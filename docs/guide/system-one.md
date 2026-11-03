@@ -34,7 +34,7 @@ clio-coder run --systemone off "<task>"
 clio-coder systemone check jev --live
 ```
 
-A task override covers the next submitted task and its continuations and expires when you submit another. A session override is kept in that session's ledger and returns with a resume. `/systemone` defaults to session scope, and `clio-coder systemone use` to user scope. A project write goes to `.clio-coder/settings.local.yaml`, which keeps the usual trust rules. The `consult` tool is registered at startup, so a choice made mid-session reaches it on the next start.
+A task override covers the next submitted task and its continuations and expires when you submit another. A session override is kept in that session's ledger and returns with a resume. `/systemone` defaults to session scope, and `clio-coder systemone use` to user scope. A project write goes to `.clio-coder/settings.local.yaml`, which keeps the usual trust rules.
 
 `status` puts each site in one of these states: **off**, **configured but unmeasured** (it names the calibrate command and sends nothing), **active** (it lists the measured actions), **recording** (only for the dataset) or **unavailable** (it says why). `main` and `memory` also state what they add: separate completions, tokens and money or subscription usage, and latency.
 
@@ -202,11 +202,11 @@ and provisioning belong to that server.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `systemOne.use` | `null` | next turn; the `consult` tool on restart |
+| `systemOne.use` | `null` | next turn |
 | `systemOne.engines` | `{}` | next turn |
 | `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
 
-`systemOne.use` picks the engine for every active site (`turn`, `toolCall`, `relevance`, `consult`, `drafts`). `jev` needs only `TYPESAFE_API_KEY`. `main` is the chat route, and `memory` is `context.memory`, with no fallback to chat when that is unset. Both of those add separate completions, which pass paid-request admission and count against the session's cost ceiling. Any other name is a declared engine, then a target. Entries under `systemOne.sites` override the choice for one site, and `null` turns that site off. `off` masks everything, per-site entries included. The record-only sites (`toolResult`, `turnEnd`, `steer` and the `toolCall` gate) are never bound by `use` and ask only while the dataset is recorded.
+`systemOne.use` picks the engine for every active site (`turn`, `toolCall`, `relevance`, `drafts`). It never binds `consult`: that tool sends agent-supplied state and file excerpts, so it takes its own `systemOne.sites.consult` entry naming a declared engine, whichever engine `use` picks. `jev` needs only `TYPESAFE_API_KEY`. `main` is the chat route, and `memory` is `context.memory`, with no fallback to chat when that is unset. Both of those add separate completions, which pass paid-request admission and count against the session's cost ceiling. Any other name is a declared engine, then a target. Entries under `systemOne.sites` override the choice for one site, and `null` turns that site off. `off` masks everything, per-site entries included. The record-only sites (`toolResult`, `turnEnd`, `steer` and the `toolCall` gate) are never bound by `use` and ask only while the dataset is recorded.
 
 `systemOne.engines` is a map from an engine name you choose to an engine definition:
 

@@ -119,7 +119,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.semantic.modalities` | `[text]` | Enabled subset of `text`, `image`, `audio`, and `mixed`. | next semantic request |
 | `context.semantic.background` | `false` | Boolean. Schedule bounded refresh at session start and after code map changes. | next session |
 | `context.semantic.inboxes` | `[]` | Explicit project or global artifact roots registered with `semantic inbox add`. | next refresh or search |
-| `systemOne.use` | `null` | The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site. `off` masks every binding. | next turn; the `consult` tool on restart |
+| `systemOne.use` | `null` | The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site except `consult`, which takes its own `systemOne.sites.consult` entry. `off` masks every binding. | next turn |
 | `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, mode?, profile? }`. | next turn |
 | `systemOne.sites` | `{}` | Map of site id to an engine name or `{ engine, timeoutMs?, tasks? }`. A site with no entry follows `systemOne.use`, and `null` turns it off. | next turn; `systemOne.sites.consult` needs a restart |
 | `safety.autonomy` | `"default"` | `default` or `yolo`. User layer or operator session control. A project layer can only tighten the user level (`default` over `yolo`); a looser value is ignored with a layer issue. | hot reload |

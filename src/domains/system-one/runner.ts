@@ -116,7 +116,7 @@ export interface Runner {
 	 * from this against live settings rather than trusting a cached verdict.
 	 */
 	answeredIdentity(digest: string, site: SiteId, moment?: string): { identity: string; contract: CallContract } | null;
-	/** Every breaker that counts a timeout or is tripped,  */
+	/** Every breaker that counts a timeout or is tripped. */
 	breakers(): SystemOneBreakerView[];
 }
 

@@ -15,8 +15,12 @@ import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manif
 import { TYPESAFE_DEFAULT_MODEL } from "../providers/runtimes/typesafe-model.js";
 import type { SiteId } from "./types.js";
 
-/** What the one setting binds. The record-only sites stay out: they spend requests without changing behavior. */
-export const ACTIVE_PROFILE: ReadonlyArray<SiteId> = ["turn", "toolCall", "relevance", "consult", "drafts"];
+/**
+ * What the one setting binds. The record-only sites stay out because they spend requests without changing behavior.
+ * `consult` stays out because its tool sends agent-supplied state and file excerpts, which takes its own
+ * `systemOne.sites.consult` entry on every engine.
+ */
+export const ACTIVE_PROFILE: ReadonlyArray<SiteId> = ["turn", "toolCall", "relevance", "drafts"];
 
 /** Asked only for the dataset: no reader takes these answers, so `use` never binds them. */
 export const RECORD_ONLY_SITES: ReadonlyArray<SiteId> = ["toolResult", "turnEnd", "steer"];
