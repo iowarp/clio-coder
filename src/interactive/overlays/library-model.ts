@@ -28,6 +28,7 @@ import {
 	type LibraryProvidedResource,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
+import { displaySafe } from "../display-safe.js";
 import {
 	type ClioTheme,
 	chip,
@@ -43,6 +44,7 @@ import {
 	statusChip,
 	titleRow,
 } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 import { type ListOverlayItem, markdownRows } from "./list-overlay.js";
 
 /** Browse lists install targets; Installed lists the copies and components that exist here. */
@@ -76,6 +78,16 @@ const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const 
 
 /** External text is never trusted on a row: one line, controls neutralized. */
 const safe = sanitizeCallTargetText;
+
+/**
+ * A pane in two parts: the head the engine pins while the rest scrolls (the
+ * name, the status chips, the keys and the reasons a key is absent), then the
+ * facts and the prose.
+ */
+interface DetailRows {
+	head: string[];
+	rest: string[];
+}
 
 /**
  * Where the bytes came from, in words.
@@ -378,9 +390,11 @@ function lastReceiptFact(id: string, scope: string, kind: string): Fact[] {
  */
 function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] {
 	const entry = (key: string, verb: string): string => `${keyCap(theme, key)} ${theme.fg("menuDescription", verb)}`;
+	// Enter opens a package's members and does nothing else, so it is named
+	// only where it opens something; Tab is the detail key.
 	return [
 		...(actions.use ? [entry("v", "use")] : []),
-		entry("Enter", actions.open ? "members" : "detail"),
+		...(actions.open ? [entry("Enter", "members")] : []),
 		...(actions.install ? [entry("i", "review install")] : []),
 		...(actions.enable ? [entry("e", "review enable/disable")] : []),
 		...(actions.update ? [entry("u", "review update")] : []),
@@ -405,7 +419,7 @@ function packageDetail(
 	actions: LibraryRowActions,
 	pairs: LibraryPairs | undefined,
 	width: number,
-): string[] {
+): DetailRows {
 	const theme = clioTheme();
 	const provider = record.kind !== view.category;
 	const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
@@ -461,21 +475,25 @@ function packageDetail(
 			? ["Contents: unknown until this package is inspected or installed."]
 			: []),
 	];
-	return [
-		titleRow(theme, safe(record.name), width, { meta: record.version ? `v${safe(record.version)}` : kindText }),
-		...chipRows(theme, status, width),
-		...chipRows(theme, actionKeyChips(theme, actions), width),
-		...noteRows(theme, actions.reasons, width),
-		...chipRows(
-			theme,
-			[`${keyCap(theme, "b")} ${theme.fg("annotation", "shows loaded components in Installed")}`],
-			width,
-		),
-		"",
-		...factRows(theme, facts, width, FACT_OPTIONS),
-		...notes.map((note) => theme.fg("annotation", note)),
-		...proseRows(record.description, width),
-	];
+	return {
+		head: [
+			titleRow(theme, safe(record.name), width, { meta: record.version ? `v${safe(record.version)}` : kindText }),
+			...chipRows(theme, status, width),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: [
+			...chipRows(
+				theme,
+				[`${keyCap(theme, "b")} ${theme.fg("annotation", "shows loaded components in Installed")}`],
+				width,
+			),
+			"",
+			...factRows(theme, facts, width, FACT_OPTIONS),
+			...notes.map((note) => theme.fg("annotation", note)),
+			...proseRows(record.description, width),
+		],
+	};
 }
 
 function copyDetail(
@@ -484,7 +502,7 @@ function copyDetail(
 	actions: LibraryRowActions,
 	pairs: LibraryPairs | undefined,
 	width: number,
-): string[] {
+): DetailRows {
 	const theme = clioTheme();
 	const flag = (name: string, on: boolean): string => statusChip(theme, on ? "ok" : "error", name);
 	const facts: Fact[] = [
@@ -516,37 +534,38 @@ function copyDetail(
 	facts.push(...lastReceiptFact(copy.name, copy.scope, copy.kind));
 	for (const diagnostic of copy.diagnostics)
 		facts.push({ label: "Diagnostic", value: statusChip(theme, "warning", safe(diagnostic)) });
-	return [
-		titleRow(theme, safe(copy.name), width, {
-			meta: `${copy.scope} copy${copy.version ? ` · v${safe(copy.version)}` : ""}`,
-		}),
-		...chipRows(
-			theme,
-			[
-				statusChip(theme, copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`),
-				copy.update ? statusChip(theme, "warning", libraryUpdateLabel(copy.update)) : null,
-				copy.trust === "foreign" ? statusChip(theme, "warning", "foreign") : null,
-			],
-			width,
-		),
-		...chipRows(
-			theme,
-			[
-				flag("enabled", copy.enabled),
-				flag("valid", copy.valid),
-				flag("compatible", copy.compatible),
-				flag("effective", copy.effective),
-			],
-			width,
-		),
-		...chipRows(theme, actionKeyChips(theme, actions), width),
-		...noteRows(theme, actions.reasons, width),
-		"",
-		...factRows(theme, facts, width, FACT_OPTIONS),
-	];
+	return {
+		head: [
+			titleRow(theme, safe(copy.name), width, {
+				meta: `${copy.scope} copy${copy.version ? ` · v${safe(copy.version)}` : ""}`,
+			}),
+			...chipRows(
+				theme,
+				[
+					statusChip(theme, copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`),
+					copy.update ? statusChip(theme, "warning", libraryUpdateLabel(copy.update)) : null,
+					copy.trust === "foreign" ? statusChip(theme, "warning", "foreign") : null,
+				],
+				width,
+			),
+			...chipRows(
+				theme,
+				[
+					flag("enabled", copy.enabled),
+					flag("valid", copy.valid),
+					flag("compatible", copy.compatible),
+					flag("effective", copy.effective),
+				],
+				width,
+			),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS)],
+	};
 }
 
-function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions, width: number): string[] {
+function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions, width: number): DetailRows {
 	const theme = clioTheme();
 	const facts: Fact[] = [
 		{ label: "Key", value: safe(resource.key) },
@@ -573,34 +592,34 @@ function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions, 
 	if (resource.reason) facts.push({ label: "Reason", value: safe(resource.reason), tone: "warning" });
 	for (const diagnostic of resource.diagnostics)
 		facts.push({ label: "Diagnostic", value: statusChip(theme, "warning", safe(diagnostic)) });
-	return [
-		titleRow(theme, safe(resource.name), width, { meta: resource.kind }),
-		...chipRows(
-			theme,
-			[
-				statusChip(theme, availabilityStatus(resource.availability), safe(resource.availability)),
-				statusChip(theme, resource.trusted ? "ok" : "warning", resource.trusted ? "trusted" : "not trusted"),
-				chip(
-					theme,
-					resource.owner ? `owned by ${safe(resource.owner.ref)}` : `${resource.source.class} component`,
-					"muted",
-				),
-			],
-			width,
-		),
-		...chipRows(theme, actionKeyChips(theme, actions), width),
-		...noteRows(theme, actions.reasons, width),
-		"",
-		...factRows(theme, facts, width, FACT_OPTIONS),
-		...proseRows(resource.description, width),
-	];
+	return {
+		head: [
+			titleRow(theme, safe(resource.name), width, { meta: resource.kind }),
+			...chipRows(
+				theme,
+				[
+					statusChip(theme, availabilityStatus(resource.availability), safe(resource.availability)),
+					statusChip(theme, resource.trusted ? "ok" : "warning", resource.trusted ? "trusted" : "not trusted"),
+					chip(
+						theme,
+						resource.owner ? `owned by ${safe(resource.owner.ref)}` : `${resource.source.class} component`,
+						"muted",
+					),
+				],
+				width,
+			),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS), ...proseRows(resource.description, width)],
+	};
 }
 
 function memberDetail(
 	subject: Extract<LibraryRowSubject, { kind: "member" }>,
 	actions: LibraryRowActions,
 	width: number,
-): string[] {
+): DetailRows {
 	const theme = clioTheme();
 	const facts: Fact[] = [
 		{ label: "Kind", value: subject.member.kind },
@@ -611,43 +630,49 @@ function memberDetail(
 	facts.push({ label: "Origin", value: libraryOriginLabel(subject.owner.origin) });
 	for (const diagnostic of subject.member.diagnostics)
 		facts.push({ label: "Diagnostic", value: statusChip(theme, "warning", safe(diagnostic)) });
-	return [
-		titleRow(theme, safe(subject.member.name), width, { meta: subject.member.kind }),
-		...chipRows(
-			theme,
-			[
-				subject.member.valid ? statusChip(theme, "ok", "valid") : statusChip(theme, "error", "invalid"),
-				statusChip(
-					theme,
-					copyStateStatus(subject.owner.state),
-					`owner ${subject.owner.scope} ${safe(subject.owner.state)}`,
-				),
-			],
-			width,
-		),
-		...chipRows(theme, actionKeyChips(theme, actions), width),
-		...noteRows(theme, actions.reasons, width),
-		"",
-		...factRows(theme, facts, width, FACT_OPTIONS),
-		...proseRows(subject.member.description, width),
-	];
+	return {
+		head: [
+			titleRow(theme, safe(subject.member.name), width, { meta: subject.member.kind }),
+			...chipRows(
+				theme,
+				[
+					subject.member.valid ? statusChip(theme, "ok", "valid") : statusChip(theme, "error", "invalid"),
+					statusChip(
+						theme,
+						copyStateStatus(subject.owner.state),
+						`owner ${subject.owner.scope} ${safe(subject.owner.state)}`,
+					),
+				],
+				width,
+			),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS), ...proseRows(subject.member.description, width)],
+	};
 }
 
-/** A notice pane: the message, then how to get back to the rows it is about. */
-function noticeDetail(title: string, facts: Fact[], message: string, width: number): string[] {
+/**
+ * A notice pane: the message, then how to get back to the rows it is about.
+ * Only a library-wide discovery notice says it covers every category; a
+ * package's companion file or an inspection diagnostic belongs to its package.
+ */
+function noticeDetail(title: string, facts: Fact[], message: string, libraryWide: boolean, width: number): DetailRows {
 	const theme = clioTheme();
-	return [
-		titleRow(theme, title, width),
-		...factRows(theme, facts, width, FACT_OPTIONS),
-		...(facts.length > 0 ? [""] : []),
-		theme.fg("body", safe(message)),
-		"",
-		theme.fg("annotation", "Discovery notices cover all categories."),
-		theme.fg(
-			"annotation",
-			"From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
-		),
-	];
+	return {
+		head: [titleRow(theme, title, width)],
+		rest: [
+			...factRows(theme, facts, width, FACT_OPTIONS),
+			...(facts.length > 0 ? [""] : []),
+			theme.fg("body", safe(message)),
+			"",
+			...(libraryWide ? [theme.fg("annotation", "Discovery notices cover all categories.")] : []),
+			theme.fg(
+				"annotation",
+				"From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
+			),
+		],
+	};
 }
 
 /** The rows one view draws, with the subject behind each id. */
@@ -658,16 +683,37 @@ export interface LibraryRowSet {
 	truncated: boolean;
 }
 
-function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: Omit<ListOverlayItem, "id">): void {
+type RowSpec = Omit<ListOverlayItem, "id" | "detail" | "detailHead" | "detailFormat"> & {
+	detail: (width: number) => DetailRows;
+};
+
+/**
+ * One row and its pane. The pane is built once per width and served to both
+ * the rows and the pinned-head count, so a receipt read from disk happens
+ * once per frame width rather than twice.
+ */
+function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: RowSpec): void {
 	set.subjects.set(id, subject);
+	let memo: { width: number; epoch: number; rows: DetailRows } | null = null;
+	const rows = (width: number): DetailRows => {
+		if (memo && memo.width === width && memo.epoch === skinEpoch()) return memo.rows;
+		memo = { width, epoch: skinEpoch(), rows: item.detail(width) };
+		return memo.rows;
+	};
+	const { detail: _detail, ...spec } = item;
 	set.items.push({
 		id,
-		...item,
+		...spec,
 		get meta() {
 			return item.meta ?? "";
 		},
 		label: subject.kind === "notice" ? clioTheme().fg("warning", safe(item.label)) : safe(item.label),
 		detailFormat: "rows",
+		detail: (width) => {
+			const built = rows(width);
+			return [...built.head, ...built.rest];
+		},
+		detailHead: (width) => rows(width).head.length,
 	});
 }
 
@@ -753,13 +799,19 @@ export interface LibraryRowOptions {
  * mode's question, as a status chip, and the origin comes last.
  */
 export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
-	const { inventory, view } = options;
+	// Every record is neutralized for display once, here, so a field a row or a
+	// pane picks up later cannot carry a terminal control past this seam.
+	const inventory = displaySafe(options.inventory);
+	const inspection = displaySafe(options.inspection);
+	const pairs = displaySafe(options.pairs);
+	const failure = options.failure === undefined ? undefined : safe(options.failure);
+	const { view } = options;
 	const theme = clioTheme();
 	const set: LibraryRowSet = { items: [], subjects: new Map(), notices: 0, truncated: false };
 
-	if (view.member && options.inspection) {
-		const owner = options.inspection.copy;
-		for (const member of options.inspection.resources) {
+	if (view.member && inspection) {
+		const owner = inspection.copy;
+		for (const member of inspection.resources) {
 			const subject: LibraryRowSubject = { kind: "member", owner, member };
 			const actions = libraryRowActions(subject, view);
 			push(set, `mem:${owner.ref}@${owner.scope}#${member.kind}:${member.name}`, subject, {
@@ -775,7 +827,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				detail: (width) => memberDetail(subject, actions, width),
 			});
 		}
-		for (const item of options.inspection.ancillary) {
+		for (const item of inspection.ancillary) {
 			const subject: LibraryRowSubject = {
 				kind: "notice",
 				message: `${item.kind} ${item.id} is declared package metadata, not a component. It runs only on an explicit request.`,
@@ -794,12 +846,13 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 							{ label: "Path", value: safe(item.path) },
 						],
 						subject.message,
+						false,
 						width,
 					),
 			});
 			set.notices += 1;
 		}
-		for (const diagnostic of options.inspection.diagnostics) {
+		for (const diagnostic of inspection.diagnostics) {
 			const subject: LibraryRowSubject = { kind: "notice", message: diagnostic };
 			push(set, `note:member-diag:${set.notices}`, subject, {
 				label: `${GLYPH.warnInline} ${diagnostic}`,
@@ -807,7 +860,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 					return theme.fg("annotation", "inspection");
 				},
 				group: LIBRARY_GROUP_NOTICES,
-				detail: (width) => noticeDetail("Inspection diagnostic", [], diagnostic, width),
+				detail: (width) => noticeDetail("Inspection diagnostic", [], diagnostic, false, width),
 			});
 			set.notices += 1;
 		}
@@ -842,7 +895,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 						: record.copies.length > 0
 							? LIBRARY_GROUP_INSTALLED
 							: LIBRARY_GROUP_AVAILABLE,
-				detail: (width) => packageDetail(record, view, actions, options.pairs, width),
+				detail: (width) => packageDetail(record, view, actions, pairs, width),
 			});
 		}
 	} else {
@@ -862,7 +915,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 					]);
 				},
 				group: LIBRARY_GROUP_INSTALLED,
-				detail: (width) => copyDetail(copy, view, actions, options.pairs, width),
+				detail: (width) => copyDetail(copy, view, actions, pairs, width),
 			});
 		}
 		for (const resource of inventory.resources) {
@@ -885,7 +938,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 
 	const truncation = libraryTruncationNotice(inventory);
 	set.truncated = truncation !== undefined;
-	for (const message of [options.failure, truncation, ...inventory.diagnostics].filter(
+	for (const message of [failure, truncation, ...inventory.diagnostics].filter(
 		(entry): entry is string => entry !== undefined,
 	)) {
 		const subject: LibraryRowSubject = { kind: "notice", message };
@@ -895,7 +948,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				return theme.fg("annotation", "library");
 			},
 			group: LIBRARY_GROUP_NOTICES,
-			detail: (width) => noticeDetail("Library notice", [], message, width),
+			detail: (width) => noticeDetail("Library notice", [], message, true, width),
 		});
 		set.notices += 1;
 	}

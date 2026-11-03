@@ -837,8 +837,8 @@ describe("library browser behavior", () => {
 		)(availableRow);
 		deepStrictEqual(
 			availableHints.map((entry) => entry.key),
-			["i", "Enter"],
-			"an uninstalled package offers install, never remove",
+			["i"],
+			"an uninstalled package offers install, never remove, and has no members to open",
 		);
 
 		const installed = harness({
@@ -862,6 +862,26 @@ describe("library browser behavior", () => {
 		match(narrow, /materio/, "the name survives at 48 columns");
 		// Pi-tui draws an input's cursor between zero-width APC markers that Node's stripper keeps.
 		for (const line of view.render(48)) equal(visibleWidth(line) <= 48, true);
+	});
+
+	it("shows the row keys in the body when no pane is drawn and the rail cannot hold them", () => {
+		const state = harness({
+			initialTab: "plugin",
+			inventory: inventory({ packages: [record({ copies: [{ scope: "user", state: "loadable" }] })] }),
+		});
+		const view = state.mount();
+		view.setViewportRows(14);
+		// A 60-column dock leaves its rail 41 cells, room for Enter and Esc only.
+		view.setRailRoom(41);
+		let body = plain(view.render(60).join("\n"));
+		if (body.includes("PgUp/PgDn scroll")) {
+			view.handleInput("\t");
+			body = plain(view.render(60).join("\n"));
+		}
+		equal(body.includes("PgUp/PgDn scroll"), false, "no pane is drawn");
+		const everywhere = `${body}\n${plain(view.getHint(41))}`;
+		for (const key of ["e", "u", "r", "Enter"])
+			equal(everywhere.includes(`[${key}] `), true, `${key} is discoverable with no pane drawn`);
 	});
 
 	it("draws the Installed empty text in Installed mode and the Browse one in Browse", () => {

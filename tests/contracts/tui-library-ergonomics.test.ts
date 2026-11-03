@@ -167,14 +167,17 @@ it("identifies provider packages and limits their catalog hints to the selected 
 		ok(item);
 		equal(item.label, "materio [plugin]");
 		equal(item.group, "Provider packages");
-		const detail = plain(item.detail?.(80).join("\n") ?? "");
-		match(detail, new RegExp(`plugin provider package for ${category}`));
-		match(detail, new RegExp(`lab-${category}`));
-		ok(!detail.includes("lab-skill"));
-		match(detail, /not loaded components/);
-		match(detail, /\[b\] shows loaded components/);
-		match(detail, /\[i\] review install/);
-		ok(!detail.includes("Enter members"));
+		for (const width of [40, 80]) {
+			// At 40 columns the facts wrap under their labels, so phrases are matched on whitespace-collapsed text.
+			const detail = plain(item.detail?.(width).join("\n") ?? "").replace(/\s+/g, " ");
+			match(detail, new RegExp(`plugin provider package for ${category}`));
+			match(detail, new RegExp(`lab-${category}`));
+			ok(!detail.includes("lab-skill"));
+			match(detail, /not loaded components/);
+			match(detail, /\[b\] shows loaded components/);
+			match(detail, /\[i\] review install/);
+			ok(!detail.includes("[Enter] members"), "an uninstalled package has no members to open");
+		}
 	}
 });
 
@@ -241,6 +244,25 @@ it("neutralizes terminal controls while preserving Unicode identity and full ins
 	// The description renders as Markdown at the pane's width, which breaks CJK text between characters, so it is compared without whitespace.
 	const collapse = (text: string): string => plain(text).replace(/\s+/g, "");
 	ok(collapse(rows.items[0]?.detail?.(40).join("\n") ?? "").includes(collapse(record.description)));
+});
+
+it("neutralizes terminal controls in every catalog field a row or its detail prints", () => {
+	const data = inventory();
+	const record = data.packages[0];
+	ok(record);
+	const hostile = "\u001b]0;spoofed title\u0007\u001b[2J\u001b[35m";
+	record.requires = [`plugin:dep${hostile}`];
+	record.sourceUrl = `./materio${hostile}`;
+	record.origin = { kind: "bundled", catalog: `/library/registry.yaml${hostile}` };
+	const view = { category: "plugin" as const, mode: "browse" as const, scope: "user" as const };
+	const item = buildLibraryRows({ view, inventory: selectForCategory(data, view) }).items[0];
+	ok(item);
+	const painted = [item.label, item.meta ?? "", ...(item.detail?.(80) ?? [])].join("\n");
+	ok(!painted.includes("\u001b]0;"), "no OSC title reaches the terminal");
+	ok(!painted.includes("\u001b[2J"), "no erase-display reaches the terminal");
+	ok(!painted.includes("\u001b[35m"), "no foreign SGR reaches the terminal");
+	ok(!painted.includes("spoofed title"));
+	match(plain(painted), /plugin:dep/);
 });
 
 it("finds core agents through the real inventory in Installed without broadening audience", async () => {

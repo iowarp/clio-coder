@@ -15,6 +15,7 @@ import type {
 } from "../../domains/workspace-snapshots/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
+import { displaySafe } from "../display-safe.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import {
 	buildResponsiveHint,
@@ -38,7 +39,7 @@ import {
 	statusChip,
 	titleRow,
 } from "../theme/index.js";
-import { type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 export const REWIND_EMPTY =
 	"No workspace snapshots in this session yet. Clio takes one before it first changes files in a turn and before every destructive command, in a Git work tree with safety.snapshots on.";
@@ -87,7 +88,10 @@ const DETAIL_LIST_SHOWN = 12;
  * list that spans days carries the date too, so two snapshots an hour apart on
  * different days never read as one hour apart.
  */
-function rewindListItems(records: ReadonlyArray<WorkspaceSnapshotRecord>, counts: RewindCounts): ListOverlayItem[] {
+function rewindListItems(raw: ReadonlyArray<WorkspaceSnapshotRecord>, counts: RewindCounts): ListOverlayItem[] {
+	// Reasons, tool names, skipped paths and stash messages are text from the
+	// work tree; they are neutralized once here.
+	const records = displaySafe(raw);
 	const days = new Set(records.map((record) => dateLocal(record.at)));
 	return records.map((record) => {
 		const when = days.size > 1 ? `${dateLocal(record.at)} ${clockLocal(record.at)}` : clockLocal(record.at);
@@ -99,8 +103,7 @@ function rewindListItems(records: ReadonlyArray<WorkspaceSnapshotRecord>, counts
 			get meta() {
 				return differenceChip(record.n, counts);
 			},
-			detailFormat: "rows",
-			detail: (width) => {
+			...detailWithHead((width) => {
 				const theme = clioTheme();
 				const facts: Fact[] = [
 					{ label: "Taken", value: `${dateLocal(record.at)} ${clockLocal(record.at)}` },
@@ -121,25 +124,28 @@ function rewindListItems(records: ReadonlyArray<WorkspaceSnapshotRecord>, counts
 				if ((record.pins?.length ?? 0) > DETAIL_LIST_SHOWN)
 					pins.push(`and ${(record.pins?.length ?? 0) - DETAIL_LIST_SHOWN} more`);
 				if (pins.length > 0) facts.push({ label: "Pinned refs", value: pins.join("\n") });
-				return [
-					titleRow(theme, `Snapshot #${record.n}`, width, { meta: `${dateLocal(record.at)} ${clockLocal(record.at)}` }),
-					...chipRows(theme, [differenceChip(record.n, counts), chip(theme, what, "muted")], width),
-					...choiceRows(
-						theme,
-						[
-							{
-								key: "Enter",
-								verb: "preview rewind",
-								consequence: "shows what restoring this snapshot would change; nothing is written until you confirm",
-								tone: "action",
-							},
-						],
-						width,
-					),
-					"",
-					...factRows(theme, facts, width, FACT_OPTIONS),
-				];
-			},
+				// The title, the difference and the Enter choice stay pinned while the
+				// facts scroll, so the key that previews is never scrolled away.
+				return {
+					head: [
+						titleRow(theme, `Snapshot #${record.n}`, width, { meta: `${dateLocal(record.at)} ${clockLocal(record.at)}` }),
+						...chipRows(theme, [differenceChip(record.n, counts), chip(theme, what, "muted")], width),
+						...choiceRows(
+							theme,
+							[
+								{
+									key: "Enter",
+									verb: "preview rewind",
+									consequence: "shows what restoring this snapshot would change; nothing is written until you confirm",
+									tone: "action",
+								},
+							],
+							width,
+						),
+					],
+					rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS)],
+				};
+			}),
 		};
 	});
 }
@@ -183,8 +189,10 @@ const REWIND_DEFAULT_ROWS = 22;
  * alone, each under a labelled rule that carries its count, and the exact
  * recovery commands in a command block so nothing in them is ever cut.
  */
-function formatRewindConfirmRows(record: WorkspaceSnapshotRecord, plan: RewindPlan, width: number): string[] {
+function formatRewindConfirmRows(rawRecord: WorkspaceSnapshotRecord, rawPlan: RewindPlan, width: number): string[] {
 	const theme = clioTheme();
+	const record = displaySafe(rawRecord);
+	const plan = displaySafe(rawPlan);
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];
 	const wrap = (token: Parameters<typeof theme.fg>[0], text: string): void => {

@@ -73,6 +73,12 @@ export class FocusBox extends Box {
 		}
 	}
 
+	setRailRoom(cells: number): void {
+		for (const child of this.children) {
+			if (isRailAware(child)) child.setRailRoom(cells);
+		}
+	}
+
 	handleInput(data: string): void {
 		if (this.onInput) {
 			this.onInput(data);
@@ -458,9 +464,23 @@ function renderHintEntries(entries: ReadonlyArray<HintEntry>, short: boolean): s
  */
 export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: number): string {
 	if (entries.length === 0) return "";
+	const { kept, short } = fitHintEntryList(entries, maxWidth);
+	return renderHintEntries(kept, short);
+}
+
+/**
+ * The entries a rail of `maxWidth` keeps, and whether it keeps them in their
+ * short spelling. A body that must show every key the rail cannot draws the
+ * complement, so the rail and the body are fitted by the same rule and never
+ * disagree about which key went where.
+ */
+export function fitHintEntryList(
+	entries: ReadonlyArray<HintEntry>,
+	maxWidth: number,
+): { kept: HintEntry[]; short: boolean } {
+	if (entries.length === 0) return { kept: [], short: false };
 	for (const short of [false, true]) {
-		const rendered = renderHintEntries(entries, short);
-		if (visibleWidth(rendered) <= maxWidth) return rendered;
+		if (visibleWidth(renderHintEntries(entries, short)) <= maxWidth) return { kept: [...entries], short };
 	}
 	// Droppable entries go first, left to right, then critical ones by the same
 	// rule. The only positional invariant left is that one entry always survives,
@@ -472,11 +492,10 @@ export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: numb
 			const index = kept.findIndex((entry) => criticalPass || !isCriticalEntry(entry));
 			if (index === -1) break;
 			kept.splice(index, 1);
-			const rendered = renderHintEntries(kept, true);
-			if (visibleWidth(rendered) <= maxWidth) return rendered;
+			if (visibleWidth(renderHintEntries(kept, true)) <= maxWidth) return { kept, short: true };
 		}
 	}
-	return renderHintEntries(kept, true);
+	return { kept, short: true };
 }
 
 /**
@@ -622,6 +641,20 @@ function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
 	return typeof (child as Partial<RowBudgetedBody>).setBodyRows === "function";
 }
 
+/**
+ * A body that is told how many cells the rail under it has for keys, so it can
+ * draw in its own rows every key the rail will drop. The rail at 60 columns
+ * holds four short entries; a row with six keys and a way out cannot be
+ * discovered from the rail alone.
+ */
+export interface RailAwareBody {
+	setRailRoom(cells: number): void;
+}
+
+function isRailAware(child: Component): child is Component & RailAwareBody {
+	return typeof (child as Partial<RailAwareBody>).setRailRoom === "function";
+}
+
 export class ClioOverlayFrame implements Component {
 	/**
 	 * Rows the box may occupy, or zero while unknown.
@@ -681,6 +714,11 @@ export class ClioOverlayFrame implements Component {
 
 	setRowBudget(rows: number): void {
 		this.rowBudget = Math.max(0, Math.floor(rows));
+	}
+
+	/** The composer says how many cells its rail has for this frame's keys, before the body is laid out. */
+	setRailRoom(cells: number): void {
+		if (isRailAware(this.child)) this.child.setRailRoom(Math.max(0, Math.floor(cells)));
 	}
 
 	render(width: number): string[] {

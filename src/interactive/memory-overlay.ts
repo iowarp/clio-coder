@@ -189,9 +189,18 @@ export class MemoryOverlayView implements Component {
 		);
 	}
 
-	getHint(): string {
+	getHint(innerWidth?: number): string {
 		this.sync();
-		return this.list.getHint();
+		return this.list.getHint(innerWidth);
+	}
+
+	/** The dock's rows, less the status line, the optional promotion line and the rule this view draws above the list. */
+	setBodyRows(rows: number): void {
+		this.list.setBodyRows(Math.max(1, rows - 2 - (this.promotionMessage === null ? 0 : 1)));
+	}
+
+	setRailRoom(cells: number): void {
+		this.list.setRailRoom(cells);
 	}
 
 	render(width: number): string[] {
@@ -517,7 +526,7 @@ export function openMemoryOverlay(
 		width: MEMORY_OVERLAY_WIDTH,
 		markerId: "memory",
 		title: () => "Memory · inspection",
-		footerHint: () => view.getHint(),
+		footerHint: (innerWidth) => view.getHint(innerWidth),
 	});
 	const timer = setInterval(() => tui.requestRender(), REFRESH_MS);
 	timer.unref?.();
