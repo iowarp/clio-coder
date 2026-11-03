@@ -166,11 +166,12 @@ it("keeps a whole variable reference, with a host only as URL userinfo, and noth
 		"grep -n token: src/a.ts",
 		"node run.mjs token: src/a.test.ts",
 	]) {
-		strictEqual(
-			completedLessonSource(task(command, "closed"), "/repo")?.succeededCommands.has(command) ?? false,
-			false,
-			command,
-		);
+		// The sibling is worth a lesson, so a source exists and this command's absence from it means something.
+		const sibling = task("node build.mjs", "sibling").slice(1, 3);
+		const [ask, ...rest] = task(command, "closed");
+		const source = completedLessonSource([ask as SessionEntry, ...sibling, ...rest], "/repo");
+		strictEqual(source?.succeededCommands.has("node build.mjs"), true, command);
+		strictEqual(source?.succeededCommands.has(command), false, command);
 	}
 });
 
