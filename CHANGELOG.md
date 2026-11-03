@@ -4,6 +4,48 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+### Terminal
+
+- A permission card leads with the tool, the action class in a risk tone and the rule that fired, shows the target unclipped in a gutter block, and lists allow, deny and stop as rows with their consequences. The rail names those keys only while their rows are off screen, the card says when a draft makes Enter inert (#186), and no key changed.
+- Fleet run approval, handoff review, `/decisions`, sign-in, context reset, the working-directory fallback and `ask_user` read the same way: facts as a table, keys as choice rows. A fleet step's write boundary never drops, at any width.
+- The expanded footer's Activity, Context and Status pages answer their question in their first rows, and Activity lists one table row per worker with at most four finished runs.
+- The Fleet Runs board is a run table that windows around the cursor and drops columns by priority, with the selected run's facts under a rule. A worker row tells `not measured` from `no calls yet`, and keeps its cost column when token coverage is unknown.
+- `/settings` rows name the layer that set each value, with an inspector saying when a change applies and where the value came from. A session-scoped model cycle set reads `session`.
+- The model, session and scope pickers, the queue, tree, fork and rewind views and key detail share one row layout that fits the dock.
+- `/context` draws its meter across the body and scrolls at narrow widths. It also shows the `Last recorded session here` line the prompt carries. `/health` is a table of journal counters, and `/usage` says nothing is recorded yet before a first prompt instead of blaming a missing read model.
+- Library rows lead with a status chip, and every pane opens with its title, chips and the keys the row accepts. `Enter` opens an installed package's members and does nothing on a component, where `Tab` is the detail key.
+- `/interop` lists proposed, detected, connected, declined and not-installed agents as separate groups. `i` clears any filter and lands on the plan's approval row, and connecting or declining acts only on a proposal row.
+- `/extensions`, `/help` and `/rewind` lead with state chips and pin their heads above scrolling facts. A dev extension is pointed at `/extensions mute`, because the `--dev` flag it named does not exist. A rewind snapshot shows `same as now`, `N files differ` or `not counted`.
+- List overlays keep every key reachable at narrow widths and neutralize package and catalog text once at one seam.
+- A worker admitted to its model reads as waiting on the model instead of starting.
+- A token landing on an empty stream queue paints at once, and only a burst's excess is paced. A reply past 20 KiB spaces its Markdown layout to at most 30 percent of the main thread, so keystrokes stay responsive.
+- Long sessions repaint less: finished calls and settled worker cards keep their rows, and fullscreen and regular frames no longer copy or scan the whole document.
+- The footer no longer folds every telemetry journal on each compose, `/skill` completion no longer digests installed plugin trees per keystroke, and the first dispatch no longer parses every retained run journal on the input thread.
+
+### Sessions and memory
+
+- `context.memory.enabled: false` now also removes the `# Memory` section from main and worker prompts, its update reminder, any buffered lesson reminder and the task-memory block of a handoff request. `/memory` lists lessons as `off, recall only`.
+- A session records a `clio_coder_memory_off` marker before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past it, even after memory returns.
+- Every request to a memory route now passes both redactors, including observation, reflection and the live turn log. A command that needed redacting no longer grounds a lesson.
+- The `Last recorded session here` line redacts what it quotes, and a flow-restricted session appears there by id and time only.
+- `/handoff` copies the source session's flow restrictions ahead of its seed. A seed that cannot be written returns to the source session and removes the new one.
+
+### Jobs
+
+- A main job with no `timeout_ms` gets an hour per occurrence instead of 10 minutes, and a command job's `main_turn` follow-up gets its own hour instead of the 60-second poll bound. An explicit `timeout_ms` bounds both as before (refs #445).
+- At `yolo`, a default clock that ends a main job's final occurrence or a follow-up queues one continuation per job, with a transcript notice and a `job.clock_resumed` record. An explicit timeout never resumes (refs #445).
+- A job occurrence past its clock names the bound that fired instead of reading as canceled, and journals `turn.aborted` with source `job_clock` (refs #445).
+- An aborted `bash` result names the elapsed time and the turn's stop reason, and a killed command settles when a descendant keeps its pipes open (refs #445).
+- The `yolo` prompt points long external waits at a `job` instead of a sleep or poll loop in `bash` (refs #445).
+
+### Tools and safety
+
+- Surfaces showing text still being written hold back a possible URL password until it resolves, so it no longer appears one character at a time. Past 2048 code units a frame gains a `[held]` marker (refs #446).
+- A stream that was aborted, errored, hit its length limit or ended with a failed run keeps the hold, on replay too, and a killed process's finished last line still shows (refs #446).
+- Journals, run feeds, settled facts, tool summaries, digests, consult files and memory promotion now write `https://u:[redacted:url-userinfo]@h` (refs #446).
+- Worker board rows and council columns, which carried the worker tail unredacted, now redact it. A live cut discards the token it lands in, and a settled cut trims up to 512 characters of it (refs #446).
+- A System One site builds its state and questions from a cleared copy, so its own bound cannot leave a partial secret.
+
 ## 0.6.7 - 2026-11-02
 
 Clio Coder 0.6.7 makes fleet work finish and sessions recover. The builtin `sdlc` playbook now runs to its three commits: commit steps stage everything git reports as changed since the last commit point against a persisted baseline, each node's task names its step, and one reader serves a verifier's closing report to the contract, the gate and claim grounding. A task worktree commit takes the worker's authored files instead of every untracked byproduct, and an SSH worker on an independent checkout returns its edits again. Sessions can be renamed, resumed by name and branched at the current point (#443, #444). An oversized prompt no longer wedges a session, two resumes can no longer both open a writable ledger, a crashed turn replays as failed instead of Done, and telemetry retention stays inside the state directory. Compaction compares its replay before publishing a result (#422).
