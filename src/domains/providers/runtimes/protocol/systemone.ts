@@ -3,7 +3,7 @@
  * the way TypeSafe's Jev does, such as `laya-serve` or `clm-serve`.
  *
  * `typesafe-jev` reached these servers only by accident. It is cloud tier,
- * reads `TYPESAFE_API_KEY`, asks for `jev-latest` when no model is set (CLM
+ * reads `TYPESAFE_API_KEY`, asks for a Jev build when no model is set (CLM
  * answers that with 422) and probes `/models` (Laya has no such route). This
  * runtime sends a model only when one is configured, needs no key, and
  * accepts a `/health` answer as a live server.

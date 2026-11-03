@@ -22,7 +22,11 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { postSystemOne, systemOneBaseUrl } from "../common/systemone-wire.js";
 
 const TYPESAFE_BASE_URL = "https://api.typesafe.ai/v1";
-const DEFAULT_MODEL = "jev-latest";
+// The build `FITTED_CUTS` was measured on. `jev-latest` moves to builds with no
+// cuts, and a site then only records. TypeSafe answers this pin though `/models`
+// lists only the moving names, so a known model is not checked against that list.
+const DEFAULT_MODEL = "jev-1.13.0";
+const KNOWN_MODELS = [DEFAULT_MODEL, "jev-latest", "jev-preview"];
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: false,
@@ -73,7 +77,7 @@ async function fetchModels(target: TargetDescriptor, ctx: ProbeContext): Promise
 	if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
 	if (Object.keys(modelLabels).length > 0) out.modelLabels = modelLabels;
 	const configured = target.defaultModel?.trim();
-	if (configured && models.length > 0 && !models.includes(configured)) {
+	if (configured && models.length > 0 && !models.includes(configured) && !KNOWN_MODELS.includes(configured)) {
 		out.ok = false;
 		out.error = `configured model '${configured}' was not returned by TypeSafe`;
 	}
@@ -88,7 +92,7 @@ const typesafeJevRuntime: RuntimeDescriptor = {
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	credentialsEnvVar: "TYPESAFE_API_KEY",
-	knownModels: ["jev-latest", "jev-preview"],
+	knownModels: KNOWN_MODELS,
 	defaultCapabilities,
 	// Not a conversational target; the configure wizard must not offer it.
 	hidden: true,
