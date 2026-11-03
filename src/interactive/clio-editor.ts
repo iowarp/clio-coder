@@ -493,28 +493,23 @@ export class ClioEditor extends Editor {
 		const fittedRight = truncateToWidth(right, room, GLYPH.ellipsis, false);
 		const groupRoom =
 			keysOnlyRoom !== undefined ? 0 : Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
-		const thinking =
+		// The status after the keys fits whole or is dropped whole: a menu's
+		// keys own the room and `think high` cut to `th…` told the operator nothing.
+		const thinkingText =
 			groupRoom > 0
-				? truncateToWidth(
-						thinkingRailHint(
-							theme,
-							this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
-							groupRoom,
-						),
+				? thinkingRailHint(
+						theme,
+						this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
 						groupRoom,
-						GLYPH.ellipsis,
-						false,
 					)
 				: "";
+		const thinking = visibleWidth(thinkingText) <= groupRoom ? thinkingText : "";
+		// The occupancy bar is drawn at its full width or not at all: a bar
+		// shrunk to one cell beside a menu's keys is a fragment, not a reading.
 		const context = this.chrome.getContextUsage?.();
-		const usage = context
-			? contextRailHint(
-					context,
-					width >= 100 ? 10 : 6,
-					Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0)),
-					theme,
-				)
-			: "";
+		const cells = width >= 100 ? 10 : 6;
+		const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
+		const usage = context && usageRoom >= cells ? contextRailHint(context, cells, usageRoom, theme) : "";
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;

@@ -32,6 +32,7 @@ import {
 } from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
+import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
 import {
 	buildLibraryRows,
@@ -55,10 +56,14 @@ export const LIBRARY_TITLE = "Library";
 
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_BROWSE =
-	"No packages of this kind in the index. Browse counts packages, not runnable components. Press b for loaded components in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
+	"No packages of this kind in the index. Browse counts packages, not runnable components.";
+const LIBRARY_EMPTY_BROWSE_REMEDY =
+	"b shows loaded components in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_INSTALLED =
-	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which components can run. Press b for installable packages.";
+	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which components can run.";
+const LIBRARY_EMPTY_INSTALLED_REMEDY = "b shows installable packages.";
+const LIBRARY_READ_FAILED_REMEDY = "R reads the Library again; n opens the notices.";
 
 export interface LibraryOverlayDeps {
 	/** The package lifecycle. Plans are reviewed before anything is written. */
@@ -479,7 +484,16 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			explicitSearch: true,
 			fullScreen: true,
 			layout: "split",
-			status: () => `${items.length} ${items.length === 1 ? "notice" : "notices"} · browse focus: n back`,
+			status: (width) =>
+				fitUnits(
+					clioTheme(),
+					"",
+					[
+						`${keyCap(clioTheme(), "n")} ${clioTheme().fg("annotation", "back to resources")}`,
+						clioTheme().fg("fieldValue", `${items.length} ${items.length === 1 ? "notice" : "notices"}`),
+					],
+					width,
+				),
 			emptyMessage:
 				"No notices in this view. From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
 			globalHints: [{ key: "n", verb: "resources", critical: true }],
@@ -510,9 +524,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const subject = selected ? rowSet.subjects.get(selected.id) : undefined;
 		if (!subject || subject.kind === "notice") return [];
 		const actions = libraryRowActions(subject, view);
+		// A narrowing footer drops from the left, so the keys go up in value from
+		// left to right: the reviews first, then the key that opens the row, then
+		// use, which is what a component is for.
 		const entries: Array<{ key: string; verb: string }> = [];
-		if (actions.use) entries.push({ key: "v", verb: "use" });
-		entries.push({ key: "Enter", verb: actions.open ? "members" : "detail" });
 		if (actions.install) entries.push({ key: "i", verb: "install" });
 		if (actions.enable)
 			entries.push({
@@ -526,6 +541,8 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			});
 		if (actions.update) entries.push({ key: "u", verb: "update" });
 		if (actions.remove) entries.push({ key: "r", verb: "remove" });
+		entries.push({ key: "Enter", verb: actions.open ? "members" : "detail" });
+		if (actions.use) entries.push({ key: "v", verb: "use" });
 		return entries;
 	};
 
@@ -550,6 +567,14 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		fullScreen: true,
 		layout: "split",
 		emptyMessage: () => (view.mode === "browse" ? LIBRARY_EMPTY_BROWSE : LIBRARY_EMPTY_INSTALLED),
+		emptyRemedy: () =>
+			failure
+				? LIBRARY_READ_FAILED_REMEDY
+				: view.mode === "browse"
+					? LIBRARY_EMPTY_BROWSE_REMEDY
+					: LIBRARY_EMPTY_INSTALLED_REMEDY,
+		// A read that failed is drawn as the error it is, not as an empty library.
+		emptyError: () => failure,
 		status,
 		onBack: {
 			active: () => view.member !== undefined,
@@ -559,10 +584,12 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				handle.refreshTabs();
 			},
 		},
+		// The status row names b, s and n with their key caps at every width from
+		// 48 columns, so the footer may give them up before a row's own keys.
 		globalHints: [
-			{ key: "b", verb: "browse/installed", short: "view", critical: true },
-			{ key: "s", verb: "user/project", short: "scope", critical: true },
-			{ key: "n", verb: "notices", critical: true },
+			{ key: "b", verb: "browse/installed", short: "view" },
+			{ key: "s", verb: "user/project", short: "scope" },
+			{ key: "n", verb: "notices" },
 			{ key: "o", verb: "import" },
 			{ key: "R", verb: "refresh" },
 		],

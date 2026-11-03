@@ -1,3 +1,14 @@
+/**
+ * `/interop`: the other coding agents on this machine, and what Clio may do
+ * with each. The operator's two questions are "which of these are connected as
+ * delegation peers?" and "what can I adopt from them?", so every row leads
+ * with its answer as a status chip and the status row keeps the two facts the
+ * adoption keys depend on, the destination scope and the kind filter.
+ *
+ * Nothing here writes until a key says so: `a` appends one delegation entry,
+ * `d` records a decline, and `y` installs exactly the reviewed plan.
+ */
+
 import { readSettings } from "../../core/config.js";
 import type { InteropAgentId, InteropContract, InteropProposal, InteropReport } from "../../domains/interop/index.js";
 import {
@@ -11,19 +22,42 @@ import {
 	planInteropAdoption,
 	renderProposalEntry,
 } from "../../domains/interop/index.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../../session-control/slash-commands.js";
-import { clioTheme } from "../theme/index.js";
+import { dateLocal } from "../format-time.js";
+import type { HintEntry } from "../overlay-frame.js";
+import {
+	chip,
+	chipRow,
+	chipRows,
+	choiceRows,
+	clioTheme,
+	commandBlock,
+	type Fact,
+	factRows,
+	fitUnits,
+	keyCap,
+	type StatusKind,
+	statusChip,
+	type TableCell,
+	tableRows,
+	titleRow,
+} from "../theme/index.js";
 import { type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
 export const INTEROP_EMPTY =
 	"no other coding agents detected on this machine. install one, then `/interop` proposes it as a delegation peer.";
 
-const GROUP_INVENTORY = "Inventory";
+const GROUP_PROPOSED = "Proposed";
 const GROUP_DETECTED = "Detected";
-const GROUP_CONFIGURED = "Configured";
+const GROUP_CONNECTED = "Connected";
 const GROUP_DECLINED = "Declined";
+const GROUP_INVENTORY = "Inventory";
+const GROUP_PLAN = "Adoption plan";
+
+const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
 
 export interface InteropOverlayDeps {
 	report: () => InteropReport | null;
@@ -67,119 +101,471 @@ export function interopOverlaySurface(
 	};
 }
 
-function planLines(proposal: InteropProposal): string[] {
-	const lines = [
-		`# Connect ${proposal.label}`,
-		"This appends one entry to `delegation.agents`:",
-		"```yaml",
-		...renderProposalEntry(proposal).split("\n"),
-		"```",
-		`**projectContext:** ${INHERITED_PROJECT_CONTEXT} (inherited; the peer receives your task text, never the project projection)`,
-		"**toolGovernance:** clio-coder-policy (Clio mediates permission requests the ACP peer reports; its own tools may not be fully visible)",
-	];
-	if (proposal.needsNetworkInstall) {
-		lines.push("**Adapter:** pinned bridge not verified locally; npx may fetch it on first use");
-	}
-	lines.push("Press `a` to connect it, `d` to decline.");
-	return lines;
+/** The adoption settings every `i` reads; the status row states them because they decide what the plan contains. */
+interface AdoptionSettings {
+	scope: "user" | "project";
+	filter: AdoptionKind | undefined;
 }
 
-function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
+const KIND_CYCLE: ReadonlyArray<AdoptionKind | undefined> = [undefined, "skill", "agent", "prompt", "plugin"];
+
+const PRESENCE_STATUS: Readonly<Record<"present" | "absent" | "unknown", StatusKind>> = {
+	present: "ok",
+	absent: "error",
+	unknown: "pending",
+};
+
+const MODE_STATUS: Readonly<Record<"ready" | "experimental" | "unavailable", StatusKind>> = {
+	ready: "ok",
+	experimental: "warning",
+	unavailable: "error",
+};
+
+function plural(count: number, unit: string): string {
+	if (count === 1) return `${count} ${unit}`;
+	return `${count} ${unit.endsWith("y") ? `${unit.slice(0, -1)}ies` : `${unit}s`}`;
+}
+
+/** The exact argv a peer is launched with, as one line. */
+function commandLine(command: string, args: ReadonlyArray<string>): string {
+	return sanitizeCallTargetText([command, ...args].join(" "));
+}
+
+/**
+ * The launch modes a peer offers, one fact per mode: its status as a chip,
+ * the reason, and the next step. Pure projection of the domain's answer.
+ */
+function modeFacts(
+	id: InteropAgentId,
+	report: InteropReport | null,
+	configuredIds: ReadonlySet<string>,
+	paneAvailable: boolean | null,
+): Fact[] {
+	const kind = interopAgentKind(id);
+	const record = report?.agents.find((agent) => agent.kind === id);
+	if (!kind || !record) return [];
+	const theme = clioTheme();
+	return peerModeCapabilities(kind, record, {
+		configuredAcp: configuredIds.has(id),
+		configuredTargets: readSettings().targets,
+		paneAvailable,
+	}).map((mode) => ({
+		label: mode.mode,
+		value: `${statusChip(theme, MODE_STATUS[mode.status], mode.status)} ${theme.fg("body", sanitizeCallTargetText(mode.reason))}. ${theme.fg("annotation", `Next: ${sanitizeCallTargetText(mode.setupAction)}`)}`,
+	}));
+}
+
+/** Counts per resource kind, in inventory order, as `3 skills`. */
+function kindCounts(items: ReadonlyArray<{ kind: string }>): string[] {
+	const counts = new Map<string, number>();
+	for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
+	return [...counts.entries()].map(([kind, count]) => plural(count, kind));
+}
+
+function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListOverlayItem[] {
 	const theme = clioTheme();
 	const report = deps.report();
 	const configuredAgents = deps.configured();
-	const configuredTargets = readSettings().targets;
-	const modeLines = (id: InteropAgentId): string[] => {
-		const kind = interopAgentKind(id);
-		const record = report?.agents.find((agent) => agent.kind === id);
-		if (!kind || !record) return [];
-		return peerModeCapabilities(kind, record, {
-			configuredAcp: configuredAgents.some((agent) => agent.id === id),
-			configuredTargets,
-			paneAvailable: deps.paneAvailable ?? null,
-		}).flatMap((mode) => [`**${mode.mode}: ${mode.status}** — ${mode.reason}`, `Next: ${mode.setupAction}`]);
-	};
-	const items: ListOverlayItem[] = deps.proposals().map((proposal) => ({
-		id: proposal.kind,
-		label: `${proposal.entry.id.padEnd(16)}${[proposal.entry.command, ...proposal.entry.args].join(" ")}`,
-		get meta() {
-			return theme.fg("warning", "not configured");
-		},
-		group: GROUP_DETECTED,
-		detail: () => [...planLines(proposal), ...modeLines(proposal.kind)],
-	}));
+	const configuredIds = new Set(configuredAgents.map((agent) => agent.id));
+	const paneAvailable = deps.paneAvailable ?? null;
+	const proposals = deps.proposals();
+	const modes = (id: InteropAgentId): Fact[] => modeFacts(id, report, configuredIds, paneAvailable);
+	// The domain re-proposes a declined agent whose binary moved or changed
+	// version, so an agent that stands declined and is not proposed again is
+	// declined, whatever fingerprint the version probe computed this time.
+	const declined = (agent: { kind: InteropAgentId; decision?: string }): boolean =>
+		agent.decision === "declined" && !proposals.some((proposal) => proposal.kind === agent.kind);
+
+	const items: ListOverlayItem[] = proposals.map((proposal) => {
+		const command = commandLine(proposal.entry.command, proposal.entry.args);
+		return {
+			id: `proposal:${proposal.kind}`,
+			label: `${proposal.label} ${proposal.entry.id} ${command}`,
+			cells: { lead: proposal.label, text: command },
+			get meta() {
+				return chipRow(
+					clioTheme(),
+					[
+						proposal.version ? chip(clioTheme(), sanitizeCallTargetText(proposal.version), "muted") : null,
+						statusChip(clioTheme(), "pending", "not configured"),
+					],
+					60,
+				);
+			},
+			group: GROUP_PROPOSED,
+			detailFormat: "rows",
+			detail: (width) => [
+				titleRow(theme, `Connect ${proposal.label}`, width, { meta: "proposal" }),
+				...chipRows(
+					theme,
+					[
+						statusChip(theme, "pending", "not configured"),
+						proposal.version ? chip(theme, `version ${sanitizeCallTargetText(proposal.version)}`, "muted") : null,
+						proposal.binary ? chip(theme, sanitizeCallTargetText(proposal.binary), "muted") : null,
+					],
+					width,
+				),
+				...choiceRows(
+					theme,
+					[
+						{ key: "a", verb: "connect", consequence: "appends exactly this entry to delegation.agents", tone: "action" },
+						{
+							key: "d",
+							verb: "decline",
+							consequence: "records the decision; Clio proposes it again when its binary version or path changes",
+						},
+					],
+					width,
+				),
+				"",
+				// The YAML is several lines; the block folds each on its own so a long
+				// argument wraps under its gutter instead of carrying a newline into a row.
+				...renderProposalEntry(proposal)
+					.split("\n")
+					.flatMap((line) => commandBlock(theme, line, width, { role: "inlineCode" })),
+				...factRows(
+					theme,
+					[
+						{
+							label: "projectContext",
+							value: `${INHERITED_PROJECT_CONTEXT} (inherited; the peer receives your task text, never the project projection)`,
+						},
+						{
+							label: "toolGovernance",
+							value:
+								"clio-coder-policy (Clio mediates permission requests the ACP peer reports; its own tools may not be fully visible)",
+						},
+						...(proposal.needsNetworkInstall
+							? [
+									{
+										label: "Adapter",
+										value: "pinned bridge not verified locally; npx may fetch it on first use",
+										tone: "warning" as const,
+									},
+								]
+							: []),
+						...modes(proposal.kind),
+					],
+					width,
+					FACT_OPTIONS,
+				),
+			],
+		};
+	});
+
+	// A present peer with no pending proposal and no standing decision: it has
+	// no ACP recipe, or Clio reaches it another way. A configured or declined
+	// agent is listed once, under its own group, never here as well.
 	for (const record of report?.agents ?? []) {
 		const kind = interopAgentKind(record.kind);
 		if (!kind || kind.binaryNames.length === 0) continue;
-		if (items.some((item) => item.id === record.kind)) continue;
+		if (proposals.some((proposal) => proposal.kind === record.kind)) continue;
+		if (configuredIds.has(record.kind) || declined(record)) continue;
+		if (record.presence === "absent") continue;
+		const text = sanitizeCallTargetText(record.version ?? record.binary ?? "version unknown");
 		items.push({
 			id: `peer:${record.kind}`,
-			label: `${kind.label.padEnd(16)}${record.version ?? record.binary ?? "version unknown"}`,
+			label: `${kind.label} ${text}`,
+			cells: { lead: kind.label, text },
 			get meta() {
-				return theme.fg("annotation", record.presence);
+				return statusChip(clioTheme(), PRESENCE_STATUS[record.presence], record.presence);
 			},
 			group: GROUP_DETECTED,
-			detail: () => [
-				`# ${kind.label}`,
-				`Presence: ${record.presence}; version: ${record.version ?? "unknown"}`,
-				...modeLines(record.kind),
+			detailFormat: "rows",
+			detail: (width) => [
+				titleRow(theme, kind.label, width, { meta: "detected" }),
+				...chipRows(
+					theme,
+					[
+						statusChip(theme, PRESENCE_STATUS[record.presence], record.presence),
+						record.version ? chip(theme, `version ${sanitizeCallTargetText(record.version)}`, "muted") : null,
+						record.binary ? chip(theme, sanitizeCallTargetText(record.binary), "muted") : null,
+					],
+					width,
+				),
+				...(kind.acp
+					? []
+					: [
+							theme.fg(
+								"annotation",
+								"No ACP recipe for this agent, so there is nothing to connect; the modes below are how Clio reaches it.",
+							),
+						]),
+				...factRows(theme, modes(record.kind), width, FACT_OPTIONS),
 			],
 		});
 	}
+
 	for (const agent of configuredAgents) {
-		const command = [agent.command, ...agent.args].join(" ");
+		const command = commandLine(agent.command, agent.args);
 		items.push({
 			id: `configured:${agent.id}`,
-			label: `${agent.id.padEnd(16)}${command}`,
+			label: `${agent.id} ${command}`,
+			cells: { lead: sanitizeCallTargetText(agent.id), text: command },
 			get meta() {
-				return theme.fg("success", "connected");
+				return statusChip(clioTheme(), "ok", "connected");
 			},
-			group: GROUP_CONFIGURED,
-			detail: () => [`# ${agent.id}`, `**ACP command:** \`${command}\``, ...modeLines(agent.id as InteropAgentId)],
+			group: GROUP_CONNECTED,
+			detailFormat: "rows",
+			detail: (width) => [
+				titleRow(theme, sanitizeCallTargetText(agent.id), width, { meta: "delegation agent" }),
+				chipRow(theme, [statusChip(theme, "ok", "connected"), chip(theme, `/delegate ${agent.id} <task>`, "muted")], width),
+				...commandBlock(theme, command, width),
+				...factRows(theme, modes(agent.id as InteropAgentId), width, FACT_OPTIONS),
+			],
 		});
 	}
+
 	for (const agent of report?.agents ?? []) {
-		if (agent.decision !== "declined" || agent.decidedFingerprint !== agent.fingerprint) continue;
+		if (!declined(agent)) continue;
+		const when = agent.decidedAt ? dateLocal(agent.decidedAt) : "";
+		const text = sanitizeCallTargetText(agent.binary ?? agent.installDir ?? "");
 		items.push({
 			id: `declined:${agent.kind}`,
-			label: `${agent.kind.padEnd(16)}${agent.binary ?? agent.installDir ?? ""}`,
+			label: `${agent.kind} ${text}`,
+			cells: { lead: agent.kind, text },
 			get meta() {
-				return theme.fg("annotation", `declined ${agent.decidedAt ?? ""}`.trim());
+				return statusChip(clioTheme(), "cancelled", `declined ${when}`.trim());
 			},
 			group: GROUP_DECLINED,
-			detail: () => [`# ${agent.kind}`, "Declined. Clio proposes it again when its binary version or path changes."],
+			detailFormat: "rows",
+			detail: (width) => [
+				titleRow(theme, interopAgentKind(agent.kind)?.label ?? agent.kind, width, { meta: "declined" }),
+				chipRow(theme, [statusChip(theme, "cancelled", `declined ${when}`.trim())], width),
+				theme.fg("annotation", "Clio proposes it again when its binary version or path changes."),
+			],
 		});
 	}
+
 	for (const agent of report?.agents ?? []) {
-		if (!agent.inventory) continue;
-		const counts = agent.inventory.items.reduce<Record<string, number>>((out, item) => {
-			out[item.kind] = (out[item.kind] ?? 0) + 1;
-			return out;
-		}, {});
+		const inventory = agent.inventory;
+		if (!inventory) continue;
+		const counts = kindCounts(inventory.items);
 		items.push({
 			id: `inventory:${agent.kind}`,
-			label: agent.kind,
+			label: `${agent.kind} ${counts.join(" ")}`,
+			cells: { lead: agent.kind, text: counts.join(", ") || "nothing adoptable" },
+			get meta() {
+				// An empty inventory has nothing to plan, so it carries no key cap.
+				return chipRow(
+					clioTheme(),
+					[
+						chip(clioTheme(), plural(inventory.items.length, "resource"), "muted"),
+						inventory.items.length > 0 ? keyCap(clioTheme(), "i") : null,
+					],
+					40,
+				);
+			},
 			group: GROUP_INVENTORY,
-			meta: `${agent.inventory.items.length} resources`,
-			detail: () => [
-				`# What would you like to adopt from ${agent.kind}?`,
-				`Presence: ${agent.presence}. Version: ${agent.version ?? "unknown"}. Inventory: ${agent.inventory?.status}.`,
-				...Object.entries(counts).map(([kind, count]) => `${count} ${kind}`),
-				"Press i to review an adoption plan. Press p for project destination, u for user, c to change the kind filter.",
-				...(agent.inventory?.items.map((item) => `${item.scope} ${item.kind}: ${item.name}`) ?? []),
-				...(agent.inventory?.diagnostics ?? []),
-			],
+			detailFormat: "rows",
+			detail: (width) => {
+				const rows = inventory.items.map((item): TableCell[] => [
+					{ text: item.scope, tone: "muted" },
+					{ text: item.kind, tone: "muted" },
+					{ text: sanitizeCallTargetText(item.name) },
+				]);
+				return [
+					titleRow(theme, `Adopt from ${agent.kind}`, width, { meta: `inventory ${inventory.status}` }),
+					...chipRows(
+						theme,
+						[
+							statusChip(theme, PRESENCE_STATUS[agent.presence], agent.presence),
+							agent.version ? chip(theme, `version ${sanitizeCallTargetText(agent.version)}`, "muted") : null,
+							...counts.map((count) => chip(theme, count, "neutral")),
+						],
+						width,
+					),
+					...(inventory.items.length > 0
+						? choiceRows(
+								theme,
+								[
+									{
+										key: "i",
+										verb: "plan adoption",
+										consequence: `reviews a plan for ${settings.filter ?? "every kind"} into ${settings.scope} scope; nothing is written`,
+										tone: "action",
+									},
+								],
+								width,
+							)
+						: [theme.fg("annotation", "Nothing adoptable was found, so there is no plan to review.")]),
+					...(rows.length > 0
+						? [
+								"",
+								...tableRows(
+									theme,
+									{
+										columns: [
+											{ label: "scope", min: 4, priority: 1 },
+											{ label: "kind", min: 4, priority: 2 },
+											{ label: "name", min: 8, priority: 3, wrap: true },
+										],
+										rows,
+										header: true,
+									},
+									width,
+								),
+							]
+						: []),
+					...inventory.diagnostics.map((diagnostic) => statusChip(theme, "warning", sanitizeCallTargetText(diagnostic))),
+				];
+			},
 		});
 	}
 	return items;
+}
+
+/** The reviewed plan as rows: the approval first, then every entry with its verdict. */
+function planItems(plan: InteropAdoptionPlan): ListOverlayItem[] {
+	const theme = clioTheme();
+	const installs = plan.entries.filter((entry) => entry.action === "install").length;
+	const skips = plan.entries.length - installs;
+	const approval: ListOverlayItem = {
+		id: "approval",
+		label: `Adopt ${plural(installs, "resource")}?`,
+		cells: { lead: `Adopt ${plural(installs, "resource")}?`, text: `from ${plan.host} into ${plan.scope} scope` },
+		get meta() {
+			return chipRow(clioTheme(), [keyCap(clioTheme(), "y"), keyCap(clioTheme(), "b")], 20);
+		},
+		group: GROUP_PLAN,
+		detailFormat: "rows",
+		detail: (width) => [
+			titleRow(theme, "Install this reviewed plan?", width, { meta: plan.host }),
+			...chipRows(
+				theme,
+				[
+					statusChip(theme, installs > 0 ? "pending" : "cancelled", `${installs} to install`),
+					chip(theme, `${skips} skipped`, "muted"),
+					chip(theme, `${plan.scope} scope`, "muted"),
+				],
+				width,
+			),
+			...choiceRows(
+				theme,
+				[
+					{
+						key: "y",
+						verb: "approve",
+						consequence:
+							installs > 0
+								? "installs exactly these entries; host files are unchanged and foreign resources keep the project-import trust gate"
+								: "installs nothing, because every entry is skipped",
+						tone: "action",
+					},
+					{ key: "b", verb: "back", consequence: "returns to the agents without installing" },
+				],
+				width,
+			),
+		],
+	};
+	return [
+		approval,
+		...plan.entries.map(
+			(entry, index): ListOverlayItem => ({
+				id: `plan:${index}`,
+				label: `${entry.action} ${entry.item.name} ${entry.item.kind}`,
+				cells: { lead: sanitizeCallTargetText(entry.item.name), text: sanitizeCallTargetText(entry.reason) },
+				get meta() {
+					return chipRow(
+						clioTheme(),
+						[
+							chip(clioTheme(), entry.item.kind, "muted"),
+							entry.action === "install"
+								? statusChip(clioTheme(), "ok", "install")
+								: statusChip(clioTheme(), "cancelled", "skip"),
+						],
+						40,
+					);
+				},
+				group: GROUP_PLAN,
+				detailFormat: "rows",
+				detail: (width) => [
+					titleRow(theme, sanitizeCallTargetText(entry.item.name), width, { meta: entry.item.kind }),
+					chipRow(
+						theme,
+						[
+							entry.action === "install" ? statusChip(theme, "ok", "install") : statusChip(theme, "cancelled", "skip"),
+							chip(theme, `${entry.item.scope} scope at the host`, "muted"),
+						],
+						width,
+					),
+					...factRows(
+						theme,
+						[
+							{ label: "Why", value: sanitizeCallTargetText(entry.reason) },
+							{ label: "Source", value: sanitizeCallTargetText(entry.item.path) },
+							...(entry.destination ? [{ label: "Destination", value: sanitizeCallTargetText(entry.destination) }] : []),
+							...(entry.digest ? [{ label: "SHA-256", value: entry.digest }] : []),
+							...(entry.requirements?.length
+								? [{ label: "Requires", value: entry.requirements.join(", "), tone: "warning" as const }]
+								: []),
+							...(entry.omitted ?? []).map((file) => ({
+								label: "Skipped file",
+								value: `${sanitizeCallTargetText(file)}: executable, host-specific, or non-text data`,
+								tone: "warning" as const,
+							})),
+						],
+						width,
+						FACT_OPTIONS,
+					),
+				],
+			}),
+		),
+	];
+}
+
+/**
+ * The persistent row above the list: where adoption writes and which kinds it
+ * takes, each with the key that changes it, then the counts. Mode and scope
+ * survive every width because they decide what `i` plans.
+ */
+function statusLine(
+	settings: AdoptionSettings,
+	counts: { proposed: number; connected: number; declined: number; inventories: number },
+	pending: InteropAdoptionPlan | undefined,
+	width: number,
+): string {
+	const theme = clioTheme();
+	// Whole chips drop from the right with the dim ellipsis, never a cut word.
+	const units = (parts: ReadonlyArray<string | null>): string[] =>
+		parts.filter((part): part is string => part !== null && part.length > 0);
+	if (pending) {
+		const installs = pending.entries.filter((entry) => entry.action === "install").length;
+		return fitUnits(
+			theme,
+			"",
+			units([
+				chip(theme, `plan from ${pending.host}`, "accent"),
+				chip(theme, `${installs} to install`, installs > 0 ? "action" : "muted"),
+				`${keyCap(theme, "y")} ${theme.fg("annotation", "approve")}`,
+				`${keyCap(theme, "b")} ${theme.fg("annotation", "back")}`,
+				chip(theme, `${pending.entries.length - installs} skipped`, "muted"),
+				chip(theme, `${pending.scope} scope`, "muted"),
+			]),
+			width,
+		);
+	}
+	const wide = width >= 72;
+	return fitUnits(
+		theme,
+		"",
+		units([
+			`${keyCap(theme, "u")}${keyCap(theme, "p")} ${theme.fg("fieldValue", wide ? `adopt into ${settings.scope}` : settings.scope)}`,
+			`${keyCap(theme, "c")} ${theme.fg("fieldValue", settings.filter ? `${settings.filter}s only` : "all kinds")}`,
+			chip(theme, `${counts.proposed} proposed`, counts.proposed > 0 ? "action" : "muted"),
+			chip(theme, `${counts.connected} connected`, counts.connected > 0 ? "success" : "muted"),
+			counts.declined > 0 ? chip(theme, `${counts.declined} declined`, "muted") : null,
+			counts.inventories > 0 ? chip(theme, plural(counts.inventories, "inventory"), "muted") : null,
+		]),
+		width,
+	);
 }
 
 export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	let closed = false;
 	let fresh: InteropReport | undefined;
 	let pending: InteropAdoptionPlan | undefined;
-	let scope: "user" | "project" = "user";
-	let filter: AdoptionKind | undefined;
+	const settings: AdoptionSettings = { scope: "user", filter: undefined };
 	const surface = ctx.interop;
 	const deps: InteropOverlayDeps = surface
 		? { ...surface, paneAvailable: ctx.panes?.status().available ?? false, onClose }
@@ -194,92 +580,107 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 			};
 	const originalReport = deps.report;
 	deps.report = () => fresh ?? originalReport();
+	let items = buildItems(deps, settings);
+	const counts = (): { proposed: number; connected: number; declined: number; inventories: number } => ({
+		proposed: items.filter((item) => item.group === GROUP_PROPOSED).length,
+		connected: items.filter((item) => item.group === GROUP_CONNECTED).length,
+		declined: items.filter((item) => item.group === GROUP_DECLINED).length,
+		inventories: items.filter((item) => item.group === GROUP_INVENTORY).length,
+	});
 	const close = (): void => {
 		closed = true;
 		pending = undefined;
 		onClose();
 	};
+	// The decision is already on disk; the rows are its projection. They are
+	// replaced rather than mutated in place, because the view memoizes the
+	// frame on the row set and a mutated array left the accepted or declined
+	// agent sitting under its old group until the next keystroke repainted it.
 	const reset = (): void => {
 		pending = undefined;
-		handle.setItems(buildItems(deps));
+		items = buildItems(deps, settings);
+		handle.setItems(items);
 	};
 	const preview = (item: ListOverlayItem): void => {
-		const host = item.id.replace(/^inventory:/, "") as InteropAgentId;
+		if (!item.id.startsWith("inventory:") || item.cells?.text === "nothing adoptable") return;
+		const host = item.id.slice("inventory:".length) as InteropAgentId;
 		const inventory = deps.report()?.agents.find((agent) => agent.kind === host)?.inventory;
 		if (!inventory) return;
-		pending = planInteropAdoption({ host, inventory, scope, ...(filter ? { kind: filter } : {}) });
-		handle.setItems([
-			{
-				id: "approval",
-				label: `Adopt ${pending.entries.filter((entry) => entry.action === "install").length} resources?`,
-				meta: scope,
-				detail: () => [
-					"# Install this reviewed plan?",
-					"Press y to approve. Press b to return without installing.",
-					"Host files are unchanged. Foreign resources keep the project-import trust gate.",
-				],
-			},
-			...pending.entries.map((entry, index) => ({
-				id: `plan:${index}`,
-				label: `${entry.action}: ${entry.item.name}`,
-				meta: entry.item.kind,
-				detail: () => [
-					`# ${entry.action} ${entry.item.name}`,
-					`Source: ${entry.item.path}`,
-					`Source scope: ${entry.item.scope}`,
-					...(entry.destination ? [`Destination: ${entry.destination}`, `SHA-256: ${entry.digest}`] : []),
-					entry.reason,
-					...(entry.requirements?.length ? [`Requires installed packages: ${entry.requirements.join(", ")}`] : []),
-					...(entry.omitted ?? []).map((file) => `Skip ${file}: executable, host-specific, or non-text data.`),
-				],
-			})),
-		]);
+		pending = planInteropAdoption({
+			host,
+			inventory,
+			scope: settings.scope,
+			...(settings.filter ? { kind: settings.filter } : {}),
+		});
+		// The plan replaces the agents; a filter typed to reach the inventory
+		// would hide every one of its rows.
+		handle.clearFilter();
+		handle.setItems(planItems(pending));
 	};
+	// Only a proposal row carries a decision. A detected peer without a
+	// proposal used to reach here too, and its row id was recorded as a
+	// declined agent kind.
 	const decide = (item: ListOverlayItem, action: (kind: InteropAgentId) => void): void => {
-		if (item.group !== GROUP_DETECTED) return;
-		action(item.id as InteropAgentId);
-		// The decision is already on disk; the rows are its projection. They are
-		// replaced rather than mutated in place, because the view memoizes the
-		// frame on the row set and a mutated array left the accepted or declined
-		// agent sitting under Detected until the next keystroke repainted it.
-		handle.setItems(buildItems(deps));
+		if (!item.id.startsWith("proposal:")) return;
+		action(item.id.slice("proposal:".length) as InteropAgentId);
+		reset();
+	};
+
+	const hints = (selected: ListOverlayItem | undefined): HintEntry[] => {
+		if (pending) {
+			return [
+				...(selected?.id === "approval" ? [{ key: "y", verb: "approve plan", short: "approve" }] : []),
+				{ key: "b", verb: "back to agents", short: "back", critical: true },
+			];
+		}
+		if (selected?.id.startsWith("proposal:")) {
+			return [
+				{ key: "a", verb: "connect", critical: true },
+				{ key: "d", verb: "decline", critical: true },
+			];
+		}
+		if (selected?.id.startsWith("inventory:") && selected.cells?.text !== "nothing adoptable")
+			return [{ key: "i", verb: "plan adoption", short: "plan", critical: true }];
+		return [];
 	};
 
 	const handle: ListOverlayHandle = openListOverlay(tui, {
 		markerId: "interop",
-		title: "What would you like to adopt or connect?",
-		items: buildItems(deps),
+		title: "Local coding agents",
+		items,
 		filterable: true,
 		explicitSearch: true,
 		layout: "split",
+		unit: "rows",
 		emptyMessage: INTEROP_EMPTY,
-		hints: [
-			{ key: "c", verb: "kind filter" },
-			{ key: "i", verb: "plan adoption" },
-			{ key: "y", verb: "approve plan" },
-			{ key: "b", verb: "back" },
-			{ key: "a", verb: "connect" },
-			{ key: "d", verb: "decline" },
+		status: (width) => statusLine(settings, counts(), pending, width),
+		globalHints: [
+			{ key: "u/p", verb: "adopt into user/project", short: "scope" },
+			{ key: "c", verb: "kinds" },
 		],
-		actions: {
-			i: preview,
+		globalActions: {
 			p: () => {
-				scope = "project";
+				settings.scope = "project";
 				reset();
 				ctx.notice("info", "Adoption destination: project.");
 			},
 			u: () => {
-				scope = "user";
+				settings.scope = "user";
 				reset();
 				ctx.notice("info", "Adoption destination: user.");
 			},
 			c: () => {
-				const kinds: Array<AdoptionKind | undefined> = [undefined, "skill", "agent", "prompt", "plugin"];
-				filter = kinds[(kinds.indexOf(filter) + 1) % kinds.length];
+				settings.filter = KIND_CYCLE[(KIND_CYCLE.indexOf(settings.filter) + 1) % KIND_CYCLE.length];
 				reset();
-				ctx.notice("info", `Adoption kind: ${filter ?? "all"}.`);
+				ctx.notice("info", `Adoption kind: ${settings.filter ?? "all"}.`);
 			},
-			b: reset,
+		},
+		hints,
+		actions: {
+			i: preview,
+			b: () => {
+				if (pending) reset();
+			},
 			y: () => {
 				if (!pending) return;
 				const plan = pending;
@@ -298,7 +699,10 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		.then((report) => {
 			if (closed) return;
 			fresh = report;
-			if (!pending) handle.setItems(buildItems(deps));
+			if (!pending) {
+				items = buildItems(deps, settings);
+				handle.setItems(items);
+			}
 		})
 		.catch((error) => {
 			if (!closed) ctx.notice("warn", `Inventory unavailable: ${String(error)}`);

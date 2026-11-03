@@ -8,49 +8,86 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	buildHint,
+	FILTER_HINT,
+	fitHintEntries,
+	type HintEntry,
+	type OverlayEscVerb,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import {
 	clioTheme,
 	emptyState,
+	errorState,
 	GLYPH,
 	listGroupHeader,
 	markdownTheme,
+	padAnsi,
+	positionRow,
 	rule,
 	selectionRow,
-	selectListTheme,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
 /**
- * Row width at and below which a list draws `narrowLabel`. It is the content
- * width of an 80-column terminal, where the help list lost every description
- * to the flags in front of it.
+ * Row width at and below which a two-column row draws `narrowLead`. It is the
+ * content width of an 80-column terminal, where the help list lost every
+ * description to the flags in front of it.
  */
 export const NARROW_ROW_WIDTH = 76;
 
+/** The share of a row the lead column of a two-column list may take. */
+const LEAD_COLUMN_SHARE = 0.4;
+
+/** Fewest list rows a stacked detail pane may leave, and fewest rows it needs to be drawn at all. */
+const STACKED_LIST_MIN_ROWS = 3;
+const STACKED_DETAIL_MIN_ROWS = 2;
+
+interface RenderedRow {
+	type: "group" | "item";
+	groupName?: string;
+	item?: ListOverlayItem;
+	itemIndex?: number;
+}
+
+export interface ListOverlayCells {
+	/** The first column: a usage, a key, a name. Shares one width with every other row that has cells. */
+	lead: string;
+	/** A shorter lead drawn at or below `NARROW_ROW_WIDTH`, so flags go before the description does. */
+	narrowLead?: string;
+	/** The second column, which takes the rest of the row. */
+	text: string;
+}
+
 export interface ListOverlayItem {
 	id: string;
-	/** Left-column text, already themed by the caller. */
+	/** Left-column text, already themed by the caller. The filter matches this text. */
 	label: string;
 	/**
-	 * A shorter spelling of `label` drawn at or below `NARROW_ROW_WIDTH`, so a
-	 * row can drop what matters least before the cut reaches what matters most.
-	 * Filtering still matches the full label.
+	 * Draw the row as two aligned columns instead of `label`. The lead column
+	 * is as wide as the widest lead among the rows, at most two fifths of the
+	 * row, so a reference list reads as a table without a fixed padding that a
+	 * long usage overran and a short one left empty.
 	 */
-	narrowLabel?: string;
+	cells?: ListOverlayCells;
 	/** Optional dim right-aligned column (origin, scope, version...). */
 	meta?: string;
 	/** Group header this item renders under, e.g. "project", "marketplace". */
 	group?: string;
 	/**
-	 * Lines for the detail pane, lazily computed at the pane's real width. May
-	 * contain markdown. Providers that laid themselves out at a guessed width had
+	 * Lines for the detail pane, lazily computed at the pane's real width.
+	 * Markdown by default; `detailFormat: "rows"` says the lines are already
+	 * laid out from the design primitives and the pane only wraps a line that
+	 * overruns it. Providers that laid themselves out at a guessed width had
 	 * their own wrapped lines re-wrapped by the pane, which repeated the row
 	 * label on every continuation line.
 	 */
 	detail?: (width: number) => string[];
+	detailFormat?: "markdown" | "rows";
 }
 
 /**
@@ -107,11 +144,15 @@ export interface ListOverlayOptions {
 	 * function is asked per frame and is handed the selected row, so a footer can
 	 * advertise the keys that row actually offers rather than a fixed set.
 	 */
-	hints?:
-		| ReadonlyArray<{ key: string; verb: string }>
-		| ((selected: ListOverlayItem | undefined) => ReadonlyArray<{ key: string; verb: string }>);
+	hints?: ReadonlyArray<HintEntry> | ((selected: ListOverlayItem | undefined) => ReadonlyArray<HintEntry>);
 	/** Custom message when list is empty; a function is asked per frame. */
 	emptyMessage?: string | (() => string);
+	/** What would fill the list, or the key that does, under the empty message. */
+	emptyRemedy?: string | (() => string);
+	/** A read that failed, asked per frame; drawn as the error state in place of the empty message while it returns text. */
+	emptyError?: () => string | undefined;
+	/** Noun for the rows in the position line; `rows` by default. */
+	unit?: string;
 	/** Layout mode: stack (detail below list) or split (detail to the right). */
 	layout?: "stack" | "split";
 	/** Primary action; omitted means Enter toggles the detail pane. */
@@ -139,6 +180,8 @@ export class ListOverlayView implements Component {
 	 * the scroll keys would do before any render has corrected it.
 	 */
 	private detailPaneDrawn: boolean;
+	/** Whether the pane on screen is the split one, which Tab cannot put away. */
+	private detailPaneSplit = false;
 	private readonly input: Input;
 	/**
 	 * The live item set. Separate from `options.items` because a surface backed by
@@ -227,6 +270,21 @@ export class ListOverlayView implements Component {
 		this.selectIndex(index);
 		this.renderMemo = null;
 		return true;
+	}
+
+	/**
+	 * Drop a typed filter and leave search focus, for a caller that replaces its
+	 * rows with a different set: a filter typed to reach an agent's inventory
+	 * hid every row of the adoption plan that took the inventory's place.
+	 */
+	clearFilter(): void {
+		if (this.filterText.length === 0 && !this.isFilterFocused) return;
+		this.filterText = "";
+		this.input.setValue("");
+		this.isFilterFocused = false;
+		this.inputEpoch += 1;
+		this.selectIndex(0);
+		this.renderMemo = null;
 	}
 
 	/** Show or hide the stacked detail pane, for callers that bind their own key to it. */
@@ -404,57 +462,84 @@ export class ListOverlayView implements Component {
 		if (tab === undefined) return null;
 		const count = this.tabCounts.get(tab.id) ?? this.items.length;
 		const countLabel = tab.countLabel?.(count) ?? `${count} ${tab.label.toLowerCase()}`;
-		return { key: "←→", verb: `tab · ${countLabel}`, short: "tab", critical: true };
+		// The tab bar itself is on screen at every width, naming ←→ when it is
+		// narrow, so the footer entry is a reminder that gives way before a row's keys.
+		return { key: "←→", verb: `tab · ${countLabel}`, short: "tab" };
 	}
 
-	getHint(): string {
+	/**
+	 * The footer, fitted to the rail it is drawn on. With a width the entries
+	 * narrow by the shared rule, so a key a surface marked critical outlives the
+	 * conveniences; without one the full hint is returned for callers that fit
+	 * it themselves.
+	 */
+	getHint(innerWidth?: number): string {
+		const { entries, esc } = this.hintEntries();
+		if (innerWidth === undefined) return buildHint(entries, esc);
+		return fitHintEntries([...entries, { key: "Esc", verb: esc }], innerWidth - 3);
+	}
+
+	private hintEntries(): { entries: HintEntry[]; esc: OverlayEscVerb } {
 		if (this.options.explicitSearch && this.isFilterFocused) {
-			return buildHint(
-				[{ key: "Enter", verb: "back to list", critical: true }],
-				this.filterText.length > 0 ? "clear filter" : "back",
-			);
+			return {
+				entries: [{ key: "Enter", verb: "back to list", critical: true }],
+				esc: this.filterText.length > 0 ? "clear filter" : "back",
+			};
 		}
 		const tabEntry = this.tabHintEntry();
 		// A list with no rows has no row to select, invoke, or act on. Offering
 		// those keys anyway is the same lie the empty state exists to stop telling.
 		// A tab key is the exception: on an empty tab it is the way to a full one.
 		if (this.items.length === 0)
-			return buildHint([...(tabEntry ? [tabEntry] : []), ...(this.options.globalHints ?? [])], this.escapeVerb());
+			return { entries: [...(tabEntry ? [tabEntry] : []), ...(this.options.globalHints ?? [])], esc: this.escapeVerb() };
 
 		const hintEntries: HintEntry[] = [];
 		if (tabEntry) hintEntries.push(tabEntry);
 		hintEntries.push({ key: "↑↓", verb: "select" });
+		// Navigation before actions, which is the order a narrowing footer drops in:
+		// droppable entries go left to right, so the last one written is the last one
+		// standing. Scrolling a pane is reachable only once the pane is on screen, and
+		// it is the widest entry, so it goes with the arrows: at 120 columns it used
+		// to outlive every global key and leave n, b and s off the rail.
+		const hasDetail = this.items.some((item) => !!item.detail);
+		if (hasDetail && this.detailPaneDrawn) hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
 		if (this.options.filterable) {
 			hintEntries.push(this.options.explicitSearch ? { key: "/", verb: "search", critical: true } : FILTER_HINT);
 		}
 		hintEntries.push(...(this.options.globalHints ?? []));
 
-		// Navigation before actions, which is the order a narrowing footer drops in:
-		// droppable entries go left to right, so the last one written is the last one
-		// standing. Scrolling a pane is reachable only once the pane is on screen, and
-		// the key that puts it there is the one worth keeping at 73 columns. Below the
-		// split threshold the footer used to advertise the scroll keys, which did
-		// nothing, and drop `Enter/Tab detail`, which was the way in.
-		const hasDetail = this.items.some((item) => !!item.detail);
+		// Below the split threshold the footer used to advertise the scroll keys,
+		// which did nothing, and drop `Enter/Tab detail`, which was the way in.
 		if (hasDetail) {
-			if (this.detailPaneDrawn) {
-				hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
-			}
-			hintEntries.push({ key: this.options.onSelect ? "Tab" : "Enter/Tab", verb: "detail" });
+			// While no pane is on screen this key is the only way to a row's facts,
+			// so a narrow footer keeps it; once a stacked pane is drawn it is a
+			// toggle. The split pane is always drawn beside the list, so there the
+			// key does nothing and is not advertised.
+			if (!this.detailPaneSplit)
+				hintEntries.push({
+					key: this.options.onSelect ? "Tab" : "Enter/Tab",
+					verb: "detail",
+					critical: !this.detailPaneDrawn,
+				});
 		}
 
 		const hints =
 			typeof this.options.hints === "function"
 				? this.options.hints(this.filteredItems()[this.selectedIndex])
 				: this.options.hints;
+		// A row's own keys are named in its detail pane; while no pane is drawn
+		// the footer is the only place they appear, so they outlive the
+		// navigation reminders there.
 		if (hints) {
-			hintEntries.push(...hints);
+			hintEntries.push(
+				...hints.map((hint) => (this.detailPaneDrawn ? hint : { ...hint, critical: hint.critical ?? true })),
+			);
 		}
 
 		// The footer follows clearFilterOrClose(). With a filter typed, Esc does
 		// not close, and saying it does sent operators out of an overlay they were
 		// still in and back in again to find out.
-		return buildHint(hintEntries, this.escapeVerb());
+		return { entries: hintEntries, esc: this.escapeVerb() };
 	}
 
 	private padLine(line: string, targetWidth: number): string {
@@ -463,13 +548,45 @@ export class ListOverlayView implements Component {
 		return line + " ".repeat(targetWidth - w);
 	}
 
-	private renderList(width: number, listMaxLines: number, filteredItems: ReadonlyArray<ListOverlayItem>): string[] {
-		const lines: string[] = [];
-		const allItems = this.items;
+	/**
+	 * The lead column of a two-column list at this width: the widest lead among
+	 * the rows that have one, capped so the text column always keeps most of
+	 * the row. Measured over every filtered row, not the visible window, so the
+	 * column does not jump while the operator scrolls.
+	 */
+	private leadWidth(width: number, items: ReadonlyArray<ListOverlayItem>): number {
+		const narrow = width <= NARROW_ROW_WIDTH;
+		let widest = 0;
+		for (const item of items) {
+			const cells = item.cells;
+			if (!cells) continue;
+			widest = Math.max(widest, visibleWidth(narrow && cells.narrowLead !== undefined ? cells.narrowLead : cells.lead));
+		}
+		return Math.min(widest, Math.max(8, Math.floor(width * LEAD_COLUMN_SHARE)));
+	}
 
+	/**
+	 * A row's label. A plain two-column row paints its lead in the option role
+	 * and its text in the description role; the focused row stays plain so the
+	 * selection rule paints it whole in the accent, which is how every other
+	 * list marks the cursor.
+	 */
+	private rowLabel(item: ListOverlayItem, focused: boolean, width: number, leadWidth: number): string {
+		const cells = item.cells;
+		if (!cells) return item.label;
+		const theme = clioTheme();
+		const narrow = width <= NARROW_ROW_WIDTH;
+		const lead = narrow && cells.narrowLead !== undefined ? cells.narrowLead : cells.lead;
+		const fitted = padAnsi(truncateToWidth(lead, leadWidth, GLYPH.ellipsis, false), leadWidth);
+		if (focused) return `${fitted}  ${cells.text}`;
+		return `${theme.fg("menuOption", fitted)}  ${theme.fg("menuDescription", cells.text)}`;
+	}
+
+	/** The list's rows in draw order: each group header, then its items. */
+	private renderedRowsFor(filteredItems: ReadonlyArray<ListOverlayItem>): RenderedRow[] {
 		const uniqueGroups: string[] = [];
 		const seenGroups = new Set<string>();
-		for (const item of allItems) {
+		for (const item of this.items) {
 			if (item.group && !seenGroups.has(item.group)) {
 				seenGroups.add(item.group);
 				uniqueGroups.push(item.group);
@@ -483,13 +600,6 @@ export class ListOverlayView implements Component {
 				grouped.set(g, []);
 			}
 			grouped.get(g)?.push(item);
-		}
-
-		interface RenderedRow {
-			type: "group" | "item";
-			groupName?: string;
-			item?: ListOverlayItem;
-			itemIndex?: number;
 		}
 
 		const renderedRows: RenderedRow[] = [];
@@ -506,6 +616,13 @@ export class ListOverlayView implements Component {
 				}
 			}
 		}
+		return renderedRows;
+	}
+
+	private renderList(width: number, listMaxLines: number, filteredItems: ReadonlyArray<ListOverlayItem>): string[] {
+		const lines: string[] = [];
+		const allItems = this.items;
+		const renderedRows = this.renderedRowsFor(filteredItems);
 
 		if (filteredItems.length === 0) {
 			// A list with nothing in it and a filter that matched nothing are
@@ -513,8 +630,20 @@ export class ListOverlayView implements Component {
 			// it wraps rather than truncating so a remedy survives a narrow pane.
 			const empty =
 				typeof this.options.emptyMessage === "function" ? this.options.emptyMessage() : this.options.emptyMessage;
-			const text = allItems.length === 0 ? (empty ?? "No matches found") : "No matches found";
-			for (const wrapped of emptyState(clioTheme(), text, Math.max(1, width - 2))) {
+			const remedy =
+				typeof this.options.emptyRemedy === "function" ? this.options.emptyRemedy() : this.options.emptyRemedy;
+			const noMatch = allItems.length > 0;
+			const error = noMatch ? undefined : this.options.emptyError?.();
+			const text = noMatch ? "No matches found" : (empty ?? "No matches found");
+			// A read that failed is not an empty library. It says what failed, and
+			// the remedy beneath it is the key that reads again.
+			const rows =
+				error !== undefined
+					? errorState(clioTheme(), error, Math.max(1, width - 2), { detail: remedy ?? "" })
+					: emptyState(clioTheme(), text, Math.max(1, width - 2), {
+							remedy: noMatch ? "Esc clears the filter" : (remedy ?? ""),
+						});
+			for (const wrapped of rows) {
 				lines.push(this.padLine(`  ${wrapped}`, width));
 			}
 		} else {
@@ -535,7 +664,7 @@ export class ListOverlayView implements Component {
 			this.listScrollOffset = Math.max(0, Math.min(this.listScrollOffset, renderedRows.length - itemRows));
 
 			const visibleRows = renderedRows.slice(this.listScrollOffset, this.listScrollOffset + itemRows);
-			const theme = selectListTheme(clioTheme());
+			const leadWidth = this.leadWidth(width - 2, filteredItems);
 
 			for (const row of visibleRows) {
 				if (row.type === "group") {
@@ -551,11 +680,10 @@ export class ListOverlayView implements Component {
 					// the package name as a single ellipsis: a list of rows nobody could
 					// identify. `selectionRow` keeps the label at least half the row and
 					// compacts the metadata into what is left, for every list alike.
-					const label = width <= NARROW_ROW_WIDTH && item.narrowLabel !== undefined ? item.narrowLabel : item.label;
 					lines.push(
 						...selectionRow(clioTheme(), {
 							focused: isSelected,
-							label,
+							label: this.rowLabel(item, isSelected, width - 2, leadWidth),
 							...(item.meta !== undefined && item.meta.length > 0 ? { meta: item.meta } : {}),
 							width,
 						}),
@@ -564,8 +692,24 @@ export class ListOverlayView implements Component {
 			}
 
 			if (scrollRows > 0) {
-				const scrollText = `  (${this.selectedIndex + 1}/${filteredItems.length})`;
-				lines.push(this.padLine(theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")), width));
+				// The position names rows of the list, headers included, because that is
+				// what the window slides over; the unit says what the rows are.
+				const start = this.listScrollOffset + 1;
+				lines.push(
+					this.padLine(
+						positionRow(
+							clioTheme(),
+							{
+								start,
+								end: Math.min(renderedRows.length, start + visibleRows.length - 1),
+								total: renderedRows.length,
+								...(this.options.unit !== undefined ? { unit: this.options.unit } : {}),
+							},
+							width,
+						),
+						width,
+					),
+				);
 			}
 		}
 
@@ -586,20 +730,49 @@ export class ListOverlayView implements Component {
 			mdLines = this.detailMemo.lines;
 		} else {
 			const detailLines = selectedItem.detail(width);
-			const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
-			mdLines = md.render(width);
+			if (selectedItem.detailFormat === "rows") {
+				// Rows laid out from the primitives already fit; only prose that was
+				// handed over unwrapped folds here, at the pane's real width.
+				mdLines = detailLines.flatMap((line) =>
+					visibleWidth(line) <= width ? [line] : wrapTextWithAnsi(line, Math.max(1, width)),
+				);
+			} else {
+				const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
+				mdLines = md.render(width);
+			}
 			this.detailMemo = { item: selectedItem, width, epoch: skinEpoch(), lines: mdLines };
 		}
 
-		const maxScrollOffset = Math.max(0, mdLines.length - height);
+		// A pane that holds more than it shows keeps one row for its position, so
+		// a scrolled fact table is never mistaken for the whole of it.
+		const scrollable = mdLines.length > height && height > 1;
+		const page = scrollable ? height - 1 : height;
+		const maxScrollOffset = Math.max(0, mdLines.length - page);
 		this.detailScrollOffset = Math.max(0, Math.min(this.detailScrollOffset, maxScrollOffset));
 
-		const sliced = mdLines.slice(this.detailScrollOffset, this.detailScrollOffset + height);
+		const sliced = mdLines.slice(this.detailScrollOffset, this.detailScrollOffset + page);
 		const padded = sliced.map((line) => {
 			const w = visibleWidth(line);
 			if (w >= width) return truncateToWidth(line, width, GLYPH.ellipsis, true);
 			return line + " ".repeat(width - w);
 		});
+		if (scrollable) {
+			padded.push(
+				this.padLine(
+					positionRow(
+						clioTheme(),
+						{
+							start: this.detailScrollOffset + 1,
+							end: this.detailScrollOffset + sliced.length,
+							total: mdLines.length,
+							keys: ["PgUp/PgDn scroll"],
+						},
+						width,
+					),
+					width,
+				),
+			);
+		}
 
 		return padded;
 	}
@@ -644,6 +817,7 @@ export class ListOverlayView implements Component {
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
 		// A cached frame retains the same detail visibility and keyboard hints.
 		this.detailPaneDrawn = isSplit && hasDetail;
+		this.detailPaneSplit = isSplit && hasDetail;
 
 		const lines: string[] = [];
 
@@ -656,9 +830,11 @@ export class ListOverlayView implements Component {
 			lines.push(...inputLines);
 		}
 
+		// Every list is docked now and the dock's rows are the budget, so a list
+		// fills them rather than stopping at the twelve rows a floating box kept.
 		const availableRows = Math.max(1, this.viewportRows - 2 - lines.length);
 		if (isSplit) {
-			const listMaxLines = this.options.fullScreen ? availableRows : Math.min(14, availableRows);
+			const listMaxLines = availableRows;
 			const detailWidth = Math.max(32, Math.floor(width * 0.45));
 			const listWidth = width - detailWidth - 1;
 
@@ -674,23 +850,25 @@ export class ListOverlayView implements Component {
 			}
 		} else {
 			const showDetail = this.showDetail && hasDetail;
-			const listLimit = this.options.fullScreen
-				? showDetail
-					? Math.max(1, Math.floor((availableRows - 1) / 2))
-					: availableRows
-				: showDetail
-					? 6
-					: 12;
-			const listMaxLines = Math.min(listLimit, showDetail ? Math.max(1, availableRows - 2) : availableRows);
-			const listLines = this.renderList(width, listMaxLines, filteredItems);
-			lines.push(...listLines);
-
-			const detailRoom = Math.max(0, availableRows - listLines.length - 1);
-			this.detailPaneDrawn = showDetail && detailRoom > 0;
+			// A stacked detail takes at most half the rows, or more when the list
+			// is shorter than its half, and only what its own lines need, so a
+			// short page hands the rest back to the list. The list keeps three rows
+			// so the cursor can move, and a pane that would get fewer than two rows
+			// is not drawn: on a 14-row terminal the Library used to leave one list
+			// row under a two-row detail nobody could read.
+			const listFloor = Math.min(STACKED_LIST_MIN_ROWS, availableRows);
+			const listNatural = this.renderedRowsFor(filteredItems).length;
+			const listShare = Math.max(listFloor, Math.min(listNatural, Math.floor((availableRows - 1) / 2)));
+			const detailCeiling = Math.max(0, availableRows - 1 - listShare);
+			const detailLines =
+				showDetail && detailCeiling >= STACKED_DETAIL_MIN_ROWS ? this.renderDetail(width, detailCeiling, selectedItem) : [];
+			this.detailPaneDrawn = detailLines.length > 0;
+			const listMaxLines = this.detailPaneDrawn
+				? Math.max(listFloor, availableRows - 1 - detailLines.length)
+				: availableRows;
+			lines.push(...this.renderList(width, listMaxLines, filteredItems));
 			if (this.detailPaneDrawn) {
 				lines.push(rule(clioTheme(), width));
-				const detailRows = this.options.fullScreen ? detailRoom : Math.min(10, detailRoom);
-				const detailLines = this.renderDetail(width, detailRows, selectedItem);
 				lines.push(...detailLines);
 			}
 		}
@@ -874,6 +1052,15 @@ export class ListOverlayView implements Component {
 	}
 }
 
+/**
+ * Prose under a rows-mode detail: Markdown rendered at the pane's width, so a
+ * description's code spans, emphasis and links keep their styling beneath the
+ * fact table instead of showing their markup.
+ */
+export function markdownRows(text: string, width: number): string[] {
+	return new Markdown(text, 0, 0, markdownTheme(clioTheme())).render(Math.max(1, Math.floor(width)));
+}
+
 export interface ListOverlayHandle extends OverlayHandle {
 	/**
 	 * Replace the rows and repaint. The view memoizes its whole frame on a row-set
@@ -894,6 +1081,8 @@ export interface ListOverlayHandle extends OverlayHandle {
 	selectById(id: string): boolean;
 	/** Show or hide the stacked detail pane. */
 	toggleDetail(): void;
+	/** Drop a typed filter and leave search focus. */
+	clearFilter(): void;
 }
 
 /**
@@ -923,7 +1112,7 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 		// A function, not the string: on a tabbed overlay the title names the tab
 		// and must be re-read after every switch.
 		title: () => view.title(),
-		footerHint: () => view.getHint(),
+		footerHint: (innerWidth) => view.getHint(innerWidth),
 	});
 	return Object.assign(handle, {
 		setItems(items: ReadonlyArray<ListOverlayItem>): void {
@@ -948,6 +1137,10 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 		},
 		toggleDetail(): void {
 			view.toggleDetail();
+			tui.requestRender();
+		},
+		clearFilter(): void {
+			view.clearFilter();
 			tui.requestRender();
 		},
 	});

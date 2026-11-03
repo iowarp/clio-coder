@@ -14,7 +14,7 @@ import { ClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openLibraryOverlay } from "../../src/interactive/overlays/library.js";
 import { buildLibraryRows, selectForCategory } from "../../src/interactive/overlays/library-model.js";
 import { type ListOverlayHandle, ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
-import { clioTheme, createClioTheme } from "../../src/interactive/theme/index.js";
+import { clioTheme, createClioTheme, statusChip } from "../../src/interactive/theme/index.js";
 import { libraryApplyFixture, libraryPlanFixture } from "../harness/library-plan-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -143,7 +143,7 @@ it("separates eight diagnostic notices from package counts across Plugins, Agent
 		const state = browser(category);
 		const text = plain(state.view.render(88).join("\n"));
 		match(text, /1 package/);
-		match(text, /n:8 notices/);
+		match(text, /\[n\] 8 notices/);
 		match(text, /Actions: User/);
 		ok(!text.includes("skill diagnostic"));
 		state.view.handleInput("n");
@@ -167,13 +167,13 @@ it("identifies provider packages and limits their catalog hints to the selected 
 		ok(item);
 		equal(item.label, "materio [plugin]");
 		equal(item.group, "Provider packages");
-		const detail = item.detail?.(40).join("\n") ?? "";
+		const detail = plain(item.detail?.(80).join("\n") ?? "");
 		match(detail, new RegExp(`plugin provider package for ${category}`));
 		match(detail, new RegExp(`lab-${category}`));
 		ok(!detail.includes("lab-skill"));
 		match(detail, /not loaded components/);
-		match(detail, /b shows loaded components/);
-		match(detail, /i review install/);
+		match(detail, /\[b\] shows loaded components/);
+		match(detail, /\[i\] review install/);
 		ok(!detail.includes("Enter members"));
 	}
 });
@@ -193,7 +193,7 @@ it("opens a useful inspector at 40, 60, 92 and 140 columns without render-time r
 			for (const line of lines) equal(visibleWidth(line), width);
 			match(plain(lines.join("\n")), /review install/);
 			match(plain(lines.join("\n")), /materio/);
-			match(plain(lines.join("\n")), /n:8 notices/);
+			match(plain(lines.join("\n")), /\[n\] 8 notices/);
 			ok(!plain(lines.join("\n")).includes("Plugins packages"));
 		}
 		equal(state.reads, 1);
@@ -238,7 +238,9 @@ it("neutralizes terminal controls while preserving Unicode identity and full ins
 	}
 	const view = { category: "agent" as const, mode: "browse" as const, scope: "user" as const };
 	const rows = buildLibraryRows({ view, inventory: selectForCategory(data, view) });
-	ok(rows.items[0]?.detail?.(40).join("\n").includes(record.description));
+	// The description renders as Markdown at the pane's width, which breaks CJK text between characters, so it is compared without whitespace.
+	const collapse = (text: string): string => plain(text).replace(/\s+/g, "");
+	ok(collapse(rows.items[0]?.detail?.(40).join("\n") ?? "").includes(collapse(record.description)));
 });
 
 it("finds core agents through the real inventory in Installed without broadening audience", async () => {
@@ -272,7 +274,7 @@ it("returns from notices to the exact resource selection, filter and browse focu
 	state.view.handleInput("\u001b[B");
 	const parent = state.view;
 	const before = plain(parent.render(36).join("\n"));
-	match(before, /n:8 notices/);
+	match(before, /\[n\] 8 notices/);
 	for (const exit of ["n", "\u001b"]) {
 		state.view.handleInput("n");
 		ok(state.view !== parent);
@@ -295,11 +297,11 @@ it("preserves semantic colors while stripping external controls before metadata 
 	const hostile = "lab\u001b[2J\u001b[35m text\u001b]0;spoof\u0007";
 	const data = inventory();
 	const view = { category: "agent" as const, mode: "installed" as const, scope: "user" as const };
-	for (const [availability, token] of [
-		["available", "success"],
+	for (const [availability, status] of [
+		["available", "ok"],
 		["untrusted", "warning"],
 		["unavailable", "error"],
-		["shadowed", "disabledOption"],
+		["shadowed", "cancelled"],
 	] as const) {
 		data.resources = [
 			{
@@ -310,15 +312,15 @@ it("preserves semantic colors while stripping external controls before metadata 
 			},
 		];
 		const meta = buildLibraryRows({ view, inventory: selectForCategory(data, view) }).items[0]?.meta ?? "";
-		ok(meta.includes(theme.fg(token, availability)));
+		ok(meta.includes(statusChip(theme, status, availability)));
 		ok(!meta.includes("\u001b[2J") && !meta.includes("\u001b[35m") && !meta.includes("spoof"));
 		match(plain(meta), /lab text/);
 	}
-	for (const [state, token] of [
-		["loadable", "success"],
+	for (const [state, status] of [
+		["loadable", "ok"],
 		["disabled", "warning"],
 		["damaged", "error"],
-		["shadowed", "disabledOption"],
+		["shadowed", "cancelled"],
 	] as const) {
 		const copy: LibraryCopy = {
 			ref: "plugin:fixture",
@@ -340,8 +342,8 @@ it("preserves semantic colors while stripping external controls before metadata 
 		data.copies = [copy];
 		const copyView = { ...view, category: "plugin" as const };
 		const meta = buildLibraryRows({ view: copyView, inventory: selectForCategory(data, copyView) }).items[0]?.meta ?? "";
-		ok(meta.includes(theme.fg(token, state)));
-		ok(meta.includes(theme.fg("warning", "foreign")));
+		ok(meta.includes(statusChip(theme, status, `user ${state}`)));
+		ok(meta.includes(statusChip(theme, "warning", "foreign")));
 		ok(!meta.includes("\u001b[2J") && !meta.includes("\u001b[35m") && !meta.includes("spoof"));
 		match(plain(meta), /lab text/);
 	}
