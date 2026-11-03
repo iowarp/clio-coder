@@ -27,6 +27,8 @@ export interface DockFrame {
 	dockTone(): import("./theme/index.js").ClioToken | undefined;
 	/** A decision needs the operator's answer, rather than an ordinary open menu. */
 	dockAwaitingInput?(): boolean;
+	/** Cells the rail has for this frame's keys; told before the body renders so the body can carry what the rail drops. */
+	setRailRoom?(cells: number): void;
 	invalidate(): void;
 }
 

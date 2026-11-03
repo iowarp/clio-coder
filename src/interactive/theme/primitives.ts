@@ -475,10 +475,27 @@ export interface SelectionRowOptions {
 }
 
 /**
+ * Metadata that was joined with the quiet middot compacts by whole chip, in
+ * the order the caller gave, so the first chip (the status, by the row
+ * grammar) is the last to go and no chip is ever cut inside a word. A lone
+ * chip that does not fit is clipped, which is the one cut the row admits.
+ */
+function fitMetaChips(theme: ClioTheme, meta: string, width: number): string {
+	if (visibleWidth(meta) <= width) return meta;
+	const separator = dotSep(theme);
+	const chips = meta.split(separator);
+	for (let keep = chips.length - 1; keep >= 1; keep -= 1) {
+		const row = chips.slice(0, keep).join(separator);
+		if (visibleWidth(row) <= width) return row;
+	}
+	return truncateToWidth(chips[0] ?? meta, width, GLYPH.ellipsis, false);
+}
+
+/**
  * The one cursor rule: the focused row carries `❯` in the accent and its label
  * in accent bold, and nothing else changes color. The label keeps at least
- * half the row; metadata compacts into what is left or drops out entirely, so
- * a list of rows is never a list of ellipses nobody can identify.
+ * half the row; metadata compacts into what is left by whole chip or drops out
+ * entirely, so a list of rows is never a list of ellipses nobody can identify.
  */
 export function selectionRow(theme: ClioTheme, options: SelectionRowOptions): string[] {
 	const safe = Math.max(3, Math.floor(options.width));
@@ -489,12 +506,7 @@ export function selectionRow(theme: ClioTheme, options: SelectionRowOptions): st
 	const rawMeta = options.meta ?? "";
 	const reservedLabel = Math.min(visibleWidth(options.label), Math.max(8, Math.floor(available * 0.5)));
 	const maxMetaWidth = Math.max(0, available - reservedLabel - 2);
-	const metaText =
-		rawMeta.length === 0 || maxMetaWidth === 0
-			? ""
-			: visibleWidth(rawMeta) > maxMetaWidth
-				? truncateToWidth(rawMeta, maxMetaWidth, GLYPH.ellipsis, true)
-				: rawMeta;
+	const metaText = rawMeta.length === 0 || maxMetaWidth === 0 ? "" : fitMetaChips(theme, rawMeta, maxMetaWidth);
 	const metaWidth = metaText ? visibleWidth(metaText) : 0;
 	const maxLabelWidth = Math.max(1, available - (metaWidth > 0 ? metaWidth + 2 : 0));
 	const fittedLabel = truncateToWidth(options.label, maxLabelWidth, GLYPH.ellipsis, false);

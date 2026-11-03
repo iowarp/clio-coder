@@ -557,6 +557,9 @@ export class ClioEditor extends Editor {
 		const contentWidth = Math.max(1, width - gutter * 2);
 		const adaptive = entry.adaptive === true;
 		const bodyRows = adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
+		// The body learns the rail's room first, so a list can draw in its own
+		// rows every key the rail below will have to drop.
+		entry.frame.setRailRoom?.(this.railLabelRoom(width));
 		let body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
 		if (adaptive) {
 			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
@@ -606,11 +609,12 @@ export class ClioEditor extends Editor {
 		const label = `${theme.fg("attentionRail", cue)} ${theme.style(entry.frame.dockTone() ?? "decisionCue", title, { bold: true })}`;
 		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
 		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
+		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
+		entry.frame.setRailRoom?.(room - (down ? visibleWidth(down) + 3 : 0));
 		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, dockBodyRows(this.dockHost) - draftRows));
 		// The frame pads every body to its budget; a card owes no blank rows above its keys.
 		let bodyEnd = rendered.length;
 		while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
-		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
 		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
 		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
 			.filter(Boolean)
