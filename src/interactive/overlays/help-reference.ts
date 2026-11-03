@@ -1,4 +1,5 @@
 import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../../session-control/slash-commands.js";
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
@@ -78,11 +79,13 @@ export function openHelpOverlay(
 	// skin change repaints the chip instead of showing the colors of the skin
 	// the help was built under.
 	commands.push(
-		...displaySafe(extensionCommands).map(
-			(row): ListOverlayItem => ({
+		...displaySafe(extensionCommands).map((row): ListOverlayItem => {
+			// The row is one line; the pane's Does fact keeps the description's lines.
+			const summary = sanitizeCallTargetText(row.description);
+			return {
 				id: `extension:${row.invocation}`,
-				label: `/${row.invocation}  ${row.description}`,
-				cells: { lead: `/${row.invocation}`, text: row.description },
+				label: `/${row.invocation}  ${summary}`,
+				cells: { lead: `/${row.invocation}`, text: summary },
 				group: "Operator extensions",
 				get meta() {
 					return row.available ? statusChip(clioTheme(), "ok", "ready") : statusChip(clioTheme(), "warning", "unavailable");
@@ -104,8 +107,8 @@ export function openHelpOverlay(
 						rest: factRows(theme, facts, width, FACT_OPTIONS),
 					};
 				}),
-			}),
-		),
+			};
+		}),
 	);
 
 	const keyItems = (): ListOverlayItem[] => {
@@ -115,9 +118,10 @@ export function openHelpOverlay(
 			// A rebound key says so, and a key two actions share carries the warning
 			// glyph, so the conflict is visible before the row is opened.
 			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
+			// The conflict leads, so a narrow row that keeps one chip keeps the warning.
 			const metaParts = (): string[] => [
-				...(row.source === "user" ? ["user"] : []),
 				...(hasConflict ? [statusChip(clioTheme(), "warning", "conflict")] : []),
+				...(row.source === "user" ? ["user"] : []),
 			];
 
 			const item: ListOverlayItem = {

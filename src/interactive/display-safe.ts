@@ -9,10 +9,11 @@ const MULTILINE_KEYS = new Set(["description", "lesson", "message", "text"]);
 /**
  * A deep copy of `value` with every string neutralized for display: terminal
  * controls, bidi overrides and zero-width characters removed, control bytes
- * replaced by a placeholder. Overlays apply it once to the records they
- * project, so a field that a later change adds to a row or a pane is covered
- * without a call at every use. Maps, arrays and plain objects are walked;
- * functions and class instances pass through untouched.
+ * replaced by a placeholder. Overlays apply it at the one seam where they take
+ * records in, each time they build their rows, so a field that a later change
+ * adds to a row or a pane is covered without a call at every use. Maps, arrays
+ * and plain objects are walked; functions and class instances pass through
+ * untouched.
  */
 export function displaySafe<T>(value: T): T {
 	return walk(value, undefined) as T;

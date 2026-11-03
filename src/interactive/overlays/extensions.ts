@@ -23,6 +23,7 @@ import {
 	factRows,
 	type StatusKind,
 	statusChip,
+	statusSeverity,
 	titleRow,
 } from "../theme/index.js";
 import { detailWithHead, type ListOverlayItem, markdownRows, openListOverlay } from "./list-overlay.js";
@@ -140,11 +141,18 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		const id = ext.id;
 		// The row text is one line; the pane renders the description as Markdown.
 		const description = sanitizeCallTargetText(ext.description);
+		// The worse of the two states leads, so a narrow row that keeps one chip
+		// keeps the one that says the runtime failed, never only "eligible".
+		const stateChips = (theme: ReturnType<typeof clioTheme>): string[] =>
+			[
+				[stateStatus(state), state] as const,
+				...(hasRuntime ? [[runtimeStatus(runtime?.state), `runtime ${runtimeWord}`] as const] : []),
+			]
+				.sort((a, b) => statusSeverity(a[0]) - statusSeverity(b[0]))
+				.map(([kind, text]) => statusChip(theme, kind, text));
 		const meta = (): string => {
 			const theme = clioTheme();
-			const parts = [statusChip(theme, stateStatus(state), state)];
-			if (hasRuntime) parts.push(statusChip(theme, runtimeStatus(runtime?.state), `runtime ${runtimeWord}`));
-			return parts.join(theme.fg("divider", " · "));
+			return stateChips(theme).join(theme.fg("divider", " · "));
 		};
 
 		return {
@@ -158,8 +166,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 			...detailWithHead((width) => {
 				const theme = clioTheme();
 				const chips = [
-					statusChip(theme, stateStatus(state), state),
-					...(hasRuntime ? [statusChip(theme, runtimeStatus(runtime?.state), `runtime ${runtimeWord}`)] : []),
+					...stateChips(theme),
 					...(ext.overriddenBy ? [chip(theme, `overridden by the ${ext.overriddenBy} copy`, "warning")] : []),
 					...(ext.devSource ? [chip(theme, `from ${ext.devSource}`, "muted")] : []),
 				];

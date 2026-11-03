@@ -75,6 +75,26 @@ export function chip(theme: ClioTheme, text: string, tone: Tone = "neutral", gly
 
 export type StatusKind = "ok" | "error" | "warning" | "info" | "running" | "queued" | "cancelled" | "pending";
 
+/**
+ * The order a row leads its status chips in, worst first, so a narrowing meta
+ * drops the reassuring chip and never the one that says something is broken.
+ */
+const STATUS_SEVERITY: Readonly<Record<StatusKind, number>> = {
+	error: 0,
+	warning: 1,
+	pending: 2,
+	queued: 3,
+	cancelled: 4,
+	info: 5,
+	running: 6,
+	ok: 7,
+};
+
+/** Lower is worse. Sort a row's status chips by this before joining them. */
+export function statusSeverity(status: StatusKind): number {
+	return STATUS_SEVERITY[status];
+}
+
 const STATUS_GLYPH: Readonly<Record<StatusKind, string>> = {
 	ok: GLYPH.ok,
 	error: GLYPH.error,

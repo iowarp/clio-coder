@@ -5,6 +5,7 @@
  * this module only renders what it reports.
  */
 
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type {
 	RewindOutcome,
 	RewindPlan,
@@ -112,7 +113,7 @@ function rewindListItems(raw: ReadonlyArray<WorkspaceSnapshotRecord>, counts: Re
 				if (record.tool !== undefined)
 					facts.push({ label: "Before", value: `${record.tool}${record.toolCallId ? ` (${record.toolCallId})` : ""}` });
 				if (counts !== "pending" && counts.kind === "unavailable")
-					facts.push({ label: "Not counted", value: counts.reason, tone: "warning" });
+					facts.push({ label: "Not counted", value: sanitizeCallTargetText(counts.reason), tone: "warning" });
 				facts.push({ label: "Commit", value: `${record.commit.slice(0, 12)} (${record.ref})` });
 				const skipped = record.skipped
 					.slice(0, DETAIL_LIST_SHOWN)

@@ -25,7 +25,7 @@ import {
 } from "./memory-view-model.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
-import { chipRow, clioTheme, fitUnits, rule, statusChip } from "./theme/index.js";
+import { chipRow, clioTheme, dotSep, fitUnits, rule, statusChip } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
@@ -51,10 +51,14 @@ function lessonItems(
 		return {
 			id: `lesson:${record.id}`,
 			label: firstLine(record.lesson),
+			// Scope and reach are two chips joined by the shared separator, so a
+			// narrow row drops the reach whole instead of cutting "recall only".
 			meta: theme.fg(
 				"annotation",
 				reach !== "none"
-					? `${record.scope === "repo" ? "this repo" : record.scope} · ${reach === "prompt" ? promptReach : "recall only"}`
+					? [record.scope === "repo" ? "this repo" : record.scope, reach === "prompt" ? promptReach : "recall only"]
+							.map((part) => theme.fg("annotation", part))
+							.join(dotSep(theme))
 					: record.rejectedAt
 						? "rejected"
 						: record.regressions?.length

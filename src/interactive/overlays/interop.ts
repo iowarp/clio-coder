@@ -146,11 +146,15 @@ function modeFacts(
 	const record = report?.agents.find((agent) => agent.kind === id);
 	if (!kind || !record) return [];
 	const theme = clioTheme();
-	return peerModeCapabilities(kind, record, {
-		configuredAcp: configuredIds.has(id),
-		configuredTargets: readSettings().targets,
-		paneAvailable,
-	}).map((mode) => ({
+	// The reasons and next steps quote configured target ids, which are
+	// operator text; they pass the same seam as the records.
+	return displaySafe(
+		peerModeCapabilities(kind, record, {
+			configuredAcp: configuredIds.has(id),
+			configuredTargets: readSettings().targets,
+			paneAvailable,
+		}),
+	).map((mode) => ({
 		label: mode.mode,
 		value: `${statusChip(theme, MODE_STATUS[mode.status], mode.status)} ${theme.fg("body", mode.reason)}. ${theme.fg("annotation", `Next: ${mode.setupAction}`)}`,
 	}));

@@ -42,6 +42,7 @@ import {
 	keyCap,
 	type StatusKind,
 	statusChip,
+	statusSeverity,
 	titleRow,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
@@ -350,6 +351,22 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 }
 
 /** Plain fields are external text; callbacks compose only trusted semantic styling. */
+/**
+ * A row's status chips, worst first, so the chip a narrowing meta keeps is
+ * the one that says something is wrong. Each is rendered when the meta is
+ * read, so it repaints with the skin.
+ */
+function worstFirst(chips: ReadonlyArray<readonly [StatusKind, string] | undefined>): Array<() => string> {
+	return chips
+		.filter((entry): entry is readonly [StatusKind, string] => entry !== undefined)
+		.sort((a, b) => statusSeverity(a[0]) - statusSeverity(b[0]))
+		.map(
+			([kind, text]) =>
+				() =>
+					statusChip(clioTheme(), kind, text),
+		);
+}
+
 function metaOf(parts: ReadonlyArray<string | (() => string) | undefined>): string {
 	return parts
 		.map((part) => (typeof part === "function" ? part() : part === undefined ? "" : safe(part)))
@@ -873,15 +890,16 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			push(set, `pkg:${record.ref}`, subject, {
 				label: record.kind !== view.category ? `${record.name} [${record.kind}]` : record.name,
 				get meta() {
+					// The selected scope is its own chip, so a narrow row drops it whole
+					// instead of cutting "project" in half; the status row names it too.
 					return metaOf([
-						() =>
-							here
-								? statusChip(theme, copyStateStatus(here.state), `${here.scope} ${safe(here.state)}`)
-								: chip(theme, `not installed (${view.scope})`, "muted"),
-						here?.update
-							? () => statusChip(theme, "warning", libraryUpdateLabel(here.update as LibraryCopyUpdate))
-							: undefined,
-						record.refusal ? () => statusChip(theme, "error", "refused") : undefined,
+						...worstFirst([
+							here ? [copyStateStatus(here.state), `${here.scope} ${safe(here.state)}`] : undefined,
+							here?.update ? ["warning", libraryUpdateLabel(here.update as LibraryCopyUpdate)] : undefined,
+							record.refusal ? ["error", "refused"] : undefined,
+						]),
+						here ? undefined : () => chip(theme, "not installed", "muted"),
+						here ? undefined : () => chip(theme, `${view.scope} scope`, "muted"),
 						record.version ? `v${record.version}` : undefined,
 						libraryOriginShort(record.origin),
 						hints.length > 0
@@ -906,11 +924,11 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				label: copy.name,
 				get meta() {
 					return metaOf([
-						() => statusChip(theme, copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`),
-						copy.update
-							? () => statusChip(theme, "warning", libraryUpdateLabel(copy.update as LibraryCopyUpdate))
-							: undefined,
-						copy.trust === "foreign" ? () => statusChip(theme, "warning", "foreign") : undefined,
+						...worstFirst([
+							[copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`],
+							copy.update ? ["warning", libraryUpdateLabel(copy.update as LibraryCopyUpdate)] : undefined,
+							copy.trust === "foreign" ? ["warning", "foreign"] : undefined,
+						]),
 						libraryOriginShort(copy.origin),
 					]);
 				},
