@@ -517,10 +517,10 @@ carries the admission diagnostic as `refusalReason`, and the session shows one
 `Memory skipped target <id>: <reason>` notice per session. The chat fallback is
 admitted against the same policy, so a restricted session can end with no model
 step at all. From its first label on, a restricted session also files no new lesson, starts no
-completed-task retention and promotes no entry, because a durable record carries no
+completed-task retention for a task after the label and promotes no entry, because a durable record carries no
 label and reaches every later route. Text recorded before the label can still be
 filed or gain evidence: history review stops at the label, and a retention already
-running or a record already filed holds only what came before it. See [Information flow](information-flow.md).
+running, an interrupted one for a task finished before the label or a record already filed holds only what came before it. See [Information flow](information-flow.md).
 
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its

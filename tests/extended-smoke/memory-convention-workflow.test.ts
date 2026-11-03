@@ -125,7 +125,7 @@ test("operator promotion persists a convention and only approval admits it into 
 		settings.chat.target = "fixture";
 		settings.chat.model = "mock-model";
 		settings.chat.thinkingLevel = "off";
-		settings.context.memory.enabled = false;
+		settings.context.memory.enabled = true;
 		writeFileSync(join(home.dir, "config", "settings.yaml"), JSON.stringify(settings));
 		const env = {
 			...process.env,
