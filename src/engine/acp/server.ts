@@ -815,8 +815,12 @@ const ACP_ADMISSION_REASONS = new Set([
 	"chat-unsupported",
 	"streaming-unsupported",
 	"context-window-exceeded",
+	"handoff-skill-refused",
 	"admission-failed",
 ]);
+
+/** A refusal whose notice carries no settings path and tells the client what to do instead, so it crosses the wire as text. */
+const ACP_VISIBLE_ADMISSION_REASONS = new Set(["handoff-skill-refused"]);
 
 const ACP_ADMISSION_FALLBACK_REASON = "admission-failed";
 
@@ -1759,7 +1763,7 @@ function handleChatEvent(
 		// the prompt fails with its reason code, and its text names the settings
 		// path, which stays off the wire. Every other transcript notice is projected.
 		if (
-			reason.length === 0 &&
+			(reason.length === 0 || ACP_VISIBLE_ADMISSION_REASONS.has(reason)) &&
 			event.surface === "transcript" &&
 			typeof event.text === "string" &&
 			event.text.length > 0
