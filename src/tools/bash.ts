@@ -12,6 +12,7 @@ import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
 import { redactKnownSecrets } from "../domains/evidence/redact.js";
+import { cutHeadGuard, dropCutHead, headGuardAfter } from "../domains/safety/redaction.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -90,8 +91,23 @@ function normalizedBashDisposition(policy: BashOutputPolicy): NormalizedToolResu
 	};
 }
 
+/**
+ * The tail a live row shows. A cut that lands inside a line must not leave a piece no pattern can recognize, and the
+ * trailing newline truncation discards is what tells the live row the last line is finished (#446).
+ */
+function boundedLiveOutput(rawOutput: string, maxBytes: number): string {
+	const tail = truncateTail(rawOutput, { maxLines: DEFAULT_MAX_LINES, maxBytes });
+	if (!tail.truncated) return tail.content;
+	const closed = rawOutput.endsWith("\n");
+	const guard = tail.lastLinePartial
+		? cutHeadGuard()
+		: headGuardAfter(rawOutput.slice(0, rawOutput.length - tail.content.length - (closed ? 1 : 0)));
+	const kept = guard === null ? tail.content : dropCutHead(tail.content, guard);
+	return closed && kept.length > 0 ? `${kept}\n` : kept;
+}
+
 /** Bound a cumulative live snapshot without writing an offload file per tick. */
-function shapeBashProgress(rawOutput: string, outputBytes: number, policy: BashOutputPolicy): ToolResult {
+export function shapeBashProgress(rawOutput: string, outputBytes: number, policy: BashOutputPolicy): ToolResult {
 	const disposition = normalizedBashDisposition(policy);
 	let output: string;
 	if (policy === "metadata-only") {
@@ -99,10 +115,7 @@ function shapeBashProgress(rawOutput: string, outputBytes: number, policy: BashO
 	} else if (policy === "summary") {
 		output = deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text;
 	} else {
-		output = truncateTail(rawOutput, {
-			maxLines: DEFAULT_MAX_LINES,
-			maxBytes: disposition.context.maxBytes,
-		}).content;
+		output = boundedLiveOutput(rawOutput, disposition.context.maxBytes);
 	}
 	return {
 		kind: "ok",

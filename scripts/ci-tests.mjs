@@ -31,6 +31,7 @@ export const coreTests = [
 	"acp-v1-basics",
 	"configure-routing",
 	"mcp-config-trust",
+	"url-userinfo-hold",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

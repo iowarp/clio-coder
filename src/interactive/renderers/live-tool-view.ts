@@ -17,7 +17,7 @@
  * are cut to the width rather than wrapped for the same reason.
  */
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
+import { holdUnresolvedUserinfo, redactSecretString } from "../../domains/safety/redaction.js";
 import { truncateToWidth } from "../../engine/tui.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
@@ -176,8 +176,10 @@ function liveOutputRows(
 	options: LiveRowsOptions & LiveOutputOptions,
 ): string[] {
 	if (rows <= 0) return [];
-	const body = text.replace(/\s+$/u, "");
-	if (body.length === 0) return [];
+	const trimmed = text.replace(/\s+$/u, "");
+	if (trimmed.length === 0) return [];
+	// Trailing whitespace already closed the last run, and the trim would hide that from the hold (#446).
+	const body = trimmed.length === text.length ? holdUnresolvedUserinfo(trimmed) : trimmed;
 	let total = 1;
 	for (let at = body.indexOf("\n"); at >= 0; at = body.indexOf("\n", at + 1)) total += 1;
 	const hiddenAbove = options.truncatedTotal !== undefined;

@@ -18,7 +18,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
-const SECRET_STRING_RE = /(https?:\/\/[^\s/@]+:)([^\s/@]+)@/giu;
+// The lookahead changes no match, since `@` can only follow the whole run. It stops a run that ends elsewhere from
+// retrying at each of its colons: this also reads journal records and tool output now, and 80 KB took 1.4 s (#446).
+const SECRET_STRING_RE = /(https?:\/\/(?=[^\s/@]+@)[^\s/@]+:)([^\s/@]+)@/giu;
 const SECRET_URL_PARAM_RE =
 	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)([^&#\s]+)/giu;
 const SECRET_ASSIGNMENT_RE =
@@ -29,8 +31,25 @@ const SECRET_ASSIGNMENT_RE =
 // literal secret that happens to start with `$` still redacts.
 const ENV_REFERENCE_RE = /^["']?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})["']?$/u;
 
-function redactUnlessEnvReference(match: string, prefix: string, secret: string, suffix = ""): string {
-	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]${suffix}`;
+/** Groups 1 and 2 of {@link URL_USERINFO_RE} hold the part one-shot redaction shows and the part it hides. */
+export const URL_USERINFO_RE = SECRET_STRING_RE;
+
+// Text passes both redactors, and again on a re-export, where promotion and handoff mask earlier markers as private-use
+// tokens. The marker's own colon lands in the prefix, so `[redacted:kind]` arrives split and would corrupt on a rewrite.
+const REDACTED_USERINFO_RE = /^(?:\[redacted\]|\uE000[\uE100-\uF8FF])$/u;
+const REDACTED_KIND_RE = /^[a-z-]+\]$/u;
+// The marker must open the password, or `https://u:REAL[redacted:abc]@h` would show REAL. Text before an earlier colon
+// stays exempt because one-shot redaction always shows it.
+const REDACTED_PREFIX_RE = /(?::|\/\/)\[redacted:$/u;
+
+/** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
+export function urlUserinfoHoldsSecret(prefix: string, secret: string): boolean {
+	if (ENV_REFERENCE_RE.test(secret) || REDACTED_USERINFO_RE.test(secret)) return false;
+	return !(REDACTED_PREFIX_RE.test(prefix) && REDACTED_KIND_RE.test(secret));
+}
+
+function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
+	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]`;
 }
 // `auth` stops short of `author` and `authority`, so prose such as "operator-authority ask" keeps its next word.
 const SECRET_FLAG_NAME_RE =
@@ -85,7 +104,7 @@ export function redactSecretString(value: string): string {
 	return redactSecretFlags(
 		value
 			.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
-				redactUnlessEnvReference(match, prefix, secret, "@"),
+				urlUserinfoHoldsSecret(prefix, secret) ? `${prefix}[redacted]@` : match,
 			)
 			.replace(SECRET_URL_PARAM_RE, (match, prefix: string, secret: string) =>
 				redactUnlessEnvReference(match, prefix, secret),
@@ -96,15 +115,129 @@ export function redactSecretString(value: string): string {
 	);
 }
 
+// A hold ends only where SECRET_STRING_RE's userinfo run ends. A friendlier stop such as `)`, `,` or a quote sits inside
+// that run, so `https://u:pa)ss@h` would show `pa)` before the pattern could ever match it (#446).
+function endsUserinfoRun(code: number): boolean {
+	if (code === 0x2f || code === 0x40) return true;
+	if (code > 0x20 && code < 0x7f) return false;
+	return /\s/u.test(String.fromCharCode(code));
+}
+
+const URL_SCHEME_END_RE = /https?:\/\/$/iu;
+const LONGEST_URL_SCHEME = "https://".length;
+const USERINFO_HOLD_LIMIT = 2048;
+const USERINFO_HOLD_MARKER = "[held]";
+
+/**
+ * The part of text still being written that is safe to show when its last run may become URL userinfo. Everything
+ * through the run's first colon appears in every completion, because the pattern's prefix always contains it; a later
+ * colon does not, since `https://u:pw:@h` redacts `pw:`. No length or timeout ever shows held text: past the limit the
+ * frame only gains a marker, so a run that never ends cannot reveal what it holds.
+ */
+export function holdUnresolvedUserinfo(value: string): string {
+	let runStart = value.length;
+	while (runStart > 0 && !endsUserinfoRun(value.charCodeAt(runStart - 1))) runStart -= 1;
+	if (!URL_SCHEME_END_RE.test(value.slice(Math.max(0, runStart - LONGEST_URL_SCHEME), runStart))) return value;
+	const colon = value.indexOf(":", runStart);
+	if (colon < 0 || colon === value.length - 1) return value;
+	return `${value.slice(0, colon + 1)}${value.length - colon - 1 > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
+}
+
+/**
+ * Where the URL an unfinished text may still be writing starts, or null. This reads back to the scheme, for a writer that
+ * must keep the whole URL together because a later piece without its scheme could never be recognized (#446).
+ */
+export function openUrlStart(value: string): number | null {
+	let runStart = value.length;
+	while (runStart > 0 && !endsUserinfoRun(value.charCodeAt(runStart - 1))) runStart -= 1;
+	const from = Math.max(0, runStart - LONGEST_URL_SCHEME);
+	const scheme = URL_SCHEME_END_RE.exec(value.slice(from, runStart));
+	return scheme === null ? null : from + scheme.index;
+}
+
+/** The index just past the userinfo run a text opens inside of, or null when it does not end in this text (#446). */
+export function userinfoRunEnd(value: string): number | null {
+	for (let index = 0; index < value.length; index += 1) if (endsUserinfoRun(value.charCodeAt(index))) return index;
+	return null;
+}
+
+/**
+ * Tokens still to discard after a text lost its head. Patterns recognize a secret by what precedes it, so whatever a cut
+ * leaves of a token, and the token after it in case the cut token was a flag naming that value as its secret, can no longer
+ * be recognized. A discarded token with a dash may itself be such a flag, so it does not count and its value goes too. It
+ * is state rather than a one-off strip because the unsafe token can continue in text not yet seen (#446).
+ */
+export interface CutHeadGuard {
+	tokens: number;
+	inToken: boolean;
+	tokenHasDash: boolean;
+}
+
+export function cutHeadGuard(): CutHeadGuard {
+	return { tokens: 2, inToken: true, tokenHasDash: false };
+}
+
+/** A guard for text following a whole-line cut, needed only when the removed text ends in a secret flag awaiting its value. */
+export function headGuardAfter(removed: string): CutHeadGuard | null {
+	const trimmed = removed.trimEnd();
+	let start = trimmed.length;
+	while (start > 0 && /[a-z0-9_-]/iu.test(trimmed.charAt(start - 1))) start -= 1;
+	return secretFlagStart(trimmed.slice(start)) === null ? null : { tokens: 1, inToken: false, tokenHasDash: false };
+}
+
+const TOKEN_RE = /\S*/uy;
+const SPACE_RE = /\s*/uy;
+
+/** Discard what the guard still covers from the front of `text`, advancing the guard. */
+export function dropCutHead(text: string, guard: CutHeadGuard): string {
+	let at = 0;
+	while (guard.tokens > 0 && at < text.length) {
+		const start = at;
+		const scan = guard.inToken ? TOKEN_RE : SPACE_RE;
+		scan.lastIndex = at;
+		scan.exec(text);
+		at = scan.lastIndex;
+		if (guard.inToken && text.slice(start, at).includes("-")) guard.tokenHasDash = true;
+		if (at === text.length) break;
+		if (guard.inToken) {
+			// The cut token's own dash adds nothing: its one possible value is already counted.
+			if (!guard.tokenHasDash || guard.tokens > 1) guard.tokens -= 1;
+			guard.tokenHasDash = false;
+		}
+		guard.inToken = !guard.inToken;
+	}
+	if (guard.tokens > 0) return "";
+	SPACE_RE.lastIndex = at;
+	SPACE_RE.exec(text);
+	return text.slice(SPACE_RE.lastIndex);
+}
+
+/** Redact text that may still grow; once it is complete, `final` releases any hold through full redaction. */
+export function redactStreamingSecretString(value: string, final = false): string {
+	return redactSecretString(final ? value : holdUnresolvedUserinfo(value));
+}
+
+/** A partial structured value, such as forming tool arguments, any string of which may stop inside a URL. */
+export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
+	if (typeof value === "string") return holdUnresolvedUserinfo(value);
+	if (depth > 8) return USERINFO_HOLD_MARKER;
+	if (Array.isArray(value)) return value.map((item) => holdUnresolvedStrings(item, depth + 1));
+	if (!isPlainObject(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) out[key] = holdUnresolvedStrings(item, depth + 1);
+	return out;
+}
+
 /** Keep completed tokens while an appended display string changes only its tail (#428). */
 export class RedactedStringProjection {
 	private source = "";
+	private final = false;
 	private committed = 0;
 	private prefix = "";
 	private text = "";
 
-	project(source: string): string {
-		if (source === this.source) return this.text;
+	project(source: string, final = false): string {
+		if (source === this.source && final === this.final) return this.text;
 		if (!source.startsWith(this.source)) {
 			this.committed = 0;
 			this.prefix = "";
@@ -121,8 +254,10 @@ export class RedactedStringProjection {
 			this.prefix += redactSecretString(tail.slice(0, through));
 			this.committed += through;
 		}
-		this.text = this.prefix + redactSecretString(tail.slice(through));
+		// A committed token ends in whitespace, so the open run a hold reads is always in this uncommitted tail (#446).
+		this.text = this.prefix + redactStreamingSecretString(tail.slice(through), final);
 		this.source = source;
+		this.final = final;
 		return this.text;
 	}
 }

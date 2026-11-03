@@ -15,6 +15,7 @@ import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/t
 import { trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { redactStreamingSecretString } from "../domains/safety/redaction.js";
 import type { TelemetryContract, TelemetryRunSummary, TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetrySnapshot } from "../domains/telemetry/index.js";
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
@@ -28,7 +29,7 @@ import { DOCK_BODY_ROWS_MAX } from "./dock.js";
 import { centeredWindow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
-import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
+import { liveWorkerAnswerText, presentWorkerContractAnswer } from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import {
 	animationStep,
@@ -558,7 +559,7 @@ function progressAnswerLines(
 	);
 	const source = presented
 		? [...(presented.footer ? [presented.footer] : []), ...presented.lines]
-		: safeWorkerAnswerText(progress.tailText).split("\n");
+		: liveWorkerAnswerText(progress.tailText, progress.settled).split("\n");
 	const wrapped: string[] = [];
 	for (const line of source) {
 		for (const row of wrapTextWithAnsi(sanitizeCallTargetText(line), railWidth)) wrapped.push(row);
@@ -886,7 +887,9 @@ function councilMemberView(
 		round: council.round,
 		route: `${row.targetId}/${row.wireModelId}`,
 		status: { ...presentation },
-		tailText: sanitizeCallTargetText(row.progress?.tailText ?? ""),
+		tailText: sanitizeCallTargetText(
+			redactStreamingSecretString(row.progress?.tailText ?? "", row.progress?.settled === true),
+		),
 		droppedLines: row.progress?.droppedLines ?? 0,
 	};
 }
@@ -1052,7 +1055,8 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			if (progress) {
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction)) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress));
-				const tail = progress.phase === "writing" ? firstLine(progress.tailText) : "";
+				const tail =
+					progress.phase === "writing" ? firstLine(redactStreamingSecretString(progress.tailText, progress.settled)) : "";
 				return { text: `${theme.fg("dispatchAction", words)}${tail ? ` ${theme.fg("assistantProse", tail)}` : ""}` };
 			}
 			if (row.currentTool) return { text: `${sanitizeCallTargetText(row.currentTool)} running` };

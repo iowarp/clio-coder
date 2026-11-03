@@ -20,7 +20,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { safetyNetRailText } from "../../domains/safety/decision-presentation.js";
-import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
+import { redactSecretString, redactStreamingSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
@@ -2269,8 +2269,8 @@ export function renderToolPreview(
 			// A failed command's body is the command's own output, shown as it ran; a
 			// failed tool's body is the harness's error text, so its paths abbreviate.
 			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
-			const body = toolOutputInk(redactSecretString(shownText.trimEnd())).flatMap((line) =>
-				indentAndWrap(line, width, failure),
+			const body = toolOutputInk(redactStreamingSecretString(shownText, finished !== undefined).trimEnd()).flatMap(
+				(line) => indentAndWrap(line, width, failure),
 			);
 			rows.push(
 				...previewRows(
@@ -2476,7 +2476,10 @@ function renderChainPreview(
 	if (body.length === 0 && (finished === undefined || settledChainSteps(finished).length === 0)) {
 		const result = finished?.result ?? options.partialResult;
 		const text = result === undefined ? "" : resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
-		body = text.trim().length === 0 ? [] : indentAndWrap(redactSecretString(text), width, failure);
+		body =
+			text.trim().length === 0
+				? []
+				: indentAndWrap(redactStreamingSecretString(text, finished !== undefined), width, failure);
 	}
 	rows.push(...previewRows(body, limit, width, finished === undefined, rail, BODY_INDENT_VISIBLE_WIDTH));
 	return rows;

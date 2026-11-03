@@ -31,6 +31,13 @@
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { durableAssistantTextFromEvent, WORKER_OUTPUT_MAX_BYTES } from "../dispatch/event-pump.js";
 import type { CallActionDescriptor } from "../safety/call-target.js";
+import {
+	type CutHeadGuard,
+	cutHeadGuard,
+	dropCutHead,
+	headGuardAfter,
+	holdUnresolvedUserinfo,
+} from "../safety/redaction.js";
 
 /**
  * Lines of worker prose kept while a run is live. The tail is what a streaming
@@ -222,7 +229,12 @@ function keepTailBytes(text: string, maxBytes: number): string {
  * the byte cap is met, and finally a head cut on a single line larger than the
  * cap on its own.
  */
-function boundLiveTail(text: string): { text: string; droppedLines: number; droppedBytes: number } {
+function boundLiveTail(text: string): {
+	text: string;
+	droppedLines: number;
+	droppedBytes: number;
+	guard: CutHeadGuard | null;
+} {
 	const lines = text.split("\n");
 	let droppedLines = 0;
 	if (lines.length > WORKER_LIVE_TAIL_LINES) {
@@ -235,16 +247,20 @@ function boundLiveTail(text: string): { text: string; droppedLines: number; drop
 	}
 	const joined = lines.join("\n");
 	const bytes = Buffer.byteLength(joined, "utf8");
-	if (bytes <= WORKER_LIVE_TAIL_MAX_BYTES) return { text: joined, droppedLines, droppedBytes: 0 };
+	if (bytes <= WORKER_LIVE_TAIL_MAX_BYTES) {
+		const removed = droppedLines === 0 ? "" : text.slice(0, text.length - joined.length);
+		return { text: joined, droppedLines, droppedBytes: 0, guard: headGuardAfter(removed) };
+	}
 	const kept = keepTailBytes(joined, WORKER_LIVE_TAIL_MAX_BYTES);
-	return { text: kept, droppedLines, droppedBytes: bytes - Buffer.byteLength(kept, "utf8") };
+	return { text: kept, droppedLines, droppedBytes: bytes - Buffer.byteLength(kept, "utf8"), guard: cutHeadGuard() };
 }
 
-/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. */
+/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. A cut URL never resolves (#446). */
 export function boundSettledText(text: string): { text: string; dropped: number } {
 	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, TAIL_TRUNCATION_MARKER);
 	if (bounded === text) return { text, dropped: 0 };
-	return { text: bounded, dropped: Math.max(0, lineCount(text) - lineCount(bounded)) };
+	const held = holdUnresolvedUserinfo(bounded);
+	return { text: held, dropped: Math.max(0, lineCount(text) - lineCount(held)) };
 }
 
 const EMPTY_SNAPSHOT: WorkerProgressSnapshot = {
@@ -265,6 +281,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let toolCalls: number | undefined;
 	let phase: WorkerProgressPhase = "starting";
 	let tailText = "";
+	/** Set while the tail has lost its head and text arriving next can still belong to the unsafe token (#446). */
+	let tailGuard: CutHeadGuard | null = null;
 	let droppedLines = 0;
 	let droppedBytes = 0;
 	let currentAction: WorkerAction | null = null;
@@ -311,15 +329,31 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		}
 		windowBytes = WORKER_PROGRESS_WINDOW_BYTES;
 		droppedBytes += bytes;
+		// The refused bytes leave a hole that could join `https://u:hun` to `/path`, or show `ter2@host` with no scheme, so
+		// the token on each side of it goes too (#446).
+		let end = tailText.length;
+		while (end > 0 && !/\s/u.test(tailText.charAt(end - 1))) end -= 1;
+		droppedBytes += Buffer.byteLength(tailText.slice(end), "utf8");
+		tailText = tailText.slice(0, end);
+		tailGuard = cutHeadGuard();
+		cached = null;
 		return "";
 	};
 
 	const appendTail = (text: string): boolean => {
 		if (text.length === 0) return false;
-		const bounded = boundLiveTail(tailText + text);
-		tailText = bounded.text;
+		const guarded = (value: string): string => {
+			if (tailGuard === null) return value;
+			const kept = dropCutHead(value, tailGuard);
+			droppedBytes += Buffer.byteLength(value, "utf8") - Buffer.byteLength(kept, "utf8");
+			if (tailGuard.tokens === 0) tailGuard = null;
+			return kept;
+		};
+		const bounded = boundLiveTail(tailText + guarded(text));
 		droppedLines += bounded.droppedLines;
 		droppedBytes += bounded.droppedBytes;
+		if (bounded.guard !== null) tailGuard = bounded.guard;
+		tailText = bounded.guard === null ? bounded.text : guarded(bounded.text);
 		return touch();
 	};
 
@@ -349,6 +383,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	const seal = (text?: string): boolean => {
 		const sealed = nonEmptyString(text) ?? nonEmptyString(durable);
 		if (sealed !== undefined) {
+			tailGuard = null;
 			const bounded = boundSettledText(sealed);
 			tailText = bounded.text;
 			droppedLines = bounded.dropped;
@@ -412,6 +447,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			const durableText = durableAssistantTextFromEvent(event);
 			if (durableText.trim().length > 0) {
 				durable = durableText;
+				// A token cannot span messages, so the next message owes the old cut nothing.
+				tailGuard = null;
 				if (delta.length === 0 && tailText.trim().length === 0) {
 					changed = appendTail(durableText) || changed;
 				}
@@ -464,6 +501,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		settle: seal,
 
 		restart(): void {
+			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
 			pendingActions.length = 0;

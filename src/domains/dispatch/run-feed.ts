@@ -34,6 +34,7 @@ import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolCallFacts } from "../../tools/agent-tools.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
+import { holdUnresolvedUserinfo, openUrlStart, userinfoRunEnd } from "../safety/redaction.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 
 export const RUN_FEED_VERSION = 1;
@@ -44,6 +45,20 @@ export const RUN_FEED_CAP_BYTES = 2 * 1024 * 1024;
 export const RUN_FEED_READ_TAIL_BYTES = 256 * 1024;
 /** Prose a text row may hold back while it waits for a word boundary. */
 const TEXT_CARRY_MAX_CHARS = 4096;
+/** The longest piece of `https://` that a row could end in and the next text complete. */
+const PARTIAL_SCHEME_CHARS = "https:/".length;
+/**
+ * Rows the model loop emits only between text blocks, so no URL spans them. Any other row, a route warning or an
+ * outcome, can arrive at any moment and keeps an open URL in the carry (#446).
+ */
+const TEXT_ENDING_EVENTS: ReadonlySet<string> = new Set([
+	"message_end",
+	"thinking",
+	"clio_coder_model_call",
+	"clio_coder_tool_start",
+	"clio_coder_tool_finish",
+	"clio_coder_tool_observation",
+]);
 /** Runs whose writer state one process keeps; an evicted run reloads it from its file. */
 const WRITER_LIMIT = 256;
 
@@ -114,6 +129,8 @@ interface WriterState {
 	/** The held-back tail of the last text row. */
 	carry: string;
 	carryAt: string;
+	/** A URL outgrew the carry, and text up to the end of its userinfo run is withheld. */
+	droppingRun: boolean;
 }
 
 const writers = new Map<string, WriterState>();
@@ -131,7 +148,15 @@ function ensureRunDirectory(stateDir: string, runId: string): string {
 
 /** Resume a feed this process did not start, such as a recovered run, from its last lines. */
 function loadWriterState(path: string): WriterState {
-	const state: WriterState = { seq: 0, bytes: 0, dropping: false, closed: false, carry: "", carryAt: "" };
+	const state: WriterState = {
+		seq: 0,
+		bytes: 0,
+		dropping: false,
+		closed: false,
+		carry: "",
+		carryAt: "",
+		droppingRun: false,
+	};
 	const tail = readTail(path, 64 * 1024);
 	if (tail === null) return state;
 	state.bytes = tail.size;
@@ -199,6 +224,20 @@ function holdBack(text: string): { head: string; tail: string } {
 }
 
 /**
+ * Write what the next text cannot complete into a credential, keeping any URL that is still open whole: split across
+ * two rows, neither piece matches the userinfo pattern (#446).
+ */
+function flushCarryPrefix(path: string, state: WriterState): void {
+	const keep = Math.max(
+		0,
+		Math.min(openUrlStart(state.carry) ?? state.carry.length, state.carry.length - PARTIAL_SCHEME_CHARS),
+	);
+	if (keep === 0) return;
+	writeBounded(path, state, { kind: "event", type: "text", detail: state.carry.slice(0, keep) }, state.carryAt);
+	state.carry = state.carry.slice(keep);
+}
+
+/**
  * Append one display row to a run's feed. Best-effort: a feed that cannot be written loses the row, and the dispatch
  * never learns about it.
  */
@@ -211,18 +250,32 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 		if (state.closed) return;
 		if (state.seq === 0 && state.bytes === 0) ensureRunDirectory(stateDir, runId);
 		if (body.kind === "event" && body.type === "text" && body.detail !== undefined) {
-			const { head, tail } = holdBack(state.carry + body.detail);
+			let detail = body.detail;
+			if (state.droppingRun === true) {
+				const end = userinfoRunEnd(detail);
+				if (end === null) return;
+				detail = detail.slice(end);
+				state.droppingRun = false;
+			}
+			const { head, tail } = holdBack(state.carry + detail);
 			if (state.carry.length === 0) state.carryAt = at;
 			if (head.length > 0) writeBounded(path, state, { ...body, detail: head }, state.carryAt);
 			state.carry = tail;
 			state.carryAt = head.length > 0 ? at : state.carryAt;
+			if (state.carry.length > TEXT_CARRY_MAX_CHARS) flushCarryPrefix(path, state);
 			if (state.carry.length > TEXT_CARRY_MAX_CHARS) {
-				writeBounded(path, state, { kind: "event", type: "text", detail: state.carry }, state.carryAt);
+				// One URL outgrew the carry. Its password, if it has one, never reaches a row.
+				const open = openUrlStart(state.carry) !== null;
+				const shown = open ? holdUnresolvedUserinfo(state.carry) : state.carry;
+				writeBounded(path, state, { kind: "event", type: "text", detail: shown }, state.carryAt);
 				state.carry = "";
+				state.droppingRun = open;
 			}
 			return;
 		}
-		if (state.carry.length > 0) {
+		const textEnds = body.kind !== "event" || TEXT_ENDING_EVENTS.has(body.type);
+		if (!textEnds && state.carry.length > 0) flushCarryPrefix(path, state);
+		else if (state.carry.length > 0) {
 			writeBounded(path, state, { kind: "event", type: "text", detail: state.carry }, state.carryAt);
 			state.carry = "";
 		}
