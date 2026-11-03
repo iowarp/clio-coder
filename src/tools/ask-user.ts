@@ -888,13 +888,13 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			if (!normalized.call) return { kind: "error", message: `ask_user: ${normalized.error ?? "invalid input"}` };
 			const call = normalized.call;
 			const turnPolicy = options?.askUserPolicy;
-			// The result tells a model to complete before prose, so a plan sent back
-			// was often completed first and its revised card hit already_complete.
+			// Proceeding closes the interview and a revision is usually completed
+			// first, so the ask that follows either hit already_complete on 5 of 9
+			// real episodes. Only a kept plan refuses another card.
 			const standalone =
 				call.action === "ask" &&
 				turnPolicy?.status === "complete" &&
-				(call.mode === "single_question" ||
-					(turnPolicy.planSentBack === true && call.questions?.length === 1 && isPlanCloseQuestion(call.questions[0])));
+				(call.mode === "single_question" || turnPolicy.asksAfterClose === true);
 			const policy = standalone ? createStandalonePolicy(options) : (turnPolicy ?? createStandalonePolicy(options));
 			if (standalone && turnPolicy?.planOnly !== undefined) policy.planOnly = turnPolicy.planOnly;
 			hydratePolicy(policy, options);
@@ -1052,7 +1052,8 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				if (closesPlan) {
 					policy.status = "complete";
 					policy.endedAt = answeredAt;
-				} else if (planCard) policy.planSentBack = true;
+				}
+				if (planCard && !/^keep\b/iu.test(result.answers[0]?.options?.[0] ?? "")) policy.asksAfterClose = true;
 				await persistAskUserTranscript(policy, options);
 				return okInterviewResult(policy, closesPlan ? "complete" : "round_answered", result.answers);
 			} finally {
