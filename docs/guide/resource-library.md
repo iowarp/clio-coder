@@ -188,7 +188,8 @@ Private index repositories may opt into Git synchronization. Set `integrations.l
 | Left / Right | Change kind tab |
 | `b` | Switch Browse and Installed |
 | `s` | Switch user/project action scope |
-| `Enter` | Open a package's members, or show detail for a member |
+| `Enter` | Open an installed package's members; it does nothing on a component |
+| `Tab` | Show or hide the detail pane when the layout is too narrow to keep it beside the list |
 | `v` | Use the selected runtime component: prepare its invocation in the composer; a playbook opens its `/fleet run` approval preview |
 | `i` | Review installation; a second request can include missing requirements |
 | `u` | Review update |

@@ -459,7 +459,7 @@ sessions.
 | View | What it shows |
 | --- | --- |
 | Activity | A heatmap of this workspace's recent session activity, git changes, session cost and tokens with elapsed time, and the first reported subscription window |
-| Accounts | Subscription and credit meters, every reported model group, remaining capacity, reset countdowns and local reset times with an explicit time zone, and stale or expired readings |
+| Accounts | Subscription and credit meters, every reported model group, reset countdowns and local reset times with an explicit time zone, and stale or expired readings |
 | Session | Recorded token and cost totals, cache traffic, reasoning, and the background-call categories (side questions, handoffs, pre-warms, memory steps) |
 | Models | Each model's share of recorded processed tokens, including cache traffic, plus its detailed token and cost breakdown |
 | Workers | Active and recent runs, recorded tokens and cost, context usage, and the shared account limit when the local credential owner is known |
@@ -468,13 +468,12 @@ Press 1–5, Tab/Shift+Tab, or ←/→ to change views; ↑/↓ or PgUp/PgDn to 
 Home/End or Ctrl+Home/Ctrl+End to jump to either end; and Esc to close. Each
 view keeps its own scroll position while the overlay stays open.
 
-#### Used, left, and what a percentage describes
+#### Used, and what a percentage describes
 
-One direction per label, on every surface. A filled meter cell always means
-consumed capacity, and the detailed meters in Accounts and Status label that
-number `used` and print the complement beside it as `remaining`. Compact badges
-carry the other direction and say so: `weekly 9% used` in a detailed meter is
-the same reading as `weekly 91% left` in a footer badge.
+One direction on every surface. A filled meter cell always means consumed
+capacity, and every percentage counts what is used: Accounts labels its meters
+`used`, the compact meters on the Status page print the same figure, and a
+footer or worker badge reads `weekly 9% used`.
 
 Subscription percentages describe an account-wide provider window shared across
 your sessions and devices. Session tokens and costs describe only what this
@@ -490,7 +489,7 @@ and fleet islands read the same cached readings the overlay does.
 - The **welcome launchpad** carries an `AI usage · used` section beside the wordmark with an `Accounts` field, or `No usage data` when no account reported. It reserves two rows from the first paint; a longer summary ends in `… /usage`.
 - The **compact footer** has two lines. Line 1 carries the working directory, the Git branch with a dirty marker, the context counter and tokens per second. Line 2 carries one notice, tip, hint or urgent prompt on the left and, on the right, the active worker count, active skills and the selected model's weekly headroom. The weekly figure appears only when the account and model group are identifiable, and the footer never promotes an unrelated account's busier window in place of the selected model's.
 - The expanded dashboard's **Status** page puts the session total above the
-  account meters, **Activity** shows shared account headroom on worker cards, and
+  account meters, **Activity** shows shared account usage under each live worker, and
   **Context** states that request occupancy and account limits are different
   quantities.
 

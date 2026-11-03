@@ -105,7 +105,7 @@ Each handoff allows at most two reduction attempts, with at most two summary cal
 
 ### Handoff phases
 
-`handoffTransaction` entries record these phases. The `/context` overlay shows `Handoff: pending` (or the last outcome) with the pending ID and the recovery command.
+`handoffTransaction` entries record these phases. The `/context` overlay's Next request section shows `handoff pending` (or the last outcome) with the pending ID and the recovery command.
 
 | Phase | Meaning |
 | --- | --- |

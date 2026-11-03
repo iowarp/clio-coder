@@ -141,7 +141,7 @@ Trust verdicts on a dispatch card print `✓` for reviewed (`success`) and `✗`
 ## 3. Structural Layouts
 
 ### 3.1 The Island (Framed Block)
-Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../../src/interactive/theme/rules.ts): the launchpad, the task island, the Fleet runs board, the dispatch cards, notices, the steering queue and the exit summary. No surface draws its own corners, tees or rounded frame.
+Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../../src/interactive/theme/rules.ts): the launchpad, the task island, the live Fleet runs island, notices, the steering queue and the exit summary. The Fleet Runs board is a docked overlay and draws a run table instead. No surface draws its own corners, tees or rounded frame.
 - **Header**: Embedded in the top border in bold `heading`: `┌─ Title ─────────── meta ─┐`. Optional right metadata is `annotation`. A title wider than the island is clipped with `…` before the corner.
 - **Body**: `│ ` + content padded to the inner width + ` │`. Sections inside one island are separated by a full-width `╌` row, never by a `├┤` tee.
 - **Width**: Every row is exactly the island width in visible cells (minimum 4). Content is truncated with `…`, never wrapped past the rail.
@@ -151,7 +151,8 @@ Every framed block is built by `frame()` and `innerDivider()` in [rules.ts](../.
 Every modal surface (`/settings`, pickers, `/view`, `/tasks`, `/usage`, permission cards, interviews) lives in the dock ([dock.ts](../../src/interactive/dock.ts)), the composer's own slot, instead of floating over the transcript. The engine keeps one overlay per frame so focus and input routing stay unchanged, but that overlay paints nothing: the frame registers with the dock and the composer draws it in normal flow between its rails, the way slash autocomplete is drawn. The transcript keeps its position and its scrollback and stays selectable by the terminal. A docked body is at most 16 rows (`DOCK_BODY_ROWS_MAX`) and shrinks to leave two rails, the footer and a sliver of transcript, with a floor of 3 rows. A permission card keeps the composer's draft visible beneath its body, because a steer typed while a call is parked is what the `CONFIRM` label is for.
 - Header: Centered or left-aligned title with category tabs.
 - Navigation: `↑`/`↓` for items, `Tab` for sections, `Enter` to select, `Esc` to close.
-- **Selection**: A focused row carries `❯`. Self-drawn lists use `selectionMark` and `selectionLabel` in [overlay-frame.ts](../../src/interactive/overlay-frame.ts) for an `accent` marker and bold `accent` label. Pi SelectList uses the public `selectedText` hook to replace its leading arrow with `❯` and style the selected row in bold `selectedOption`, including its description. No subclass or dependency patch is used.
+- **Selection**: A focused row carries `❯`. Self-drawn lists use `selectionMark` and `selectionLabel` in [overlay-frame.ts](../../src/interactive/overlay-frame.ts) for an `accent` marker and bold `accent` label. Rows built from the design primitives use `selectionRow` in [primitives.ts](../../src/interactive/theme/primitives.ts). Pi SelectList uses the public `selectedText` hook to replace its leading arrow with `❯` and style the selected row in bold `selectedOption`, including its description. No subclass or dependency patch is used.
+- **Permission card**: From the top, an identity row with the tool in its transcript glyph and color, the action class in a risk tone and the rule that fired; the target in a gutter block that folds and is never clipped; a fact table (`why`, `effect`, `mutation`, `asked by`, `authority`, `advisory`); the unattended countdown; and allow, deny and stop as choice rows with their consequences ([permission-overlay.ts](../../src/interactive/permission-overlay.ts)). A short dock folds the choices to one wrapped row, then pins the identity and choices around a scrolling window, and on the shortest cards the choices join the window. The rail carries only the keys the card's rows do not name, and takes allow, deny and stop back whenever those rows are off screen. Opening the terms brings the window to the choices, with the terms below them.
 - **Floating exception**: The task island is the one surface that still floats: a non-capturing overlay at the top right. The `?` key card is a non-capturing docked frame.
 - **Pane-host docks are a different mechanism**: The files, music and workers docks are Herdr panes beside Clio Coder's own pane, not composer dock frames, and they never draw into the transcript or the composer. They have three states (visible, hidden, closed), a first-tap show or hide on `Alt+E`, `Alt+A` and `Alt+W`, and a double tap within 400 ms that closes them. [Panes and the Files Pane](../guide/panes-and-files.md#showing-hiding-and-closing-docks) specifies them.
 
@@ -184,7 +185,7 @@ No row exceeds the terminal width in visible cells at any width. `tests/contract
 | Context progress | A full-width three-row rail directly above the composer, shown while a compaction, init, refresh or reset runs and for 6 seconds after it ends. |
 | Council card | Side-by-side columns while every column is at least 34 cells wide after 2-cell gutters, otherwise stacked. |
 | Compact footer | Two rows. Line 1 reserves a stats column at least 28 cells wide once a figure shows, capped at 40% of the width, so changing numbers do not move the path. At 60 columns or fewer, line 2 is omitted when it has nothing to say and key hints show one entry instead of two. |
-| Expanded footer | Context and Status pages split into two columns from 84 columns. Activity splits its summary from 110 and shows two active worker cards side by side from 120. |
+| Expanded footer | The Context legend and the Status machine and connection sections split into two columns from 84 columns. Activity stays one column at every width. A page's height follows the terminal, 6 to 12 rows, and what does not fit scrolls with `Alt+PgUp` and `Alt+PgDn`. |
 | Transcript | Prompt and prose rows wrap. Tables, code and diagrams are fitted to the width (see [5.1](#51-assistant-text-rendering)). Fullscreen reserves the last column for the scrollbar. |
 
 Gutters stay 2 columns with hanging indents.
@@ -202,7 +203,11 @@ The viewport has two kinds of content.
 
 **Prose reuse.** Inside an entry, each assistant text segment and each reasoning stretch keeps its wrapped rows for up to three layouts (width and fence mode, plus the preview budget for reasoning), keyed by its source text, whether it is finalized and the skin epoch. Another entry streaming or a running tool's clock therefore never re-wraps earlier prose. A worker card projects its answer preview and redaction incrementally over appended deltas, and caches each redacted display field by its source text ([worker-entry.ts](../../src/interactive/renderers/worker-entry.ts)).
 
-**Measuring.** `src/interactive/render-trace.ts` records frames, panel `entriesRendered` and `cacheHit`, bytes written per commit, and `rowsChanged`: the number of root rows that differ from the previous frame at the same index. Set `CLIO_CODER_RENDER_TRACE` to a file path to arm the trace. `rowsChanged` is computed only while a trace file is armed and is an estimate of pi-tui's differential write, since a viewport move, a resize or an overlay can make pi-tui repaint more rows. Tests never assert wall-clock time.
+**Finished work.** A running turn's assistant entry keeps the rows of its finished calls, and a late result or an attached worker card drops them; a Compact fold re-renders only when it grows. A worker card compares the telemetry values it prints, so a batch that moved none of them keeps its rows and the frozen prefix. Fullscreen composes its document only when the header or transcript changes, and a streamed token writes the header and tail into a pooled array that already holds the settled prefix.
+
+**Pacing.** While pacing is active, a delta landing on an empty queue is released at once, and only a burst's excess is spread out, over a window of at most 250 ms that follows the provider's cadence ([stream-pacer.ts](../../src/interactive/stream-pacer.ts)). Past 20 KiB of open reply, answer text is applied no more often than keeps its Markdown layout under 30 percent of the main thread, at most 2 seconds apart, so a keystroke's frame reuses the last layout. Every ordered boundary releases the held text first ([chat-renderer.ts](../../src/interactive/chat-renderer.ts)).
+
+**Measuring.** `src/interactive/render-trace.ts` records frames, panel `entriesRendered` and `cacheHit`, a chat submit's phases from Enter to admission, bytes written per commit, and `rowsChanged`: the number of root rows that differ from the previous frame at the same index. Set `CLIO_CODER_RENDER_TRACE` to a file path to arm the trace. `rowsChanged` is computed only while a trace file is armed and is an estimate of pi-tui's differential write, since a viewport move, a resize or an overlay can make pi-tui repaint more rows. `scripts/bench-tui.ts` drives provider-free render workloads, and `scripts/bench-tui-feedback.ts` measures feedback latency through a real PTY against a fake provider; neither includes terminal painting. Tests never assert wall-clock time.
 
 ### 3.6 Screen Modes
 
@@ -244,11 +249,11 @@ The input surface (`ClioEditor`) frames the operator's prompt:
 
 The compact footer is two lines:
 - **Line 1 (Workspace & Metrics)**: Working directory and Git branch with a `*` when dirty, then a right-hand stats column with context occupancy (`used/window (percent)`) and throughput (`tps`). Branch and context figures stay blank until known. Once metrics appear, the footer reserves their column and the dirty marker's space so changing numbers do not shift the path's cut point. A narrow row drops the percent, then states it as `ctx N%`.
-- **Line 2 (Notices & Hints)**: One message, in this order of precedence: an armed quit or leader key, an open approval card's key legend, the top notice, setting feedback, a footer tip, then rotating key hints. Beside it, when space permits, the tail shows active worker count, armed skill names and the selected model's weekly quota headroom. Key hints are shown whole, two per page (one at 60 columns or fewer), and rotate every 12 seconds; a dropped hint leads the next page.
+- **Line 2 (Notices & Hints)**: One message, in this order of precedence: an armed quit or leader key, the top notice, setting feedback, a footer tip, then rotating key hints. Beside it, when space permits, the tail shows active worker count, armed skill names and the selected model's weekly quota headroom. Key hints are shown whole, two per page (one at 60 columns or fewer), and rotate every 12 seconds; a dropped hint leads the next page.
 - **Notice Slot**: Line 2 has room for one notice. It shows the head of the notice center's order, most severe first and newest within a level, with the level's glyph and token. A notice that is multi-line or wider than its room is cut and ends in the dashboard key plus `more`; the expanded dashboard wraps it in full.
 - **Narrow Terminals**: Secondary hints yield space to the context percentage and phase without wrapping; optional counts drop before a number is cut.
 
-The expanded footer has three pages, Activity, Context and Status, which the dashboard key cycles through before closing. Machine counters are sampled only while Status is visible. Worker counts in both footers include running, queued, cancelling, retrying and stale runs.
+The expanded footer has three pages, Activity, Context and Status, which the dashboard key cycles through before closing ([pages.ts](../../src/interactive/footer/pages.ts)). Activity leads with the harness phase and live figures, then the session's totals and task board, one table row per worker with live runs first and at most four finished, and each live run's route, account, task, activity and `/view` reference. Context leads with the category meter and its figure, then headroom, the composition legend and cache facts. Status leads with spend and account meters, then workers and the worker cap, the machine and connections. Machine counters are sampled only while Status is visible. Worker counts in both footers include running, queued, cancelling, retrying and stale runs.
 
 ### 4.4 Composer Phases
 
@@ -262,13 +267,13 @@ The live phase is named on the composer's top rail, after the model nickname. It
 | Writing | `is writing`, or `is preparing a tool` while a tool call forms |
 | Tool running | Tool-specific wording, or `is running <tool>` |
 | Dispatch in flight | `is waiting for a worker` |
-| Approval required | `needs approval`, with the permission keys on the bottom rail |
+| Approval required | `needs approval`, with the keys the card's rows do not name on the bottom rail |
 | Retrying | `is retrying <attempt>/<max>` |
 | Compacting | `is compacting context` |
 | No output | `has no output · <seconds>s` |
 | Ended | `finished`, `failed`, `was cancelled`, `reached the output limit`, or `stopped generating tool arguments` |
 
-While the composer is empty its placeholder follows the mode: `A parked call is waiting for your decision`, `Clio has your prompt and is preparing the turn`, or `Clio is compacting the session context`. The expanded Activity page shows a `state` row with the footer phase verb while a turn streams.
+While the composer is empty its placeholder follows the mode: `A parked call is waiting for your decision`, `Clio has your prompt and is preparing the turn`, or `Clio is compacting the session context`. The expanded Activity page's first row leads with the footer phase verb, or `Ready` when idle.
 
 ### 4.5 Exit Summary
 

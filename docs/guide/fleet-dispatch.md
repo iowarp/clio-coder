@@ -1686,8 +1686,8 @@ hard block.
   or `/delegate`, `◆` for one the model started by calling a dispatch tool, and
   a quiet `·` on the board for Clio Coder's internal helper runs (transcript helper
   rows use `↳`). A running `◇` on the board is therefore the operator's own work.
-  The footer shows the live worker count (`N workers`) and the Activity quadrant a
-  `fleet <summary>` such as `fleet 2 active 1 done`; neither splits by origin.
+  The footer shows the live worker count (`N workers`) and the Activity page's
+  Workers rule a summary such as `2 active · 1 done`; neither splits by origin.
 - User-origin and agent-origin runs stream into the chat transcript as an
   attributed worker block. The typed command is echoed dim above the block.
   Header units display `<agentId>` (a council member shows its roster label)
@@ -1720,10 +1720,11 @@ hard block.
 - Internal `context-bootstrap` and `wiki-writer` runs report through the context rail
   and never open a transcript block. Other shadow and internal helper runs open a
   compact `↳` row.
-- The Fleet Runs board, the overlay that `/fleet` opens, shows per-run cards with the node id (absent placement
+- The Fleet Runs board, the overlay that `/fleet` opens, shows a run table that windows around the cursor and drops
+  columns by priority, with the selected run's facts under a rule: the node id (absent placement
   renders `local`), gate badges (`gate reviewer c2`), reroute badges, live
   tool activity (the current or last call as a redacted verb and object; raw
-  arguments never cross the worker stdout seam), and a per-worker context meter.
+  arguments never cross the worker stdout seam), and the worker's context figure.
   It also lists finished runs. `Up` and `Down` (or `k` and `j`) move the cursor, `s`
   steers the selected run, and `x` cancels it.
 - `Enter` on a live run takes the [workers dock](#workers-dock-and-dashboard)
@@ -1733,8 +1734,8 @@ hard block.
   `Enter` toggles the inline worker detail: the phase, the running call
   with a redacted action descriptor (`bash running npm test`), the bounded tail of the
   worker's own prose, and the full task, route and budget lines. The default list
-  stays compact, so a fan-out of scouts costs one card each until an operator
-  opens one. Council rows have no detail.
+  stays compact, so a fan-out of scouts costs one row each until an operator
+  opens one. A council row shows its member grid when selected and has no further detail.
 - The board and the transcript worker block read one projection
   ([worker-progress.ts](../../src/domains/telemetry/worker-progress.ts)), so they cannot disagree about what a
   worker is saying or touching. Progress settles on `agent_end`, with the live phase shown as `finishing` until the terminal run event arrives. It keeps 40 lines and 4096 bytes of tail, 8
@@ -1764,11 +1765,11 @@ hard block.
   removal. Agent bindings are the **Agent routes** in `/settings agents`.
 - `/fleet run <playbook> [--var k=v ...]` compiles the playbook's plan and opens
   the approval overlay before anything dispatches. The overlay lists the steps
-  grouped by wave, and for each step its kind, its agent and resolved target
+  grouped by wave, as a table per wave from 100 columns and as fact blocks below that, and for each step its kind, its agent and resolved target
   (or its command id and the exact argv from `commands.yaml` for a code step),
-  its scope, and its declared write boundary, followed by the budget ceiling
-  the run would be admitted under (`budget: admitted under no session ceiling`
-  when `safety.limits.sessionCostUsd` is `0`). Enter dispatches the plan through the same
+  its scope, and its declared write boundary, followed by the budget: a meter of spend against the
+  session ceiling, or `admitted under no session ceiling`
+  when `safety.limits.sessionCostUsd` is `0`, with the playbook's own ceiling beneath. Enter dispatches the plan through the same
   path `clio-coder fleet run` uses, so admission, autonomy, run records, and the
   durable ledger are identical. Esc cancels with nothing dispatched and nothing
   written. A playbook that fails preflight opens the same overlay with its

@@ -409,8 +409,10 @@ input-to-stdout-commit endpoint.
 Adaptive streaming remains inside that presentation boundary. One semantic
 classifier drops only transparent raw text/thinking mirrors, sends derived
 visible content through one generation/epoch FIFO, and treats every other
-transcript mutation as an ordered drain boundary. Pacer slices mutate the
-panel directly and are never re-emitted on the public bus, so session storage,
+transcript mutation as an ordered drain boundary. A delta landing on an empty
+queue is released at once, and only a burst's excess is spread out. Pacer slices
+reach the panel without the public bus, past a cost gate that spaces answer text
+once an open reply passes 20 KiB, and are never re-emitted there, so session storage,
 replay/export, tool-call formation, and cumulative tool-result behavior keep
 their canonical synchronous inputs. Abort, retry, interrupt, submit, mode
 change, and teardown drain the queue and can await the containing committed

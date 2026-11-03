@@ -509,7 +509,7 @@ Only runtimes that map to a Pi catalog provider can reach rule 4: `anthropic`, `
 Cost appears in these places, and every one renders the journaled facts through one renderer ([`render.ts`](../../src/core/telemetry/render.ts)). How a value keeps its kind from journal to display is described in [honest values](../architecture/telemetry.md#honest-values).
 
 - Each run's `run.settled` record carries its `usage` and `pricing` facts.
-- The footer shows the session total, and the footer dashboard page labels it `Tracked cost` and lists the session ceiling beside it as `Clio ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
+- The footer shows the session total, and the footer dashboard's Status page labels it `Tracked cost` and shows the session ceiling as `ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
 - `/usage` shows a `cost` row for the session and for each model.
 - The dispatch board, `clio-coder fleet` output and the `monitor` tool show a cost per run.
 - The exit summary prints a `Cost` row, and under `report` a cost per model in its `Models` section, in the same wording as the table below.
