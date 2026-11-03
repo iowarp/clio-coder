@@ -39,6 +39,7 @@ import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { filterAssistantProseStream } from "./assistant-prose-stream.js";
 import { clioClientIdentity } from "./client-identity.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
+import { routeUnattachedToolCalls } from "./unattached-tool-call.js";
 
 export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
 
@@ -238,11 +239,14 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		const delegate = (guarded: typeof streamOptions) =>
 			streamFn ? streamFn(model, resolvedRequestContext(context), guarded) : transcriptStreamFn(model, context, guarded);
 		const open = async () =>
-			filterAssistantProseStream(
-				await (streamFn || transcriptStreamFn !== engineStreamSimple
-					? guardToolArgumentStream(model, context, streamOptions, delegate)
-					: delegate(streamOptions)),
-				model,
+			routeUnattachedToolCalls(
+				filterAssistantProseStream(
+					await (streamFn || transcriptStreamFn !== engineStreamSimple
+						? guardToolArgumentStream(model, context, streamOptions, delegate)
+						: delegate(streamOptions)),
+					model,
+				),
+				resolvedRequestContext(context).tools,
 			);
 		const marker = normalizeContext(context)
 			.messages.map(providerCheckpointFromMessage)

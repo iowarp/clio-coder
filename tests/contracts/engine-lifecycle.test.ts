@@ -318,6 +318,58 @@ describe("tool argument generation bounds", () => {
 	});
 });
 
+describe("engine lifecycle: a call to a tool with no attached schema", () => {
+	const run = async (attached: string[]) => {
+		const received: unknown[] = [];
+		const stub = (name: string): AgentTool<ReturnType<typeof Type.Object>, Record<string, never>> => ({
+			name,
+			label: name,
+			description: name,
+			parameters: Type.Object({}, { additionalProperties: true }),
+			async execute(_id, params) {
+				received.push(params);
+				return { content: [{ type: "text", text: "ok" }], details: {} };
+			},
+		});
+		const turns = [
+			assistant([{ type: "toolCall", id: "c1", name: "grep", arguments: { pattern: "x" } }], "toolUse"),
+			finalTurn(),
+		];
+		const { agent } = createEngineAgent({
+			initialState: { model: MODEL, tools: attached.map(stub) },
+			streamFn: () => {
+				const source = createAssistantMessageEventStream();
+				const message = turns.shift() as AssistantMessage;
+				source.push({ type: "done", reason: message.stopReason === "toolUse" ? "toolUse" : "stop", message });
+				return source;
+			},
+		});
+		await agent.prompt("go");
+		return { received, messages: agent.state.messages };
+	};
+
+	it("runs as the gateway call that reaches it, in history too", async () => {
+		const { received, messages } = await run(["gateway"]);
+		const routed = { op: "call", capability: "grep", args: { pattern: "x" } };
+		deepStrictEqual(received, [routed]);
+		const first = messages.find((message) => message.role === "assistant") as AssistantMessage;
+		const call = first.content[0] as import("@earendil-works/pi-ai").ToolCall;
+		strictEqual(call.name, "gateway");
+		deepStrictEqual(call.arguments, routed);
+	});
+
+	it("stays not found on a surface with no gateway", async () => {
+		const { received, messages } = await run(["read"]);
+		deepStrictEqual(received, []);
+		const result = messages.find((message) => message.role === "toolResult") as unknown as {
+			isError: boolean;
+			content: Array<{ text: string }>;
+		};
+		strictEqual(result.isError, true);
+		strictEqual(result.content[0]?.text, "Tool grep not found");
+	});
+});
+
 describe("engine lifecycle: prepareNextTurn runs only before another assistant turn", () => {
 	it("prepares once between a tool batch and its continuation, never after the final turn", async () => {
 		const run = buildRun([toolTurn("call-1", { value: "one" }), finalTurn()]);
