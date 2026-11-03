@@ -8,7 +8,7 @@ import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import { createRedactionTally } from "../../src/domains/evidence/redact.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
-import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
+import { cutsFor, FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
@@ -19,6 +19,8 @@ import {
 	createRunner,
 	noteSystemOneCall,
 } from "../../src/domains/system-one/runner.js";
+import { RELEVANCE_CLUSTER_SITE } from "../../src/domains/system-one/sites/relevance.js";
+import { TURN_SITE } from "../../src/domains/system-one/sites/turn.js";
 import type {
 	Answer,
 	DecisionEngine,
@@ -34,7 +36,7 @@ import type {
  * and that every call past `state()` leaves exactly one record.
  */
 
-const FITTED_BUILD = "jev-1.13.0";
+const FITTED_BUILD = "jev-1.14.0";
 /** A measured cut applies only under the renderer and site version its table was fitted under. */
 const FITTED_CONTRACT = FITTED_CONTRACTS[FITTED_BUILD];
 const answer: Answer = { type: "noul", noul: 0.9, certainty: 0.8, calibrated: true };
@@ -265,6 +267,37 @@ describe("System One runner", () => {
 		deepStrictEqual(
 			records.map((record) => record.fitted),
 			[false, true],
+		);
+	});
+
+	it("acts on jev-1.14.0's measured keys, keeps a key left without a cut silent, and has no table for jev-1.13.0", () => {
+		const contract = { siteVersion: TURN_SITE.version, renderer: "systemone-v1" } as const;
+		const cuts = cutsFor("jev-1.14.0", "turn", undefined, contract);
+		strictEqual(cuts.fitted, true);
+		strictEqual(cuts.cut("direct"), FITTED_CUTS["jev-1.14.0"]?.["turn.direct"]);
+		strictEqual(cuts.cut("orientation"), undefined);
+		const noul = (p: number): Answer => ({ type: "noul", noul: p, certainty: Math.abs(p * 2 - 1), calibrated: true });
+		const choice = (name: string): Answer => ({
+			type: "choice",
+			choice: name,
+			probabilities: { [name]: 1 },
+			certainty: 1,
+			calibrated: true,
+		});
+		const value = TURN_SITE.read(
+			{ direct: noul(0.99), orientation: noul(0.99), breadth: choice("repository"), intent: choice("inspect") },
+			{ task: "give me a tour", previous: "", previousTask: "" },
+			cuts,
+		);
+		strictEqual(value?.acts.orientation, false);
+		ok(value?.hints.scope);
+		strictEqual(cutsFor("jev-1.13.0", "turn", undefined, contract).fitted, false);
+		strictEqual(
+			cutsFor("jev-1.14.0", "relevance", undefined, {
+				siteVersion: RELEVANCE_CLUSTER_SITE.version,
+				renderer: "systemone-v1",
+			}).cut("clusters"),
+			FITTED_CUTS["jev-1.14.0"]?.["relevance.clusters"],
 		);
 	});
 

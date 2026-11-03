@@ -22,10 +22,11 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { postSystemOne, systemOneBaseUrl } from "../common/systemone-wire.js";
 
 const TYPESAFE_BASE_URL = "https://api.typesafe.ai/v1";
-// The build `FITTED_CUTS` was measured on. `jev-latest` moves to builds with no
-// cuts, and a site then only records. TypeSafe answers this pin though `/models`
-// lists only the moving names, so a known model is not checked against that list.
-const DEFAULT_MODEL = "jev-1.13.0";
+// The build `FITTED_CUTS` was measured on. `jev-latest` can move to a build with
+// no cuts, and a site then only records. TypeSafe answers this pin though
+// `/models` lists only the moving names, so a known model is not checked against
+// that list.
+const DEFAULT_MODEL = "jev-1.14.0";
 const KNOWN_MODELS = [DEFAULT_MODEL, "jev-latest", "jev-preview"];
 
 const defaultCapabilities: CapabilityFlags = {

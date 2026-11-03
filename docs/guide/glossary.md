@@ -215,7 +215,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `SiteDefinition` and `SiteId` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 53. Build
-- **Definition**: The identity of what answered a System One question, and the key every cut is fitted against. For a `systemone` engine it is the model the server reports, such as `jev-1.13.0`. For an `llm` engine it is a composite of runtime, host, wire model, readout mode and prompt version. A probability means something only for the build that produced it.
+- **Definition**: The identity of what answered a System One question, and the key every cut is fitted against. For a `systemone` engine it is the model the server reports, such as `jev-1.14.0`. For an `llm` engine it is a composite of runtime, host, wire model, readout mode and prompt version. A probability means something only for the build that produced it.
 - **Owning Type**: `EngineReply.build` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 54. Cut

@@ -85,7 +85,7 @@ export interface DecideOptions {
 }
 
 export interface DecideResult {
-	/** Resolved model build, e.g. `jev-1.13.0` when `jev-latest` was asked for. */
+	/** Resolved model build, e.g. `jev-1.14.0` when `jev-latest` was asked for. */
 	model: string;
 	answers: Record<string, DecisionAnswer>;
 	tokensUsed?: { input: number; output: number };

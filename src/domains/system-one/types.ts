@@ -89,7 +89,7 @@ export interface EngineRequest {
 export interface EngineReply {
 	/**
 	 * What answered, and the key every cut is fitted against: the model a
-	 * System One server reports (`jev-1.13.0`), or the LLM engine's composite
+	 * System One server reports (`jev-1.14.0`), or the LLM engine's composite
 	 * build (runtime, host, wire model, readout mode, prompt version).
 	 */
 	readonly build: string;

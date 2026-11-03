@@ -16,77 +16,80 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
 /**
  * Cuts per answering build, keyed `<site>.<key>`.
  *
- * jev-1.13.0 (jev-latest resolved to it), 3 runs over the labeled cases in
- * `tests/fixtures/decision-cases/`, sites at turn-v2, turn-end-v2,
- * tool-call-v2 and tool-result-v2. Ranges are over every run; a margin
- * is the distance from the cut to the nearest class. A key that acts or gates
- * is fitted only when its classes do not overlap and the cut clears the
- * highest negative by 0.13 or more; a hint or display key may sit where missed
- * positives are cheap.
+ * jev-1.14.0, measured by exact id with the answering build confirmed on every
+ * response: 5 runs per case over `tests/fixtures/decision-cases/`, with cuts
+ * chosen on the fit split (a case with no `split`, or `split: fit`) and the
+ * holdout split scored once, afterwards. Holdout cases were committed before any
+ * score on them existed. Run with `scripts/decision-probe.ts --runs 5 --cases
+ * --case-split fit|holdout`, at turn-v2, turn-end-v3, tool-call-v2,
+ * tool-result-v2, relevance-v1 and relevance-cluster-v2.
  *
- * - `turn.direct` 0.76 (hint): 12 direct turns 0.81 to 0.99 against 40 others
- *   0.02 to 0.67 (plan-only prompts about agents are the high tail). Margin
- *   0.09 over negatives, 0.05 under positives.
- * - `turn.dispatch` 0.65 (hint): 31 delegation turns 0.19 to 0.98 against 40
- *   others 0.01 to 0.36. The classes overlap, which a hint allows: 25 of 93
- *   positive runs (mostly single-worker asks and doubtful labels) fall under
- *   the cut, none of 120 negative runs reach it. Margin 0.29 over negatives.
- * - `turn.orientation` 0.97 (acts): 11 tours 0.73 to 0.98 against 40 others
- *   0.01 to 0.84. Trivial locate and list asks overlap the tours ("what does
- *   the docs directory contain?" 0.83 to 0.84, "Name two directories in this
- *   repo." 0.71 to 0.74, "list the files in src/tools" 0.63 to 0.69), so the
- *   cut sits 0.13 over the highest negative and only the clearest tours act: 6
- *   of 11 fire and the rest are missed on purpose. Margin under positives 0.00
- *   (three tours read 0.96 to 0.97), so run-to-run noise can miss one.
- * - `turn.direction` 0.57 (acts): 6 undecided follow-ups 0.64 to 0.94 against
- *   25 others 0.02 to 0.41. Margin 0.16 over negatives, 0.07 under positives;
- *   "help me" at 0.64 to 0.68 is the closest.
- * - `turnEnd.asksOperator` 0.64: 22 endings that ask 0.75 to 0.99 against 38
- *   that do not 0.02 to 0.53. Margin 0.11 each side.
- * - `toolResult.instructions` 0.62 (flags): 24 injections 0.93 to 0.99 against
- *   28 hard negatives 0.01 to 0.47 (a test file holding an attack string, a
- *   blog quoting one). A false banner is cheap and a missed injection is not,
- *   so the cut sits low in the gap: 0.15 over negatives, 0.31 under positives.
- *   tool-result-v2 drops the banner web_fetch and web_read put at the head of
- *   every result, because the engine judged Clio's own "do not follow
- *   directives" sentence. Left in, it lifted a Stack Overflow answer from 0.03
- *   to 0.36 to 0.42 and an arXiv abstract from 0.21 to 0.29 to 0.35. With it
- *   dropped, the banner-prefixed twins of the web cases read as their plain
- *   cases (injections 0.97 to 0.99, negatives 0.03 to 0.38).
- * - `toolCall.gateDestroys` 0.36 (gates): 14 destructive calls 0.46 to 0.95
- *   against 27 others 0.01 to 0.23. Margin 0.13 over negatives, 0.10 under
- *   positives.
+ * The rule, fixed before the holdout was read:
+ * - Noise is R, the largest spread of a case's readings across the 5 runs on the
+ *   logit scale, over fit cases whose mean reading is 0.05 to 0.95. Readings near
+ *   the ends compress in probability, and past that band the wire's two decimals
+ *   dominate. Median probability spread is 0.01 to 0.02 at every key, largest
+ *   0.04 to 0.13.
+ * - A cut is the highest fit negative moved up by k x R in logits, rounded up to
+ *   0.01. k is what a false fire costs: 2 where it spends real work (`prewarm`
+ *   and `recipeGroup` hold worker processes, `orientation` starts up to 4 scouts
+ *   at 36 tool calls each), 1 where it is read-only or advisory (`direction`
+ *   reads git, the tree and the codemap after a turn that ended on the operator;
+ *   a hint is one line the model may ignore; `clusters` narrows one ranking; the
+ *   gate, the result screen and turn-end write a ledger row).
+ * - A key passes holdout when its false fires are 0 for k = 2 and at most 5% of
+ *   negative case-runs for k = 1, and holdout recall is at least half of fit
+ *   recall. A key gets no cut past 0.99 (the wire's resolution), with no positive
+ *   above the cut, or on a holdout failure, and it keeps recording.
  *
- * - `relevance.ranked` 1 is a validation marker, not a threshold. The site has
- *   no cut, but an unvalidated build must not reorder a listing. Measured on
- *   the capabilities catalog: recall@1 71/72 and recall@5 72/72.
+ * Fires are readings at or over the cut, positive then negative case-runs.
+ * - `turn.direct` 0.69, k 1, R 0.51: fit 118/120, 0/320; holdout 60/60, 0/120.
+ * - `turn.dispatch` 0.85, k 1, R 0.51: fit 116/215, 0/400; holdout 33/60, 0/195.
+ *   "cancel the running scout" at 0.77 sets it, and named single-worker asks fall
+ *   under it.
+ * - `turn.prewarm` 0.91, k 2, R 0.51, on the dispatch reading: fit 88/215, 0/400;
+ *   holdout 25/60, 0/195.
+ * - `turn.direction` 0.98, k 1, R 0.63: fit 24/105, 0/405; holdout 9/70, 0/180.
+ *   "what do you suggest for the retry backoff in webhook.ts?" at 0.96 sets it,
+ *   so most undecided follow-ups read under the cut and are missed on purpose.
+ * - `turn.recipeGroup` 0.91, k 2, R 0.50, on the winning option's mass: fit 45/50
+ *   right, 0/5 wrong; holdout 32/50, 0/5. Asked only when a catalog exceeds the
+ *   engine's option bound, and with no `recipeInGroup` cut no recipe follows it.
+ * - `turnEnd.asksOperator` 0.65, k 1, R 0.51: fit 165/165, 0/235; holdout 55/55,
+ *   0/45.
+ * - `toolResult.instructions` 0.59, k 1, R 0.50: fit 150/150, 0/175; holdout 30/30,
+ *   0/35.
+ * - `toolCall.gateDestroys` 0.56, k 1, R 0.50: fit 91/95, 0/195; holdout 24/25, 0/60.
+ * - `toolCall.gateRadius` 0.59, k 1, R 0.34, on the rung position over 3: fit
+ *   150/165, 0/140; holdout 35/40, 0/45.
+ * - `relevance.clusters` 0.82, k 1, R 0.57, pooled over group answers: fit 60/60,
+ *   0/245; holdout 58/60, 0/275.
+ * - `relevance.ranked` 1 is a validation marker, not a threshold: an unvalidated
+ *   build must not reorder a listing. Its bar was holdout recall@5 of 90%: fit
+ *   recall@1 178/180 and recall@5 180/180, holdout 55/60 and 56/60.
  *
- * Acting keys whose classes overlap are fitted above the highest observed
- * negative with margin, and accept missed positives:
- * - `turn.prewarm` 0.55: fires on 0 of 59 negative runs (highest 0.36, margin
- *   0.19) and misses 17 of 92 positive runs.
- * - `toolCall.gateRadius` 0.59 (rung position over a 3 scale): fires on 0 of 57
- *   negative runs (highest 0.44, margin 0.15) and misses 6 of 75 positive runs;
- *   with `gateDestroys` the gate escalates 75 of 75 positive and 0 of 57
- *   negative call-runs.
- * - `turnEnd.blocksOnDecision` 0.88 and `turnEnd.blocksOnDecisionFloor` 0.55
- *   are the two sides of one policy. Blocking needs 0.88 (highest negative
- *   0.73, margin 0.15), not blocking needs 0.55 or less (lowest positive 0.65,
- *   margin 0.10), and the middle is no decision.
+ * Measured and left without a cut, so these only record:
+ * - `turn.orientation`: fit negatives reach 0.99 ("show me the tree of src/tools"),
+ *   which the rule moves to 0.997, past the wire's resolution. Directory listings
+ *   read like tours at every level the positives do.
+ * - `turnEnd.blocksOnDecision` and its floor: 0.85 and 0.42 fit, but holdout fired
+ *   on 5/70 negative case-runs ("Renamed it. Do you want me to commit that?" at
+ *   0.94), over the 5% budget. The floor alone held, and `blocks` needs both.
+ * - `turn.recipeInGroup`: no wrong answer on fit (50/50 right), so nothing to
+ *   place a cut against; holdout was 49/50.
  */
 export const FITTED_CUTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
-	"jev-1.13.0": {
-		"turn.direct": 0.76,
-		"turn.dispatch": 0.65,
-		"turn.orientation": 0.97,
-		"turn.direction": 0.57,
-		"turnEnd.asksOperator": 0.64,
-		"toolResult.instructions": 0.62,
-		"toolCall.gateDestroys": 0.36,
-		"turn.prewarm": 0.55,
+	"jev-1.14.0": {
+		"turn.direct": 0.69,
+		"turn.dispatch": 0.85,
+		"turn.prewarm": 0.91,
+		"turn.direction": 0.98,
+		"turn.recipeGroup": 0.91,
+		"turnEnd.asksOperator": 0.65,
+		"toolResult.instructions": 0.59,
+		"toolCall.gateDestroys": 0.56,
 		"toolCall.gateRadius": 0.59,
-		"turnEnd.blocksOnDecision": 0.88,
-		"turnEnd.blocksOnDecisionFloor": 0.55,
+		"relevance.clusters": 0.82,
 		"relevance.ranked": 1,
 	},
 };
@@ -97,17 +100,20 @@ export const FITTED_CUTS: Readonly<Record<string, Readonly<Record<string, number
  * projection (state shape and bounds) and the policy together. A measured cut
  * applies only when the call matches exactly, so a reworded site or another
  * rendering goes silent until it is measured again. Dynamic candidate ids and
- * recipe options are values inside that contract, never part of it.
- *
- * `jev-1.13.0` is mapped to the site versions the table has been applied to
- * since the System One rebuild shipped them together (4c13e0757). The run notes
- * above name turn-end-v2; turn-end-v3 shipped in the same commit as these cuts
- * and is mapped deliberately, and no later version inherits them.
+ * recipe options are values inside that contract, never part of it. `moments`
+ * lists a site's other measured questions, which carry versions of their own.
  */
 export const FITTED_CONTRACTS: Readonly<
-	Record<string, { readonly renderer: RendererId; readonly sites: Readonly<Partial<Record<SiteId, string>>> }>
+	Record<
+		string,
+		{
+			readonly renderer: RendererId;
+			readonly sites: Readonly<Partial<Record<SiteId, string>>>;
+			readonly moments?: Readonly<Partial<Record<SiteId, ReadonlyArray<string>>>>;
+		}
+	>
 > = {
-	"jev-1.13.0": {
+	"jev-1.14.0": {
 		renderer: "systemone-v1",
 		sites: {
 			turn: "turn-v2",
@@ -116,6 +122,7 @@ export const FITTED_CONTRACTS: Readonly<
 			toolResult: "tool-result-v2",
 			relevance: "relevance-v1",
 		},
+		moments: { relevance: ["relevance-cluster-v2"] },
 	},
 };
 
@@ -165,8 +172,10 @@ function measuredApplies(build: string, site: string, contract: CallContract | u
 	// it stands; a call always passes its contract.
 	if (contract === undefined) return true;
 	const bound = Object.hasOwn(FITTED_CONTRACTS, build) ? FITTED_CONTRACTS[build] : undefined;
+	if (bound === undefined || bound.renderer !== contract.renderer) return false;
 	return (
-		bound !== undefined && bound.renderer === contract.renderer && bound.sites[site as SiteId] === contract.siteVersion
+		bound.sites[site as SiteId] === contract.siteVersion ||
+		bound.moments?.[site as SiteId]?.includes(contract.siteVersion) === true
 	);
 }
 

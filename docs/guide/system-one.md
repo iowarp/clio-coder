@@ -15,7 +15,7 @@ Decision engines come in four tiers. No tier turns on the next one.
 | 0. Shipped defaults | Nothing is bound. | Deterministic behavior everywhere. This is the product. |
 | 1. Base chat model | An `llm` engine over a chat target you already use. | `/draft` judging, the approval-card advisory and `consult`. These are asked only while an approval card or the `/draft` overlay is open, or when the agent calls `consult`. Every other site costs two requests per question with logprobs, or five without, and an unfitted build never acts on them. |
 | 2. Local decision model | A `systemone` engine with a `profile` (Strands Decider, Julia-1, Laya, GLiNER) on a server you run, placed on a processor the chat model does not use: the integrated GPU, the NPU or the CPU. | Advice and recording. The card advisory, `consult` and `/draft` use its answers at once. No local build ships with fitted cuts, so every other site only records what it would have said. |
-| 3. Hosted API engine | A `systemone` engine over the `typesafe-jev` runtime. | The shipped cuts for the `jev-1.13.0` build: turn hints and acts when the reading lands in time, and catalog rankings. The redacted state leaves the machine. |
+| 3. Hosted API engine | A `systemone` engine over the `typesafe-jev` runtime. | The shipped cuts for the `jev-1.14.0` build: turn hints, direction and prewarm when the reading lands in time, and catalog rankings. It has no orientation cut, so the orientation scout does not start. The redacted state leaves the machine. |
 
 A tier 2 model costs no hosted API fee, but it still uses your hardware, and a detached call can compete with the chat model on a shared server. A decision model is small enough to run on a processor the chat model leaves idle, which is what [Placing engines](#placing-engines) is about.
 
@@ -85,7 +85,7 @@ The `systemone` runtime assumes a 480-token window, so raise `capabilities.conte
 targets:
   - id: jev
     runtime: typesafe-jev
-    defaultModel: jev-1.13.0
+    defaultModel: jev-1.14.0
 
 systemOne:
   engines:
@@ -209,7 +209,7 @@ An engine answers typed questions for a state. Clio Coder builds one engine per 
 
 ### Engine kind `systemone`
 
-The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-1.13.0`, the build Clio Coder's cuts were measured on, credential `TYPESAFE_API_KEY`; `jev-latest` and `jev-preview` move to builds with no cuts, so a site asking them only records), `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises) or `inception` with the engine's `model: mercury-decide` (Inception's hosted decision model at `/v1/decisions`, credential `INCEPTION_API_KEY`; no build has fitted cuts). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by it. Clio Coder's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
+The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-1.14.0`, the build Clio Coder's cuts were measured on, credential `TYPESAFE_API_KEY`; `jev-latest` and `jev-preview` act only while they answer as a build with cuts, and otherwise a site asking them only records), `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises) or `inception` with the engine's `model: mercury-decide` (Inception's hosted decision model at `/v1/decisions`, credential `INCEPTION_API_KEY`; no build has fitted cuts). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.14.0`, and every cut is keyed by it. Clio Coder's shipped cuts are fitted for the hosted engine's `jev-1.14.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
 
 ### Engine kind `llm`
 
@@ -240,8 +240,8 @@ The call starts when you submit. When orientation or direction could act on the 
 
 - Add a `[Scope]` hint: the request reads as answerable without inspecting the workspace, so answer directly.
 - Add a `[Plan]` hint: the request reads as work suited to workers, so the delegation rules apply. It is suppressed when the request already names delegation.
-- Tell the turn controller that an orientation or a direction workflow is wanted (`turnControl.workflows`), and that a dispatch is expected. An expected dispatch suppresses the orientation scout only when its probability is at least the orientation probability, so a request that reads more like a tour than a dispatch still gets the scout (an engine that reports no probabilities keeps the plain expectation). The shipped cut for the orientation reading is high, so the orientation scout fires only when the request explicitly asks for a tour of the project. Without a reading the turn controller can only collect finished background runs, and it skips the Git and ledger reads the other workflows need.
-- Predict the worker about to be dispatched so its process can be held ready. This prewarm runs only when `fleet.speculativeDispatch` is true, which is also experimental, and it holds two workers for a parallel shape and one otherwise. A recipe catalog larger than the engine reads in one question is asked by the catalog's own categories first, and a recipe chosen by category is picked by a second call chained after the first, never by a second wait. Both steps need the `turn.recipeGroup` and `turn.recipeInGroup` cuts, which no shipped build has, so they act only under operator cuts. A catalog whose recipes carry no categories is not asked, and the reason is recorded.
+- Tell the turn controller that an orientation or a direction workflow is wanted (`turnControl.workflows`), and that a dispatch is expected. An expected dispatch suppresses the orientation scout only when its probability is at least the orientation probability, so a request that reads more like a tour than a dispatch still gets the scout (an engine that reports no probabilities keeps the plain expectation). The `jev-1.14.0` table has no orientation cut, because directory listings read as high as tours, so the orientation scout starts only under an operator cut. Its direction cut sits at 0.98, so most undecided follow-ups stay below it. Without a reading the turn controller can only collect finished background runs, and it skips the Git and ledger reads the other workflows need.
+- Predict the worker about to be dispatched so its process can be held ready. This prewarm runs only when `fleet.speculativeDispatch` is true, which is also experimental, and it holds two workers for a parallel shape and one otherwise. A recipe catalog larger than the engine reads in one question is asked by the catalog's own categories first, and a recipe chosen by category is picked by a second call chained after the first, never by a second wait. Both steps need the `turn.recipeGroup` and `turn.recipeInGroup` cuts. `jev-1.14.0` ships only the first, so a recipe chosen by category is held only under an operator `turn.recipeInGroup` cut. A catalog whose recipes carry no categories is not asked, and the reason is recorded.
 
 Every hint and act is a suggestion the main agent or the turn controller may ignore.
 
@@ -272,7 +272,7 @@ Without a `systemOne.sites.relevance` entry, Clio Coder derives the binding from
 
 Long catalogs are ranked by local vocabulary first. This site scores the pruned entries by meaning, and the caller uses the scores only to reorder a skills listing or gateway result, or to add related entries beside a query's own hits. It never removes an entry and never reorders entries a query matched.
 
-A listing never waits for this site. The ranker answers from rankings that have already finished, kept by catalog, question, binding and the session's flow restrictions. On a miss the listing keeps its order, and one detached call fills the ranking for the next listing that asks the same thing. A build without the `relevance.ranked` marker never reorders anything, and once it is known to be unfitted it is asked only while the dataset is recorded. An `llm` engine counts as known to be unfitted before its first request unless `systemOne.cuts` holds a `relevance.ranked` cut for an `llm:` build, so such an engine sends nothing for this site while the dataset is off. One call scores up to 256 entries that fit the engine's window. A larger catalog is asked by its categories, which needs a `clusters` cut that no build has yet and entries that carry described categories, so such a listing keeps its order and leaves no decision row.
+A listing never waits for this site. The ranker answers from rankings that have already finished, kept by catalog, question, binding and the session's flow restrictions. On a miss the listing keeps its order, and one detached call fills the ranking for the next listing that asks the same thing. A build without the `relevance.ranked` marker never reorders anything, and once it is known to be unfitted it is asked only while the dataset is recorded. An `llm` engine counts as known to be unfitted before its first request unless `systemOne.cuts` holds a `relevance.ranked` cut for an `llm:` build, so such an engine sends nothing for this site while the dataset is off. One call scores up to 256 entries that fit the engine's window. A larger catalog is asked by its categories, which needs a `relevance.clusters` cut, which `jev-1.14.0` ships and other builds lack, and entries that carry described categories. Without both, such a listing keeps its order and leaves no decision row.
 
 ### `consult`: the agent asks directly
 
@@ -286,13 +286,13 @@ When the `consult` site is bound at startup, the main agent gets a `consult` too
 
 A probability means something only for the build that produced it. Clio Coder therefore keys every cut by the answering build, extended with the renderer and site version for profiles that use a bounded renderer. The rule and the shipped table are in [Calibration](../architecture/system-one.md#calibration-cuts-belong-to-a-threshold-identity) on the architecture page.
 
-- **Fitted cuts** ship for the `jev-1.13.0` build only. LLM engines and other builds have none until a run fits them.
+- **Fitted cuts** ship for the `jev-1.14.0` build only. LLM engines and other builds have none until a run fits them.
 - **`systemOne.cuts` overrides.** Add cuts for a build the table lacks, or replace one. Keys are `<site>.<key>` and values are between 0.01 and 0.99. The operator's value wins over the table. For the legacy wire and for LLM engines the map key is the build string. For `julia-1` and the `gliner2.5-*` profiles it is the threshold identity, `<build>+<renderer>@<site version>`, which the ledger's per-engine route records show.
 
 ```yaml
 systemOne:
   cuts:
-    "jev-1.13.0":
+    "jev-1.14.0":
       turn.direct: 0.80
 ```
 

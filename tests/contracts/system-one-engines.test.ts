@@ -197,7 +197,7 @@ describe("TypeSafe Jev runtime", () => {
 		const server = await started(() => ({
 			body: {
 				models: [{ name: "jev-latest" }, { name: "jev-preview" }],
-				model: "jev-1.13.0",
+				model: "jev-1.14.0",
 				answers: { q: { type: "noul", noul: 0.5 } },
 			},
 		}));
@@ -208,8 +208,9 @@ describe("TypeSafe Jev runtime", () => {
 			{ state, questions: { q: { type: "noul", instructions: "Is it?", criteria: { true: "yes", false: "no" } } } },
 			ctx,
 		);
-		strictEqual(server.requests[0]?.model, "jev-1.13.0");
-		strictEqual((await typesafeJevRuntime.probe?.({ ...target, defaultModel: "jev-1.13.0" }, ctx))?.ok, true);
+		strictEqual(server.requests[0]?.model, "jev-1.14.0");
+		strictEqual((await typesafeJevRuntime.probe?.({ ...target, defaultModel: "jev-1.14.0" }, ctx))?.ok, true);
+		strictEqual((await typesafeJevRuntime.probe?.({ ...target, defaultModel: "jev-1.13.0" }, ctx))?.ok, false);
 		strictEqual((await typesafeJevRuntime.probe?.({ ...target, defaultModel: "jev-0.0.1" }, ctx))?.ok, false);
 	});
 });
