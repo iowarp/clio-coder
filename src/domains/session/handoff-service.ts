@@ -268,6 +268,27 @@ export async function prepareHandoff(
 }
 
 /**
+ * Undo a successor that could not be seeded. A failed seed writes no new transcript, so a host keeps the source's
+ * conversation in its agent, and its next turn has to land in the session whose ledger holds those labels. The successor
+ * goes too, since it holds none of what it was minted to carry. Returns what could not be undone, for the refusal.
+ */
+function abandonSuccessor(session: SessionContract, fromSessionId: string, minted: string | null): string {
+	try {
+		// A resume rather than a branch switch: creating the successor parked the source's task bank, and only a resume restores it.
+		if (session.current()?.id !== fromSessionId) session.resume(fromSessionId);
+	} catch (error) {
+		return `; could not return to session ${fromSessionId} (${errorText(error)}). The open session may not carry its restrictions, so /resume ${fromSessionId} before sending anything`;
+	}
+	if (minted === null) return "";
+	try {
+		session.deleteSession(minted);
+	} catch (error) {
+		return `; the empty session ${minted} could not be removed (${errorText(error)})`;
+	}
+	return "";
+}
+
+/**
  * Mint the successor session and seed it with the reviewed document.
  *
  * Order matters. The new session is minted through the one creation path the
@@ -303,7 +324,7 @@ export function commitHandoff(
 	}
 	const { fromSessionId, goal } = draft;
 	const activations = session.current()?.skillActivations ?? [];
-	let toSessionId: string;
+	let toSessionId: string | null = null;
 	try {
 		// The document was drawn from restricted context, and each session's ledger is the only authority for what it
 		// carries. Read before minting, and written ahead of the seed, so no document exists unlabeled.
@@ -330,7 +351,8 @@ export function commitHandoff(
 		});
 		for (const activation of activations) session.recordSkillActivation(activation);
 	} catch (error) {
-		return refuse("error", "seed_failed", `could not seed the new session: ${errorText(error)}`);
+		const leftover = abandonSuccessor(session, fromSessionId, toSessionId);
+		return refuse("error", "seed_failed", `could not seed the new session: ${errorText(error)}${leftover}`);
 	}
 	const warnings: string[] = [];
 	try {
