@@ -229,11 +229,13 @@ export function latestPriorSession(
 		if (ancestors.has(candidate.meta.id)) continue;
 		const scan = scanCurrentJsonl(candidate.currentPath);
 		if (scan.messageCount < 2) continue;
-		const preview = scan.firstUserMessage ?? scan.firstAssistantMessage;
+		// This line rides a later session that holds none of these labels and may go anywhere, so a restricted
+		// session offers its id and time only: labels are per session, and a name can be set after the read.
+		const preview = scan.flowRestricted ? null : (scan.firstUserMessage ?? scan.firstAssistantMessage);
 		return {
 			id: candidate.meta.id,
 			lastActiveAt: candidate.lastActiveAt,
-			name: scan.name,
+			name: scan.flowRestricted ? null : scan.name,
 			firstMessagePreview:
 				preview === null
 					? null
@@ -247,6 +249,8 @@ export function latestPriorSession(
 }
 
 const PREVIEW_MAX_CHARS = 240;
+/** Persisted flow labels; the same custom entry type `src/entry/flow-ledger.ts` writes. */
+const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
 
 function collapseWhitespace(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
@@ -349,6 +353,7 @@ interface ScanResult {
 	lastTimestamp: string | null;
 	name: string | null;
 	labels: Map<string, { label: string; timestamp: string }>;
+	flowRestricted: boolean;
 }
 
 function hasAssistantContent(payload: unknown): boolean {
@@ -367,10 +372,12 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 		lastTimestamp: null,
 		name: null,
 		labels: new Map(),
+		flowRestricted: false,
 	};
 	if (!existsSync(currentPath)) return result;
 	const records = readSessionFileEntries(currentPath).filter((entry) => !isSessionHeader(entry));
 	for (const parsed of collectSessionEntries(records, currentPath)) {
+		if (parsed.kind === "custom" && parsed.customType === FLOW_RESTRICTION_ENTRY_TYPE) result.flowRestricted = true;
 		if (
 			parsed.kind === "message" &&
 			(parsed.role === "tool_call" || (parsed.role === "assistant" && hasAssistantContent(parsed.payload)))

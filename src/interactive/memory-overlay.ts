@@ -42,8 +42,10 @@ function lessonItems(
 	eligible: ReadonlySet<string>,
 	group: string,
 	selection: MemoryPromptSelection | null,
+	memoryOn: boolean,
 ): ListOverlayItem[] {
 	const theme = clioTheme();
+	const promptReach = memoryOn ? "prompt" : "off, recall only";
 	return records.map((record) => {
 		const reach = memoryReach(record, eligible.has(record.id));
 		return {
@@ -52,7 +54,7 @@ function lessonItems(
 			meta: theme.fg(
 				"annotation",
 				reach !== "none"
-					? `${record.scope === "repo" ? "this repo" : record.scope} · ${reach === "prompt" ? "prompt" : "recall only"}`
+					? `${record.scope === "repo" ? "this repo" : record.scope} · ${reach === "prompt" ? promptReach : "recall only"}`
 					: record.rejectedAt
 						? "rejected"
 						: record.regressions?.length
@@ -64,7 +66,7 @@ function lessonItems(
 									: "excluded",
 			),
 			group,
-			detail: () => memoryLessonDetail(record, eligible.has(record.id), selection),
+			detail: () => memoryLessonDetail(record, eligible.has(record.id), selection, memoryOn),
 		};
 	});
 }
@@ -273,9 +275,9 @@ export class MemoryOverlayView implements Component {
 			const ids = new Set(eligible.map((record) => record.id));
 			const review = records.filter((record) => !ids.has(record.id));
 			this.rows = {
-				lessons: lessonItems(eligible, ids, "Reusable lessons", status.promptSelection ?? null),
+				lessons: lessonItems(eligible, ids, "Reusable lessons", status.promptSelection ?? null, status.enabled),
 				task: bankItems(memoryBankEntries(status.bank)),
-				review: lessonItems(review, ids, "Candidates and excluded lessons", status.promptSelection ?? null),
+				review: lessonItems(review, ids, "Candidates and excluded lessons", status.promptSelection ?? null, status.enabled),
 				diagnostics: this.diagnosticItems(status),
 			};
 			this.list.refreshTabs();

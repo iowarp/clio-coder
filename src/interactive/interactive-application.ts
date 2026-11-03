@@ -154,6 +154,8 @@ export interface InteractiveDeps {
 	onFirstFrameCommit?: (frameId: number) => void;
 	/** See EditorSubmitDeps.labelOperatorCommand. */
 	labelOperatorCommand?: (command: string, cwd: string) => string | null;
+	/** Runs before an operator shell line reaches the ledger, so a ledger fact can precede it. */
+	beforeShellEntryRecorded?: () => void;
 	/** Existing Stage 0 owner to hydrate in place. */
 	terminalLease?: TerminalLease;
 	/** Fired after the first committed frame containing the hydrated Stage 1 root. */
@@ -1377,6 +1379,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			return picked === wait ? "wait" : "stop";
 		},
 		...(deps.labelOperatorCommand ? { labelOperatorCommand: deps.labelOperatorCommand } : {}),
+		...(deps.beforeShellEntryRecorded ? { beforeShellEntryRecorded: deps.beforeShellEntryRecorded } : {}),
 	});
 	// The lease drains the terminal; operator shell ownership outlives that
 	// surface and must settle before the session domain stops, on every exit.

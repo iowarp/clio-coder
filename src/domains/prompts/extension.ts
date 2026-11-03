@@ -18,6 +18,7 @@ import {
 	selectActiveRules,
 } from "../context/index.js";
 import { detectRunIdentity } from "../dispatch/run-identity.js";
+import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { loadMcpServerConfig } from "../gateway/mcp/config.js";
 import type { ResourcesContract } from "../resources/contract.js";
 import { modelVisibleSkills } from "../resources/skills/loader.js";
@@ -316,7 +317,12 @@ export function createPromptsBundle(
 					...renderCustomizationFragments(sources.customization, cwd, input.workingContextPaths ?? []).fragments,
 				],
 			});
-			return { ...compiled, projectPreload, projectHandbookFiles };
+			return {
+				...compiled,
+				projectPreload,
+				projectHandbookFiles,
+				priorSessionFact: compiledPriorSessionFact(sources.workspaceRoot),
+			};
 		},
 		async compileWorkerPrompt(input: CompileWorkerPromptInput) {
 			if (!table) throw new Error("prompts domain not started");
@@ -498,6 +504,17 @@ function workspaceRootFragment(cwd: string, startFacts: ReadonlyArray<string> = 
 }
 
 export const SESSION_START_FACTS_MAX_CHARS = 400;
+const PRIOR_SESSION_FACT_PREFIX = "- Last recorded session here, ";
+
+/** The prior-session line in the bytes this prompt carries, or null when the workspace facts hold none. */
+function compiledPriorSessionFact(workspaceRoot: ReadonlyArray<RenderedPromptFragment>): string | null {
+	for (const fragment of workspaceRoot) {
+		for (const line of fragment.body.split("\n")) {
+			if (line.startsWith(PRIOR_SESSION_FACT_PREFIX)) return line.slice(2);
+		}
+	}
+	return null;
+}
 
 function quotedFact(text: string, maxChars: number): string {
 	const collapsed = text.replace(/\s+/g, " ").trim();
@@ -547,8 +564,10 @@ export function sessionStartFacts(
 	try {
 		const prior = latestPriorSession(cwd, sessionId, orientationCutoff);
 		if (prior !== null) {
+			// The preview is raw ledger text, and this line rides every request of every later session here (#423).
 			const topic = prior.name ?? prior.firstMessagePreview;
-			priorFact = `- Last recorded session here, ${prior.lastActiveAt}: ${topic ? quotedFact(topic, 64) : prior.id}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
+			const quoted = topic ? quotedFact(redactSecretsText(topic, createRedactionTally()), 64) : prior.id;
+			priorFact = `${PRIOR_SESSION_FACT_PREFIX}${prior.lastActiveAt}: ${quoted}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
 		}
 	} catch {
 		// Session history is orientation; an unreadable state directory renders no line.

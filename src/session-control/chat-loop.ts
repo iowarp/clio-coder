@@ -967,6 +967,9 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: (request: MemoryPromptRequest) => string;
+	memoryEnabled?: () => boolean;
+	/** Runs before any turn is written, so a ledger fact can precede the text it describes. */
+	beforeTurnRecorded?: (session: SessionContract) => void;
 	getMemoryRecordStatuses?: TurnContextDeps["getMemoryRecordStatuses"];
 	/**
 	 * Start reading this turn's request through the `turn` site, once, before the
@@ -1466,6 +1469,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
 		getMemorySection: deps.getMemorySection,
+		...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
 		getMemoryRecordStatuses: deps.getMemoryRecordStatuses,
 		...(deps.getMemoryRelevance ? { getMemoryRelevance: deps.getMemoryRelevance } : {}),
 		memoryCommitBridge: deps.memoryCommitBridge,
@@ -1615,6 +1619,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		getToolOwner: (name) => deps.toolRegistry?.get(name as import("../core/tool-names.js").ToolName)?.sourceInfo?.owner,
 		state,
 		session: deps.session,
+		...(deps.beforeTurnRecorded ? { beforeTurnRecorded: deps.beforeTurnRecorded } : {}),
 		readSessionEntries: deps.readSessionEntries,
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
