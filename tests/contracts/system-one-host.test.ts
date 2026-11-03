@@ -92,10 +92,11 @@ function fakeSystemOne(
 
 const SILENT_RECORDER: DecisionRecorder = { decision: () => {}, outcome: () => {} };
 
-function hostOver(systemOne: SystemOne, recording?: () => boolean) {
+function hostOver(systemOne: SystemOne, recording?: () => boolean, onPrediction?: (prediction: unknown) => void) {
 	return createSystemOneHost({
 		systemOne,
 		...(recording !== undefined ? { recording } : {}),
+		...(onPrediction !== undefined ? { onPrediction } : {}),
 		usage: createDecisionUsageTally(SILENT_RECORDER),
 		readSessionEntries: () => [],
 		listRecipes: () => RECIPES,
@@ -164,6 +165,27 @@ describe("contracts/system one host: the turn site", () => {
 		const waiting = host.awaitInterpretation(60_000, cancel.signal);
 		cancel.abort();
 		strictEqual(await waiting, undefined);
+	});
+
+	it("hands over a late prediction once, and none after the turn settled", async () => {
+		let release: (answers: Readonly<Record<string, Answer>>) => void = () => {};
+		const { systemOne } = fakeSystemOne(() => new Promise((resolve) => (release = resolve)), ["turn"]);
+		const predictions: unknown[] = [];
+		const host = hostOver(systemOne, undefined, (prediction) => predictions.push(prediction));
+
+		host.readTurn(turnInput("turn-1"));
+		strictEqual(predictions.length, 0);
+		release(LOUD_TURN);
+		await landed();
+		strictEqual(predictions.length, 1, "a reading later than the prompt still predicts");
+		host.clearVerdict();
+
+		host.readTurn(turnInput("turn-2"));
+		const late = release;
+		host.clearVerdict();
+		late(LOUD_TURN);
+		await landed();
+		strictEqual(predictions.length, 1, "a reading landing after settlement holds nothing");
 	});
 
 	it("leaves hints, interpretation and prewarm empty when the verdict is null", async () => {

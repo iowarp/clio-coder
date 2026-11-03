@@ -267,6 +267,8 @@ export interface SystemOneHostDeps {
 	 * with recording off it is not made at all. Absent reads as on.
 	 */
 	recording?: () => boolean;
+	/** Called once per turn when a reading predicts a worker, however late before settlement it lands. */
+	onPrediction?: (prediction: TurnPrewarmPrediction) => void;
 }
 
 export interface TurnReadInput {
@@ -408,6 +410,8 @@ interface HeldTurn {
 	groupRecipe: string | null;
 	/** Settles when the fitted reading is held or the call settled without one; null when nothing is in flight. */
 	landed: Promise<void> | null;
+	/** Whether this turn's prediction was already handed over. */
+	predicted: boolean;
 }
 
 export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
@@ -470,6 +474,32 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		return earlier;
 	}
 
+	function predictionOf(held: HeldTurn): TurnPrewarmPrediction | null {
+		const value = held.verdict?.value;
+		if (value === undefined) return null;
+		const recipe =
+			value.acts.prewarm && typeof value.recipe === "string"
+				? value.recipe
+				: value.acts.prewarmPending
+					? held.groupRecipe
+					: null;
+		if (recipe === null) return null;
+		// Two held workers cover a parallel split; anything else is one.
+		return { agentId: recipe, count: value.shape === "parallel" ? 2 : 1 };
+	}
+
+	function announcePrediction(held: HeldTurn): void {
+		if (turn !== held || held.predicted) return;
+		const prediction = predictionOf(held);
+		if (prediction === null) return;
+		held.predicted = true;
+		try {
+			deps.onPrediction?.(prediction);
+		} catch {
+			// A hold that cannot start leaves the dispatch to spawn its own worker.
+		}
+	}
+
 	function interpretation(): TurnInterpretation | undefined {
 		const value = turn?.verdict?.value;
 		if (value === undefined) return undefined;
@@ -493,6 +523,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 				verdict: null,
 				groupRecipe: null,
 				landed: null,
+				predicted: false,
 			};
 			turn = held;
 			noteOperatorTurn(input.userTurnId, input.request);
@@ -548,6 +579,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 					held.landed = null;
 					markLanded();
 				}
+				announcePrediction(held);
 				const verdict = held.verdict;
 				if (turn !== held || verdict === null) return;
 				// A category was chosen but not its member: one bounded follow-up under
@@ -563,6 +595,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 					{ ref: input.userTurnId },
 				);
 				if (turn === held) held.groupRecipe = picked?.value.recipe ?? null;
+				announcePrediction(held);
 			});
 		},
 
@@ -591,24 +624,13 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			return interpretation();
 		},
 
-		prewarm() {
-			const value = turn?.verdict?.value;
-			if (value === undefined) return null;
-			const recipe =
-				value.acts.prewarm && typeof value.recipe === "string"
-					? value.recipe
-					: value.acts.prewarmPending
-						? (turn?.groupRecipe ?? null)
-						: null;
-			if (recipe === null) return null;
-			// Two held workers cover a parallel split; anything else is one.
-			return { agentId: recipe, count: value.shape === "parallel" ? 2 : 1 };
-		},
+		prewarm: () => (turn === null ? null : predictionOf(turn)),
 
 		clearVerdict() {
 			// A fresh record, so a reading still in flight lands in the one it was
 			// started for and never in what the next continuation reads.
-			if (turn !== null) turn = { id: turn.id, task: turn.task, verdict: null, groupRecipe: null, landed: null };
+			if (turn !== null)
+				turn = { id: turn.id, task: turn.task, verdict: null, groupRecipe: null, landed: null, predicted: false };
 		},
 
 		task: () => turn?.task ?? "",
