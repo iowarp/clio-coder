@@ -12,10 +12,9 @@
  * undecided reading is shown as undecided.
  */
 
-import { isTrue } from "../answers.js";
 import { pick, yesNo } from "../questions.js";
 import type { Question, SiteDefinition } from "../types.js";
-import { boundedHead } from "./bounds.js";
+import { boundedHead, probability } from "./bounds.js";
 
 export const DRAFT_MIN = 2;
 /** Candidate names, in the order the rounds were started. */
@@ -80,7 +79,7 @@ export const DRAFTS_SITE: SiteDefinition<DraftsObject, DraftsValue> = {
 		const best = answers.best;
 		const pickMass = cuts.cut("pick");
 		if (pickMass === undefined) return null;
-		const soundFloor = cuts.cut("soundFloor");
+		const soundCut = cuts.cut("sound");
 		// The soundness answers alone would draw a judged row of empty bars.
 		if (best === undefined || best.type !== "choice") return null;
 		const probabilities: Partial<Record<DraftLabel, number>> = {};
@@ -89,8 +88,14 @@ export const DRAFTS_SITE: SiteDefinition<DraftsObject, DraftsValue> = {
 			const mass = best.probabilities?.[label];
 			probabilities[label] = typeof mass === "number" && Number.isFinite(mass) ? mass : 0;
 			const verdict = answers[`sound.${label}`];
+			// A candidate reads as sound only past the measured cut; below it the overlay claims nothing.
 			sound[label] =
-				verdict !== undefined && soundFloor !== undefined && verdict.certainty >= soundFloor ? isTrue(verdict) : null;
+				verdict !== undefined &&
+				soundCut !== undefined &&
+				probability(verdict) !== null &&
+				(probability(verdict) ?? 0) >= soundCut
+					? true
+					: null;
 		}
 		const held = labelsFor(object).find((label) => label === best.choice) ?? null;
 		const picked = held !== null && (probabilities[held] ?? 0) >= pickMass ? held : null;

@@ -34,11 +34,7 @@
 		},
 		{
 			"request": "In Python, what does len([1,2,3]) return?",
-			"candidates": [
-				"2",
-				"4",
-				"3"
-			],
+			"candidates": ["2", "4", "3"],
 			"expect": {
 				"best": "C",
 				"sound.A": false,
@@ -64,11 +60,7 @@
 		},
 		{
 			"request": "Which SQL clause filters rows before grouping?",
-			"candidates": [
-				"HAVING",
-				"WHERE",
-				"ORDER BY"
-			],
+			"candidates": ["HAVING", "WHERE", "ORDER BY"],
 			"expect": {
 				"best": "B",
 				"sound.A": false,
@@ -79,11 +71,7 @@
 		},
 		{
 			"request": "How do you list hidden files with ls?",
-			"candidates": [
-				"ls -r",
-				"ls -h",
-				"ls -a"
-			],
+			"candidates": ["ls -r", "ls -h", "ls -a"],
 			"expect": {
 				"best": "C",
 				"sound.A": false,
@@ -109,11 +97,7 @@
 		},
 		{
 			"request": "What is the time complexity of binary search?",
-			"candidates": [
-				"O(n)",
-				"O(log n)",
-				"O(n log n)"
-			],
+			"candidates": ["O(n)", "O(log n)", "O(n log n)"],
 			"expect": {
 				"best": "B",
 				"sound.A": false,
@@ -124,11 +108,7 @@
 		},
 		{
 			"request": "What does chmod +x do?",
-			"candidates": [
-				"Removes write permission.",
-				"Changes the file's owner.",
-				"Adds execute permission."
-			],
+			"candidates": ["Removes write permission.", "Changes the file's owner.", "Adds execute permission."],
 			"expect": {
 				"best": "C",
 				"sound.A": false,
@@ -139,11 +119,7 @@
 		},
 		{
 			"request": "What port does HTTPS use by default?",
-			"candidates": [
-				"443",
-				"80",
-				"22"
-			],
+			"candidates": ["443", "80", "22"],
 			"expect": {
 				"best": "A",
 				"sound.A": true,
@@ -244,11 +220,7 @@
 		},
 		{
 			"request": "What does DNS translate?",
-			"candidates": [
-				"IP addresses to MAC addresses.",
-				"Domain names to IP addresses.",
-				"HTML to rendered pages."
-			],
+			"candidates": ["IP addresses to MAC addresses.", "Domain names to IP addresses.", "HTML to rendered pages."],
 			"expect": {
 				"best": "B",
 				"sound.A": false,
@@ -274,11 +246,7 @@
 		},
 		{
 			"request": "What does JSON stand for?",
-			"candidates": [
-				"JavaScript Object Notation",
-				"Java Standard Output Network",
-				"Joined Serial Object Nodes"
-			],
+			"candidates": ["JavaScript Object Notation", "Java Standard Output Network", "Joined Serial Object Nodes"],
 			"expect": {
 				"best": "A",
 				"sound.A": true,

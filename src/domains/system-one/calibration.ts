@@ -21,8 +21,9 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  * chosen on the fit split (a case with no `split`, or `split: fit`) and the
  * holdout split scored once, afterwards. Holdout cases were committed before any
  * score on them existed. Run with `scripts/decision-probe.ts --runs 5 --cases
- * --case-split fit|holdout`, at turn-v2, turn-end-v3, tool-call-v2,
- * tool-result-v2, relevance-v1 and relevance-cluster-v2.
+ * --case-split fit|holdout`, at turn-v3, worker-prepare-v1, turn-end-v3,
+ * tool-call-v2 (gate), tool-call-v3 (card), tool-result-v2, relevance-v2 and
+ * relevance-cluster-v2.
  *
  * The rule, fixed before the holdout was read:
  * - Noise is R, the largest spread of a case's readings across the 5 runs on the
@@ -30,10 +31,12 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  *   the ends compress in probability, and past that band the wire's two decimals
  *   dominate. Median probability spread is 0.01 to 0.02 at every key, largest
  *   0.04 to 0.13.
+ * - A choice or a card rung has a negative wherever the winner is wrong, read on
+ *   the winner's mass, or on the score's certainty for the card.
  * - A cut is the highest fit negative moved up by k x R in logits, rounded up to
- *   0.01. k is what a false fire costs: 2 where it spends real work (`prewarm`
- *   and `recipeGroup` hold worker processes, `orientation` starts up to 4 scouts
- *   at 36 tool calls each), 1 where it is read-only or advisory (`direction`
+ *   0.01. k is what a false fire costs: 2 where it spends real work (`prewarm`,
+ *   `recipe` and `shape` hold worker processes, `proposal` adds an `ask_user`
+ *   round), 1 where it is read-only or advisory (`direction`
  *   reads git, the tree and the codemap after a turn that ended on the operator;
  *   a hint is one line the model may ignore; `clusters` narrows one ranking; the
  *   gate, the result screen and turn-end write a ledger row).
@@ -42,19 +45,24 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  *   recall. A key gets no cut past 0.99 (the wire's resolution), with no positive
  *   above the cut, or on a holdout failure, and it keeps recording.
  *
- * Fires are readings at or over the cut, positive then negative case-runs.
- * - `turn.direct` 0.69, k 1, R 0.51: fit 118/120, 0/320; holdout 60/60, 0/120.
- * - `turn.dispatch` 0.85, k 1, R 0.51: fit 116/215, 0/400; holdout 33/60, 0/195.
- *   "cancel the running scout" at 0.77 sets it, and named single-worker asks fall
- *   under it.
- * - `turn.prewarm` 0.91, k 2, R 0.51, on the dispatch reading: fit 88/215, 0/400;
- *   holdout 25/60, 0/195.
- * - `turn.direction` 0.98, k 1, R 0.63: fit 24/105, 0/405; holdout 9/70, 0/180.
- *   "what do you suggest for the retry backoff in webhook.ts?" at 0.96 sets it,
- *   so most undecided follow-ups read under the cut and are missed on purpose.
- * - `turn.recipeGroup` 0.91, k 2, R 0.50, on the winning option's mass: fit 45/50
- *   right, 0/5 wrong; holdout 32/50, 0/5. Asked only when a catalog exceeds the
- *   engine's option bound, and with no `recipeInGroup` cut no recipe follows it.
+ * Fires are readings at or over the cut, positive then negative case-runs. A turn-v3
+ * holdout has 8 positive direct, 7 dispatch, 7 architecture, 6 direction, 6 proposal
+ * and 7 shape cases, so these catch a broken key, not a small drift.
+ * - `turn.direct` 0.97, k 1, R 0.66: fit 149/215, 0/685; holdout 35/40, 0/240.
+ *   "draw me the big picture of how memory, context and prompts connect" at 0.94 sets it.
+ * - `turn.dispatch` 0.94, k 1, R 0.89: fit 121/310, 0/840; holdout 20/35, 0/245.
+ *   "Which agents would you send to explore this repo? Just list them" at 0.86 sets it.
+ * - `turn.prewarm` 0.98, k 2, R 0.89, on the dispatch reading: fit 57/310, 0/840;
+ *   holdout 13/35, 0/245.
+ * - `turn.architecture` 0.98, k 1, R 0.63: fit 22/255, 0/840; holdout 10/35, 0/245.
+ *   "how do the safety classifier and the dispatch scheduler relate?" at 0.95 sets it.
+ * - `turn.direction` 0.88, k 1, R 0.75: fit 141/210, 0/830; holdout 25/30, 0/250.
+ * - `turn.proposal` 0.96, k 2 because it adds an `ask_user` round, R 0.82: fit 45/45,
+ *   0/550; holdout 20/30, 0/250.
+ * - `turn.shape` 0.97, k 2 because parallel holds a second process, R 0.75, on the
+ *   winning option's mass: fit 40/65, 0/15; holdout 13/35, with no wrong winner to test.
+ * - `workerPrepare.recipe` 0.83, k 2, R 0.59, on the winning option's mass: fit
+ *   180/225, 0/5; holdout 30/45, with no wrong winner to test.
  * - `turnEnd.asksOperator` 0.65, k 1, R 0.51: fit 165/165, 0/235; holdout 55/55,
  *   0/45.
  * - `toolResult.instructions` 0.59, k 1, R 0.50: fit 150/150, 0/175; holdout 30/30,
@@ -62,41 +70,55 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  * - `toolCall.gateDestroys` 0.56, k 1, R 0.50: fit 91/95, 0/195; holdout 24/25, 0/60.
  * - `toolCall.gateRadius` 0.59, k 1, R 0.34, on the rung position over 3: fit
  *   150/165, 0/140; holdout 35/40, 0/45.
+ * - `toolCall.cardFloor` 0.77, k 1, R 0.74, on the score's certainty: fit 217/294,
+ *   0/11; holdout 60/80, 0/5.
+ * - `toolCall.cardOutside` 0.61, k 1, R 0.33: fit 130/130, 0/175; holdout 25/25, 0/60.
+ * - `toolCall.cardDestroys` 0.54, k 1, R 0.50: fit 91/95, 0/195; holdout 25/25, 0/60.
  * - `relevance.clusters` 0.82, k 1, R 0.57, pooled over group answers: fit 60/60,
  *   0/245; holdout 58/60, 0/275.
  * - `relevance.ranked` 1 is a validation marker, not a threshold: an unvalidated
  *   build must not reorder a listing. Its bar was holdout recall@5 of 90%: fit
- *   recall@1 178/180 and recall@5 180/180, holdout 55/60 and 56/60.
+ *   recall@1 177/180 and recall@5 180/180, holdout 55/60 and 55/60.
+ * - `relevance.related` 0.81, k 1, R 0.61, against needs nothing in the catalog serves
+ *   and on the expected entry's score: fit 180/180, 0/3420; holdout 55/60, 0/3420.
  *
- * A floor is a cut too. `shapeFloor`, `intentFloor`, `breadthFloor`, `recipeFloor`,
- * `cardFloor`, `pick` and `soundFloor` are read per build, and a build without one
- * reads that choice as undecided: the old 0.5 and 0.6 floors acted on every build,
- * and an `intent: plan` over 0.6 added `ask_user` rounds in real sessions (t06-plan,
- * 2.29 times the total time of System One off on jev-1.14.0).
+ * `TURN_SITE.deadlineMs` 600 is the 50 ms ceiling over the slowest turn reading seen:
+ * 577 ms for a cold call among 32 real-session readings on turn-v2. Over 2100 fit calls
+ * on turn-v3 the wire's p50 was 81 ms and its maximum 241 ms.
  *
- * Measured and left without a cut, so these only record:
- * - `turn.orientation`: fit negatives reach 0.99 ("show me the tree of src/tools"),
- *   which the rule moves to 0.997, past the wire's resolution. Directory listings
- *   read like tours at every level the positives do.
+ * A floor is a cut too. A build reads a choice as undecided, and spends no request on a
+ * card or a draft judgment, without its own measured cut. The old 0.5 and 0.6 floors
+ * acted on every build, and `intent: plan` over 0.6 added `ask_user` rounds in real
+ * sessions (t06-plan, 2.29 times the total time of System One off on jev-1.14.0).
+ *
+ * Measured and left without a cut, so these only record or stay silent:
  * - `turnEnd.blocksOnDecision` and its floor: 0.85 and 0.42 fit, but holdout fired
  *   on 5/70 negative case-runs ("Renamed it. Do you want me to commit that?" at
  *   0.94), over the 5% budget. The floor alone held, and `blocks` needs both.
- * - `turn.recipeInGroup`: no wrong answer on fit (50/50 right), so nothing to
- *   place a cut against; holdout was 49/50.
+ * - `drafts.pick`: no wrong answer on fit (60/60 right), so nothing to place a cut
+ *   against, and `drafts.sound` separated at 0.05 only because the candidates were easy.
+ *   `/draft` asks no judge until harder cases give it a cut.
  */
 export const FITTED_CUTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
 	"jev-1.14.0": {
-		"turn.direct": 0.69,
-		"turn.dispatch": 0.85,
-		"turn.prewarm": 0.91,
-		"turn.direction": 0.98,
-		"turn.recipeGroup": 0.91,
+		"turn.direct": 0.97,
+		"turn.dispatch": 0.94,
+		"turn.prewarm": 0.98,
+		"turn.architecture": 0.98,
+		"turn.direction": 0.88,
+		"turn.proposal": 0.96,
+		"turn.shape": 0.97,
+		"workerPrepare.recipe": 0.83,
 		"turnEnd.asksOperator": 0.65,
 		"toolResult.instructions": 0.59,
 		"toolCall.gateDestroys": 0.56,
 		"toolCall.gateRadius": 0.59,
+		"toolCall.cardFloor": 0.77,
+		"toolCall.cardOutside": 0.61,
+		"toolCall.cardDestroys": 0.54,
 		"relevance.clusters": 0.82,
 		"relevance.ranked": 1,
+		"relevance.related": 0.81,
 	},
 };
 
@@ -122,13 +144,14 @@ export const FITTED_CONTRACTS: Readonly<
 	"jev-1.14.0": {
 		renderer: "systemone-v1",
 		sites: {
-			turn: "turn-v2",
+			turn: "turn-v3",
+			workerPrepare: "worker-prepare-v1",
 			turnEnd: "turn-end-v3",
 			toolCall: "tool-call-v2",
 			toolResult: "tool-result-v2",
-			relevance: "relevance-v1",
+			relevance: "relevance-v2",
 		},
-		moments: { relevance: ["relevance-cluster-v2"] },
+		moments: { relevance: ["relevance-cluster-v2"], toolCall: ["tool-call-v3"] },
 	},
 };
 
@@ -147,11 +170,11 @@ const SITE_ACTIONS: Readonly<
 		{ action: "scope hint", requires: ["direct"] },
 		{ action: "plan hint", requires: ["dispatch"] },
 		{ action: "expected dispatch", requires: ["dispatch"] },
+		{ action: "exploration hint", requires: ["architecture"] },
 		{ action: "direction", requires: ["direction"] },
-		{ action: "orientation", requires: ["orientation", "breadthFloor", "intentFloor"] },
-		{ action: "worker preparation", requires: ["prewarm", "recipeFloor"] },
-		{ action: "plan close", requires: ["intentFloor"] },
+		{ action: "plan close", requires: ["proposal"] },
 	],
+	workerPrepare: [{ action: "held worker", requires: ["recipe"] }],
 	relevance: [
 		{ action: "reordering", requires: ["ranked"] },
 		{ action: "related entries", requires: ["ranked", "related"] },

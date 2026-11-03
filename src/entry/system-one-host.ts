@@ -46,7 +46,7 @@ import { STEER_SITE } from "../domains/system-one/sites/steer.js";
 import { TOOL_CALL_GATE_SITE } from "../domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
 import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/turn.js";
-import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
+import { TURN_SITE, WORKER_PREPARE_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE } from "../domains/system-one/sites/turn-end.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import { addGroup, emptyFactSum } from "../domains/telemetry/folds.js";
@@ -258,7 +258,7 @@ export interface SystemOneHostDeps {
 	usage: DecisionUsageTally;
 	/** The current session's ledger, for the operator's earlier requests. */
 	readSessionEntries: () => ReadonlyArray<SessionEntry>;
-	/** The recipes a dispatch could name first, or null unless the prewarm is on. */
+	/** The recipes a dispatch could name first, or null unless worker preparation is on. */
 	listRecipes: () => ReadonlyArray<TurnRecipeOption> | null;
 	/** The session current now, so operator texts kept for one session are never read in another. */
 	currentSession?: () => string | null;
@@ -407,7 +407,8 @@ interface HeldTurn {
 	id: string;
 	task: string;
 	verdict: Verdict<TurnValue> | null;
-	groupRecipe: string | null;
+	/** The recipe `WORKER_PREPARE_SITE` picked once the reading predicted a dispatch. */
+	recipe: string | null;
 	/** Settles when the fitted reading is held or the call settled without one; null when nothing is in flight. */
 	landed: Promise<void> | null;
 	/** Whether this turn's prediction was already handed over. */
@@ -476,16 +477,9 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 
 	function predictionOf(held: HeldTurn): TurnPrewarmPrediction | null {
 		const value = held.verdict?.value;
-		if (value === undefined) return null;
-		const recipe =
-			value.acts.prewarm && typeof value.recipe === "string"
-				? value.recipe
-				: value.acts.prewarmPending
-					? held.groupRecipe
-					: null;
-		if (recipe === null) return null;
-		// Two held workers cover a parallel split; anything else is one.
-		return { agentId: recipe, count: value.shape === "parallel" ? 2 : 1 };
+		if (value === undefined || !value.acts.prewarm || held.recipe === null) return null;
+		// A second held process only under a measured parallel reading; anything else is one.
+		return { agentId: held.recipe, count: value.shape === "parallel" ? 2 : 1 };
 	}
 
 	function announcePrediction(held: HeldTurn): void {
@@ -504,12 +498,10 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		const value = turn?.verdict?.value;
 		if (value === undefined) return undefined;
 		return {
-			intent: value.intent,
-			orientation: {
-				wanted: value.acts.orientation,
-				breadth: value.breadth,
-				...(value.orientation !== null ? { probability: value.orientation } : {}),
-			},
+			// Only a measured proposal reading names an intent, so a plan-close never arms on anything less.
+			intent: value.acts.proposal ? "plan" : "unknown",
+			// Automatic scouts stay off: an architecture reading is advice to the main agent.
+			orientation: { wanted: false, breadth: null },
 			direction: { requested: value.acts.direction },
 			dispatch: { expected: value.acts.dispatch, ...(value.dispatch !== null ? { probability: value.dispatch } : {}) },
 		};
@@ -521,7 +513,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 				id: input.userTurnId,
 				task: input.task,
 				verdict: null,
-				groupRecipe: null,
+				recipe: null,
 				landed: null,
 				predicted: false,
 			};
@@ -536,26 +528,13 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			// would only build its state are skipped with it.
 			const shadow = systemOne.shadowed("turn");
 			if (shadow && !recordingOn()) return;
-			let recipes: ReadonlyArray<TurnRecipeOption> | null = null;
-			try {
-				recipes = deps.listRecipes();
-			} catch {
-				// Without recipes the turn asks no recipe question, which is the prewarm off.
-			}
 			let previousTask = "";
 			try {
 				previousTask = input.previousTask();
 			} catch {
 				// An unreadable ledger costs the correction evidence, never the turn.
 			}
-			const recipeOptionLimit = systemOne.limits?.("turn", "recipe")?.maxOptions;
-			const object = {
-				task: input.task,
-				previous: input.previous,
-				previousTask,
-				...(recipes !== null ? { recipes } : {}),
-				...(recipeOptionLimit !== undefined ? { recipeOptionLimit } : {}),
-			};
+			const object = { task: input.task, previous: input.previous, previousTask };
 			if (shadow) {
 				detached(() => systemOne.run(TURN_SITE, object, { ref: input.userTurnId }));
 				return;
@@ -579,22 +558,20 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 					held.landed = null;
 					markLanded();
 				}
-				announcePrediction(held);
 				const verdict = held.verdict;
-				if (turn !== held || verdict === null) return;
-				// A category was chosen but not its member: one bounded follow-up under
-				// its own deadline picks the recipe to hold, chained here so it never
-				// adds a wait of its own.
-				const value = verdict.value;
-				if (!value.acts.prewarmPending || typeof value.recipeGroup !== "string") return;
-				const members = recipesInGroup(object, value.recipeGroup);
-				if (members.length === 0) return;
-				const picked = await systemOne.run(
-					TURN_RECIPE_SITE,
-					{ task: input.task, previous: input.previous, previousTask, recipes: members },
-					{ ref: input.userTurnId },
-				);
-				if (turn === held) held.groupRecipe = picked?.value.recipe ?? null;
+				if (turn !== held || verdict === null || !verdict.value.acts.prewarm) return;
+				// A chained call under its own deadline, so most turns spend no request here and
+				// no reader ever waits for it.
+				let recipes: ReadonlyArray<TurnRecipeOption> | null = null;
+				try {
+					recipes = deps.listRecipes();
+				} catch {
+					// Without recipes there is nothing to hold.
+				}
+				if (recipes === null || !systemOne.bound("workerPrepare")) return;
+				const picked = await systemOne.run(WORKER_PREPARE_SITE, { ...object, recipes }, { ref: input.userTurnId });
+				if (turn !== held) return;
+				held.recipe = picked?.value.recipe ?? null;
 				announcePrediction(held);
 			});
 		},
@@ -630,7 +607,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 			// A fresh record, so a reading still in flight lands in the one it was
 			// started for and never in what the next continuation reads.
 			if (turn !== null)
-				turn = { id: turn.id, task: turn.task, verdict: null, groupRecipe: null, landed: null, predicted: false };
+				turn = { id: turn.id, task: turn.task, verdict: null, recipe: null, landed: null, predicted: false };
 		},
 
 		task: () => turn?.task ?? "",

@@ -51,7 +51,7 @@ interface Seen {
 function site(overrides: Partial<SiteDefinition<string, string>> = {}, seen?: Seen): SiteDefinition<string, string> {
 	return {
 		id: "turn",
-		version: FITTED_CONTRACT?.sites.turn ?? "turn-v2",
+		version: FITTED_CONTRACT?.sites.turn ?? "turn-v3",
 		deadlineMs: 30,
 		state: (object) => {
 			if (seen) seen.stateCalls += 1;
@@ -151,7 +151,7 @@ describe("System One runner", () => {
 				],
 				systemOne: { use, engines: {}, sites },
 			}) as unknown as ClioSettings;
-		const profile = ["turn", "toolCall", "relevance", "drafts"];
+		const profile = ["turn", "workerPrepare", "toolCall", "relevance", "drafts"];
 		deepStrictEqual(effectiveSystemOne(settingsFor(null)).systemOne.sites, {});
 		for (const use of ["jev", "memory", "main", "chat"]) {
 			deepStrictEqual(Object.keys(effectiveSystemOne(settingsFor(use)).systemOne.sites), profile, use);
@@ -216,7 +216,10 @@ describe("System One runner", () => {
 		match(headline(null), /^off/);
 		match(headline("off"), /^off/);
 		match(headline("jev"), /^unavailable: TYPESAFE_API_KEY is not set/);
-		match(headline("jev", ["TYPESAFE_API_KEY"]), /^active for measured actions at turn, relevance/);
+		match(
+			headline("jev", ["TYPESAFE_API_KEY"]),
+			/^active for measured actions at turn, workerPrepare, toolCall, relevance/,
+		);
 		match(headline("main", ["OPENAI_API_KEY"]), /configured but unmeasured.*systemone calibrate main/);
 		match(headline("main", ["OPENAI_API_KEY"]), /adds separate completions on chat\/chat-model/);
 		match(headline("memory"), /^unavailable: context.memory names no target/);
@@ -325,11 +328,10 @@ describe("System One runner", () => {
 			calibrated: true,
 		});
 		const value = TURN_SITE.read(
-			{ direct: noul(0.99), orientation: noul(0.99), breadth: choice("repository"), intent: choice("inspect") },
+			{ direct: noul(0.99), architecture: noul(0.99), shape: choice("single") },
 			{ task: "give me a tour", previous: "", previousTask: "" },
 			cuts,
 		);
-		strictEqual(value?.acts.orientation, false);
 		ok(value?.hints.scope);
 		strictEqual(cutsFor("jev-1.13.0", "turn", undefined, contract).fitted, false);
 		strictEqual(

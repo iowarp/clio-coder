@@ -30,12 +30,6 @@ export const RELEVANCE_MAX_CANDIDATES = 256;
 const MAX_SUMMARY_CHARS = 240;
 /** Code points of the need and of the turn's task. */
 const MAX_NEED_CHARS = 600;
-/**
- * How far off a coin-flip a noul must land before it counts as an opinion. A
- * confident negative is not an abstention: it scores low and ranks last, which
- * is a judgment the caller asked for. Only the undecided middle holds its slot.
- */
-const MIN_CERTAINTY = 0.2;
 
 export type RelevanceUse = "skills" | "capabilities" | "memory";
 
@@ -94,7 +88,7 @@ function subjects(object: RelevanceObject): RelevanceCandidate[] {
 
 export const RELEVANCE_SITE: SiteDefinition<RelevanceObject, RelevanceValue> = {
 	id: "relevance",
-	version: "relevance-v1",
+	version: "relevance-v2",
 	deadlineMs: 1500,
 	state(object) {
 		const task = boundedHead(object.task, MAX_NEED_CHARS);
@@ -131,7 +125,7 @@ export const RELEVANCE_SITE: SiteDefinition<RelevanceObject, RelevanceValue> = {
 		for (const candidate of subjects(object)) {
 			const answer = answers[candidate.id];
 			if (answer === undefined || answer.type !== "noul" || answer.noul === undefined) continue;
-			if (!Number.isFinite(answer.noul) || answer.certainty < MIN_CERTAINTY) continue;
+			if (!Number.isFinite(answer.noul)) continue;
 			scores[candidate.id] = answer.noul;
 		}
 		const relatedAt = cuts.cut("related");

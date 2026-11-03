@@ -1940,6 +1940,7 @@ function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly
 
 const SITE_OFF_CHOICE = "(off)";
 const SITE_LABELS: Readonly<Record<SiteId, string>> = {
+	workerPrepare: "Worker preparation",
 	turn: "Before each answer",
 	toolCall: "Before using a tool",
 	toolResult: "After a tool responds",
@@ -1956,10 +1957,14 @@ const SITE_LABELS: Readonly<Record<SiteId, string>> = {
  * leaving the machine, so the row states it next to the binding.
  */
 const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly sends: string }>> = {
+	workerPrepare: {
+		does: "picks the worker recipe to hold ready when a turn reading predicts a dispatch",
+		sends: "the request, the last reply and the recipe descriptions",
+	},
 	turn: {
 		does:
 			"reads what your message asks for without delaying it; a fitted build's hints and acts are used only when the reading lands before the prompt is built, and every other reading is only recorded",
-		sends: "your request, the tail of the last reply, your previous request and recipe descriptions",
+		sends: "your request, the tail of the last reply and your previous request",
 	},
 	toolCall: {
 		does:

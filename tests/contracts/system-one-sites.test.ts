@@ -4,7 +4,12 @@ import { UNTRUSTED_CONTENT_BANNER } from "../../src/core/untrusted-content.js";
 import { RELEVANCE_SITE } from "../../src/domains/system-one/sites/relevance.js";
 import { TOOL_CALL_GATE_SITE, type ToolCallObject } from "../../src/domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE } from "../../src/domains/system-one/sites/tool-result.js";
-import { TURN_SCOPE_HINT, TURN_SITE, type TurnObject } from "../../src/domains/system-one/sites/turn.js";
+import {
+	TURN_SCOPE_HINT,
+	TURN_SITE,
+	type TurnObject,
+	WORKER_PREPARE_SITE,
+} from "../../src/domains/system-one/sites/turn.js";
 import { TURN_END_SITE, type TurnEndObject } from "../../src/domains/system-one/sites/turn-end.js";
 import type { Answer, SiteCuts } from "../../src/domains/system-one/types.js";
 
@@ -46,12 +51,10 @@ function loudTurn(overrides: Readonly<Record<string, Answer>> = {}): Readonly<Re
 	return {
 		direct: noul(0.99),
 		dispatch: noul(0.99),
-		orientation: noul(0.99),
+		architecture: noul(0.99),
 		direction: noul(0.99),
-		breadth: choice("repository"),
-		intent: choice("inspect"),
+		proposal: noul(0.99),
 		shape: choice("parallel"),
-		recipe: choice("scout"),
 		...overrides,
 	};
 }
@@ -69,15 +72,9 @@ function turn(answers: Readonly<Record<string, Answer>>, cuts: SiteCuts, object:
 
 describe("turn policy", () => {
 	it("gives no hint and starts nothing under an unfitted build", () => {
-		const value = turn(loudTurn(), UNFITTED, { ...TASK, recipes: RECIPES });
-		deepStrictEqual(value.hints, { scope: null, plan: null });
-		deepStrictEqual(value.acts, {
-			orientation: false,
-			direction: false,
-			prewarm: false,
-			dispatch: false,
-			prewarmPending: false,
-		});
+		const value = turn(loudTurn(), UNFITTED);
+		deepStrictEqual(value.hints, { scope: null, plan: null, explore: null });
+		deepStrictEqual(value.acts, { direction: false, prewarm: false, dispatch: false, proposal: false });
 	});
 
 	it("hints scope at the cut and above, not below", () => {
@@ -107,10 +104,10 @@ describe("turn policy", () => {
 		ok(turn(loudTurn(), cuts, { ...TASK, task: "explore this repo fully" }).hints.plan !== null);
 	});
 
-	it("starts an orientation at the cut and above, not below", () => {
-		const cuts = fitted({ orientation: 0.65, intentFloor: 0.6, breadthFloor: 0.5 });
-		strictEqual(turn(loudTurn({ orientation: noul(0.65) }), cuts).acts.orientation, true);
-		strictEqual(turn(loudTurn({ orientation: noul(0.64) }), cuts).acts.orientation, false);
+	it("hints exploration at the cut and starts no scout", () => {
+		const cuts = fitted({ architecture: 0.65 });
+		ok(turn(loudTurn({ architecture: noul(0.65) }), cuts).hints.explore !== null);
+		strictEqual(turn(loudTurn({ architecture: noul(0.64) }), cuts).hints.explore, null);
 	});
 
 	it("starts direction at the cut and above, not below", () => {
@@ -119,23 +116,26 @@ describe("turn policy", () => {
 		strictEqual(turn(loudTurn({ direction: noul(0.56) }), cuts).acts.direction, false);
 	});
 
-	it("prewarms at the cut only when a recipe was predicted", () => {
-		const cuts = fitted({ prewarm: 0.55, recipeFloor: 0.6 });
-		const object = { ...TASK, recipes: RECIPES };
-		strictEqual(turn(loudTurn({ dispatch: noul(0.55) }), cuts, object).acts.prewarm, true);
-		strictEqual(turn(loudTurn({ dispatch: noul(0.54) }), cuts, object).acts.prewarm, false);
-		// Without the recipe question there is nothing to warm, however sure the dispatch is.
-		strictEqual(turn(loudTurn({ dispatch: noul(0.99) }), cuts).acts.prewarm, false);
-		// A measured dispatch reading does not make an unmeasured recipe pick act.
-		strictEqual(turn(loudTurn({ dispatch: noul(0.99) }), fitted({ prewarm: 0.55 }), object).acts.prewarm, false);
+	it("predicts a dispatch for worker preparation at the cut", () => {
+		const cuts = fitted({ prewarm: 0.55 });
+		strictEqual(turn(loudTurn({ dispatch: noul(0.55) }), cuts).acts.prewarm, true);
+		strictEqual(turn(loudTurn({ dispatch: noul(0.54) }), cuts).acts.prewarm, false);
 	});
 
-	it("reads a choice as undecided until the build has a measured floor for it", () => {
-		const answers = loudTurn({ intent: choice("plan", 0.97) });
-		strictEqual(turn(answers, fitted({ direct: 0.7 })).intent, "unknown");
+	it("names a recipe only past its own cut, and asks nothing without one", () => {
+		const answers = { recipe: choice("scout", 0.9) };
+		const object = { ...TASK, recipes: RECIPES };
+		strictEqual(WORKER_PREPARE_SITE.read(answers, object, fitted({ recipe: 0.8 }))?.recipe, "scout");
+		strictEqual(WORKER_PREPARE_SITE.read(answers, object, fitted({ prewarm: 0.5 })), null);
+		strictEqual(WORKER_PREPARE_SITE.requiredCut, "recipe");
+	});
+
+	it("reads a proposal and a shape only past their measured cuts", () => {
+		const answers = loudTurn({ proposal: noul(0.97), shape: choice("parallel", 0.9) });
+		strictEqual(turn(answers, fitted({ direct: 0.7 })).acts.proposal, false);
 		strictEqual(turn(answers, fitted({ direct: 0.7 })).shape, null);
-		strictEqual(turn(answers, fitted({ direct: 0.7 })).breadth, null);
-		strictEqual(turn(answers, fitted({ direct: 0.7, intentFloor: 0.6 })).intent, "plan");
+		strictEqual(turn(answers, fitted({ proposal: 0.96 })).acts.proposal, true);
+		strictEqual(turn(answers, fitted({ shape: 0.5 })).shape, "parallel");
 	});
 });
 
@@ -245,7 +245,7 @@ describe("turn end policy", () => {
 });
 
 describe("relevance scoring", () => {
-	it("drops answers less certain than the abstention floor and keeps confident negatives", () => {
+	it("keeps every answered entry, the undecided ones included, for the ranking the marker validated", () => {
 		const object = {
 			use: "skills" as const,
 			need: "review a pull request",
@@ -261,8 +261,7 @@ describe("relevance scoring", () => {
 			object,
 			fitted({ ranked: 1 }),
 		);
-		ok(value !== null);
-		deepStrictEqual(value.scores, { leaning: 0.62, "confident-no": 0.05 });
+		deepStrictEqual(value?.scores, { "coin-flip": 0.55, leaning: 0.62, "confident-no": 0.05 });
 	});
 	it("returns no scores under a build with no ranked cut, so no listing is reordered", () => {
 		const object = {

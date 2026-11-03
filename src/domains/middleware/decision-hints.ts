@@ -21,6 +21,7 @@ export const DECISION_HINTS_REGISTRATION_ID = "observer.decision-hints";
 export interface DecisionHintLines {
 	readonly scope: string | null;
 	readonly plan: string | null;
+	readonly explore?: string | null;
 }
 
 export interface DecisionHintsDeps {
@@ -55,6 +56,8 @@ export function createDecisionHintsRegistration(deps: DecisionHintsDeps): Middle
 				// A controller that already ran the orientation or collected the batch
 				// has made the plan for the turn; a delegation hint would second-guess it.
 				if (hints.plan !== null && deps.controllerActed?.() !== true) lines.push(hints.plan);
+				// Worker advice already says how to explore, so this line only reaches a turn without it.
+				if (hints.explore && hints.plan === null) lines.push(hints.explore);
 			} catch {
 				return NO_EFFECTS;
 			}

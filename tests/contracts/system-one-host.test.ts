@@ -45,10 +45,9 @@ const FITTED: SiteCuts = {
 const LOUD_TURN: Readonly<Record<string, Answer>> = {
 	direct: noul(0.99),
 	dispatch: noul(0.99),
-	orientation: noul(0.99),
+	architecture: noul(0.99),
 	direction: noul(0.99),
-	breadth: choice("repository"),
-	intent: choice("inspect"),
+	proposal: noul(0.2),
 	shape: choice("parallel"),
 	recipe: choice("scout"),
 };
@@ -146,7 +145,7 @@ describe("contracts/system one host: the turn site", () => {
 		const waiting = host.awaitInterpretation(60_000, new AbortController().signal);
 		await landed();
 		release(LOUD_TURN);
-		strictEqual((await waiting)?.intent, "inspect", "the reading, not the bound, ended the wait");
+		strictEqual((await waiting)?.dispatch?.expected, true, "the reading, not the bound, ended the wait");
 	});
 
 	it("does not wait when the site is unbound, and the operator's cancel ends a wait", async () => {
@@ -169,7 +168,10 @@ describe("contracts/system one host: the turn site", () => {
 
 	it("hands over a late prediction once, and none after the turn settled", async () => {
 		let release: (answers: Readonly<Record<string, Answer>>) => void = () => {};
-		const { systemOne } = fakeSystemOne(() => new Promise((resolve) => (release = resolve)), ["turn"]);
+		const { systemOne } = fakeSystemOne(
+			(site) => (site === "turn" ? new Promise((resolve) => (release = resolve)) : LOUD_TURN),
+			["turn", "workerPrepare"],
+		);
 		const predictions: unknown[] = [];
 		const host = hostOver(systemOne, undefined, (prediction) => predictions.push(prediction));
 
@@ -190,7 +192,7 @@ describe("contracts/system one host: the turn site", () => {
 
 	it("leaves hints, interpretation and prewarm empty when the verdict is null", async () => {
 		let answers: Readonly<Record<string, Answer>> | null = LOUD_TURN;
-		const { systemOne } = fakeSystemOne(() => answers, ["turn"]);
+		const { systemOne } = fakeSystemOne(() => answers, ["turn", "workerPrepare"]);
 		const host = hostOver(systemOne);
 
 		host.readTurn(turnInput("turn-1"));

@@ -528,7 +528,7 @@ export interface FleetWorktreesSettings {
 export interface FleetSettings extends FleetRouteSettings {
 	/** Standing worker node preference; null leaves unpinned work local and permits a session question. */
 	defaultNode: string | null;
-	/** Experimental worker prewarm. The System One `turn` site (`systemOne.sites.turn`) is asked which recipe a dispatch would name first, and only a fitted build's answer starts a worker; off by default. */
+	/** Experimental worker prewarm. After a turn reading predicts a dispatch, the `workerPrepare` site is asked which recipe it would name first, and only a measured build's answer starts a worker; off by default. */
 	speculativeDispatch: boolean;
 	nodes: FleetNodeSettings[];
 	adaptiveRouting: AdaptiveRoutingSettings;
@@ -787,11 +787,10 @@ export const DEFAULT_SETTINGS = {
 		rosters: {} as WorkerRosters,
 		agentProfiles: {} as FleetAgentProfiles,
 		/**
-		 * Experimental. With the `turn` site bound, a confident forecast from its
-		 * recipe question of the worker the main agent is about to dispatch starts
-		 * that worker's process ahead of the call and holds it until a matching
-		 * dispatch adopts it or the turn settles. Off, no recipe question is asked
-		 * and nothing is held.
+		 * Experimental. With the `workerPrepare` site bound, a measured pick of the
+		 * worker the main agent is about to dispatch starts that worker's process
+		 * ahead of the call and holds it until a matching dispatch adopts it or the
+		 * turn settles. Off, no recipe question is asked and nothing is held.
 		 */
 		speculativeDispatch: false,
 		nodes: [] as FleetNodeSettings[],
