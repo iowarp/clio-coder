@@ -2,11 +2,12 @@ import type { ExtensionCommandRow } from "../../domains/extensions/operator-comm
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../../session-control/slash-commands.js";
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
+import { displaySafe } from "../display-safe.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
 import { compactArgumentHint } from "../slash-autocomplete.js";
-import { clioTheme, type Fact, factRows, statusChip, titleRow } from "../theme/index.js";
+import { clioTheme, dotSep, type Fact, factRows, statusChip, titleRow } from "../theme/index.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
-import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+import { detailWithHead, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** Fact tables keep their label column at every width, the way the key detail does. */
 const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
@@ -53,8 +54,7 @@ export function openHelpOverlay(
 				// Overlay key actions are deliberately not duplicated here: each
 				// overlay's footer hint is the live source of its keys, and a static
 				// copy would rot exactly like the old SLASH_HOTKEYS table did.
-				detailFormat: "rows",
-				detail: (width) => {
+				...detailWithHead((width) => {
 					const theme = clioTheme();
 					const facts: Fact[] = [
 						{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
@@ -64,25 +64,30 @@ export function openHelpOverlay(
 							([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
 						),
 					];
-					return [
-						titleRow(theme, `/${ref.name}`, width, { meta: ref.group }),
-						...factRows(theme, facts, width, FACT_OPTIONS),
-					];
-				},
+					return {
+						head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
+						rest: factRows(theme, facts, width, FACT_OPTIONS),
+					};
+				}),
 			};
 			return item;
 		});
 
+	// Operator commands carry text an extension author wrote; it is neutralized
+	// once here before any row or pane picks it up. The metas are getters so a
+	// skin change repaints the chip instead of showing the colors of the skin
+	// the help was built under.
 	commands.push(
-		...extensionCommands.map(
+		...displaySafe(extensionCommands).map(
 			(row): ListOverlayItem => ({
 				id: `extension:${row.invocation}`,
 				label: `/${row.invocation}  ${row.description}`,
 				cells: { lead: `/${row.invocation}`, text: row.description },
 				group: "Operator extensions",
-				meta: row.available ? statusChip(clioTheme(), "ok", "ready") : statusChip(clioTheme(), "warning", "unavailable"),
-				detailFormat: "rows",
-				detail: (width) => {
+				get meta() {
+					return row.available ? statusChip(clioTheme(), "ok", "ready") : statusChip(clioTheme(), "warning", "unavailable");
+				},
+				...detailWithHead((width) => {
 					const theme = clioTheme();
 					const facts: Fact[] = [
 						{ label: "Does", value: row.description },
@@ -94,11 +99,11 @@ export function openHelpOverlay(
 								: statusChip(theme, "warning", row.reason ?? "runtime unavailable"),
 						},
 					];
-					return [
-						titleRow(theme, `/${row.invocation}`, width, { meta: "operator extension" }),
-						...factRows(theme, facts, width, FACT_OPTIONS),
-					];
-				},
+					return {
+						head: [titleRow(theme, `/${row.invocation}`, width, { meta: "operator extension" })],
+						rest: factRows(theme, facts, width, FACT_OPTIONS),
+					};
+				}),
 			}),
 		),
 	);
@@ -107,12 +112,26 @@ export function openHelpOverlay(
 		const conflicts = manager.getConflicts();
 		const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
 			const formattedKeys = formatKey(manager.actionLabel(row.id));
+			// A rebound key says so, and a key two actions share carries the warning
+			// glyph, so the conflict is visible before the row is opened.
+			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
+			const metaParts = (): string[] => [
+				...(row.source === "user" ? ["user"] : []),
+				...(hasConflict ? [statusChip(clioTheme(), "warning", "conflict")] : []),
+			];
 
 			const item: ListOverlayItem = {
 				id: row.id,
 				label: `${formattedKeys}  ${row.description}`,
 				cells: { lead: formattedKeys, text: row.description },
 				group: "Keys",
+				...(row.source === "user" || hasConflict
+					? {
+							get meta() {
+								return metaParts().join(dotSep(clioTheme()));
+							},
+						}
+					: {}),
 				detailFormat: "rows",
 				detail: (width) => {
 					const warnings = manager
@@ -137,16 +156,6 @@ export function openHelpOverlay(
 					return formatKeybindingDetailBodyLines(detailEntry, width);
 				},
 			};
-
-			// A rebound key says so, and a key two actions share carries the warning
-			// glyph, so the conflict is visible before the row is opened.
-			const metaParts: string[] = [];
-			if (row.source === "user") metaParts.push("user");
-			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
-			if (hasConflict) metaParts.push(statusChip(clioTheme(), "warning", "conflict"));
-			if (metaParts.length > 0) {
-				item.meta = metaParts.join(" · ");
-			}
 
 			return item;
 		});

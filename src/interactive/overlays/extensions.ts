@@ -13,6 +13,7 @@ import { promptRefs } from "../../domains/extensions/operator-commands.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../../session-control/slash-commands.js";
+import { displaySafe } from "../display-safe.js";
 import {
 	chip,
 	chipRows,
@@ -24,7 +25,7 @@ import {
 	statusChip,
 	titleRow,
 } from "../theme/index.js";
-import { type ListOverlayItem, markdownRows, openListOverlay } from "./list-overlay.js";
+import { detailWithHead, type ListOverlayItem, markdownRows, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
 export const EXTENSIONS_EMPTY =
@@ -108,21 +109,36 @@ const SCOPE_GROUP: Readonly<Record<InstalledExtension["scope"], string>> = {
  * The command that manages this copy. The CLI takes `--user` or `--project`;
  * a dev folder is never in install state, so its only handle is the session
  * mute, and naming a `--dev` flag that does not exist sent operators to a
- * usage error.
+ * usage error. A muted folder is offered the way back, not a second mute.
  */
 function manageCommand(ext: InstalledExtension): string {
-	if (ext.scope === "dev") return `/extensions mute ${ext.id}`;
+	if (ext.scope === "dev") return `/extensions ${ext.muted ? "unmute" : "mute"} ${ext.id}`;
 	return `clio-coder extensions enable|disable|remove ${ext.id} --${ext.scope}`;
 }
 
+function manageLabel(ext: InstalledExtension): string {
+	if (ext.scope !== "dev") return "Manage this copy with";
+	return ext.muted ? "Bring this folder back for the session with" : "Unload this folder for the session with";
+}
+
 export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
-	const list = ctx.listExtensions?.() ?? [];
-	const items: ListOverlayItem[] = list.map((ext) => {
+	// Every record is neutralized once, here: the manifests, the operator
+	// runtime's view of them and their commands all carry text a package author
+	// wrote. The envelope digest is taken from the raw record, so it is the same
+	// digest the CLI and the receipts print.
+	const raw = ctx.listExtensions?.() ?? [];
+	const list = displaySafe(raw);
+	const runtimes = displaySafe(ctx.operatorExtensions?.entries() ?? []);
+	const commands = displaySafe(
+		ctx.operatorExtensions?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? [])) ?? [],
+	);
+	const items: ListOverlayItem[] = list.map((ext, index) => {
 		const state = extensionState(ext);
 		const hasRuntime = Boolean(ext.runtime || ext.runtimeV2);
-		const runtime = ctx.operatorExtensions?.entries().find((entry) => entry.id === ext.id && entry.scope === ext.scope);
+		const runtime = runtimes.find((entry) => entry.id === ext.id && entry.scope === ext.scope);
 		const runtimeWord = runtime?.state ?? "not started";
-		const id = sanitizeCallTargetText(ext.id);
+		const id = ext.id;
+		// The row text is one line; the pane renders the description as Markdown.
 		const description = sanitizeCallTargetText(ext.description);
 		const meta = (): string => {
 			const theme = clioTheme();
@@ -139,26 +155,31 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 				return meta();
 			},
 			group: SCOPE_GROUP[ext.scope],
-			detailFormat: "rows",
-			detail: (width) => {
+			...detailWithHead((width) => {
 				const theme = clioTheme();
 				const chips = [
 					statusChip(theme, stateStatus(state), state),
 					...(hasRuntime ? [statusChip(theme, runtimeStatus(runtime?.state), `runtime ${runtimeWord}`)] : []),
 					...(ext.overriddenBy ? [chip(theme, `overridden by the ${ext.overriddenBy} copy`, "warning")] : []),
-					...(ext.devSource ? [chip(theme, `from ${sanitizeCallTargetText(ext.devSource)}`, "muted")] : []),
+					...(ext.devSource ? [chip(theme, `from ${ext.devSource}`, "muted")] : []),
 				];
-				const facts: Fact[] = [];
-				if (ext.plugin) facts.push({ label: "Plugin", value: sanitizeCallTargetText(pluginPairing(ext, state)) });
-				const envelopeDigest = extensionIdentity(ext).envelopeDigest;
+				const facts: Fact[] = [
+					{ label: "Version", value: ext.version },
+					{
+						label: "Scope",
+						value: ext.scope === "dev" ? `dev folder${ext.devSource ? ` ${ext.devSource}` : ""}` : ext.scope,
+					},
+				];
+				if (ext.plugin) facts.push({ label: "Plugin", value: pluginPairing(ext, state) });
+				const envelopeDigest = extensionIdentity(raw[index] ?? ext).envelopeDigest;
 				if (envelopeDigest) facts.push({ label: "Envelope", value: `sha256 ${envelopeDigest}` });
-				const receipt = readLifecycleReceipts(ext.id, ext.scope, "extension").at(-1);
+				const receipt = displaySafe(readLifecycleReceipts(ext.id, ext.scope, "extension").at(-1));
 				if (receipt)
 					facts.push({
 						label: "Last lifecycle",
 						value: `${receipt.operation} ${receipt.at} by ${receipt.actor}; ${receipt.id}@${receipt.version}; digest ${receipt.contentDigest}; operation ${receipt.operationId}`,
 					});
-				for (const row of recentPackageActivity(ext.id))
+				for (const row of displaySafe(recentPackageActivity(ext.id)))
 					facts.push({ label: "Activity", value: `${row.at} ${packageActivityText(row)}`, tone: "muted" });
 				if (hasRuntime) {
 					facts.push({ label: "Runtime", value: `${runtimeWord}; generation ${runtime?.generation ?? 0}` });
@@ -171,20 +192,17 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 							: "Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
 						tone: "muted",
 					});
-					if (runtime?.reason)
-						facts.push({ label: "Reason", value: sanitizeCallTargetText(runtime.reason), tone: "warning" });
+					if (runtime?.reason) facts.push({ label: "Reason", value: runtime.reason, tone: "warning" });
 					if (runtime?.status) facts.push({ label: "Status", value: sanitizeCallTargetText(runtime.status.text) });
 					// One label for every command keeps the label column narrow; the
 					// invocation leads the value so a long one wraps under itself.
-					for (const command of ctx.operatorExtensions
-						?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? []))
-						.filter((row) => row.extensionId === ext.id) ?? [])
+					for (const command of commands.filter((row) => row.extensionId === ext.id))
 						facts.push({
 							label: "Command",
-							value: `${theme.fg("inlineCode", `/${sanitizeCallTargetText(command.invocation)}`)} ${theme.fg("body", sanitizeCallTargetText(command.description))} ${
+							value: `${theme.fg("inlineCode", `/${command.invocation}`)} ${theme.fg("body", sanitizeCallTargetText(command.description))} ${
 								command.available
 									? statusChip(theme, "ok", "ready")
-									: statusChip(theme, "warning", sanitizeCallTargetText(command.reason ?? "unavailable"))
+									: statusChip(theme, "warning", command.reason ?? "unavailable")
 							}`,
 						});
 				}
@@ -196,26 +214,29 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					});
 					facts.push({
 						label: "Command tools",
-						value: `${ext.capabilities.tools.map((tool) => sanitizeCallTargetText(tool.name)).join(", ")}. Restart the session after changes to refresh tool schemas.`,
+						value: `${ext.capabilities.tools.map((tool) => tool.name).join(", ")}. Restart the session after changes to refresh tool schemas.`,
 					});
 				}
 				for (const reason of runtime?.newSessionReasons ?? [])
-					facts.push({ label: "New session", value: sanitizeCallTargetText(reason), tone: "warning" });
+					facts.push({ label: "New session", value: reason, tone: "warning" });
 				for (const diagnostic of ext.diagnostics)
 					facts.push({
 						label: diagnostic.type,
 						value: statusChip(theme, diagnostic.type, sanitizeCallTargetText(diagnostic.message)),
 					});
-				return [
-					titleRow(theme, id, width, { meta: `v${sanitizeCallTargetText(ext.version)} · ${ext.scope}` }),
-					...chipRows(theme, chips, width),
-					...markdownRows(description, width),
-					"",
-					theme.fg("annotation", ext.scope === "dev" ? "Unload this folder for the session with" : "Manage this copy with"),
-					...commandBlock(theme, manageCommand(ext), width),
-					...factRows(theme, facts, width, FACT_OPTIONS),
-				];
-			},
+				// The title and the state chips stay pinned while the rest scrolls;
+				// the description keeps its Markdown structure under them.
+				return {
+					head: [titleRow(theme, id, width, { meta: `v${ext.version} · ${ext.scope}` }), ...chipRows(theme, chips, width)],
+					rest: [
+						...markdownRows(ext.description, width),
+						"",
+						theme.fg("annotation", manageLabel(ext)),
+						...commandBlock(theme, manageCommand(ext), width),
+						...factRows(theme, facts, width, FACT_OPTIONS),
+					],
+				};
+			}),
 		};
 	});
 
