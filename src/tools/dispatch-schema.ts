@@ -171,7 +171,7 @@ const DispatchVerificationSchema = Type.Array(
 	),
 	{
 		maxItems: 8,
-		description: 'Array of {check:"id"} from verify(); never invent ids or pass shell commands.',
+		description: 'Array of {check:"id"} of declared ids; never invent ids or pass shell commands.',
 	},
 );
 

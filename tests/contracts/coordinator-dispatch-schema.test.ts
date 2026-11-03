@@ -190,7 +190,7 @@ describe("compact coordinator dispatch contract", () => {
 		for (const schema of [coordinatorDispatchParameters(), buildDispatchParameters()]) {
 			const description = JSON.stringify(schema.properties.intent);
 			match(description, /array/u);
-			match(description, /verify\(\)/u);
+			match(description, /declared ids/u);
 			match(description, /never invent/u);
 		}
 		const checks = new Map([["test", { id: "test", timeoutMs: 5000 }]]);
@@ -200,6 +200,7 @@ describe("compact coordinator dispatch contract", () => {
 		const invented = normalizeDispatchIntent({ verification: [{ check: "test suite" }] }, checks);
 		ok(!invented.ok);
 		strictEqual(invented.reason, "verification_check_undeclared");
+		match(invented.message, /declared ids: test;/u);
 		const malformed = normalizeDispatchIntent({ verification: { check: "test" } }, checks);
 		ok(!malformed.ok);
 		strictEqual(malformed.reason, "verification_malformed");

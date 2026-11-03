@@ -24,7 +24,7 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 export const verifyToolSurface = {
 	name: ToolNames.Verify,
 	description:
-		'Run a declared verification check: no arguments lists package scripts, .clio-coder/verifiers.yaml entries and checks derived from build/CI files; check=<id> runs one; check="frontend" with path validates an HTML/CSS/JS artifact.',
+		'Run a declared verification check: check=<id> runs one, and an undeclared id names the declared ones; check="frontend" with path validates an HTML/CSS/JS artifact; no arguments lists declared and build/CI-derived checks.',
 	parameters: Type.Object({
 		check: Type.Optional(
 			Type.String({
