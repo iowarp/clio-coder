@@ -69,7 +69,8 @@ function answerText(entry: WorkerEntryState, source: string): string {
 		projection = new WorkerAnswerProjection();
 		workerAnswers.set(owner, projection);
 	}
-	return projection.project(source, !entry.pending && !isPending(entry));
+	// Only a run that succeeded ended its text on purpose; a failed, stalled or cancelled one can stop inside a URL (#446).
+	return projection.project(source, !entry.pending && !isPending(entry) && entry.result?.outcome === "succeeded");
 }
 
 /**

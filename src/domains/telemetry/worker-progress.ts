@@ -37,6 +37,7 @@ import {
 	dropCutHead,
 	headGuardAfter,
 	holdUnresolvedUserinfo,
+	messageStopCompleted,
 } from "../safety/redaction.js";
 
 /**
@@ -117,6 +118,8 @@ export interface WorkerProgressSnapshot {
 	/** Distinct tool names in first-use order, bounded by {@link WORKER_TOOL_NAME_LIMIT}. */
 	toolNames: ReadonlyArray<string>;
 	settled: boolean;
+	/** The stream ended on purpose, so a held URL may release. Absent reads as not completed (#446). */
+	completed?: boolean;
 }
 
 export interface WorkerProgressFold {
@@ -128,8 +131,9 @@ export interface WorkerProgressFold {
 	/**
 	 * Seal the projection. `text` is the receipt's answer where one could be
 	 * read; without it the live tail stands as the run's last honest word.
+	 * `completed` is the run's own verdict; without it the fold's stream decides.
 	 */
-	settle(text?: string): boolean;
+	settle(text?: string, completed?: boolean): boolean;
 	/**
 	 * A later attempt of the same work takes over. The tail and the trail are
 	 * history the operator is already reading and stay; the current call, the
@@ -289,6 +293,9 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
+	/** Whether the last text seen belongs to a model message that stopped on purpose. */
+	let streamCompleted = false;
+	let completed = false;
 	let durable = "";
 	/** True after one assistant message ended and before the next message emits prose. */
 	let betweenAssistantMessages = false;
@@ -380,7 +387,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		return undefined;
 	};
 
-	const seal = (text?: string): boolean => {
+	const seal = (text?: string, runCompleted?: boolean): boolean => {
+		completed = runCompleted ?? streamCompleted;
 		const sealed = nonEmptyString(text) ?? nonEmptyString(durable);
 		if (sealed !== undefined) {
 			tailGuard = null;
@@ -433,6 +441,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			const delta = workerTextDelta(event);
 			if (delta.length > 0) {
+				streamCompleted = false;
 				const separator = betweenAssistantMessages && tailText.length > 0 && !tailText.endsWith("\n") ? "\n\n" : "";
 				betweenAssistantMessages = false;
 				changed = appendTail(admitDelta(`${separator}${delta}`, nowMs)) || changed;
@@ -444,6 +453,9 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			// A durable message_end is the answer as the receipt will seal it. An
 			// ACP peer that streamed no deltas reaches a surface only here.
+			if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
+				streamCompleted = messageStopCompleted(event.message.stopReason);
+			}
 			const durableText = durableAssistantTextFromEvent(event);
 			if (durableText.trim().length > 0) {
 				durable = durableText;
@@ -509,6 +521,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			durable = "";
 			betweenAssistantMessages = false;
 			settled = false;
+			streamCompleted = false;
+			completed = false;
 			phase = "starting";
 			touch();
 		},
@@ -532,6 +546,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				recentActions: recentActions.map((entry) => ({ ...entry })),
 				toolNames: [...toolNames],
 				settled,
+				completed,
 			};
 			return cached;
 		},

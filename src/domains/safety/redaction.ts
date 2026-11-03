@@ -255,9 +255,20 @@ export function dropShortCutHead(text: string, guard: CutHeadGuard): string {
 	return text.slice(tokenStart);
 }
 
-/** Redact text that may still grow; once it is complete, `final` releases any hold through full redaction. */
-export function redactStreamingSecretString(value: string, final = false): string {
-	return redactSecretString(final ? value : holdUnresolvedUserinfo(value));
+/**
+ * Redact text that may still grow. Only a stream that completed releases a hold through full redaction: after an abort or
+ * an error no later text can resolve it, so the last frame reads like the open one (#446).
+ */
+export function redactStreamingSecretString(value: string, completed = false): string {
+	return redactSecretString(completed ? value : holdUnresolvedUserinfo(value));
+}
+
+/**
+ * Whether a model message's stop reason means its text ended where the model meant it to. `length`, `error`, `aborted` and
+ * anything unrecognized or absent, as a legacy ledger row can be, may have stopped inside a URL (#446).
+ */
+export function messageStopCompleted(stopReason: unknown): boolean {
+	return stopReason === "stop" || stopReason === "toolUse";
 }
 
 /** A partial structured value, such as forming tool arguments, any string of which may stop inside a URL. */
@@ -274,13 +285,13 @@ export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
 /** Keep completed tokens while an appended display string changes only its tail (#428). */
 export class RedactedStringProjection {
 	private source = "";
-	private final = false;
+	private completed = false;
 	private committed = 0;
 	private prefix = "";
 	private text = "";
 
-	project(source: string, final = false): string {
-		if (source === this.source && final === this.final) return this.text;
+	project(source: string, completed = false): string {
+		if (source === this.source && completed === this.completed) return this.text;
 		if (!source.startsWith(this.source)) {
 			this.committed = 0;
 			this.prefix = "";
@@ -299,9 +310,9 @@ export class RedactedStringProjection {
 			this.committed += through;
 		}
 		// A committed token ends in whitespace, so the open run a hold reads is always in this uncommitted tail (#446).
-		this.text = this.prefix + redactStreamingSecretString(tail.slice(through), final);
+		this.text = this.prefix + redactStreamingSecretString(tail.slice(through), completed);
 		this.source = source;
-		this.final = final;
+		this.completed = completed;
 		return this.text;
 	}
 }

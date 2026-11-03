@@ -845,10 +845,15 @@ function replayEntries(
 						// could attach a Done receipt to an earlier visible failure.
 						const interruptClosure = messageInterruptClosure(entry);
 						// The receipt has no answer text; settlement still uses the original aborted call (#430).
+						// A row with no recorded stop reason reads as `stop` for the model, but the panel must not release a
+						// hold on that assumption: only a recorded reason says the text ended on purpose (#446).
+						const recordedStop = (entry.payload as { stopReason?: unknown } | null | undefined)?.stopReason;
 						const displayMessage =
 							interruptClosure !== null && message.role === "assistant"
 								? { ...message, content: [], stopReason: "stop" as const }
-								: message;
+								: message.role === "assistant" && recordedStop === undefined
+									? ({ ...message, stopReason: undefined } as unknown as typeof message)
+									: message;
 						chatPanel.applyEvent({ type: "message_start", message: displayMessage });
 						chatPanel.applyEvent({ type: "message_end", message: displayMessage });
 						runAssistantMessages.push(message);

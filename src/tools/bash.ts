@@ -136,6 +136,8 @@ function bashResultDetails(
 ): ToolResultDetails {
 	return {
 		outcome,
+		// `message` trims the output, and a killed process's last line releases only if whitespace finished it (#446).
+		outputEndsOpen: /\S$/u.test(rawOutput),
 		exitCode: result.exitCode,
 		signal: result.signal,
 		timedOut: result.timedOut,

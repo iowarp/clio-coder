@@ -20,7 +20,12 @@ import { ToolNames } from "../../core/tool-names.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { safetyNetRailText } from "../../domains/safety/decision-presentation.js";
-import { redactSecretString, redactStreamingSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
+import {
+	holdUnresolvedUserinfo,
+	redactSecretString,
+	redactStreamingSecretString,
+	redactToolArgs,
+} from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
@@ -293,7 +298,7 @@ interface CommandStatus {
 }
 
 function commandStatusLine(result: unknown): CommandStatus | null {
-	const text = unwrapResultEnvelope(result);
+	const text = resultEnvelopeText(result);
 	if (typeof text !== "string") return null;
 	const lines = text.split("\n");
 	for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -1381,7 +1386,46 @@ export function renderToolArguments(
  * joined, image blocks become compact MIME/size placeholders, and unknown
  * content blocks are named without serializing their payload.
  */
+const KILLED_OUTCOMES: ReadonlySet<unknown> = new Set(["abort", "timeout", "output-cap"]);
+const KILLED_STATUS_RE = /^bash: command (?:aborted|timed out|output exceeded)\b/u;
+const TAIL_NOTE_PREFIX = "[Output tail-truncated";
+
+/**
+ * Whether a result is the output of a process that did not exit on its own. A row without details, as a legacy ledger row
+ * can be, is judged by the status paragraph the tool wrote (#446).
+ */
+function killedWithOpenOutput(result: unknown, text: string): boolean {
+	const details = detailsOf(result);
+	if (details?.outputEndsOpen === false) return false;
+	if (details !== null && "outcome" in details) {
+		return (
+			KILLED_OUTCOMES.has(details.outcome) ||
+			details.aborted === true ||
+			details.timedOut === true ||
+			typeof details.signal === "string"
+		);
+	}
+	return KILLED_STATUS_RE.test(text.slice(text.lastIndexOf("\n\n") + 2));
+}
+
+/** A killed process's output ends in the paragraph before the tool's status line, and past the cap before the tail note too. */
+function holdKilledOutput(text: string): string {
+	const paragraphs = text.split("\n\n");
+	const notes = paragraphs.at(-1)?.startsWith(TAIL_NOTE_PREFIX) ? 2 : 1;
+	const output = paragraphs.length - 1 - notes;
+	if (output < 0) return text;
+	paragraphs[output] = holdUnresolvedUserinfo(paragraphs[output] ?? "");
+	return paragraphs.join("\n\n");
+}
+
 function unwrapResultEnvelope(result: unknown): unknown {
+	const unwrapped = resultEnvelopeText(result);
+	return typeof unwrapped === "string" && killedWithOpenOutput(result, unwrapped)
+		? holdKilledOutput(unwrapped)
+		: unwrapped;
+}
+
+function resultEnvelopeText(result: unknown): unknown {
 	if (typeof result === "string" || result === null || result === undefined) return result;
 	const presentationText = toolResultPresentationText(result);
 	if (presentationText !== null) return presentationText;
@@ -1883,9 +1927,10 @@ export function renderBashTranscriptExecution(
 		);
 	}
 	const message = execution.error?.trim();
-	const output = message
-		? `${execution.output}${execution.output.length > 0 ? "\n\n" : ""}${message}`
-		: execution.output;
+	// Only a process that exited on its own ended its output on purpose. A trailing newline still finishes a line (#446).
+	const exited = execution.cancelled !== true && execution.error === undefined && typeof execution.exitCode === "number";
+	const shownOutput = exited ? execution.output : holdUnresolvedUserinfo(execution.output);
+	const output = message ? `${shownOutput}${shownOutput.length > 0 ? "\n\n" : ""}${message}` : shownOutput;
 	const finished: ToolExecutionFinished = {
 		toolCallId: "local-bash",
 		toolName: "bash",

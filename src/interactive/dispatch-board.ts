@@ -559,7 +559,7 @@ function progressAnswerLines(
 	);
 	const source = presented
 		? [...(presented.footer ? [presented.footer] : []), ...presented.lines]
-		: liveWorkerAnswerText(progress.tailText, progress.settled).split("\n");
+		: liveWorkerAnswerText(progress.tailText, progress.completed === true).split("\n");
 	const wrapped: string[] = [];
 	for (const line of source) {
 		for (const row of wrapTextWithAnsi(sanitizeCallTargetText(line), railWidth)) wrapped.push(row);
@@ -888,7 +888,7 @@ function councilMemberView(
 		route: `${row.targetId}/${row.wireModelId}`,
 		status: { ...presentation },
 		tailText: sanitizeCallTargetText(
-			redactStreamingSecretString(row.progress?.tailText ?? "", row.progress?.settled === true),
+			redactStreamingSecretString(row.progress?.tailText ?? "", row.progress?.completed === true),
 		),
 		droppedLines: row.progress?.droppedLines ?? 0,
 	};
@@ -1056,7 +1056,9 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction)) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress));
 				const tail =
-					progress.phase === "writing" ? firstLine(redactStreamingSecretString(progress.tailText, progress.settled)) : "";
+					progress.phase === "writing"
+						? firstLine(redactStreamingSecretString(progress.tailText, progress.completed === true))
+						: "";
 				return { text: `${theme.fg("dispatchAction", words)}${tail ? ` ${theme.fg("assistantProse", tail)}` : ""}` };
 			}
 			if (row.currentTool) return { text: `${sanitizeCallTargetText(row.currentTool)} running` };

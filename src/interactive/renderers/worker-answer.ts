@@ -4,25 +4,24 @@ import { RedactedStringProjection, redactStreamingSecretString } from "../../dom
 import { GLYPH } from "../theme/index.js";
 
 /** Sanitize complete source text before splitting, so OSC payloads cannot cross rows. */
-function projectWorkerAnswerText(text: string, settled: boolean, projection?: WorkerAnswerProjection): string {
+function projectWorkerAnswerText(text: string, completed: boolean, projection?: WorkerAnswerProjection): string {
 	const normalized = (projection ? projection.prose.project(text, false, true) : sanitizeAssistantProse(text))
 		.replaceAll(String.fromCharCode(0x9d), "\u001b]")
 		.replaceAll(String.fromCharCode(0x9b), "\u001b[")
 		.replaceAll(String.fromCharCode(0x9c), "\u001b\\");
 	const safe = sanitizeMultilineDisplayText(normalized).text;
-	return (projection ? projection.secrets.project(safe, settled) : redactStreamingSecretString(safe, settled)).replace(
-		/[\p{Cf}\u0080-\u009f]/gu,
-		"",
-	);
+	return (
+		projection ? projection.secrets.project(safe, completed) : redactStreamingSecretString(safe, completed)
+	).replace(/[\p{Cf}\u0080-\u009f]/gu, "");
 }
 
 export function safeWorkerAnswerText(text: string): string {
 	return projectWorkerAnswerText(text, true);
 }
 
-/** Text that may still grow keeps unresolved URL userinfo back until `settled` releases it. */
-export function liveWorkerAnswerText(text: string, settled: boolean): string {
-	return projectWorkerAnswerText(text, settled);
+/** A worker's text keeps unresolved URL userinfo back unless its stream `completed`, so a dead worker never releases it. */
+export function liveWorkerAnswerText(text: string, completed: boolean): string {
+	return projectWorkerAnswerText(text, completed);
 }
 
 /** Each worker keeps parser state across appended deltas, including complete preview tails (#428). */
@@ -30,14 +29,14 @@ export class WorkerAnswerProjection {
 	readonly prose = new AssistantProseProjection();
 	readonly secrets = new RedactedStringProjection();
 	private source: string | undefined;
-	private settled = false;
+	private completed = false;
 	private text = "";
 
-	project(source: string, settled: boolean): string {
-		if (source !== this.source || settled !== this.settled) {
-			this.text = projectWorkerAnswerText(source, settled, this);
+	project(source: string, completed: boolean): string {
+		if (source !== this.source || completed !== this.completed) {
+			this.text = projectWorkerAnswerText(source, completed, this);
 			this.source = source;
-			this.settled = settled;
+			this.completed = completed;
 		}
 		return this.text;
 	}

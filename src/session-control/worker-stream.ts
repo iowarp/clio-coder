@@ -310,7 +310,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		// produced none keeps the live tail rather than blanking the block.
 		const fold = progressByAssignment.get(entry.assignmentId);
 		if (fold !== undefined) {
-			fold.settle(nonEmptyString(facts.text));
+			fold.settle(nonEmptyString(facts.text), facts.outcome === "succeeded");
 			applyProgress(entry, fold);
 		}
 		return { kind: "updated", entry };

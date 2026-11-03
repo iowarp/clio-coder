@@ -344,7 +344,10 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			const facts = runReaders.readRunResult?.(summary.runId);
 			// A failed or retired seal cannot supply the board's terminal answer.
 			const text = facts?.trust?.artifactIntegrity.state === "verified" ? facts.text : undefined;
-			summary.progressFold.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
+			summary.progressFold.settle(
+				typeof text === "string" && text.trim().length > 0 ? text : undefined,
+				summary.status === "completed",
+			);
 			if (
 				typeof text === "string" &&
 				text.trim().length > 0 &&
@@ -355,7 +358,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			}
 			if (facts?.trust !== undefined) summary.trust = summarizeTrustStatus(facts.trust);
 		} catch {
-			summary.progressFold.settle();
+			summary.progressFold.settle(undefined, false);
 		}
 	}
 
@@ -454,7 +457,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			if (type === "heartbeat_status") {
 				const status = resolveHeartbeat(event.status);
 				if (status && !isTerminal(summary.status) && summary.status !== "cancelling") summary.status = status;
-				if (status === "dead") summary.progressFold.settle();
+				if (status === "dead") summary.progressFold.settle(undefined, false);
 				markChanged();
 				return;
 			}
@@ -553,7 +556,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			if (wasRetrying && raw.startedAt === null) {
 				summary.status = "aborted";
 				summary.finishedAtMs = Date.now();
-				summary.progressFold.settle();
+				summary.progressFold.settle(undefined, false);
 			} else {
 				if (isTerminal(summary.status) && !wasRetrying) return;
 				summary.status = "cancelling";

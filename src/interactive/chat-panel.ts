@@ -10,6 +10,7 @@ import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains
 import {
 	holdUnresolvedStrings,
 	holdUnresolvedUserinfo,
+	messageStopCompleted,
 	redactSecretString,
 	redactStreamingSecretString,
 } from "../domains/safety/redaction.js";
@@ -1205,7 +1206,7 @@ function changeSettledCall(seg: ToolSegment): void {
 
 /** Arguments still forming can stop anywhere inside a URL, so they show only what cannot become its userinfo (#446). */
 function shownArgs(seg: ToolSegment): unknown {
-	return seg.argsComplete || seg.finished ? seg.args : holdUnresolvedStrings(seg.args);
+	return seg.argsComplete ? seg.args : holdUnresolvedStrings(seg.args);
 }
 
 /** A settled tool segment as the renderers read a finished call. */
@@ -1918,10 +1919,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * ends that stretch; a later `thinking_delta` opens a new segment after it,
 	 * so the transcript keeps the order the model actually worked in.
 	 */
-	const closeOpenThinking = (entry: Extract<TranscriptEntry, { role: "assistant" }>): void => {
+	const closeOpenThinking = (entry: Extract<TranscriptEntry, { role: "assistant" }>, completed = true): void => {
 		const open = openThinkingSegment(entry);
 		if (open === null) return;
 		open.finalized = true;
+		// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
+		if (!completed) open.text = holdUnresolvedUserinfo(open.text);
 		invalidateEntryCache(entry);
 	};
 
@@ -2438,7 +2441,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						if (seg.kind === "error")
 							add("Provider or terminal error", seg.at, () => providerErrorEvidence(seg.text).split("\n"));
 						if (seg.kind === "thinking" && seg.text.trim().length > 0) {
-							const prose = sanitizeAssistantProse(seg.finalized ? seg.text : holdUnresolvedUserinfo(seg.text));
+							// Whole, because these rows redact one at a time and `--token` can end the line before its value.
+							const prose = redactSecretString(
+								sanitizeAssistantProse(seg.finalized ? seg.text : holdUnresolvedUserinfo(seg.text)),
+							);
 							const opening = prose.trim().split("\n", 1)[0] ?? "";
 							add(`Thinking · ${opening}`, seg.at, () => sanitizeMultilineDisplayText(prose).text.split("\n"));
 						}
@@ -2851,6 +2857,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (current?.role === "assistant") {
 					for (const segment of current.segments) {
 						if (segment.kind !== "tool" || segment.finished || segment.executionStarted || segment.argsComplete) continue;
+						if (!messageStopCompleted((event.message as { stopReason?: unknown }).stopReason)) {
+							segment.args = holdUnresolvedStrings(segment.args);
+						}
 						segment.argsComplete = true;
 						completedStreamedArgs = true;
 					}
@@ -2887,14 +2896,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// non-streaming provider, a replayed message) gets one segment at the
 				// point this message began, ahead of the text the same message
 				// produced, rather than a marker dangling after the answer.
-				closeOpenThinking(assistant);
+				const messageCompleted = messageStopCompleted((event.message as { stopReason?: unknown }).stopReason);
+				closeOpenThinking(assistant, messageCompleted);
 				if (thinking.length > 0) {
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
 					const streamedThisMessage = assistant.segments
 						.slice(messageStart)
 						.some((segment) => segment.kind === "thinking" && segment.text.length > 0);
 					if (!streamedThisMessage) {
-						assistant.segments.splice(messageStart, 0, { kind: "thinking", text: thinking, at: stamp(), finalized: true });
+						assistant.segments.splice(messageStart, 0, {
+							kind: "thinking",
+							// A replay reaches here too, so an aborted message hides what its live view hid (#446).
+							text: messageCompleted ? thinking : holdUnresolvedUserinfo(thinking),
+							at: stamp(),
+							finalized: true,
+						});
 					}
 				}
 				assistant.messageStartSegmentIndex = undefined;
@@ -3017,7 +3033,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 					if (entry.pending) {
 						invalidateEntryCache(entry);
-						closeOpenThinking(entry);
+						// A message that settled closed its own reasoning, so this one never got a stop reason.
+						closeOpenThinking(entry, false);
 						entry.pending = false;
 						entry.messageStartSegmentIndex = undefined;
 					}

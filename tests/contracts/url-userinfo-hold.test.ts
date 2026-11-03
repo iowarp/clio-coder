@@ -14,13 +14,18 @@ import {
 	WORKER_PROGRESS_WINDOW_BYTES,
 	WORKER_PROGRESS_WINDOW_MS,
 } from "../../src/domains/telemetry/worker-progress.js";
-import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
+import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
+import { renderBashTranscriptExecution } from "../../src/interactive/renderers/tool-execution.js";
 import {
 	liveWorkerAnswerText,
 	safeWorkerAnswerText,
 	WorkerAnswerProjection,
 } from "../../src/interactive/renderers/worker-answer.js";
+import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import {
 	BASH_DEFAULT_RESULT_DISPOSITION,
 	BASH_DISPLAY_MAX_BYTES,
@@ -397,6 +402,262 @@ test("run feed row fields are redacted before their bound cuts them", () => {
 			.match(SECRET_LETTERS),
 		null,
 	);
+});
+
+const CUT_OFF = ["aborted", "error", "length", undefined] as const;
+const KILLED_STATUS =
+	"bash: command aborted after 1s of its 300000ms timeout. The host ended the run and recorded no cause.";
+const plainRows = (panel: ChatPanel) => panel.render(400).map(stripTerminalSequences).join("\n");
+const viewOf = async (panel: ChatPanel) => {
+	const shown: string[] = [];
+	for (const artifact of panel.inspectionArtifacts()) shown.push(artifact.title, ...(await artifact.load()).lines);
+	return shown.join("\n");
+};
+const message = (content: unknown[], stopReason?: string) => ({
+	type: "message_end",
+	message: { role: "assistant", content, ...(stopReason === undefined ? {} : { stopReason }) },
+});
+
+function thinkingPanel(text: string, stopReason: string | undefined, streamed: boolean): ChatPanel {
+	const panel = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	if (streamed) panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: text, partialThinking: text });
+	panel.applyEvent(message([{ type: "thinking", thinking: text }], stopReason) as never);
+	return panel;
+}
+
+function killedBashPanel(output: string, details: Record<string, unknown> | undefined): ChatPanel {
+	const panel = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+	const text = details?.outcome === "success" ? output : `${output}\n\n${KILLED_STATUS}`;
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	panel.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "c",
+		toolName: "bash",
+		args: { command: "run" },
+	} as never);
+	panel.applyEvent({
+		type: "tool_execution_end",
+		toolCallId: "c",
+		toolName: "bash",
+		isError: details?.outcome !== "success",
+		result: { content: [{ type: "text", text }], ...(details === undefined ? {} : { details }) },
+	} as never);
+	return panel;
+}
+
+test("a stream cut off at any offset shows no secret part in any frame, and a completed one equals one-shot", async () => {
+	for (const text of CORPUS) {
+		const oneShot = redactSecretString(text);
+		const hidden = (frame: string, where: string) =>
+			strictEqual(leaked(frame, oneShot).join(""), "", `${where} of ${JSON.stringify(text)}`);
+		for (let at = 1; at <= text.length; at += 1) {
+			const prefix = text.slice(0, at);
+			const where = `offset ${at}`;
+			for (const stopReason of CUT_OFF) {
+				const fold = createWorkerProgressFold();
+				fold.observe(delta(prefix), 0);
+				const open = liveWorkerAnswerText(fold.snapshot().tailText, false);
+				fold.observe(message([{ type: "text", text: prefix }], stopReason), 1);
+				fold.observe({ type: "agent_end" }, 2);
+				const snapshot = fold.snapshot();
+				strictEqual(liveWorkerAnswerText(snapshot.tailText, snapshot.completed === true), open, `${stopReason} ${where}`);
+				hidden(open, `${stopReason} ${where}`);
+			}
+			hidden(plainRows(thinkingPanel(prefix, "aborted", true)), `thinking ${where}`);
+			hidden(await viewOf(thinkingPanel(prefix, "aborted", true)), `thinking view ${where}`);
+			const killed = killedBashPanel(prefix, { outcome: "abort", aborted: true, outputEndsOpen: true });
+			hidden(plainRows(killed), `killed ${where}`);
+			// /view redacts a tool's rows one at a time, so a flag and its value on two lines is a gap with or without an abort.
+			if (!text.includes("\n")) hidden(await viewOf(killed), `killed view ${where}`);
+		}
+		const fold = createWorkerProgressFold();
+		fold.observe(delta(text), 0);
+		fold.observe(message([{ type: "text", text }], "stop"), 1);
+		fold.observe({ type: "agent_end" }, 2);
+		strictEqual(fold.snapshot().completed, true);
+		strictEqual(liveWorkerAnswerText(fold.snapshot().tailText, true), safeWorkerAnswerText(text), `completed ${text}`);
+	}
+});
+
+test("what ended a stream decides whether its last URL shows", async () => {
+	const url = "http://localhost:8080";
+	const done = "see http://localhost:8080";
+	for (const stopReason of ["stop", "toolUse"])
+		strictEqual(plainRows(thinkingPanel(done, stopReason, true)).includes(url), true);
+	for (const stopReason of CUT_OFF) strictEqual(plainRows(thinkingPanel(done, stopReason, true)).includes(url), false);
+	const success = killedBashPanel(done, { outcome: "success", outputEndsOpen: true });
+	strictEqual(plainRows(success).includes(url), true);
+	strictEqual((await viewOf(success)).includes(url), true);
+	const failed = killedBashPanel(done, {
+		outcome: "nonzero",
+		exitCode: 1,
+		signal: null,
+		aborted: false,
+		timedOut: false,
+		outputEndsOpen: true,
+	});
+	strictEqual(plainRows(failed).includes(url), true);
+	for (const details of [
+		{ outcome: "abort", outputEndsOpen: true },
+		{ outcome: "timeout", outputEndsOpen: true },
+		{ outcome: "output-cap", outputEndsOpen: true },
+		{ outcome: "nonzero", signal: "SIGKILL", outputEndsOpen: true },
+	]) {
+		const panel = killedBashPanel(done, details);
+		strictEqual(plainRows(panel).includes(url), false, details.outcome);
+		strictEqual((await viewOf(panel)).includes(url), false, details.outcome);
+	}
+	// A finished line is finished, however the process ended.
+	strictEqual(plainRows(killedBashPanel(done, { outcome: "abort", outputEndsOpen: false })).includes(url), true);
+	const local = (execution: object) =>
+		renderBashTranscriptExecution({ command: "run", output: done, ...execution } as never, 400).join("\n");
+	strictEqual(local({ exitCode: 0 }).includes(url), true);
+	strictEqual(local({ cancelled: true }).includes(url), false);
+	strictEqual(local({ exitCode: null }).includes(url), false);
+	const fold = createWorkerProgressFold();
+	fold.observe(delta(done), 0);
+	fold.observe(message([{ type: "text", text: done }], "stop"), 1);
+	fold.observe({ type: "agent_end" }, 2);
+	strictEqual(fold.snapshot().completed, true);
+	fold.settle(undefined, false);
+	strictEqual(fold.snapshot().completed, false);
+	const resumed = createWorkerProgressFold();
+	resumed.observe(message([{ type: "text", text: "first" }], "stop"), 0);
+	resumed.observe(delta(" https://user:ZQ"), 1);
+	resumed.observe({ type: "agent_end" }, 2);
+	strictEqual(resumed.snapshot().completed, false);
+	const died = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+	died.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	died.applyEvent({
+		type: "message_update",
+		assistantMessageEvent: {
+			type: "toolcall_delta",
+			contentIndex: 0,
+			partial: {
+				content: [{ type: "toolCall", id: "d", name: "bash", arguments: { command: "curl https://u:ZQXJ" } }],
+			},
+		},
+	} as never);
+	died.applyEvent({ type: "agent_end", messages: [] } as never);
+	strictEqual(plainRows(died).match(SECRET_LETTERS), null);
+	const openThought = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+	openThought.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	openThought.applyEvent({
+		type: "thinking_delta",
+		contentIndex: 0,
+		delta: "see https://user:ZQXJ",
+		partialThinking: "x",
+	});
+	openThought.applyEvent({ type: "agent_end", messages: [] } as never);
+	strictEqual(plainRows(openThought).match(SECRET_LETTERS), null);
+	const worker = (settle: (stream: ReturnType<typeof createWorkerStream>) => void) => {
+		const stream = createWorkerStream({
+			readResult: () => null,
+		});
+		const started = stream.started({
+			runId: "r",
+			assignmentId: "w",
+			attempt: 0,
+			requestOrigin: "user",
+			agentId: "coder",
+			targetId: "local",
+			wireModelId: "m",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			pid: 1,
+		} as never);
+		strictEqual(started !== null, true);
+		stream.progress({ runId: "r", agentId: "coder", event: delta(done) });
+		settle(stream);
+		const entry = stream.get("w");
+		strictEqual(entry !== undefined, true);
+		return renderWorkerEntryLines(entry as never, 200, { unbounded: true })
+			.map(stripTerminalSequences)
+			.join("\n");
+	};
+	const terminal = { runId: "r", outcomeCode: null, outcomeDetail: null };
+	strictEqual(worker((stream) => stream.aborted({ runId: "r" } as never)).includes(url), false);
+	strictEqual(worker((stream) => stream.failed({ ...terminal, outcome: "failed" } as never)).includes(url), false);
+	strictEqual(worker((stream) => stream.completed({ ...terminal, outcome: "succeeded" } as never)).includes(url), true);
+	const forming = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+	forming.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	forming.applyEvent({
+		type: "message_update",
+		assistantMessageEvent: {
+			type: "toolcall_delta",
+			contentIndex: 0,
+			partial: { content: [{ type: "toolCall", id: "c", name: "bash", arguments: { command: "curl https://u:ZQXJ" } }] },
+		},
+	} as never);
+	forming.applyEvent(message([], "aborted") as never);
+	forming.applyEvent({ type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] } as never);
+	strictEqual(plainRows(forming).match(SECRET_LETTERS), null);
+	strictEqual((await viewOf(forming)).match(SECRET_LETTERS), null);
+});
+
+test("replay and /resume hide what the live view hid", async () => {
+	const entry = (turnId: string, role: string, payload: unknown, parentTurnId: string | null) => ({
+		kind: "message",
+		turnId,
+		parentTurnId,
+		timestamp: "2026-01-01T00:00:00.000Z",
+		role,
+		payload,
+	});
+	const replay = (...entries: unknown[]) => {
+		const panel = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+		rehydrateChatPanelFromTurns(panel, entries as never);
+		return panel;
+	};
+	const thinking = (stopReason?: string) => [
+		entry("u", "user", { text: "go" }, null),
+		entry(
+			"a",
+			"assistant",
+			{
+				content: [{ type: "thinking", thinking: "see https://user:ZQXJ" }],
+				...(stopReason === undefined ? {} : { stopReason }),
+			},
+			"u",
+		),
+	];
+	for (const stopReason of ["aborted", "error", "length", undefined]) {
+		const panel = replay(...thinking(stopReason));
+		strictEqual(plainRows(panel).includes("https://user:"), true, String(stopReason));
+		strictEqual(plainRows(panel).match(SECRET_LETTERS), null, String(stopReason));
+		strictEqual((await viewOf(panel)).match(SECRET_LETTERS), null, String(stopReason));
+	}
+	strictEqual(plainRows(replay(...thinking("stop"))).includes("ZQXJ"), true);
+	const tool = (details: unknown) => [
+		entry("u", "user", { text: "go" }, null),
+		entry(
+			"a",
+			"assistant",
+			{ content: [{ type: "toolCall", id: "c", name: "bash", arguments: { command: "x" } }], stopReason: "toolUse" },
+			"u",
+		),
+		entry("tc", "tool_call", { toolCallId: "c", name: "bash", args: { command: "x" } }, "a"),
+		entry(
+			"tr",
+			"tool_result",
+			{
+				toolCallId: "c",
+				outcome: "error",
+				result: {
+					content: [{ type: "text", text: `see https://user:ZQXJ\n\n${KILLED_STATUS}` }],
+					...(details === undefined ? {} : { details }),
+				},
+			},
+			"tc",
+		),
+	];
+	for (const details of [{ outcome: "abort", aborted: true }, undefined]) {
+		const panel = replay(...tool(details));
+		strictEqual(plainRows(panel).includes("https://user:"), true, JSON.stringify(details));
+		strictEqual(plainRows(panel).match(SECRET_LETTERS), null, JSON.stringify(details));
+		strictEqual((await viewOf(panel)).match(SECRET_LETTERS), null, JSON.stringify(details));
+	}
 });
 
 test("live command output holds only an open last line", () => {
