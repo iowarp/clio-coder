@@ -215,7 +215,9 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			inspectionCache = { ref: member.ref, ...(member.scope ? { scope: member.scope } : {}), inspection: result };
 			return result;
 		} catch (error) {
-			failure = `${member.ref}: ${error instanceof Error ? error.message : String(error)}`;
+			// A failed inspection is this package's problem, said once as a notice;
+			// it is not a library read failure, which would paint every empty tab red.
+			deps.notice("error", `${member.ref}: ${error instanceof Error ? error.message : String(error)}`);
 			view.member = undefined;
 			return undefined;
 		}
@@ -455,7 +457,6 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		} else if (subject.kind === "copy") {
 			view.member = { ref: subject.copy.ref, scope: subject.copy.scope };
 		} else {
-			handle.toggleDetail();
 			return;
 		}
 		inspectionCache = null;
@@ -541,7 +542,9 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			});
 		if (actions.update) entries.push({ key: "u", verb: "update" });
 		if (actions.remove) entries.push({ key: "r", verb: "remove" });
-		entries.push({ key: "Enter", verb: actions.open ? "members" : "detail" });
+		// Enter is named only where it opens members; a pane is Tab's, and at
+		// split width Enter on a component did nothing while the rail said detail.
+		if (actions.open) entries.push({ key: "Enter", verb: "members" });
 		if (actions.use) entries.push({ key: "v", verb: "use" });
 		return entries;
 	};

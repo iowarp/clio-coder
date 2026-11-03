@@ -24,7 +24,15 @@ import {
 	type LibraryStepOutcome,
 	type LibraryStepReview,
 } from "../../domains/resources/index.js";
-import { type Component, isKeyRelease, matchesKey, type OverlayHandle, type TUI } from "../../engine/tui.js";
+import {
+	type Component,
+	isKeyRelease,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
+import { displaySafe } from "../display-safe.js";
 import {
 	buildResponsiveHint,
 	createCachedBody,
@@ -59,6 +67,23 @@ function libraryReviewWidth(columns: number): number {
 
 function stepHeadline(step: LibraryPlanStep): string {
 	return `${step.operation} ${step.identity.ref} in ${step.identity.scope} scope`;
+}
+
+/** The verdict line, bold and wrapped: a long package name folds, it never loses its scope. */
+function headline(token: Parameters<ClioThemeStyle>[0], text: string, width: number): string[] {
+	return wrapTextWithAnsi(clioTheme().style(token, text, { bold: true }), Math.max(1, Math.floor(width)));
+}
+type ClioThemeStyle = ReturnType<typeof clioTheme>["style"];
+
+/**
+ * One step's rule names the operation and the scope, which always fit; the
+ * package ref, which can be longer than the rule, is the step's first fact.
+ */
+function stepRule(step: LibraryPlanStep, index: number, total: number, width: number): string {
+	return sectionRule(clioTheme(), width, `${step.operation} in ${step.identity.scope} scope`, {
+		...(total > 1 ? { meta: `${index + 1}/${total}` } : {}),
+		...(step.refusal ? { token: "error" as const } : {}),
+	});
 }
 
 /**
@@ -100,7 +125,7 @@ function reviewFacts(step: LibraryPlanStep, review: LibraryStepReview | undefine
 /** One step's facts, in the order the questions matter. */
 function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined, detail: boolean): Fact[] {
 	const theme = clioTheme();
-	const facts: Fact[] = [];
+	const facts: Fact[] = [{ label: "Package", value: step.identity.ref }];
 	if (step.refusal) facts.push({ label: "Refused", value: statusChip(theme, "error", step.refusal) });
 	if (step.content && !step.content.valid)
 		facts.push({
@@ -170,17 +195,22 @@ function reviewChoices(applicable: boolean, verb: string, consequence: string, d
  * dependency story.
  */
 export function formatLibraryPlanReview(
-	plan: LibraryLifecyclePlan,
+	rawPlan: LibraryLifecyclePlan,
 	width: number,
 	options: { detail?: boolean } = {},
 ): string[] {
 	const theme = clioTheme();
+	// Refs, notes, diagnostics and recovery text come from manifests and the
+	// tree; one pass here neutralizes every string a row below prints.
+	const plan = displaySafe(rawPlan);
 	const detail = options.detail === true;
 	const target = plan.steps.at(-1);
 	const rows: string[] = [
-		theme.style("decisionQuestion", target ? stepHeadline(target) : `${plan.request.operation} ${plan.request.ref}`, {
-			bold: true,
-		}),
+		...headline(
+			"decisionQuestion",
+			target ? stepHeadline(target) : `${plan.request.operation} ${plan.request.ref}`,
+			width,
+		),
 		...chipRows(
 			theme,
 			[
@@ -203,12 +233,7 @@ export function formatLibraryPlanReview(
 		),
 	];
 	plan.steps.forEach((step, index) => {
-		rows.push(
-			sectionRule(theme, width, stepHeadline(step), {
-				...(plan.steps.length > 1 ? { meta: `${index + 1}/${plan.steps.length}` } : {}),
-				...(step.refusal ? { token: "error" as const } : {}),
-			}),
-		);
+		rows.push(stepRule(step, index, plan.steps.length, width));
 		rows.push(
 			...factRows(
 				theme,
@@ -281,7 +306,7 @@ function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: Librar
 
 function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult): Fact[] {
 	const theme = clioTheme();
-	const facts: Fact[] = [];
+	const facts: Fact[] = [{ label: "Package", value: outcome.identity.ref }];
 	if (outcome.error) {
 		facts.push({ label: "Error", value: statusChip(theme, "error", `${outcome.error.code}: ${outcome.error.message}`) });
 		if (outcome.error.changed)
@@ -334,13 +359,14 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
  * session refresh are then separate facts: a package can be on disk with one
  * resource still unavailable, and that is not a failed write.
  */
-export function formatLibraryOutcome(result: LibraryApplyResult, width: number): string[] {
+export function formatLibraryOutcome(rawResult: LibraryApplyResult, width: number): string[] {
 	const theme = clioTheme();
+	const result = displaySafe(rawResult);
 	const rows: string[] = [
-		theme.style(
+		...headline(
 			result.failed > 0 ? "error" : "success",
 			`${result.committed} committed · ${result.failed} failed · ${result.unattempted} unattempted`,
-			{ bold: true },
+			width,
 		),
 		...chipRows(theme, [refreshChip(result.refresh)], width),
 		...choiceRows(
@@ -360,7 +386,7 @@ export function formatLibraryOutcome(result: LibraryApplyResult, width: number):
 	for (const outcome of result.outcomes) {
 		const status = outcome.status === "committed" ? "ok" : outcome.status === "failed" ? "error" : "queued";
 		rows.push(
-			sectionRule(theme, width, `${outcome.operation} ${outcome.identity.ref} (${outcome.identity.scope})`, {
+			sectionRule(theme, width, `${outcome.operation} in ${outcome.identity.scope} scope`, {
 				meta: outcome.status,
 				...(outcome.status === "failed" ? { token: "error" as const } : {}),
 			}),
@@ -395,11 +421,12 @@ export function formatLibraryOutcome(result: LibraryApplyResult, width: number):
  * exists to prevent.
  */
 function formatLibraryImportReview(
-	plan: LibraryImportPlan,
+	rawPlan: LibraryImportPlan,
 	width: number,
 	options: { detail?: boolean } = {},
 ): string[] {
 	const theme = clioTheme();
+	const plan = displaySafe(rawPlan);
 	const detail = options.detail === true;
 	const install = plan.action === "install";
 	const facts: Fact[] = [
@@ -442,10 +469,10 @@ function formatLibraryImportReview(
 			: []),
 	];
 	return [
-		theme.style(
+		...headline(
 			install ? "decisionQuestion" : "error",
 			`${install ? "import" : "blocked"} ${plan.id ?? plan.source.input} into ${plan.scope} scope`,
-			{ bold: true },
+			width,
 		),
 		...chipRows(
 			theme,
@@ -478,6 +505,8 @@ class LibraryReviewBody implements Component, RowBudgetedBody {
 	);
 	private bodyRows = 0;
 	private page = 1;
+	/** The last window, kept while nothing moved, so the dock's own cache sees the same lines again. */
+	private memo: { all: string[]; width: number; start: number; height: number; lines: string[] } | null = null;
 
 	constructor(private readonly review: (width: number, detail: boolean) => string[]) {}
 
@@ -528,8 +557,15 @@ class LibraryReviewBody implements Component, RowBudgetedBody {
 		this.page = height;
 		const { window, start, position } = windowRows(all, this.scroll, height);
 		this.scroll = start;
-		if (position === null) return window;
-		return [...window, positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width)];
+		const memo = this.memo;
+		if (memo && memo.all === all && memo.width === width && memo.start === start && memo.height === height)
+			return memo.lines;
+		const lines =
+			position === null
+				? window
+				: [...window, positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width)];
+		this.memo = { all, width, start, height, lines };
+		return lines;
 	}
 
 	invalidate(): void {

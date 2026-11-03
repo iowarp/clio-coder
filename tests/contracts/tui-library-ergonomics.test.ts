@@ -167,14 +167,17 @@ it("identifies provider packages and limits their catalog hints to the selected 
 		ok(item);
 		equal(item.label, "materio [plugin]");
 		equal(item.group, "Provider packages");
-		const detail = plain(item.detail?.(80).join("\n") ?? "");
-		match(detail, new RegExp(`plugin provider package for ${category}`));
-		match(detail, new RegExp(`lab-${category}`));
-		ok(!detail.includes("lab-skill"));
-		match(detail, /not loaded components/);
-		match(detail, /\[b\] shows loaded components/);
-		match(detail, /\[i\] review install/);
-		ok(!detail.includes("Enter members"));
+		for (const width of [40, 80]) {
+			// At 40 columns the facts wrap under their labels, so phrases are matched on whitespace-collapsed text.
+			const detail = plain(item.detail?.(width).join("\n") ?? "").replace(/\s+/g, " ");
+			match(detail, new RegExp(`plugin provider package for ${category}`));
+			match(detail, new RegExp(`lab-${category}`));
+			ok(!detail.includes("lab-skill"));
+			match(detail, /not loaded components/);
+			match(detail, /\[b\] shows loaded components/);
+			match(detail, /\[i\] review install/);
+			ok(!detail.includes("[Enter] members"), "an uninstalled package has no members to open");
+		}
 	}
 });
 

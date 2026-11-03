@@ -837,8 +837,8 @@ describe("library browser behavior", () => {
 		)(availableRow);
 		deepStrictEqual(
 			availableHints.map((entry) => entry.key),
-			["i", "Enter"],
-			"an uninstalled package offers install, never remove",
+			["i"],
+			"an uninstalled package offers install, never remove, and has no members to open",
 		);
 
 		const installed = harness({
