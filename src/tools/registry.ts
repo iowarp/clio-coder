@@ -688,6 +688,8 @@ export interface AskUserTranscriptRound {
 
 export interface AskUserToolPolicy {
 	planOnly?: boolean;
+	/** A plan card was answered with a revision or typed text, so the next plan card is owed even after action=complete. */
+	planSentBack?: boolean;
 	id: string;
 	status: AskUserInterviewStatus;
 	startedAt: string;

@@ -888,7 +888,13 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 			if (!normalized.call) return { kind: "error", message: `ask_user: ${normalized.error ?? "invalid input"}` };
 			const call = normalized.call;
 			const turnPolicy = options?.askUserPolicy;
-			const standalone = call.action === "ask" && call.mode === "single_question" && turnPolicy?.status === "complete";
+			// The result tells a model to complete before prose, so a plan sent back
+			// was often completed first and its revised card hit already_complete.
+			const standalone =
+				call.action === "ask" &&
+				turnPolicy?.status === "complete" &&
+				(call.mode === "single_question" ||
+					(turnPolicy.planSentBack === true && call.questions?.length === 1 && isPlanCloseQuestion(call.questions[0])));
 			const policy = standalone ? createStandalonePolicy(options) : (turnPolicy ?? createStandalonePolicy(options));
 			if (standalone && turnPolicy?.planOnly !== undefined) policy.planOnly = turnPolicy.planOnly;
 			hydratePolicy(policy, options);
@@ -1037,16 +1043,16 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				// The answered close is the interview's last act, so requiring
 				// action=complete after it only cost a round. A revision or a typed
 				// qualification keeps it open, because another card follows.
+				const planCard = questions.length === 1 && isPlanCloseQuestion(questions[0]);
 				const closesPlan =
-					questions.length === 1 &&
-					isPlanCloseQuestion(questions[0]) &&
+					planCard &&
 					result.answers[0]?.options?.length === 1 &&
 					!result.answers[0].value?.trim() &&
 					!/^revise\b/iu.test(result.answers[0].options[0] ?? "");
 				if (closesPlan) {
 					policy.status = "complete";
 					policy.endedAt = answeredAt;
-				}
+				} else if (planCard) policy.planSentBack = true;
 				await persistAskUserTranscript(policy, options);
 				return okInterviewResult(policy, closesPlan ? "complete" : "round_answered", result.answers);
 			} finally {

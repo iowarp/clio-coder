@@ -134,6 +134,21 @@ describe("ask_user tool", () => {
 		ok(result.kind === "ok" && result.output.startsWith("ask_user result: complete\n"));
 	});
 
+	it("shows a revised plan card after a sent-back plan was completed, and not after a kept one", async () => {
+		const card = (answer: string) => ({ answers: [{ question: "Carry out this plan?", answer, options: [answer] }] });
+		const asked = { questions: [{ question: "Carry out this plan?", options: [{ label: "Revise the plan first" }] }] };
+		const revised = { questions: [{ question: "Carry out the revised plan?", options: [{ label: "Keep the plan" }] }] };
+		const sentBack = fixture([card("Revise the plan first"), card("Keep the plan")]);
+		await sentBack.call(asked);
+		await sentBack.call({ action: "complete", summary: "Revising" });
+		const shown = await sentBack.call(revised);
+		ok(shown.kind === "ok" && shown.output.startsWith("ask_user result: standalone_answered\n"));
+		const kept = fixture([card("Keep the plan")]);
+		await kept.call(asked);
+		const again = await kept.call(revised);
+		ok(again.kind === "ok" && again.output.startsWith("ask_user result: already_complete\n"));
+	});
+
 	it("hides the install-offer binding tag from the surface and keeps it in the answer", async () => {
 		const tag = skillInstallOfferTag("offer-1");
 		const asked = {
