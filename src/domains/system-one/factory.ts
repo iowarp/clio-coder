@@ -12,7 +12,7 @@ import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../providers/contract.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
-import { cutsFor } from "./calibration.js";
+import { cutsFor, FITTED_CUTS } from "./calibration.js";
 import { capabilityEngineSource } from "./capability-settings.js";
 import type { DecisionTask } from "./contract.js";
 import { SITE_TASKS } from "./contract.js";
@@ -128,6 +128,13 @@ function unavailableEngine(name: string, problem: string): DecisionEngine {
 		unsupported: () => problem,
 		decide: () => Promise.reject(new Error(problem)),
 	};
+}
+
+/** Whether any LLM build has a ranking cut, measured or the operator's: identities are `llm:<runtime>@<host>/<model>#<mode>:<prompt>`. */
+function anyLlmRankingCut(overrides: Readonly<Record<string, Readonly<Record<string, number>>>>): boolean {
+	return Object.entries({ ...FITTED_CUTS, ...overrides }).some(
+		([identity, table]) => identity.startsWith("llm:") && table["relevance.ranked"] !== undefined,
+	);
 }
 
 function maxOptionsOf(engine: DecisionEngine): number {
@@ -318,7 +325,10 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				if (resolution.usable === undefined) return false;
 				// Shadow only when every engine taking part last answered unfitted. One
 				// validated route keeps the site live, and an engine not yet heard from
-				// is unknown, which is never shadow.
+				// is unknown, which is never shadow. The exception is an LLM engine at
+				// `relevance` with no ranking cut for any LLM build: its answer could not
+				// reorder a listing, and a slow one that keeps timing out never answers,
+				// so waiting to hear from it spends requests that cannot be used.
 				const usable = [resolution.usable, ...(resolution.routes ?? []).flatMap((route) => route.usable ?? [])];
 				// Cuts are live settings, so fittedness is recomputed from the identity
 				// each engine last answered under, never cached with the answer.
@@ -327,7 +337,8 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 					// The runner files each answer under the moment it was asked at; the bare
 					// site key never matches a site that is only asked at named moments.
 					const last = runner.answeredIdentity(digestOf(engine), site, moment);
-					return last !== null && !cutsFor(last.identity, site, cuts, last.contract).fitted;
+					if (last === null) return site === "relevance" && engine.cfg.kind === "llm" && !anyLlmRankingCut(cuts);
+					return !cutsFor(last.identity, site, cuts, last.contract).fitted;
 				});
 			} catch {
 				// Unknown is not shadow: the caller waits exactly as it did before this existed.

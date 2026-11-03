@@ -7,6 +7,7 @@ import { newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import { createRedactionTally } from "../../src/domains/evidence/redact.js";
+import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
@@ -180,6 +181,30 @@ describe("System One runner", () => {
 		explicit.systemOne.engines.manual = { kind: "llm", target: "memory", model: "gpt-6-luna", mode: "auto" };
 		explicit.systemOne.sites.relevance = { engine: "manual", timeoutMs: 5000 };
 		strictEqual(capabilitySettings(explicit), explicit);
+	});
+
+	it("reads an LLM engine at relevance as shadow before its first request, unless a ranking cut exists for an LLM build", () => {
+		const cuts: Record<string, Record<string, number>> = {};
+		const so = createSystemOne({
+			settings: () =>
+				({
+					systemOne: {
+						engines: { side: { kind: "llm", target: "t", model: "m", mode: "auto" } },
+						sites: { relevance: { engine: "side" }, consult: { engine: "side" } },
+						cuts,
+					},
+				}) as unknown as ClioSettings,
+			providers: {
+				getTarget: () => ({ id: "t", runtime: "llamacpp", url: "http://127.0.0.1:1", defaultModel: "m" }),
+				getRuntime: () => llamacppRuntime,
+			},
+			credentialsPresent: () => new Set(),
+			recorder: () => ({ decision: () => {}, outcome: () => {} }),
+		});
+		strictEqual(so.shadowed("relevance"), true);
+		strictEqual(so.shadowed("consult"), false);
+		cuts["llm:llamacpp@127.0.0.1:1/m#logprobs:p1"] = { "relevance.ranked": 0.5 };
+		strictEqual(so.shadowed("relevance"), false);
 	});
 
 	it("asks nothing and records nothing when state() is null", async () => {
