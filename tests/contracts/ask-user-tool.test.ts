@@ -131,6 +131,7 @@ describe("ask_user tool", () => {
 			["Keep the plan (Recommended)", "Proceed as planned", "Revise the plan first"],
 		);
 		ok(result.kind === "ok" && !result.output.includes("then implement in this same turn"));
+		ok(result.kind === "ok" && result.output.startsWith("ask_user result: complete\n"));
 	});
 
 	it("hides the install-offer binding tag from the surface and keeps it in the answer", async () => {

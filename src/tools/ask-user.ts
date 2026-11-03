@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
+import { isPlanCloseQuestion } from "../core/plan-request.js";
 import { safeResourceWriteAsync } from "../core/safe-resource-write.js";
 import { stripSkillInstallOfferTag } from "../core/skill-activation.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -1033,8 +1034,21 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				}
 				const derived = deriveAnswerDecisions(questions, result.answers, policy);
 				upsertDecisions(policy, derived);
+				// The answered close is the interview's last act, so requiring
+				// action=complete after it only cost a round. A revision or a typed
+				// qualification keeps it open, because another card follows.
+				const closesPlan =
+					questions.length === 1 &&
+					isPlanCloseQuestion(questions[0]) &&
+					result.answers[0]?.options?.length === 1 &&
+					!result.answers[0].value?.trim() &&
+					!/^revise\b/iu.test(result.answers[0].options[0] ?? "");
+				if (closesPlan) {
+					policy.status = "complete";
+					policy.endedAt = answeredAt;
+				}
 				await persistAskUserTranscript(policy, options);
-				return okInterviewResult(policy, "round_answered", result.answers);
+				return okInterviewResult(policy, closesPlan ? "complete" : "round_answered", result.answers);
 			} finally {
 				policy.inFlight = false;
 			}
