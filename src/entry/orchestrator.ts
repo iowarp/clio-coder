@@ -120,7 +120,6 @@ import {
 	buildDispatchMemorySection,
 	canonicalMemoryRepositoryIdentity,
 	completedLessonSource,
-	createMemoryLessonJudge,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
 	entriesBeforeMemoryOff,
@@ -2210,7 +2209,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// load; a worker dispatched before that carries no extension hooks.
 	let workerHookSource: import("./extension-reload.js").ExtensionReloadCoordinator["workerHooks"] | null = null;
 	const memoryOwner = new MemoryRuntime();
-	let getMemoryLessonJudge: (() => ReturnType<typeof createMemoryLessonJudge> | null) | null = null;
+	let getMemoryLessonJudge: (() => null) | null = null;
 	const result = await loadDomains(
 		[
 			options.startupSettings
@@ -3875,7 +3874,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return systemOneCore.run(site, object, merged);
 		},
 	};
-	getMemoryLessonJudge = () => (systemOne.bound("consult") ? createMemoryLessonJudge(systemOne) : null);
+	// The judge's 0.8 and 0.6 were never measured, so binding `consult` no longer turns it on.
+	getMemoryLessonJudge = () => null;
 	// How each approval the main agent parked was answered, joined to the card's
 	// advisory and the yolo gate by the request id both carried.
 	termination.onDrain(
@@ -4762,7 +4762,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				canAsk: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
 				isPlan: () => {
 					const interpretation = systemOneHost.interpretation();
-					return interpretation === undefined ? undefined : interpretation.intent === "plan";
+					// An undecided intent is no reading: the plan-close keeps its own rule, as without System One.
+					return interpretation === undefined || interpretation.intent === "unknown"
+						? undefined
+						: interpretation.intent === "plan";
 				},
 			}),
 		);

@@ -75,6 +75,8 @@ export interface RelevanceObject {
 export interface RelevanceValue {
 	/** Candidate id to probability of fitting. Absent means undecided. */
 	readonly scores: Readonly<Record<string, number>>;
+	/** `relevance.related`: the measured score at which an entry nothing else matched may join a list. */
+	readonly relatedAt?: number;
 }
 
 /** Candidates that can be asked about: unique, named, and never a key that rewrites a prototype. */
@@ -132,7 +134,8 @@ export const RELEVANCE_SITE: SiteDefinition<RelevanceObject, RelevanceValue> = {
 			if (!Number.isFinite(answer.noul) || answer.certainty < MIN_CERTAINTY) continue;
 			scores[candidate.id] = answer.noul;
 		}
-		return Object.keys(scores).length > 0 ? { scores } : null;
+		const relatedAt = cuts.cut("related");
+		return Object.keys(scores).length > 0 ? { scores, ...(relatedAt !== undefined ? { relatedAt } : {}) } : null;
 	},
 	summarize: (value) => ({ scored: Object.keys(value.scores).length }),
 };

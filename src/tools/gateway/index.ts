@@ -96,12 +96,12 @@ const ACTION_CLASS_PURPOSE: Readonly<Partial<Record<ActionClass, string>>> = {
 export const GATEWAY_RANK_MIN_LISTING = 40;
 /** Related entries a find adds beside a query's own hits. */
 export const GATEWAY_RELATED_MAX = 5;
-/** Probability at or above which a ranked entry counts as related. */
-const GATEWAY_RELATED_MIN_SCORE = 0.5;
 
 /** Scores for capability names, and who produced them. */
 export interface GatewayCapabilityRanking {
 	scores: Readonly<Record<string, number>>;
+	/** The measured score at which an entry the query missed may be offered as related. */
+	relatedAt?: number;
 	source: string;
 }
 
@@ -140,7 +140,12 @@ export function capabilityRankerFrom(ranker: RelevanceRanker): GatewayCapability
 				...(entry.categories !== undefined ? { categories: entry.categories } : {}),
 			})),
 		});
-		return ranked === null ? null : { scores: ranked.scores, source: ranked.source };
+		if (ranked === null) return null;
+		return {
+			scores: ranked.scores,
+			...(ranked.relatedAt !== undefined ? { relatedAt: ranked.relatedAt } : {}),
+			source: ranked.source,
+		};
 	};
 	return Object.assign(rank, { asks: () => ranker.asks() });
 }
@@ -555,9 +560,10 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				const hits = new Set(entries.map((entry) => entry.name));
 				const others = catalogEntries.filter((entry) => !hits.has(entry.name));
 				const ranking = rank(rawQuery, others);
-				if (ranking !== null) {
+				const relatedAt = ranking?.relatedAt;
+				if (ranking !== null && relatedAt !== undefined) {
 					related = others
-						.filter((entry) => (ranking.scores[entry.name] ?? 0) >= GATEWAY_RELATED_MIN_SCORE)
+						.filter((entry) => (ranking.scores[entry.name] ?? 0) >= relatedAt)
 						.sort((left, right) => (ranking.scores[right.name] ?? 0) - (ranking.scores[left.name] ?? 0))
 						.slice(0, GATEWAY_RELATED_MAX);
 					if (related.length > 0) relatedBy = ranking.source;

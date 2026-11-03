@@ -117,7 +117,7 @@ describe("System One runner", () => {
 		const lookups: string[] = [];
 		const records: DecisionRecord[] = [];
 		const so = createSystemOne({
-			settings: () => ({ systemOne: { engines: {}, sites: {}, cuts: {} } }) as ClioSettings,
+			settings: () => ({ systemOne: { use: null, engines: {}, sites: {} } }) as ClioSettings,
 			providers: {
 				getTarget: (id) => {
 					lookups.push(id);
@@ -147,7 +147,7 @@ describe("System One runner", () => {
 					{ id: "chat", runtime: "openai" },
 					{ id: "memory", runtime: "llamacpp", url: "http://127.0.0.1:8080" },
 				],
-				systemOne: { use, engines: {}, sites, cuts: {} },
+				systemOne: { use, engines: {}, sites },
 			}) as unknown as ClioSettings;
 		const profile = ["turn", "toolCall", "relevance", "consult", "drafts"];
 		deepStrictEqual(effectiveSystemOne(settingsFor(null)).systemOne.sites, {});
@@ -193,9 +193,9 @@ describe("System One runner", () => {
 						use: null,
 						engines: { side: { kind: "llm", target: "t", model: "m", mode: "auto" } },
 						sites: { relevance: { engine: "side" }, turn: { engine: "side" } },
-						cuts,
 					},
 				}) as unknown as ClioSettings,
+			localCuts: () => cuts,
 			providers: {
 				getTarget: () => ({ id: "t", runtime: "llamacpp", url: "http://127.0.0.1:1", defaultModel: "m" }),
 				getRuntime: () => llamacppRuntime,

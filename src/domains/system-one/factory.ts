@@ -65,6 +65,8 @@ export interface SystemOneDeps {
 	recorder?: () => DecisionRecorder | null;
 	/** The session current now. Read when a call starts, so a late answer is filed under the session that asked. */
 	currentSession?: () => string | null;
+	/** Cuts the table does not ship, from a local measurement or a probe's placeholder. Settings never supply them. */
+	localCuts?: () => Readonly<Record<string, Readonly<Record<string, number>>>>;
 	/** The safety domain's information-flow check, applied to every outgoing engine request. */
 	flowCheck?: DecisionFlowCheck;
 }
@@ -166,7 +168,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 		...(deps.recorder ? { recorder: deps.recorder } : {}),
 		...(deps.currentSession ? { currentSession: deps.currentSession } : {}),
 		...(deps.flowCheck ? { flowCheck: deps.flowCheck } : {}),
-		cutOverrides: () => deps.settings().systemOne.cuts,
+		cutOverrides: () => deps.localCuts?.() ?? {},
 	});
 	// One engine per configured name, replaced when its configuration digest moves.
 	const engines = new Map<string, { digest: string; engine: DecisionEngine }>();
@@ -362,7 +364,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				const usable = [resolution.usable, ...(resolution.routes ?? []).flatMap((route) => route.usable ?? [])];
 				// Cuts are live settings, so fittedness is recomputed from the identity
 				// each engine last answered under, never cached with the answer.
-				const cuts = deps.settings().systemOne.cuts;
+				const cuts = deps.localCuts?.() ?? {};
 				return usable.every((engine) => {
 					// The runner files each answer under the moment it was asked at; the bare
 					// site key never matches a site that is only asked at named moments.
@@ -391,7 +393,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				if (usable === undefined) return null;
 				const prefix = `${site}.`;
 				const cuts: Record<string, Record<string, number>> = {};
-				for (const [identity, table] of Object.entries(deps.settings().systemOne.cuts)) {
+				for (const [identity, table] of Object.entries(deps.localCuts?.() ?? {})) {
 					const own = Object.entries(table).filter(([key]) => key.startsWith(prefix));
 					if (own.length > 0) cuts[identity] = Object.fromEntries(own);
 				}

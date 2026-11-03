@@ -242,7 +242,6 @@ System One is experimental and off by default; its keys and sites may change bet
 | `systemOne.use` | `null` | next turn; the `consult` tool on restart |
 | `systemOne.engines` | `{}` | next turn |
 | `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
-| `systemOne.cuts` | `{}` | next turn |
 
 ### Safety
 

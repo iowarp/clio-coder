@@ -110,8 +110,6 @@ export interface SystemOneSettings {
 	engines: Record<string, SystemOneEngineSettings>;
 	/** Optional per-site overrides of `use`. A site with no entry follows `use`, and null turns that site off. */
 	sites: Partial<Record<SiteId, SystemOneSiteBinding | null>>;
-	/** Operator-fitted cuts by answering build, for builds the code table lacks. Keys are `<site>.<key>`. */
-	cuts: Record<string, Record<string, number>>;
 }
 
 /**
@@ -850,7 +848,6 @@ export const DEFAULT_SETTINGS = {
 		use: null,
 		engines: {},
 		sites: {},
-		cuts: {},
 	} as SystemOneSettings,
 	safety: {
 		autonomy: "default" as AutonomyLevel,
@@ -1065,7 +1062,6 @@ systemOne:
   use: null
   engines: {}
   sites: {}
-  cuts: {}
 
 safety:
   autonomy: default

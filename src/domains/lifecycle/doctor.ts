@@ -1347,20 +1347,11 @@ function buildsWithCuts(site: string, table: Readonly<Record<string, Readonly<Re
  * states which builds a bound site's readings would be validated for: measured
  * cuts that ship, cuts the operator wrote, and everything else unvalidated.
  */
-function cutStanding(
-	site: string,
-	measured: Readonly<Record<string, Readonly<Record<string, number>>>>,
-	operator: Readonly<Record<string, Readonly<Record<string, number>>>>,
-): string {
+function cutStanding(site: string, measured: Readonly<Record<string, Readonly<Record<string, number>>>>): string {
 	const fitted = buildsWithCuts(site, measured);
-	const written = buildsWithCuts(site, operator);
-	const parts = [
-		...(fitted.length > 0 ? [`measured for ${fitted.join(", ")}`] : []),
-		...(written.length > 0 ? [`operator-configured for ${written.join(", ")}`] : []),
-	];
-	return parts.length === 0
-		? "no build has cuts at this site, so every answer is unvalidated"
-		: `cuts ${parts.join(", ")}; any other answering build is unvalidated and only records`;
+	return fitted.length === 0
+		? "no build has cuts at this site, so it sends nothing unless the dataset is recorded"
+		: `cuts measured for ${fitted.join(", ")}; any other build sends nothing unless the dataset is recorded`;
 }
 
 /**
@@ -1409,7 +1400,7 @@ async function systemOneFindings(
 			detail:
 				`${binding.engine} (${binding.kind}) → ${binding.target}/${binding.model ?? "target default"}` +
 				(binding.deadlineMs === undefined ? "" : `; deadline ${binding.deadlineMs} ms`) +
-				`; ${cutStanding(binding.site, FITTED_CUTS, settings.systemOne.cuts)}` +
+				`; ${cutStanding(binding.site, FITTED_CUTS)}` +
 				(unverified ? `; connection ${binding.target} is not verified, so this site may stay silent` : ""),
 		});
 	}

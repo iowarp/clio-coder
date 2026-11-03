@@ -23,8 +23,6 @@ import { boundedHead, probability, round2 } from "./bounds.js";
 
 /** Code points of the card target sent. The card itself bounds it well under this. */
 const MAX_TARGET_CHARS = 240;
-/** How certain the engine must be before the card says anything at all. */
-const CARD_MIN_CERTAINTY = 0.25;
 
 /**
  * The blast-radius ladder, lowest rung first.
@@ -141,19 +139,23 @@ export const TOOL_CALL_CARD_SITE: SiteDefinition<ToolCallObject, ToolCallCardVal
 	version: "tool-call-v2",
 	deadlineMs: 5000,
 	moment: "card",
+	// No request is spent on an advisory a build has no floor to show.
+	requiredCut: "cardFloor",
 	state,
 	questions: () => ({ radius: RADIUS_QUESTION, outside: OUTSIDE_QUESTION, destroys: DESTROYS_QUESTION }),
 	read(answers, _object, cuts) {
 		// An undecided rating has no rung to name, so the card stays as it was.
-		const score = rating(answers.radius, CARD_MIN_CERTAINTY);
+		const floor = cuts.cut("cardFloor");
+		if (floor === undefined) return null;
+		const score = rating(answers.radius, floor);
 		if (score === null) return null;
 		const label = rungLabel(score);
-		const outside = decided(answers.outside);
+		const outside = decided(answers.outside, floor);
 		return {
 			score,
 			label,
 			outside,
-			destroys: decided(answers.destroys),
+			destroys: decided(answers.destroys, floor),
 			line: advisoryLine(label, outside, cuts.build),
 		};
 	},
@@ -165,8 +167,8 @@ export const TOOL_CALL_CARD_SITE: SiteDefinition<ToolCallObject, ToolCallCardVal
 	}),
 };
 
-function decided(answer: Answer | undefined): boolean | null {
-	return answer !== undefined && answer.certainty >= CARD_MIN_CERTAINTY ? isTrue(answer) : null;
+function decided(answer: Answer | undefined, floor: number): boolean | null {
+	return answer !== undefined && answer.certainty >= floor ? isTrue(answer) : null;
 }
 
 const GATE_QUESTIONS: Readonly<Record<string, Question>> = { radius: RADIUS_QUESTION, destroys: DESTROYS_QUESTION };

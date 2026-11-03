@@ -91,7 +91,7 @@ export interface RunnerDeps {
 	 * name the session that asked, not the one that happens to be current by then.
 	 */
 	currentSession?: () => string | null;
-	/** `systemOne.cuts`, read per call so an edited cut applies to the next one. */
+	/** Cuts beyond the shipped table, read per call. */
 	cutOverrides: () => Readonly<Record<string, Readonly<Record<string, number>>>>;
 	flowCheck?: DecisionFlowCheck;
 }
@@ -470,21 +470,20 @@ export function createRunner(deps: RunnerDeps): Runner {
 		let missingCut = 0;
 		for (const plan of live) {
 			const { route } = plan;
-			if (site.requiredCut !== undefined) {
+			const { requiredCut } = site;
+			if (requiredCut !== undefined) {
 				const known = knownBuilds.get(route.digest);
-				const build =
-					known !== undefined && performance.now() - known.at <= ANSWERED_BUILD_TTL_MS ? known.build : route.engine.model;
+				const builds =
+					known !== undefined && performance.now() - known.at <= ANSWERED_BUILD_TTL_MS
+						? [known.build]
+						: route.engine.expectedBuilds();
 				const compactVersion = Object.keys(plan.compact).length > 0 ? site.compact?.version : undefined;
-				const identity =
-					build === null ? null : thresholdIdentity(build, route.engine.renderer, site.version, compactVersion);
-				const cut =
-					identity === null
-						? undefined
-						: cutsFor(identity, site.id, overrides, {
-								siteVersion: site.version,
-								renderer: route.engine.renderer,
-							}).cut(site.requiredCut);
-				if (cut === undefined) {
+				const hasCut = builds.some((build) => {
+					const identity = thresholdIdentity(build, route.engine.renderer, site.version, compactVersion);
+					const contract = { siteVersion: site.version, renderer: route.engine.renderer };
+					return cutsFor(identity, site.id, overrides, contract).cut(requiredCut) !== undefined;
+				});
+				if (!hasCut) {
 					plan.outcome = "unsupported";
 					plan.error = `decision ${site.id}/${site.moment ?? "main"} requires a ${site.requiredCut} cut for the engine identity`;
 					missingCut += 1;

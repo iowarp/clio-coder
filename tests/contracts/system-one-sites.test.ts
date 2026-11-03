@@ -108,7 +108,7 @@ describe("turn policy", () => {
 	});
 
 	it("starts an orientation at the cut and above, not below", () => {
-		const cuts = fitted({ orientation: 0.65 });
+		const cuts = fitted({ orientation: 0.65, intentFloor: 0.6, breadthFloor: 0.5 });
 		strictEqual(turn(loudTurn({ orientation: noul(0.65) }), cuts).acts.orientation, true);
 		strictEqual(turn(loudTurn({ orientation: noul(0.64) }), cuts).acts.orientation, false);
 	});
@@ -120,12 +120,22 @@ describe("turn policy", () => {
 	});
 
 	it("prewarms at the cut only when a recipe was predicted", () => {
-		const cuts = fitted({ prewarm: 0.55 });
+		const cuts = fitted({ prewarm: 0.55, recipeFloor: 0.6 });
 		const object = { ...TASK, recipes: RECIPES };
 		strictEqual(turn(loudTurn({ dispatch: noul(0.55) }), cuts, object).acts.prewarm, true);
 		strictEqual(turn(loudTurn({ dispatch: noul(0.54) }), cuts, object).acts.prewarm, false);
 		// Without the recipe question there is nothing to warm, however sure the dispatch is.
 		strictEqual(turn(loudTurn({ dispatch: noul(0.99) }), cuts).acts.prewarm, false);
+		// A measured dispatch reading does not make an unmeasured recipe pick act.
+		strictEqual(turn(loudTurn({ dispatch: noul(0.99) }), fitted({ prewarm: 0.55 }), object).acts.prewarm, false);
+	});
+
+	it("reads a choice as undecided until the build has a measured floor for it", () => {
+		const answers = loudTurn({ intent: choice("plan", 0.97) });
+		strictEqual(turn(answers, fitted({ direct: 0.7 })).intent, "unknown");
+		strictEqual(turn(answers, fitted({ direct: 0.7 })).shape, null);
+		strictEqual(turn(answers, fitted({ direct: 0.7 })).breadth, null);
+		strictEqual(turn(answers, fitted({ direct: 0.7, intentFloor: 0.6 })).intent, "plan");
 	});
 });
 

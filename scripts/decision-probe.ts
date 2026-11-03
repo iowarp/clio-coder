@@ -232,9 +232,6 @@ function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder, requiredCut?
 			...settings.systemOne,
 			engines: { [name]: engine },
 			sites: { [siteId]: { engine: name, timeoutMs } },
-			// A site with a required cut sends nothing without one. This placeholder lets
-			// the probe measure it; the probe reads the raw answers, never the verdict.
-			cuts: requiredCut !== undefined && model !== undefined ? { [model]: { [requiredCut]: 0.01 } } : {},
 		},
 	};
 	const auth = openAuthStorage();
@@ -253,6 +250,9 @@ function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder, requiredCut?
 		name,
 		engine,
 		system: createSystemOne({
+			// A site with a required cut sends nothing without one. This placeholder lets
+			// the probe measure it; the probe reads the raw answers, never the verdict.
+			localCuts: () => (requiredCut !== undefined && model !== undefined ? { [model]: { [requiredCut]: 0.01 } } : {}),
 			settings: () => live,
 			providers,
 			credentialsPresent: () => new Set<string>(),

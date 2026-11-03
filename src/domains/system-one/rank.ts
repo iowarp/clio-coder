@@ -45,6 +45,11 @@ export interface RelevanceRankRequest {
 export interface RelevanceRanking {
 	/** Candidate id to probability of fitting; an absent id is an abstention. */
 	readonly scores: Readonly<Record<string, number>>;
+	/**
+	 * The measured score at which an entry nothing else matched may be added. Absent
+	 * for a build with no such cut: its scores may reorder entries and add none.
+	 */
+	readonly relatedAt?: number;
 	/** The answering build, for the footer line that says who ordered the list. */
 	readonly source: string;
 	/** Join key of the ranking call, carried by the follow-up outcome rows. */
@@ -159,7 +164,9 @@ export function createRelevanceRanker(input: RelevanceRankerInput): OwnedRelevan
 			{ use: request.use, need: request.need, task, candidates: request.candidates },
 			{ ref, signal, ...flowOption(flow) },
 		);
-		return verdict === null ? null : { scores: verdict.value.scores, source: verdict.build, ref };
+		if (verdict === null) return null;
+		const { scores, relatedAt } = verdict.value;
+		return { scores, ...(relatedAt !== undefined ? { relatedAt } : {}), source: verdict.build, ref };
 	};
 
 	/**

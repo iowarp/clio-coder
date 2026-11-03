@@ -35,17 +35,6 @@ const MAX_PREVIOUS_TASK_CHARS = 300;
 /** Code points of one recipe description offered as an option. */
 const MAX_RECIPE_DESCRIPTION_CHARS = 240;
 
-/** Certainty floors under which a choice reads as undecided rather than guessed. */
-const SHAPE_MIN_CERTAINTY = 0.5;
-const INTENT_MIN_CERTAINTY = 0.6;
-const BREADTH_MIN_CERTAINTY = 0.5;
-/**
- * A wrong prediction costs one idle process until the turn settles, so the bar
- * favors abstaining. At 0.5 the labeled turns drew one wrong answer; at 0.6,
- * none.
- */
-const RECIPE_MIN_CERTAINTY = 0.6;
-
 export const TURN_SHAPES = {
 	single: "One worker handles the whole request",
 	parallel: "Several independent pieces that can run at the same time",
@@ -319,19 +308,27 @@ export function recipesInGroup(object: TurnObject, key: string): ReadonlyArray<T
 }
 
 /**
- * The winning option when it holds at least `cut` of the mass and clears the
- * recipe certainty floor, else null. A cut on a choice is a probability of the
- * chosen option, never a certainty.
+ * The winning option when it holds at least `cut` of the mass, else null. A cut
+ * on a choice is a probability of the chosen option, never a certainty.
  */
 function choiceAtCut(answer: Answer | undefined, cut: number, allowed: ReadonlyArray<string>): string | null {
-	const winner = choiceIn(answer, RECIPE_MIN_CERTAINTY, allowed);
+	const winner = choiceIn(answer, 0, allowed);
 	if (winner === null || answer?.calibrated !== true) return null;
 	const mass = answer.probabilities?.[winner];
 	return mass !== undefined && Number.isFinite(mass) && mass >= cut ? winner : null;
 }
 
-/** The winning option when it is one of `allowed` and at least `minCertainty` peaked, else null. */
-function choiceIn(answer: Answer | undefined, minCertainty: number, allowed: ReadonlyArray<string>): string | null {
+/**
+ * The winning option when it is one of `allowed` and at least `minCertainty`
+ * peaked, else null. A floor nobody measured for this build reads as undecided,
+ * so a choice cannot act on a number carried over from another build.
+ */
+function choiceIn(
+	answer: Answer | undefined,
+	minCertainty: number | undefined,
+	allowed: ReadonlyArray<string>,
+): string | null {
+	if (minCertainty === undefined) return null;
 	const winner = chosen(answer, minCertainty);
 	return winner !== null && allowed.includes(winner) ? winner : null;
 }
@@ -370,6 +367,8 @@ function policy(
 			// Intent is a veto for the three workflows that already have a task in hand.
 			orientation:
 				crosses(value.orientation, orientationCut) &&
+				// Intent is read as a veto only where its own floor was measured.
+				cut("intentFloor") !== undefined &&
 				(value.breadth === "repository" || value.breadth === "area") &&
 				value.intent !== "implement" &&
 				value.intent !== "continue" &&
@@ -438,13 +437,14 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 		// choices and not the yes/no questions). Any answered question is a value;
 		// only a call that answered nothing is no value.
 		if (!Object.values(answers).some((answer) => answer !== undefined)) return null;
-		const shape = choiceIn(answers.shape, SHAPE_MIN_CERTAINTY, Object.keys(TURN_SHAPES)) as TurnShape | null;
+		const floor = (key: string): number | undefined => (cuts.fitted ? cuts.cut(key) : undefined);
+		const shape = choiceIn(answers.shape, floor("shapeFloor"), Object.keys(TURN_SHAPES)) as TurnShape | null;
 		const intentAnswer = answers.intent;
-		const intent = (choiceIn(intentAnswer, INTENT_MIN_CERTAINTY, TURN_INTENTS) ?? "unknown") as TurnIntent;
-		const breadth = choiceIn(answers.breadth, BREADTH_MIN_CERTAINTY, BREADTHS) as TurnBreadth | null;
+		const intent = (choiceIn(intentAnswer, floor("intentFloor"), TURN_INTENTS) ?? "unknown") as TurnIntent;
+		const breadth = choiceIn(answers.breadth, floor("breadthFloor"), BREADTHS) as TurnBreadth | null;
 		const plan = recipePlan(object);
 		const recipe =
-			plan?.kind === "flat" ? choiceIn(answers.recipe, RECIPE_MIN_CERTAINTY, Object.keys(plan.options)) : undefined;
+			plan?.kind === "flat" ? choiceIn(answers.recipe, floor("recipeFloor"), Object.keys(plan.options)) : undefined;
 		// A category pick narrows what a prewarm may start, so it reads only under its own cut.
 		const groupCut = cuts.fitted ? cuts.cut("recipeGroup") : undefined;
 		const pickedGroup =

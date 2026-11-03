@@ -22,8 +22,6 @@ const MAX_MESSAGE_CHARS = 800;
 const MAX_TASK_CHARS = 400;
 /** Code points of the assistant's latest text, from its tail, which is what the operator is reacting to. */
 const MAX_PREVIOUS_CHARS = 400;
-/** Under this certainty a choice reads as undecided rather than guessed. */
-const MIN_CERTAINTY = 0.4;
 
 export const STEER_RELATIONS = {
 	correction: "Corrects, narrows or redirects the work in progress: a different file, approach, scope or constraint",
@@ -90,12 +88,15 @@ export const STEER_SITE: SiteDefinition<SteerObject, SteerValue> = {
 		};
 	},
 	questions: () => ({ relation: RELATION_QUESTION, urgency: URGENCY_QUESTION }),
-	read(answers) {
+	read(answers, _object, cuts) {
 		const relationAnswer = answers.relation;
 		const urgencyAnswer = answers.urgency;
 		if (relationAnswer === undefined && urgencyAnswer === undefined) return null;
-		const relation = chosen(relationAnswer, MIN_CERTAINTY);
-		const urgency = chosen(urgencyAnswer, MIN_CERTAINTY);
+		// No build has these floors, so a call records its raw answers and names no choice.
+		const relationFloor = cuts.cut("relationFloor");
+		const urgencyFloor = cuts.cut("urgencyFloor");
+		const relation = relationFloor === undefined ? null : chosen(relationAnswer, relationFloor);
+		const urgency = urgencyFloor === undefined ? null : chosen(urgencyAnswer, urgencyFloor);
 		return {
 			relation: isRelation(relation) ? relation : null,
 			relationCertainty: relationAnswer?.certainty ?? 0,

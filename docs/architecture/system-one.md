@@ -24,16 +24,16 @@ A site declares `id`, a `version`, a hard `deadlineMs`, an optional `moment`, an
 
 | Site | Definitions (moment, version) | Tasks asked | Cut keys read |
 | --- | --- | --- | --- |
-| `turn` | `turn-v2`; moment `recipe`, `turn-recipe-v1` | `intent`, `recipe`, `clusterSelect` | `direct`, `dispatch`, `orientation`, `direction`, `prewarm`, `recipeGroup`; `recipeInGroup` at the `recipe` moment |
-| `toolCall` | moment `card` and moment `gate`, both `tool-call-v2` | `toolRisk` | none at `card`; `gateRadius` and `gateDestroys` at `gate` |
+| `turn` | `turn-v2`; moment `recipe`, `turn-recipe-v1` | `intent`, `recipe`, `clusterSelect` | `direct`, `dispatch`, `orientation`, `direction`, `prewarm`, `recipeGroup`, `shapeFloor`, `intentFloor`, `breadthFloor`, `recipeFloor`; `recipeInGroup` at the `recipe` moment |
+| `toolCall` | moment `card` and moment `gate`, both `tool-call-v2` | `toolRisk` | `cardFloor` at `card`, required; `gateRadius` and `gateDestroys` at `gate` |
 | `toolResult` | `tool-result-v2` | `injection` | `instructions` |
 | `turnEnd` | `turn-end-v3` | `turnEnd` | `asksOperator`, `blocksOnDecision`, `blocksOnDecisionFloor` |
-| `relevance` | `relevance-v1`; moment `clusters`, `relevance-cluster-v2` | `relevance`, `clusterSelect` | `ranked` (a validation marker); `clusters` at the `clusters` moment, required |
+| `relevance` | `relevance-v1`; moment `clusters`, `relevance-cluster-v2` | `relevance`, `clusterSelect` | `ranked` (a validation marker), `related`; `clusters` at the `clusters` moment, required |
 | `consult` | `consult-v1` | `consult` | none |
-| `drafts` | `drafts-v1` | `drafts` | none |
-| `steer` | `steer-v1` | `steer` | none |
+| `drafts` | `drafts-v1` | `drafts` | `pick`, required; `soundFloor` |
+| `steer` | `steer-v1` | `steer` | `relationFloor`, `urgencyFloor` |
 
-Each definition lives in one file under `src/domains/system-one/sites/`. `consult` is a factory because the agent supplies the questions. `consult`, `drafts` and `steer` have no cut and no policy.
+Each definition lives in one file under `src/domains/system-one/sites/`. `consult` is a factory because the agent supplies the questions. `consult` has no cut and no policy.
 
 One call carries one state and every question about it. The `systemone` engine sends those questions in one request. The `llm` engine sends requests per question and option order or vote, with concurrency bounded by the endpoint's capacity. Every state is capped by code points in [bounds.ts](../../src/domains/system-one/sites/bounds.ts) so a fitted cut was measured on evidence of a known size and a small-window engine never truncates the part that matters. A site's `compact` wordings are short variants for renderers with a declared per-option bound. They carry their own version, which joins the threshold identity of any build read through them.
 
@@ -89,7 +89,7 @@ In-flight calls are tracked so shutdown can wait a bounded time for a row that a
 
 ## Calibration: cuts belong to a threshold identity
 
-[calibration.ts](../../src/domains/system-one/calibration.ts) is the one reviewable table of what a build's numbers mean. A cut is keyed by `thresholdIdentity(build, renderer, siteVersion, compactVersion)` ([contract.ts](../../src/domains/system-one/contract.ts)). For the legacy wire and the `llm` prompt the identity is the bare build string. For a bounded renderer it is `<build>+<renderer>@<siteVersion>`, with `/<compactVersion>` appended when a compact wording was read. `FITTED_CUTS` holds `<site>.<key>` entries per identity, each fitted from a labeled run on that exact build with the run cited beside the numbers. `FITTED_CONTRACTS` lists the renderer and site versions a measured table was fitted under, and a measured cut applies only when the call matches exactly, so a reworded site or another rendering goes silent until it is measured again. `cutsFor(identity, site, overrides, contract)` overlays the operator's `systemOne.cuts`, which are not subject to the contract match, and reports `fitted`, true when any cut exists for the site under the identity. `source(key)` says whether a cut is `measured` or the operator's.
+[calibration.ts](../../src/domains/system-one/calibration.ts) is the one reviewable table of what a build's numbers mean. A cut is keyed by `thresholdIdentity(build, renderer, siteVersion, compactVersion)` ([contract.ts](../../src/domains/system-one/contract.ts)). For the legacy wire and the `llm` prompt the identity is the bare build string. For a bounded renderer it is `<build>+<renderer>@<siteVersion>`, with `/<compactVersion>` appended when a compact wording was read. `FITTED_CUTS` holds `<site>.<key>` entries per identity, each fitted from a labeled run on that exact build with the run cited beside the numbers. `FITTED_CONTRACTS` lists the renderer and site versions a measured table was fitted under, and a measured cut applies only when the call matches exactly, so a reworded site or another rendering goes silent until it is measured again. `cutsFor(identity, site, overrides, contract)` overlays local cuts the factory is handed, never settings, and reports `fitted`, true when any cut exists for the site under the identity. Each action reads its own key, so `fitted` says only that a site has some measurement.
 
 The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` renderer, under the site versions `turn-v2`, `turn-end-v3`, `tool-call-v2`, `tool-result-v2`, `relevance-v1` and `relevance-cluster-v2`. Its note in `calibration.ts` states the rule: a margin derived from the measured run-to-run noise and what a false fire costs, chosen on a fit split and scored once on a held-out split.
 
@@ -104,12 +104,17 @@ The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` rendere
 | `turnEnd.asksOperator` | Reading that the reply asks the operator, only recorded |
 | `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor` | The two sides of one policy: blocking needs the first, not blocking needs the second or less, and the middle is no decision. Only recorded |
 | `relevance.ranked` | Validation marker, not a threshold. A build without it never reorders a listing |
+| `relevance.related` | The score at which an entry nothing else matched may join a list. Without it, scores only reorder |
+| `turn.shapeFloor`, `turn.intentFloor`, `turn.breadthFloor`, `turn.recipeFloor` | Certainty under which a choice reads as undecided |
+| `toolCall.cardFloor` | Certainty under which the card shows nothing. Required, so a build without it sends no request |
+| `drafts.pick`, `drafts.soundFloor` | The mass a `/draft` recommendation needs and the soundness floor. `pick` is required |
+| `steer.relationFloor`, `steer.urgencyFloor` | Certainty under which a steer reading names no choice. Only recorded |
 
 `jev-1.14.0` has no `turn.orientation`, `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor` or `turn.recipeInGroup` cut, because each failed that rule, so those readings only record and a category-first recipe pick holds a worker only under an operator cut.
 
 A site that hints, gates or acts must stay silent when `fitted` is false. That state is **shadow mode**: the engine is still asked and the call is fully recorded, but the policy returns no hint, no gate and no act. A keyed threshold is chosen above the highest observed negative with the measured margin, and it accepts missed positives where the classes overlap. Safety sites can only add friction. `FITTED_TEMPERATURES` follows the same rule for LLM builds and is empty until a build is fitted.
 
-In [system-one-host.ts](../../src/entry/system-one-host.ts), `turn`, `turnEnd`, the `toolCall` gate, the `toolResult` screen and `steer` always detach. An unfitted reading is skipped when dataset recording is off, and the `turn` reading is kept for its readers only from a fitted build. The gate and screen only record, even with fitted cuts. Callers query `shadowed(site, moment)` under the same moment that recorded the answering identity. It is true only when every engine taking part last answered from an unfitted identity within ten minutes, and an engine not yet heard from is unknown, which is never shadow. The exception is an `llm` engine at `relevance` when no `llm:` identity holds a `relevance.ranked` cut: its answer cannot reorder a listing and a slow one may never answer, so it counts as shadow before its first request. `relevance` reads a finished cached ranking synchronously and starts missing work detached. Shadow requests are skipped unless the dataset is recording. A catalog too large for one request is asked by its own categories (at most 32 groups of at most 64 entries, two levels deep), which needs the `relevance.clusters` cut.
+In [system-one-host.ts](../../src/entry/system-one-host.ts), `turn`, `turnEnd`, the `toolCall` gate, the `toolResult` screen and `steer` always detach. `turnEnd`, the gate, the screen and `steer` have no reader and are asked only while the dataset is recorded, even with fitted cuts. The `turn` reading is kept for its readers only from a fitted build. Callers query `shadowed(site, moment)` under the same moment that recorded the answering identity. It is true when no engine taking part can act: each last answered from an unfitted identity within ten minutes, or, not yet heard from, would answer as a build with no cut at the site, so an unmeasured engine is never called to learn its build. `relevance` reads a finished cached ranking synchronously and starts missing work detached. Shadow requests are skipped unless the dataset is recording. A catalog too large for one request is asked by its own categories (at most 32 groups of at most 64 entries, two levels deep), which needs the `relevance.clusters` cut.
 
 ## Records
 
@@ -154,7 +159,7 @@ A new engine or a new build of an existing engine (Laya, Julia-1, the Strands De
 
 1. Bind the engine to a site and run `node --import tsx scripts/decision-probe.ts <fixture.json> --engine <name>` against a labeled fixture in `tests/fixtures/decision-cases/` (`turn.json`, `turn-end.json`, `tool-calls.json`, `tool-results.json` or `capabilities.json`). The engine comes from `systemOne.engines` in the operator's settings, or from `--kind`, `--target` and `--model`. Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers. The probe calls the engine live and is never part of CI.
 2. For each labeled key, read agreement, abstention, wrong and confidently wrong counts, the probability ranges of the positive and negative classes per run, and the suggested cut with its margin to each side. The suggestion is null when the classes overlap.
-3. Choose cuts with `--case-split fit` by the rule in `calibration.ts`, score them once with `--case-split holdout`, add to `FITTED_CUTS` under the printed build only the keys that hold, citing the run beside them, and list the renderer and site versions in `FITTED_CONTRACTS`. An operator can try cuts earlier with `systemOne.cuts`, which overlays the table without changing it.
+3. Choose cuts with `--case-split fit` by the rule in `calibration.ts`, score them once with `--case-split holdout`, add to `FITTED_CUTS` under the printed build only the keys that hold, citing the run beside them, and list the renderer and site versions in `FITTED_CONTRACTS`.
 4. Record real traffic with research capture and export it to compare builds on the operator's own turns.
 
 A cut from one build says nothing about another build, another vendor, a different renderer or site version, or a chat model reporting logprobs, which is why the key is the identity and an identity absent from the table never acts. The probe and the fixtures live in the source repository and are not in the npm package.

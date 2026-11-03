@@ -109,7 +109,9 @@ export function createCapabilityGate(options: CapabilityGateOptions = {}): Capab
 							candidates: candidates.map((c) => ({ id: c.id, summary: c.description })),
 						})
 					: null;
-			if (relevance) Object.assign(semantic, relevance.scores);
+			// An entry joins on a score only past the build's measured cut, and with no cut the list stays lexical.
+			const relatedAt = relevance?.relatedAt;
+			if (relevance && relatedAt !== undefined) Object.assign(semantic, relevance.scores);
 			const best = lexical[0]?.score ?? 0;
 			const ordered = new Map(
 				lexical
@@ -118,11 +120,11 @@ export function createCapabilityGate(options: CapabilityGateOptions = {}): Capab
 			);
 			for (const candidate of candidates) {
 				const score = semantic[candidate.id];
-				if (score === undefined || !Number.isFinite(score) || score < 0.5 || score > 1) continue;
+				if (score === undefined || !Number.isFinite(score) || relatedAt === undefined || score < relatedAt || score > 1)
+					continue;
 				const local = ordered.get(candidate.id);
-				const base = local?.score ?? 0;
-				// FW-1: a calibrated paraphrase match must be able to beat a lexical-only leader.
-				ordered.set(candidate.id, { ...candidate, ...local, score: base + 2 * score });
+				// FW-1: a measured paraphrase match outranks a lexical-only leader, whose normalized score tops out at 1.
+				ordered.set(candidate.id, { ...candidate, ...local, score: 1 + score });
 			}
 			return [...ordered.values()].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, limit);
 		},

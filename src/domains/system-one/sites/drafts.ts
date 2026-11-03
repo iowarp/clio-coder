@@ -25,8 +25,6 @@ export type DraftLabel = (typeof DRAFT_LABELS)[number];
 /** Code points of the request and of one candidate sent to the judge. */
 const MAX_REQUEST_CHARS = 1500;
 const MAX_CANDIDATE_CHARS = 6000;
-/** Soundness is advisory, and an undecided reading has no business being shown as one. */
-const MIN_CERTAINTY = 0.2;
 
 export interface DraftsObject {
 	readonly request: string;
@@ -49,6 +47,8 @@ function labelsFor(object: DraftsObject): ReadonlyArray<DraftLabel> {
 
 export const DRAFTS_SITE: SiteDefinition<DraftsObject, DraftsValue> = {
 	id: "drafts",
+	// No request is spent on a recommendation a build has no measurement to make.
+	requiredCut: "pick",
 	version: "drafts-v1",
 	deadlineMs: 5000,
 	// Each candidate's text is carried once in state and named by label from the
@@ -76,8 +76,11 @@ export const DRAFTS_SITE: SiteDefinition<DraftsObject, DraftsValue> = {
 		questions.best = pick("Which candidate best answers state.request?", options);
 		return questions;
 	},
-	read(answers, object) {
+	read(answers, object, cuts) {
 		const best = answers.best;
+		const pickMass = cuts.cut("pick");
+		if (pickMass === undefined) return null;
+		const soundFloor = cuts.cut("soundFloor");
 		// The soundness answers alone would draw a judged row of empty bars.
 		if (best === undefined || best.type !== "choice") return null;
 		const probabilities: Partial<Record<DraftLabel, number>> = {};
@@ -86,9 +89,11 @@ export const DRAFTS_SITE: SiteDefinition<DraftsObject, DraftsValue> = {
 			const mass = best.probabilities?.[label];
 			probabilities[label] = typeof mass === "number" && Number.isFinite(mass) ? mass : 0;
 			const verdict = answers[`sound.${label}`];
-			sound[label] = verdict !== undefined && verdict.certainty >= MIN_CERTAINTY ? isTrue(verdict) : null;
+			sound[label] =
+				verdict !== undefined && soundFloor !== undefined && verdict.certainty >= soundFloor ? isTrue(verdict) : null;
 		}
-		const picked = labelsFor(object).find((label) => label === best.choice) ?? null;
+		const held = labelsFor(object).find((label) => label === best.choice) ?? null;
+		const picked = held !== null && (probabilities[held] ?? 0) >= pickMass ? held : null;
 		return { picked, probabilities, sound };
 	},
 	summarize: (value) => ({

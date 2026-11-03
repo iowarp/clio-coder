@@ -122,7 +122,6 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `systemOne.use` | `null` | The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site. `off` masks every binding. | next turn; the `consult` tool on restart |
 | `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, mode?, profile? }`. | next turn |
 | `systemOne.sites` | `{}` | Map of site id to an engine name or `{ engine, timeoutMs?, tasks? }`. A site with no entry follows `systemOne.use`, and `null` turns it off. | next turn; `systemOne.sites.consult` needs a restart |
-| `systemOne.cuts` | `{}` | Per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. | next turn |
 | `safety.autonomy` | `"default"` | `default` or `yolo`. User layer or operator session control. A project layer can only tighten the user level (`default` over `yolo`); a looser value is ignored with a layer issue. | hot reload |
 | `safety.limits.sessionCostUsd` | `5` | Finite number at least 0, in USD; a negative value fails validation. Session cost ceiling. It gates requests on routes priced by target rates or the catalog; see [pricing](configuration-and-targets.md#pricing-and-cost-provenance). `0` means no session ceiling: paid requests are admitted, dispatch plans and Scout continuations carry a ceiling of 0, and fleet previews skip the remaining-budget check. A parked request re-reads the ceiling every 250 ms and dispatch admission reads it per call, so raising it releases a waiting request. | hot reload |
 | `safety.limits.chatToolCallsPerTurn` | `60` | Integer at least 1. At the limit Clio stops using tools and summarizes the turn. | next turn |
@@ -376,6 +375,7 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 | `delegation.agents[].labels` and `integrations.externalAgents.entries[].labels` | Nothing read or displayed external agent labels. |
 | `fleet.decisionProfiles` | System One replaced decision profiles. Bind an engine under `systemOne.engines` and `systemOne.sites`. An empty `{}` is accepted silently. |
 | `turnControl.interpretation` | The `systemOne.sites.turn` site reads the request, and nothing falls back to the main model. |
+| `systemOne.cuts` | A number acts only when it was measured on the exact build. |
 | `systemOne.record` | Research capture keeps the System One dataset: `telemetry.research.systemOneDataset` with `content`. |
 | `systemOne.retentionDays` and `systemOne.maxMiB` | System One samples are research content in session journals, which telemetry retention bounds. |
 

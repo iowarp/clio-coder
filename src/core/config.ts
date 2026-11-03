@@ -1023,6 +1023,8 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	// Written as an empty map by `init` from 0.5.3 through 0.5.7, so most upgraded files carry it.
 	"fleet.decisionProfiles":
 		"System One replaced decision profiles; bind an engine under systemOne.engines and systemOne.sites",
+	"systemOne.cuts":
+		"a number acts only when it was measured on the exact build; run clio-coder systemone calibrate instead of writing cuts by hand",
 	"systemOne.record": "research capture keeps the System One dataset: telemetry.research.systemOneDataset with content",
 	"systemOne.retentionDays":
 		"System One samples are research content in session journals, which telemetry retention expires",
@@ -1116,6 +1118,8 @@ function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void 
 			// `init` wrote `fleet.decisionProfiles: {}` from 0.5.3 through 0.5.7, so an empty map is
 			// the default shape of every upgraded file and carries no configuration to lose.
 			if (path === "fleet.decisionProfiles" && isEmptyPlainObject(raw.fleet, "decisionProfiles")) continue;
+			// The same default shape: `init` wrote `systemOne.cuts: {}` until it was retired.
+			if (path === "systemOne.cuts" && isEmptyPlainObject(raw.systemOne, "cuts")) continue;
 			// A key with no replacement does nothing, so it must never block loading or an
 			// upgrade: a 0.5.x interop setup wrote entries[].permissionTimeoutMs by default and
 			// the 0.6.0 installer refused every such home. It is ignored and doctor names it.
@@ -1401,7 +1405,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites", "cuts"]);
+	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites"]);
 	const next = settings.systemOne;
 	if ("use" in raw) {
 		if (raw.use === null) next.use = null;
@@ -1527,33 +1531,6 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 							};
 			}
 			next.sites = sites;
-		}
-	}
-	if ("cuts" in raw) {
-		if (!isPlainObject(raw.cuts)) issues.add("systemOne.cuts", `expected a map, got ${describe(raw.cuts)}`);
-		else {
-			const cuts: ClioSettings["systemOne"]["cuts"] = {};
-			for (const [build, rows] of Object.entries(raw.cuts)) {
-				const path = `systemOne.cuts.${build}`;
-				if (!acceptedMapKey(issues, "systemOne.cuts", build)) continue;
-				if (!isPlainObject(rows)) {
-					issues.add(path, `expected a map, got ${describe(rows)}`);
-					continue;
-				}
-				const entry: Record<string, number> = {};
-				for (const [key, value] of Object.entries(rows)) {
-					const dot = key.indexOf(".");
-					if (!acceptedMapKey(issues, path, key)) continue;
-					if (dot <= 0 || dot === key.length - 1 || !(SITE_IDS as ReadonlyArray<string>).includes(key.slice(0, dot))) {
-						issues.add(`${path}.${key}`, `expected "<site>.<key>" with a site from ${SITE_IDS.join(", ")}`);
-						continue;
-					}
-					const parsed = expectNumber(issues, `${path}.${key}`, value, { min: 0.01, max: 0.99 });
-					if (parsed !== undefined) entry[key] = parsed;
-				}
-				cuts[build] = entry;
-			}
-			next.cuts = cuts;
 		}
 	}
 }

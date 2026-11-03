@@ -68,6 +68,12 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  *   build must not reorder a listing. Its bar was holdout recall@5 of 90%: fit
  *   recall@1 178/180 and recall@5 180/180, holdout 55/60 and 56/60.
  *
+ * A floor is a cut too. `shapeFloor`, `intentFloor`, `breadthFloor`, `recipeFloor`,
+ * `cardFloor`, `pick` and `soundFloor` are read per build, and a build without one
+ * reads that choice as undecided: the old 0.5 and 0.6 floors acted on every build,
+ * and an `intent: plan` over 0.6 added `ask_user` rounds in real sessions (t06-plan,
+ * 2.29 times the total time of System One off on jev-1.14.0).
+ *
  * Measured and left without a cut, so these only record:
  * - `turn.orientation`: fit negatives reach 0.99 ("show me the tree of src/tools"),
  *   which the rule moves to 0.997, past the wire's resolution. Directory listings
