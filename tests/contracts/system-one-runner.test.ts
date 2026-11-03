@@ -151,7 +151,7 @@ describe("System One runner", () => {
 				],
 				systemOne: { use, engines: {}, sites },
 			}) as unknown as ClioSettings;
-		const profile = ["turn", "toolCall", "relevance", "consult", "drafts"];
+		const profile = ["turn", "toolCall", "relevance", "drafts"];
 		deepStrictEqual(effectiveSystemOne(settingsFor(null)).systemOne.sites, {});
 		for (const use of ["jev", "memory", "main", "chat"]) {
 			deepStrictEqual(Object.keys(effectiveSystemOne(settingsFor(use)).systemOne.sites), profile, use);
@@ -175,6 +175,9 @@ describe("System One runner", () => {
 		const overridden = effectiveSystemOne(settingsFor("jev", { relevance: "memory", drafts: null })).systemOne.sites;
 		strictEqual(overridden.relevance, "memory");
 		strictEqual(overridden.drafts, undefined);
+		// consult takes its own entry on every engine.
+		strictEqual(effectiveSystemOne(settingsFor("jev")).systemOne.sites.consult, undefined);
+		strictEqual(effectiveSystemOne(settingsFor("jev", { consult: "memory" })).systemOne.sites.consult, "memory");
 		// off masks everything, a site bound one by one included.
 		deepStrictEqual(effectiveSystemOne(settingsFor("off", { turn: "memory" })).systemOne.sites, {});
 		deepStrictEqual(effectiveSystemOne(settingsFor(null, { turn: "memory" })).systemOne.sites, { turn: "memory" });
