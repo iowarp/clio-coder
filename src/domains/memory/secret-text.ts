@@ -1,5 +1,5 @@
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
-import { isEnvReference, openUrlStart, redactSecretString, redactToolArgs } from "../safety/redaction.js";
+import { isEnvReference, redactSecretString, redactToolArgs } from "../safety/redaction.js";
 
 declare const memoryRouteTextBrand: unique symbol;
 /**
@@ -7,6 +7,13 @@ declare const memoryRouteTextBrand: unique symbol;
  * request's `userPrompt` takes only this type, so a new caller cannot reach the route without going through here.
  */
 export type MemoryRouteText = string & { readonly [memoryRouteTextBrand]: true };
+
+/** Whether text ending here is still inside an http(s) URL's userinfo, whose run a slash, an `@` or a space would end. */
+function insideUrlUserinfo(before: string): boolean {
+	let start = before.length;
+	while (start > 0 && !/[\s/@]/u.test(before.charAt(start - 1))) start -= 1;
+	return /https?:\/\/$/iu.test(before.slice(Math.max(0, start - "https://".length), start));
+}
 
 /**
  * A whole `$NAME` names a variable, not a credential. `$NAME@host` is that only as URL userinfo, where the `@` closes the
@@ -16,7 +23,7 @@ export type MemoryRouteText = string & { readonly [memoryRouteTextBrand]: true }
 function keepAssignmentValue(value: string, before: string): boolean {
 	const at = value.indexOf("@");
 	if (at < 0) return isEnvReference(value);
-	return isEnvReference(value.slice(0, at)) && !value.includes("@", at + 1) && openUrlStart(before) !== null;
+	return isEnvReference(value.slice(0, at)) && !value.includes("@", at + 1) && insideUrlUserinfo(before);
 }
 
 /**

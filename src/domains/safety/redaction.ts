@@ -21,10 +21,14 @@ const ENV_KEY_RE = /^env(?:ironment)?$/iu;
 // The lookahead changes no match, since `@` can only follow the whole run. It stops a run that ends elsewhere from
 // retrying at each of its colons: this also reads journal records and tool output now, and 80 KB took 1.4 s (#446).
 const SECRET_STRING_RE = /(https?:\/\/(?=[^\s/@]+@)[^\s/@]+:)([^\s/@]+)@/giu;
-const SECRET_URL_PARAM_RE =
-	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)([^&#\s]+)/giu;
+const SECRET_URL_PARAM_NAME_RE =
+	/[?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)/giu;
+const SECRET_URL_PARAM_STOP_RE = /[=\s]/gu;
+const SECRET_URL_PARAM_VALUE_RE = /[^&#\s]+/uy;
+// A name's run must reach the `=`, so only the run's start can match and the secret word need only be found once. Two
+// stars around the word retried at every occurrence: `api_key_` repeated took 9 s at 320 KB, on a path a frame can wait on.
 const SECRET_ASSIGNMENT_RE =
-	/(?<![A-Z0-9_])((?:[A-Z0-9_]*(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS(?:WORD)?|PRIVATE|SECRET|TOKEN)[A-Z0-9_]*)=)([^\s;&|]+)/giu;
+	/(?<![A-Z0-9_])(?=[A-Z0-9_]*?(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS|PRIVATE|SECRET|TOKEN))([A-Z0-9_]*=)([^\s;&|]+)/giu;
 // `:_authToken=${NPM_TOKEN}` or `--token "$TOKEN"` names a variable instead of
 // holding a credential. Hiding it leaves the operator unable to see what was
 // written. A bare `$name` counts only in the uppercase environment shape, so a
@@ -104,19 +108,44 @@ function redactSecretFlags(value: string): string {
 	return out.join("");
 }
 
+/**
+ * `?token=value`, where a parameter name runs on to the next `=`. A scan rather than one pattern: every name in a run shares
+ * that `=` or its absence, and a pattern walks to it again from each one, so `&token` repeated took 8 s at 320 KB.
+ */
+function redactSecretUrlParams(value: string): string {
+	const names = new RegExp(SECRET_URL_PARAM_NAME_RE);
+	const stops = new RegExp(SECRET_URL_PARAM_STOP_RE);
+	const secrets = new RegExp(SECRET_URL_PARAM_VALUE_RE);
+	const out: string[] = [];
+	let copied = 0;
+	let stop = -1;
+	for (let name = names.exec(value); name !== null; name = names.exec(value)) {
+		if (stop < names.lastIndex) {
+			stops.lastIndex = names.lastIndex;
+			stop = stops.exec(value)?.index ?? value.length;
+		}
+		if (value[stop] !== "=") continue;
+		secrets.lastIndex = stop + 1;
+		if (secrets.exec(value) === null) continue;
+		names.lastIndex = secrets.lastIndex;
+		if (ENV_REFERENCE_RE.test(value.slice(stop + 1, secrets.lastIndex))) continue;
+		out.push(value.slice(copied, stop + 1), "[redacted]");
+		copied = secrets.lastIndex;
+	}
+	out.push(value.slice(copied));
+	return out.join("");
+}
+
 /** Scrub credentials embedded in one string: URL userinfo, query params, `KEY=value`, and `--flag value`. */
 export function redactSecretString(value: string): string {
 	return redactSecretFlags(
-		value
-			.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
+		redactSecretUrlParams(
+			value.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
 				urlUserinfoHoldsSecret(prefix, secret) ? `${prefix}[redacted]@` : match,
-			)
-			.replace(SECRET_URL_PARAM_RE, (match, prefix: string, secret: string) =>
-				redactUnlessEnvReference(match, prefix, secret),
-			)
-			.replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
-				redactUnlessEnvReference(match, prefix, secret),
 			),
+		).replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
+			redactUnlessEnvReference(match, prefix, secret),
+		),
 	);
 }
 
@@ -260,7 +289,8 @@ export class RedactedStringProjection {
 		let through = 0;
 		// Whitespace after a non-flag token closes every credential pattern. A flag
 		// can consume the following token, so keep it buffered with its value (#428).
-		const tokens = /\S+\s+/gu;
+		// Only a token's start can match: retrying inside a long token cost 1.6 s per frame at 64 KB.
+		const tokens = /(?<!\S)\S+\s+/gu;
 		for (const match of tail.matchAll(tokens)) {
 			if (!match[0].includes("-")) through = match.index + match[0].length;
 		}

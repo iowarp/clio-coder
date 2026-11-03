@@ -12,6 +12,7 @@ import { memoryRouteJson, redactForMemoryRoute } from "../../src/domains/memory/
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelRequest } from "../../src/domains/memory/task-memory-policy.js";
 import { runTaskMemoryPolicy } from "../../src/domains/memory/task-memory-policy.js";
+import { RedactedStringProjection } from "../../src/domains/safety/redaction.js";
 import type { SessionEntry } from "../../src/domains/session/index.js";
 import { observationSourceUnits } from "../../src/domains/session/memory-source.js";
 
@@ -138,8 +139,10 @@ it("keeps a whole variable reference, with a host only as URL userinfo, and noth
 		"API_TOKEN=$API_TOKEN node x.mjs",
 	];
 	for (const command of kept) strictEqual(redactForMemoryRoute(command), command);
-	const proven = completedLessonSource(task(kept[0] ?? "", "clone"), "/repo");
-	deepStrictEqual([...(proven?.succeededCommands ?? [])], [kept[0]]);
+	for (const command of kept.slice(0, 2)) {
+		const proven = completedLessonSource(task(command, "kept"), "/repo");
+		deepStrictEqual([...(proven?.succeededCommands ?? [])], [command]);
+	}
 	for (const [text, secret] of [
 		["password: a$ABCDEFGHIJ", "a$ABCDEFGHIJ"],
 		['"api_key": "x$ABCDEFGHIJKLMN"', "x$ABCDEFGHIJKLMN"],
@@ -195,6 +198,17 @@ it("redaction stays linear on the shapes that once stalled it", () => {
 		redactSecretsText(text, createRedactionTally());
 		ok(performance.now() - started < 1000, text.slice(0, 20));
 	}
+});
+
+it("display redaction stays linear on the shapes that once stalled it", () => {
+	for (const text of ["api_key_".repeat(40_000), "&token".repeat(53_000)]) {
+		const started = performance.now();
+		redactForMemoryRoute(text);
+		ok(performance.now() - started < 1000, text.slice(0, 20));
+	}
+	const started = performance.now();
+	new RedactedStringProjection().project("a".repeat(320_000));
+	ok(performance.now() - started < 1000, "projection");
 });
 
 it("a bound before redaction takes a token it lands inside whole", () => {
