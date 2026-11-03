@@ -18,7 +18,7 @@ import { cutsFor, validationOf } from "./calibration.js";
 import type { DecisionTask } from "./contract.js";
 import { primaryTask, SITE_TASKS, thresholdIdentity } from "./contract.js";
 import { validateQuestion } from "./questions.js";
-import { scrub } from "./recorder/scrub.js";
+import { clearedSiteObject, scrub } from "./recorder/scrub.js";
 import type {
 	Answer,
 	CallOutcome,
@@ -241,8 +241,12 @@ export function createRunner(deps: RunnerDeps): Runner {
 		const primary = binding.routes[0];
 		if (primary === undefined) return null;
 		let state: Readonly<Record<string, unknown>> | null;
+		// What the sites build from, cleared before any of them can cut it. Only `read` sees the original, and what it
+		// returns stays in this process.
+		let cleared: O;
 		try {
-			const built = site.state(object);
+			cleared = clearedSiteObject(object, createRedactionTally());
+			const built = site.state(cleared);
 			// The state is the operator's prompt and tool output, and a hosted engine
 			// (Jev, an LLM API) receives it verbatim. Redacting once here, before the
 			// request exists, covers every engine kind and the record alike. The key-name
@@ -447,14 +451,14 @@ export function createRunner(deps: RunnerDeps): Runner {
 			// Question text can carry the operator's words (a consult question, a
 			// need), so it is redacted like the state, by value only: ids and option
 			// keys are the semantic keys answers and cuts are joined by.
-			questions = redactAll(site.questions(object));
+			questions = redactAll(site.questions(cleared));
 			const ids = Object.keys(questions);
 			if (ids.length === 0) throw new Error("the site asked no questions");
 			for (const id of ids) {
 				const problem = validateQuestion(questions[id] as Question);
 				if (problem !== null) throw new Error(`question '${id}': ${problem}`);
 			}
-			const compact = site.compact === undefined ? {} : redactAll(site.compact.questions(object));
+			const compact = site.compact === undefined ? {} : redactAll(site.compact.questions(cleared));
 			const asked = SITE_TASKS[site.id];
 			for (const id of ids) {
 				const task = site.taskOf?.(id) ?? primaryTask(site.id);
