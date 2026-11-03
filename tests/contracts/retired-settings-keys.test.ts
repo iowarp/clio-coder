@@ -39,6 +39,29 @@ test("user settings load with retired per-agent keys and list them as retired", 
 	}
 });
 
+// `init` wrote `systemOne: { engines: {}, sites: {}, cuts: {} }`, so every existing home names a key since retired.
+test("a retired systemOne key never blocks loading: an empty cuts is silent and the rest are listed", async (t) => {
+	const home = await isolateClioEnv("clio-retired-system-one-");
+	t.after(() => home.restore());
+	const file = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	const cases: ReadonlyArray<{ line: string; retired: string | null }> = [
+		{ line: "cuts: {}", retired: null },
+		{ line: "cuts: { jev-1.14.0: { turn.direct: 0.5 } }", retired: "systemOne.cuts" },
+		{ line: "record: true", retired: "systemOne.record" },
+		{ line: "retentionDays: 30", retired: "systemOne.retentionDays" },
+		{ line: "maxMiB: 100", retired: "systemOne.maxMiB" },
+	];
+	for (const { line, retired } of cases) {
+		writeFileSync(file, `version: 2\nsystemOne:\n  engines: {}\n  sites: {}\n  ${line}\n`);
+		readSettings();
+		const validation = validateSettingsFile();
+		strictEqual(validation.issues.length, 0, `${line}: ${JSON.stringify(validation.issues)}`);
+		const listed = validation.retired.filter((entry) => entry.path.startsWith("systemOne.")).map((entry) => entry.path);
+		strictEqual(JSON.stringify(listed), JSON.stringify(retired === null ? [] : [retired]), line);
+	}
+});
+
 test("the v1 migration drops the retired per-agent keys and records why", () => {
 	const result = migrateSettingsV1Document({
 		version: 1,

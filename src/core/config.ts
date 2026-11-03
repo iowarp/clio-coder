@@ -1405,7 +1405,8 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites"]);
+	// The last four are retired; listed so a tombstone is all they report and an old file still loads.
+	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites", "cuts", "record", "retentionDays", "maxMiB"]);
 	const next = settings.systemOne;
 	if ("use" in raw) {
 		if (raw.use === null) next.use = null;
