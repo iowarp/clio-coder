@@ -1191,7 +1191,7 @@ Declared and derived checks pass through the conservative action classifier and 
 
 ### Repeat a task with /loop and the job tool
 
-To repeat a task, enter `/loop <every> <task>` in the terminal, or call the `job` capability through the gateway. `/loop list`, `/loop status`, `/loop pause`, `/loop resume` and `/loop stop` control recurring jobs. The job tool's `every_ms`, `count` and `timeout_ms` bound repeated work.
+To repeat a task, enter `/loop <every> <task>` in the terminal, or call the `job` capability through the gateway. `/loop list`, `/loop status`, `/loop pause`, `/loop resume` and `/loop stop` control recurring jobs. The job tool's `every_ms`, `count` and `timeout_ms` bound repeated work. A main job created without `timeout_ms` gives each occurrence an hour, and a `main_turn` follow-up gets its own hour instead of a command job's 60-second poll bound; an explicit `timeout_ms` bounds both. At `yolo`, when the default clock ends a main job's final occurrence or a follow-up, Clio queues one continuation per job, with a transcript notice and a `job.clock_resumed` journal record. An explicit timeout never resumes.
 
 A `job` with `runner: "main"` repeats its prompt on the main conversation lane. Prompt wording does not restrict capabilities. Set `allow` to an explicit list of capability names to enforce a tool boundary on every occurrence, including in YOLO:
 
