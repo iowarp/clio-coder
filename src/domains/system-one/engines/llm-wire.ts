@@ -60,8 +60,8 @@ const CHAT_WIRES: Readonly<Record<string, BaseStyle>> = {
  * against dynamo on 2026-09-02, see `model-runtime-capabilities.ts`), and
  * llama.cpp, vLLM and SGLang read the template flag. A LiteLLM gateway may
  * front either, and a wrong spelling reads as no preference rather than an
- * error, so it sends both. Runtimes absent here get no extra field rather
- * than a guessed one.
+ * error, so it sends both, and so does `openai-compat`, which can front any
+ * server. Runtimes absent here get no extra field rather than a guessed one.
  */
 const THINKING_OFF: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
 	lmstudio: { reasoning_effort: "none" },
@@ -69,6 +69,7 @@ const THINKING_OFF: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
 	vllm: { chat_template_kwargs: { enable_thinking: false } },
 	sglang: { chat_template_kwargs: { enable_thinking: false } },
 	litellm: { reasoning_effort: "none", chat_template_kwargs: { enable_thinking: false } },
+	"openai-compat": { reasoning_effort: "none", chat_template_kwargs: { enable_thinking: false } },
 	deepseek: { thinking: { type: "disabled" } },
 };
 
@@ -207,6 +208,9 @@ function contentOf(data: ChatCompletion): string {
 // A server that rejected `response_format` once will reject it again, so the
 // verdict outlives the call and the engine instance.
 const schemaRejections = new Set<string>();
+// The same for the thinking switch on `openai-compat`, where the fields are a
+// guess at an unknown server and a strict one refuses what it does not know.
+const thinkingRejections = new Set<string>();
 
 export interface HttpChannelInput {
 	/** The engine this channel answers for. */
@@ -222,7 +226,6 @@ export interface HttpChannelInput {
 
 export function createHttpChannel(input: HttpChannelInput): Channel {
 	const { target, runtime, model, baseUrl, host, signal } = input;
-	const extras = THINKING_OFF[runtime.id] ?? {};
 	const dialect = responseSchemaDialectFor(runtime.id);
 	const rejectionKey = `${runtime.id}|${baseUrl}|${model}`;
 	// One credential lookup per call, however many requests the call makes.
@@ -289,6 +292,20 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 		return response.data;
 	}
 
+	async function postThinkingOff(body: Record<string, unknown>): Promise<ChatCompletion> {
+		const extras = THINKING_OFF[runtime.id];
+		if (extras === undefined || thinkingRejections.has(rejectionKey)) return post(body);
+		try {
+			return await post({ ...body, ...extras });
+		} catch (error) {
+			const refused = error instanceof ChatHttpError && (error.status === 400 || error.status === 422);
+			if (runtime.id !== "openai-compat" || !refused) throw error;
+			const data = await post(body);
+			thinkingRejections.add(rejectionKey);
+			return data;
+		}
+	}
+
 	const messages = (prompt: Prompt) => [
 		{ role: "system", content: prompt.system },
 		{ role: "user", content: prompt.user },
@@ -297,14 +314,13 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 	return {
 		wire: "http",
 		async firstToken(prompt) {
-			const data = await post({
+			const data = await postThinkingOff({
 				model,
 				messages: messages(prompt),
 				max_tokens: 1,
 				temperature: 0,
 				logprobs: true,
 				top_logprobs: TOP_LOGPROBS,
-				...extras,
 			});
 			const usage = channelUsageOf(data);
 			return { tokens: firstTokenOf(data), ...(usage ? { usage } : {}) };
@@ -315,14 +331,13 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 				messages: messages(prompt),
 				max_tokens: VOTE_MAX_TOKENS,
 				temperature: VOTE_TEMPERATURE,
-				...extras,
 			};
 			const schema = voteSchema(labelCount);
 			const bound =
 				dialect === null || schemaRejections.has(rejectionKey) ? null : responseFormatFor(dialect, schema, "answer");
 			let data: ChatCompletion;
 			try {
-				data = await post(bound === null ? base : { ...base, response_format: bound });
+				data = await postThinkingOff(bound === null ? base : { ...base, response_format: bound });
 			} catch (error) {
 				// Native enforcement is an optimization, never a precondition: a server
 				// that refuses the constrained request still answers the plain one.
@@ -332,7 +347,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 					isResponseSchemaRejection(`HTTP ${error.status ?? ""} ${error.body ?? error.message}`);
 				if (!rejected) throw error;
 				schemaRejections.add(rejectionKey);
-				data = await post(base);
+				data = await postThinkingOff(base);
 			}
 			const usage = channelUsageOf(data);
 			return { text: contentOf(data), ...(usage ? { usage } : {}) };

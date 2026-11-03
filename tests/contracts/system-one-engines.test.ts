@@ -1,8 +1,10 @@
-import { rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, describe, it } from "node:test";
+import typesafeJevRuntime from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
+import openAICompatRuntime from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import systemOneRuntime from "../../src/domains/providers/runtimes/protocol/systemone.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
@@ -190,7 +192,55 @@ describe("System One engine over a /v1/systemone server", () => {
 	});
 });
 
+describe("TypeSafe Jev runtime", () => {
+	it("asks for the build the cuts were measured on, and accepts that pin though /models lists only the moving names", async () => {
+		const server = await started(() => ({
+			body: {
+				models: [{ name: "jev-latest" }, { name: "jev-preview" }],
+				model: "jev-1.13.0",
+				answers: { q: { type: "noul", noul: 0.5 } },
+			},
+		}));
+		const target = { id: "jev", runtime: "typesafe-jev", url: server.url };
+		const ctx = { httpTimeoutMs: 2000, credentialsPresent: new Set<string>() };
+		await typesafeJevRuntime.decide?.(
+			target,
+			{ state, questions: { q: { type: "noul", instructions: "Is it?", criteria: { true: "yes", false: "no" } } } },
+			ctx,
+		);
+		strictEqual(server.requests[0]?.model, "jev-1.13.0");
+		strictEqual((await typesafeJevRuntime.probe?.({ ...target, defaultModel: "jev-1.13.0" }, ctx))?.ok, true);
+		strictEqual((await typesafeJevRuntime.probe?.({ ...target, defaultModel: "jev-0.0.1" }, ctx))?.ok, false);
+	});
+});
+
 describe("LLM engine over an OpenAI-compatible chat server", () => {
+	it("turns thinking off on openai-compat, and drops the switch for a server that refuses it", async () => {
+		const answerFirst = (body: Body): Reply =>
+			firstToken(options(body).find((option) => option.text.startsWith("true:"))?.letter ?? "A", "B", 0.9);
+		const ask = (url: string) =>
+			createLlmEngine({
+				name: "compat",
+				target: { id: "compat", runtime: "openai-compat", url, defaultModel: "m" },
+				runtime: openAICompatRuntime,
+				model: null,
+				mode: "auto",
+				host,
+			}).decide({ state, questions: { urgent: yesNo("Urgent?", "it is", "it is not") }, signal: signal() });
+		const lenient = await started(answerFirst);
+		strictEqual((await ask(lenient.url)).answers.urgent?.calibrated, true);
+		strictEqual(lenient.requests[0]?.reasoning_effort, "none");
+		deepStrictEqual(lenient.requests[0]?.chat_template_kwargs, { enable_thinking: false });
+		const strict = await started((body) =>
+			"chat_template_kwargs" in body || "reasoning_effort" in body
+				? { status: 400, body: { error: "Unrecognized request argument" } }
+				: answerFirst(body),
+		);
+		strictEqual((await ask(strict.url)).answers.urgent?.calibrated, true);
+		// One refused warm request and its plain retry, then the second order goes plain at once.
+		strictEqual(strict.requests.length, 3);
+	});
+
 	it("averages both option orders, so a position-biased model reads as undecided and flips", async () => {
 		// Always favors letter A. Forward, A is `false`; reversed, A is `true`.
 		const server = await started(() => firstToken("A", " B", 0.7));
