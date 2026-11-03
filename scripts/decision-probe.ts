@@ -3,7 +3,7 @@
  *
  *   node --import tsx scripts/decision-probe.ts <fixture> --engine <name> [--runs 3] [--json] [--cases]
  *        [--kind systemone|llm --target T --model M --mode auto|logprobs|answer] [--site toolCall.gate]
- *        [--deadline MS] [--split broad] [--limit N] [--recipes]
+ *        [--deadline MS] [--split broad] [--limit N] [--recipes] [--case-split fit|holdout]
  *
  * It **calls the named engine** and is never part of CI. The engine comes from
  * `systemOne.engines` in the operator's settings, or from `--kind`, `--target`
@@ -22,6 +22,8 @@
  * negative classes; and a suggested cut with its margin to each side, which is
  * null when the classes overlap. The answering build is printed because a cut
  * belongs to one build. `--cases` writes one JSON line per call to stderr.
+ * `--case-split` keeps one split of a fixture: a case with no `split` field is in
+ * the fit split, and a holdout case is scored only against cuts chosen on fit.
  */
 
 import { readFileSync } from "node:fs";
@@ -30,6 +32,7 @@ import { validateSettingsFile } from "../src/core/config.js";
 import { openAuthStorage, resolveAuthTarget } from "../src/domains/providers/auth/index.js";
 import type { ProvidersContract } from "../src/domains/providers/contract.js";
 import { BUILTIN_RUNTIMES } from "../src/domains/providers/runtimes/builtins.js";
+import { groupByCategory } from "../src/domains/system-one/hierarchy.js";
 import type {
 	Answer,
 	DecisionRecord,
@@ -39,7 +42,12 @@ import type {
 	SiteId,
 } from "../src/domains/system-one/index.js";
 import { createSystemOne } from "../src/domains/system-one/index.js";
-import { RELEVANCE_SITE, type RelevanceObject } from "../src/domains/system-one/sites/relevance.js";
+import {
+	type ClusterObject,
+	RELEVANCE_CLUSTER_SITE,
+	RELEVANCE_SITE,
+	type RelevanceObject,
+} from "../src/domains/system-one/sites/relevance.js";
 import {
 	TOOL_CALL_CARD_SITE,
 	TOOL_CALL_GATE_SITE,
@@ -47,7 +55,13 @@ import {
 	type ToolCallObject,
 } from "../src/domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE, type ToolResultObject } from "../src/domains/system-one/sites/tool-result.js";
-import { TURN_SITE, type TurnObject, type TurnRecipeOption } from "../src/domains/system-one/sites/turn.js";
+import {
+	TURN_RECIPE_SITE,
+	TURN_SITE,
+	type TurnObject,
+	type TurnRecipeObject,
+	type TurnRecipeOption,
+} from "../src/domains/system-one/sites/turn.js";
 import { TURN_END_SITE, type TurnEndObject } from "../src/domains/system-one/sites/turn-end.js";
 
 /** A probability this close to the coin-flip is an abstention, the band the sites' readers use. */
@@ -106,7 +120,40 @@ function driverFor(fixture: Fixture): Driver<never, unknown> {
 					...((testCase.recipes === true || process.argv.includes("--recipes")) && Array.isArray(source.recipes)
 						? { recipes: source.recipes as TurnRecipeOption[] }
 						: {}),
+					...(typeof source.recipeOptionLimit === "number" ? { recipeOptionLimit: source.recipeOptionLimit } : {}),
 				}),
+			});
+		case "turnRecipe":
+			return asDriver<TurnRecipeObject, unknown>({
+				site: TURN_RECIPE_SITE,
+				object: (source, testCase) => {
+					const known = source.recipes as Record<string, TurnRecipeOption>;
+					return {
+						task: String(testCase.task),
+						previous: "",
+						previousTask: "",
+						recipes: (testCase.members as string[]).map((id) => known[id] as TurnRecipeOption),
+					};
+				},
+			});
+		case "relevanceClusters":
+			return asDriver<ClusterObject, unknown>({
+				site: RELEVANCE_CLUSTER_SITE,
+				object: (source, testCase) => {
+					const groups = (source.groups as Array<{ id: string; label: string; purpose: string }>).map((category) => ({
+						id: category.id,
+						summary: category.purpose,
+						categories: [category],
+					}));
+					const grouping = groupByCategory(groups, { maxGroups: 32, maxMembers: 64 });
+					if ("abstain" in grouping) return fail(grouping.abstain);
+					return {
+						use: source.use as ClusterObject["use"],
+						need: String(testCase.query),
+						task: String(testCase.task),
+						groups: grouping.groups,
+					};
+				},
 			});
 		case "turnEnd":
 			return asDriver<TurnEndObject, unknown>({
@@ -154,7 +201,7 @@ function lenientSettings() {
 	return settings;
 }
 
-function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder) {
+function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder, requiredCut?: string) {
 	const settings = lenientSettings();
 	const name = argValue("--engine");
 	if (name === undefined) fail("--engine <name> is required");
@@ -185,7 +232,9 @@ function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder) {
 			...settings.systemOne,
 			engines: { [name]: engine },
 			sites: { [siteId]: { engine: name, timeoutMs } },
-			cuts: {},
+			// A site with a required cut sends nothing without one. This placeholder lets
+			// the probe measure it; the probe reads the raw answers, never the verdict.
+			cuts: requiredCut !== undefined && model !== undefined ? { [model]: { [requiredCut]: 0.01 } } : {},
 		},
 	};
 	const auth = openAuthStorage();
@@ -385,10 +434,12 @@ async function probeRelevance(fixture: Fixture, runs: number): Promise<void> {
 async function probeLabeled(fixture: Fixture, runs: number): Promise<void> {
 	const driver = driverFor(fixture);
 	const records: DecisionRecord[] = [];
-	const { system, engine } = buildSystemOne(driver.site.id, {
-		decision: (row) => records.push(row),
-		outcome: () => undefined,
-	});
+	const required = driver.site.requiredCut;
+	const { system, engine } = buildSystemOne(
+		driver.site.id,
+		{ decision: (row) => records.push(row), outcome: () => undefined },
+		required === undefined ? undefined : `${driver.site.id}.${required}`,
+	);
 	const tally = new Map<string, KeyTally>();
 	const misses: string[] = [];
 	const latencies: number[] = [];
@@ -417,8 +468,16 @@ async function probeLabeled(fixture: Fixture, runs: number): Promise<void> {
 								: round(answer.score),
 					]),
 				);
+				// A choice cut is a probability of the winning option, not its certainty.
+				const masses = Object.fromEntries(
+					Object.entries(answers).flatMap(([id, answer]) =>
+						answer.type === "choice" && answer.choice !== undefined
+							? [[id, round(answer.probabilities?.[answer.choice])]]
+							: [],
+					),
+				);
 				process.stderr.write(
-					`${JSON.stringify({ run, outcome: record.outcome, expect: testCase.expect, values, case: labelOf(testCase) })}\n`,
+					`${JSON.stringify({ run, outcome: record.outcome, build: record.build, expect: testCase.expect, values, masses, case: labelOf(testCase) })}\n`,
 				);
 			}
 			for (const [key, expected] of Object.entries(testCase.expect)) {
@@ -565,6 +624,8 @@ async function main(): Promise<void> {
 	const fixture = JSON.parse(readFileSync(path, "utf8")) as Fixture;
 	const limit = argValue("--limit");
 	if (limit !== undefined) fixture.cases = fixture.cases.slice(0, Number(limit));
+	const caseSplit = argValue("--case-split");
+	if (caseSplit !== undefined) fixture.cases = fixture.cases.filter((entry) => (entry.split ?? "fit") === caseSplit);
 	const runs = Number(argValue("--runs") ?? 3);
 	if (!Number.isInteger(runs) || runs < 1) fail("--runs must be a positive integer");
 	if (fixture.site === "relevance") await probeRelevance(fixture, runs);
