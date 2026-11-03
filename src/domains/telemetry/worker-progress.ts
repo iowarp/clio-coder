@@ -31,6 +31,14 @@
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { durableAssistantTextFromEvent, WORKER_OUTPUT_MAX_BYTES } from "../dispatch/event-pump.js";
 import type { CallActionDescriptor } from "../safety/call-target.js";
+import {
+	type CutHeadGuard,
+	cutHeadGuard,
+	dropCutHead,
+	headGuardAfter,
+	holdUnresolvedUserinfo,
+	messageStopCompleted,
+} from "../safety/redaction.js";
 
 /**
  * Lines of worker prose kept while a run is live. The tail is what a streaming
@@ -110,6 +118,8 @@ export interface WorkerProgressSnapshot {
 	/** Distinct tool names in first-use order, bounded by {@link WORKER_TOOL_NAME_LIMIT}. */
 	toolNames: ReadonlyArray<string>;
 	settled: boolean;
+	/** The stream ended on purpose, so a held URL may release. Absent reads as not completed (#446). */
+	completed?: boolean;
 }
 
 export interface WorkerProgressFold {
@@ -121,8 +131,9 @@ export interface WorkerProgressFold {
 	/**
 	 * Seal the projection. `text` is the receipt's answer where one could be
 	 * read; without it the live tail stands as the run's last honest word.
+	 * `completed` is the run's own verdict; without it the fold's stream decides.
 	 */
-	settle(text?: string): boolean;
+	settle(text?: string, completed?: boolean): boolean;
 	/**
 	 * A later attempt of the same work takes over. The tail and the trail are
 	 * history the operator is already reading and stay; the current call, the
@@ -222,7 +233,12 @@ function keepTailBytes(text: string, maxBytes: number): string {
  * the byte cap is met, and finally a head cut on a single line larger than the
  * cap on its own.
  */
-function boundLiveTail(text: string): { text: string; droppedLines: number; droppedBytes: number } {
+function boundLiveTail(text: string): {
+	text: string;
+	droppedLines: number;
+	droppedBytes: number;
+	guard: CutHeadGuard | null;
+} {
 	const lines = text.split("\n");
 	let droppedLines = 0;
 	if (lines.length > WORKER_LIVE_TAIL_LINES) {
@@ -235,16 +251,20 @@ function boundLiveTail(text: string): { text: string; droppedLines: number; drop
 	}
 	const joined = lines.join("\n");
 	const bytes = Buffer.byteLength(joined, "utf8");
-	if (bytes <= WORKER_LIVE_TAIL_MAX_BYTES) return { text: joined, droppedLines, droppedBytes: 0 };
+	if (bytes <= WORKER_LIVE_TAIL_MAX_BYTES) {
+		const removed = droppedLines === 0 ? "" : text.slice(0, text.length - joined.length);
+		return { text: joined, droppedLines, droppedBytes: 0, guard: headGuardAfter(removed) };
+	}
 	const kept = keepTailBytes(joined, WORKER_LIVE_TAIL_MAX_BYTES);
-	return { text: kept, droppedLines, droppedBytes: bytes - Buffer.byteLength(kept, "utf8") };
+	return { text: kept, droppedLines, droppedBytes: bytes - Buffer.byteLength(kept, "utf8"), guard: cutHeadGuard() };
 }
 
-/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. */
+/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. A cut URL never resolves (#446). */
 export function boundSettledText(text: string): { text: string; dropped: number } {
 	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, TAIL_TRUNCATION_MARKER);
 	if (bounded === text) return { text, dropped: 0 };
-	return { text: bounded, dropped: Math.max(0, lineCount(text) - lineCount(bounded)) };
+	const held = holdUnresolvedUserinfo(bounded);
+	return { text: held, dropped: Math.max(0, lineCount(text) - lineCount(held)) };
 }
 
 const EMPTY_SNAPSHOT: WorkerProgressSnapshot = {
@@ -265,12 +285,19 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let toolCalls: number | undefined;
 	let phase: WorkerProgressPhase = "starting";
 	let tailText = "";
+	/** Set while the tail has lost its head and text arriving next can still belong to the unsafe token (#446). */
+	let tailGuard: CutHeadGuard | null = null;
 	let droppedLines = 0;
 	let droppedBytes = 0;
 	let currentAction: WorkerAction | null = null;
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
+	/** Whether the last text seen belongs to a model message that stopped on purpose. */
+	let streamCompleted = false;
+	/** Whether text has arrived since the last message ended, so a cut can still land inside it. */
+	let textOpen = false;
+	let completed = false;
 	let durable = "";
 	/** True after one assistant message ended and before the next message emits prose. */
 	let betweenAssistantMessages = false;
@@ -311,15 +338,43 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		}
 		windowBytes = WORKER_PROGRESS_WINDOW_BYTES;
 		droppedBytes += bytes;
+		// The refused bytes leave a hole that could join `https://u:hun` to `/path`, or show `ter2@host` with no scheme, so
+		// the token on each side of it goes too (#446).
+		let end = tailText.length;
+		while (end > 0 && !/\s/u.test(tailText.charAt(end - 1))) end -= 1;
+		droppedBytes += Buffer.byteLength(tailText.slice(end), "utf8");
+		tailText = tailText.slice(0, end);
+		tailGuard = cutHeadGuard();
+		cached = null;
 		return "";
+	};
+
+	/**
+	 * A cut-off stream can never resolve what it was holding, while the next message or attempt keeps writing to this tail
+	 * and would close the run the hold reads, so the held part leaves the tail now (#446).
+	 */
+	const dropHeldTail = (): void => {
+		const held = holdUnresolvedUserinfo(tailText);
+		if (held === tailText) return;
+		tailText = held;
+		betweenAssistantMessages = true;
+		touch();
 	};
 
 	const appendTail = (text: string): boolean => {
 		if (text.length === 0) return false;
-		const bounded = boundLiveTail(tailText + text);
-		tailText = bounded.text;
+		const guarded = (value: string): string => {
+			if (tailGuard === null) return value;
+			const kept = dropCutHead(value, tailGuard);
+			droppedBytes += Buffer.byteLength(value, "utf8") - Buffer.byteLength(kept, "utf8");
+			if (tailGuard.tokens === 0) tailGuard = null;
+			return kept;
+		};
+		const bounded = boundLiveTail(tailText + guarded(text));
 		droppedLines += bounded.droppedLines;
 		droppedBytes += bounded.droppedBytes;
+		if (bounded.guard !== null) tailGuard = bounded.guard;
+		tailText = bounded.guard === null ? bounded.text : guarded(bounded.text);
 		return touch();
 	};
 
@@ -346,9 +401,11 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		return undefined;
 	};
 
-	const seal = (text?: string): boolean => {
+	const seal = (text?: string, runCompleted?: boolean): boolean => {
+		completed = runCompleted ?? streamCompleted;
 		const sealed = nonEmptyString(text) ?? nonEmptyString(durable);
 		if (sealed !== undefined) {
+			tailGuard = null;
 			const bounded = boundSettledText(sealed);
 			tailText = bounded.text;
 			droppedLines = bounded.dropped;
@@ -398,6 +455,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			const delta = workerTextDelta(event);
 			if (delta.length > 0) {
+				streamCompleted = false;
+				textOpen = true;
 				const separator = betweenAssistantMessages && tailText.length > 0 && !tailText.endsWith("\n") ? "\n\n" : "";
 				betweenAssistantMessages = false;
 				changed = appendTail(admitDelta(`${separator}${delta}`, nowMs)) || changed;
@@ -409,13 +468,30 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			// A durable message_end is the answer as the receipt will seal it. An
 			// ACP peer that streamed no deltas reaches a surface only here.
+			if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
+				streamCompleted = messageStopCompleted(event.message.stopReason);
+			}
 			const durableText = durableAssistantTextFromEvent(event);
 			if (durableText.trim().length > 0) {
 				durable = durableText;
+				// A token cannot span messages, so the next message owes the old cut nothing.
+				tailGuard = null;
 				if (delta.length === 0 && tailText.trim().length === 0) {
 					changed = appendTail(durableText) || changed;
+					textOpen = true;
 				}
 				betweenAssistantMessages = true;
+			}
+			if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
+				if (!streamCompleted) {
+					// The cut belongs to this message: an empty one leaves what an earlier message finished alone.
+					if (durableText.trim().length > 0) durable = holdUnresolvedUserinfo(durable);
+					if (textOpen) {
+						dropHeldTail();
+						changed = true;
+					}
+				}
+				textOpen = false;
 			}
 
 			const action = toolEventAction(event);
@@ -464,13 +540,18 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		settle: seal,
 
 		restart(): void {
+			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
 			pendingActions.length = 0;
 			pendingActionsById.clear();
 			durable = "";
 			betweenAssistantMessages = false;
+			if (textOpen) dropHeldTail();
+			textOpen = false;
 			settled = false;
+			streamCompleted = false;
+			completed = false;
 			phase = "starting";
 			touch();
 		},
@@ -494,6 +575,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				recentActions: recentActions.map((entry) => ({ ...entry })),
 				toolNames: [...toolNames],
 				settled,
+				completed,
 			};
 			return cached;
 		},

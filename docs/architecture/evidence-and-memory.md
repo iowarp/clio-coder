@@ -59,6 +59,7 @@ Secret-shaped values are replaced with `[redacted:<kind>]` in a run's settled fa
 
 | Kind | Matches |
 | --- | --- |
+| `url-userinfo` | What follows the last colon of `http://` or `https://` userinfo, by the pattern display redaction uses. The scheme, username, `@` and host stay, so `https://u:pa:ss@h` still shows `pa:`, and a `$NAME` reference is left alone. |
 | `pem` | A `-----BEGIN ... PRIVATE KEY-----` block through its `END` line, or to the end of the text when the block is unterminated. |
 | `aws-access-key` | `AKIA` followed by 16 uppercase letters or digits. |
 | `github-token` | `ghp_`, `gho_`, `ghu_`, `ghs_` or `ghr_` followed by 20 or more alphanumerics, and `github_pat_` followed by 20 or more word characters. |

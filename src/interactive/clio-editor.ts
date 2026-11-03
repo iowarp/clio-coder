@@ -493,28 +493,23 @@ export class ClioEditor extends Editor {
 		const fittedRight = truncateToWidth(right, room, GLYPH.ellipsis, false);
 		const groupRoom =
 			keysOnlyRoom !== undefined ? 0 : Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
-		const thinking =
+		// The status after the keys fits whole or is dropped whole: a menu's
+		// keys own the room and `think high` cut to `th…` told the operator nothing.
+		const thinkingText =
 			groupRoom > 0
-				? truncateToWidth(
-						thinkingRailHint(
-							theme,
-							this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
-							groupRoom,
-						),
+				? thinkingRailHint(
+						theme,
+						this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
 						groupRoom,
-						GLYPH.ellipsis,
-						false,
 					)
 				: "";
+		const thinking = visibleWidth(thinkingText) <= groupRoom ? thinkingText : "";
+		// The occupancy bar is drawn at its full width or not at all: a bar
+		// shrunk to one cell beside a menu's keys is a fragment, not a reading.
 		const context = this.chrome.getContextUsage?.();
-		const usage = context
-			? contextRailHint(
-					context,
-					width >= 100 ? 10 : 6,
-					Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0)),
-					theme,
-				)
-			: "";
+		const cells = width >= 100 ? 10 : 6;
+		const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
+		const usage = context && usageRoom >= cells ? contextRailHint(context, cells, usageRoom, theme) : "";
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
@@ -562,6 +557,9 @@ export class ClioEditor extends Editor {
 		const contentWidth = Math.max(1, width - gutter * 2);
 		const adaptive = entry.adaptive === true;
 		const bodyRows = adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
+		// The body learns the rail's room first, so a list can draw in its own
+		// rows every key the rail below will have to drop.
+		entry.frame.setRailRoom?.(this.railLabelRoom(width));
 		let body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
 		if (adaptive) {
 			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
@@ -611,11 +609,12 @@ export class ClioEditor extends Editor {
 		const label = `${theme.fg("attentionRail", cue)} ${theme.style(entry.frame.dockTone() ?? "decisionCue", title, { bold: true })}`;
 		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
 		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
+		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
+		entry.frame.setRailRoom?.(room - (down ? visibleWidth(down) + 3 : 0));
 		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, dockBodyRows(this.dockHost) - draftRows));
 		// The frame pads every body to its budget; a card owes no blank rows above its keys.
 		let bodyEnd = rendered.length;
 		while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
-		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
 		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
 		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
 			.filter(Boolean)

@@ -97,6 +97,8 @@ export interface BuildContextLedgerInput {
 	 * when the workspace has no parseable handbook.
 	 */
 	projectHandbookFiles?: ReadonlyArray<string> | null;
+	/** The prior-session line the session's compiled prompt carries; null when it carries none. */
+	priorSessionFact?: string | null;
 	lastCompaction?: {
 		stage: string;
 		tokensBefore: number;
@@ -205,6 +207,8 @@ export interface ContextLedger {
 	 * override resets the inherited chain). Null before a prompt has compiled.
 	 */
 	projectHandbookFiles: ReadonlyArray<string> | null;
+	/** Quoted from the compiled prompt, so the operator reads what the model was sent. */
+	priorSessionFact?: string | null;
 	toolCount: number;
 	/** Non-empty content categories in display order (excludes reserve/free). */
 	groups: ReadonlyArray<ContextLedgerGroup>;
@@ -403,6 +407,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		compactionAuto: input.compactionAuto === true,
 		projectPreload: input.projectPreload ?? null,
 		projectHandbookFiles: input.projectHandbookFiles ?? null,
+		priorSessionFact: input.priorSessionFact ?? null,
 		toolCount: Math.max(0, Math.floor(input.toolCount ?? 0)),
 		groups,
 		meter,

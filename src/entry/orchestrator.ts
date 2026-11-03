@@ -123,8 +123,10 @@ import {
 	createMemoryLessonJudge,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
+	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
 	MemoryRuntime,
+	markMemoryOffRecording,
 	memoryStatus,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
@@ -2845,6 +2847,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			units: ReturnType<typeof observationSourceUnits>;
 		};
 	} | null = null;
+	const memoryEnabledNow = (): boolean =>
+		(effectiveSettingsForDispatch?.() ?? getCurrentSettings()).context.memory.enabled;
+	const beforeTurnRecorded = (target: SessionContract): void => {
+		if (!memoryEnabledNow()) markMemoryOffRecording(target);
+	};
+	const beforeShellEntryRecorded = (): void => {
+		if (session) beforeTurnRecorded(session);
+	};
 	const memoryActiveEntries = () => {
 		const meta = session?.current();
 		if (!meta || !session) return null;
@@ -2856,7 +2866,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			memoryProjection.sessionId !== meta.id ||
 			memoryProjection.pinned !== pinned
 		) {
-			const active = filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined);
+			const active = entriesBeforeMemoryOff(filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined));
 			const checkpointIndex = active.reduce(
 				(last, entry, index) => (entry.kind === "compactionSummary" ? index : last),
 				-1,
@@ -4833,6 +4843,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
+		memoryEnabled: memoryEnabledNow,
+		beforeTurnRecorded,
 		getMemorySection: (request) => {
 			lastMemoryPromptRuntimeId = request.runtimeId;
 			return memoryReader(request);
@@ -4907,6 +4919,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		getTaskMemoryHandoffSource: () => {
+			// Memory off stops handoff seeding, and the empty block still told the model to copy it into the handoff.
+			if (!memoryEnabledNow()) return "";
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");
 			const settings = getCurrentSettings();
@@ -5674,6 +5688,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				toolRegistry,
 				labelOperatorCommand,
+				beforeShellEntryRecorded,
 				hostToolEvents: acpHostToolEvents,
 				...(session
 					? {
@@ -6153,6 +6168,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		gitHookChanges: () => hookDrift.sessionChanges(),
 		labelOperatorCommand,
+		beforeShellEntryRecorded,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),

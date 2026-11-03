@@ -49,6 +49,8 @@ import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
 export interface TurnPersistenceDeps {
+	/** Runs before any turn is written, so a ledger fact can precede the text it describes. */
+	beforeTurnRecorded?: (session: SessionContract) => void;
 	getToolOwner?: (name: string) => PackageIdentity | undefined;
 	state: ChatTurnState;
 	session?: SessionContract | undefined;
@@ -142,6 +144,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	// the right parent is the session's real leaf, so re-sync to it and append
 	// once more; a second refusal is a genuine session fault and propagates.
 	const appendTurn = (session: SessionContract, turn: Omit<TurnInput, "parentId">): ClioTurnRecord => {
+		deps.beforeTurnRecorded?.(session);
 		try {
 			return session.append({ ...turn, parentId: state.lastTurnId } as TurnInput);
 		} catch (err) {

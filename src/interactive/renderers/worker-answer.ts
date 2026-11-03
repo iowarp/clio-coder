@@ -1,23 +1,27 @@
 import { AssistantProseProjection, sanitizeAssistantProse } from "../../core/assistant-prose.js";
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
-import { RedactedStringProjection, redactSecretString } from "../../domains/safety/redaction.js";
+import { RedactedStringProjection, redactStreamingSecretString } from "../../domains/safety/redaction.js";
 import { GLYPH } from "../theme/index.js";
 
 /** Sanitize complete source text before splitting, so OSC payloads cannot cross rows. */
-function projectWorkerAnswerText(text: string, projection?: WorkerAnswerProjection): string {
+function projectWorkerAnswerText(text: string, completed: boolean, projection?: WorkerAnswerProjection): string {
 	const normalized = (projection ? projection.prose.project(text, false, true) : sanitizeAssistantProse(text))
 		.replaceAll(String.fromCharCode(0x9d), "\u001b]")
 		.replaceAll(String.fromCharCode(0x9b), "\u001b[")
 		.replaceAll(String.fromCharCode(0x9c), "\u001b\\");
 	const safe = sanitizeMultilineDisplayText(normalized).text;
-	return (projection ? projection.secrets.project(safe) : redactSecretString(safe)).replace(
-		/[\p{Cf}\u0080-\u009f]/gu,
-		"",
-	);
+	return (
+		projection ? projection.secrets.project(safe, completed) : redactStreamingSecretString(safe, completed)
+	).replace(/[\p{Cf}\u0080-\u009f]/gu, "");
 }
 
 export function safeWorkerAnswerText(text: string): string {
-	return projectWorkerAnswerText(text);
+	return projectWorkerAnswerText(text, true);
+}
+
+/** A worker's text keeps unresolved URL userinfo back unless its stream `completed`, so a dead worker never releases it. */
+export function liveWorkerAnswerText(text: string, completed: boolean): string {
+	return projectWorkerAnswerText(text, completed);
 }
 
 /** Each worker keeps parser state across appended deltas, including complete preview tails (#428). */
@@ -25,12 +29,14 @@ export class WorkerAnswerProjection {
 	readonly prose = new AssistantProseProjection();
 	readonly secrets = new RedactedStringProjection();
 	private source: string | undefined;
+	private completed = false;
 	private text = "";
 
-	project(source: string): string {
-		if (source !== this.source) {
-			this.text = projectWorkerAnswerText(source, this);
+	project(source: string, completed: boolean): string {
+		if (source !== this.source || completed !== this.completed) {
+			this.text = projectWorkerAnswerText(source, completed, this);
 			this.source = source;
+			this.completed = completed;
 		}
 		return this.text;
 	}

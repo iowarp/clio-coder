@@ -562,6 +562,8 @@ export interface ClioAcpServerOptions {
 	 * the session readers it records and replays through are not wired.
 	 */
 	labelOperatorCommand?: (command: string, cwd: string) => string | null;
+	/** Runs before an operator shell line reaches the ledger, so a ledger fact can precede it. */
+	beforeShellEntryRecorded?: () => void;
 	/**
 	 * Tool calls the host makes on the operator's behalf inside a prompt turn,
 	 * such as the dispatch a `/council` command starts. They arrive as the same
@@ -6657,6 +6659,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...(handshake.toolProgressEnabled ? { onUpdate } : {}),
 				});
 				if (run.unlabeled !== null) options.diagnostics?.(`shell output kept out of context: ${run.unlabeled}`);
+				options.beforeShellEntryRecorded?.();
 				entry = durable.appendEntry(run.entry);
 				// As in the terminal: the entry stays anchored where the line started,
 				// and the context is rebuilt from the leaf the session has now.

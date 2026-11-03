@@ -20,7 +20,12 @@ import { ToolNames } from "../../core/tool-names.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { safetyNetRailText } from "../../domains/safety/decision-presentation.js";
-import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
+import {
+	holdUnresolvedUserinfo,
+	redactSecretString,
+	redactStreamingSecretString,
+	redactToolArgs,
+} from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
@@ -293,7 +298,7 @@ interface CommandStatus {
 }
 
 function commandStatusLine(result: unknown): CommandStatus | null {
-	const text = unwrapResultEnvelope(result);
+	const text = resultEnvelopeText(result);
 	if (typeof text !== "string") return null;
 	const lines = text.split("\n");
 	for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -1381,7 +1386,78 @@ export function renderToolArguments(
  * joined, image blocks become compact MIME/size placeholders, and unknown
  * content blocks are named without serializing their payload.
  */
+const KILLED_OUTCOMES: ReadonlySet<unknown> = new Set(["abort", "aborted", "timeout", "timed-out", "output-cap"]);
+const KILLED_STATUS_RE =
+	/^(?:bash: command (?:aborted|timed out|output exceeded)\b|(?:bash: command failed \(exit |Command exited with code )(?:124|1(?:2[89]|[3-9]\d)|2\d\d)\b)/u;
+const TAIL_NOTE_PREFIX = "[Output tail-truncated";
+const STDOUT_TAIL_MARK = "--- stdout tail ---";
+const STDERR_TAIL_MARK = "--- stderr tail ---";
+
+/**
+ * A process killed below the shell still gives the shell an exit code: `timeout` exits 124 and a signal death reads as
+ * 128 plus the signal. Exit 1 is a process that finished and said so (#446).
+ */
+function exitMeansKilled(code: unknown): boolean {
+	return typeof code === "number" && (code === 124 || code >= 128);
+}
+
+/**
+ * Whether a result is the output of a process that did not exit on its own, or of one still running under a tool that
+ * reports each stream's tail. A row without details, as a legacy ledger row can be, is judged by the status paragraph the
+ * tool wrote (#446).
+ */
+function killedWithOpenOutput(result: unknown, text: string): boolean {
+	const details = detailsOf(result);
+	if (details?.outputEndsOpen === false) return false;
+	if (details === null) return KILLED_STATUS_RE.test(text.slice(text.lastIndexOf("\n\n") + 2));
+	if (KILLED_OUTCOMES.has(details.outcome) || isPlainObject(details.progress)) return true;
+	// Process results carry both flags. A monitor or pane wait reports only a timeout of its own wait, and a monitor's
+	// exit code is its worker's, so neither says this text was cut (#446).
+	if ("aborted" in details && "timedOut" in details) {
+		return (
+			details.aborted === true ||
+			details.timedOut === true ||
+			typeof details.signal === "string" ||
+			exitMeansKilled(details.exitCode)
+		);
+	}
+	if ("outcome" in details) return false;
+	return KILLED_STATUS_RE.test(text.slice(text.lastIndexOf("\n\n") + 2));
+}
+
+/**
+ * Where a killed process's output ends depends on the tool. run_script lists each stream's tail. A running one ends its
+ * text with its stderr, whose last line is what can still grow. A finished one follows stderr with trailing lines not
+ * marked apart from it, so every stderr line holds. bash ends its output in the paragraph before its status line, and
+ * past the cap before the tail note too. A single paragraph ends in the output itself.
+ */
+function holdKilledOutput(text: string, running: boolean): string {
+	const lines = text.split("\n");
+	const stderr = lines.lastIndexOf(STDERR_TAIL_MARK);
+	if (stderr > 0 && lines.includes(STDOUT_TAIL_MARK)) {
+		lines[stderr - 1] = holdUnresolvedUserinfo(lines[stderr - 1] ?? "");
+		for (let index = running ? lines.length - 1 : stderr + 1; index < lines.length; index += 1) {
+			lines[index] = holdUnresolvedUserinfo(lines[index] ?? "");
+		}
+		return lines.join("\n");
+	}
+	const paragraphs = text.split("\n\n");
+	if (paragraphs.length === 1) return holdUnresolvedUserinfo(text);
+	const notes = paragraphs.at(-1)?.startsWith(TAIL_NOTE_PREFIX) ? 2 : 1;
+	const output = paragraphs.length - 1 - notes;
+	if (output < 0) return text;
+	paragraphs[output] = holdUnresolvedUserinfo(paragraphs[output] ?? "");
+	return paragraphs.join("\n\n");
+}
+
 function unwrapResultEnvelope(result: unknown): unknown {
+	const unwrapped = resultEnvelopeText(result);
+	return typeof unwrapped === "string" && killedWithOpenOutput(result, unwrapped)
+		? holdKilledOutput(unwrapped, isPlainObject(detailsOf(result)?.progress))
+		: unwrapped;
+}
+
+function resultEnvelopeText(result: unknown): unknown {
 	if (typeof result === "string" || result === null || result === undefined) return result;
 	const presentationText = toolResultPresentationText(result);
 	if (presentationText !== null) return presentationText;
@@ -1834,6 +1910,8 @@ export interface BashTranscriptExecution {
 	totalBytes?: number | undefined;
 	exitCode?: number | null | undefined;
 	cancelled?: boolean | undefined;
+	/** False when the source's trailing whitespace finished the last line, for a caller that trims the output (#446). */
+	outputEndsOpen?: boolean | undefined;
 	truncated?: boolean | undefined;
 	fullOutputPath?: string | undefined;
 	excludeFromContext?: boolean | undefined;
@@ -1883,9 +1961,15 @@ export function renderBashTranscriptExecution(
 		);
 	}
 	const message = execution.error?.trim();
-	const output = message
-		? `${execution.output}${execution.output.length > 0 ? "\n\n" : ""}${message}`
-		: execution.output;
+	// Only a process that exited on its own ended its output on purpose. A trailing newline still finishes a line (#446).
+	const exited =
+		execution.cancelled !== true &&
+		execution.error === undefined &&
+		typeof execution.exitCode === "number" &&
+		!exitMeansKilled(execution.exitCode);
+	const shownOutput =
+		exited || execution.outputEndsOpen === false ? execution.output : holdUnresolvedUserinfo(execution.output);
+	const output = message ? `${shownOutput}${shownOutput.length > 0 ? "\n\n" : ""}${message}` : shownOutput;
 	const finished: ToolExecutionFinished = {
 		toolCallId: "local-bash",
 		toolName: "bash",
@@ -2269,8 +2353,8 @@ export function renderToolPreview(
 			// A failed command's body is the command's own output, shown as it ran; a
 			// failed tool's body is the harness's error text, so its paths abbreviate.
 			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
-			const body = toolOutputInk(redactSecretString(shownText.trimEnd())).flatMap((line) =>
-				indentAndWrap(line, width, failure),
+			const body = toolOutputInk(redactStreamingSecretString(shownText, finished !== undefined).trimEnd()).flatMap(
+				(line) => indentAndWrap(line, width, failure),
 			);
 			rows.push(
 				...previewRows(
@@ -2476,7 +2560,10 @@ function renderChainPreview(
 	if (body.length === 0 && (finished === undefined || settledChainSteps(finished).length === 0)) {
 		const result = finished?.result ?? options.partialResult;
 		const text = result === undefined ? "" : resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
-		body = text.trim().length === 0 ? [] : indentAndWrap(redactSecretString(text), width, failure);
+		body =
+			text.trim().length === 0
+				? []
+				: indentAndWrap(redactStreamingSecretString(text, finished !== undefined), width, failure);
 	}
 	rows.push(...previewRows(body, limit, width, finished === undefined, rail, BODY_INDENT_VISIBLE_WIDTH));
 	return rows;

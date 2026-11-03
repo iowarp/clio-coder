@@ -15,16 +15,16 @@ tier runs on the independent `context.memory.target` and `context.memory.model`
 route when both are set. When neither is set, it runs on the active chat route
 (`chat.target` and `chat.model`), so a default installation with a chat route
 spends model calls on memory. Memory stays in the rules tier only when no route
-resolves, for example when no chat route is configured. The action agent's system
-prompt and tool surface do not change, and disabling `context.memory.enabled`
-removes observation, bank writes, model resolution, reminders, handoff offers,
-and handoff seeding.
+resolves, for example when no chat route is configured. The background tier does
+not change the action agent's system prompt or tool surface. Disabling
+`context.memory.enabled` removes observation, bank writes, model resolution,
+reminders, the `# Memory` section, handoff offers, and handoff seeding.
 
 ## Inspect or configure memory
 
 ### Turn memory off
 
-To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls and reminders, along with handoff offers and seeding. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
+To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. A session records a `clio_coder_memory_off` ledger marker before its first turn with memory off, and history review and completed-task retention read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
 
 ### Inspect the memory bank
 

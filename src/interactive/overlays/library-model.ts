@@ -5,6 +5,10 @@
  * The overlay owns the keyboard, the lifecycle port
  * owns the writes, and this module owns what is true on screen, so the wording
  * of an origin label or a disabled reason is testable without a terminal.
+ *
+ * Every pane answers the operator's question first: is this installed here,
+ * is it usable, and which keys act on it. The facts follow as a table and the
+ * description last, composed from the shared design primitives.
  */
 
 import { readLifecycleReceipts } from "../../core/library-receipts.js";
@@ -24,8 +28,25 @@ import {
 	type LibraryProvidedResource,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
-import { clioTheme, GLYPH } from "../theme/index.js";
-import type { ListOverlayItem } from "./list-overlay.js";
+import { displaySafe } from "../display-safe.js";
+import {
+	type ClioTheme,
+	chip,
+	chipRows,
+	clioTheme,
+	dotSep,
+	type Fact,
+	factRows,
+	fitUnits,
+	GLYPH,
+	keyCap,
+	type StatusKind,
+	statusChip,
+	statusSeverity,
+	titleRow,
+} from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
+import { type ListOverlayItem, markdownRows } from "./list-overlay.js";
 
 /** Browse lists install targets; Installed lists the copies and components that exist here. */
 export type LibraryMode = "browse" | "installed";
@@ -53,6 +74,22 @@ export const LIBRARY_GROUP_MEMBERS = "Members";
 export const LIBRARY_GROUP_UNMANAGED = "Not a package";
 export const LIBRARY_GROUP_NOTICES = "Notices";
 
+/** Fact tables keep their label column at every width, the way the key detail does. */
+const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
+
+/** External text is never trusted on a row: one line, controls neutralized. */
+const safe = sanitizeCallTargetText;
+
+/**
+ * A pane in two parts: the head the engine pins while the rest scrolls (the
+ * name, the status chips, the keys and the reasons a key is absent), then the
+ * facts and the prose.
+ */
+interface DetailRows {
+	head: string[];
+	rest: string[];
+}
+
 /**
  * Where the bytes came from, in words.
  *
@@ -74,6 +111,18 @@ export function libraryOriginLabel(origin: LibraryOrigin): string {
 			return "Core";
 		default:
 			return "Unknown origin";
+	}
+}
+
+/** The origin as a row chip: the same fact in fewer cells, so a narrow row keeps its name. */
+function libraryOriginShort(origin: LibraryOrigin): string {
+	switch (origin.kind) {
+		case "bundled":
+			return "Bundled";
+		case "imported":
+			return `From ${origin.agent}`;
+		default:
+			return libraryOriginLabel(origin);
 	}
 }
 
@@ -104,12 +153,30 @@ function libraryFormatLabel(format: string | undefined): string {
 	return "Format unknown";
 }
 
+/** A copy state as the outcome glyph it carries, so a damaged copy reads as damaged without color. */
+function copyStateStatus(state: string): StatusKind {
+	if (state === "loadable") return "ok";
+	if (state === "disabled") return "warning";
+	if (state === "shadowed") return "cancelled";
+	return "error";
+}
+
+function availabilityStatus(availability: LibraryComponent["availability"]): StatusKind {
+	if (availability === "available") return "ok";
+	if (availability === "untrusted") return "warning";
+	if (availability === "shadowed") return "cancelled";
+	return "error";
+}
+
 /**
  * The persistent mode/scope row, at the width it is drawn.
  *
- * Mode and scope survive every width, because they say what the action keys
- * will do. The counts are what gets dropped first: they are useful, and they
- * are not the thing an operator would be wrong about.
+ * Mode and scope survive every width, each with the key that changes it,
+ * because they say what the action keys will do and the footer cannot always
+ * hold those keys. The notices come next, since a notice is something to act
+ * on, and the counts are what gets dropped first: they are useful, and they are
+ * not the thing an operator would be wrong about. Chips are dropped whole, so a
+ * narrow row never ends on a cut word.
  */
 export function libraryStatusLine(
 	view: LibraryView,
@@ -122,18 +189,32 @@ export function libraryStatusLine(
 	const unit = view.member ? "member" : view.mode === "browse" ? "package" : "entry";
 	const plural = unit === "entry" ? "entries" : `${unit}s`;
 	const total = `${counts.rows} ${counts.rows === 1 ? unit : plural}`;
-	if (width < 34) return theme.fg("fieldValue", `${mode}·Actions:${scope}`);
-	const parts =
-		width < 72
-			? [theme.fg("fieldValue", width >= 48 ? `${mode} ${total}` : total), theme.fg("annotation", `s:${scope}`)]
-			: [theme.fg("fieldValue", `${mode} · Actions: ${scope}`), theme.fg("annotation", total)];
-	if (counts.notices > 0)
-		parts.push(theme.fg("warning", `n:${counts.notices} ${counts.notices === 1 ? "notice" : "notices"}`));
-	else if (width < 72) parts.push(theme.fg("annotation", "n notices"));
-	if (counts.truncated) parts.push(theme.fg("warning", "incomplete results"));
-	if (view.member && width >= 72)
-		parts.push(theme.fg("annotation", `members of ${sanitizeCallTargetText(view.member.ref)}`));
-	return parts.join(theme.fg("border", " │ "));
+	const wide = width >= 72;
+	const keyed = width >= 48;
+	const notices =
+		counts.notices > 0
+			? `${keyCap(theme, "n")} ${theme.fg("warning", `${counts.notices} ${counts.notices === 1 ? "notice" : "notices"}`)}`
+			: wide
+				? null
+				: `${keyCap(theme, "n")} ${theme.fg("annotation", "notices")}`;
+	const parts = [
+		keyed ? `${keyCap(theme, "b")} ${theme.fg("fieldValue", mode)}` : theme.fg("fieldValue", mode),
+		keyed
+			? `${keyCap(theme, "s")} ${theme.fg("fieldValue", wide ? `Actions: ${scope}` : scope)}`
+			: theme.fg("fieldValue", scope),
+		notices,
+		theme.fg("annotation", total),
+		counts.truncated ? statusChip(theme, "warning", wide ? "incomplete results" : "incomplete") : null,
+		view.member && wide ? theme.fg("annotation", `members of ${safe(view.member.ref)}`) : null,
+	];
+	// Whole chips are dropped from the right, with the dim ellipsis that says
+	// so, rather than a cut that lands inside a word.
+	return fitUnits(
+		theme,
+		"",
+		parts.filter((part): part is string => part !== null && part.length > 0),
+		width,
+	);
 }
 
 /** One phrase for a copy its catalog row has moved past. */
@@ -269,47 +350,84 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 	};
 }
 
-function copyStateWord(copy: LibraryCopy): string {
-	const theme = clioTheme();
-	if (copy.state === "loadable") return theme.fg("success", "loadable");
-	if (copy.state === "disabled") return theme.fg("warning", "disabled");
-	if (copy.state === "shadowed") return theme.fg("disabledOption", "shadowed");
-	return theme.fg("error", sanitizeCallTargetText(copy.state));
-}
-
-function availabilityWord(resource: LibraryComponent): string {
-	const theme = clioTheme();
-	if (resource.availability === "available") return theme.fg("success", "available");
-	if (resource.availability === "untrusted") return theme.fg("warning", "untrusted");
-	if (resource.availability === "shadowed") return theme.fg("disabledOption", "shadowed");
-	return theme.fg("error", sanitizeCallTargetText(resource.availability));
-}
-
 /** Plain fields are external text; callbacks compose only trusted semantic styling. */
+/**
+ * A row's status chips, worst first, so the chip a narrowing meta keeps is
+ * the one that says something is wrong. Each is rendered when the meta is
+ * read, so it repaints with the skin.
+ */
+function worstFirst(chips: ReadonlyArray<readonly [StatusKind, string] | undefined>): Array<() => string> {
+	return chips
+		.filter((entry): entry is readonly [StatusKind, string] => entry !== undefined)
+		.sort((a, b) => statusSeverity(a[0]) - statusSeverity(b[0]))
+		.map(
+			([kind, text]) =>
+				() =>
+					statusChip(clioTheme(), kind, text),
+		);
+}
+
 function metaOf(parts: ReadonlyArray<string | (() => string) | undefined>): string {
 	return parts
-		.map((part) => (typeof part === "function" ? part() : part === undefined ? "" : sanitizeCallTargetText(part)))
+		.map((part) => (typeof part === "function" ? part() : part === undefined ? "" : safe(part)))
 		.filter(Boolean)
-		.join(" · ");
+		.join(dotSep(clioTheme()));
 }
 
-/** One line per partner of a plugin or extension, or none when the package has no pair. */
-function pairLines(
+/** One fact per partner of a plugin or extension, or none when the package has no pair. */
+function pairFacts(
 	subject: { kind: LibraryEntryKind; name: string; ref: string },
 	pairs: LibraryPairs | undefined,
-): string[] {
-	return (pairs?.get(subject.ref as `${LibraryEntryKind}:${string}`) ?? []).map(
-		(pair) => `**${pair.role === "extension" ? "Extension" : "Plugin"}:** ${describeLibraryPair(subject, pair)}`,
-	);
+): Fact[] {
+	return (pairs?.get(subject.ref as `${LibraryEntryKind}:${string}`) ?? []).map((pair) => ({
+		label: pair.role === "extension" ? "Extension" : "Plugin",
+		value: safe(describeLibraryPair(subject, pair)),
+	}));
 }
 
-function lastReceiptLine(id: string, scope: string, kind: string): string[] {
+function lastReceiptFact(id: string, scope: string, kind: string): Fact[] {
 	const receipt = readLifecycleReceipts(id, scope, kind).at(-1);
 	return receipt
 		? [
-				`**Last lifecycle:** ${receipt.operation} ${receipt.at} by ${receipt.actor}; ${receipt.id}@${receipt.version ?? "unversioned"}; digest ${receipt.contentDigest ?? "unavailable"}; operation ${receipt.operationId}`,
+				{
+					label: "Last lifecycle",
+					value: safe(
+						`${receipt.operation} ${receipt.at} by ${receipt.actor}; ${receipt.id}@${receipt.version ?? "unversioned"}; digest ${receipt.contentDigest ?? "unavailable"}; operation ${receipt.operationId}`,
+					),
+					tone: "muted",
+				},
 			]
 		: [];
+}
+
+/**
+ * The keys this row answers to, as key caps with the verb each one really
+ * performs: a management key opens a review, never a write. The same words the
+ * footer uses, so the pane and the rail never disagree.
+ */
+function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] {
+	const entry = (key: string, verb: string): string => `${keyCap(theme, key)} ${theme.fg("menuDescription", verb)}`;
+	// Enter opens a package's members and does nothing else, so it is named
+	// only where it opens something; Tab is the detail key.
+	return [
+		...(actions.use ? [entry("v", "use")] : []),
+		...(actions.open ? [entry("Enter", "members")] : []),
+		...(actions.install ? [entry("i", "review install")] : []),
+		...(actions.enable ? [entry("e", "review enable/disable")] : []),
+		...(actions.update ? [entry("u", "review update")] : []),
+		...(actions.remove ? [entry("r", "review remove")] : []),
+	];
+}
+
+/** Each reason an action is absent, right under the keys it explains, as an info chip on its own row. */
+function noteRows(theme: ClioTheme, reasons: ReadonlyArray<string>, width: number): string[] {
+	return reasons.flatMap((reason) => chipRows(theme, [statusChip(theme, "info", safe(reason))], width));
+}
+
+/** The description last, rendered as Markdown at the pane's width so its code spans and emphasis keep their styling. */
+function proseRows(text: string | undefined, width: number): string[] {
+	if (!text) return [];
+	return ["", ...markdownRows(sanitizeMultilineDisplayText(text).text, width)];
 }
 
 function packageDetail(
@@ -317,47 +435,82 @@ function packageDetail(
 	view: LibraryView,
 	actions: LibraryRowActions,
 	pairs: LibraryPairs | undefined,
-): string[] {
+	width: number,
+): DetailRows {
+	const theme = clioTheme();
 	const provider = record.kind !== view.category;
 	const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
-	const lines = [
-		`# ${record.name}`,
-		`**Kind:** ${record.kind}${provider ? ` provider package for ${view.category} components` : " package"}`,
-		`**Actions (${view.scope}):** ${libraryActionSummary(actions)}`,
-		"b shows loaded components in Installed. Tab toggles detail; PgUp/PgDn scroll.",
-		...(provider ? ["Catalog hints describe potential components, not loaded components."] : []),
+	const here = record.copies.find((copy) => copy.scope === view.scope);
+	const kindText = `${record.kind}${provider ? ` provider package for ${view.category} components` : " package"}`;
+	const status = [
+		here
+			? statusChip(theme, copyStateStatus(here.state), `installed here: ${here.scope} ${safe(here.state)}`)
+			: chip(theme, `not installed in ${view.scope} scope`, "muted", GLYPH.phaseWaiting),
+		here?.update ? statusChip(theme, "warning", libraryUpdateLabel(here.update)) : null,
+		record.refusal ? statusChip(theme, "error", "cannot be installed") : null,
+		record.copies.length > 0 && !here
+			? chip(theme, `${record.copies.map((copy) => `${copy.scope} ${copy.state}`).join(", ")}`, "muted")
+			: null,
+	];
+	const facts: Fact[] = [
+		{ label: "Ref", value: safe(record.ref) },
+		{ label: "Kind", value: kindText },
 		...(hints.length
 			? [
-					`**Catalog hints (${view.category === "plugin" ? "all kinds" : view.category}):** ${hints.map((hint) => `${hint.kind}:${hint.name}`).join(", ")}`,
+					{
+						label: `Catalog hints (${view.category === "plugin" ? "all kinds" : view.category})`,
+						value: hints.map((hint) => safe(`${hint.kind}:${hint.name}`)).join(", "),
+					},
 				]
 			: []),
-		`**Origin:** ${libraryOriginLabel(record.origin)}`,
+		{ label: "Origin", value: libraryOriginLabel(record.origin) },
 	];
 	const detail = libraryOriginDetail(record.origin);
-	lines.push(...lastReceiptLine(record.name, view.scope, record.kind));
-	if (detail) lines.push(`**Source:** \`${detail}\``);
-	lines.push(`**Format:** ${libraryFormatLabel(record.format)}`);
-	if (record.version) lines.push(`**Version:** ${record.version}`);
-	if (record.sha256) lines.push(`**Recorded digest:** \`${record.sha256.slice(0, 12)}\``);
-	lines.push(
-		`**Installed copies:** ${
+	if (detail) facts.push({ label: "Source", value: safe(detail) });
+	facts.push({ label: "Format", value: libraryFormatLabel(record.format) });
+	if (record.version) facts.push({ label: "Version", value: safe(record.version) });
+	if (record.sha256) facts.push({ label: "Recorded digest", value: record.sha256.slice(0, 12), tone: "muted" });
+	facts.push({
+		label: "Installed copies",
+		value:
 			record.copies.length === 0
 				? "none"
 				: record.copies
 						.map((copy) => `${copy.scope} (${copy.state}${copy.update ? `, ${libraryUpdateLabel(copy.update)}` : ""})`)
-						.join(", ")
-		}`,
-	);
-	lines.push(`**Selected scope:** ${view.scope}`);
-	if (record.requires?.length) lines.push(`**Requires:** ${record.requires.join(", ")}`);
-	lines.push(...pairLines(record, pairs));
-	if (view.category !== "plugin" && (record.provides?.length ?? 0) > hints.length)
-		lines.push("Other component kinds are listed in the Plugins category.");
-	if (record.provides === undefined && record.copies.length === 0)
-		lines.push("**Contents:** unknown until this package is inspected or installed.");
-	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
-	lines.push("", "---", "", record.description);
-	return lines;
+						.join(", "),
+	});
+	facts.push({ label: "Selected scope", value: view.scope });
+	if (record.requires?.length) facts.push({ label: "Requires", value: record.requires.join(", ") });
+	facts.push(...pairFacts(record, pairs));
+	facts.push(...lastReceiptFact(record.name, view.scope, record.kind));
+	const notes = [
+		...(provider ? ["Catalog hints describe potential components, not loaded components."] : []),
+		...(view.category !== "plugin" && (record.provides?.length ?? 0) > hints.length
+			? ["Other component kinds are listed in the Plugins category."]
+			: []),
+		...(record.provides === undefined && record.copies.length === 0
+			? ["Contents: unknown until this package is inspected or installed."]
+			: []),
+	];
+	return {
+		head: [
+			titleRow(theme, safe(record.name), width, { meta: record.version ? `v${safe(record.version)}` : kindText }),
+			...chipRows(theme, status, width),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: [
+			...chipRows(
+				theme,
+				[`${keyCap(theme, "b")} ${theme.fg("annotation", "shows loaded components in Installed")}`],
+				width,
+			),
+			"",
+			...factRows(theme, facts, width, FACT_OPTIONS),
+			...notes.map((note) => theme.fg("annotation", note)),
+			...proseRows(record.description, width),
+		],
+	};
 }
 
 function copyDetail(
@@ -365,84 +518,178 @@ function copyDetail(
 	view: LibraryView,
 	actions: LibraryRowActions,
 	pairs: LibraryPairs | undefined,
-): string[] {
-	const lines = [
-		`# ${copy.name}`,
-		`**Kind:** ${copy.kind}`,
-		`**Scope:** ${copy.scope}`,
-		`**State:** ${copy.state}`,
-		...(copy.update ? [`**Update:** ${libraryUpdateLabel(copy.update)}`] : []),
-		`**Enabled:** ${copy.enabled ? "yes" : "no"} · **Valid:** ${copy.valid ? "yes" : "no"} · **Compatible:** ${copy.compatible ? "yes" : "no"} · **Effective:** ${copy.effective ? "yes" : "no"}`,
-		`**Trust:** ${copy.trust}`,
-		`**Origin:** ${libraryOriginLabel(copy.origin)}`,
+	width: number,
+): DetailRows {
+	const theme = clioTheme();
+	const flag = (name: string, on: boolean): string => statusChip(theme, on ? "ok" : "error", name);
+	const facts: Fact[] = [
+		{ label: "Ref", value: safe(copy.ref) },
+		{ label: "Kind", value: `${copy.kind} copy` },
+		{ label: "Trust", value: safe(copy.trust), ...(copy.trust === "foreign" ? { tone: "warning" as const } : {}) },
+		{ label: "Origin", value: libraryOriginLabel(copy.origin) },
 	];
 	const detail = libraryOriginDetail(copy.origin);
-	lines.push(...lastReceiptLine(copy.name, copy.scope, copy.kind));
-	if (detail) lines.push(`**Source:** \`${detail}\``);
-	lines.push(`**Format:** ${libraryFormatLabel(copy.format)}`);
-	lines.push(`**Root:** \`${copy.root}\``);
-	if (copy.overriddenBy) lines.push(`**Overridden by:** the ${copy.overriddenBy} copy`);
+	if (detail) facts.push({ label: "Source", value: safe(detail) });
+	facts.push({ label: "Format", value: libraryFormatLabel(copy.format) });
+	facts.push({ label: "Root", value: safe(copy.root) });
+	if (copy.overriddenBy) facts.push({ label: "Overridden by", value: `the ${copy.overriddenBy} copy`, tone: "warning" });
 	if (copy.recordedDigest)
-		lines.push(
-			`**Integrity:** recorded \`${copy.recordedDigest.slice(0, 12)}\`${
+		facts.push({
+			label: "Integrity",
+			value: `recorded ${copy.recordedDigest.slice(0, 12)}${
 				copy.observedDigest
 					? copy.observedDigest === copy.recordedDigest
 						? ", observed identical"
-						: `, observed \`${copy.observedDigest.slice(0, 12)}\` (content changed)`
+						: `, observed ${copy.observedDigest.slice(0, 12)} (content changed)`
 					: ""
 			}`,
-		);
-	if (copy.installedAt) lines.push(`**Installed:** ${copy.installedAt}`);
-	lines.push(`**Selected scope:** ${view.scope}`);
-	lines.push(...pairLines(copy, pairs));
-	for (const diagnostic of copy.diagnostics) lines.push(`**Diagnostic:** ${diagnostic}`);
-	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
-	lines.push("", "Press Enter to list this package's members.");
-	return lines;
+			...(copy.observedDigest && copy.observedDigest !== copy.recordedDigest ? { tone: "warning" as const } : {}),
+		});
+	if (copy.installedAt) facts.push({ label: "Installed", value: safe(copy.installedAt) });
+	facts.push({ label: "Selected scope", value: view.scope });
+	facts.push(...pairFacts(copy, pairs));
+	facts.push(...lastReceiptFact(copy.name, copy.scope, copy.kind));
+	for (const diagnostic of copy.diagnostics)
+		facts.push({ label: "Diagnostic", value: statusChip(theme, "warning", safe(diagnostic)) });
+	return {
+		head: [
+			titleRow(theme, safe(copy.name), width, {
+				meta: `${copy.scope} copy${copy.version ? ` · v${safe(copy.version)}` : ""}`,
+			}),
+			...chipRows(
+				theme,
+				[
+					statusChip(theme, copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`),
+					copy.update ? statusChip(theme, "warning", libraryUpdateLabel(copy.update)) : null,
+					copy.trust === "foreign" ? statusChip(theme, "warning", "foreign") : null,
+				],
+				width,
+			),
+			...chipRows(
+				theme,
+				[
+					flag("enabled", copy.enabled),
+					flag("valid", copy.valid),
+					flag("compatible", copy.compatible),
+					flag("effective", copy.effective),
+				],
+				width,
+			),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS)],
+	};
 }
 
-function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions): string[] {
-	const lines = [
-		`# ${resource.name}`,
-		`**Kind:** ${resource.kind}`,
-		`**Use:** ${resource.invocation ? `\`${resource.invocation}\`` : "not invocable in this state"}`,
-		`**Availability:** ${resource.availability}`,
-		`**Source:** ${resource.source.class} (${resource.source.id}), ${resource.source.scope} scope`,
-		`**Origin:** ${libraryOriginLabel(resource.origin)}`,
+function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions, width: number): DetailRows {
+	const theme = clioTheme();
+	const facts: Fact[] = [
+		{ label: "Key", value: safe(resource.key) },
+		{ label: "Kind", value: resource.kind },
+		{
+			label: "Use",
+			value: resource.invocation ? theme.fg("inlineCode", safe(resource.invocation)) : "not invocable in this state",
+		},
+		{ label: "Source", value: `${resource.source.class} (${safe(resource.source.id)}), ${resource.source.scope} scope` },
+		{ label: "Origin", value: libraryOriginLabel(resource.origin) },
 	];
 	const detail = libraryOriginDetail(resource.origin);
-	if (detail) lines.push(`**Location:** \`${detail}\``);
-	if (resource.format) lines.push(`**Format:** ${libraryFormatLabel(resource.format)}`);
-	lines.push(`**Trusted:** ${resource.trusted ? "yes" : "no"}`);
+	if (detail) facts.push({ label: "Location", value: safe(detail) });
+	if (resource.format) facts.push({ label: "Format", value: libraryFormatLabel(resource.format) });
 	if (resource.owner)
-		lines.push(
-			`**Owner:** ${resource.owner.ref} (${resource.owner.scope} scope)${
-				resource.owner.componentId ? `, declared component \`${resource.owner.componentId}\`` : ""
+		facts.push({
+			label: "Owner",
+			value: `${safe(resource.owner.ref)} (${resource.owner.scope} scope)${
+				resource.owner.componentId ? `, declared component ${safe(resource.owner.componentId)}` : ""
 			}`,
-		);
-	lines.push(`**Path:** \`${resource.path}\``);
-	if (resource.audience) lines.push(`**Audience:** ${resource.audience}`);
-	if (resource.reason) lines.push(`**Reason:** ${resource.reason}`);
-	for (const diagnostic of resource.diagnostics) lines.push(`**Diagnostic:** ${diagnostic}`);
-	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
-	lines.push("", "---", "", resource.description);
-	return lines;
+		});
+	facts.push({ label: "Path", value: safe(resource.path) });
+	if (resource.audience) facts.push({ label: "Audience", value: safe(resource.audience) });
+	if (resource.reason) facts.push({ label: "Reason", value: safe(resource.reason), tone: "warning" });
+	for (const diagnostic of resource.diagnostics)
+		facts.push({ label: "Diagnostic", value: statusChip(theme, "warning", safe(diagnostic)) });
+	return {
+		head: [
+			titleRow(theme, safe(resource.name), width, { meta: resource.kind }),
+			...chipRows(
+				theme,
+				[
+					statusChip(theme, availabilityStatus(resource.availability), safe(resource.availability)),
+					statusChip(theme, resource.trusted ? "ok" : "warning", resource.trusted ? "trusted" : "not trusted"),
+					chip(
+						theme,
+						resource.owner ? `owned by ${safe(resource.owner.ref)}` : `${resource.source.class} component`,
+						"muted",
+					),
+				],
+				width,
+			),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS), ...proseRows(resource.description, width)],
+	};
 }
 
-function memberDetail(subject: Extract<LibraryRowSubject, { kind: "member" }>, actions: LibraryRowActions): string[] {
-	const lines = [
-		`# ${subject.member.name}`,
-		`**Kind:** ${subject.member.kind}`,
-		`**Owner:** ${subject.owner.ref} (${subject.owner.scope} scope, ${subject.owner.state})`,
-		`**Valid:** ${subject.member.valid ? "yes" : "no"}`,
+function memberDetail(
+	subject: Extract<LibraryRowSubject, { kind: "member" }>,
+	actions: LibraryRowActions,
+	width: number,
+): DetailRows {
+	const theme = clioTheme();
+	const facts: Fact[] = [
+		{ label: "Kind", value: subject.member.kind },
+		{ label: "Owner", value: `${safe(subject.owner.ref)} (${subject.owner.scope} scope, ${safe(subject.owner.state)})` },
 	];
-	if (subject.member.componentId) lines.push(`**Declared component:** \`${subject.member.componentId}\``);
-	lines.push(`**Path:** \`${subject.member.path}\``);
-	lines.push(`**Origin:** ${libraryOriginLabel(subject.owner.origin)}`);
-	for (const diagnostic of subject.member.diagnostics) lines.push(`**Diagnostic:** ${diagnostic}`);
-	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
-	if (subject.member.description) lines.push("", "---", "", subject.member.description);
-	return lines;
+	if (subject.member.componentId) facts.push({ label: "Declared component", value: safe(subject.member.componentId) });
+	facts.push({ label: "Path", value: safe(subject.member.path) });
+	facts.push({ label: "Origin", value: libraryOriginLabel(subject.owner.origin) });
+	for (const diagnostic of subject.member.diagnostics)
+		facts.push({ label: "Diagnostic", value: statusChip(theme, "warning", safe(diagnostic)) });
+	return {
+		head: [
+			titleRow(theme, safe(subject.member.name), width, { meta: subject.member.kind }),
+			...chipRows(
+				theme,
+				[
+					subject.member.valid ? statusChip(theme, "ok", "valid") : statusChip(theme, "error", "invalid"),
+					statusChip(
+						theme,
+						copyStateStatus(subject.owner.state),
+						`owner ${subject.owner.scope} ${safe(subject.owner.state)}`,
+					),
+				],
+				width,
+			),
+			...chipRows(theme, actionKeyChips(theme, actions), width),
+			...noteRows(theme, actions.reasons, width),
+		],
+		rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS), ...proseRows(subject.member.description, width)],
+	};
+}
+
+/**
+ * A notice pane: the message, then how to get back to the rows it is about.
+ * Only a library-wide discovery notice says it covers every category; a
+ * package's companion file or an inspection diagnostic belongs to its package.
+ */
+function noticeDetail(title: string, facts: Fact[], message: string, libraryWide: boolean, width: number): DetailRows {
+	const theme = clioTheme();
+	return {
+		head: [titleRow(theme, title, width)],
+		rest: [
+			...factRows(theme, facts, width, FACT_OPTIONS),
+			...(facts.length > 0 ? [""] : []),
+			theme.fg("body", safe(message)),
+			"",
+			...(libraryWide ? [theme.fg("annotation", "Discovery notices cover all categories.")] : []),
+			theme.fg(
+				"annotation",
+				"From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
+			),
+		],
+	};
 }
 
 /** The rows one view draws, with the subject behind each id. */
@@ -453,53 +700,37 @@ export interface LibraryRowSet {
 	truncated: boolean;
 }
 
-function libraryActionSummary(actions: LibraryRowActions): string {
-	return [
-		actions.use ? "v use" : undefined,
-		actions.open ? "Enter members" : "Enter detail",
-		actions.install ? "i review install" : undefined,
-		actions.enable ? "e review enable/disable" : undefined,
-		actions.update ? "u review update" : undefined,
-		actions.remove ? "r review remove" : undefined,
-	]
-		.filter(Boolean)
-		.join(" · ");
-}
+type RowSpec = Omit<ListOverlayItem, "id" | "detail" | "detailHead" | "detailFormat"> & {
+	detail: (width: number) => DetailRows;
+};
 
-function push(
-	set: LibraryRowSet,
-	view: LibraryView,
-	id: string,
-	subject: LibraryRowSubject,
-	item: Omit<ListOverlayItem, "id">,
-): void {
+/**
+ * One row and its pane. The pane is built once per width and served to both
+ * the rows and the pinned-head count, so a receipt read from disk happens
+ * once per frame width rather than twice.
+ */
+function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: RowSpec): void {
 	set.subjects.set(id, subject);
-	const detail = item.detail;
+	let memo: { width: number; epoch: number; rows: DetailRows } | null = null;
+	const rows = (width: number): DetailRows => {
+		if (memo && memo.width === width && memo.epoch === skinEpoch()) return memo.rows;
+		memo = { width, epoch: skinEpoch(), rows: item.detail(width) };
+		return memo.rows;
+	};
+	const { detail: _detail, ...spec } = item;
 	set.items.push({
 		id,
-		...item,
+		...spec,
 		get meta() {
 			return item.meta ?? "";
 		},
-		label:
-			subject.kind === "notice"
-				? clioTheme().fg("warning", sanitizeCallTargetText(item.label))
-				: sanitizeCallTargetText(item.label),
-		...(detail
-			? {
-					detail: (width: number) => {
-						const lines = detail(width).map((line) => sanitizeMultilineDisplayText(line).text);
-						if (subject.kind !== "package" && subject.kind !== "notice")
-							lines.splice(
-								1,
-								0,
-								`**Actions:** ${libraryActionSummary(libraryRowActions(subject, view))}`,
-								"Tab toggles detail. PgUp/PgDn scroll.",
-							);
-						return lines;
-					},
-				}
-			: {}),
+		label: subject.kind === "notice" ? clioTheme().fg("warning", safe(item.label)) : safe(item.label),
+		detailFormat: "rows",
+		detail: (width) => {
+			const built = rows(width);
+			return [...built.head, ...built.rest];
+		},
+		detailHead: (width) => rows(width).head.length,
 	});
 }
 
@@ -581,55 +812,72 @@ export interface LibraryRowOptions {
  * is looking at. Installed lists what this machine actually has, which is what
  * an operator repairing something is looking at. Neither hides the other's
  * evidence: a browse row states its installed copies and an installed row
- * states its origin.
+ * states its origin. A row's metadata leads with the fact that answers the
+ * mode's question, as a status chip, and the origin comes last.
  */
 export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
-	const { inventory, view } = options;
+	// Every record is neutralized for display once, here, so a field a row or a
+	// pane picks up later cannot carry a terminal control past this seam.
+	const inventory = displaySafe(options.inventory);
+	const inspection = displaySafe(options.inspection);
+	const pairs = displaySafe(options.pairs);
+	const failure = options.failure === undefined ? undefined : safe(options.failure);
+	const { view } = options;
 	const theme = clioTheme();
 	const set: LibraryRowSet = { items: [], subjects: new Map(), notices: 0, truncated: false };
 
-	if (view.member && options.inspection) {
-		const owner = options.inspection.copy;
-		for (const member of options.inspection.resources) {
+	if (view.member && inspection) {
+		const owner = inspection.copy;
+		for (const member of inspection.resources) {
 			const subject: LibraryRowSubject = { kind: "member", owner, member };
 			const actions = libraryRowActions(subject, view);
-			push(set, view, `mem:${owner.ref}@${owner.scope}#${member.kind}:${member.name}`, subject, {
+			push(set, `mem:${owner.ref}@${owner.scope}#${member.kind}:${member.name}`, subject, {
 				label: member.name,
 				get meta() {
 					return metaOf([
+						() => (member.valid ? statusChip(theme, "ok", "valid") : statusChip(theme, "error", "invalid")),
 						member.kind,
-						() => (member.valid ? theme.fg("success", "valid") : theme.fg("error", "invalid")),
 						member.componentId ? `component ${member.componentId}` : undefined,
 					]);
 				},
 				group: LIBRARY_GROUP_MEMBERS,
-				detail: () => memberDetail(subject, actions),
+				detail: (width) => memberDetail(subject, actions, width),
 			});
 		}
-		for (const item of options.inspection.ancillary) {
+		for (const item of inspection.ancillary) {
 			const subject: LibraryRowSubject = {
 				kind: "notice",
 				message: `${item.kind} ${item.id} is declared package metadata, not a component. It runs only on an explicit request.`,
 			};
-			push(set, view, `note:ancillary:${item.kind}:${item.id}`, subject, {
+			push(set, `note:ancillary:${item.kind}:${item.id}`, subject, {
 				label: `${item.kind}: ${item.id}`,
 				get meta() {
 					return theme.fg("annotation", "companion file");
 				},
 				group: LIBRARY_GROUP_NOTICES,
-				detail: () => [`# ${item.id}`, `**Declared as:** ${item.kind}`, `**Path:** \`${item.path}\``, "", subject.message],
+				detail: (width) =>
+					noticeDetail(
+						safe(item.id),
+						[
+							{ label: "Declared as", value: safe(item.kind) },
+							{ label: "Path", value: safe(item.path) },
+						],
+						subject.message,
+						false,
+						width,
+					),
 			});
 			set.notices += 1;
 		}
-		for (const diagnostic of options.inspection.diagnostics) {
+		for (const diagnostic of inspection.diagnostics) {
 			const subject: LibraryRowSubject = { kind: "notice", message: diagnostic };
-			push(set, view, `note:member-diag:${set.notices}`, subject, {
-				label: `${theme.fg("warning", GLYPH.warnInline)} ${diagnostic}`,
+			push(set, `note:member-diag:${set.notices}`, subject, {
+				label: `${GLYPH.warnInline} ${diagnostic}`,
 				get meta() {
 					return theme.fg("annotation", "inspection");
 				},
 				group: LIBRARY_GROUP_NOTICES,
-				detail: () => ["# Inspection diagnostic", diagnostic],
+				detail: (width) => noticeDetail("Inspection diagnostic", [], diagnostic, false, width),
 			});
 			set.notices += 1;
 		}
@@ -639,17 +887,24 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const actions = libraryRowActions(subject, view);
 			const here = record.copies.find((copy) => copy.scope === view.scope);
 			const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
-			push(set, view, `pkg:${record.ref}`, subject, {
+			push(set, `pkg:${record.ref}`, subject, {
 				label: record.kind !== view.category ? `${record.name} [${record.kind}]` : record.name,
 				get meta() {
+					// The selected scope is its own chip, so a narrow row drops it whole
+					// instead of cutting "project" in half; the status row names it too.
 					return metaOf([
-						here ? `${here.scope} ${here.state}` : `not installed (${view.scope})`,
-						here?.update ? libraryUpdateLabel(here.update) : undefined,
+						...worstFirst([
+							here ? [copyStateStatus(here.state), `${here.scope} ${safe(here.state)}`] : undefined,
+							here?.update ? ["warning", libraryUpdateLabel(here.update as LibraryCopyUpdate)] : undefined,
+							record.refusal ? ["error", "refused"] : undefined,
+						]),
+						here ? undefined : () => chip(theme, "not installed", "muted"),
+						here ? undefined : () => chip(theme, `${view.scope} scope`, "muted"),
+						record.version ? `v${record.version}` : undefined,
+						libraryOriginShort(record.origin),
 						hints.length > 0
 							? `${hints.length} ${view.category === "plugin" ? "component" : view.category} hints`
 							: undefined,
-						libraryOriginLabel(record.origin),
-						record.version ? `v${record.version}` : undefined,
 					]);
 				},
 				group:
@@ -658,66 +913,60 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 						: record.copies.length > 0
 							? LIBRARY_GROUP_INSTALLED
 							: LIBRARY_GROUP_AVAILABLE,
-				detail: () => packageDetail(record, view, actions, options.pairs),
+				detail: (width) => packageDetail(record, view, actions, pairs, width),
 			});
 		}
 	} else {
 		for (const copy of inventory.copies) {
 			const subject: LibraryRowSubject = { kind: "copy", copy };
 			const actions = libraryRowActions(subject, view);
-			push(set, view, `copy:${copy.ref}@${copy.scope}`, subject, {
+			push(set, `copy:${copy.ref}@${copy.scope}`, subject, {
 				label: copy.name,
 				get meta() {
 					return metaOf([
-						copy.scope,
-						() => copyStateWord(copy),
-						copy.update ? libraryUpdateLabel(copy.update) : undefined,
-						libraryOriginLabel(copy.origin),
-						copy.trust === "foreign" ? () => theme.fg("warning", "foreign") : undefined,
+						...worstFirst([
+							[copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`],
+							copy.update ? ["warning", libraryUpdateLabel(copy.update as LibraryCopyUpdate)] : undefined,
+							copy.trust === "foreign" ? ["warning", "foreign"] : undefined,
+						]),
+						libraryOriginShort(copy.origin),
 					]);
 				},
 				group: LIBRARY_GROUP_INSTALLED,
-				detail: () => copyDetail(copy, view, actions, options.pairs),
+				detail: (width) => copyDetail(copy, view, actions, pairs, width),
 			});
 		}
 		for (const resource of inventory.resources) {
 			const subject: LibraryRowSubject = { kind: "component", resource };
 			const actions = libraryRowActions(subject, view);
-			push(set, view, `res:${resource.key}`, subject, {
+			push(set, `res:${resource.key}`, subject, {
 				label: resource.name,
 				get meta() {
 					return metaOf([
-						() => availabilityWord(resource),
+						() => statusChip(theme, availabilityStatus(resource.availability), safe(resource.availability)),
 						resource.owner ? resource.owner.ref : resource.source.class,
-						libraryOriginLabel(resource.origin),
+						libraryOriginShort(resource.origin),
 					]);
 				},
 				group: resource.owner ? LIBRARY_GROUP_INSTALLED : LIBRARY_GROUP_UNMANAGED,
-				detail: () => resourceDetail(resource, actions),
+				detail: (width) => resourceDetail(resource, actions, width),
 			});
 		}
 	}
 
 	const truncation = libraryTruncationNotice(inventory);
 	set.truncated = truncation !== undefined;
-	for (const message of [options.failure, truncation, ...inventory.diagnostics].filter(
+	for (const message of [failure, truncation, ...inventory.diagnostics].filter(
 		(entry): entry is string => entry !== undefined,
 	)) {
 		const subject: LibraryRowSubject = { kind: "notice", message };
-		push(set, view, `note:${set.notices}`, subject, {
-			label: `${theme.fg("warning", GLYPH.warnInline)} ${message}`,
+		push(set, `note:${set.notices}`, subject, {
+			label: `${GLYPH.warnInline} ${message}`,
 			get meta() {
 				return theme.fg("annotation", "library");
 			},
 			group: LIBRARY_GROUP_NOTICES,
-			detail: () => [
-				"# Library notice",
-				"",
-				"Discovery notices cover all categories.",
-				"From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
-				"",
-				message,
-			],
+			detail: (width) => noticeDetail("Library notice", [], message, true, width),
 		});
 		set.notices += 1;
 	}

@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsText } from "../../domains/evidence/redact.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
+import { redactStreamingSecretString } from "../../domains/safety/redaction.js";
 
 const SCAN_LIMIT = 8_192;
 const DISPLAY_LIMIT = 600;
@@ -45,7 +45,8 @@ function terminalSafePrefix(value: string, limit: number): string {
 /** Available evidence is sanitized and redacted only when explicitly inspected. */
 export function providerErrorEvidence(value: string, scanLimit = value.length): string {
 	return redactSecretsText(
-		redactSecretString(terminalSafePrefix(value, scanLimit)).replace(
+		// A scan limit can end this prefix inside a URL, where userinfo never resolves (#446).
+		redactStreamingSecretString(terminalSafePrefix(value, scanLimit), scanLimit >= value.length).replace(
 			/(\b(?:authorization["']?\s*[:=]\s*["']?\s*)?(?:Bearer|Basic)\s+)[^\s"'<>]+/gi,
 			"$1[redacted]",
 		),

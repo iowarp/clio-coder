@@ -11,6 +11,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // Keep the development gate small and source-only. Package, platform and
 // historical regressions stay available through their explicit commands.
 export const coreTests = [
+	"memory-off-marker",
+	"memory-route-redaction",
+	"prior-session-hint",
 	"auth-storage-durability",
 	"bash-exec-settlement",
 	"bash-output-cap",
@@ -31,6 +34,7 @@ export const coreTests = [
 	"acp-v1-basics",
 	"configure-routing",
 	"mcp-config-trust",
+	"url-userinfo-hold",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

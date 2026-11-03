@@ -139,6 +139,8 @@ export interface EditorSubmitDeps {
 	 * output then stays out of context.
 	 */
 	labelOperatorCommand?: (command: string, cwd: string) => string | null;
+	/** Runs before an operator shell line reaches the ledger, so a ledger fact can precede it. */
+	beforeShellEntryRecorded?: () => void;
 	runBash?: typeof runBashCommand;
 	resolveEditor?: () => string | null;
 	editExternally?: (initialText: string, command: string) => ExternalEditResult;
@@ -243,6 +245,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					...(deps.runBash ? { runBash: deps.runBash } : {}),
 				});
 				if (unlabeled !== null) deps.io.stderr(`[bash] output kept out of context: ${unlabeled}\n`);
+				if (deps.session?.current()) deps.beforeShellEntryRecorded?.();
 				const entry = deps.session?.current()
 					? deps.session.appendEntry(input)
 					: ({

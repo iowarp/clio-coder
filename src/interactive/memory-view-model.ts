@@ -51,7 +51,12 @@ function applicability(record: MemoryRecord): string {
 }
 
 /** Eligibility belongs to memory policy; inspection explains its result without adding another gate. */
-function reachLine(record: MemoryRecord, eligible: boolean, selection: MemoryPromptSelection | null): string {
+function reachLine(
+	record: MemoryRecord,
+	eligible: boolean,
+	selection: MemoryPromptSelection | null,
+	memoryOn: boolean,
+): string {
 	if (record.rejectedAt !== undefined) return "Rejected by operator; never shown.";
 	if (record.regressions?.length) return "Contradicted; excluded from the prompt and recall.";
 	if (!record.approved) return "Awaiting approval; excluded from the prompt and recall.";
@@ -62,6 +67,8 @@ function reachLine(record: MemoryRecord, eligible: boolean, selection: MemoryPro
 			? "Delegated workers only; not this session's agent."
 			: "Outside this session's repository or runtime.";
 	if (reach === "recall") return `Through memory_recall only; the prompt does not carry ${record.scope} scope.`;
+	// A selection built before memory went off still names this record, and it no longer describes the prompt.
+	if (!memoryOn) return "Memory is off, so the prompt and reminders do not carry it; memory_recall can still read it.";
 	const item = selection?.items.find((candidate) => candidate.id === record.id);
 	if (item === undefined) return "Prompt scope; no prompt has been built with it yet.";
 	return item.reason === "selected"
@@ -88,6 +95,7 @@ export function memoryLessonDetail(
 	record: MemoryRecord,
 	eligible: boolean,
 	selection: MemoryPromptSelection | null = null,
+	memoryOn = true,
 ): string[] {
 	const observations = record.observations ?? [];
 	// The repository condition repeats the applicability line above it.
@@ -100,6 +108,8 @@ export function memoryLessonDetail(
 				: "Approved; reviewer and approval time were not recorded."
 			: "Not approved.";
 	return [
+		// The pane names the lesson first, so a key pressed on it is never blind.
+		`# ${record.lesson.split("\n")[0]?.trim() || record.id}`,
 		"## Concerns",
 		...memorySubjectLines(record.lesson),
 		"",
@@ -108,7 +118,7 @@ export function memoryLessonDetail(
 		"",
 		"## Applies",
 		applicability(record),
-		reachLine(record, eligible, selection),
+		reachLine(record, eligible, selection, memoryOn),
 		...when.map((condition) => `When: ${condition}`),
 		...record.avoidWhen.map((condition) => `Not when: ${condition}`),
 		...(record.regressions ?? []).map((regression) => `Contradiction: ${regression}`),

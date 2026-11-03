@@ -25,7 +25,7 @@ import {
 } from "./memory-view-model.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
-import { chipRow, clioTheme, fitUnits, rule, statusChip } from "./theme/index.js";
+import { chipRow, clioTheme, dotSep, fitUnits, rule, statusChip } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
@@ -42,17 +42,23 @@ function lessonItems(
 	eligible: ReadonlySet<string>,
 	group: string,
 	selection: MemoryPromptSelection | null,
+	memoryOn: boolean,
 ): ListOverlayItem[] {
 	const theme = clioTheme();
+	const promptReach = memoryOn ? "prompt" : "off, recall only";
 	return records.map((record) => {
 		const reach = memoryReach(record, eligible.has(record.id));
 		return {
 			id: `lesson:${record.id}`,
 			label: firstLine(record.lesson),
+			// Scope and reach are two chips joined by the shared separator, so a
+			// narrow row drops the reach whole instead of cutting "recall only".
 			meta: theme.fg(
 				"annotation",
 				reach !== "none"
-					? `${record.scope === "repo" ? "this repo" : record.scope} · ${reach === "prompt" ? "prompt" : "recall only"}`
+					? [record.scope === "repo" ? "this repo" : record.scope, reach === "prompt" ? promptReach : "recall only"]
+							.map((part) => theme.fg("annotation", part))
+							.join(dotSep(theme))
 					: record.rejectedAt
 						? "rejected"
 						: record.regressions?.length
@@ -64,7 +70,7 @@ function lessonItems(
 									: "excluded",
 			),
 			group,
-			detail: () => memoryLessonDetail(record, eligible.has(record.id), selection),
+			detail: () => memoryLessonDetail(record, eligible.has(record.id), selection, memoryOn),
 		};
 	});
 }
@@ -187,9 +193,18 @@ export class MemoryOverlayView implements Component {
 		);
 	}
 
-	getHint(): string {
+	getHint(innerWidth?: number): string {
 		this.sync();
-		return this.list.getHint();
+		return this.list.getHint(innerWidth);
+	}
+
+	/** The dock's rows, less the status line, the optional promotion line and the rule this view draws above the list. */
+	setBodyRows(rows: number): void {
+		this.list.setBodyRows(Math.max(1, rows - 2 - (this.promotionMessage === null ? 0 : 1)));
+	}
+
+	setRailRoom(cells: number): void {
+		this.list.setRailRoom(cells);
 	}
 
 	render(width: number): string[] {
@@ -273,9 +288,9 @@ export class MemoryOverlayView implements Component {
 			const ids = new Set(eligible.map((record) => record.id));
 			const review = records.filter((record) => !ids.has(record.id));
 			this.rows = {
-				lessons: lessonItems(eligible, ids, "Reusable lessons", status.promptSelection ?? null),
+				lessons: lessonItems(eligible, ids, "Reusable lessons", status.promptSelection ?? null, status.enabled),
 				task: bankItems(memoryBankEntries(status.bank)),
-				review: lessonItems(review, ids, "Candidates and excluded lessons", status.promptSelection ?? null),
+				review: lessonItems(review, ids, "Candidates and excluded lessons", status.promptSelection ?? null, status.enabled),
 				diagnostics: this.diagnosticItems(status),
 			};
 			this.list.refreshTabs();
@@ -515,7 +530,7 @@ export function openMemoryOverlay(
 		width: MEMORY_OVERLAY_WIDTH,
 		markerId: "memory",
 		title: () => "Memory · inspection",
-		footerHint: () => view.getHint(),
+		footerHint: (innerWidth) => view.getHint(innerWidth),
 	});
 	const timer = setInterval(() => tui.requestRender(), REFRESH_MS);
 	timer.unref?.();

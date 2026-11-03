@@ -4,6 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { defaultRunEventJournal, type RunEventJournalSink } from "../domains/dispatch/run-event-journal.js";
 import type { RunResult } from "../domains/dispatch/types.js";
+import { createRedactionTally, redactSecretsText } from "../domains/evidence/redact.js";
 import { assistantTextFromEvent } from "./dispatch-event-text.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
@@ -63,7 +64,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function eventDetail(event: unknown): string | undefined {
 	const normalized = isRecord(event) ? normalizeClioCoderEventRecord(event) : event;
 	const text = assistantTextFromEvent(normalized);
-	if (text.length > 0) return truncateUtf8(text, RUN_TAIL_TEXT_LIMIT, "...");
+	// A bound first would cut a secret into a piece the row's own redaction cannot recognize (#446).
+	if (text.length > 0) return truncateUtf8(redactSecretsText(text, createRedactionTally()), RUN_TAIL_TEXT_LIMIT, "...");
 	if (!isRecord(normalized)) return undefined;
 	if (normalized.type === "clio_coder_tool_finish" && isRecord(normalized.payload)) {
 		const tool = typeof normalized.payload.tool === "string" ? normalized.payload.tool : "tool";
@@ -74,7 +76,8 @@ function eventDetail(event: unknown): string | undefined {
 		const attempt = typeof normalized.attempt === "number" ? normalized.attempt : "?";
 		const runId = typeof normalized.runId === "string" ? normalized.runId : "?";
 		const reason = typeof normalized.reason === "string" ? normalized.reason : "retry";
-		return truncateUtf8(`attempt ${attempt} -> ${runId}: ${reason}`, RUN_TAIL_TEXT_LIMIT, "...");
+		const line = `attempt ${attempt} -> ${runId}: ${reason}`;
+		return truncateUtf8(redactSecretsText(line, createRedactionTally()), RUN_TAIL_TEXT_LIMIT, "...");
 	}
 	return undefined;
 }

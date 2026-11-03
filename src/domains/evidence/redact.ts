@@ -1,11 +1,13 @@
 /**
- * Export-boundary secret redaction. Applied when an evidence bundle is built
- * (cold path), never during live turns: previews, transcript text, and
- * receipt payloads are scrubbed before serialization so a leaked value stops
- * at the machine boundary. Raw session files stay untouched; the bundle is
- * the boundary, and its overview records how much was filtered so the bundle
- * stays truthful about its own redaction.
+ * Secret redaction by value shape. An evidence bundle applies it at the export
+ * boundary, where previews, transcript text, and receipt payloads are scrubbed
+ * before serialization and the overview records how much was filtered. Raw
+ * session files stay untouched. It also runs synchronously during live turns:
+ * memory-route text, System One state and session-start facts pass through it, so
+ * every pattern here has to stay linear in its input.
  */
+
+import { URL_USERINFO_RE, urlUserinfoHoldsSecret } from "../safety/redaction.js";
 
 export interface RedactionTally {
 	count: number;
@@ -28,6 +30,9 @@ interface SecretPattern {
  * escaped into free text, command output, or tool arguments.
  */
 const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
+	// Shares its pattern with display redaction so the two hide the same text (#446). It runs first because the
+	// assignment value below would swallow the `@` and host of `https://u:token=abcdefgh@h`.
+	{ kind: "url-userinfo", re: URL_USERINFO_RE },
 	{
 		kind: "pem",
 		re: /-----BEGIN [A-Z0-9 ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK)-----[\s\S]*?(?:-----END [A-Z0-9 ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK)-----|$)/g,
@@ -38,12 +43,17 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	{ kind: "sk-key", re: /\bsk-(?:[A-Za-z0-9_-]{2,20}-)?[A-Za-z0-9_-]{16,}\b/g },
 	{ kind: "slack-token", re: /\bxox[bpars]-[A-Za-z0-9-]{8,}\b/g },
 	{ kind: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{30,}\b/g },
-	{ kind: "jwt", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b/g },
+	{
+		kind: "jwt",
+		// Group 1 is the run ahead of the token and stays in the text. The first `eyJ` of a run is the only start that can
+		// win, so testing the shape once from the run's start keeps `eyJaaaaaaaa-` repeated from rescanning at each one.
+		re: /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b)([A-Za-z0-9_-]*?)\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b/g,
+	},
 	{
 		kind: "authorization",
 		// An opaque credential has no shape of its own, so the header or scheme naming it is the signal. A bare
 		// `bearer <word>` needs a digit to stay out of prose, and `$TOKEN` falls outside the value charset.
-		re: /\b((?:authorization\s*["']?\s*[:=]\s*["']?(?:bearer|basic|token)\s+)|(?:bearer\s+)(?=[A-Za-z0-9._~+/-]*\d))([A-Za-z0-9._~+/-]{8,}=*)/gi,
+		re: /\b((?:authorization\s*(?:["']\s*)?[:=]\s*["']?(?:bearer|basic|token)\s+)|(?:bearer\s+)(?=[A-Za-z0-9._~+/-]*\d))([A-Za-z0-9._~+/-]{8,}=*)/gi,
 	},
 	{
 		kind: "assignment",
@@ -53,12 +63,17 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		// is code, not a credential: source constants such as
 		// `BASE_TOKENS = frozenset({` were redacted on every read (DF-12). A
 		// password like `Summer2024(!)` still reads as a value.
-		re: /\b((?:[A-Za-z0-9_-]*(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*)\s*["']?\s*[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
+		//
+		// A key spans one run of name characters and always reaches the run's end, so only the run's first word can
+		// start a match and the secret word need only be found once. Two stars around the word took 7.6 s on 8 KB of
+		// `token-`, and `\\s*["']?\\s*` split a run of spaces every possible way.
+		re: /\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|secret|token|passwd|password|credential))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
 	},
 ];
 
 /** The assignment pattern's key half, for a key that arrives as a JSON property name. */
-const SECRET_PROPERTY_NAME = /(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*$/i;
+const SECRET_PROPERTY_NAME =
+	/(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*$)[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|secret|token|passwd|password|credential)/i;
 
 /**
  * A known value shorter than this is too likely to be ordinary text (a word,
@@ -99,14 +114,45 @@ export function redactKnownSecrets(text: string, values: Iterable<string>, tally
 	});
 }
 
+/**
+ * The head of text about to be redacted synchronously, for text of no fixed size such as a pasted prompt. A token the
+ * bound lands inside goes whole, since what is left of it could be a partial secret no pattern recognizes.
+ */
+export function headForRedaction(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	let end = maxChars;
+	if (!/\s/u.test(text.charAt(end))) while (end > 0 && !/\s/u.test(text.charAt(end - 1))) end -= 1;
+	return text.slice(0, end).trimEnd();
+}
+
 /** Replace every secret-shaped value in `text`, tallying replacements. */
-export function redactSecretsText(text: string, tally: RedactionTally): string {
+export function redactSecretsText(
+	text: string,
+	tally: RedactionTally,
+	options?: {
+		/**
+		 * A caller that knows more about its text may keep an assignment value this rule would hide. `before` is the text
+		 * ahead of the value, which is what says whether the value sits inside a URL.
+		 */
+		keepAssignmentValue?: (value: string, before: string) => boolean;
+	},
+): string {
 	let out = text;
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
+			if (pattern.kind === "url-userinfo") {
+				if (!urlUserinfoHoldsSecret(String(match[1]), String(match[2]))) return String(match[0]);
+				tally.count += 1;
+				return `${String(match[1])}[redacted:url-userinfo]@`;
+			}
+			if (pattern.kind === "assignment" && options?.keepAssignmentValue) {
+				const key = String(match[1]);
+				const before = String(match[4]).slice(0, Number(match[3]) + key.length);
+				if (options.keepAssignmentValue(String(match[2]), before)) return String(match[0]);
+			}
 			tally.count += 1;
-			if (pattern.kind === "assignment" || pattern.kind === "authorization") {
-				// Keep the key and separator; replace only the value.
+			if (pattern.kind === "assignment" || pattern.kind === "authorization" || pattern.kind === "jwt") {
+				// Keep the key and separator, or the run ahead of the token; replace only the value.
 				return `${String(match[1])}[redacted:${pattern.kind}]`;
 			}
 			return `[redacted:${pattern.kind}]`;
@@ -158,8 +204,11 @@ export function redactSecretSegments(segments: string[], tally: RedactionTally):
 	const ranges: { start: number; end: number; kind: string }[] = [];
 	for (const pattern of SECRET_PATTERNS) {
 		for (const match of joined.matchAll(new RegExp(pattern.re.source, pattern.re.flags))) {
-			const start = match.index + (pattern.kind === "assignment" ? (match[1]?.length ?? 0) : 0);
-			ranges.push({ start, end: match.index + match[0].length, kind: pattern.kind });
+			const userinfo = pattern.kind === "url-userinfo";
+			if (userinfo && !urlUserinfoHoldsSecret(match[1] ?? "", match[2] ?? "")) continue;
+			const keepsHead = userinfo || pattern.kind === "assignment" || pattern.kind === "jwt";
+			const start = match.index + (keepsHead ? (match[1]?.length ?? 0) : 0);
+			ranges.push({ start, end: match.index + match[0].length - (userinfo ? 1 : 0), kind: pattern.kind });
 			tally.count += 1;
 		}
 	}

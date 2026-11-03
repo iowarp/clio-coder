@@ -5,6 +5,7 @@
  * this module only renders what it reports.
  */
 
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type {
 	RewindOutcome,
 	RewindPlan,
@@ -15,6 +16,7 @@ import type {
 } from "../../domains/workspace-snapshots/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
+import { displaySafe } from "../display-safe.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import {
 	buildResponsiveHint,
@@ -23,8 +25,22 @@ import {
 	showClioOverlayFrame,
 	windowRows,
 } from "../overlay-frame.js";
-import { chip, chipRow, clioTheme, commandBlock, positionRow, sectionRule } from "../theme/index.js";
-import { type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+import {
+	chip,
+	chipRow,
+	chipRows,
+	choiceRows,
+	clioTheme,
+	commandBlock,
+	type Fact,
+	factRows,
+	GLYPH,
+	positionRow,
+	sectionRule,
+	statusChip,
+	titleRow,
+} from "../theme/index.js";
+import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 export const REWIND_EMPTY =
 	"No workspace snapshots in this session yet. Clio takes one before it first changes files in a turn and before every destructive command, in a Git work tree with safety.snapshots on.";
@@ -32,13 +48,20 @@ export const REWIND_EMPTY =
 /** Differences from the work tree: still counting, counted, or not countable. */
 export type RewindCounts = "pending" | SnapshotDifferences;
 
-function differenceLabel(n: number, counts: RewindCounts): string {
-	if (counts === "pending") return "…";
-	if (counts.kind === "unavailable") return "?";
+/**
+ * How far the work tree has moved from a snapshot, as one chip. The count is
+ * the fact the operator picks a snapshot by, so it carries the outcome glyph:
+ * nothing to restore reads as a check, a count still being taken says so, and
+ * a count that could not be taken says so instead of printing a question mark.
+ */
+function differenceChip(n: number, counts: RewindCounts): string {
+	const theme = clioTheme();
+	if (counts === "pending") return chip(theme, "counting differences", "muted", GLYPH.running);
+	if (counts.kind === "unavailable") return statusChip(theme, "warning", "not counted");
 	const count = counts.counts.get(n);
-	if (count === undefined) return "?";
-	if (count === 0) return "same as now";
-	return `${count} file${count === 1 ? "" : "s"} differ${count === 1 ? "s" : ""}`;
+	if (count === undefined) return statusChip(theme, "warning", "not counted");
+	if (count === 0) return statusChip(theme, "ok", "same as now");
+	return chip(theme, `${count} file${count === 1 ? "" : "s"} differ${count === 1 ? "s" : ""}`, "neutral");
 }
 
 /** One pinned ref as the operator reads it: what it is and the commit it holds. */
@@ -56,41 +79,74 @@ const REF_STATE_LABEL: Readonly<Record<RewindRef["state"], string>> = {
 	unknown: "not checked",
 };
 
-/** Rows for the snapshot list, one per snapshot, newest first as the service returns them. */
-function rewindListItems(records: ReadonlyArray<WorkspaceSnapshotRecord>, counts: RewindCounts): ListOverlayItem[] {
-	const theme = clioTheme();
+const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
+/** Paths or refs a detail lists before counting the rest. */
+const DETAIL_LIST_SHOWN = 12;
+
+/**
+ * Rows for the snapshot list, one per snapshot, newest first as the service
+ * returns them. The clock is enough while every snapshot is from one day; a
+ * list that spans days carries the date too, so two snapshots an hour apart on
+ * different days never read as one hour apart.
+ */
+function rewindListItems(raw: ReadonlyArray<WorkspaceSnapshotRecord>, counts: RewindCounts): ListOverlayItem[] {
+	// Reasons, tool names, skipped paths and stash messages are text from the
+	// work tree; they are neutralized once here.
+	const records = displaySafe(raw);
+	const days = new Set(records.map((record) => dateLocal(record.at)));
 	return records.map((record) => {
+		const when = days.size > 1 ? `${dateLocal(record.at)} ${clockLocal(record.at)}` : clockLocal(record.at);
 		const what = record.tool !== undefined ? `${record.reason} · ${record.tool}` : record.reason;
 		return {
 			id: String(record.n),
-			label: `#${String(record.n).padEnd(4)} ${clockLocal(record.at)}  ${what}`,
-			meta: theme.fg("annotation", differenceLabel(record.n, counts)),
-			detail: () => {
-				const lines = [
-					`# Snapshot ${record.n}`,
-					`**Taken:** ${dateLocal(record.at)} ${clockLocal(record.at)}`,
-					`**Reason:** ${record.reason}`,
+			label: `#${record.n} ${when} ${what}`,
+			cells: { lead: `#${record.n}`, text: `${when}  ${what}` },
+			get meta() {
+				return differenceChip(record.n, counts);
+			},
+			...detailWithHead((width) => {
+				const theme = clioTheme();
+				const facts: Fact[] = [
+					{ label: "Taken", value: `${dateLocal(record.at)} ${clockLocal(record.at)}` },
+					{ label: "Reason", value: record.reason },
 				];
 				if (record.tool !== undefined)
-					lines.push(`**Before:** ${record.tool}${record.toolCallId ? ` (${record.toolCallId})` : ""}`);
-				lines.push(`**Differs from now:** ${differenceLabel(record.n, counts)}`);
-				if (counts !== "pending" && counts.kind === "unavailable") lines.push(`**Not counted:** ${counts.reason}`);
-				lines.push(`**Commit:** ${record.commit.slice(0, 12)} (${record.ref})`);
-				if (record.skipped.length > 0) {
-					lines.push("**Not in this snapshot:**");
-					for (const skip of record.skipped.slice(0, 12))
-						lines.push(`- ${skip.path} (${skip.why === "too-large" ? "untracked, over 16 MiB" : "nested repository"})`);
-					if (record.skipped.length > 12) lines.push(`- and ${record.skipped.length - 12} more`);
-				}
-				const pins = record.pins ?? [];
-				if (pins.length > 0) {
-					lines.push("**Pinned refs:**");
-					for (const pin of pins.slice(0, 12)) lines.push(`- ${pinLabel(pin)}`);
-					if (pins.length > 12) lines.push(`- and ${pins.length - 12} more`);
-				}
-				lines.push("", "Enter shows what a rewind to this snapshot would change before anything is written.");
-				return lines;
-			},
+					facts.push({ label: "Before", value: `${record.tool}${record.toolCallId ? ` (${record.toolCallId})` : ""}` });
+				if (counts !== "pending" && counts.kind === "unavailable")
+					facts.push({ label: "Not counted", value: sanitizeCallTargetText(counts.reason), tone: "warning" });
+				facts.push({ label: "Commit", value: `${record.commit.slice(0, 12)} (${record.ref})` });
+				const skipped = record.skipped
+					.slice(0, DETAIL_LIST_SHOWN)
+					.map((skip) => `${skip.path} (${skip.why === "too-large" ? "untracked, over 16 MiB" : "nested repository"})`);
+				if (record.skipped.length > DETAIL_LIST_SHOWN)
+					skipped.push(`and ${record.skipped.length - DETAIL_LIST_SHOWN} more`);
+				if (skipped.length > 0) facts.push({ label: "Not in it", value: skipped.join("\n"), tone: "warning" });
+				const pins = (record.pins ?? []).slice(0, DETAIL_LIST_SHOWN).map(pinLabel);
+				if ((record.pins?.length ?? 0) > DETAIL_LIST_SHOWN)
+					pins.push(`and ${(record.pins?.length ?? 0) - DETAIL_LIST_SHOWN} more`);
+				if (pins.length > 0) facts.push({ label: "Pinned refs", value: pins.join("\n") });
+				// The title, the difference and the Enter choice stay pinned while the
+				// facts scroll, so the key that previews is never scrolled away.
+				return {
+					head: [
+						titleRow(theme, `Snapshot #${record.n}`, width, { meta: `${dateLocal(record.at)} ${clockLocal(record.at)}` }),
+						...chipRows(theme, [differenceChip(record.n, counts), chip(theme, what, "muted")], width),
+						...choiceRows(
+							theme,
+							[
+								{
+									key: "Enter",
+									verb: "preview rewind",
+									consequence: "shows what restoring this snapshot would change; nothing is written until you confirm",
+									tone: "action",
+								},
+							],
+							width,
+						),
+					],
+					rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS)],
+				};
+			}),
 		};
 	});
 }
@@ -111,8 +167,9 @@ export function openRewindListOverlay(tui: TUI, options: OpenRewindListOptions):
 		title: "Rewind workspace files",
 		items: rewindListItems(options.records, "pending"),
 		layout: "split",
+		unit: "snapshots",
 		emptyMessage: REWIND_EMPTY,
-		hints: [{ key: "Enter", verb: "preview rewind" }],
+		hints: [{ key: "Enter", verb: "preview rewind", short: "preview", critical: true }],
 		onSelect: (item) => options.onSelect(Number(item.id)),
 		onClose: options.onClose,
 	});
@@ -133,8 +190,10 @@ const REWIND_DEFAULT_ROWS = 22;
  * alone, each under a labelled rule that carries its count, and the exact
  * recovery commands in a command block so nothing in them is ever cut.
  */
-function formatRewindConfirmRows(record: WorkspaceSnapshotRecord, plan: RewindPlan, width: number): string[] {
+function formatRewindConfirmRows(rawRecord: WorkspaceSnapshotRecord, rawPlan: RewindPlan, width: number): string[] {
 	const theme = clioTheme();
+	const record = displaySafe(rawRecord);
+	const plan = displaySafe(rawPlan);
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];
 	const wrap = (token: Parameters<typeof theme.fg>[0], text: string): void => {

@@ -49,6 +49,7 @@ import {
 	sourceCoverageDigest,
 } from "./observations.js";
 import { memorySectionBlocks } from "./prompt-section.js";
+import { memoryRouteJson } from "./secret-text.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import {
@@ -643,7 +644,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			? reflectionRequest(work.inputs, work.units)
 			: {
 					systemPrompt: OBSERVATION_PROMPT,
-					userPrompt: JSON.stringify({
+					userPrompt: memoryRouteJson({
 						source: work.units.map((unit) => JSON.parse(unit.text)),
 						successfulResultRefs: work.units.flatMap((unit) => unit.successfulResultRefs),
 					}),

@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
 import type { SkillActivation } from "../../src/core/skill-activation.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
@@ -14,7 +14,9 @@ import {
 	type HandoffServiceDeps,
 	prepareHandoff,
 } from "../../src/domains/session/handoff-service.js";
+import { FLOW_RESTRICTION_ENTRY_TYPE } from "../../src/domains/session/history.js";
 import type { TUI } from "../../src/engine/tui.js";
+import { createFlowLedger } from "../../src/entry/flow-ledger.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createOverlaySessionLifecycle } from "../../src/interactive/overlay-session-lifecycle.js";
 import type { OverlayTransitions } from "../../src/interactive/overlay-transitions.js";
@@ -53,7 +55,7 @@ const ENTRIES: SessionEntry[] = [
 	message("c2", "u1", "tool_call", { name: "read", args: { path: "src/abandoned.ts" } }),
 ];
 
-function fakeSession(options: { failNote?: boolean; failSeed?: boolean } = {}) {
+function fakeSession(options: { failNote?: boolean; failSeed?: boolean; failFlow?: boolean } = {}) {
 	const activation = { name: "writer" } as unknown as SkillActivation;
 	const metas = new Map<string, SessionMeta>([
 		[
@@ -85,11 +87,22 @@ function fakeSession(options: { failNote?: boolean; failSeed?: boolean } = {}) {
 			current = id;
 			return metas.get(id);
 		},
+		resume: (id: string) => {
+			if (!metas.has(id)) throw new Error(`unknown session ${id}`);
+			current = id;
+			return metas.get(id);
+		},
 		appendEntry: (entry: Record<string, unknown>) => {
 			if (options.failSeed && entry.customType === HANDOFF_SEED_CUSTOM_TYPE) throw new Error("disk full");
+			if (options.failFlow && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE) throw new Error("disk full");
 			if (options.failNote && entry.customType === HANDOFF_NOTE_CUSTOM_TYPE) throw new Error("note refused");
 			written.set(current, [...(written.get(current) ?? []), entry]);
 			return entry;
+		},
+		deleteSession: (id: string) => {
+			if (id === current) throw new Error("refusing to delete the open session");
+			metas.delete(id);
+			written.delete(id);
 		},
 		recordSkillActivation: (value: SkillActivation) => {
 			activations.set(current, [...(activations.get(current) ?? []), value]);
@@ -222,6 +235,48 @@ test("handoff commit seeds the successor, notes the source, replays skills and l
 	deepStrictEqual(note?.data, { toSessionId: "to-1", goal: GOAL });
 });
 
+test("handoff commit carries the source session's flow restrictions into the successor, ahead of the document", async () => {
+	const set = {
+		version: 1,
+		restrictions: [
+			{ ruleId: "secrets-local", policyHash: "h", sourceRef: "/repo/secrets/notes.txt", recipients: ["target:stub"] },
+		],
+	};
+	const restriction = { kind: "custom", customType: FLOW_RESTRICTION_ENTRY_TYPE, parentTurnId: "u1", data: { set } };
+	const fake = fakeSession();
+	const { deps: service } = deps(fake, [{ status: "answered", text: EXTRACTION }], {
+		readEntries: (sessionId) => (sessionId === "from" ? [...ENTRIES, restriction as unknown as SessionEntry] : []),
+	});
+	const prepared = await prepareHandoff(service, GOAL);
+	ok(prepared.ok);
+	ok(commitHandoff(service, prepared.draft, "# reviewed").ok);
+	deepStrictEqual(
+		fake.written.get("to-1")?.map((entry) => entry.customType),
+		[FLOW_RESTRICTION_ENTRY_TYPE, HANDOFF_SEED_CUSTOM_TYPE],
+	);
+	const ledger = createFlowLedger({ session: fake.session, readEntries: (id) => fake.written.get(id) ?? [] });
+	deepStrictEqual(ledger.current(), set);
+
+	// A label that cannot be written ends the handoff back in the session whose ledger still holds it.
+	const failing = fakeSession({ failFlow: true });
+	const refusing = deps(failing, [{ status: "answered", text: EXTRACTION }], {
+		readEntries: (sessionId) => (sessionId === "from" ? [...ENTRIES, restriction as unknown as SessionEntry] : []),
+	}).deps;
+	const failingDraft = await prepareHandoff(refusing, GOAL);
+	ok(failingDraft.ok);
+	const sourceLedger = createFlowLedger({
+		session: failing.session,
+		readEntries: (id) => (id === "from" ? [restriction] : (failing.written.get(id) ?? [])),
+	});
+	deepStrictEqual(sourceLedger.current(), set);
+	const refused = commitHandoff(refusing, failingDraft.draft, "# reviewed");
+	strictEqual(refused.ok ? null : refused.code, "seed_failed");
+	strictEqual(failing.current, "from");
+	deepStrictEqual(sourceLedger.current(), set);
+	strictEqual(sourceLedger.refusal(), null);
+	throws(() => failing.session.switchBranch("to-1"), /unknown session/, "no empty child is left to resume");
+});
+
 test("handoff commit writes nothing for an empty or stale review, and keeps the seed when only the note fails", async () => {
 	const fake = fakeSession();
 	const { deps: service } = deps(fake, [{ status: "answered", text: EXTRACTION }]);
@@ -253,6 +308,9 @@ test("handoff commit writes nothing for an empty or stale review, and keeps the 
 		match(failed.reason, /could not seed the new session: disk full/);
 	}
 	strictEqual(seedFails.written.get("from"), undefined, "no note names a successor that was never seeded");
+	strictEqual(seedFails.current, "from", "the operator keeps the session the conversation came from");
+	strictEqual(seedFails.session.switchBranch("from")?.id, "from");
+	throws(() => seedFails.session.switchBranch("to-1"), /unknown session/);
 });
 
 test("the terminal /handoff runs the shared service from extraction through the reviewed seed", async () => {

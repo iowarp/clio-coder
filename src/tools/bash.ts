@@ -22,11 +22,11 @@ import {
 	type ToolResultDisposition,
 } from "./result-disposition.js";
 import { writeToolOffload } from "./result-shaping.js";
-import { DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
+import { DEFAULT_MAX_LINES, truncateTailAtToken } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // Operator presentation cap, tail-biased because diagnostics usually land last.
-const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
+export const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
 // What a bounded result leaves in the model's context, which every later
 // request resends. A 16 KB tail kept the least useful end of a search: three
 // rg results held 51 KB of campaign T3's transcript. Head and tail keep the
@@ -90,19 +90,29 @@ function normalizedBashDisposition(policy: BashOutputPolicy): NormalizedToolResu
 	};
 }
 
+/**
+ * Truncation and summaries both discard the trailing newline, which is what tells the live row the last line is
+ * finished, so `Local: http://localhost:5173` would stall at its colon (#446).
+ */
+function closedLikeSource(rawOutput: string, shown: string): string {
+	return shown.length > 0 && /\s$/u.test(rawOutput) && !/\s$/u.test(shown) ? `${shown}\n` : shown;
+}
+
 /** Bound a cumulative live snapshot without writing an offload file per tick. */
-function shapeBashProgress(rawOutput: string, outputBytes: number, policy: BashOutputPolicy): ToolResult {
+export function shapeBashProgress(rawOutput: string, outputBytes: number, policy: BashOutputPolicy): ToolResult {
 	const disposition = normalizedBashDisposition(policy);
 	let output: string;
 	if (policy === "metadata-only") {
 		output = `bash: running; captured ${outputBytes} bytes; stdout/stderr omitted by metadata-only policy`;
 	} else if (policy === "summary") {
-		output = deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text;
+		output = closedLikeSource(rawOutput, deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text);
 	} else {
-		output = truncateTail(rawOutput, {
-			maxLines: DEFAULT_MAX_LINES,
-			maxBytes: disposition.context.maxBytes,
-		}).content;
+		const { content } = truncateTailAtToken(
+			rawOutput,
+			{ maxLines: DEFAULT_MAX_LINES, maxBytes: disposition.context.maxBytes },
+			"all",
+		);
+		output = closedLikeSource(rawOutput, content);
 	}
 	return {
 		kind: "ok",
@@ -126,6 +136,8 @@ function bashResultDetails(
 ): ToolResultDetails {
 	return {
 		outcome,
+		// `message` trims the output, and a killed process's last line releases only if whitespace finished it (#446).
+		outputEndsOpen: /\S$/u.test(rawOutput),
 		exitCode: result.exitCode,
 		signal: result.signal,
 		timedOut: result.timedOut,
@@ -157,7 +169,7 @@ export function bashOutputCapResult(
 	const preview = inline
 		? raw
 		: showBody
-			? truncateTail(raw, { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES }).content
+			? truncateTailAtToken(raw, { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES }).content
 			: "";
 	let offloadPath: string | null = null;
 	let savedBytes = 0;
@@ -279,7 +291,7 @@ function bashAbortStatus(elapsedMs: number, timeoutMs: number, cause: string | n
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. Default timeout 300s; use panes for long-lived processes or an explicit timeout_ms. For a long external wait such as CI, use job (runner command, until, on_match main_turn) instead of sleeping or polling here. Networking follows the host and OS isolation; disabling web_fetch does not isolate bash networking. At autonomy default it runs unasked in an OS sandbox when available (workspace and scratch roots writable, secrets hidden); otherwise read-only inspection runs and other commands are reviewed.",
+		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist. Combined output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. Default timeout 300s; use panes for long-lived processes or an explicit timeout_ms. Networking follows the host and OS isolation; disabling web_fetch does not isolate bash networking. At autonomy default it runs unasked in an OS sandbox when available (workspace and scratch roots writable, secrets hidden); otherwise read-only inspection runs and other commands are reviewed.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(

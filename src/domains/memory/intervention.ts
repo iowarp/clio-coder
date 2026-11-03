@@ -12,11 +12,11 @@ import {
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
 import { gatewayChainReceipts } from "../../tools/surface.js";
+import { headForRedaction } from "../evidence/redact.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
 import { hashToolCall } from "../safety/loop-detector.js";
-import { redactSecretString } from "../safety/redaction.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
@@ -42,6 +42,7 @@ import {
 } from "./memory-events.js";
 import { sharesInvocationTarget } from "./recipes.js";
 import type { MemoryRestorationInput } from "./restoration.js";
+import { redactForMemoryRoute } from "./secret-text.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "./task-bank.js";
 import {
 	runTaskMemoryPolicy,
@@ -480,6 +481,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const offer = content === undefined ? undefined : offerForContent(content);
 		return () =>
 			!disposed &&
+			// A reminder buffered before memory went off is not sent after it.
+			settings().enabled &&
 			generation === capturedGeneration &&
 			commitState === owner &&
 			(!owner || (!!stamp && !!scope && owner.isCurrent(stamp, scope))) &&
@@ -716,7 +719,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							turnLog.length = 0;
 						}
 						if (input.text?.trim()) {
-							currentTask = shortText(input.text, 2_000);
+							// Bounded first: this runs synchronously at turn start on a prompt of any length.
+							currentTask = shortText(redactForMemoryRoute(headForRedaction(input.text, 16_384)), 2_000);
 							operatorAskedRepeat = operatorRequestsCommandRepeat(input.text);
 						}
 						// Mid-turn annotations are spent per turn, not per session: the same
@@ -1734,14 +1738,20 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// A successful read carries a bounded excerpt of what it returned, so the
 		// lesson pass can quote the source a fact came from. The excerpt is also
 		// the only text that read can later vouch for.
-		const readExcerpt = readPath === null ? "" : shortText(digest.text, TURN_LOG_READ_EXCERPT_CHARS);
+		const readExcerpt =
+			readPath === null ? "" : shortText(redactForMemoryRoute(digest.text), TURN_LOG_READ_EXCERPT_CHARS);
 		if (readPath !== null) {
 			recordObservedRead(observedReads, readPath, readExcerpt);
 			noteReadEvidence(readPath, readExcerpt, root);
 		}
-		const excerpt = outcome === "error" ? ` => ${shortText(digest.text, 160)}` : readExcerpt ? ` => ${readExcerpt}` : "";
+		const excerpt =
+			outcome === "error"
+				? ` => ${shortText(redactForMemoryRoute(digest.text), 160)}`
+				: readExcerpt
+					? ` => ${readExcerpt}`
+					: "";
 		turnLog.push(
-			`${toolStep}. ${outcome === "ok" ? "ok" : "FAILED"}: ${shortText(command ?? prepared.callDescription, TURN_LOG_CALL_MAX_CHARS)}${excerpt}`,
+			`${toolStep}. ${outcome === "ok" ? "ok" : "FAILED"}: ${shortText(redactForMemoryRoute(command ?? prepared.callDescription), TURN_LOG_CALL_MAX_CHARS)}${excerpt}`,
 		);
 		observeChainSteps(prepared.toolName, input);
 		while (turnLog.length > TURN_LOG_LIMIT) turnLog.shift();
@@ -1998,7 +2008,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				// The same receipt rule a direct shell call meets.
 				const succeeded = successfulShellReceipt(settled, details);
 				if (succeeded) rememberSucceededCommand(child.args.command, child.args.cwd);
-				turnLog.push(`${label} ${succeeded ? "ok" : "FAILED"}: ${shortText(child.args.command, TURN_LOG_CALL_MAX_CHARS)}`);
+				turnLog.push(
+					`${label} ${succeeded ? "ok" : "FAILED"}: ${shortText(redactForMemoryRoute(child.args.command), TURN_LOG_CALL_MAX_CHARS)}`,
+				);
 				continue;
 			}
 			const path =
@@ -2006,7 +2018,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					? repositoryRelativePath(child.args.path, [workspaceRoot()])
 					: null;
 			const excerpt =
-				path === null ? "" : shortText(redactSecretString(chainChildText(child.result)), TURN_LOG_READ_EXCERPT_CHARS);
+				path === null ? "" : shortText(redactForMemoryRoute(chainChildText(child.result)), TURN_LOG_READ_EXCERPT_CHARS);
 			if (path !== null) {
 				recordObservedRead(observedReads, path, excerpt);
 				noteReadEvidence(path, excerpt, workspaceRoot());
@@ -2236,11 +2248,13 @@ function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {
 		toolName,
 		operationFingerprint: createHash("sha256").update(canonical).digest("hex").slice(0, 16),
 		callDescription: shortText(
-			Object.keys(publicArgs).length > 0
-				? `${toolName} ${hashToolCall("", publicArgs)}`
-				: toolName === "dispatch"
-					? "dispatch plan preparation"
-					: toolName,
+			redactForMemoryRoute(
+				Object.keys(publicArgs).length > 0
+					? `${toolName} ${hashToolCall("", publicArgs)}`
+					: toolName === "dispatch"
+						? "dispatch plan preparation"
+						: toolName,
+			),
 			CALL_DESCRIPTION_MAX_CHARS,
 		),
 	};

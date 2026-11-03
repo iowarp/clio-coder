@@ -198,6 +198,11 @@ export interface CompiledSessionPrompt {
 	 */
 	projectHandbookFiles?: string[];
 	/**
+	 * The prior-session line exactly as this prompt carries it, or null when none
+	 * rendered. Set by the prompts extension, which owns the workspace facts.
+	 */
+	priorSessionFact?: string | null;
+	/**
 	 * Repo-relative `.clio-coder/rules/**` ids selected into this compile, in
 	 * load order. Set only by `compileWorkerPrompt`, which owns rule
 	 * selection; the pure compiler and `compileSessionPrompt` leave it absent.

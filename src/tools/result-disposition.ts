@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createRedactionTally, redactSecretsText } from "../domains/evidence/redact.js";
+import { CUT_TRIM_LIMIT_CHARS, cutHeadGuard, dropShortCutHead } from "../domains/safety/redaction.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { byteLength } from "./truncate-utf8.js";
@@ -276,7 +277,43 @@ function utf8WordSuffix(text: string, maxBytes: number): string {
 	return kept.length > 0 ? kept : suffix;
 }
 
-/** A deterministic, UTF-8-safe excerpt whose total bytes never exceed maxBytes. */
+/**
+ * The head of unredacted text, ending on a whole credential-sized token. Word snapping gives up past its small window,
+ * which left `https://user:hunter2` beside the omission marker where no later redaction can recognize it. A longer token
+ * keeps its bytes (#446).
+ */
+function wholeTokenPrefix(text: string, maxBytes: number): string {
+	const prefix = utf8Prefix(text, maxBytes);
+	if (/\s/u.test(text.charAt(prefix.length))) return prefix;
+	const floor = Math.max(0, prefix.length - CUT_TRIM_LIMIT_CHARS);
+	let end = prefix.length;
+	while (end > floor && !/\s/u.test(prefix.charAt(end - 1))) end -= 1;
+	const whole = prefix.slice(0, end).trimEnd();
+	return (end === floor && floor > 0) || whole.length === 0 ? prefix : whole;
+}
+
+/** The tail of unredacted text, with the credential-sized tokens a cut leaves unrecognizable discarded (#446). */
+function wholeTokenSuffix(text: string, maxBytes: number): string {
+	return dropShortCutHead(utf8Suffix(text, maxBytes), cutHeadGuard());
+}
+
+/**
+ * The excerpt of a raw tool result, which the ledger keeps and later redaction reads. Those bytes are omitted output
+ * either way, and a result under its budget is never cut.
+ */
+function rawResultExcerpt(text: string, maxBytes: number, bias: ToolResultExcerptBias): string {
+	if (maxBytes <= 0) return "";
+	if (byteLength(text) <= maxBytes) return text;
+	if (bias === "tail") return wholeTokenSuffix(text, maxBytes);
+	const marker = "\n[… omitted …]\n";
+	const markerBytes = byteLength(marker);
+	if (markerBytes >= maxBytes) return wholeTokenPrefix(text, maxBytes);
+	const bodyBudget = maxBytes - markerBytes;
+	const headBudget = Math.floor(bodyBudget / 2);
+	return `${wholeTokenPrefix(text, headBudget)}${marker}${wholeTokenSuffix(text, bodyBudget - headBudget)}`;
+}
+
+/** A deterministic, UTF-8-safe excerpt of already redacted text whose total bytes never exceed maxBytes. */
 function boundedToolResultExcerpt(text: string, maxBytes: number, bias: ToolResultExcerptBias = "head-tail"): string {
 	if (maxBytes <= 0) return "";
 	if (byteLength(text) <= maxBytes) return text;
@@ -470,7 +507,7 @@ function joinHeaderAndBody(
 	const separatorBytes = byteLength(separator);
 	if (headerBytes + separatorBytes >= maxBytes) return capUtf8(header, maxBytes);
 	const bodyBudget = maxBytes - headerBytes - separatorBytes;
-	return `${header}${separator}${boundedToolResultExcerpt(body, bodyBudget, bias)}`;
+	return `${header}${separator}${rawResultExcerpt(body, bodyBudget, bias)}`;
 }
 
 function fullTrailer(input: ProjectToolResultContextInput): string {

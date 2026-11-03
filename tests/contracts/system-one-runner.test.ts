@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
@@ -6,10 +6,12 @@ import { validPayload } from "../../src/core/telemetry/events.js";
 import { newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import { createRedactionTally } from "../../src/domains/evidence/redact.js";
 import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
+import { clearedSiteObject } from "../../src/domains/system-one/recorder/scrub.js";
 import {
 	BREAKER_COOLDOWN_MS,
 	BREAKER_THRESHOLD,
@@ -186,6 +188,43 @@ describe("System One runner", () => {
 		strictEqual(await runner.run(bind(fake), site({ state: () => null }), "x", {}), null);
 		strictEqual(fake.calls(), 0);
 		strictEqual(records.length, 0);
+	});
+
+	it("hands a site only cleared text, so no cut of its own can leave a partial secret", async () => {
+		const { runner, bind } = harness();
+		const raw = `${"x ".repeat(100)}AKIAIOSFODNN7EXAMPLE https://u:hunter2hunter2@host/a --token tokenvalue1`;
+		const handed: string[] = [];
+		const answers: string[] = [];
+		const clearing = site({
+			state: (object) => {
+				handed.push(object);
+				return { task: object.slice(0, 203) };
+			},
+			questions: (object) => {
+				handed.push(object);
+				return { direct: yesNo("Direct?", "yes", "no") };
+			},
+			read: (_answers, object) => {
+				answers.push(object);
+				return "read";
+			},
+		});
+		await runner.run(bind(fakeEngine(replyAs(FITTED_BUILD))), clearing, raw, {});
+		strictEqual(handed.length, 2);
+		for (const text of handed) doesNotMatch(text, /AKIA|hunter2|tokenvalue1/);
+		// `read` stays local and compares against what the caller passed.
+		deepStrictEqual(answers, [raw]);
+	});
+
+	it("gives a site both ends of a long text, cut where no partial secret survives", () => {
+		const middle = "word ".repeat(30_000);
+		const tally = createRedactionTally();
+		const text = clearedSiteObject(`start ${middle}AKIAIOSFODNN7EXAMPLE ${middle}finish`, tally);
+		ok(text.length < 70_000);
+		ok(text.startsWith("start word"));
+		ok(text.endsWith("word finish"));
+		const key = `${"word ".repeat(13_000)}-----BEGIN RSA PRIVATE KEY----- ${"Zm9v ".repeat(30_000)}-----END RSA PRIVATE KEY----- after`;
+		doesNotMatch(clearedSiteObject(key, tally), /Zm9v/);
 	});
 
 	it("gives read() fitted:false for a build nobody fitted, and true for one in the table", async () => {

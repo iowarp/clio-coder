@@ -1,11 +1,17 @@
 import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../../session-control/slash-commands.js";
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
+import { displaySafe } from "../display-safe.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
 import { compactArgumentHint } from "../slash-autocomplete.js";
+import { clioTheme, dotSep, type Fact, factRows, statusChip, titleRow } from "../theme/index.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
-import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+import { detailWithHead, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+
+/** Fact tables keep their label column at every width, the way the key detail does. */
+const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
 
 function formatKey(raw: string): string {
 	if (raw === "(unbound)") return raw;
@@ -23,11 +29,6 @@ function formatKey(raw: string): string {
 		.join(" / ");
 }
 
-/** The usage cell: a fixed column that a long usage may overrun by design. */
-function usageColumn(usage: string): string {
-	return usage.length >= 30 ? `${usage} ` : usage.padEnd(30);
-}
-
 export function openHelpOverlay(
 	tui: TUI,
 	manager: ClioKeybindingManager,
@@ -41,7 +42,6 @@ export function openHelpOverlay(
 	const commands: ListOverlayItem[] = [...commandReference()]
 		.sort((a, b) => (groupRank.get(a.group) ?? 0) - (groupRank.get(b.group) ?? 0))
 		.map((ref) => {
-			const label = `${usageColumn(ref.usage)}${ref.description}`;
 			// Below 80 columns the flags are dropped before the description is cut:
 			// `/run [--agent-profile <profile>] …` left nothing of what /run does.
 			const { flags: _flags, ...withoutFlags } = ref.args ?? {};
@@ -49,50 +49,94 @@ export function openHelpOverlay(
 			const narrowUsage = positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`;
 			const item: ListOverlayItem = {
 				id: ref.name,
-				label,
-				narrowLabel: `${usageColumn(narrowUsage)}${ref.description}`,
+				label: `${ref.usage}  ${ref.description}`,
+				cells: { lead: ref.usage, narrowLead: narrowUsage, text: ref.description },
 				group: ref.group,
 				// Overlay key actions are deliberately not duplicated here: each
 				// overlay's footer hint is the live source of its keys, and a static
 				// copy would rot exactly like the old SLASH_HOTKEYS table did.
-				detail: () => [
-					`# Command: /${ref.name}`,
-					`**Usage:** \`${ref.usage}\``,
-					`**Description:** ${ref.description}`,
-					// The same copy the composer's detail panel shows for each subcommand.
-					...Object.entries(ref.subcommandDescriptions ?? {}).map(
-						([name, purpose]) => `**/${ref.name} ${name}:** ${purpose}`,
-					),
-				],
+				...detailWithHead((width) => {
+					const theme = clioTheme();
+					const facts: Fact[] = [
+						{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
+						{ label: "Does", value: ref.description },
+						// The same copy the composer's detail panel shows for each subcommand.
+						...Object.entries(ref.subcommandDescriptions ?? {}).map(
+							([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
+						),
+					];
+					return {
+						head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
+						rest: factRows(theme, facts, width, FACT_OPTIONS),
+					};
+				}),
 			};
 			return item;
 		});
 
+	// Operator commands carry text an extension author wrote; it is neutralized
+	// once here before any row or pane picks it up. The metas are getters so a
+	// skin change repaints the chip instead of showing the colors of the skin
+	// the help was built under.
 	commands.push(
-		...extensionCommands.map((row) => ({
-			id: `extension:${row.invocation}`,
-			label: `/${row.invocation}  ${row.description}`,
-			group: "Operator extensions",
-			meta: row.available ? "ready" : "unavailable",
-			detail: () => [
-				`# /${row.invocation}`,
-				`Owner: ${row.extensionId} (${row.scope}); operator generation ${row.generation}`,
-				row.available ? "Runs installed operator code; results stay local to you." : (row.reason ?? "Runtime unavailable"),
-			],
-		})),
+		...displaySafe(extensionCommands).map((row): ListOverlayItem => {
+			// The row is one line; the pane's Does fact keeps the description's lines.
+			const summary = sanitizeCallTargetText(row.description);
+			return {
+				id: `extension:${row.invocation}`,
+				label: `/${row.invocation}  ${summary}`,
+				cells: { lead: `/${row.invocation}`, text: summary },
+				group: "Operator extensions",
+				get meta() {
+					return row.available ? statusChip(clioTheme(), "ok", "ready") : statusChip(clioTheme(), "warning", "unavailable");
+				},
+				...detailWithHead((width) => {
+					const theme = clioTheme();
+					const facts: Fact[] = [
+						{ label: "Does", value: row.description },
+						{ label: "Owner", value: `${row.extensionId} (${row.scope} scope), operator generation ${row.generation}` },
+						{
+							label: "Status",
+							value: row.available
+								? statusChip(theme, "ok", "ready; runs installed operator code and its results stay local to you")
+								: statusChip(theme, "warning", row.reason ?? "runtime unavailable"),
+						},
+					];
+					return {
+						head: [titleRow(theme, `/${row.invocation}`, width, { meta: "operator extension" })],
+						rest: factRows(theme, facts, width, FACT_OPTIONS),
+					};
+				}),
+			};
+		}),
 	);
 
 	const keyItems = (): ListOverlayItem[] => {
 		const conflicts = manager.getConflicts();
 		const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
 			const formattedKeys = formatKey(manager.actionLabel(row.id));
-			const keysPart = formattedKeys.length >= 24 ? `${formattedKeys} ` : formattedKeys.padEnd(24);
-			const label = `${keysPart}${row.description}`;
+			// A rebound key says so, and a key two actions share carries the warning
+			// glyph, so the conflict is visible before the row is opened.
+			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
+			// The conflict leads, so a narrow row that keeps one chip keeps the warning.
+			const metaParts = (): string[] => [
+				...(hasConflict ? [statusChip(clioTheme(), "warning", "conflict")] : []),
+				...(row.source === "user" ? ["user"] : []),
+			];
 
 			const item: ListOverlayItem = {
 				id: row.id,
-				label,
+				label: `${formattedKeys}  ${row.description}`,
+				cells: { lead: formattedKeys, text: row.description },
 				group: "Keys",
+				...(row.source === "user" || hasConflict
+					? {
+							get meta() {
+								return metaParts().join(dotSep(clioTheme()));
+							},
+						}
+					: {}),
+				detailFormat: "rows",
 				detail: (width) => {
 					const warnings = manager
 						.platformWarnings()
@@ -117,14 +161,6 @@ export function openHelpOverlay(
 				},
 			};
 
-			const metaParts: string[] = [];
-			if (row.source === "user") metaParts.push("user");
-			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
-			if (hasConflict) metaParts.push("conflict");
-			if (metaParts.length > 0) {
-				item.meta = metaParts.join(", ");
-			}
-
 			return item;
 		});
 
@@ -137,7 +173,8 @@ export function openHelpOverlay(
 	const topics: ListOverlayItem[] = [
 		{
 			id: "topic-keyboard-migration",
-			label: "keyboard migration             Defaults, action menu, editing and explicit overrides",
+			label: "keyboard migration  Defaults, action menu, editing and explicit overrides",
+			cells: { lead: "keyboard migration", text: "Defaults, action menu, editing and explicit overrides" },
 			group: "Topics",
 			detail: () => [
 				"# Keyboard migration",
@@ -149,7 +186,8 @@ export function openHelpOverlay(
 		},
 		{
 			id: "topic-fleet-runs",
-			label: `${"fleet runs & steering".padEnd(30)}Inspect, guide, and cancel delegated workers`,
+			label: "fleet runs & steering  Inspect, guide, and cancel delegated workers",
+			cells: { lead: "fleet runs & steering", text: "Inspect, guide, and cancel delegated workers" },
 			group: "Topics",
 			detail: () => [
 				"# Fleet runs & steering",
@@ -165,7 +203,8 @@ export function openHelpOverlay(
 		},
 		{
 			id: "topic-files-pane",
-			label: `${"panes & files".padEnd(30)}The files pane, the logs and shell panes, and what closes them`,
+			label: "panes & files  The files pane, the logs and shell panes, and what closes them",
+			cells: { lead: "panes & files", text: "The files pane, the logs and shell panes, and what closes them" },
 			group: "Topics",
 			detail: () => [
 				"# Panes & files",
@@ -180,7 +219,8 @@ export function openHelpOverlay(
 		},
 		{
 			id: "topic-steering-modes",
-			label: `${"steering modes".padEnd(30)}Interrupt, next slot, or end of turn: when a message lands mid-run`,
+			label: "steering modes  Interrupt, next slot, or end of turn: when a message lands mid-run",
+			cells: { lead: "steering modes", text: "Interrupt, next slot, or end of turn: when a message lands mid-run" },
 			group: "Topics",
 			detail: () => [
 				"# Steering modes",
@@ -195,7 +235,8 @@ export function openHelpOverlay(
 		},
 		{
 			id: "topic-autonomy",
-			label: `${"autonomy & safety net".padEnd(30)}How the autonomy level and the always-on guardrails interact`,
+			label: "autonomy & safety net  How the autonomy level and the always-on guardrails interact",
+			cells: { lead: "autonomy & safety net", text: "How the autonomy level and the always-on guardrails interact" },
 			group: "Topics",
 			detail: () => [
 				"# Autonomy & safety net",

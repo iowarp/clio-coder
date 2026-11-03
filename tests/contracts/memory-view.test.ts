@@ -7,6 +7,7 @@ import type { MemoryRecord } from "../../src/domains/memory/types.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { MemoryOverlayView } from "../../src/interactive/memory-overlay.js";
 import { memoryLessonDetail, memoryTaskDetail, memoryViewSignature } from "../../src/interactive/memory-view-model.js";
+import { ClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 
 function record(id: string, lesson: string, fields: Partial<MemoryRecord> = {}): MemoryRecord {
 	return {
@@ -285,6 +286,36 @@ test("memory tabs fit narrow and wide terminals with long content", () => {
 		for (let tab = 0; tab < 4; tab++) {
 			for (const line of view.render(width)) ok(visibleWidth(line) <= width, `${width}: ${stripTerminalSequences(line)}`);
 			view.handleInput(nextTab);
+		}
+	}
+});
+
+test("the lessons list stays inside the frame's row budget and keeps the cursor on screen", () => {
+	const records = Array.from({ length: 30 }, (_, index) =>
+		record(`r${index}`, `Lesson number ${index} about verification`),
+	);
+	const view = new MemoryOverlayView(
+		() => status(),
+		() => records,
+		() => {},
+		() => {},
+	);
+	const frame = new ClioOverlayFrame(
+		view,
+		() => "Memory",
+		() => view.getHint(),
+	);
+	for (const rows of [14, 24]) {
+		frame.setRowBudget(rows);
+		for (let press = 1; press < records.length; press++) {
+			view.handleInput("\u001b[B");
+			const lines = frame.render(100).map(stripTerminalSequences);
+			ok(lines.length <= rows, `${rows} rows: ${lines.length} rendered`);
+			ok(!lines.some((line) => /… \d+ more rows/u.test(line)), `${rows} rows: the frame cut the list`);
+			ok(
+				lines.some((line) => line.includes("❯ Lesson number")),
+				`${rows} rows: cursor off screen after ${press} presses`,
+			);
 		}
 	}
 });
