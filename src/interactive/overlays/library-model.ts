@@ -702,7 +702,7 @@ export interface LibraryRowSet {
 	truncated: boolean;
 }
 
-type RowSpec = Pick<ListOverlayItem, "label" | "meta" | "group"> & {
+type RowSpec = Pick<ListOverlayItem, "label" | "meta" | "group" | "searchGroup"> & {
 	detail: (width: number) => DetailRows;
 };
 
@@ -726,6 +726,7 @@ function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: 
 		id,
 		label: subject.kind === "notice" ? clioTheme().fg("warning", safe(item.label)) : safe(item.label),
 		...(item.group !== undefined ? { group: item.group } : {}),
+		...(item.searchGroup !== undefined ? { searchGroup: item.searchGroup } : {}),
 		get meta() {
 			return item.meta ?? "";
 		},
@@ -861,7 +862,8 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		const owner = inspection.copy;
 		// The header names the copy, because two copies of one package list
 		// the same members and the status row drops the owner below 72 columns.
-		const group = `${LIBRARY_GROUP_MEMBERS} of ${safe(owner.ref)} (${owner.scope})`;
+		// The scope leads because a narrow row cuts the tail, and the ref is long.
+		const group = `${LIBRARY_GROUP_MEMBERS} (${owner.scope}) of ${safe(owner.ref)}`;
 		for (const member of inspection.resources) {
 			const subject: LibraryRowSubject = { kind: "member", owner, member };
 			const actions = libraryRowActions(subject, view);
@@ -875,6 +877,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 					]);
 				},
 				group,
+				searchGroup: false,
 				detail: (width) => memberDetail(subject, actions, width),
 			});
 		}

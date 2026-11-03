@@ -238,3 +238,66 @@ it("inverts the pane on every detail key press, two presses before a repaint inc
 	view.handleInput("\t");
 	ok(paneDrawn(), "the next press shows it again");
 });
+
+it("leaves the pane request alone when the detail key has no pane to change", () => {
+	const items = [0, 1].map((index) => ({
+		id: `row-${index}`,
+		label: `row ${index}`,
+		detail: () => Array.from({ length: 12 }, (_, line) => `line ${line}`),
+		detailFormat: "rows" as const,
+	}));
+	const view = new ListOverlayView(
+		{
+			title: "Library",
+			items,
+			fullScreen: true,
+			layout: "split",
+			filterable: true,
+			explicitSearch: true,
+			onSelect() {},
+			onClose() {},
+		},
+		() => {},
+	);
+	view.toggleDetail();
+	view.setBodyRows(14);
+	const paneDrawn = (width = 60): boolean =>
+		view.render(width).map(stripVTControlCharacters).join("\n").includes("line 0");
+	ok(paneDrawn());
+	for (const key of "/zzzq\r") view.handleInput(key);
+	ok(!paneDrawn(), "no row matches, so no pane is drawn");
+	for (let press = 0; press < 3; press += 1) {
+		view.handleInput("\t");
+		paneDrawn();
+	}
+	view.handleInput("\t");
+	view.handleInput("\t");
+	view.handleInput("\x1b");
+	ok(paneDrawn(), "the pane comes back as it was, whatever the presses or their repaints");
+	paneDrawn(120);
+	view.handleInput("\t");
+	ok(paneDrawn(60), "the split pane cannot be put away, so Tab there left the stacked one alone");
+});
+
+it("cuts an empty state before the keys under it", () => {
+	const view = new ListOverlayView(
+		{
+			title: "Library",
+			items: [],
+			fullScreen: true,
+			emptyMessage: "An empty state long enough to wrap ".repeat(8),
+			emptyRemedy: "b shows installable packages.",
+			globalHints: [
+				{ key: "o", verb: "import" },
+				{ key: "R", verb: "refresh" },
+			],
+			onClose() {},
+		},
+		() => {},
+	);
+	view.setRailRoom(20);
+	view.setViewportRows(8);
+	const lines = view.render(50).map(stripVTControlCharacters);
+	ok(lines.length <= 6, `the body stays inside its ${6} rows: ${lines.length}`);
+	match(lines.join("\n"), /\[o\] import/);
+});

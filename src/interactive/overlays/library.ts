@@ -131,16 +131,22 @@ function requestRefFor(subject: LibraryRowSubject): { ref: string; reason?: stri
 
 /**
  * Whether the copy `e` would act on is enabled, or undefined when the row has
- * no copy to act on. A browse row carries its copies' states, not their
- * flags, so a disabled copy there offered `disable` and planned one.
+ * no copy to act on. A browse row carries its copies' states, not their flags,
+ * and a damaged state hides disabled, so the flag comes from the copy itself.
  */
-function subjectEnabled(subject: LibraryRowSubject, scope: PluginScope): boolean | undefined {
+function subjectEnabled(
+	subject: LibraryRowSubject,
+	scope: PluginScope,
+	copies: LibraryInventory["copies"],
+): boolean | undefined {
 	if (subject.kind === "copy") return subject.copy.enabled;
 	if (subject.kind === "member") return subject.owner.enabled;
 	if (subject.kind === "component") return true;
 	if (subject.kind === "package") {
 		const here = subject.record.copies.find((copy) => copy.scope === scope);
-		return here === undefined ? undefined : here.state !== "disabled";
+		if (here === undefined) return undefined;
+		const copy = copies.find((item) => item.ref === subject.record.ref && item.scope === scope);
+		return copy?.enabled ?? here.state !== "disabled";
 	}
 	return undefined;
 }
@@ -547,7 +553,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const entries: Array<{ key: string; verb: string }> = [];
 		if (actions.install) entries.push({ key: "i", verb: "install" });
 		if (actions.enable)
-			entries.push({ key: "e", verb: subjectEnabled(subject, view.scope) === false ? "enable" : "disable" });
+			entries.push({
+				key: "e",
+				verb: subjectEnabled(subject, view.scope, inventory().copies) === false ? "enable" : "disable",
+			});
 		if (actions.update) entries.push({ key: "u", verb: "update" });
 		if (actions.remove) entries.push({ key: "r", verb: "remove" });
 		// Enter is named only where it opens members; a pane is Tab's, and at
@@ -638,7 +647,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			r: (item) => manage("remove", item),
 			e: (item) => {
 				const subject = selected(item);
-				manage(subject && subjectEnabled(subject, view.scope) === false ? "enable" : "disable", item);
+				manage(subject && subjectEnabled(subject, view.scope, inventory().copies) === false ? "enable" : "disable", item);
 			},
 		},
 		onClose: deps.onClose,

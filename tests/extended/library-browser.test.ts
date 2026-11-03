@@ -742,8 +742,55 @@ describe("library browser behavior", () => {
 		const state = harness({ initialTab: "plugin" });
 		state.options.globalActions?.b?.();
 		state.press("\r");
-		match(plain(state.rows("plugin")[0]?.group ?? ""), /^Members of plugin:materio \(user\)$/);
+		match(plain(state.rows("plugin")[0]?.group ?? ""), /^Members \(user\) of plugin:materio$/);
 		match(state.status(120), /members of plugin:materio \(user\)/);
+	});
+
+	it("narrows a member list by member name, never by the header that names the copy", () => {
+		const state = harness({ initialTab: "plugin" });
+		state.options.globalActions?.b?.();
+		state.press("\r");
+		const view = state.mount();
+		for (const key of "/user") view.handleInput(key);
+		match(plain(view.render(100).join("\n")), /No matches found/);
+	});
+
+	it("keeps the scope in the member header when a narrow row cuts a long ref", () => {
+		const ref = "plugin:acme-enterprise-long-package-name";
+		const headers = (["user", "project"] as const).map((scope) => {
+			const state = harness({
+				initialTab: "plugin",
+				inspection: {
+					copy: copy({ ref, scope }),
+					resources: [{ kind: "skill", name: "lab", path: "/p/SKILL.md", valid: true, diagnostics: [] }],
+					ancillary: [],
+					prerequisites: [],
+					diagnostics: [],
+				},
+			});
+			state.options.globalActions?.b?.();
+			state.press("\r");
+			const view = state.mount();
+			return (width: number) => plain(view.render(width).find((line) => plain(line).includes("── Members")) ?? "");
+		});
+		for (const width of [40, 50, 56]) {
+			match(headers[0]?.(width) ?? "", /\(user\)/);
+			match(headers[1]?.(width) ?? "", /\(project\)/);
+		}
+	});
+
+	it("offers enable on a browse row whose disabled copy also reads as damaged", () => {
+		const state = harness({
+			initialTab: "plugin",
+			inventory: inventory({
+				packages: [record({ copies: [{ scope: "user", state: "damaged" }] })],
+				copies: [copy({ state: "damaged", enabled: false, effective: false, loadable: false })],
+			}),
+		});
+		const row = state.rows("plugin")[0];
+		ok(row);
+		state.press("e", row.id);
+		deepStrictEqual(state.planned, [{ operation: "enable", ref: "plugin:materio", scope: "user" }]);
 	});
 
 	it("offers enable, not disable, on a browse row whose copy in the selected scope is disabled", () => {

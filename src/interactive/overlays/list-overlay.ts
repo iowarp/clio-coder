@@ -90,6 +90,8 @@ export interface ListOverlayItem {
 	meta?: string;
 	/** Group header this item renders under, e.g. "project", "marketplace". */
 	group?: string;
+	/** False when the group names the rows' owner rather than the row, so search skips it. */
+	searchGroup?: boolean;
 	/**
 	 * Lines for the detail pane, lazily computed at the pane's real width.
 	 * Markdown by default; `detailFormat: "rows"` says the lines are already
@@ -334,6 +336,13 @@ export class ListOverlayView implements Component {
 	 * press a no-op. From here on the pane may take the body over.
 	 */
 	private toggleDetailByKey(): void {
+		// With no pane to change the press changes nothing: a no-match filter or an
+		// empty tab has no row to describe, and the split pane is always drawn.
+		// Flipping the request here would surface later as a pane that moved on its own.
+		if (!this.filteredItems()[this.selectedIndex]?.detail || this.detailPaneSplit) {
+			this.onChange();
+			return;
+		}
 		this.takeoverAllowed = true;
 		// Before the first frame nothing has been drawn yet, and after a press the
 		// frame has not caught up with, the request is what the key inverts.
@@ -455,7 +464,9 @@ export class ListOverlayView implements Component {
 		const query = this.filterText.trim();
 		if (query.length === 0) return this.items;
 		if (this.filterMemo?.query === query) return this.filterMemo.items;
-		const items = fuzzyFilter([...this.items], query, (item) => `${item.label} ${item.group ?? ""}`);
+		const items = fuzzyFilter([...this.items], query, (item) =>
+			item.searchGroup === false ? item.label : `${item.label} ${item.group ?? ""}`,
+		);
 		this.filterMemo = { query, items };
 		return items;
 	}
@@ -723,8 +734,12 @@ export class ListOverlayView implements Component {
 					: emptyState(clioTheme(), text, Math.max(1, width - 2), {
 							remedy: noMatch ? "Esc clears the filter" : (remedy ?? ""),
 						});
-			for (const wrapped of rows) {
-				lines.push(this.padLine(`  ${wrapped}`, width));
+			// Keys sit below these rows and the frame cuts from the bottom, so the
+			// message gives up its tail before a key goes off screen.
+			const kept = rows.slice(0, Math.max(1, listMaxLines));
+			for (const [index, wrapped] of kept.entries()) {
+				const cut = index === kept.length - 1 && kept.length < rows.length;
+				lines.push(this.padLine(`  ${wrapped}${cut ? ` ${GLYPH.ellipsis}` : ""}`, width));
 			}
 		} else {
 			const scrollRows = renderedRows.length > listMaxLines && listMaxLines > 1 ? 1 : 0;
@@ -927,6 +942,8 @@ export class ListOverlayView implements Component {
 	}
 
 	render(width: number): string[] {
+		// Any frame has caught up with the presses, a memoized one too.
+		this.detailKeyPending = false;
 		const filteredItems = this.filteredItems();
 		const status = this.options.status?.(width);
 
@@ -957,7 +974,6 @@ export class ListOverlayView implements Component {
 			status,
 		].join("|");
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
-		this.detailKeyPending = false;
 		const theme = clioTheme();
 
 		let tabRows = this.renderTabBar(width);
