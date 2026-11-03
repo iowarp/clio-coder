@@ -33,6 +33,10 @@ export interface FlowLedger {
 	refusal(): string | null;
 	/** Record restrictions that just entered the session. Persists before returning when it can. */
 	absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
+	/** What any session's ledger carries, current or not. Throws when that ledger cannot be read. */
+	restrictionsOf(sessionId: string): FlowRestrictionSet | null;
+	/** Whether a session carries a restriction. An unreadable ledger answers true, since the ledger never downgrades on failure. */
+	isRestricted(sessionId: string): boolean;
 }
 
 /** The union of every flow-restriction entry in a session's ledger. */
@@ -142,6 +146,13 @@ export function createFlowLedger(deps: {
 		}
 	};
 
+	const restrictionsOf = (sessionId: string): FlowRestrictionSet | null =>
+		mergeFlowRestrictions(
+			flowRestrictionsFromEntries(deps.readEntries(sessionId)),
+			known.get(sessionId),
+			...(pending.get(sessionId) ?? []).map((item) => item.set),
+		);
+
 	return {
 		current() {
 			sync();
@@ -167,6 +178,14 @@ export function createFlowLedger(deps: {
 				pending.set(loadedFor, queue);
 			}
 			flush();
+		},
+		restrictionsOf,
+		isRestricted(sessionId) {
+			try {
+				return (restrictionsOf(sessionId)?.restrictions.length ?? 0) > 0;
+			} catch {
+				return true;
+			}
 		},
 	};
 }

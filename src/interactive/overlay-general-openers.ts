@@ -89,6 +89,7 @@ export interface OverlayGeneralOpenersDeps {
 	getTaskBoard?: Parameters<typeof openTasksOverlay>[1];
 	userTasks?: UserTasksStore;
 	getDecisionBoard?: Parameters<typeof openDecisionsOverlay>[1];
+	sessionFlowRestricted?: (sessionId: string) => boolean;
 	supersedeDecision?: (interviewId: string, key: string, correction?: string) => unknown;
 	submitChat: (text: string) => void;
 	getTaskMemoryStatus?: Parameters<typeof openMemoryOverlay>[1];
@@ -492,6 +493,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				onPromote: async (entry, scope) => {
 					const meta = deps.getSessionMeta();
 					if (!meta) throw new Error("memory promotion requires an active session");
+					if (deps.sessionFlowRestricted?.(meta.id) === true)
+						throw new Error("this session carries an information-flow restriction, and a record reaches every later route");
 					const result = await proposeTaskBankPromotion(deps.dataDir, { id: meta.id, cwd: meta.cwd }, entry, scope);
 					records = loadMemoryRecordsSync(deps.dataDir);
 					return result;

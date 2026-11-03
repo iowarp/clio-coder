@@ -15,6 +15,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { type FlowRestrictionSet, isFlowRestrictionSet } from "../../core/flow-restrictions.js";
 import type { SessionContract } from "./contract.js";
 import type { DecisionLedgerEntry, SessionEntry } from "./entries.js";
 import {
@@ -54,6 +55,11 @@ export interface HandoffServiceDeps {
 	createSession?: () => void;
 	/** The settled decision board, which wins over extracted decisions. */
 	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
+	/**
+	 * The host's flow ledger, for the one case a label has no session to land in: the seed failed and the source could
+	 * not be made current again. The ledger holds what it cannot write and refuses transfers until it can.
+	 */
+	absorbFlow?: (set: FlowRestrictionSet) => void;
 }
 
 /**
@@ -325,10 +331,11 @@ export function commitHandoff(
 	const { fromSessionId, goal } = draft;
 	const activations = session.current()?.skillActivations ?? [];
 	let toSessionId: string | null = null;
+	let restrictions: Array<Extract<SessionEntry, { kind: "custom" }>> = [];
 	try {
 		// The document was drawn from restricted context, and each session's ledger is the only authority for what it
 		// carries. Read before minting, and written ahead of the seed, so no document exists unlabeled.
-		const restrictions = deps.readEntries(fromSessionId).filter(isFlowRestrictionEntry);
+		restrictions = deps.readEntries(fromSessionId).filter(isFlowRestrictionEntry);
 		deps.createSession();
 		const minted = session.current()?.id ?? null;
 		if (minted === null || minted === fromSessionId) throw new Error("the new session was not created");
@@ -352,6 +359,13 @@ export function commitHandoff(
 		for (const activation of activations) session.recordSkillActivation(activation);
 	} catch (error) {
 		const leftover = abandonSuccessor(session, fromSessionId, toSessionId);
+		// Still off the source with the source's conversation in the host's agent, and this session's ledger holds nothing.
+		if (session.current()?.id !== fromSessionId) {
+			for (const restriction of restrictions) {
+				const set = (restriction.data as { set?: unknown } | undefined)?.set;
+				if (isFlowRestrictionSet(set)) deps.absorbFlow?.(set);
+			}
+		}
 		return refuse("error", "seed_failed", `could not seed the new session: ${errorText(error)}${leftover}`);
 	}
 	const warnings: string[] = [];

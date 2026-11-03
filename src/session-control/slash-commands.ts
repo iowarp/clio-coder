@@ -286,7 +286,8 @@ export type CouncilDispatchOutcome =
 export type TaskMemorySeedCommandResult =
 	| { status: "seeded"; seeded: number; skipped: number; source: string }
 	| { status: "disabled" }
-	| { status: "not-found" };
+	| { status: "not-found" }
+	| { status: "refused"; reason: string };
 
 export type InitCommandOptions = ContextInitOptions;
 
@@ -2462,6 +2463,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return;
 				case "not-found":
 					ctx.notice("info", "no structured task-memory snapshot found in the newest handoff");
+					return;
+				case "refused":
+					ctx.notice("warn", `task memory not seeded: ${result.reason}`);
 			}
 		},
 	},

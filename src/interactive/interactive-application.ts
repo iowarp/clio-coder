@@ -1,6 +1,7 @@
 import type { ClioSettings } from "../core/config.js";
 import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
+import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
@@ -234,6 +235,10 @@ export interface InteractiveDeps {
 	getTaskBoard?: () => TaskBoardSnapshot | null;
 	/** Settled interview snapshots folded from the active session branch. */
 	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
+	/** The flow ledger, for labels a failed `/handoff` could not land in a session. */
+	absorbFlow?: (set: FlowRestrictionSet) => void;
+	/** Whether a session carries an information-flow restriction; `/memory` will not promote out of one. */
+	sessionFlowRestricted?: (sessionId: string) => boolean;
 	/** Append an acknowledged operator-authored decision revision. */
 	supersedeDecision?: (interviewId: string, key: string, correction?: string) => unknown;
 	/** Project-scoped operator task inbox used by `/tasks` subcommands. */

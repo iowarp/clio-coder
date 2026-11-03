@@ -516,7 +516,9 @@ background model. The step records `information_flow_blocked`, the telemetry row
 carries the admission diagnostic as `refusalReason`, and the session shows one
 `Memory skipped target <id>: <reason>` notice per session. The chat fallback is
 admitted against the same policy, so a restricted session can end with no model
-step at all. See [Information flow](information-flow.md).
+step at all. A restricted session also files no lesson, retains no completed task and
+promotes no entry, because a durable record carries no label and reaches every later
+route. See [Information flow](information-flow.md).
 
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its
@@ -782,14 +784,17 @@ Ordinary turns receive no snapshot. The skill writes the handoff to
 private status and secret-shaped values do not cross the export boundary. The
 parser also accepts the older `clio-task-memory` fence language and `version: 1`
 snapshots in handoff files written by earlier builds. Version 1 snapshots seed
-a bank but cannot be promoted, because they carry no source provenance.
+a bank unless the project declares information-flow source rules, and cannot be
+promoted, because they carry no source provenance.
 `clio-coder context reset` removes `.clio-coder/handoffs/`.
 
 When `/resume` restores a session with an id different from the previous one,
 or a resumed session opens at startup, Clio checks only the newest
 `handoff-*.md` by modification time (at most 1,000,000 bytes) and offers
 `/memory seed` if it contains a valid snapshot. Seeding is explicit and
-deduplicated by class and normalized content. It resets injection attribution for
+deduplicated by class and normalized content. The session takes the flow
+restrictions of the snapshot's source session first, and under source rules a
+source whose ledger cannot be read is refused. It resets injection attribution for
 the new entries, and the master kill switch disables both the offer and the
 writes. Navigation that parks, resumes or switches turns in the session clears the
 prior bank before the new session can observe it. `clio-coder memory promote

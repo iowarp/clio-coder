@@ -46,6 +46,8 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "getTaskBoard"
 	| "userTasks"
 	| "getDecisionBoard"
+	| "absorbFlow"
+	| "sessionFlowRestricted"
 	| "getTaskMemoryStatus"
 	| "systemOne"
 	| "recordOutcome"
@@ -502,6 +504,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.onForkSession ? { onForkSession: deps.app.onForkSession } : {}),
 		...(deps.app.onNewSession ? { onNewSession: deps.app.onNewSession } : {}),
 		...(deps.app.getDecisionBoard ? { getDecisionBoard: deps.app.getDecisionBoard } : {}),
+		...(deps.app.absorbFlow ? { absorbFlow: deps.app.absorbFlow } : {}),
 		terminal: deps.terminal,
 		suspendTerminal: deps.suspendTerminal,
 		announceTaskMemorySeedOffer,
@@ -538,6 +541,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),
 		...(deps.app.userTasks ? { userTasks: deps.app.userTasks } : {}),
 		...(deps.app.getDecisionBoard ? { getDecisionBoard: deps.app.getDecisionBoard } : {}),
+		...(deps.app.sessionFlowRestricted ? { sessionFlowRestricted: deps.app.sessionFlowRestricted } : {}),
 		...(deps.app.supersedeDecision ? { supersedeDecision: deps.app.supersedeDecision } : {}),
 		submitChat: (text) => deps.getSlashContext().submitChat(text),
 		...(deps.app.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.app.getTaskMemoryStatus } : {}),

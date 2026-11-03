@@ -56,6 +56,7 @@ export interface OverlaySessionLifecycleDeps {
 	onNewSession?(): void;
 	/** The session's settled decision board, which wins over extracted decisions. */
 	getDecisionBoard?(): ReadonlyArray<DecisionLedgerEntry>;
+	absorbFlow?: HandoffServiceDeps["absorbFlow"];
 	/** Stop and restart the terminal around an external editor child process. */
 	suspendTerminal?<T>(run: () => T): T;
 	resolveEditor?: typeof resolveExternalEditor;
@@ -478,6 +479,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			isTurnInFlight: () => deps.chat.isStreaming(),
 			...(deps.onNewSession ? { createSession: deps.onNewSession } : {}),
 			...(deps.getDecisionBoard ? { getDecisionBoard: deps.getDecisionBoard } : {}),
+			...(deps.absorbFlow ? { absorbFlow: deps.absorbFlow } : {}),
 		};
 	}
 

@@ -109,6 +109,7 @@ export function bindBoardActions(deps: {
 	taskBank: () => TaskMemorySnapshot;
 	currentSession: () => { id: string; cwd: string } | null | undefined;
 	dataDir: string;
+	sessionFlowRestricted?: (sessionId: string) => boolean;
 }): AcpBoardActions {
 	return {
 		supersedeDecision: (interviewId, key, correction) => {
@@ -134,6 +135,8 @@ export function bindBoardActions(deps: {
 		proposeMemory: async (entryId, scope) => {
 			const session = deps.currentSession();
 			if (!session) throw new Error("memory promotion requires an active session");
+			if (deps.sessionFlowRestricted?.(session.id) === true)
+				throw new Error("this session carries an information-flow restriction, and a record reaches every later route");
 			const bank = deps.taskBank();
 			const entry = [...bank.knowledge, ...bank.procedural].find((row) => row.id === entryId);
 			if (entry === undefined) throw new Error(`task-bank entry ${entryId} is not in this session`);

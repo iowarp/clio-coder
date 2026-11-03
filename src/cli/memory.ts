@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import {
@@ -17,6 +18,9 @@ import {
 	rejectMemoryRecord,
 	type TaskMemoryHandoffEntry,
 } from "../domains/memory/index.js";
+import { FLOW_RESTRICTION_ENTRY_TYPE } from "../domains/session/history.js";
+import { parseSessionEntries } from "../domains/session/index.js";
+import { sessionLedgersForRoots } from "../domains/session/related-ledgers.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder memory list
@@ -269,6 +273,14 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			const snapshot = await readReviewedHandoff(handoffPath);
+			// A record has no flow label and reaches every later route, so a restricted source promotes nothing.
+			const source = sessionLedgersForRoots(clioStateDir(), [process.cwd()]).find(
+				(ledger) => ledger.sessionId === snapshot.source.sessionId,
+			);
+			if (source !== undefined && ledgerFlowRestricted(source.path)) {
+				printError(`session ${snapshot.source.sessionId} carries an information-flow restriction; nothing was promoted`);
+				return 1;
+			}
 			const entries = selectHandoffEntries(snapshot, parsed.entryIds);
 			for (const entry of entries) {
 				const result = await proposeMemoryPromotion(
@@ -345,6 +357,19 @@ function scopeSelection(parsed: ParsedMemoryArgs): MemoryScopeSelection | undefi
 	}
 	if (parsed.agentId === undefined) throw new Error("agent scope requires --agent");
 	return { scope: "agent", agent: memoryAgentIdentity(parsed.agentId) };
+}
+
+/** Fails closed: a ledger that cannot be read or parsed vouches for nothing. */
+function ledgerFlowRestricted(path: string): boolean {
+	try {
+		const read = parseSessionEntries(readFileSync(path, "utf8"), path);
+		return (
+			read.errors.length > 0 ||
+			read.entries.some((entry) => entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE)
+		);
+	} catch {
+		return true;
+	}
 }
 
 async function readReviewedHandoff(path: string): Promise<ReviewedTaskMemoryHandoffSnapshot> {

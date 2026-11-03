@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
+import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
@@ -14,6 +15,33 @@ import { runTaskMemoryPolicy, TaskMemoryEndpointPreemptedError } from "../../src
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
+
+test("a flow-restricted session files no lesson at scope end, and a clean one still does", async () => {
+	const root = mkdtempSync(join(tmpdir(), "memory-flow-"));
+	try {
+		const bank = new TaskMemoryBank();
+		const lesson = bank.saveKnowledge("Release with the token from the notes.", { durable: true });
+		const feedback = (dataDir: string, restricted: boolean) =>
+			new MemoryLessonFeedback({
+				dataDir: () => dataDir,
+				stateDir: () => root,
+				session: () => ({ id: "s", cwd: root }),
+				sessionFlowRestricted: () => restricted,
+				notice: () => {},
+				diagnostic: () => {},
+			});
+		const restricted = feedback(join(root, "restricted"), true);
+		restricted.scopeEnd({ sessionId: "s", lessons: [lesson] });
+		await restricted.whenSettled();
+		strictEqual(loadMemoryRecordsSync(join(root, "restricted")).length, 0);
+		const clean = feedback(join(root, "clean"), false);
+		clean.scopeEnd({ sessionId: "s", lessons: [lesson] });
+		await clean.whenSettled();
+		strictEqual(loadMemoryRecordsSync(join(root, "clean")).length, 1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 test("an approved command lesson surfaces once at the first non-documentation edit and holds on the command's success", () => {
 	const delivered: string[] = [];

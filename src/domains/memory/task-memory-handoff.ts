@@ -69,7 +69,8 @@ export interface TaskMemoryHandoffOffer {
 export type TaskMemoryHandoffSeedOutcome =
 	| ({ status: "seeded"; source: string } & TaskMemoryHandoffSeedResult)
 	| { status: "disabled" }
-	| { status: "not-found" };
+	| { status: "not-found" }
+	| { status: "refused"; reason: string };
 
 function exportEntry(entry: TaskMemoryEntry): TaskMemoryHandoffEntry {
 	return {
@@ -240,10 +241,14 @@ export function seedTaskMemoryFromNewestHandoff(
 	bank: TaskMemoryBank,
 	cwd: string,
 	enabled: boolean,
+	/** Refuses the snapshot or labels the session for it, before any entry reaches the bank; a reason refuses. */
+	admit?: (snapshot: TaskMemoryHandoffSnapshot) => string | null,
 ): TaskMemoryHandoffSeedOutcome {
 	if (!enabled) return { status: "disabled" };
 	const artifact = readNewestTaskMemoryHandoff(cwd);
 	if (artifact === null) return { status: "not-found" };
+	const refusal = admit?.(artifact.snapshot) ?? null;
+	if (refusal !== null) return { status: "refused", reason: refusal };
 	return {
 		status: "seeded",
 		...seedTaskMemoryBank(bank, artifact.snapshot),

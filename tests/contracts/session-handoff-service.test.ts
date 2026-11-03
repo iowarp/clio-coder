@@ -1,6 +1,14 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { SkillActivation } from "../../src/core/skill-activation.js";
+import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
+import {
+	renderTaskMemoryHandoffSource,
+	seedTaskMemoryFromNewestHandoff,
+} from "../../src/domains/memory/task-memory-handoff.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import {
@@ -55,7 +63,9 @@ const ENTRIES: SessionEntry[] = [
 	message("c2", "u1", "tool_call", { name: "read", args: { path: "src/abandoned.ts" } }),
 ];
 
-function fakeSession(options: { failNote?: boolean; failSeed?: boolean; failFlow?: boolean } = {}) {
+function fakeSession(
+	options: { failNote?: boolean; failSeed?: boolean; failFlow?: boolean; failResume?: boolean } = {},
+) {
 	const activation = { name: "writer" } as unknown as SkillActivation;
 	const metas = new Map<string, SessionMeta>([
 		[
@@ -88,6 +98,7 @@ function fakeSession(options: { failNote?: boolean; failSeed?: boolean; failFlow
 			return metas.get(id);
 		},
 		resume: (id: string) => {
+			if (options.failResume) throw new Error("source locked");
 			if (!metas.has(id)) throw new Error(`unknown session ${id}`);
 			current = id;
 			return metas.get(id);
@@ -275,6 +286,79 @@ test("handoff commit carries the source session's flow restrictions into the suc
 	deepStrictEqual(sourceLedger.current(), set);
 	strictEqual(sourceLedger.refusal(), null);
 	throws(() => failing.session.switchBranch("to-1"), /unknown session/, "no empty child is left to resume");
+});
+
+test("a seed that fails with no way back holds the source's labels, so the unlabeled child sends nothing", async () => {
+	const set = {
+		version: 1,
+		restrictions: [{ ruleId: "secrets", policyHash: "h", sourceRef: "/repo/secrets/notes.txt", recipients: [] }],
+	};
+	const restriction = { kind: "custom", customType: FLOW_RESTRICTION_ENTRY_TYPE, parentTurnId: "u1", data: { set } };
+	const fake = fakeSession({ failFlow: true, failResume: true });
+	const ledger = createFlowLedger({ session: fake.session, readEntries: (id) => fake.written.get(id) ?? [] });
+	const { deps: service } = deps(fake, [{ status: "answered", text: EXTRACTION }], {
+		readEntries: (sessionId) => (sessionId === "from" ? [...ENTRIES, restriction as unknown as SessionEntry] : []),
+		absorbFlow: (held) => ledger.absorb(held, { tool: "handoff" }),
+	});
+	const prepared = await prepareHandoff(service, GOAL);
+	ok(prepared.ok);
+	const refused = commitHandoff(service, prepared.draft, "# reviewed");
+	strictEqual(refused.ok ? null : refused.code, "seed_failed");
+	strictEqual(fake.current, "to-1");
+	deepStrictEqual(ledger.current(), set);
+	match(ledger.refusal() ?? "", /could not be persisted to session to-1/);
+});
+
+test("a handoff seed refused by its admission leaves the bank untouched", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "memory-seed-"));
+	try {
+		const handoffs = join(cwd, ".clio-coder", "handoffs");
+		mkdirSync(handoffs, { recursive: true });
+		const bank = new TaskMemoryBank();
+		const source = new TaskMemoryBank();
+		source.saveKnowledge("the token lives in the notes");
+		writeFileSync(
+			join(handoffs, "handoff-2026-11-03.md"),
+			renderTaskMemoryHandoffSource(source.snapshot(), {
+				sessionId: "from",
+				evidenceRefs: ["session-from"],
+				runtimeIds: [],
+				agentIds: [],
+			}),
+		);
+		const seen: string[] = [];
+		const refused = seedTaskMemoryFromNewestHandoff(bank, cwd, true, (snapshot) => {
+			if (snapshot.version === 2) seen.push(snapshot.source.sessionId);
+			return "no provenance";
+		});
+		deepStrictEqual(refused, { status: "refused", reason: "no provenance" });
+		deepStrictEqual(seen, ["from"]);
+		strictEqual(bank.snapshot().knowledge.length, 0);
+		strictEqual(seedTaskMemoryFromNewestHandoff(bank, cwd, true, () => null).status, "seeded");
+		strictEqual(bank.snapshot().knowledge.length, 1);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("the flow ledger reads another session's labels and fails closed on an unreadable one", () => {
+	const set = {
+		version: 1,
+		restrictions: [{ ruleId: "secrets", policyHash: "h", sourceRef: "/repo/secrets/notes.txt", recipients: [] }],
+	};
+	const ledger = createFlowLedger({
+		session: fakeSession().session,
+		readEntries: (id) => {
+			if (id === "gone") throw new Error("no such session");
+			return id === "labeled" ? [{ kind: "custom", customType: FLOW_RESTRICTION_ENTRY_TYPE, data: { set } }] : [];
+		},
+	});
+	deepStrictEqual(ledger.restrictionsOf("labeled"), set);
+	strictEqual(ledger.restrictionsOf("clean"), null);
+	throws(() => ledger.restrictionsOf("gone"), /no such session/);
+	strictEqual(ledger.isRestricted("labeled"), true);
+	strictEqual(ledger.isRestricted("clean"), false);
+	strictEqual(ledger.isRestricted("gone"), true);
 });
 
 test("handoff commit writes nothing for an empty or stale review, and keeps the seed when only the note fails", async () => {
