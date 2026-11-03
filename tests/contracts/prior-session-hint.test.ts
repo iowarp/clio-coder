@@ -91,6 +91,30 @@ it("redacts secret-shaped text the prior-session line quotes from another sessio
 	}
 });
 
+it("a session recorded with memory off offers its id and time, never its words", async () => {
+	const env = await isolateClioEnv("clio-prior-session-off-");
+	try {
+		const cwd = join(env.dir, "project");
+		const dir = join(clioStateDir(), "sessions", cwdHash(cwd), "unrecorded");
+		mkdirSync(dir, { recursive: true });
+		const now = Date.now();
+		const at = new Date(now - 60_000).toISOString();
+		writeFileSync(join(dir, "meta.json"), JSON.stringify({ id: "unrecorded", cwd, createdAt: at, endedAt: at }));
+		const base = { parentTurnId: null, timestamp: at };
+		const entries = [
+			{ ...base, kind: "custom", turnId: "m1", customType: "clio_coder_memory_off", data: {} },
+			{ ...base, kind: "message", turnId: "u1", role: "user", payload: { text: "first prompt words" } },
+			{ ...base, kind: "message", turnId: "u2", role: "user", payload: { text: "second prompt" } },
+		];
+		writeFileSync(join(dir, "current.jsonl"), `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+		const facts = sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n");
+		match(facts, /Last recorded session here, [^:]+:\d+:[^:]+: unrecorded\./);
+		doesNotMatch(facts, /first prompt words/);
+	} finally {
+		env.restore();
+	}
+});
+
 it("a session holding an information-flow restriction offers its id and time, never its words", async () => {
 	const env = await isolateClioEnv("clio-prior-session-flow-");
 	try {

@@ -231,11 +231,13 @@ export function latestPriorSession(
 		if (scan.messageCount < 2) continue;
 		// This line rides a later session that holds none of these labels and may go anywhere, so a restricted
 		// session offers its id and time only: labels are per session, and a name can be set after the read.
-		const preview = scan.flowRestricted ? null : (scan.firstUserMessage ?? scan.firstAssistantMessage);
+		// A session recorded with memory off gets the same answer, because off also covers what later prompts may read.
+		const withheld = scan.flowRestricted || scan.memoryOff;
+		const preview = withheld ? null : (scan.firstUserMessage ?? scan.firstAssistantMessage);
 		return {
 			id: candidate.meta.id,
 			lastActiveAt: candidate.lastActiveAt,
-			name: scan.flowRestricted ? null : scan.name,
+			name: withheld ? null : scan.name,
 			// Uncut: the quoting site bounds it on a token boundary, and a cut here could split a secret first.
 			firstMessagePreview: preview,
 			messageCount: scan.messageCount,
@@ -247,6 +249,8 @@ export function latestPriorSession(
 const PREVIEW_MAX_CHARS = 240;
 /** Persisted flow labels; the same custom entry type `src/entry/flow-ledger.ts` writes. */
 export const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
+/** The custom entry `src/domains/memory/recording-marker.ts` writes; memory imports session, not the reverse. */
+const MEMORY_OFF_ENTRY_TYPE = "clio_coder_memory_off";
 
 function collapseWhitespace(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
@@ -350,6 +354,7 @@ interface ScanResult {
 	name: string | null;
 	labels: Map<string, { label: string; timestamp: string }>;
 	flowRestricted: boolean;
+	memoryOff: boolean;
 }
 
 function hasAssistantContent(payload: unknown): boolean {
@@ -369,11 +374,13 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 		name: null,
 		labels: new Map(),
 		flowRestricted: false,
+		memoryOff: false,
 	};
 	if (!existsSync(currentPath)) return result;
 	const records = readSessionFileEntries(currentPath).filter((entry) => !isSessionHeader(entry));
 	for (const parsed of collectSessionEntries(records, currentPath)) {
 		if (parsed.kind === "custom" && parsed.customType === FLOW_RESTRICTION_ENTRY_TYPE) result.flowRestricted = true;
+		if (parsed.kind === "custom" && parsed.customType === MEMORY_OFF_ENTRY_TYPE) result.memoryOff = true;
 		if (
 			parsed.kind === "message" &&
 			(parsed.role === "tool_call" || (parsed.role === "assistant" && hasAssistantContent(parsed.payload)))
