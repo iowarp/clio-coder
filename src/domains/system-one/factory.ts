@@ -18,6 +18,7 @@ import { SITE_TASKS } from "./contract.js";
 import { createLlmEngine, llmEngineProblem } from "./engines/llm.js";
 import type { EngineHost, LlmRequestAdmission } from "./engines/shared.js";
 import { createSystemOneEngine } from "./engines/systemone.js";
+import type { MeasurementIndex } from "./measurement.js";
 import { profileFor } from "./profiles.js";
 import { MAX_CHOICE_OPTIONS } from "./questions.js";
 import type { DecisionFlowCheck, RunnerRoute } from "./runner.js";
@@ -52,7 +53,7 @@ export type OneShotPort = (request: {
 	schema?: object;
 	maxTokens: number;
 	signal: AbortSignal;
-}) => Promise<{ text: string; usage?: { input: number; output: number } }>;
+}) => Promise<{ text: string; usage?: { input: number; output: number }; model?: string }>;
 
 export interface SystemOneDeps {
 	settings: () => Readonly<ClioSettings>;
@@ -67,6 +68,8 @@ export interface SystemOneDeps {
 	currentSession?: () => string | null;
 	/** Cuts the table does not ship, from a local measurement or a probe's placeholder. Settings never supply them. */
 	localCuts?: () => Readonly<Record<string, Readonly<Record<string, number>>>>;
+	/** What `clio-coder systemone calibrate` measured on this machine. */
+	measurements?: () => MeasurementIndex;
 	/** The safety domain's information-flow check, applied to every outgoing engine request. */
 	flowCheck?: DecisionFlowCheck;
 }
@@ -83,6 +86,8 @@ export interface SystemOneInstance extends SystemOne {
 	 * deadline but not the turn's shorter wait still leaves its row.
 	 */
 	settled(maxWaitMs: number): Promise<void>;
+	/** The deadline a measurement set for this site's bound engine, or null. A binding's own `timeoutMs` still wins. */
+	measuredDeadlineMs(site: SiteId): number | null;
 }
 
 type EngineSettings = ClioSettings["systemOne"]["engines"][string];
@@ -159,6 +164,10 @@ function maxOptionsOf(engine: DecisionEngine): number {
 }
 
 export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
+	const localCuts = (): Readonly<Record<string, Readonly<Record<string, number>>>> => ({
+		...deps.measurements?.().cuts,
+		...deps.localCuts?.(),
+	});
 	const host: EngineHost = {
 		auth: deps.providers.auth,
 		credentialsPresent: deps.credentialsPresent,
@@ -168,7 +177,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 		...(deps.recorder ? { recorder: deps.recorder } : {}),
 		...(deps.currentSession ? { currentSession: deps.currentSession } : {}),
 		...(deps.flowCheck ? { flowCheck: deps.flowCheck } : {}),
-		cutOverrides: () => deps.localCuts?.() ?? {},
+		cutOverrides: localCuts,
 	});
 	// One engine per configured name, replaced when its configuration digest moves.
 	const engines = new Map<string, { digest: string; engine: DecisionEngine }>();
@@ -320,10 +329,17 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 						host,
 						oneShot: deps.oneShot,
 						endpointCapacity: deps.endpointCapacity,
+						measuredBuilds: (key) => deps.measurements?.().buildsFor(key) ?? [],
 					});
 		const built = { digest, engine };
 		engines.set(name, built);
 		return built;
+	}
+
+	function measuredDeadlineMs(site: SiteId): number | null {
+		const resolution = resolve(site);
+		if (resolution.usable === undefined || deps.measurements === undefined) return null;
+		return deps.measurements().deadlineMs(site, engineFor(resolution.usable).engine.expectedBuilds());
 	}
 
 	return {
@@ -342,7 +358,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 					options.onFailure?.(resolution.info.problem ?? `System One site '${site.id}' is not bound`);
 					return null;
 				}
-				const timeoutMs = resolution.usable?.timeoutMs;
+				const timeoutMs = resolution.usable?.timeoutMs ?? measuredDeadlineMs(site.id) ?? undefined;
 				return await runner.run({ routes, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }, site, object, options);
 			} catch (error) {
 				// Nothing that goes wrong in System One may reach the caller's turn.
@@ -364,7 +380,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				const usable = [resolution.usable, ...(resolution.routes ?? []).flatMap((route) => route.usable ?? [])];
 				// Cuts are live settings, so fittedness is recomputed from the identity
 				// each engine last answered under, never cached with the answer.
-				const cuts = deps.localCuts?.() ?? {};
+				const cuts = localCuts();
 				return usable.every((engine) => {
 					// The runner files each answer under the moment it was asked at; the bare
 					// site key never matches a site that is only asked at named moments.
@@ -393,7 +409,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 				if (usable === undefined) return null;
 				const prefix = `${site}.`;
 				const cuts: Record<string, Record<string, number>> = {};
-				for (const [identity, table] of Object.entries(deps.localCuts?.() ?? {})) {
+				for (const [identity, table] of Object.entries(localCuts())) {
 					const own = Object.entries(table).filter(([key]) => key.startsWith(prefix));
 					if (own.length > 0) cuts[identity] = Object.fromEntries(own);
 				}
@@ -427,6 +443,13 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			});
 		},
 		settled: (maxWaitMs) => runner.settled(maxWaitMs),
+		measuredDeadlineMs(site) {
+			try {
+				return measuredDeadlineMs(site);
+			} catch {
+				return null;
+			}
+		},
 		breakers: () => runner.breakers(),
 	};
 }

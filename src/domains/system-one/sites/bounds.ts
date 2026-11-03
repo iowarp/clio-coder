@@ -68,10 +68,13 @@ export function withoutQuotedCode(text: string): string {
  * A noul's probability, or null for another type, an abstention, malformed mass,
  * or mass that is not a calibrated probability. Every hint, gate and act reads a
  * noul through here, so a vote fraction or a one-order readout never crosses a
- * fitted cut. The dataset still keeps the raw answer.
+ * fitted cut. A categorical label is read too, because no cut exists for it
+ * unless a measurement validated that label's action on this exact build. The
+ * dataset still keeps the raw answer.
  */
 export function probability(answer: Answer | undefined): number | null {
-	if (answer === undefined || answer.type !== "noul" || answer.noul === undefined || !answer.calibrated) return null;
+	if (answer === undefined || answer.type !== "noul" || answer.noul === undefined) return null;
+	if (!answer.calibrated && answer.readout !== "categorical") return null;
 	return Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : null;
 }
 

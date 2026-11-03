@@ -7,6 +7,7 @@
 
 import type { ClioSettings } from "../core/config.js";
 import { credentialAvailable } from "../domains/providers/credentials.js";
+import { createMeasurementReader } from "../domains/system-one/measurement.js";
 import type { RuntimeLookup } from "../domains/system-one/recorder/bindings.js";
 import type { SystemOneCommand, SystemOneScopes } from "../domains/system-one/scopes.js";
 import { SYSTEM_ONE_OFF } from "../domains/system-one/selection.js";
@@ -30,6 +31,7 @@ export function createSystemOneControl(deps: {
 	latencyMs: (site: SiteId) => number | null;
 	persistSession: (use: string | null) => void;
 }): SystemOneControl {
+	const measurements = createMeasurementReader();
 	const status = (): string[] => {
 		const override = deps.scopes.current();
 		return formatStatus(
@@ -40,6 +42,7 @@ export function createSystemOneControl(deps: {
 				hasCredential: credentialAvailable,
 				recording: deps.recording(),
 				latencyMs: deps.latencyMs,
+				measurements: measurements(),
 			}),
 		);
 	};

@@ -190,7 +190,8 @@ function choiceAtCut(
 	cut: number | undefined,
 	allowed: ReadonlyArray<string>,
 ): string | null {
-	if (cut === undefined || answer === undefined || answer.calibrated !== true) return null;
+	if (cut === undefined || answer === undefined) return null;
+	if (answer.calibrated !== true && answer.readout !== "categorical") return null;
 	const winner = chosen(answer, 0);
 	if (winner === null || !allowed.includes(winner)) return null;
 	const mass = answer.probabilities?.[winner];

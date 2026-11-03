@@ -77,7 +77,8 @@ export type ReadoutKind =
 	| "sigmoid-independent"
 	| "ordinal-expectation"
 	| "logprob"
-	| "vote";
+	| "vote"
+	| "categorical";
 
 /** Renderer revisions. Bumping one changes every identity cuts are keyed by. */
 export type RendererId = "systemone-v1" | "julia-compact-v1" | "gliner-label-v1" | "llm-prompt";

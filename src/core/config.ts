@@ -1381,7 +1381,7 @@ function validateKeybindings(issues: Issues, path: string, value: unknown): Reco
 }
 
 const SYSTEM_ONE_ENGINE_KINDS = ["systemone", "llm"] as const;
-const SYSTEM_ONE_MODES = ["auto", "logprobs", "answer"] as const;
+const SYSTEM_ONE_MODES = ["auto", "logprobs", "answer", "batch"] as const;
 
 /**
  * `systemOne` is a map keyed by operator-chosen names, and assigning a key

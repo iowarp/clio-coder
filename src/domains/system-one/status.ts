@@ -9,6 +9,8 @@ import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manif
 import { TYPESAFE_DEFAULT_MODEL } from "../providers/runtimes/typesafe-model.js";
 import type { LocalCuts } from "./calibration.js";
 import { measuredActions } from "./calibration.js";
+import { batchRequestKey } from "./engines/llm.js";
+import type { MeasurementIndex } from "./measurement.js";
 import { describeBindings, type RuntimeLookup } from "./recorder/bindings.js";
 import type { ChoiceResolution } from "./selection.js";
 import { ACTIVE_PROFILE, effectiveSystemOne, RECORD_ONLY_SITES, resolveChoice } from "./selection.js";
@@ -42,6 +44,7 @@ export interface StatusInput {
 	readonly hasCredential?: (runtimeId: string, envVar: string) => boolean;
 	readonly recording?: boolean;
 	readonly localCuts?: LocalCuts;
+	readonly measurements?: MeasurementIndex;
 	readonly latencyMs?: (site: SiteId) => number | null;
 }
 
@@ -65,7 +68,7 @@ export function describeStatus(input: StatusInput): SystemOneStatus {
 	const applied = { ...input.settings, systemOne: { ...input.settings.systemOne, use } };
 	const effective = effectiveSystemOne(applied);
 	const recording = input.recording === true;
-	const local = input.localCuts ?? {};
+	const local = { ...input.measurements?.cuts, ...input.localCuts };
 	const sites = describeBindings(applied, input.runtimes).map((binding): SiteStatus => {
 		const { site, engine } = binding;
 		if (engine === null) return { site, state: "off", engine: null, destination: null, detail: "asks nothing" };
@@ -95,9 +98,14 @@ export function describeStatus(input: StatusInput): SystemOneStatus {
 				detail: "the agent may ask; readings are uncalibrated and no policy reads them; registered at startup",
 			};
 		}
+		// A batch route's build is what its measurement says answered; any other LLM readout has no measurement.
+		const requestKey =
+			cfg?.kind === "llm" && cfg.mode === "batch" && target !== undefined
+				? batchRequestKey(target, target.runtime, binding.model ?? null)
+				: null;
 		const build =
 			cfg?.kind === "llm"
-				? null
+				? ((requestKey === null ? undefined : input.measurements?.buildsFor(requestKey)[0]) ?? null)
 				: (binding.model ?? target?.defaultModel ?? (target?.runtime === "typesafe-jev" ? TYPESAFE_DEFAULT_MODEL : null));
 		const actions = measuredActions(site, build, local);
 		if (actions.length === 0) {

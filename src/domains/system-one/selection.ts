@@ -60,7 +60,7 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 	if (name === "main") {
 		const { target, model } = settings.chat;
 		if (!target) return { kind: "unavailable", name, problem: "no chat route is configured" };
-		return { kind: "engine", name, engine: { kind: "llm", target, ...(model ? { model } : {}) } };
+		return { kind: "engine", name, engine: { kind: "llm", target, mode: "batch", ...(model ? { model } : {}) } };
 	}
 	if (name === "memory") {
 		const { target, model } = settings.context.memory;
@@ -71,7 +71,7 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 				problem: "context.memory names no target and model, and memory never falls back to the chat route",
 			};
 		}
-		return { kind: "engine", name, engine: { kind: "llm", target, model } };
+		return { kind: "engine", name, engine: { kind: "llm", target, model, mode: "batch" } };
 	}
 	const target = settings.targets.find((entry) => entry.id === name);
 	if (target === undefined) {
@@ -79,7 +79,11 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 	}
 	const runtime = getRuntimeRegistry().get(target.runtime) ?? findBuiltinRuntimeBootMetadata(target.runtime);
 	const decides = DECISION_RUNTIMES.has(runtime?.id ?? target.runtime);
-	return { kind: "engine", name, engine: { kind: decides ? "systemone" : "llm", target: name } };
+	return {
+		kind: "engine",
+		name,
+		engine: decides ? { kind: "systemone", target: name } : { kind: "llm", target: name, mode: "batch" },
+	};
 }
 
 /** The settings System One resolves bindings from: the choice expanded, a site's own entry winning over it. */

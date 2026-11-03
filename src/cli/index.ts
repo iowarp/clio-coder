@@ -88,7 +88,7 @@ Usage:
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
   clio-coder telemetry consent|share|import|prune|verify  manage research content consent; share or import telemetry archives; apply retention; verify a sealed scope or archive
-  clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
+  clio-coder systemone status|use|off|check|calibrate|export  System One decisions: choose and measure an engine, or export the dataset (experimental)
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind
   clio-coder mcp list|test|trust|untrust  list, test and trust declared MCP servers

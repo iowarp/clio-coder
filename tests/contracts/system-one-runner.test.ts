@@ -159,12 +159,14 @@ describe("System One runner", () => {
 		deepStrictEqual(effectiveSystemOne(settingsFor("main")).systemOne.engines.main, {
 			kind: "llm",
 			target: "chat",
+			mode: "batch",
 			model: "chat-model",
 		});
 		deepStrictEqual(effectiveSystemOne(settingsFor("memory")).systemOne.engines.memory, {
 			kind: "llm",
 			target: "memory",
 			model: "side-model",
+			mode: "batch",
 		});
 		// Jev needs only its key: the choice brings its target, and sends nothing without the key.
 		deepStrictEqual(

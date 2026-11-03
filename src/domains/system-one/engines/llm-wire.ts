@@ -114,6 +114,22 @@ export interface Channel {
 	firstToken(prompt: Prompt): Promise<{ tokens: TokenLogprob[] | null; usage?: ChannelUsage }>;
 	/** One sampled reply to the prompt, schema-bound where the runtime has a dialect. */
 	vote(prompt: Prompt, labelCount: number): Promise<{ text: string; usage?: ChannelUsage }>;
+	/** One deterministic reply held to `schema`, with the identity the server reported for it. */
+	batch(prompt: Prompt, schema: Record<string, unknown>, maxTokens: number): Promise<BatchReply>;
+}
+
+export interface AnsweredIdentity {
+	/** The model name the server reported on this response. */
+	readonly model: string;
+	/** The server's fingerprint, where it sends one. */
+	readonly fingerprint?: string;
+}
+
+export interface BatchReply {
+	readonly text: string;
+	readonly usage?: ChannelUsage;
+	/** Null when the response names no model, so nothing can tie it to a measurement. */
+	readonly answered: AnsweredIdentity | null;
 }
 
 export class ChatHttpError extends Error {
@@ -128,6 +144,8 @@ export class ChatHttpError extends Error {
 }
 
 interface ChatCompletion {
+	model?: unknown;
+	system_fingerprint?: unknown;
 	choices?: Array<{
 		message?: { content?: unknown };
 		logprobs?: {
@@ -190,6 +208,13 @@ function firstTokenOf(data: ChatCompletion): TokenLogprob[] | null {
 	const chosen = tokenEntry(first);
 	if (chosen !== null && !out.some((entry) => entry.token === chosen.token)) out.push(chosen);
 	return out.length > 0 ? out : null;
+}
+
+function identityOf(data: ChatCompletion): AnsweredIdentity | null {
+	const model = data.model;
+	if (typeof model !== "string" || model.length === 0) return null;
+	const fingerprint = data.system_fingerprint;
+	return typeof fingerprint === "string" && fingerprint.length > 0 ? { model, fingerprint } : { model };
 }
 
 function contentOf(data: ChatCompletion): string {
@@ -311,6 +336,24 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 		{ role: "user", content: prompt.user },
 	];
 
+	async function postBound(base: Record<string, unknown>, schema: Record<string, unknown>): Promise<ChatCompletion> {
+		const bound =
+			dialect === null || schemaRejections.has(rejectionKey) ? null : responseFormatFor(dialect, schema, "answer");
+		try {
+			return await postThinkingOff(bound === null ? base : { ...base, response_format: bound });
+		} catch (error) {
+			// Native enforcement is an optimization, never a precondition: a server
+			// that refuses the constrained request still answers the plain one.
+			const rejected =
+				bound !== null &&
+				error instanceof ChatHttpError &&
+				isResponseSchemaRejection(`HTTP ${error.status ?? ""} ${error.body ?? error.message}`);
+			if (!rejected) throw error;
+			schemaRejections.add(rejectionKey);
+			return postThinkingOff(base);
+		}
+	}
+
 	return {
 		wire: "http",
 		async firstToken(prompt) {
@@ -326,31 +369,17 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 			return { tokens: firstTokenOf(data), ...(usage ? { usage } : {}) };
 		},
 		async vote(prompt, labelCount) {
-			const base = {
-				model,
-				messages: messages(prompt),
-				max_tokens: VOTE_MAX_TOKENS,
-				temperature: VOTE_TEMPERATURE,
-			};
-			const schema = voteSchema(labelCount);
-			const bound =
-				dialect === null || schemaRejections.has(rejectionKey) ? null : responseFormatFor(dialect, schema, "answer");
-			let data: ChatCompletion;
-			try {
-				data = await postThinkingOff(bound === null ? base : { ...base, response_format: bound });
-			} catch (error) {
-				// Native enforcement is an optimization, never a precondition: a server
-				// that refuses the constrained request still answers the plain one.
-				const rejected =
-					bound !== null &&
-					error instanceof ChatHttpError &&
-					isResponseSchemaRejection(`HTTP ${error.status ?? ""} ${error.body ?? error.message}`);
-				if (!rejected) throw error;
-				schemaRejections.add(rejectionKey);
-				data = await postThinkingOff(base);
-			}
+			const data = await postBound(
+				{ model, messages: messages(prompt), max_tokens: VOTE_MAX_TOKENS, temperature: VOTE_TEMPERATURE },
+				voteSchema(labelCount),
+			);
 			const usage = channelUsageOf(data);
 			return { text: contentOf(data), ...(usage ? { usage } : {}) };
+		},
+		async batch(prompt, schema, maxTokens) {
+			const data = await postBound({ model, messages: messages(prompt), max_tokens: maxTokens, temperature: 0 }, schema);
+			const usage = channelUsageOf(data);
+			return { text: contentOf(data), answered: identityOf(data), ...(usage ? { usage } : {}) };
 		},
 	};
 }
@@ -386,6 +415,31 @@ export function createOneShotChannel(input: OneShotChannelInput): Channel {
 					signal,
 				});
 				return { text: reply.text, ...(reply.usage ? { usage: reply.usage } : {}) };
+			} catch (error) {
+				if (error instanceof LlmAdmissionRefused) {
+					input.onAdmissionRefused?.(error);
+					throw error;
+				}
+				throw new Error(`one-shot call failed: ${errorText(error)}`);
+			}
+		},
+		async batch(prompt, schema, maxTokens) {
+			try {
+				const reply = await port({
+					engine: input.engine,
+					targetId,
+					model,
+					system: prompt.system,
+					user: prompt.user,
+					schema,
+					maxTokens,
+					signal,
+				});
+				return {
+					text: reply.text,
+					answered: reply.model === undefined ? null : { model: reply.model },
+					...(reply.usage ? { usage: reply.usage } : {}),
+				};
 			} catch (error) {
 				if (error instanceof LlmAdmissionRefused) {
 					input.onAdmissionRefused?.(error);

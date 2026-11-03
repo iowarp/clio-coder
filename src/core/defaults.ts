@@ -75,7 +75,7 @@ export type FleetAgentProfiles = Record<string, string>;
  * `mode` only matters for `llm`: `auto` probes the target once and picks.
  */
 export type SystemOneEngineKind = "systemone" | "llm";
-export type SystemOneMode = "auto" | "logprobs" | "answer";
+export type SystemOneMode = "auto" | "logprobs" | "answer" | "batch";
 
 export interface SystemOneEngineSettings {
 	kind: SystemOneEngineKind;

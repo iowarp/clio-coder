@@ -11,6 +11,10 @@
  * binding whose option orders keep coming back unreadable flips to votes too.
  * A call never mixes the two readouts, and its reply carries a `note` saying
  * why it is not the readout the operator configured.
+ *
+ * Mode `batch` is the economical readout: one schema-bound request per call
+ * (`llm-batch.ts`), under a build named by what the server reported on that
+ * response, so a change of the answering model voids a measurement at once.
  */
 
 import { performance } from "node:perf_hooks";
@@ -19,10 +23,20 @@ import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
 import type { OneShotPort } from "../factory.js";
 import type { Answer, DecisionEngine, EngineReply, EngineRequest } from "../types.js";
+import {
+	BATCH_PROMPT_VERSION,
+	batchMaxTokens,
+	batchPrompt,
+	batchSchema,
+	decidedAnswer,
+	isDecided,
+	readBatchReply,
+} from "./llm-batch.js";
 import { PROMPT_VERSION, renderState } from "./llm-prompt.js";
 import type { ReadContext } from "./llm-readout.js";
 import { answerQuestion, LogprobsUnavailable } from "./llm-readout.js";
 import { createScheduler } from "./llm-schedule.js";
+import type { AnsweredIdentity, Channel } from "./llm-wire.js";
 import { chatBaseUrl, createHttpChannel, createOneShotChannel, hasChatWire } from "./llm-wire.js";
 import type { EngineHost } from "./shared.js";
 import { errorText, LlmAdmissionRefused } from "./shared.js";
@@ -64,6 +78,40 @@ export interface LlmEngineInput {
 	readonly host: EngineHost;
 	readonly oneShot?: OneShotPort | undefined;
 	readonly endpointCapacity?: ((targetId: string) => number) | undefined;
+	/** The builds a local measurement names for a batch request key; only those can act. */
+	readonly measuredBuilds?: ((requestKey: string) => ReadonlyArray<string>) | undefined;
+}
+
+function hostOf(baseUrl: string): string {
+	try {
+		return new URL(baseUrl).host;
+	} catch {
+		// A malformed URL still has to yield a stable build key; the request itself fails loudly.
+		return baseUrl;
+	}
+}
+
+/**
+ * What a batch measurement answers for before any response names a build: this
+ * runtime, this endpoint, this requested model and this prompt. Null when the
+ * target names no model to ask.
+ */
+export function batchRequestKey(
+	target: TargetDescriptor,
+	runtimeId: string,
+	model: string | null | undefined,
+): string | null {
+	const wireModel = model ?? target.defaultModel;
+	if (wireModel === undefined) return null;
+	const baseUrl = hasChatWire(runtimeId) ? chatBaseUrl(runtimeId, target) : null;
+	return `llm:${runtimeId}@${baseUrl === null ? "oneshot" : hostOf(baseUrl)}/${wireModel}#batch:${BATCH_PROMPT_VERSION}`;
+}
+
+/** The build a batch response is measured under: the name and fingerprint this response reported. */
+function batchBuild(target: TargetDescriptor, runtimeId: string, answered: AnsweredIdentity): string {
+	const baseUrl = hasChatWire(runtimeId) ? chatBaseUrl(runtimeId, target) : null;
+	const fingerprint = answered.fingerprint === undefined ? "" : `~${answered.fingerprint}`;
+	return `llm:${runtimeId}@${baseUrl === null ? "oneshot" : hostOf(baseUrl)}/${answered.model}${fingerprint}#batch:${BATCH_PROMPT_VERSION}`;
 }
 
 /** Why an LLM engine over this target cannot answer, or null when it can. */
@@ -88,13 +136,39 @@ export function llmEngineProblem(input: {
 	return null;
 }
 
-function hostOf(baseUrl: string): string {
-	try {
-		return new URL(baseUrl).host;
-	} catch {
-		// A malformed URL still has to yield a stable build key; the request itself fails loudly.
-		return baseUrl;
+/** Every question of the call in one request. An unreadable reply is a failed call, never a guess. */
+async function decideBatch(
+	channel: Channel,
+	target: TargetDescriptor,
+	runtimeId: string,
+	name: string,
+	request: EngineRequest,
+): Promise<EngineReply> {
+	const asked: Record<string, EngineRequest["questions"][string]> = {};
+	const answers: Record<string, Answer> = {};
+	for (const [id, question] of Object.entries(request.questions)) {
+		if (!isDecided(question)) {
+			asked[id] = question;
+			continue;
+		}
+		const only = decidedAnswer(question);
+		if (only !== null) answers[id] = only;
 	}
+	const reply = await channel.batch(
+		batchPrompt(renderState(request.state), asked),
+		batchSchema(asked),
+		batchMaxTokens(asked),
+	);
+	// A response nothing can tie to a measurement may not act, and the runner's next check goes by its build.
+	if (reply.answered === null)
+		throw new Error(`llm engine '${name}': the response names no model, so no identity is established`);
+	const read = readBatchReply(reply.text, asked);
+	if (read === null) throw new Error(`llm engine '${name}' returned no JSON object`);
+	return {
+		build: batchBuild(target, runtimeId, reply.answered),
+		answers: { ...answers, ...read },
+		...(reply.usage ? { usage: reply.usage } : {}),
+	};
 }
 
 export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
@@ -112,6 +186,11 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 		expectedBuilds() {
 			const wireModel = model ?? target.defaultModel;
 			if (wireModel === undefined) return [];
+			if (configured === "batch") {
+				// A batch build carries what the server reported, which only a measurement knows beforehand.
+				const key = batchRequestKey(target, runtime.id, wireModel);
+				return key === null ? [] : (input.measuredBuilds?.(key) ?? []);
+			}
 			const baseUrl = hasChatWire(runtime.id) ? chatBaseUrl(runtime.id, target) : null;
 			const prefix = `llm:${runtime.id}@${baseUrl === null ? "oneshot" : hostOf(baseUrl)}/${wireModel}`;
 			const modes =
@@ -136,6 +215,19 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 			const baseUrl = hasChatWire(runtime.id) ? chatBaseUrl(runtime.id, target) : null;
 			if (baseUrl === null && input.oneShot === undefined) {
 				throw new Error(`llm engine '${name}' has no chat wire and no one-shot port`);
+			}
+			if (configured === "batch") {
+				const channel =
+					baseUrl !== null
+						? createHttpChannel({ engine: name, target, runtime, model: wireModel, baseUrl, host, signal: request.signal })
+						: createOneShotChannel({
+								engine: name,
+								targetId: target.id,
+								model: wireModel,
+								port: input.oneShot as OneShotPort,
+								signal: request.signal,
+							});
+				return decideBatch(channel, target, runtime.id, name, request);
 			}
 			const verdictKey = `${target.id}|${wireModel}|${baseUrl ?? "oneshot"}`;
 			const stateText = renderState(request.state);

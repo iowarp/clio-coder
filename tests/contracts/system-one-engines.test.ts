@@ -7,9 +7,19 @@ import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/l
 import openAICompatRuntime from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import systemOneRuntime from "../../src/domains/providers/runtimes/protocol/systemone.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
-import { createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
+import { judgeFit, judgeHoldout, type KeySpec } from "../../src/domains/system-one/calibrate.js";
+import { batchRequestKey, createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
 import { createSystemOneEngine } from "../../src/domains/system-one/engines/systemone.js";
+import { createSystemOne } from "../../src/domains/system-one/factory.js";
+import {
+	indexMeasurements,
+	LABEL_POLICY_VERSION,
+	MEASURED_SITE_VERSIONS,
+	type Measurement,
+} from "../../src/domains/system-one/measurement.js";
 import { pick, yesNo } from "../../src/domains/system-one/questions.js";
+import { probability } from "../../src/domains/system-one/sites/bounds.js";
+import { TURN_SITE } from "../../src/domains/system-one/sites/turn.js";
 import type { Question } from "../../src/domains/system-one/types.js";
 
 /**
@@ -391,5 +401,162 @@ describe("LLM engine over an OpenAI-compatible chat server", () => {
 			server.requests.every((body) => options(body).length <= 25),
 			true,
 		);
+	});
+});
+
+describe("LLM engine in batch mode", () => {
+	const questions: Record<string, Question> = {
+		direct: yesNo("Direct?", "It is direct", "It is not"),
+		shape: pick("Which shape?", { single: "One worker", parallel: "Several" }),
+		only: pick("Only one?", { one: "The only option" }),
+		missing: yesNo("Missing?", "Yes", "No"),
+	};
+	const batchEngine = (url: string, measuredBuilds?: (key: string) => ReadonlyArray<string>) =>
+		createLlmEngine({
+			name: "main",
+			target: { id: "chat", runtime: "llamacpp", url } as TargetDescriptor,
+			runtime: llamacppRuntime,
+			model: "small",
+			mode: "batch",
+			host,
+			...(measuredBuilds ? { measuredBuilds } : {}),
+		});
+
+	it("sends one schema-bound request and names the build by what the response reported", async () => {
+		const server = await started(() => ({
+			body: {
+				model: "small-q4",
+				system_fingerprint: "b1234",
+				choices: [{ message: { content: '{"direct":"yes","shape":"parallel","missing":"unsure"}' } }],
+				usage: { prompt_tokens: 40, completion_tokens: 9, total_tokens: 49 },
+			},
+		}));
+		const reply = await batchEngine(server.url).decide({ state, questions, signal: signal() });
+		strictEqual(server.requests.length, 1);
+		const body = server.requests[0] as { temperature: number; response_format: { schema: { required: string[] } } };
+		strictEqual(body.temperature, 0);
+		// The question with one option costs no words.
+		deepStrictEqual(body.response_format.schema.required, ["direct", "shape", "missing"]);
+		strictEqual(reply.build, `llm:llamacpp@${new URL(server.url).host}/small-q4~b1234#batch:b1`);
+		strictEqual(reply.answers.direct?.noul, 1);
+		strictEqual(reply.answers.direct?.calibrated, false);
+		strictEqual(reply.answers.direct?.readout, "categorical");
+		strictEqual(probability(reply.answers.direct), 1);
+		strictEqual(reply.answers.shape?.choice, "parallel");
+		strictEqual(reply.answers.only?.choice, "one");
+		// The abstention is no answer, which no reader takes for a no.
+		strictEqual(reply.answers.missing, undefined);
+	});
+
+	it("refuses a response that names no model and a reply with no JSON", async () => {
+		const unnamed = await started(() => ({ body: { choices: [{ message: { content: '{"direct":"yes"}' } }] } }));
+		await rejects(batchEngine(unnamed.url).decide({ state, questions, signal: signal() }), /no identity/u);
+		const prose = await started(() => ({ body: { model: "small", choices: [{ message: { content: "I think yes" } }] } }));
+		await rejects(batchEngine(prose.url).decide({ state, questions, signal: signal() }), /no JSON/u);
+	});
+
+	it("expects only the build a measurement names, so an unmeasured route is never called to learn it", async () => {
+		const target = { id: "chat", runtime: "llamacpp", url: "http://h:1" } as TargetDescriptor;
+		const key = batchRequestKey(target, "llamacpp", "small");
+		const engine = batchEngine("http://h:1", (asked) => (asked === key ? ["measured-build"] : []));
+		deepStrictEqual(engine.expectedBuilds(), ["measured-build"]);
+		deepStrictEqual(batchEngine("http://h:1").expectedBuilds(), []);
+	});
+});
+
+describe("System One calibration", () => {
+	it("acts only on the measured build, and any other answering identity acts on nothing", async () => {
+		let fingerprint = "b1";
+		const server = await started(() => ({
+			body: {
+				model: "small",
+				system_fingerprint: fingerprint,
+				choices: [
+					{ message: { content: '{"direct":"yes","dispatch":"no","shape":"single","architecture":"no","direction":"no"}' } },
+				],
+			},
+		}));
+		const target = { id: "chat", runtime: "llamacpp", url: server.url, defaultModel: "small" } as TargetDescriptor;
+		const build = `llm:llamacpp@${new URL(server.url).host}/small~b1#batch:b1`;
+		const so = createSystemOne({
+			settings: () =>
+				({
+					targets: [target],
+					systemOne: {
+						use: null,
+						engines: { main: { kind: "llm", target: "chat", mode: "batch" } },
+						sites: { turn: "main" },
+					},
+				}) as never,
+			providers: { getTarget: () => target, getRuntime: () => llamacppRuntime } as never,
+			credentialsPresent: () => new Set<string>(),
+			measurements: () => ({
+				cuts: { [build]: { "turn.direct": 1 } },
+				buildsFor: () => [build],
+				deadlineMs: () => 2000,
+			}),
+		});
+		const object = { task: "hi", previous: "", previousTask: "" };
+		strictEqual(so.shadowed("turn"), false);
+		strictEqual(so.measuredDeadlineMs("turn"), 2000);
+		const measured = await so.run(TURN_SITE, object);
+		strictEqual(measured?.fitted, true);
+		strictEqual(typeof measured?.value.hints.scope, "string");
+		fingerprint = "b2";
+		const swapped = await so.run(TURN_SITE, object);
+		strictEqual(swapped?.fitted, false);
+		strictEqual(swapped?.value.hints.scope, null);
+		strictEqual(so.shadowed("turn"), true);
+	});
+
+	const yes = (k: 1 | 2): KeySpec => ({ key: "direct", label: "direct", k, read: "yes" });
+	const tally = (hits: number, positives: number, falseFires: number, negatives: number) => ({
+		hits,
+		positives,
+		falseFires,
+		negatives,
+	});
+
+	it("holds a key to its false-fire bar, its recall and adequate cases", () => {
+		strictEqual(judgeFit(yes(1), tally(10, 20, 1, 40)), null);
+		strictEqual(judgeFit(yes(1), tally(10, 20, 3, 40))?.includes("false fires"), true);
+		strictEqual(judgeFit(yes(2), tally(10, 20, 1, 40))?.includes("false fires"), true);
+		strictEqual(judgeFit(yes(1), tally(0, 20, 0, 40)), "no hit on fit");
+		strictEqual(judgeHoldout(yes(1), tally(10, 20, 0, 40), tally(5, 8, 2, 48)), null);
+		strictEqual(judgeHoldout(yes(1), tally(10, 20, 0, 40), tally(1, 8, 0, 48))?.includes("recall"), true);
+		strictEqual(judgeHoldout(yes(1), tally(10, 20, 0, 40), tally(5, 5, 0, 12))?.includes("too few"), true);
+	});
+
+	it("gives a measured key a cut of 1 only under the site version it was measured on", () => {
+		const measurement = (version: string): Measurement => ({
+			v: 1,
+			requestKey: "key",
+			build: "build",
+			measuredAt: "2026-11-03T00:00:00.000Z",
+			policy: LABEL_POLICY_VERSION,
+			sites: {
+				turn: {
+					version,
+					caseSet: "sha",
+					requests: 1,
+					failed: 0,
+					tokens: { input: 1, output: 1 },
+					latencyMs: { p50: 1, p95: 1, max: 1 },
+					deadlineMs: 700,
+				},
+			},
+			keys: {
+				"turn.direct": { pass: true, k: 1, fit: tally(1, 5, 0, 20) },
+				"turn.dispatch": { pass: false, k: 1, fit: tally(0, 5, 9, 20), reason: "false fires" },
+			},
+		});
+		const current = indexMeasurements([measurement(MEASURED_SITE_VERSIONS.turn as string)]);
+		deepStrictEqual(current.cuts, { build: { "turn.direct": 1 } });
+		deepStrictEqual(current.buildsFor("key"), ["build"]);
+		strictEqual(current.deadlineMs("turn", ["build"]), 700);
+		strictEqual(current.deadlineMs("turn", ["another"]), null);
+		const reworded = indexMeasurements([measurement("turn-v0")]);
+		deepStrictEqual(reworded.cuts, {});
+		strictEqual(reworded.deadlineMs("turn", ["build"]), null);
 	});
 });

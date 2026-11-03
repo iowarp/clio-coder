@@ -68,6 +68,7 @@
 		"!assets/README.md",
 		"!scripts/README.md",
 		"src/**",
+		"tests/fixtures/decision-cases/*.json",
 		"models/**",
 		"library/**",
 		".claude-plugin/marketplace.json",
