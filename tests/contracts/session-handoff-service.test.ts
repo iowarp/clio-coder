@@ -14,7 +14,9 @@ import {
 	type HandoffServiceDeps,
 	prepareHandoff,
 } from "../../src/domains/session/handoff-service.js";
+import { FLOW_RESTRICTION_ENTRY_TYPE } from "../../src/domains/session/history.js";
 import type { TUI } from "../../src/engine/tui.js";
+import { createFlowLedger } from "../../src/entry/flow-ledger.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createOverlaySessionLifecycle } from "../../src/interactive/overlay-session-lifecycle.js";
 import type { OverlayTransitions } from "../../src/interactive/overlay-transitions.js";
@@ -220,6 +222,29 @@ test("handoff commit seeds the successor, notes the source, replays skills and l
 	const note = fake.written.get("from")?.[0];
 	strictEqual(note?.customType, HANDOFF_NOTE_CUSTOM_TYPE);
 	deepStrictEqual(note?.data, { toSessionId: "to-1", goal: GOAL });
+});
+
+test("handoff commit carries the source session's flow restrictions into the successor, ahead of the document", async () => {
+	const set = {
+		version: 1,
+		restrictions: [
+			{ ruleId: "secrets-local", policyHash: "h", sourceRef: "/repo/secrets/notes.txt", recipients: ["target:stub"] },
+		],
+	};
+	const restriction = { kind: "custom", customType: FLOW_RESTRICTION_ENTRY_TYPE, parentTurnId: "u1", data: { set } };
+	const fake = fakeSession();
+	const { deps: service } = deps(fake, [{ status: "answered", text: EXTRACTION }], {
+		readEntries: (sessionId) => (sessionId === "from" ? [...ENTRIES, restriction as unknown as SessionEntry] : []),
+	});
+	const prepared = await prepareHandoff(service, GOAL);
+	ok(prepared.ok);
+	ok(commitHandoff(service, prepared.draft, "# reviewed").ok);
+	deepStrictEqual(
+		fake.written.get("to-1")?.map((entry) => entry.customType),
+		[FLOW_RESTRICTION_ENTRY_TYPE, HANDOFF_SEED_CUSTOM_TYPE],
+	);
+	const ledger = createFlowLedger({ session: fake.session, readEntries: (id) => fake.written.get(id) ?? [] });
+	deepStrictEqual(ledger.current(), set);
 });
 
 test("handoff commit writes nothing for an empty or stale review, and keeps the seed when only the note fails", async () => {

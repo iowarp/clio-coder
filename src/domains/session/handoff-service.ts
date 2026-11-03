@@ -30,6 +30,7 @@ import {
 	validateHandoffFiles,
 	validateHandoffGoal,
 } from "./handoff.js";
+import { FLOW_RESTRICTION_ENTRY_TYPE } from "./history.js";
 
 /** How one out-of-turn extraction round ended; the chat loop's side-question outcome, structurally. */
 export type HandoffExtractionRound =
@@ -101,6 +102,10 @@ function refuse(level: HandoffRefusal["level"], code: HandoffRefusal["code"], re
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+function isFlowRestrictionEntry(entry: SessionEntry): entry is Extract<SessionEntry, { kind: "custom" }> {
+	return entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE;
+}
 
 function handoffSnapshot(deps: HandoffServiceDeps) {
 	const meta = deps.session?.current();
@@ -300,10 +305,22 @@ export function commitHandoff(
 	const activations = session.current()?.skillActivations ?? [];
 	let toSessionId: string;
 	try {
+		// The document was drawn from restricted context, and each session's ledger is the only authority for what it
+		// carries. Read before minting, and written ahead of the seed, so no document exists unlabeled.
+		const restrictions = deps.readEntries(fromSessionId).filter(isFlowRestrictionEntry);
 		deps.createSession();
 		const minted = session.current()?.id ?? null;
 		if (minted === null || minted === fromSessionId) throw new Error("the new session was not created");
 		toSessionId = minted;
+		for (const restriction of restrictions) {
+			session.appendEntry({
+				kind: "custom",
+				parentTurnId: null,
+				customType: FLOW_RESTRICTION_ENTRY_TYPE,
+				display: false,
+				data: restriction.data,
+			});
+		}
 		session.appendEntry({
 			kind: "custom",
 			parentTurnId: null,

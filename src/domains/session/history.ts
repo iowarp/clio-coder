@@ -246,7 +246,7 @@ export function latestPriorSession(
 
 const PREVIEW_MAX_CHARS = 240;
 /** Persisted flow labels; the same custom entry type `src/entry/flow-ledger.ts` writes. */
-const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
+export const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
 
 function collapseWhitespace(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
