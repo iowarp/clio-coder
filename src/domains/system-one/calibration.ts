@@ -21,7 +21,7 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  * chosen on the fit split (a case with no `split`, or `split: fit`) and the
  * holdout split scored once, afterwards. Holdout cases were committed before any
  * score on them existed. Run with `scripts/decision-probe.ts --runs 5 --cases
- * --case-split fit|holdout`, at turn-v3, worker-prepare-v1, turn-end-v3,
+ * --case-split fit|holdout`, at turn-v4, worker-prepare-v1, turn-end-v3,
  * tool-call-v2 (gate), tool-call-v3 (card), tool-result-v2, relevance-v2 and
  * relevance-cluster-v2.
  *
@@ -35,8 +35,7 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  *   the winner's mass, or on the score's certainty for the card.
  * - A cut is the highest fit negative moved up by k x R in logits, rounded up to
  *   0.01. k is what a false fire costs: 2 where it spends real work (`prewarm`,
- *   `recipe` and `shape` hold worker processes, `proposal` adds an `ask_user`
- *   round), 1 where it is read-only or advisory (`direction`
+ *   `recipe` and `shape` hold worker processes), 1 where it is read-only or advisory (`direction`
  *   reads git, the tree and the codemap after a turn that ended on the operator;
  *   a hint is one line the model may ignore; `clusters` narrows one ranking; the
  *   gate, the result screen and turn-end write a ledger row).
@@ -45,9 +44,9 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  *   recall. A key gets no cut past 0.99 (the wire's resolution), with no positive
  *   above the cut, or on a holdout failure, and it keeps recording.
  *
- * Fires are readings at or over the cut, positive then negative case-runs. A turn-v3
- * holdout has 8 positive direct, 7 dispatch, 7 architecture, 6 direction, 6 proposal
- * and 7 shape cases, so these catch a broken key, not a small drift.
+ * Fires are readings at or over the cut, positive then negative case-runs. The turn
+ * holdout has 8 positive direct, 7 dispatch, 7 architecture, 6 direction and 7 shape
+ * cases, so these catch a broken key, not a small drift.
  * - `turn.direct` 0.97, k 1, R 0.66: fit 149/215, 0/685; holdout 35/40, 0/240.
  *   "draw me the big picture of how memory, context and prompts connect" at 0.94 sets it.
  * - `turn.dispatch` 0.94, k 1, R 0.89: fit 121/310, 0/840; holdout 20/35, 0/245.
@@ -57,8 +56,6 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  * - `turn.architecture` 0.98, k 1, R 0.63: fit 22/255, 0/840; holdout 10/35, 0/245.
  *   "how do the safety classifier and the dispatch scheduler relate?" at 0.95 sets it.
  * - `turn.direction` 0.88, k 1, R 0.75: fit 141/210, 0/830; holdout 25/30, 0/250.
- * - `turn.proposal` 0.96, k 2 because it adds an `ask_user` round, R 0.82: fit 45/45,
- *   0/550; holdout 20/30, 0/250.
  * - `turn.shape` 0.97, k 2 because parallel holds a second process, R 0.75, on the
  *   winning option's mass: fit 40/65, 0/15; holdout 13/35, with no wrong winner to test.
  * - `workerPrepare.recipe` 0.83, k 2, R 0.59, on the winning option's mass: fit
@@ -82,9 +79,16 @@ import type { QuestionType, SiteCuts, SiteId } from "./types.js";
  * - `relevance.related` 0.81, k 1, R 0.61, against needs nothing in the catalog serves
  *   and on the expected entry's score: fit 180/180, 0/3420; holdout 55/60, 0/3420.
  *
+ * The turn cuts were chosen and held out on turn-v3. turn-v4 only removes its proposal
+ * question, and a fit rescore on jev-1.14.0 (5 runs, 420 cases) kept every cut: no case's
+ * mean reading moved past that key's R, the largest logit shift being 0.20 on direct, 0.40
+ * on dispatch, 0.25 on architecture, 0.28 on direction and 0.40 on labeled shape cases,
+ * with 0 false fires at each cut. The holdout was not rescored. The rule run again on this
+ * pass gives 0.97 for architecture, 0.87 for direction and 0.98 for shape, each 0.01 from
+ * the kept cut, because R is itself a maximum that moves between passes.
+ *
  * `TURN_SITE.deadlineMs` 600 is the 50 ms ceiling over the slowest turn reading seen:
- * 577 ms for a cold call among 32 real-session readings on turn-v2. Over 2100 fit calls
- * on turn-v3 the wire's p50 was 81 ms and its maximum 241 ms.
+ * 577 ms for a cold call among 32 real-session readings on turn-v2.
  *
  * A floor is a cut too. A build reads a choice as undecided, and spends no request on a
  * card or a draft judgment, without its own measured cut. The old 0.5 and 0.6 floors
@@ -106,7 +110,6 @@ export const FITTED_CUTS: Readonly<Record<string, Readonly<Record<string, number
 		"turn.prewarm": 0.98,
 		"turn.architecture": 0.98,
 		"turn.direction": 0.88,
-		"turn.proposal": 0.96,
 		"turn.shape": 0.97,
 		"workerPrepare.recipe": 0.83,
 		"turnEnd.asksOperator": 0.65,
@@ -144,7 +147,7 @@ export const FITTED_CONTRACTS: Readonly<
 	"jev-1.14.0": {
 		renderer: "systemone-v1",
 		sites: {
-			turn: "turn-v3",
+			turn: "turn-v4",
 			workerPrepare: "worker-prepare-v1",
 			turnEnd: "turn-end-v3",
 			toolCall: "tool-call-v2",
@@ -172,7 +175,6 @@ const SITE_ACTIONS: Readonly<
 		{ action: "expected dispatch", requires: ["dispatch"] },
 		{ action: "exploration hint", requires: ["architecture"] },
 		{ action: "direction", requires: ["direction"] },
-		{ action: "plan close", requires: ["proposal"] },
 	],
 	workerPrepare: [{ action: "held worker", requires: ["recipe"] }],
 	relevance: [

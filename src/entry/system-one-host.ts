@@ -7,7 +7,7 @@ import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/
  * What the composition root keeps between System One calls.
  *
  * The turn site is asked once, at submit, without holding up the submit. The
- * hint registration, the plan-close registration and the prewarm take a fitted
+ * hint registration and the prewarm take a fitted
  * reading that has already landed when they read, and otherwise behave as if
  * the site were unbound. The turn controller runs before the prompt and usually
  * before any reading could land, so it alone may wait for one: only when a
@@ -498,8 +498,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		const value = turn?.verdict?.value;
 		if (value === undefined) return undefined;
 		return {
-			// Only a measured proposal reading names an intent, so a plan-close never arms on anything less.
-			intent: value.acts.proposal ? "plan" : "unknown",
+			intent: "unknown",
 			// Automatic scouts stay off: an architecture reading is advice to the main agent.
 			orientation: { wanted: false, breadth: null },
 			direction: { requested: value.acts.direction },
@@ -540,9 +539,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 				return;
 			}
 			// Only the turn controller may wait for the reading, and never past the
-			// site's deadline. Readers take it only from a fitted build: an unfitted
-			// reading's intent has no cut and once overrode the plan-close regex on
-			// its own. The operator's cancel does not abort it, because the reading is
+			// site's deadline. Readers take it only from a fitted build. The operator's cancel does not abort it, because the reading is
 			// still a record of the request.
 			let markLanded: () => void = () => {};
 			held.landed = new Promise<void>((resolve) => {

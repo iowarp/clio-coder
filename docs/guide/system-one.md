@@ -15,7 +15,7 @@ Decision engines come in four tiers. No tier turns on the next one.
 | 0. Shipped defaults | Nothing is bound. | Deterministic behavior everywhere. This is the product. |
 | 1. Base chat model | An `llm` engine over a chat target you already use. | `/draft` judging, the approval-card advisory and `consult`. These are asked only while an approval card or the `/draft` overlay is open, or when the agent calls `consult`. Every other site costs two requests per question with logprobs, or five without, and an unfitted build never acts on them. |
 | 2. Local decision model | A `systemone` engine with a `profile` (Strands Decider, Julia-1, Laya, GLiNER) on a server you run, placed on a processor the chat model does not use: the integrated GPU, the NPU or the CPU. | Advice and recording. The card advisory, `consult` and `/draft` use its answers at once. No local build ships with fitted cuts, so every other site only records what it would have said. |
-| 3. Hosted API engine | A `systemone` engine over the `typesafe-jev` runtime. | The shipped cuts for the `jev-1.14.0` build: turn hints, direction, plan close and worker preparation when the reading lands in time, catalog rankings and the card advisory. The redacted state leaves the machine. |
+| 3. Hosted API engine | A `systemone` engine over the `typesafe-jev` runtime. | The shipped cuts for the `jev-1.14.0` build: turn hints, direction and worker preparation when the reading lands in time, catalog rankings and the card advisory. The redacted state leaves the machine. |
 
 A tier 2 model costs no hosted API fee, but it still uses your hardware, and a detached call can compete with the chat model on a shared server. A decision model is small enough to run on a processor the chat model leaves idle, which is what [Placing engines](#placing-engines) is about.
 
@@ -244,7 +244,7 @@ A site is named by the object it judges. One call to a site carries one bounded 
 
 | Site | Judges | Default deadline | What its answer does |
 | --- | --- | --- | --- |
-| `turn` | The operator's request, read at submit | 600 ms | Under a measured build, hints, direction, dispatch expectation and plan close, when the reading lands in time. Otherwise recorded. |
+| `turn` | The operator's request, read at submit | 600 ms | Under a measured build, hints, direction and dispatch expectation, when the reading lands in time. Otherwise recorded. |
 | `workerPrepare` | Which recipe a predicted dispatch names first | 600 ms | Holds a worker process, chained after a turn reading that predicts a dispatch. |
 | `toolCall` | A proposed tool call | 5000 ms for the approval card, 1500 ms for the yolo gate | Card advisory. The yolo gate only records. |
 | `toolResult` | Content returned by `web_fetch`, `web_read` and MCP tools | 1500 ms | Recorded only. |
@@ -256,7 +256,7 @@ A site is named by the object it judges. One call to a site carries one bounded 
 
 ### `turn`: hints and acts that land in time
 
-The site asks whether the request is answerable without the workspace, whether it holds work separate workers could carry out and in what shape, whether it asks to synthesize how components relate, whether it asks Clio to propose or choose the next task, and whether its deliverable is a proposal awaiting a choice.
+The site asks whether the request is answerable without the workspace, whether it holds work separate workers could carry out and in what shape, whether it asks to synthesize how components relate, and whether it asks Clio to propose or choose the next task.
 
 The call starts when you submit. When direction could act on the reading, the turn controller waits for it before the prompt is built, for at most the site's deadline (600 ms, or the binding's `timeoutMs`), so a reading that takes that long delays the turn by that long. Nothing else waits. Readers take a reading only if it has landed when they read, and only from a measured build. A reading that lands later is only recorded. A canceled turn does not abort the call, so its reading is still recorded. A landed, measured reading can:
 
@@ -264,7 +264,6 @@ The call starts when you submit. When direction could act on the reading, the tu
 - Add a `[Plan]` hint: the request reads as work suited to workers, so the delegation rules apply. It is suppressed when the request already names delegation.
 - Add an `[Explore]` hint: the request reads as asking how components relate, and no worker advice was given. No scout starts automatically.
 - Tell the turn controller that direction is wanted (`turnControl.workflows`) and that a dispatch is expected. Without a reading the turn controller can only collect finished background runs, and it skips the Git and ledger reads the other workflows need.
-- Arm the plan close, so a proposal ends in a choice through `ask_user`. An `off` or undecided reading leaves the plan close its own rule, which looks for the request naming a plan.
 
 A reading that predicts a dispatch also asks `workerPrepare` which recipe it would name first, only while `fleet.speculativeDispatch` is true, which is also experimental. Most turns spend no request here. Nothing waits for the answer: a worker process is held when it lands, usually while the main model is still generating, and two are held only under a measured parallel reading. A wrong pick costs one idle process until the turn settles. A prepared process has run no model. A catalog larger than the engine reads in one question is not asked.
 
@@ -285,7 +284,7 @@ Only results from `web_fetch`, `web_read` and MCP tools are read. They carry thi
 
 After a turn settles, the site reads the assistant's final message, detached. Its readings (whether the message asks the operator something, blocks on a decision, announced work never started, claims a passing check, finished a unit of work, stopped mid-operation or moved on from the request) are recorded beside the turn outcome. Settlement never waits for them, and the clarification streak that gates the `direction` workflow keeps its own regex reading of the closing text.
 
-No prose-question nudge reads the reply. Turn-ending guidance lives in the prompt and the `ask_user` result. The plan-close registration uses explicit proposal mode, the intent of a fitted `turn` reading that landed in time, or, without one, the operator's request naming a plan; never this site's reading of the reply.
+No prose-question nudge reads the reply. Turn-ending guidance lives in the prompt and the `ask_user` result. The plan-close registration uses explicit proposal mode or the operator's request naming a plan. No System One reading arms it.
 
 ### `steer`: recorded readings of queued messages
 
@@ -307,7 +306,7 @@ When the `consult` site is bound at startup, the main agent gets a `consult` too
 
 ## Calibration and shadow mode
 
-A probability means something only for the build that produced it. Clio Coder therefore keys every cut by the answering build, extended with the renderer and site version for profiles that use a bounded renderer. Each action needs its own cut, including the certainty floors under a choice: a measured dispatch reading does not make an unmeasured recipe pick act, and an intent with no measured floor reads as undecided, so the plan-close keeps its own rule. The rule and the shipped table are in [Calibration](../architecture/system-one.md#calibration-cuts-belong-to-a-threshold-identity) on the architecture page.
+A probability means something only for the build that produced it. Clio Coder therefore keys every cut by the answering build, extended with the renderer and site version for profiles that use a bounded renderer. Each action needs its own cut, including the certainty floors under a choice: a measured dispatch reading does not make an unmeasured recipe pick act. The rule and the shipped table are in [Calibration](../architecture/system-one.md#calibration-cuts-belong-to-a-threshold-identity) on the architecture page.
 
 - **Fitted cuts** ship for the `jev-1.14.0` build only. LLM engines and other builds have none until a run fits them.
 - **Shadow mode.** A site whose answering build has no cut for it never hints, ranks or acts, and its answers are recorded, so the ledger and the dataset show what it would have said. `consult` reads no cut and returns any build's answer, marked with that build. The card advisory and the `/draft` judge need their own measured cuts and send nothing without them. An engine whose expected build has no measurement is never called to learn its build: a pinned model answers under its own name, while a moving alias or an unnamed default has no table entry to match. So the `turn` and `relevance` sites make no call while the dataset is not recorded, and leave no ledger row. A build that answers under another name than the one measured stops acting at once, and is rechecked once its last answer is ten minutes old. The record-only sites ask only while the dataset is recorded.

@@ -1,5 +1,5 @@
 {
-	"description": "Labeled turns for the turn site at turn-v3. Keys under expect name questions: direct, dispatch, architecture, direction and proposal are graded as probabilities, and shape as the winning option's mass. Labels say what should happen, not what a past session did. turn-v2 cases, its old holdout included, are all fit for turn-v3 because they informed no new wording's score; their orientation label became architecture and an intent label became proposal. The cases after them alternate fit and holdout within each authored class, and the holdout was committed before any score on it existed. A holdout is scored once against cuts chosen on fit.",
+	"description": "Labeled turns for the turn site at turn-v4. Keys under expect name questions: direct, dispatch, architecture and direction are graded as probabilities, and shape as the winning option's mass. Labels say what should happen, not what a past session did. turn-v2 cases, its old holdout included, are all fit for turn-v4 because they informed no new wording's score; their orientation label became architecture. The cases after them alternate fit and holdout within each authored class, and the holdout was committed before any score on it existed. A holdout is scored once against cuts chosen on fit.",
 	"site": "turn",
 	"cases": [
 		{
@@ -8,8 +8,7 @@
 				"direct": true,
 				"dispatch": false,
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -75,8 +74,7 @@
 				"direct": true,
 				"dispatch": false,
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -119,8 +117,7 @@
 				"direct": false,
 				"dispatch": false,
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -130,8 +127,7 @@
 				"direct": false,
 				"dispatch": false,
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -193,8 +189,7 @@
 				"direct": false,
 				"dispatch": true,
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -206,7 +201,6 @@
 				"dispatch": true,
 				"direction": false,
 				"architecture": true,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "fit"
@@ -261,8 +255,7 @@
 			"task": "explore this repo",
 			"expect": {
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -270,8 +263,7 @@
 			"task": "give me a tour of this codebase",
 			"expect": {
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -279,8 +271,7 @@
 			"task": "what is this project and how is it organized?",
 			"expect": {
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -288,8 +279,7 @@
 			"task": "I just cloned this repo. Where do I start?",
 			"expect": {
 				"direction": true,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -297,8 +287,7 @@
 			"task": "what does this project do and how is it laid out?",
 			"expect": {
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -306,8 +295,7 @@
 			"task": "I'm new to this codebase. Walk me through its main parts and how they fit together before I change anything.",
 			"expect": {
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -315,8 +303,7 @@
 			"task": "give me the lay of the land in this repository: what lives where and what talks to what",
 			"expect": {
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -324,8 +311,7 @@
 			"task": "how do the safety classifier and the dispatch scheduler relate?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -333,8 +319,7 @@
 			"task": "explain how tool argument validation and receipt sealing work; they are separate areas",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -342,8 +327,7 @@
 			"task": "compare the memory promotion path with the evidence bundle builder",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -351,8 +335,7 @@
 			"task": "where is the loop guard's block threshold set?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -360,8 +343,7 @@
 			"task": "which file defines the dispatch request origin type?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -369,8 +351,7 @@
 			"task": "what does answerCertainty in decisions.ts compute?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -378,8 +359,7 @@
 			"task": "Name two directories in this repo.",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -387,8 +367,7 @@
 			"task": "list the files in src/tools",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -396,8 +375,7 @@
 			"task": "what scripts are in package.json?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -405,8 +383,7 @@
 			"task": "where is the config loader defined?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -414,8 +391,7 @@
 			"task": "what branch am I on?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -423,8 +399,7 @@
 			"task": "how many test files are under tests/contracts?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -432,8 +407,7 @@
 			"task": "show the README title",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -441,8 +415,7 @@
 			"task": "which file exports createSystemOne?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -450,8 +423,7 @@
 			"task": "what version is package.json at?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -459,8 +431,7 @@
 			"task": "what does the docs directory contain?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -468,8 +439,7 @@
 			"task": "is there a tsconfig.json at the repo root?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -477,8 +447,7 @@
 			"task": "print the first ten lines of src/cli/index.ts",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -486,8 +455,7 @@
 			"task": "which directory holds the prompt fragments?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -495,8 +463,7 @@
 			"task": "does this repo use pnpm or npm?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -504,8 +471,7 @@
 			"task": "find where TOOL_PLACEMENT is defined",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -514,8 +480,7 @@
 			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
 			"expect": {
 				"direction": true,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -524,8 +489,7 @@
 			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
 			"expect": {
 				"direction": true,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -534,8 +498,7 @@
 			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
 			"expect": {
 				"direction": true,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -544,8 +507,7 @@
 			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
 			"expect": {
 				"direction": true,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -554,8 +516,7 @@
 			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
 			"expect": {
 				"direction": true,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -564,8 +525,7 @@
 			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
 			"expect": {
 				"direction": true,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -573,8 +533,7 @@
 			"task": "does Clio have a built-in way to review a scientific Python package, and how would I start it?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -582,8 +541,7 @@
 			"task": "is there a workflow for planning a research software change before implementing it?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -591,8 +549,7 @@
 			"task": "can you run a literature search on arXiv from here?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -600,8 +557,7 @@
 			"task": "what progress and completed checks are recorded in this session?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -609,8 +565,7 @@
 			"task": "what have you verified so far in this session?",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -618,8 +573,7 @@
 			"task": "list the tasks and evidence recorded so far",
 			"expect": {
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -629,8 +583,7 @@
 			"expect": {
 				"dispatch": true,
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -640,8 +593,7 @@
 			"expect": {
 				"dispatch": true,
 				"direction": false,
-				"architecture": true,
-				"proposal": false
+				"architecture": true
 			},
 			"split": "fit"
 		},
@@ -782,8 +734,7 @@
 				"direct": false,
 				"dispatch": false,
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -794,8 +745,7 @@
 			"expect": {
 				"direct": false,
 				"dispatch": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -805,8 +755,7 @@
 			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -816,8 +765,7 @@
 			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -827,8 +775,7 @@
 			"previousTask": "Plan only, do not edit anything: list the files you would touch to rename GATEWAY_RELATED_MAX in src/tools/gateway/index.ts. Just the file list.",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -836,8 +783,7 @@
 			"task": "Plan how you would explore the whole repository with scouts, but do not launch anything yet.",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": true
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -845,8 +791,7 @@
 			"task": "Just give me the plan for splitting the provider migration across workers. Do not dispatch anything.",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": true
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -862,8 +807,7 @@
 			"task": "Draft a plan only for reviewing every file under src/domains/safety in parallel, and don't start yet.",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": true
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -933,8 +877,7 @@
 			"source": "verbatim",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -952,8 +895,7 @@
 			"source": "verbatim",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -962,8 +904,7 @@
 			"source": "verbatim",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -972,8 +913,7 @@
 			"source": "verbatim",
 			"expect": {
 				"direct": false,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -982,8 +922,7 @@
 			"source": "verbatim",
 			"expect": {
 				"direct": true,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -992,8 +931,7 @@
 			"source": "verbatim",
 			"expect": {
 				"direct": true,
-				"dispatch": false,
-				"proposal": false
+				"dispatch": false
 			},
 			"split": "fit"
 		},
@@ -1004,8 +942,7 @@
 			"expect": {
 				"direct": false,
 				"direction": false,
-				"architecture": false,
-				"proposal": false
+				"architecture": false
 			},
 			"split": "fit"
 		},
@@ -2989,8 +2926,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3000,8 +2936,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3011,8 +2946,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3022,8 +2956,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3033,8 +2966,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3044,8 +2976,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3055,8 +2986,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3066,8 +2996,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3077,8 +3006,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3088,8 +3016,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3099,8 +3026,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3110,8 +3036,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3121,8 +3046,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3132,8 +3056,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3143,8 +3066,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3154,8 +3076,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3165,8 +3086,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3176,8 +3096,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3187,8 +3106,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3198,8 +3116,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3209,8 +3126,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3220,8 +3136,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3231,8 +3146,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3242,8 +3156,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3253,8 +3166,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3264,8 +3176,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3275,8 +3186,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3286,8 +3196,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3297,8 +3206,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3308,8 +3216,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3319,8 +3226,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3330,8 +3236,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3341,8 +3246,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3352,8 +3256,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3363,8 +3266,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3374,8 +3276,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3385,8 +3286,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3396,8 +3296,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3407,8 +3306,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3418,8 +3316,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3429,8 +3326,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3440,8 +3336,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3451,8 +3346,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3462,8 +3356,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3473,8 +3366,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3484,8 +3376,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3495,8 +3386,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3506,8 +3396,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3517,8 +3406,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3528,8 +3416,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3539,8 +3426,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3550,8 +3436,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3561,8 +3446,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3572,8 +3456,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3583,8 +3466,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3594,8 +3476,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": true,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3606,7 +3487,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "fit"
@@ -3618,7 +3498,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "holdout"
@@ -3630,7 +3509,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "fit"
@@ -3642,7 +3520,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "holdout"
@@ -3654,7 +3531,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "single"
 			},
 			"split": "fit"
@@ -3666,7 +3542,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "single"
 			},
 			"split": "holdout"
@@ -3678,7 +3553,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "single"
 			},
 			"split": "fit"
@@ -3690,7 +3564,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "single"
 			},
 			"split": "holdout"
@@ -3702,7 +3575,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "sequence"
 			},
 			"split": "fit"
@@ -3714,7 +3586,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "sequence"
 			},
 			"split": "holdout"
@@ -3726,7 +3597,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "council"
 			},
 			"split": "fit"
@@ -3738,7 +3608,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "council"
 			},
 			"split": "holdout"
@@ -3750,7 +3619,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "fit"
@@ -3762,7 +3630,6 @@
 				"dispatch": true,
 				"architecture": false,
 				"direction": false,
-				"proposal": false,
 				"shape": "parallel"
 			},
 			"split": "holdout"
@@ -3773,8 +3640,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3784,8 +3650,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3795,8 +3660,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3806,8 +3670,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3817,8 +3680,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3828,8 +3690,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3839,8 +3700,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3850,8 +3710,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3861,8 +3720,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3872,8 +3730,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3883,8 +3740,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3894,8 +3750,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": true
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3905,8 +3760,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3916,8 +3770,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3927,8 +3780,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3938,8 +3790,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3949,8 +3800,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3960,8 +3810,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3971,8 +3820,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit"
 		},
@@ -3982,8 +3830,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout"
 		},
@@ -3993,8 +3840,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit"
 		},
@@ -4004,8 +3850,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "holdout"
 		},
@@ -4015,8 +3860,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit"
 		},
@@ -4026,8 +3870,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "holdout"
 		},
@@ -4037,8 +3880,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit"
 		},
@@ -4048,8 +3890,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "holdout"
 		},
@@ -4059,8 +3900,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit"
 		},
@@ -4070,8 +3910,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "holdout"
 		},
@@ -4081,8 +3920,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit"
 		},
@@ -4092,8 +3930,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "holdout"
 		},
@@ -4103,8 +3940,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit",
 			"previous": "I would add a --json flag to stats, print one object with counts by state, and keep the text output as the default. Want me to go ahead?"
@@ -4115,8 +3951,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout",
 			"previous": "I would add a --json flag to stats, print one object with counts by state, and keep the text output as the default. Want me to go ahead?"
@@ -4127,8 +3962,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit",
 			"previous": "Two ways to do this: keep the retry loop in the worker, or move it into the queue. The queue version is less code but couples retries to storage."
@@ -4139,8 +3973,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout",
 			"previous": "I would add a --json flag to stats, print one object with counts by state, and keep the text output as the default. Want me to go ahead?"
@@ -4151,8 +3984,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit",
 			"previous": "Two ways to do this: keep the retry loop in the worker, or move it into the queue. The queue version is less code but couples retries to storage."
@@ -4163,8 +3995,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout",
 			"previous": "Fixed the off-by-one in backoff and the suite passes. The cap test now covers attempt 20."
@@ -4175,8 +4006,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "fit",
 			"previous": "I would add a --json flag to stats, print one object with counts by state, and keep the text output as the default. Want me to go ahead?"
@@ -4187,8 +4017,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout",
 			"previous": "Fixed the off-by-one in backoff and the suite passes. The cap test now covers attempt 20."
@@ -4199,8 +4028,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit",
 			"previous": "Two ways to do this: keep the retry loop in the worker, or move it into the queue. The queue version is less code but couples retries to storage."
@@ -4211,8 +4039,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "holdout",
 			"previous": "Two ways to do this: keep the retry loop in the worker, or move it into the queue. The queue version is less code but couples retries to storage."
@@ -4223,8 +4050,7 @@
 				"direct": false,
 				"dispatch": false,
 				"architecture": false,
-				"direction": true,
-				"proposal": false
+				"direction": true
 			},
 			"split": "fit",
 			"previous": "Fixed the off-by-one in backoff and the suite passes. The cap test now covers attempt 20."
@@ -4235,8 +4061,7 @@
 				"direct": true,
 				"dispatch": false,
 				"architecture": false,
-				"direction": false,
-				"proposal": false
+				"direction": false
 			},
 			"split": "holdout",
 			"previous": "Fixed the off-by-one in backoff and the suite passes. The cap test now covers attempt 20."

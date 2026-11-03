@@ -53,7 +53,6 @@ function loudTurn(overrides: Readonly<Record<string, Answer>> = {}): Readonly<Re
 		dispatch: noul(0.99),
 		architecture: noul(0.99),
 		direction: noul(0.99),
-		proposal: noul(0.99),
 		shape: choice("parallel"),
 		...overrides,
 	};
@@ -74,7 +73,7 @@ describe("turn policy", () => {
 	it("gives no hint and starts nothing under an unfitted build", () => {
 		const value = turn(loudTurn(), UNFITTED);
 		deepStrictEqual(value.hints, { scope: null, plan: null, explore: null });
-		deepStrictEqual(value.acts, { direction: false, prewarm: false, dispatch: false, proposal: false });
+		deepStrictEqual(value.acts, { direction: false, prewarm: false, dispatch: false });
 	});
 
 	it("hints scope at the cut and above, not below", () => {
@@ -130,11 +129,9 @@ describe("turn policy", () => {
 		strictEqual(WORKER_PREPARE_SITE.requiredCut, "recipe");
 	});
 
-	it("reads a proposal and a shape only past their measured cuts", () => {
-		const answers = loudTurn({ proposal: noul(0.97), shape: choice("parallel", 0.9) });
-		strictEqual(turn(answers, fitted({ direct: 0.7 })).acts.proposal, false);
+	it("reads a shape only past its measured cut", () => {
+		const answers = loudTurn({ shape: choice("parallel", 0.9) });
 		strictEqual(turn(answers, fitted({ direct: 0.7 })).shape, null);
-		strictEqual(turn(answers, fitted({ proposal: 0.96 })).acts.proposal, true);
 		strictEqual(turn(answers, fitted({ shape: 0.5 })).shape, "parallel");
 	});
 });

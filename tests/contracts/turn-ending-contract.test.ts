@@ -76,8 +76,9 @@ describe("turn-ending contract in the session prompt", () => {
 it("continues only an armed plan that has not asked or changed files, once", () => {
 	let plan = false;
 	let canAsk = true;
-	const rule = createPlanCloseRegistration({ canAsk: () => canAsk, isPlan: () => plan });
-	const start = (metadata: MiddlewareHookInput["metadata"] = {}) => rule.evaluate({ hook: "turn_start", metadata });
+	const rule = createPlanCloseRegistration({ canAsk: () => canAsk });
+	const start = (metadata: MiddlewareHookInput["metadata"] = {}) =>
+		rule.evaluate({ hook: "turn_start", ...(plan ? { text: "Write a plan for adding a cache." } : {}), metadata });
 	const end = (stopReason = "stop") => rule.evaluate({ hook: "turn_end", metadata: { stopReason } });
 	start();
 	deepStrictEqual(end(), []);
@@ -150,7 +151,7 @@ it("delivers a downgraded plan close once, only on a current same-session contin
 		{ text: "continue", sessionId: "other", idleMs: 0, requestContinuation: false, expected: false },
 	]) {
 		elapsed = 1_000;
-		const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
+		const rule = createPlanCloseRegistration({ canAsk: () => true });
 		rule.evaluate({ hook: "turn_start", sessionId: "original", text: "Write a plan for adding a cache." });
 		deepStrictEqual(
 			rule.evaluate({ hook: "turn_end", sessionId: "original", metadata: { stopReason: "stop", contextTokens: 128_000 } }),
@@ -176,7 +177,7 @@ it("delivers a downgraded plan close once, only on a current same-session contin
 
 // #431: a long pasted document that mentions planning is evidence, not a plan request.
 it("does not arm on a long pasted document that mentions planning", () => {
-	const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
+	const rule = createPlanCloseRegistration({ canAsk: () => true });
 	const armed = (text: string) => {
 		const effects = rule.evaluate({ hook: "turn_start", text, metadata: { promptChars: text.length } });
 		rule.evaluate({ hook: "turn_end", metadata: { stopReason: "stop" } });
@@ -348,7 +349,7 @@ it("detects explicit plan-only requests and removes only a trailing duplicated c
 	strictEqual(isPlanOnlyRequest("Plan and implement this; do not edit tests."), false);
 	strictEqual(isPlanOnlyRequest("Plan this change; do not implement it."), true);
 	strictEqual(isPlanOnlyRequest("Do not edit anything; explain the parser."), false);
-	const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
+	const rule = createPlanCloseRegistration({ canAsk: () => true });
 	rule.evaluate({ hook: "turn_start", text: request });
 	const close = rule.evaluate({ hook: "turn_end", text: "Plan", metadata: { stopReason: "stop" } });
 	ok(close[0]?.kind === "request_continuation" && close[0].message.includes("Keep the plan (Recommended)"));

@@ -4836,13 +4836,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// instead of a "Carry out this plan?" card, which parked unattended
 				// runs (#421), so the close nudge would contradict it there.
 				canAsk: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
-				isPlan: () => {
-					const interpretation = systemOneHost.interpretation();
-					// An undecided intent is no reading: the plan-close keeps its own rule, as without System One.
-					return interpretation === undefined || interpretation.intent === "unknown"
-						? undefined
-						: interpretation.intent === "plan";
-				},
 			}),
 		);
 		// Demo guidance: operator-only capability tips after a turn. Everything it

@@ -47,7 +47,6 @@ const LOUD_TURN: Readonly<Record<string, Answer>> = {
 	dispatch: noul(0.99),
 	architecture: noul(0.99),
 	direction: noul(0.99),
-	proposal: noul(0.2),
 	shape: choice("parallel"),
 	recipe: choice("scout"),
 };

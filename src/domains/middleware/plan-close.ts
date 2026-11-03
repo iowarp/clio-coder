@@ -34,17 +34,12 @@ function operatorRequest(text: string, promptChars: unknown): string {
 }
 
 /**
- * Close a requested plan through ask_user once. Proposal mode arms it; so does
- * the turn verdict when System One is fitted. Without a verdict, the default
- * install's case, the operator's request naming a plan arms it: the prompt
- * contract alone closed 2 of 5 identical plan requests on a local model in the
- * v0.6.0 flywheel, and the verdict-only arming never ran outside System One.
+ * Close a requested plan through ask_user once. Proposal mode arms it, and so
+ * does the operator's request naming a plan: the prompt contract alone closed 2
+ * of 5 identical plan requests on a local model in the v0.6.0 flywheel. System
+ * One does not arm it, because the extra round showed no measured benefit.
  */
-export function createPlanCloseRegistration(deps: {
-	canAsk: () => boolean;
-	/** The fitted verdict's reading, or undefined when System One gave none. */
-	isPlan: () => boolean | undefined;
-}): MiddlewareHookRegistration {
+export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): MiddlewareHookRegistration {
 	let armed = false;
 	let planOnly = false;
 	let changed = false;
@@ -84,15 +79,12 @@ export function createPlanCloseRegistration(deps: {
 					const wantsPlan = PLAN_REQUEST.test(request) && !DISCUSSION_REQUEST.test(request);
 					planOnly = wantsPlan && isPlanOnlyRequest(request);
 					const proposal = input.metadata?.turnMode === "proposal";
-					const verdict = deps.isPlan();
-					armed = planOnly || proposal || (verdict ?? wantsPlan);
+					armed = planOnly || proposal || wantsPlan;
 					armedBy = planOnly
 						? "regex:PLAN_ONLY@operator-request"
 						: proposal
 							? "mode:proposal@turn"
-							: verdict !== undefined
-								? "verdict:system-one.turn@turn"
-								: "regex:PLAN_REQUEST@operator-request";
+							: "regex:PLAN_REQUEST@operator-request";
 				}
 				if (armed) context?.evidence?.(armedBy);
 				return armed

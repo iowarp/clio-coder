@@ -24,7 +24,7 @@ A site declares `id`, a `version`, a hard `deadlineMs`, an optional `moment`, an
 
 | Site | Definitions (moment, version) | Tasks asked | Cut keys read |
 | --- | --- | --- | --- |
-| `turn` | `turn-v3` | `intent` | `direct`, `dispatch`, `prewarm`, `architecture`, `direction`, `proposal`, `shape` |
+| `turn` | `turn-v4` | `intent` | `direct`, `dispatch`, `prewarm`, `architecture`, `direction`, `shape` |
 | `workerPrepare` | `worker-prepare-v1` | `recipe` | `recipe`, required |
 | `toolCall` | moment `card` and moment `gate`, `tool-call-v3` and `tool-call-v2` | `toolRisk` | `cardFloor`, required, `cardOutside` and `cardDestroys` at `card`; `gateRadius` and `gateDestroys` at `gate` |
 | `toolResult` | `tool-result-v2` | `injection` | `instructions` |
@@ -92,7 +92,7 @@ In-flight calls are tracked so shutdown can wait a bounded time for a row that a
 
 [calibration.ts](../../src/domains/system-one/calibration.ts) is the one reviewable table of what a build's numbers mean. A cut is keyed by `thresholdIdentity(build, renderer, siteVersion, compactVersion)` ([contract.ts](../../src/domains/system-one/contract.ts)). For the legacy wire and the `llm` prompt the identity is the bare build string. For a bounded renderer it is `<build>+<renderer>@<siteVersion>`, with `/<compactVersion>` appended when a compact wording was read. `FITTED_CUTS` holds `<site>.<key>` entries per identity, each fitted from a labeled run on that exact build with the run cited beside the numbers. `FITTED_CONTRACTS` lists the renderer and site versions a measured table was fitted under, and a measured cut applies only when the call matches exactly, so a reworded site or another rendering goes silent until it is measured again. `cutsFor(identity, site, overrides, contract)` overlays local cuts the factory is handed, never settings, and reports `fitted`, true when any cut exists for the site under the identity. Each action reads its own key, so `fitted` says only that a site has some measurement.
 
-The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` renderer, under the site versions `turn-v3`, `worker-prepare-v1`, `turn-end-v3`, `tool-call-v2` (gate), `tool-call-v3` (card), `tool-result-v2`, `relevance-v2` and `relevance-cluster-v2`. Its note in `calibration.ts` states the rule: a margin derived from the measured run-to-run noise and what a false fire costs, chosen on a fit split and scored once on a held-out split.
+The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` renderer, under the site versions `turn-v4`, `worker-prepare-v1`, `turn-end-v3`, `tool-call-v2` (gate), `tool-call-v3` (card), `tool-result-v2`, `relevance-v2` and `relevance-cluster-v2`. Its note in `calibration.ts` states the rule: a margin derived from the measured run-to-run noise and what a false fire costs, chosen on a fit split and scored once on a held-out split.
 
 | Cut key | Role |
 | --- | --- |
@@ -100,7 +100,6 @@ The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` rendere
 | `turn.dispatch` | `[Plan]` hint and the expected-dispatch act |
 | `turn.architecture` | `[Explore]` hint |
 | `turn.direction` | Direction act |
-| `turn.proposal` | Plan close |
 | `turn.prewarm` | Asking `workerPrepare` |
 | `turn.shape` | The mass a shape needs, which the plan hint phrases and a second held worker reads |
 | `workerPrepare.recipe` | The mass a recipe pick needs to hold a worker |
@@ -146,7 +145,7 @@ The composition root builds one `SystemOne`, one recorder and one host ([system-
 
 | Site | Reader | Degrades to |
 | --- | --- | --- |
-| `turn` | Started once before the prompt is built. The turn controller waits for it, up to the call's own deadline, when direction could act on it, and no other reader waits; a measured reading ready in time can inform hints, turn control and the plan close, and a late reading cannot enter the next continuation | No hints, previous turn-control behavior |
+| `turn` | Started once before the prompt is built. The turn controller waits for it, up to the call's own deadline, when direction could act on it, and no other reader waits; a measured reading ready in time can inform hints and turn control, and a late reading cannot enter the next continuation | No hints, previous turn-control behavior |
 | `workerPrepare` | Chained after a turn reading that predicts a dispatch. A held process is started when it lands, and a reading after settlement holds nothing | The dispatch spawns its own worker |
 | `toolCall` gate | Detached recording as an unrecognized `execute` starts at `yolo`, interactive only; never parks | `yolo` unchanged |
 | `toolCall` card | Approval overlay, polled per frame, never waited on | No advisory line |

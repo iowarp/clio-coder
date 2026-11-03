@@ -5,7 +5,7 @@
  * request) carries every question a turn-level reader wants answered: whether
  * the message needs the workspace at all, whether it holds independent work and
  * in what shape, whether it asks to synthesize how components relate, whether it
- * asks Clio to choose the next task, and whether its deliverable is a proposal.
+ * asks Clio to choose the next task.
  * `WORKER_PREPARE_SITE` asks which recipe a dispatch would name first, chained
  * after a reading that predicts a dispatch.
  * Latency is per call rather than per question, so a new question costs a
@@ -90,8 +90,6 @@ export interface TurnValue {
 	readonly architecture: number | null;
 	/** Probability that the operator asks Clio to propose or choose the next task. */
 	readonly direction: number | null;
-	/** Probability that the deliverable is a proposal awaiting the operator's choice. */
-	readonly proposal: number | null;
 	/** One line each for the main agent's submitted message, or null when the policy stays silent. */
 	readonly hints: { readonly scope: string | null; readonly plan: string | null; readonly explore: string | null };
 	/** What the turn controller may start. Never a grant of authority. */
@@ -100,8 +98,6 @@ export interface TurnValue {
 		readonly prewarm: boolean;
 		/** The dispatch cut fired: the model is about to dispatch. Unlike the plan hint it holds when the task names delegation. */
 		readonly dispatch: boolean;
-		/** The proposal cut fired: the plan-close may arm. */
-		readonly proposal: boolean;
 	};
 }
 
@@ -134,12 +130,6 @@ const DIRECTION_QUESTION = yesNo(
 	"States, approves, continues or corrects a task, asks a concrete question, or is a greeting or thanks",
 );
 
-const PROPOSAL_QUESTION = yesNo(
-	"Is the deliverable of `task` a proposal or design that waits for the operator's choice, rather than carrying out a stated task?",
-	"Asks for a plan, a design or options to review, or says not to start or change anything yet",
-	"Asks to carry something out, including implementing an existing plan or writing a plan file as the work itself; or asks a question that needs only an answer",
-);
-
 const RECIPE_INSTRUCTIONS =
 	"Which one worker agent would the assistant dispatch first for `task`? Pick the agent whose description matches the work that agent would carry out. When the request names an agent, pick that agent. Ignore what the assistant does itself with the results afterwards.";
 
@@ -150,7 +140,7 @@ const RECIPE_INSTRUCTIONS =
  * identity of any build read through them; no Jev cut was measured on them and
  * none applies. Each option fits 46 UTF-8 bytes, so it provably fits the bound.
  */
-const TURN_COMPACT_VERSION = "turn-compact-v2";
+const TURN_COMPACT_VERSION = "turn-compact-v3";
 const COMPACT: Readonly<Record<string, Question>> = {
 	direct: yesNo(DIRECT_QUESTION.instructions, "Answerable without this workspace", "Needs this workspace or an action"),
 	dispatch: yesNo(
@@ -174,7 +164,6 @@ const COMPACT: Readonly<Record<string, Question>> = {
 		"Asks what to do next or for options",
 		"States, continues or approves a task",
 	),
-	proposal: yesNo(PROPOSAL_QUESTION.instructions, "A plan or design to review first", "Carry out work or answer"),
 };
 
 /** The task already says who should do the work, so a plan line would only repeat it. */
@@ -217,7 +206,7 @@ function planHint(shape: TurnShape | null): string {
 }
 
 function policy(
-	value: Pick<TurnValue, "direct" | "dispatch" | "architecture" | "direction" | "proposal" | "shape">,
+	value: Pick<TurnValue, "direct" | "dispatch" | "architecture" | "direction" | "shape">,
 	task: string,
 	cuts: SiteCuts,
 ): Pick<TurnValue, "hints" | "acts"> {
@@ -234,14 +223,13 @@ function policy(
 			direction: crosses(value.direction, cut("direction")),
 			dispatch: dispatchConfident,
 			prewarm: crosses(value.dispatch, cut("prewarm")),
-			proposal: crosses(value.proposal, cut("proposal")),
 		},
 	};
 }
 
 export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 	id: "turn",
-	version: "turn-v3",
+	version: "turn-v4",
 	deadlineMs: 600,
 	taskOf: () => "intent",
 	cutTask: () => "intent",
@@ -262,7 +250,6 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 		shape: SHAPE_QUESTION,
 		architecture: ARCHITECTURE_QUESTION,
 		direction: DIRECTION_QUESTION,
-		proposal: PROPOSAL_QUESTION,
 	}),
 	read(answers, object, cuts) {
 		// A profile may answer only part of the turn (a label model takes the
@@ -279,7 +266,6 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 			) as TurnShape | null,
 			architecture: probability(answers.architecture),
 			direction: probability(answers.direction),
-			proposal: probability(answers.proposal),
 		};
 		return { ...value, ...policy(value, object.task, cuts) };
 	},
@@ -289,14 +275,12 @@ export const TURN_SITE: SiteDefinition<TurnObject, TurnValue> = {
 		shape: value.shape,
 		architecture: value.architecture === null ? null : round2(value.architecture),
 		direction: value.direction === null ? null : round2(value.direction),
-		proposal: value.proposal === null ? null : round2(value.proposal),
 		scopeHint: value.hints.scope !== null,
 		planHint: value.hints.plan !== null,
 		exploreHint: value.hints.explore !== null,
 		actDirection: value.acts.direction,
 		actPrewarm: value.acts.prewarm,
 		actDispatch: value.acts.dispatch,
-		actProposal: value.acts.proposal,
 	}),
 };
 
