@@ -72,6 +72,8 @@ test("promote --from-handoff finds the source from any directory and refuses onl
 		);
 		strictEqual(await promote("unknown2", project), 1, "under source rules an unknown source is refused");
 		strictEqual(records(), 2);
+		strictEqual(await promote("unknown3", elsewhere), 1, "the rules are the named repository's, not the cwd's");
+		strictEqual(records(), 2);
 	} finally {
 		process.chdir(previousCwd);
 		env.restore();

@@ -274,7 +274,10 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			const snapshot = await readReviewedHandoff(handoffPath);
-			const flowRefusal = promotionFlowRefusal(snapshot.source.sessionId, process.cwd());
+			const flowRefusal = promotionFlowRefusal(
+				snapshot.source.sessionId,
+				selection.scope === "repo" ? selection.repository.key : process.cwd(),
+			);
 			if (flowRefusal !== null) {
 				printError(`${flowRefusal}; nothing was promoted`);
 				return 1;
