@@ -45,18 +45,20 @@ function lessonItems(
 	memoryOn: boolean,
 ): ListOverlayItem[] {
 	const theme = clioTheme();
-	const promptReach = memoryOn ? "prompt" : "off, recall only";
 	return records.map((record) => {
 		const reach = memoryReach(record, eligible.has(record.id));
 		return {
 			id: `lesson:${record.id}`,
 			label: firstLine(record.lesson),
 			// Scope and reach are two chips joined by the shared separator, so a
-			// narrow row drops the reach whole instead of cutting "recall only".
+			// narrow row drops the reach whole instead of cutting it.
 			meta: theme.fg(
 				"annotation",
 				reach !== "none"
-					? [record.scope === "repo" ? "this repo" : record.scope, reach === "prompt" ? promptReach : "recall only"]
+					? [
+							record.scope === "repo" ? "this repo" : record.scope,
+							!memoryOn ? "off" : reach === "prompt" ? "prompt" : "recall only",
+						]
 							.map((part) => theme.fg("annotation", part))
 							.join(dotSep(theme))
 					: record.rejectedAt

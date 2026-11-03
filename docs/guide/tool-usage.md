@@ -1060,7 +1060,8 @@ approved durable records eligible for the current repository, runtime and agent.
 `query` is required; `limit` defaults to 8, with a maximum of 20. This is a
 read-only orchestrator capability. It cannot save, propose or approve memory,
 and workers do not receive it. No matches returns
-`No task or approved durable memory matched the query.` Source:
+`No task or approved durable memory matched the query.` With
+`context.memory.enabled: false` it refuses with `memory is off`. Source:
 `src/tools/memory-recall.ts` and `src/domains/memory/recall.ts`.
 
 ## decide: record a design decision

@@ -27,6 +27,23 @@ function record(id: string, lesson: string, fields: Partial<MemoryRecord> = {}):
 }
 
 describe("memory_recall tool", () => {
+	it("refuses with memory off and reads nothing", async () => {
+		const recalled: unknown[] = [];
+		const tool = createMemoryRecallTool({
+			enabled: () => false,
+			onRecall: (ids) => recalled.push(ids),
+			bank: () => {
+				throw new Error("the bank must not be read");
+			},
+			records: () => {
+				throw new Error("the store must not be read");
+			},
+			eligibility: () => ({ activeRepository: null, activeRuntime: null, activeAgent: null }),
+		});
+		deepStrictEqual(await tool.run({ query: "tsup" }), { kind: "error", message: "memory_recall: memory is off" });
+		deepStrictEqual(recalled, []);
+	});
+
 	it("returns matching bank entries and eligible approved records, never status or gated records", async () => {
 		const bank = new TaskMemoryBank();
 		bank.updateStatus("tsup build is half done");

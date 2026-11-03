@@ -24,7 +24,7 @@ reminders, the `# Memory` section, handoff offers, and handoff seeding.
 
 ### Turn memory off
 
-To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, and `/memory` lists each eligible lesson as `off, recall only`, because `memory_recall` can still read it. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
+To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, `/memory` lists each eligible lesson as `off`, and `memory_recall` refuses with `memory is off`. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
 
 ### Inspect the memory bank
 
@@ -202,8 +202,8 @@ grants permission to execute the command. Source:
 `src/domains/memory/intervention.ts` and `src/domains/memory/lesson-projection.ts`.
 
 `/memory` opens on **Lessons**: the reusable lessons eligible for this session,
-what each concerns, whether the main prompt carries it (`off, recall only`
-while memory is off), its evidence and its track record. Task memory, review candidates and diagnostics occupy separate
+what each concerns, whether the main prompt carries it (`off` while memory is
+off), its evidence and its track record. Task memory, review candidates and diagnostics occupy separate
 tabs. Opening the view does not activate memory (`src/interactive/memory-overlay.ts`).
 
 ## Prepare observation notes for compaction

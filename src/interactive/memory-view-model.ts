@@ -66,9 +66,9 @@ function reachLine(
 		return record.scope === "agent"
 			? "Delegated workers only; not this session's agent."
 			: "Outside this session's repository or runtime.";
-	if (reach === "recall") return `Through memory_recall only; the prompt does not carry ${record.scope} scope.`;
 	// A selection built before memory went off still names this record, and it no longer describes the prompt.
-	if (!memoryOn) return "Memory is off, so the prompt and reminders do not carry it; memory_recall can still read it.";
+	if (!memoryOn) return "Memory is off, so the prompt, reminders and memory_recall do not carry it.";
+	if (reach === "recall") return `Through memory_recall only; the prompt does not carry ${record.scope} scope.`;
 	const item = selection?.items.find((candidate) => candidate.id === record.id);
 	if (item === undefined) return "Prompt scope; no prompt has been built with it yet.";
 	return item.reason === "selected"

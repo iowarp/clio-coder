@@ -239,6 +239,9 @@ test("reach follows the main prompt's scopes and the last prompt selection", () 
 	const lessons = plain(view);
 	match(lessons, /this repo · prompt/u);
 	match(lessons, /language · recall only/u);
+	const off = memoryLessonDetail(inPrompt, true, selection, false).join("\n");
+	match(off, /Memory is off, so the prompt, reminders and memory_recall do not carry it/u);
+	match(memoryLessonDetail(recallOnly, true, selection, false).join("\n"), /Memory is off/u);
 });
 
 test("text, applicability, verification and feedback changes refresh a selected detail without ID changes", () => {

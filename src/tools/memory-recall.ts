@@ -6,6 +6,8 @@ import type { MemoryRecord, MemoryRetrievalOptions } from "../domains/memory/typ
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 export interface MemoryRecallDeps {
+	/** Off means off: a recalled record would enter the next request and the ledger as a tool result. */
+	enabled?: () => boolean;
 	onRecall?: (ids: readonly string[]) => void;
 	/** The live session task bank; null when the session has none. */
 	bank: () => TaskMemorySnapshot | null;
@@ -33,6 +35,7 @@ export function createMemoryRecallTool(deps: MemoryRecallDeps): ToolSpec {
 		baseActionClass: "read",
 		executionMode: "parallel",
 		async run(args): Promise<ToolResult> {
+			if (deps.enabled?.() === false) return { kind: "error", message: "memory_recall: memory is off" };
 			const query = typeof args.query === "string" ? args.query.trim() : "";
 			if (query.length === 0) return { kind: "error", message: "memory_recall: query is required" };
 			const limit = typeof args.limit === "number" ? args.limit : undefined;

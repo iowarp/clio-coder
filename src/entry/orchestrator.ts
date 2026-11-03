@@ -4111,6 +4111,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Read-only recall over the stores the main prompt draws from, under the
 		// same repository and runtime gates; the agent scope stays with workers.
 		memoryRecall: {
+			enabled: memoryEnabledNow,
 			onRecall: (ids) => memoryOwner.recordRecall(ids),
 			bank: () => taskMemoryBank.snapshot(),
 			records: () => loadMemoryRecordsSync(clioDataDir()),
