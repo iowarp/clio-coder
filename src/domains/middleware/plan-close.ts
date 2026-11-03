@@ -1,4 +1,4 @@
-import { isPlanOnlyRequest } from "../../core/plan-request.js";
+import { isPlanCloseQuestion, isPlanOnlyRequest } from "../../core/plan-request.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
@@ -92,7 +92,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 							{
 								kind: "inject_reminder",
 								audience: "model",
-								message: `End the plan text without a question or option list; ask_user is its only close.${planOnly ? ' This is plan-only: the card must offer "Keep the plan (Recommended)" first, then any implementation choices, then "Revise the plan first".' : ""}`,
+								message: `End the plan text without a question or option list; ask_user "Carry out this plan?" is its only close.${planOnly ? ' This is plan-only: the card must offer "Keep the plan (Recommended)" first, then any implementation choices, then "Revise the plan first".' : ""}`,
 							},
 						]
 					: [];
@@ -112,14 +112,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 					asked = true;
 					const questions = input.toolArgs?.questions;
 					if (Array.isArray(questions)) {
-						closed ||= questions.some(
-							(question) =>
-								question !== null &&
-								typeof question === "object" &&
-								"question" in question &&
-								typeof question.question === "string" &&
-								/^carry out this plan\?/iu.test(question.question.trim()),
-						);
+						closed ||= questions.some(isPlanCloseQuestion);
 					}
 				}
 				return [];

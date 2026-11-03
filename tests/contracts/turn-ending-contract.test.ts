@@ -120,6 +120,14 @@ it("continues only an armed plan that has not asked or changed files, once", () 
 		toolArgs: { questions: [{ question: "Carry out this plan?" }] },
 	});
 	deepStrictEqual(rule.evaluate({ hook: "turn_end", text: "No files changed.", metadata: { stopReason: "stop" } }), []);
+	// A card worded freely over the taught close options already closed the plan.
+	start();
+	rule.evaluate({
+		hook: "after_tool",
+		toolName: ToolNames.AskUser,
+		toolArgs: { questions: [{ question: "How should we proceed?", options: [{ label: "Keep the plan (Recommended)" }] }] },
+	});
+	deepStrictEqual(rule.evaluate({ hook: "turn_end", text: "Plan kept.", metadata: { stopReason: "stop" } }), []);
 	start();
 	rule.evaluate({ hook: "after_tool", toolName: ToolNames.Read });
 	strictEqual(end().length, 1);
