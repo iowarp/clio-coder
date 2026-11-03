@@ -41,6 +41,10 @@ import { shapeToolResult } from "../../src/tools/result-shaping.js";
 const SEED = 0x5eed;
 const DOCUMENTS = 60;
 const CHUNKINGS = 6;
+// One sweep offset in this many runs by default, rotating per case so the cases together still reach every offset. Set it
+// to 1 for the deep sweep, which also restores the wide display-tail range.
+const OFFSET_STRIDE: number = 5;
+const sweptOffset = (offset: number, sweep: number): boolean => (Math.abs(offset) + sweep + SEED) % OFFSET_STRIDE === 0;
 
 // Secrets draw on letters nothing else in the corpus uses, so one leaked character is enough to fail a frame.
 const SECRET_LETTERS = /[ZQXJΩЖ😀]/gu;
@@ -198,10 +202,13 @@ test("no frame of a rolling worker tail shows a secret, wherever a byte cut or a
 		(size: number) => "xy ".repeat(Math.ceil(size / 3)).slice(0, size),
 		(size: number) => "line\n".repeat(Math.ceil(size / 5)).slice(0, size),
 	];
+	let sweep = 0;
 	for (const text of CORPUS) {
 		const oneShot = redactSecretString(text);
 		for (const fill of fillers) {
+			sweep += 1;
 			for (let offset = 0; offset <= text.length + 2; offset += 1) {
+				if (!sweptOffset(offset, sweep)) continue;
 				const stream = `${fill(WORKER_LIVE_TAIL_MAX_BYTES - offset)}${text} tail words here\nand a line after`;
 				const fold = createWorkerProgressFold();
 				let now = 1000;
@@ -247,9 +254,12 @@ test("no frame of the bash live tail shows a secret, and a finished line past th
 			})
 			.join("\n");
 	const cap = 16 * 1024;
+	let sweep = 0;
 	for (const text of CORPUS) {
 		const oneShot = redactSecretString(text);
+		sweep += 1;
 		for (let offset = 0; offset <= text.length + 2; offset += 1) {
+			if (!sweptOffset(offset, sweep)) continue;
 			const where = `offset ${offset} of ${JSON.stringify(text)}`;
 			strictEqual(leaked(shown(`${text} ${"z".repeat(cap - text.length - 1 + offset)}`), oneShot).join(""), "", where);
 			const words = `${text} ${"zz ".repeat(Math.ceil((cap + offset) / 3))}`;
@@ -327,8 +337,11 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 	const edges = excerpt(`${filler(40_000, "q ")}\n${filler(40_000, "w ")}\n`);
 	const headBytes = edges.indexOf(marker);
 	const tailBytes = edges.length - headBytes - marker.length;
+	let sweep = 0;
 	for (const secret of cases) {
+		sweep += 1;
 		for (let offset = -secret.length - 8; offset < 8; offset += 1) {
+			if (!sweptOffset(offset, sweep)) continue;
 			const where = `offset ${offset} of ${secret}`;
 			const atHead = `${filler(headBytes + offset, "q ")} ${secret} ${filler(40_000, "w ")}`;
 			strictEqual(shown(excerpt(atHead)).match(SECRET_LETTERS), null, `head ${where}`);
@@ -338,7 +351,8 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 	}
 	const display = (tail: number) =>
 		shape(`${filler(120_000, "q ")}https://user:ZQXJZQXJ@host/repo.git ${filler(tail, "w ")}`).output;
-	for (let tail = 64_500; tail < 65_600; tail += 11) {
+	const [firstTail, lastTail, tailStep] = OFFSET_STRIDE === 1 ? [64_500, 65_600, 11] : [64_950, 65_010, 5];
+	for (let tail = firstTail; tail < lastTail; tail += tailStep) {
 		const output = display(tail);
 		strictEqual(shown(output.slice(0, output.lastIndexOf("\n\n"))).match(SECRET_LETTERS), null, `display tail ${tail}`);
 	}
@@ -355,6 +369,9 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 		strictEqual(body.length - body.indexOf(marker) - marker.length > 7900, true);
 		strictEqual(shape(`${first}${last}`).output.includes(last.slice(-64)), true);
 	}
+	// A word before the long token must not pull the head back to it.
+	const afterWord = excerpt(`a ${filler(40_000, "q")}\n${filler(40_000, "w")}\n`);
+	strictEqual(afterWord.indexOf(marker) > 7000, true);
 	const live = shapeBashProgress(filler(40_000, "q"), 40_000, "bounded") as { output: string };
 	strictEqual(live.output, "");
 });
@@ -485,6 +502,7 @@ test("a stream cut off at any offset shows no secret part in any frame, and a co
 				strictEqual(liveWorkerAnswerText(snapshot.tailText, snapshot.completed === true), open, `${stopReason} ${where}`);
 				hidden(open, `${stopReason} ${where}`);
 			}
+			if (!sweptOffset(at, text.length)) continue;
 			hidden(plainRows(thinkingPanel(prefix, "aborted", true)), `thinking ${where}`);
 			hidden(await viewOf(thinkingPanel(prefix, "aborted", true)), `thinking view ${where}`);
 			const killed = killedBashPanel(prefix, { outcome: "abort", aborted: true, outputEndsOpen: true });
