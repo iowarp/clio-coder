@@ -308,12 +308,12 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import { capabilitySettings } from "../domains/system-one/capability-settings.js";
 import type { LlmRequestAdmission, OneShotPort, SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
+import { effectiveSystemOne } from "../domains/system-one/selection.js";
 import { TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
@@ -3825,7 +3825,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return capacity?.limit ?? Number.POSITIVE_INFINITY;
 	};
 	const systemOneCore = createSystemOne({
-		settings: () => capabilitySettings(getCurrentSettings()),
+		settings: () => effectiveSystemOne(getCurrentSettings()),
 		// Every engine request is judged against the restrictions it inherited
 		// before a byte leaves, typed and LLM engines alike. The runner treats a
 		// throw as abstention, so this only ever returns.
@@ -3924,7 +3924,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const settings = getCurrentSettings();
 		return (
 			relevanceStartRefusal({
-				settings: capabilitySettings(settings),
+				settings: effectiveSystemOne(settings),
 				getTarget: (targetId) => providers.getTarget(targetId),
 				capacities: resolveEndpointCapacities({
 					statuses: providers.list(),
@@ -4648,7 +4648,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		readInterpretation: async (wait) => {
 			if (wait === undefined) return systemOneHost.interpretation();
 			const binding = getCurrentSettings().systemOne.sites.turn;
-			const bindingTimeoutMs = typeof binding === "object" ? binding.timeoutMs : undefined;
+			const bindingTimeoutMs = typeof binding === "object" && binding !== null ? binding.timeoutMs : undefined;
 			return systemOneHost.awaitInterpretation(bindingTimeoutMs ?? TURN_SITE.deadlineMs, wait.signal);
 		},
 		facts: {

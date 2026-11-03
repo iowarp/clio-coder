@@ -1401,8 +1401,18 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	issues.unknownKeys("systemOne", raw, ["engines", "sites", "cuts"]);
+	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites", "cuts"]);
 	const next = settings.systemOne;
+	if ("use" in raw) {
+		if (raw.use === null) next.use = null;
+		else {
+			const use = expectString(issues, "systemOne.use", raw.use);
+			if (use !== undefined) {
+				if (use.trim().length === 0) issues.add("systemOne.use", "expected an engine or target name, or off");
+				else next.use = use;
+			}
+		}
+	}
 	if ("engines" in raw) {
 		if (!isPlainObject(raw.engines)) issues.add("systemOne.engines", `expected a map, got ${describe(raw.engines)}`);
 		else {
@@ -1461,8 +1471,11 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					issues.add(path, `unknown site, expected one of ${SITE_IDS.join(", ")}`);
 					continue;
 				}
-				// A later layer writes null to unbind a site an earlier layer bound; merging keeps the null.
-				if (value === null) continue;
+				// A later layer writes null to unbind a site an earlier layer or systemOne.use bound.
+				if (value === null) {
+					sites[site as SiteId] = null;
+					continue;
+				}
 				let engine: string | undefined;
 				let timeoutMs: number | undefined;
 				let tasks: Partial<Record<DecisionTask, string>> | undefined;

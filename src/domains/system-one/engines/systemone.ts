@@ -84,6 +84,7 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 		url: target.url ?? null,
 		profile: profile.id,
 		renderer: profile.renderer,
+		expectedBuilds: () => (asked === null ? [] : [asked]),
 		unsupported(task: DecisionTask, question: Question, compact?: Question): string | null {
 			const rendered = render(profile, task, question, compact);
 			return "abstain" in rendered ? rendered.abstain : null;

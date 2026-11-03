@@ -13,7 +13,6 @@ import type { ProvidersContract } from "../providers/contract.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { cutsFor, FITTED_CUTS } from "./calibration.js";
-import { capabilityEngineSource } from "./capability-settings.js";
 import type { DecisionTask } from "./contract.js";
 import { SITE_TASKS } from "./contract.js";
 import { createLlmEngine, llmEngineProblem } from "./engines/llm.js";
@@ -23,6 +22,7 @@ import { profileFor } from "./profiles.js";
 import { MAX_CHOICE_OPTIONS } from "./questions.js";
 import type { DecisionFlowCheck, RunnerRoute } from "./runner.js";
 import { createRunner } from "./runner.js";
+import { resolveChoice } from "./selection.js";
 import type {
 	DecisionEngine,
 	DecisionRecorder,
@@ -105,6 +105,8 @@ interface Resolution {
 	}>;
 }
 
+const CREDENTIAL_CHECK_MS = 5_000;
+
 function kindOf(cfg: EngineSettings): EngineKind {
 	return cfg.kind;
 }
@@ -125,15 +127,28 @@ function unavailableEngine(name: string, problem: string): DecisionEngine {
 		url: null,
 		profile: null,
 		renderer: "systemone-v1",
+		expectedBuilds: () => [],
 		unsupported: () => problem,
 		decide: () => Promise.reject(new Error(problem)),
 	};
 }
 
-/** Whether any LLM build has a ranking cut, measured or the operator's: identities are `llm:<runtime>@<host>/<model>#<mode>:<prompt>`. */
-function anyLlmRankingCut(overrides: Readonly<Record<string, Readonly<Record<string, number>>>>): boolean {
+/**
+ * Whether a build this engine would answer as has any cut at the site. The check
+ * runs before a request, so an unmeasured engine is never called to learn its
+ * build: a pin answers as its own name, and a moving alias or an unnamed default
+ * has no table entry to match.
+ */
+function measuredBuild(
+	builds: ReadonlyArray<string>,
+	site: string,
+	overrides: Readonly<Record<string, Readonly<Record<string, number>>>>,
+): boolean {
+	const prefix = `${site}.`;
 	return Object.entries({ ...FITTED_CUTS, ...overrides }).some(
-		([identity, table]) => identity.startsWith("llm:") && table["relevance.ranked"] !== undefined,
+		([identity, table]) =>
+			builds.some((build) => identity === build || identity.startsWith(`${build}+`)) &&
+			Object.keys(table).some((key) => key.startsWith(prefix)),
 	);
 }
 
@@ -159,14 +174,17 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 	function resolve(site: SiteId): Resolution {
 		const config = deps.settings().systemOne;
 		const binding = config.sites[site];
-		if (binding === undefined) return { info: { site, engine: null } };
+		if (binding === undefined || binding === null) return { info: { site, engine: null } };
 		const name = typeof binding === "string" ? binding : binding.engine;
 		const timeoutMs = typeof binding === "string" ? undefined : binding.timeoutMs;
 		const timeout = timeoutMs === undefined ? {} : { deadlineMs: timeoutMs };
 		const routed = typeof binding === "string" ? undefined : binding.tasks;
 		const cfg = Object.hasOwn(config.engines, name) ? config.engines[name] : undefined;
 		if (cfg === undefined) {
-			return { info: { site, engine: name, ...timeout, problem: `engine '${name}' is not defined in systemOne.engines` } };
+			const choice = resolveChoice(deps.settings(), name);
+			const problem =
+				choice.kind === "unavailable" ? choice.problem : `engine '${name}' is not defined in systemOne.engines`;
+			return { info: { site, engine: name, ...timeout, problem } };
 		}
 		const base = {
 			site,
@@ -198,11 +216,27 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 		return { info: base, usable: { ...own.usable, timeoutMs }, routes };
 	}
 
+	let credentialCheck: { at: number; present: ReadonlySet<string> } | null = null;
+
+	/** Which required key is absent. Sampled every few seconds: building the set reparses the auth store. */
+	function missingKey(target: TargetDescriptor, runtime: RuntimeDescriptor): string | null {
+		const required = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+		if (required === undefined) return null;
+		const now = performance.now();
+		if (credentialCheck === null || now - credentialCheck.at > CREDENTIAL_CHECK_MS) {
+			credentialCheck = { at: now, present: deps.credentialsPresent() };
+		}
+		return credentialCheck.present.has(required) ? null : `${required} is not set, so nothing is sent`;
+	}
+
 	function usableEngine(name: string): { usable: Usable } | { problem: string } {
 		const config = deps.settings().systemOne;
 		const cfg = Object.hasOwn(config.engines, name) ? config.engines[name] : undefined;
 		if (cfg === undefined) return { problem: `engine '${name}' is not defined in systemOne.engines` };
-		const target = deps.providers.getTarget(cfg.target);
+		// `systemOne.use: jev` brings its own target, which only the effective settings carry.
+		const target =
+			deps.providers.getTarget(cfg.target) ??
+			deps.settings().targets.find((entry) => entry.id === cfg.target && entry.runtime === "typesafe-jev");
 		if (!target) return { problem: `target '${cfg.target}' is not configured` };
 		const runtime = deps.providers.getRuntime(target.runtime);
 		if (!runtime) return { problem: `runtime '${target.runtime}' is not registered` };
@@ -211,6 +245,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			// Declaring the capability and implementing the verb are separate claims,
 			// and a target bound here by mistake is likelier an ordinary chat model.
 			if (!runtime.decide) problem = `runtime '${runtime.id}' does not answer typed decisions`;
+			else problem = missingKey(target, runtime);
 		} else {
 			problem = llmEngineProblem({
 				target,
@@ -226,14 +261,12 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 		const { usable } = resolution;
 		if (usable === undefined) return null;
 		const own = engineFor(usable);
-		const derivedFrom = capabilityEngineSource(usable.cfg);
 		const routes: RunnerRoute[] = [
 			{
 				name: usable.name,
 				engine: own.engine,
 				digest: own.digest,
 				tasks: null,
-				...(derivedFrom !== undefined ? { derivedFrom } : {}),
 			},
 		];
 		for (const route of resolution.routes ?? []) {
@@ -323,12 +356,9 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			try {
 				const resolution = resolve(site);
 				if (resolution.usable === undefined) return false;
-				// Shadow only when every engine taking part last answered unfitted. One
-				// validated route keeps the site live, and an engine not yet heard from
-				// is unknown, which is never shadow. The exception is an LLM engine at
-				// `relevance` with no ranking cut for any LLM build: its answer could not
-				// reorder a listing, and a slow one that keeps timing out never answers,
-				// so waiting to hear from it spends requests that cannot be used.
+				// Shadow only when no engine taking part can act: each last answered
+				// unfitted, or, not yet heard from, would answer as a build nobody measured.
+				// One validated route keeps the site live.
 				const usable = [resolution.usable, ...(resolution.routes ?? []).flatMap((route) => route.usable ?? [])];
 				// Cuts are live settings, so fittedness is recomputed from the identity
 				// each engine last answered under, never cached with the answer.
@@ -337,12 +367,12 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 					// The runner files each answer under the moment it was asked at; the bare
 					// site key never matches a site that is only asked at named moments.
 					const last = runner.answeredIdentity(digestOf(engine), site, moment);
-					if (last === null) return site === "relevance" && engine.cfg.kind === "llm" && !anyLlmRankingCut(cuts);
+					if (last === null) return !measuredBuild(engineFor(engine).engine.expectedBuilds(), site, cuts);
 					return !cutsFor(last.identity, site, cuts, last.contract).fitted;
 				});
 			} catch {
-				// Unknown is not shadow: the caller waits exactly as it did before this existed.
-				return false;
+				// Nothing established that this engine can act, so no request is spent on it.
+				return true;
 			}
 		},
 		limits(site: SiteId, task: DecisionTask) {

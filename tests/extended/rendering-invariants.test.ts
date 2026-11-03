@@ -1119,14 +1119,12 @@ describe("Pi TUI compatibility", () => {
 		const handle = openHealthOverlay(tui, undefined, {
 			getSystemOneBreakers: () => [
 				{ engine: "local-small", site: "turn", moment: null, state: "open", failures: 3, remainingMs: 120_000 },
-				{ engine: "derived", site: "consult", moment: null, state: "disabled", failures: 3, remainingMs: 0 },
 			],
 		});
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 80) ?? []).map(stripTerminalSequences).join("\n");
 			match(plain, /System One breakers/u);
 			match(plain, /local-small turn open 120s after 3 consecutive timeouts/u);
-			match(plain, /derived consult disabled for this session after 3 failed decisions/u);
 		} finally {
 			handle.hide();
 		}

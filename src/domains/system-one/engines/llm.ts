@@ -109,6 +109,19 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 		url: target.url ?? null,
 		profile: null,
 		renderer: "llm-prompt",
+		expectedBuilds() {
+			const wireModel = model ?? target.defaultModel;
+			if (wireModel === undefined) return [];
+			const baseUrl = hasChatWire(runtime.id) ? chatBaseUrl(runtime.id, target) : null;
+			const prefix = `llm:${runtime.id}@${baseUrl === null ? "oneshot" : hostOf(baseUrl)}/${wireModel}`;
+			const modes =
+				baseUrl === null || configured === "answer"
+					? ["answer"]
+					: configured === "logprobs"
+						? ["logprobs"]
+						: ["logprobs", "answer"];
+			return modes.map((mode) => `${prefix}#${mode}:${PROMPT_VERSION}`);
+		},
 		// The prompt carries any task and shape the wire validates; votes and logprobs read every one.
 		unsupported: () => null,
 		windowTokens:

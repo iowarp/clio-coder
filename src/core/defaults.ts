@@ -102,9 +102,14 @@ export type SystemOneSiteBinding =
 	| { engine: string; timeoutMs?: number; tasks?: Partial<Record<DecisionTask, string>> };
 
 export interface SystemOneSettings {
+	/**
+	 * The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site. Unset
+	 * leaves only sites bound one by one, and `off` masks those too.
+	 */
+	use: string | null;
 	engines: Record<string, SystemOneEngineSettings>;
-	/** Site id to binding. A site with no entry is off, so the capability is opt-in by absence. */
-	sites: Partial<Record<SiteId, SystemOneSiteBinding>>;
+	/** Optional per-site overrides of `use`. A site with no entry follows `use`, and null turns that site off. */
+	sites: Partial<Record<SiteId, SystemOneSiteBinding | null>>;
 	/** Operator-fitted cuts by answering build, for builds the code table lacks. Keys are `<site>.<key>`. */
 	cuts: Record<string, Record<string, number>>;
 }
@@ -842,6 +847,7 @@ export const DEFAULT_SETTINGS = {
 		} as SemanticSettings,
 	} as ContextSettings,
 	systemOne: {
+		use: null,
 		engines: {},
 		sites: {},
 		cuts: {},
@@ -1051,10 +1057,12 @@ context:
     background: false
     inboxes: []
 
-# Experimental. System One decision engines stay off until a site is bound to an
-# engine declared here; nothing waits for an engine's answer. Sites, keys and cuts
-# may change between releases.
+# Experimental. System One stays off until you choose an engine with use: jev,
+# memory, main, a declared engine or a target. sites overrides one site; off masks
+# everything. An engine with no measurement for its exact build sends nothing.
+# Sites, keys and cuts may change between releases.
 systemOne:
+  use: null
   engines: {}
   sites: {}
   cuts: {}

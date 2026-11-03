@@ -126,6 +126,8 @@ export interface DecisionEngine {
 	/** The capability profile, or null for an LLM engine, which renders its own prompt. */
 	readonly profile: ProfileId | null;
 	readonly renderer: RendererId;
+	/** The builds it would answer as, for checking a measurement before any request. Empty when none can be named. Pure. */
+	expectedBuilds(): ReadonlyArray<string>;
 	/** Why this engine must not be asked `question` for `task`, or null when it may. Pure. */
 	unsupported(task: DecisionTask, question: Question, compact?: Question): string | null;
 	/** Rejects on transport failure, an unusable reply, or abort. The runner owns deadlines and fallback. */
@@ -231,11 +233,10 @@ export interface SystemOneBreakerView {
 	readonly moment: string | null;
 	/**
 	 * `closed` while it counts timeouts below the threshold, `open` while it cools down, `probing` while the one call
-	 * past the cooldown runs, `half-open` once the next call may probe, and `disabled` for a derived engine this
-	 * session turned off after repeated failed decisions.
+	 * past the cooldown runs, and `half-open` once the next call may probe.
 	 */
-	readonly state: "closed" | "open" | "probing" | "half-open" | "disabled";
-	/** Consecutive timeouts, or consecutive failed decisions for a disabled engine. */
+	readonly state: "closed" | "open" | "probing" | "half-open";
+	/** Consecutive timeouts. */
 	readonly failures: number;
 	/** Cooldown left while open or probing, else 0. */
 	readonly remainingMs: number;

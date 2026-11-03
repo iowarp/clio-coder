@@ -1378,12 +1378,14 @@ async function systemOneFindings(
 	// A session binds sites from the layered settings, so a site a trusted
 	// project file binds is live there and must not read as unbound here. An
 	// untrusted project layer contributes nothing, exactly as in a session.
-	const settings = readLayeredSettings(process.cwd()).settings;
+	const layered = readLayeredSettings(process.cwd()).settings;
+	const { effectiveSystemOne } = await import("../system-one/selection.js");
+	const settings = effectiveSystemOne(layered);
 	const { describeBindings } = await import("../system-one/recorder/index.js");
 	const { FITTED_CUTS } = await import("../system-one/calibration.js");
 	const profiles = await import("../system-one/profiles.js");
 	const juliaCounted = existsSync((await import("../system-one/julia-tokenizer.js")).juliaTokenizerPath());
-	const bindings = describeBindings(settings, runtimes);
+	const bindings = describeBindings(layered, runtimes);
 	const off = bindings.filter((binding) => binding.engine === null).map((binding) => binding.site);
 	const rows: DoctorFinding[] = [];
 	if (off.length === bindings.length) {
@@ -1433,7 +1435,7 @@ async function systemOneFindings(
  * engine that does not answer leaves its sites behaving as if unbound.
  */
 function systemOneEngineFindings(
-	settings: ReturnType<typeof readSettings>,
+	settings: Readonly<ReturnType<typeof readSettings>>,
 	bindings: ReadonlyArray<SiteBindingInfo>,
 	runtimes: { get(id: string): RuntimeDescriptor | null },
 	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
@@ -1496,7 +1498,9 @@ function systemOneEngineFindings(
 		rows.push({
 			ok: true,
 			name: rowName,
-			detail: `${head}; ${where} answered${latency === undefined ? "" : `, round trip ${latency} ms`}${serving}; passive check, no decision asked`,
+			// `/models` lists names a server is willing to serve, and a hosted one lists moving aliases, so
+			// this proves the endpoint answers and never which build would answer a decision.
+			detail: `${head}; ${where} answered${latency === undefined ? "" : `, round trip ${latency} ms`}${serving}; passive check, no decision asked, so the requested build is not verified`,
 		});
 	}
 	return rows;

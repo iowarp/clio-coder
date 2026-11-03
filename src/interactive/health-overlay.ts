@@ -45,8 +45,6 @@ function systemOneBreakerPhrase(breaker: SystemOneBreakerView): string {
 			return `probing after ${timeouts}`;
 		case "half-open":
 			return `half-open after ${timeouts}; the next call probes`;
-		case "disabled":
-			return `disabled for this session after ${breaker.failures} failed decisions`;
 		case "closed":
 			return timeouts;
 	}

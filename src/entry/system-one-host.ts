@@ -16,7 +16,8 @@ import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/
  * add before the prompt. The turn-end site is asked once per settled turn,
  * detached, and its reading is only recorded beside the turn outcome; the
  * clarification streak keeps the regex reading. The relevance site ranks a
- * catalog when a tool is asked for one.
+ * catalog when a tool is asked for one. The turn-end, tool-result, gate and steer
+ * readings have no reader, so they are asked only while the dataset is recorded.
  * Everything here degrades to what the harness did before System One existed:
  * an unbound, slow, failed or unfitted site hands back null and the reader
  * keeps its own answer.
@@ -600,10 +601,8 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		},
 
 		recordTurnEnd(input) {
-			if (!systemOne.bound("turnEnd")) return;
-			// A shadowed build's reading can only be recorded, so with recording off
-			// there is nothing to make the call for.
-			if (systemOne.shadowed("turnEnd") && !recordingOn()) return;
+			// No reader takes this answer, whatever its build: without recording it would only spend a request.
+			if (!systemOne.bound("turnEnd") || !recordingOn()) return;
 			let earlier: string[] = [];
 			try {
 				earlier = earlierOperatorTexts(input.userTurnId);
@@ -627,8 +626,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		},
 
 		screenToolResult(source, content, ref, restrictions) {
-			if (!systemOne.bound("toolResult")) return;
-			if (systemOne.shadowed("toolResult") && !recordingOn()) return;
+			if (!systemOne.bound("toolResult") || !recordingOn()) return;
 			// The restrictions the result carries travel with the request, so the
 			// engine's flow check refuses the classifier call before any byte
 			// leaves: a restricted read is never redacted after being classified.
@@ -636,16 +634,12 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		},
 
 		observeToolCallGate(subject, ref) {
-			if (!systemOne.bound("toolCall")) return;
-			// A shadowed build's reading can only be recorded, so with recording off
-			// there is nothing to make the call for.
-			if (systemOne.shadowed("toolCall", "gate") && !recordingOn()) return;
+			if (!systemOne.bound("toolCall") || !recordingOn()) return;
 			detached(() => systemOne.run(TOOL_CALL_GATE_SITE, { ...subject, moment: "gate" }, runOptions(ref)));
 		},
 
 		readSteer(input) {
-			if (!systemOne.bound("steer")) return;
-			if (systemOne.shadowed("steer") && !recordingOn()) return;
+			if (!systemOne.bound("steer") || !recordingOn()) return;
 			detached(() =>
 				systemOne.run(
 					STEER_SITE,

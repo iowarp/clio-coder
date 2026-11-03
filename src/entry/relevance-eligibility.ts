@@ -48,7 +48,7 @@ function destinationOf(target: TargetDescriptor, model: string | null): string {
 export function relevanceStartRefusal(input: RelevanceEligibilityInput): string | null {
 	const { systemOne, chat } = input.settings;
 	const binding = systemOne.sites.relevance;
-	if (binding === undefined) return null;
+	if (binding === undefined || binding === null) return null;
 	const primary = typeof binding === "string" ? binding : binding.engine;
 	const routed = typeof binding === "string" ? [] : Object.values(binding.tasks ?? {});
 	const names = [...new Set([primary, ...routed].filter((name): name is string => typeof name === "string"))];

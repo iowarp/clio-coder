@@ -11,9 +11,9 @@
 
 import type { ClioSettings } from "../../../core/config.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
-import { capabilitySettings } from "../capability-settings.js";
 import type { DecisionTask } from "../contract.js";
 import { SITE_TASKS } from "../contract.js";
+import { effectiveSystemOne, resolveChoice } from "../selection.js";
 import type { SiteBindingInfo } from "../types.js";
 import { SITE_IDS } from "../types.js";
 
@@ -22,17 +22,21 @@ export interface RuntimeLookup {
 }
 
 export function describeBindings(settings: Readonly<ClioSettings>, runtimes?: RuntimeLookup): SiteBindingInfo[] {
-	const { sites, engines } = capabilitySettings(settings).systemOne;
+	const effective = effectiveSystemOne(settings);
+	const { sites, engines } = effective.systemOne;
 	return SITE_IDS.map((site): SiteBindingInfo => {
 		const binding = sites[site];
-		if (binding === undefined) return { site, engine: null };
+		if (binding === undefined || binding === null) return { site, engine: null };
 		const name = typeof binding === "string" ? binding : binding.engine;
 		const timeoutMs = typeof binding === "string" ? undefined : binding.timeoutMs;
 		const routed = typeof binding === "string" ? undefined : binding.tasks;
 		const deadline = timeoutMs === undefined ? {} : { deadlineMs: timeoutMs };
 		const engine = Object.hasOwn(engines, name) ? engines[name] : undefined;
 		if (engine === undefined) {
-			return { site, engine: name, ...deadline, problem: `engine '${name}' is not defined in systemOne.engines` };
+			const choice = resolveChoice(settings, name);
+			const problem =
+				choice.kind === "unavailable" ? choice.problem : `engine '${name}' is not defined in systemOne.engines`;
+			return { site, engine: name, ...deadline, problem };
 		}
 		const described = {
 			site,
@@ -51,7 +55,7 @@ export function describeBindings(settings: Readonly<ClioSettings>, runtimes?: Ru
 				return { ...described, problem: `task ${task} routes to engine '${routedTo}', which is not defined` };
 			}
 		}
-		const target = settings.targets.find((entry) => entry.id === engine.target);
+		const target = effective.targets.find((entry) => entry.id === engine.target);
 		if (target === undefined) {
 			return { ...described, problem: `target '${engine.target}' is not defined in targets` };
 		}

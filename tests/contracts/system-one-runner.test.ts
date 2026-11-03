@@ -9,7 +9,6 @@ import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import { createRedactionTally } from "../../src/domains/evidence/redact.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import { cutsFor, FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
-import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
 import { clearedSiteObject } from "../../src/domains/system-one/recorder/scrub.js";
@@ -19,6 +18,7 @@ import {
 	createRunner,
 	noteSystemOneCall,
 } from "../../src/domains/system-one/runner.js";
+import { effectiveSystemOne, resolveChoice } from "../../src/domains/system-one/selection.js";
 import { RELEVANCE_CLUSTER_SITE } from "../../src/domains/system-one/sites/relevance.js";
 import { TURN_SITE } from "../../src/domains/system-one/sites/turn.js";
 import type {
@@ -84,6 +84,7 @@ function fakeEngine(decide: (signal: AbortSignal) => Promise<EngineReply>, windo
 			url: null,
 			profile: null,
 			renderer: FITTED_CONTRACT?.renderer ?? "systemone-v1",
+			expectedBuilds: () => [],
 			unsupported: () => null,
 			decide: async ({ signal }) => {
 				calls += 1;
@@ -137,62 +138,61 @@ describe("System One runner", () => {
 		strictEqual(records.length, 0);
 	});
 
-	it("derives relevance from context.memory only for a local target, under the site deadline (#429)", () => {
-		const settingsFor = (runtime: string, url?: string, model = "side-model") =>
+	it("opts in through systemOne.use alone, and a memory route binds nothing by itself", () => {
+		const settingsFor = (use: string | null, sites: Record<string, unknown> = {}) =>
 			({
 				chat: { target: "chat", model: "chat-model" },
-				context: { memory: { enabled: true, target: "memory", model } },
-				targets: [{ id: "memory", runtime, ...(url === undefined ? {} : { url }) }],
-				systemOne: { engines: {}, sites: {}, cuts: {} },
+				context: { memory: { enabled: true, target: "memory", model: "side-model" } },
+				targets: [
+					{ id: "chat", runtime: "openai" },
+					{ id: "memory", runtime: "llamacpp", url: "http://127.0.0.1:8080" },
+				],
+				systemOne: { use, engines: {}, sites, cuts: {} },
 			}) as unknown as ClioSettings;
-		const derive = (runtime: string, url?: string, model?: string) =>
-			capabilitySettings(settingsFor(runtime, url, model)).systemOne;
-		// A remote subscription or cloud memory model must not be auto-bound to a per-turn site.
-		deepStrictEqual(derive("openai-codex").sites, {});
-		deepStrictEqual(derive("openrouter", "https://openrouter.ai/api/v1").sites, {});
-		for (const runtime of ["litellm", "openrouter"]) {
-			for (const url of [
-				"http://10.0.0.1:4000",
-				"http://172.16.0.1:4000",
-				"http://192.168.86.1:4000",
-				"http://localhost:4000",
-				"http://127.0.0.1:4000",
-				"http://[::1]:4000",
-				"http://[fd00::1]:4000",
-			]) {
-				for (const model of ["gpt-6-luna", "unknown-alias"]) {
-					const settings = settingsFor(runtime, url, model);
-					strictEqual(capabilitySettings(settings), settings, `${runtime}/${model} through ${url}`);
-				}
-			}
+		const profile = ["turn", "toolCall", "relevance", "consult", "drafts"];
+		deepStrictEqual(effectiveSystemOne(settingsFor(null)).systemOne.sites, {});
+		for (const use of ["jev", "memory", "main", "chat"]) {
+			deepStrictEqual(Object.keys(effectiveSystemOne(settingsFor(use)).systemOne.sites), profile, use);
 		}
-		for (const runtime of ["openai-codex", "claude-code"]) {
-			deepStrictEqual(derive(runtime, "http://127.0.0.1:4000", "gpt-6-luna").sites, {});
-		}
-		const gateway = settingsFor("llamacpp", "http://127.0.0.1:8080");
-		gateway.targets = gateway.targets.map((target) => ({ ...target, gateway: true }));
-		strictEqual(capabilitySettings(gateway), gateway);
-		// A local one derives without the 800 ms override, so the site's own deadline applies.
-		deepStrictEqual(derive("llamacpp", "http://127.0.0.1:8080").sites, {
-			relevance: { engine: "clio-capability-side-model" },
+		deepStrictEqual(effectiveSystemOne(settingsFor("main")).systemOne.engines.main, {
+			kind: "llm",
+			target: "chat",
+			model: "chat-model",
 		});
-		deepStrictEqual(derive("openai-compat", "http://192.168.86.1:8080").sites, {
-			relevance: { engine: "clio-capability-side-model" },
+		deepStrictEqual(effectiveSystemOne(settingsFor("memory")).systemOne.engines.memory, {
+			kind: "llm",
+			target: "memory",
+			model: "side-model",
 		});
-		const explicit = settingsFor("litellm", "http://192.168.86.1:4000", "gpt-6-luna");
-		explicit.systemOne.engines.manual = { kind: "llm", target: "memory", model: "gpt-6-luna", mode: "auto" };
-		explicit.systemOne.sites.relevance = { engine: "manual", timeoutMs: 5000 };
-		strictEqual(capabilitySettings(explicit), explicit);
+		// Jev needs only its key: the choice brings its target, and sends nothing without the key.
+		deepStrictEqual(
+			effectiveSystemOne(settingsFor("jev")).targets.find((target) => target.id === "jev")?.runtime,
+			"typesafe-jev",
+		);
+		// A site's own entry overrides the choice, and null turns that site off.
+		const overridden = effectiveSystemOne(settingsFor("jev", { relevance: "memory", drafts: null })).systemOne.sites;
+		strictEqual(overridden.relevance, "memory");
+		strictEqual(overridden.drafts, undefined);
+		// off masks everything, a site bound one by one included.
+		deepStrictEqual(effectiveSystemOne(settingsFor("off", { turn: "memory" })).systemOne.sites, {});
+		deepStrictEqual(effectiveSystemOne(settingsFor(null, { turn: "memory" })).systemOne.sites, { turn: "memory" });
+		// memory never borrows the chat route, and an unknown name says what it is not.
+		const noMemory = settingsFor("memory");
+		noMemory.context.memory.target = null;
+		strictEqual(resolveChoice(noMemory, "memory").kind, "unavailable");
+		strictEqual(resolveChoice(settingsFor(null), "nope").kind, "unavailable");
 	});
 
-	it("reads an LLM engine at relevance as shadow before its first request, unless a ranking cut exists for an LLM build", () => {
+	it("reads an engine with no measurement for its build as shadow before any request", () => {
 		const cuts: Record<string, Record<string, number>> = {};
 		const so = createSystemOne({
 			settings: () =>
 				({
+					targets: [],
 					systemOne: {
+						use: null,
 						engines: { side: { kind: "llm", target: "t", model: "m", mode: "auto" } },
-						sites: { relevance: { engine: "side" }, consult: { engine: "side" } },
+						sites: { relevance: { engine: "side" }, turn: { engine: "side" } },
 						cuts,
 					},
 				}) as unknown as ClioSettings,
@@ -204,9 +204,10 @@ describe("System One runner", () => {
 			recorder: () => ({ decision: () => {}, outcome: () => {} }),
 		});
 		strictEqual(so.shadowed("relevance"), true);
-		strictEqual(so.shadowed("consult"), false);
+		strictEqual(so.shadowed("turn"), true);
 		cuts["llm:llamacpp@127.0.0.1:1/m#logprobs:p1"] = { "relevance.ranked": 0.5 };
 		strictEqual(so.shadowed("relevance"), false);
+		strictEqual(so.shadowed("turn"), true);
 	});
 
 	it("asks nothing and records nothing when state() is null", async () => {

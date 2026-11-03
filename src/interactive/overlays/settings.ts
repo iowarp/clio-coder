@@ -64,9 +64,7 @@ import {
 } from "../../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
-import { capabilityEngineSource, capabilitySettings } from "../../domains/system-one/capability-settings.js";
 import { describeBindings } from "../../domains/system-one/recorder/bindings.js";
-import { RELEVANCE_SITE } from "../../domains/system-one/sites/relevance.js";
 import type { SiteId } from "../../domains/system-one/types.js";
 import { SITE_IDS } from "../../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../../domains/turn-control/index.js";
@@ -186,6 +184,7 @@ type EntrySettingId =
 	| `workers.profiles.${string}`
 	| `workers.agentBindings.${string}`
 	| `systemOne.sites.${string}`
+	| "systemOne.use"
 	| `targets.${string}`
 	| `fleet.nodes.${string}`
 	| `fleet.endpoints.${string}`;
@@ -2004,29 +2003,35 @@ const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly send
 function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
 	const engineNames = Object.keys(live().systemOne.engines);
 	const bindings = new Map(describeBindings(settings).map((binding) => [binding.site, binding]));
-	const effective = capabilitySettings(settings).systemOne;
-	return SITE_IDS.map((site) => {
-		const binding = bindings.get(site);
-		const engine = binding?.engine ?? null;
-		const config = engine === null ? undefined : effective.engines[engine];
-		const derived = config !== undefined && capabilityEngineSource(config) !== undefined;
-		const note = SITE_NOTES[site];
-		const state =
-			binding === undefined || engine === null
-				? "Off: asks nothing."
-				: binding.problem !== undefined
-					? `Bound to engine ${engine}, which cannot answer: ${binding.problem}. The site asks nothing until it can.`
-					: `Asks ${binding.target}/${binding.model ?? "default"} through engine ${engine}.${derived ? ` Derived from context.memory; uses the site's ${RELEVANCE_SITE.deadlineMs} ms deadline.` : ""}`;
-		const selectable = engineNames.length > 0;
-		return settingItem(`systemOne.sites.${site}`, engine ?? SITE_OFF_CHOICE, {
-			label: SITE_LABELS[site],
-			description: `Experimental. ${state} It ${note.does}. Sends ${note.sends}.${selectable || derived ? "" : " Add a decision engine in the settings file first."}`,
-			...(derived
-				? {
-						readOnly: true,
-						affordance: "Derived from context.memory; configure an explicit relevance binding in the settings file",
-					}
-				: selectable
+	const targetNames = settings.targets.map((target) => target.id);
+	const useChoices = [...new Set(["jev", "memory", "main", ...engineNames, ...targetNames])];
+	const use = settings.systemOne.use;
+	const useRow = settingItem("systemOne.use", use ?? SITE_OFF_CHOICE, {
+		label: "Decision engine",
+		description:
+			"Experimental opt-in for every active site. Off until chosen. main and memory add separate completions to that route; jev sends redacted state to TypeSafe. An engine with no measurement for its exact build sends nothing, and clio-coder systemone status says why.",
+		submenu: selectListSubmenu("Decision engine", [
+			{ value: SITE_OFF_CHOICE, label: "Off" },
+			...useChoices.map((name) => ({ value: name, label: name })),
+		]),
+	});
+	return [
+		useRow,
+		...SITE_IDS.map((site) => {
+			const binding = bindings.get(site);
+			const engine = binding?.engine ?? null;
+			const note = SITE_NOTES[site];
+			const state =
+				binding === undefined || engine === null
+					? "Off: asks nothing."
+					: binding.problem !== undefined
+						? `Bound to engine ${engine}, which cannot answer: ${binding.problem}. The site asks nothing until it can.`
+						: `Asks ${binding.target}/${binding.model ?? "default"} through engine ${engine}.`;
+			const selectable = engineNames.length > 0;
+			return settingItem(`systemOne.sites.${site}`, engine ?? SITE_OFF_CHOICE, {
+				label: SITE_LABELS[site],
+				description: `Experimental. ${state} It ${note.does}. Sends ${note.sends}.${selectable ? "" : " Add a decision engine in the settings file first."}`,
+				...(selectable
 					? {
 							submenu: selectListSubmenu(`Decision engine: ${SITE_LABELS[site]}`, [
 								{ value: SITE_OFF_CHOICE, label: "Off" },
@@ -2034,8 +2039,9 @@ function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonl
 							]),
 						}
 					: { readOnly: true, affordance: "Add a decision engine in the settings file" }),
-		});
-	});
+			});
+		}),
+	];
 }
 
 /** One short phrase for a route's breaker, keyed by the model it serves. */
@@ -2797,6 +2803,10 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 		}
 		return true;
 	}
+	if (id === "systemOne.use") {
+		settings.systemOne.use = value === SITE_OFF_CHOICE || value === "" ? null : value;
+		return true;
+	}
 	if (id.startsWith("systemOne.sites.")) {
 		const site = id.slice("systemOne.sites.".length);
 		if (!(SITE_IDS as ReadonlyArray<string>).includes(site)) return true;
@@ -2806,8 +2816,8 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 			// A deadline and the task routes the operator set on the binding outlive a
 			// change of engine; only the site's own engine is what this row chooses.
 			const current = settings.systemOne.sites[key];
-			const timeoutMs = typeof current === "object" ? current.timeoutMs : undefined;
-			const tasks = typeof current === "object" ? current.tasks : undefined;
+			const timeoutMs = typeof current === "object" && current !== null ? current.timeoutMs : undefined;
+			const tasks = typeof current === "object" && current !== null ? current.tasks : undefined;
 			settings.systemOne.sites[key] =
 				timeoutMs === undefined && tasks === undefined
 					? value

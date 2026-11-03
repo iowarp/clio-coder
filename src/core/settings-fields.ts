@@ -252,6 +252,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"turnTimeoutMs",
 	"unattendedAfterSeconds",
 	"url",
+	"use",
 	"user",
 	"version",
 	"vision",
