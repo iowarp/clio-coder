@@ -4919,6 +4919,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		getTaskMemoryHandoffSource: () => {
+			// Memory off stops handoff seeding, and the empty block still told the model to copy it into the handoff.
+			if (!memoryEnabledNow()) return "";
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");
 			const settings = getCurrentSettings();
