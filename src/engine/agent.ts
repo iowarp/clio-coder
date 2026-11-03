@@ -247,6 +247,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 					model,
 				),
 				resolvedRequestContext(context).tools,
+				model,
 			);
 		const marker = normalizeContext(context)
 			.messages.map(providerCheckpointFromMessage)

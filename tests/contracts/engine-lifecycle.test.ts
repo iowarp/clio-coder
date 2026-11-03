@@ -37,6 +37,7 @@ import {
 import { guardToolArgumentStream } from "../../src/engine/tool-argument-stream.js";
 import { Text, TUI_KEYBINDINGS } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentTool, EngineModel } from "../../src/engine/types.js";
+import { routeUnattachedToolCalls } from "../../src/engine/unattached-tool-call.js";
 import { createInteractiveShell, type InteractiveShellTui } from "../../src/interactive/interactive-shell.js";
 
 it("leaves the main screen intact when a fullscreen shell stops", () => {
@@ -356,6 +357,19 @@ describe("engine lifecycle: a call to a tool with no attached schema", () => {
 		const call = first.content[0] as import("@earendil-works/pi-ai").ToolCall;
 		strictEqual(call.name, "gateway");
 		deepStrictEqual(call.arguments, routed);
+	});
+
+	it("ends with an error message when the source stream throws", async () => {
+		const source = createAssistantMessageEventStream();
+		source[Symbol.asyncIterator] = () => ({ next: () => Promise.reject(new Error("source failed")) });
+		const routed = routeUnattachedToolCalls(
+			source,
+			[{ name: "gateway", description: "", parameters: Type.Object({}) }],
+			MODEL,
+		);
+		const message = await routed.result();
+		strictEqual(message.stopReason, "error");
+		strictEqual(message.errorMessage, "source failed");
 	});
 
 	it("stays not found on a surface with no gateway", async () => {

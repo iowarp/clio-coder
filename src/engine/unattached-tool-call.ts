@@ -1,7 +1,9 @@
 import {
+	type Api,
 	type AssistantMessage,
 	type AssistantMessageEventStream,
 	createAssistantMessageEventStream,
+	type Model,
 	type Tool,
 	type ToolCall,
 } from "@earendil-works/pi-ai";
@@ -21,6 +23,7 @@ import { ToolNames } from "../core/tool-names.js";
 export function routeUnattachedToolCalls(
 	source: AssistantMessageEventStream,
 	tools: ReadonlyArray<Tool> | undefined,
+	model: Model<Api>,
 ): AssistantMessageEventStream {
 	if (!tools?.some((tool) => tool.name === ToolNames.Gateway)) return source;
 	const attached = new Set(tools.map((tool) => tool.name));
@@ -33,14 +36,42 @@ export function routeUnattachedToolCalls(
 		content: message.content.map((block) => (block.type === "toolCall" ? routeCall(block) : block)),
 	});
 	const output = createAssistantMessageEventStream();
+	let lastPartial: AssistantMessage | undefined;
 	void (async () => {
-		for await (const event of source) {
-			if (event.type === "toolcall_end")
-				output.push({ ...event, toolCall: routeCall(event.toolCall), partial: route(event.partial) });
-			else if (event.type === "done") output.push({ ...event, message: route(event.message) });
-			else output.push(event);
+		try {
+			for await (const event of source) {
+				if ("partial" in event) lastPartial = event.partial;
+				if (event.type === "toolcall_end")
+					output.push({ ...event, toolCall: routeCall(event.toolCall), partial: route(event.partial) });
+				else if (event.type === "done") output.push({ ...event, message: route(event.message) });
+				else output.push(event);
+			}
+			output.end(route(await source.result()));
+		} catch (cause) {
+			const reason = cause instanceof Error && cause.name === "AbortError" ? "aborted" : "error";
+			const message: AssistantMessage = {
+				...(lastPartial ?? {
+					role: "assistant" as const,
+					content: [],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					timestamp: Date.now(),
+				}),
+				stopReason: reason,
+				errorMessage: cause instanceof Error ? cause.message : String(cause),
+			};
+			output.push({ type: "error", reason, error: message });
+			output.end(message);
 		}
-		output.end(route(await source.result()));
 	})();
 	return output;
 }
