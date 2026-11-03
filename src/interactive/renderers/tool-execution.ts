@@ -1386,31 +1386,61 @@ export function renderToolArguments(
  * joined, image blocks become compact MIME/size placeholders, and unknown
  * content blocks are named without serializing their payload.
  */
-const KILLED_OUTCOMES: ReadonlySet<unknown> = new Set(["abort", "timeout", "output-cap"]);
-const KILLED_STATUS_RE = /^bash: command (?:aborted|timed out|output exceeded)\b/u;
+const KILLED_OUTCOMES: ReadonlySet<unknown> = new Set(["abort", "aborted", "timeout", "timed-out", "output-cap"]);
+const KILLED_STATUS_RE =
+	/^(?:bash: command (?:aborted|timed out|output exceeded)\b|(?:bash: command failed \(exit |Command exited with code )(?:124|1(?:2[89]|[3-9]\d)|2\d\d)\b)/u;
 const TAIL_NOTE_PREFIX = "[Output tail-truncated";
+const STDOUT_TAIL_MARK = "--- stdout tail ---";
+const STDERR_TAIL_MARK = "--- stderr tail ---";
 
 /**
- * Whether a result is the output of a process that did not exit on its own. A row without details, as a legacy ledger row
- * can be, is judged by the status paragraph the tool wrote (#446).
+ * A process killed below the shell still gives the shell an exit code: `timeout` exits 124 and a signal death reads as
+ * 128 plus the signal. Exit 1 is a process that finished and said so (#446).
+ */
+function exitMeansKilled(code: unknown): boolean {
+	return typeof code === "number" && (code === 124 || code >= 128);
+}
+
+/**
+ * Whether a result is the output of a process that did not exit on its own, or of one still running under a tool that
+ * reports each stream's tail. A row without details, as a legacy ledger row can be, is judged by the status paragraph the
+ * tool wrote (#446).
  */
 function killedWithOpenOutput(result: unknown, text: string): boolean {
 	const details = detailsOf(result);
 	if (details?.outputEndsOpen === false) return false;
-	if (details !== null && "outcome" in details) {
-		return (
-			KILLED_OUTCOMES.has(details.outcome) ||
+	if (
+		details !== null &&
+		(KILLED_OUTCOMES.has(details.outcome) ||
 			details.aborted === true ||
 			details.timedOut === true ||
-			typeof details.signal === "string"
-		);
+			typeof details.signal === "string" ||
+			exitMeansKilled(details.exitCode) ||
+			isPlainObject(details.progress))
+	) {
+		return true;
 	}
+	if (details !== null && "outcome" in details) return false;
 	return KILLED_STATUS_RE.test(text.slice(text.lastIndexOf("\n\n") + 2));
 }
 
-/** A killed process's output ends in the paragraph before the tool's status line, and past the cap before the tail note too. */
+/**
+ * Where a killed process's output ends depends on the tool. run_script lists each stream's tail, and its trailing lines
+ * are not marked apart from stderr, so every stderr line holds. bash ends its output in the paragraph before its status
+ * line, and past the cap before the tail note too. A single paragraph ends in the output itself.
+ */
 function holdKilledOutput(text: string): string {
+	const lines = text.split("\n");
+	const stderr = lines.lastIndexOf(STDERR_TAIL_MARK);
+	if (stderr > 0 && lines.includes(STDOUT_TAIL_MARK)) {
+		lines[stderr - 1] = holdUnresolvedUserinfo(lines[stderr - 1] ?? "");
+		for (let index = stderr + 1; index < lines.length; index += 1) {
+			lines[index] = holdUnresolvedUserinfo(lines[index] ?? "");
+		}
+		return lines.join("\n");
+	}
 	const paragraphs = text.split("\n\n");
+	if (paragraphs.length === 1) return holdUnresolvedUserinfo(text);
 	const notes = paragraphs.at(-1)?.startsWith(TAIL_NOTE_PREFIX) ? 2 : 1;
 	const output = paragraphs.length - 1 - notes;
 	if (output < 0) return text;
@@ -1878,6 +1908,8 @@ export interface BashTranscriptExecution {
 	totalBytes?: number | undefined;
 	exitCode?: number | null | undefined;
 	cancelled?: boolean | undefined;
+	/** False when the source's trailing whitespace finished the last line, for a caller that trims the output (#446). */
+	outputEndsOpen?: boolean | undefined;
 	truncated?: boolean | undefined;
 	fullOutputPath?: string | undefined;
 	excludeFromContext?: boolean | undefined;
@@ -1928,8 +1960,13 @@ export function renderBashTranscriptExecution(
 	}
 	const message = execution.error?.trim();
 	// Only a process that exited on its own ended its output on purpose. A trailing newline still finishes a line (#446).
-	const exited = execution.cancelled !== true && execution.error === undefined && typeof execution.exitCode === "number";
-	const shownOutput = exited ? execution.output : holdUnresolvedUserinfo(execution.output);
+	const exited =
+		execution.cancelled !== true &&
+		execution.error === undefined &&
+		typeof execution.exitCode === "number" &&
+		!exitMeansKilled(execution.exitCode);
+	const shownOutput =
+		exited || execution.outputEndsOpen === false ? execution.output : holdUnresolvedUserinfo(execution.output);
 	const output = message ? `${shownOutput}${shownOutput.length > 0 ? "\n\n" : ""}${message}` : shownOutput;
 	const finished: ToolExecutionFinished = {
 		toolCallId: "local-bash",

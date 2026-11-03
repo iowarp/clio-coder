@@ -635,6 +635,165 @@ test("what ended a stream decides whether its last URL shows", async () => {
 	strictEqual((await viewOf(forming)).match(SECRET_LETTERS), null);
 });
 
+test("later text cannot close what a cut-off stream was holding", () => {
+	for (const stopReason of CUT_OFF) {
+		const next = createWorkerProgressFold();
+		next.observe(delta("clone https://user:ZQXJ"), 0);
+		next.observe(message([{ type: "text", text: "clone https://user:ZQXJ" }], stopReason), 1);
+		next.observe(delta("next message text"), 2);
+		strictEqual(next.snapshot().tailText, "clone https://user:\n\nnext message text", String(stopReason));
+		const failover = createWorkerProgressFold();
+		failover.observe(delta("clone https://user:ZQXJ"), 0);
+		failover.observe(message([{ type: "text", text: "clone https://user:ZQXJ" }], stopReason), 1);
+		failover.restart();
+		failover.observe(delta("second attempt words"), 2);
+		strictEqual(failover.snapshot().tailText.match(SECRET_LETTERS), null, String(stopReason));
+	}
+	const noEnd = createWorkerProgressFold();
+	noEnd.observe(delta("clone https://user:ZQXJ"), 0);
+	noEnd.restart();
+	noEnd.observe(delta("second attempt words"), 1);
+	strictEqual(noEnd.snapshot().tailText, "clone https://user:\n\nsecond attempt words");
+	const kept = createWorkerProgressFold();
+	kept.observe(delta("see http://localhost:8080"), 0);
+	kept.observe(message([{ type: "text", text: "see http://localhost:8080" }], "stop"), 1);
+	kept.restart();
+	strictEqual(kept.snapshot().tailText, "see http://localhost:8080");
+	const stream = createWorkerStream({ readResult: () => null });
+	const started = {
+		assignmentId: "w",
+		requestOrigin: "user",
+		agentId: "coder",
+		targetId: "t",
+		wireModelId: "m",
+		runtimeId: "o",
+		runtimeKind: "http",
+		pid: 1,
+	};
+	stream.started({ ...started, runId: "r1", attempt: 0 } as never);
+	stream.progress({ runId: "r1", agentId: "coder", event: delta("clone https://user:ZQXJ") });
+	stream.progress({ runId: "r1", agentId: "coder", event: message([{ type: "text", text: "x" }], "error") });
+	stream.started({ ...started, runId: "r2", attempt: 1 } as never);
+	stream.progress({ runId: "r2", agentId: "coder", event: delta("second attempt words") });
+	const frame = () =>
+		renderWorkerEntryLines(stream.get("w") as never, 200, { unbounded: true })
+			.map(stripTerminalSequences)
+			.join("\n");
+	strictEqual(frame().match(SECRET_LETTERS), null);
+	stream.completed({ runId: "r2", outcome: "succeeded", outcomeCode: null, outcomeDetail: null } as never);
+	strictEqual(frame().match(SECRET_LETTERS), null);
+});
+
+test("every killed tool result holds each stream's tail, and exit codes tell a kill from a failure", async () => {
+	const url = "http://localhost:8080";
+	const panelOf = (name: string, text: string, details: Record<string, unknown>) => {
+		const panel = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: "c", toolName: name, args: {} } as never);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "c",
+			toolName: name,
+			isError: true,
+			result: { content: [{ type: "text", text }], details },
+		} as never);
+		return panel;
+	};
+	const script = (stdout: string, stderr: string) =>
+		`run_script aborted: python3 s.py\n--- stdout tail ---\n${stdout}\n--- stderr tail ---\n${stderr}\nthe run was cancelled; the logs end where the script was stopped`;
+	for (const details of [
+		{ outcome: "aborted", aborted: true },
+		{ outcome: "timed-out", timedOut: true },
+		{ outcome: "failed", exitCode: 137 },
+	]) {
+		for (const [stdout, stderr] of [
+			["clone https://user:ZQXJ", "(empty)"],
+			["(empty)", "clone https://user:ZQXJ"],
+		] as const) {
+			const panel = panelOf("run_script", script(stdout, stderr), details);
+			strictEqual(plainRows(panel).match(SECRET_LETTERS), null, JSON.stringify(details));
+			strictEqual((await viewOf(panel)).match(SECRET_LETTERS), null, JSON.stringify(details));
+		}
+	}
+	strictEqual(
+		plainRows(panelOf("run_script", script(`see ${url}\n`, "(empty)"), { outcome: "aborted", aborted: true })).includes(
+			url,
+		),
+		true,
+	);
+	strictEqual(
+		plainRows(panelOf("run_script", script(`see ${url}`, "(empty)"), { outcome: "succeeded", exitCode: 0 })).includes(
+			url,
+		),
+		true,
+	);
+	const verified = panelOf("verify", "verify: command exited with code 137 before judgement: clone https://user:ZQXJ", {
+		aborted: true,
+		exitCode: 137,
+	});
+	strictEqual(plainRows(verified).match(SECRET_LETTERS), null);
+	const running = panelOf("run_script", "x", {});
+	running.applyEvent({ type: "tool_execution_start", toolCallId: "d", toolName: "run_script", args: {} } as never);
+	running.applyEvent({
+		type: "tool_execution_update",
+		toolCallId: "d",
+		toolName: "run_script",
+		args: {},
+		partialResult: {
+			content: [{ type: "text", text: script("clone https://user:ZQXJ", "(no output yet)") }],
+			details: { progress: { elapsedMs: 1 } },
+		},
+	} as never);
+	strictEqual(plainRows(running).match(SECRET_LETTERS), null);
+	const failed = (exitCode: number) => `see https://user:ZQXJ\n\nbash: command failed (exit ${exitCode})`;
+	for (const exitCode of [124, 128, 137, 143]) {
+		const panel = killedBashPanel("see https://user:ZQXJ", {
+			outcome: "nonzero",
+			exitCode,
+			signal: null,
+			outputEndsOpen: true,
+		});
+		strictEqual(plainRows(panel).match(SECRET_LETTERS), null, String(exitCode));
+		strictEqual((await viewOf(panel)).match(SECRET_LETTERS), null, String(exitCode));
+		strictEqual(plainRows(panelOf("bash", failed(exitCode), {})).match(SECRET_LETTERS), null, `no details ${exitCode}`);
+		const shell = renderBashTranscriptExecution(
+			{ command: "run", output: "see https://user:ZQXJ", exitCode } as never,
+			400,
+		).join("\n");
+		strictEqual(shell.match(SECRET_LETTERS), null, `operator ${exitCode}`);
+	}
+	for (const exitCode of [1, 2, 127]) {
+		const panel = killedBashPanel(`see ${url}`, { outcome: "nonzero", exitCode, signal: null, outputEndsOpen: true });
+		strictEqual(plainRows(panel).includes(url), true, String(exitCode));
+		strictEqual(
+			renderBashTranscriptExecution({ command: "run", output: `see ${url}`, exitCode } as never, 400)
+				.join("\n")
+				.includes(url),
+			true,
+		);
+	}
+	const cancelled = (output: string) => {
+		const panel = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "bashExecution",
+				turnId: "b",
+				parentTurnId: null,
+				timestamp: "2026-01-01T00:00:00.000Z",
+				command: "run",
+				output,
+				exitCode: null,
+				cancelled: true,
+				truncated: false,
+				excludeFromContext: false,
+			},
+		] as never);
+		return plainRows(panel);
+	};
+	strictEqual(cancelled("Local: http://localhost:5173\n").includes("http://localhost:5173"), true);
+	strictEqual(cancelled("Local: http://localhost:5173").includes("http://localhost:5173"), false);
+});
+
 test("replay and /resume hide what the live view hid", async () => {
 	const entry = (turnId: string, role: string, payload: unknown, parentTurnId: string | null) => ({
 		kind: "message",

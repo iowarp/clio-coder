@@ -532,6 +532,7 @@ function renderBashExecutionEntry(
 		{
 			command: entry.command,
 			output: normalizedOutput,
+			outputEndsOpen: /\S$/u.test(entry.output),
 			running: false,
 			exitCode: entry.exitCode,
 			cancelled: entry.cancelled,

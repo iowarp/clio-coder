@@ -347,6 +347,18 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		return "";
 	};
 
+	/**
+	 * A cut-off stream can never resolve what it was holding, while the next message or attempt keeps writing to this tail
+	 * and would close the run the hold reads, so the held part leaves the tail now (#446).
+	 */
+	const dropHeldTail = (): void => {
+		const held = holdUnresolvedUserinfo(tailText);
+		if (held === tailText) return;
+		tailText = held;
+		betweenAssistantMessages = true;
+		touch();
+	};
+
 	const appendTail = (text: string): boolean => {
 		if (text.length === 0) return false;
 		const guarded = (value: string): string => {
@@ -466,6 +478,16 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				}
 				betweenAssistantMessages = true;
 			}
+			if (
+				event.type === "message_end" &&
+				isRecord(event.message) &&
+				event.message.role === "assistant" &&
+				!streamCompleted
+			) {
+				durable = holdUnresolvedUserinfo(durable);
+				dropHeldTail();
+				changed = true;
+			}
 
 			const action = toolEventAction(event);
 			if (action !== null && event.type === "clio_coder_tool_start") {
@@ -520,6 +542,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			pendingActionsById.clear();
 			durable = "";
 			betweenAssistantMessages = false;
+			if (!streamCompleted) dropHeldTail();
 			settled = false;
 			streamCompleted = false;
 			completed = false;
