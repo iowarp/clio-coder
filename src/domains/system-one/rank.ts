@@ -92,7 +92,7 @@ export interface RelevanceRankerInput {
 	/** Whether the dataset is kept (research capture), the only thing an unfitted ranking produces. */
 	readonly recording: () => boolean;
 	/** Shared pre-turn callers serialize optional inference without delaying their local answer. */
-	readonly maxPending?: number;
+	readonly maxPending?: number | (() => number);
 	/** The turn's task text, which is the need of an unfiltered listing. */
 	readonly task: () => string;
 	readonly tracker?: FollowUpTracker | undefined;
@@ -151,6 +151,8 @@ function groupsFor(candidates: ReadonlyArray<RelevanceCandidate>): Grouping<Rele
 }
 
 export function createRelevanceRanker(input: RelevanceRankerInput): OwnedRelevanceRanker {
+	const maxPendingNow = (): number =>
+		typeof input.maxPending === "function" ? input.maxPending() : (input.maxPending ?? Number.POSITIVE_INFINITY);
 	const flowOption = (flow: unknown): { flow?: unknown } => (flow !== undefined ? { flow } : {});
 	const rankFlat = async (
 		request: RelevanceRankRequest,
@@ -353,7 +355,7 @@ export function createRelevanceRanker(input: RelevanceRankerInput): OwnedRelevan
 				else input.tracker?.unranked(request.use);
 				return ranking;
 			}
-			if (!disposed && !pending.has(key) && pending.size < (input.maxPending ?? Number.POSITIVE_INFINITY)) {
+			if (!disposed && !pending.has(key) && pending.size < maxPendingNow()) {
 				let allowed = true;
 				try {
 					allowed = input.mayStart?.() ?? true;

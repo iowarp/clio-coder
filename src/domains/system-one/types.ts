@@ -22,6 +22,7 @@ import type { ProfileId } from "./profiles.js";
 
 export const SITE_IDS = [
 	"turn",
+	"workerPrepare",
 	"toolCall",
 	"toolResult",
 	"turnEnd",

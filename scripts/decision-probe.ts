@@ -3,7 +3,7 @@
  *
  *   node --import tsx scripts/decision-probe.ts <fixture> --engine <name> [--runs 3] [--json] [--cases]
  *        [--kind systemone|llm --target T --model M --mode auto|logprobs|answer] [--site toolCall.gate]
- *        [--deadline MS] [--split broad] [--limit N] [--recipes] [--case-split fit|holdout]
+ *        [--deadline MS] [--split broad] [--limit N] [--case-split fit|holdout]
  *
  * It **calls the named engine** and is never part of CI. The engine comes from
  * `systemOne.engines` in the operator's settings, or from `--kind`, `--target`
@@ -31,6 +31,7 @@ import { pathToFileURL } from "node:url";
 import { validateSettingsFile } from "../src/core/config.js";
 import { openAuthStorage, resolveAuthTarget } from "../src/domains/providers/auth/index.js";
 import type { ProvidersContract } from "../src/domains/providers/contract.js";
+import { credentialAvailable } from "../src/domains/providers/credentials.js";
 import { BUILTIN_RUNTIMES } from "../src/domains/providers/runtimes/builtins.js";
 import { groupByCategory } from "../src/domains/system-one/hierarchy.js";
 import type {
@@ -42,6 +43,7 @@ import type {
 	SiteId,
 } from "../src/domains/system-one/index.js";
 import { createSystemOne } from "../src/domains/system-one/index.js";
+import { DRAFTS_SITE, type DraftsObject } from "../src/domains/system-one/sites/drafts.js";
 import {
 	type ClusterObject,
 	RELEVANCE_CLUSTER_SITE,
@@ -56,11 +58,11 @@ import {
 } from "../src/domains/system-one/sites/tool-call.js";
 import { TOOL_RESULT_SITE, type ToolResultObject } from "../src/domains/system-one/sites/tool-result.js";
 import {
-	TURN_RECIPE_SITE,
 	TURN_SITE,
 	type TurnObject,
-	type TurnRecipeObject,
 	type TurnRecipeOption,
+	WORKER_PREPARE_SITE,
+	type WorkerPrepareObject,
 } from "../src/domains/system-one/sites/turn.js";
 import { TURN_END_SITE, type TurnEndObject } from "../src/domains/system-one/sites/turn-end.js";
 
@@ -117,24 +119,26 @@ function driverFor(fixture: Fixture): Driver<never, unknown> {
 					task: String(testCase.task),
 					previous: typeof testCase.previous === "string" ? testCase.previous : "",
 					previousTask: typeof testCase.previousTask === "string" ? testCase.previousTask : "",
-					...((testCase.recipes === true || process.argv.includes("--recipes")) && Array.isArray(source.recipes)
-						? { recipes: source.recipes as TurnRecipeOption[] }
-						: {}),
 					...(typeof source.recipeOptionLimit === "number" ? { recipeOptionLimit: source.recipeOptionLimit } : {}),
 				}),
 			});
-		case "turnRecipe":
-			return asDriver<TurnRecipeObject, unknown>({
-				site: TURN_RECIPE_SITE,
-				object: (source, testCase) => {
-					const known = source.recipes as Record<string, TurnRecipeOption>;
-					return {
-						task: String(testCase.task),
-						previous: "",
-						previousTask: "",
-						recipes: (testCase.members as string[]).map((id) => known[id] as TurnRecipeOption),
-					};
-				},
+		case "workerPrepare":
+			return asDriver<WorkerPrepareObject, unknown>({
+				site: WORKER_PREPARE_SITE,
+				object: (source, testCase) => ({
+					task: String(testCase.task),
+					previous: typeof testCase.previous === "string" ? testCase.previous : "",
+					previousTask: typeof testCase.previousTask === "string" ? testCase.previousTask : "",
+					recipes: source.recipes as TurnRecipeOption[],
+				}),
+			});
+		case "drafts":
+			return asDriver<DraftsObject, unknown>({
+				site: DRAFTS_SITE,
+				object: (_source, testCase) => ({
+					request: String(testCase.request),
+					candidates: testCase.candidates as string[],
+				}),
 			});
 		case "relevanceClusters":
 			return asDriver<ClusterObject, unknown>({
@@ -250,12 +254,27 @@ function buildSystemOne(siteId: SiteId, recorder: DecisionRecorder, requiredCut?
 		name,
 		engine,
 		system: createSystemOne({
-			// A site with a required cut sends nothing without one. This placeholder lets
-			// the probe measure it; the probe reads the raw answers, never the verdict.
-			localCuts: () => (requiredCut !== undefined && model !== undefined ? { [model]: { [requiredCut]: 0.01 } } : {}),
+			// A site with a required cut sends nothing without one, and relevance returns no value without
+			// its marker. These placeholders let the probe measure them; it reads the raw answers, never the verdict.
+			localCuts: () =>
+				model === undefined
+					? {}
+					: {
+							[model]: {
+								...(requiredCut !== undefined ? { [requiredCut]: 0.01 } : {}),
+								...(siteId === "relevance" ? { "relevance.ranked": 1 } : {}),
+							},
+						},
 			settings: () => live,
 			providers,
-			credentialsPresent: () => new Set<string>(),
+			credentialsPresent: () =>
+				new Set(
+					BUILTIN_RUNTIMES.flatMap((runtime) =>
+						runtime.credentialsEnvVar !== undefined && credentialAvailable(runtime.id, runtime.credentialsEnvVar)
+							? [runtime.credentialsEnvVar]
+							: [],
+					),
+				),
 			recorder: () => recorder,
 		}),
 	};
@@ -390,10 +409,17 @@ async function probeRelevance(fixture: Fixture, runs: number): Promise<void> {
 			latencies.push(performance.now() - started);
 			const scores = verdict?.value.scores ?? {};
 			if (verdict === null) unranked += 1;
+			if (process.argv.includes("--cases")) {
+				process.stderr.write(
+					`${JSON.stringify({ run, query: turn.query, expect: turn.expect, hits: [...hits], scores })}\n`,
+				);
+			}
 			const order = catalog
 				.filter((entry) => scores[entry.name] !== undefined)
 				.sort((left, right) => (scores[right.name] ?? 0) - (scores[left.name] ?? 0))
 				.map((entry) => entry.name);
+			// A need nothing serves is scored only through `--cases`, as the negatives of a related-entry cut.
+			if (turn.expect === null) continue;
 			const position = order.indexOf(turn.expect);
 			if (position === 0) top1 += 1;
 			if (position >= 0 && position < 5) top5 += 1;
@@ -407,7 +433,7 @@ async function probeRelevance(fixture: Fixture, runs: number): Promise<void> {
 			}
 		}
 	}
-	const total = cases.length * runs;
+	const total = cases.filter((turn) => turn.expect !== null).length * runs;
 	const builds = [...new Set(records.map((row) => row.build).filter((build): build is string => build !== null))];
 	const p50 = Math.round(median(latencies));
 	const max = Math.round(Math.max(0, ...latencies));
@@ -468,12 +494,14 @@ async function probeLabeled(fixture: Fixture, runs: number): Promise<void> {
 								: round(answer.score),
 					]),
 				);
-				// A choice cut is a probability of the winning option, not its certainty.
+				// A choice cut is a probability of the winning option, not its certainty. A score floor is its certainty.
 				const masses = Object.fromEntries(
 					Object.entries(answers).flatMap(([id, answer]) =>
 						answer.type === "choice" && answer.choice !== undefined
 							? [[id, round(answer.probabilities?.[answer.choice])]]
-							: [],
+							: answer.type === "score"
+								? [[id, round(answer.certainty)]]
+								: [],
 					),
 				);
 				process.stderr.write(

@@ -1,0 +1,334 @@
+{
+	"description": "Labeled /draft judgments: which candidate best answers the request, and whether each is correct and complete. The best label's position rotates so a position preference cannot pass. Cases alternate fit and holdout, and the holdout was committed before any score on it existed.",
+	"site": "drafts",
+	"cases": [
+		{
+			"request": "What does the HTTP status 404 mean?",
+			"candidates": [
+				"The server could not find the requested resource.",
+				"The server refused the request because the client lacks permission.",
+				"The request succeeded and a new resource was created."
+			],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What does git stash do?",
+			"candidates": [
+				"It deletes uncommitted changes permanently.",
+				"It sets aside uncommitted changes so the working tree is clean, and can restore them later.",
+				"It creates a new branch from the last commit."
+			],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "In Python, what does len([1,2,3]) return?",
+			"candidates": ["2", "4", "3"],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What is a mutex for?",
+			"candidates": [
+				"It lets only one thread hold a resource at a time, protecting shared state.",
+				"It speeds up a loop by running it on the GPU.",
+				"It encrypts memory between processes."
+			],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "Which SQL clause filters rows before grouping?",
+			"candidates": ["HAVING", "WHERE", "ORDER BY"],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "How do you list hidden files with ls?",
+			"candidates": ["ls -r", "ls -h", "ls -a"],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does idempotent mean for an API call?",
+			"candidates": [
+				"Repeating it has the same effect as doing it once.",
+				"It always returns an error the second time.",
+				"It runs faster when repeated."
+			],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What is the time complexity of binary search?",
+			"candidates": ["O(n)", "O(log n)", "O(n log n)"],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does chmod +x do?",
+			"candidates": ["Removes write permission.", "Changes the file's owner.", "Adds execute permission."],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What port does HTTPS use by default?",
+			"candidates": ["443", "80", "22"],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does a foreign key enforce?",
+			"candidates": [
+				"That a column is unique across the database.",
+				"That a value refers to an existing row in another table.",
+				"That a column is indexed."
+			],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What does TCP add over IP?",
+			"candidates": [
+				"Name resolution for hosts.",
+				"Encryption of every packet.",
+				"Reliable, ordered delivery between endpoints."
+			],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "Why use a bloom filter?",
+			"candidates": [
+				"To test set membership cheaply, accepting some false positives.",
+				"To sort a large list in linear time.",
+				"To compress images without loss."
+			],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What does git rebase do?",
+			"candidates": [
+				"It deletes a remote branch.",
+				"It replays commits on top of another base.",
+				"It merges two repositories into one."
+			],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does the Unix pipe | do?",
+			"candidates": [
+				"Runs two commands at once with no connection.",
+				"Sends a file to the printer.",
+				"Connects one command's output to the next command's input."
+			],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What is a race condition?",
+			"candidates": [
+				"A result that depends on the timing of concurrent operations.",
+				"A loop that never finishes.",
+				"An error from running out of memory."
+			],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does DNS translate?",
+			"candidates": ["IP addresses to MAC addresses.", "Domain names to IP addresses.", "HTML to rendered pages."],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What is a segfault?",
+			"candidates": [
+				"A failed network connection.",
+				"A disk running out of space.",
+				"An access to memory the process may not touch."
+			],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does JSON stand for?",
+			"candidates": ["JavaScript Object Notation", "Java Standard Output Network", "Joined Serial Object Nodes"],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What does a load balancer do?",
+			"candidates": [
+				"Compresses responses before sending.",
+				"Distributes requests across several servers.",
+				"Stores session data on disk."
+			],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does the --force flag on git push risk?",
+			"candidates": [
+				"Nothing, it only retries the push.",
+				"It deletes the local repository.",
+				"It can overwrite commits others pushed to the remote."
+			],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What is a deadlock?",
+			"candidates": [
+				"Threads waiting on each other so none can proceed.",
+				"A thread finishing before it started.",
+				"A lock with no owner that any thread can take."
+			],
+			"expect": {
+				"best": "A",
+				"sound.A": true,
+				"sound.B": false,
+				"sound.C": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "What does HTTP 503 mean?",
+			"candidates": [
+				"The client sent a malformed request.",
+				"The service is temporarily unavailable.",
+				"The resource moved permanently."
+			],
+			"expect": {
+				"best": "B",
+				"sound.A": false,
+				"sound.B": true,
+				"sound.C": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "What does CORS control?",
+			"candidates": [
+				"How CSS cascades across files.",
+				"How databases replicate across regions.",
+				"Which origins a browser lets read a cross-origin response."
+			],
+			"expect": {
+				"best": "C",
+				"sound.A": false,
+				"sound.B": false,
+				"sound.C": true
+			},
+			"split": "holdout"
+		}
+	]
+}

@@ -16,7 +16,7 @@
  * mutation text or a transcript.
  */
 
-import { isTrue, rating } from "../answers.js";
+import { rating } from "../answers.js";
 import { rate, yesNo } from "../questions.js";
 import type { Answer, Question, SiteDefinition } from "../types.js";
 import { boundedHead, probability, round2 } from "./bounds.js";
@@ -129,14 +129,13 @@ function normalizedRadius(score: number): number {
  * and deny do.
  */
 function advisoryLine(label: ToolCallRung, outside: boolean | null, build: string): string {
-	const reach =
-		outside === true ? " It reaches outside the workspace." : outside === false ? " It stays inside the workspace." : "";
+	const reach = outside === true ? " It reaches outside the workspace." : "";
 	return `Experimental advisory only, nothing below is gated on it: blast radius reads as ${label}.${reach} Judged by ${build}.`;
 }
 
 export const TOOL_CALL_CARD_SITE: SiteDefinition<ToolCallObject, ToolCallCardValue> = {
 	id: "toolCall",
-	version: "tool-call-v2",
+	version: "tool-call-v3",
 	deadlineMs: 5000,
 	moment: "card",
 	// No request is spent on an advisory a build has no floor to show.
@@ -150,12 +149,17 @@ export const TOOL_CALL_CARD_SITE: SiteDefinition<ToolCallObject, ToolCallCardVal
 		const score = rating(answers.radius, floor);
 		if (score === null) return null;
 		const label = rungLabel(score);
-		const outside = decided(answers.outside, floor);
+		// Each reach and loss claim is made only past its own measured cut, and silence is not a claim of safety.
+		const atCut = (answer: Answer | undefined, cut: number | undefined): boolean | null => {
+			const p = probability(answer);
+			return p !== null && cut !== undefined && p >= cut ? true : null;
+		};
+		const outside = atCut(answers.outside, cuts.cut("cardOutside"));
 		return {
 			score,
 			label,
 			outside,
-			destroys: decided(answers.destroys, floor),
+			destroys: atCut(answers.destroys, cuts.cut("cardDestroys")),
 			line: advisoryLine(label, outside, cuts.build),
 		};
 	},
@@ -166,10 +170,6 @@ export const TOOL_CALL_CARD_SITE: SiteDefinition<ToolCallObject, ToolCallCardVal
 		destroys: value.destroys,
 	}),
 };
-
-function decided(answer: Answer | undefined, floor: number): boolean | null {
-	return answer !== undefined && answer.certainty >= floor ? isTrue(answer) : null;
-}
 
 const GATE_QUESTIONS: Readonly<Record<string, Question>> = { radius: RADIUS_QUESTION, destroys: DESTROYS_QUESTION };
 

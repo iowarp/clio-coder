@@ -725,7 +725,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"fleet.speculativeDispatch": [
 		"Start predicted work early",
-		"Experimental. System One's turn site is asked which recipe a dispatch would name first. Only a fitted build's answer starts a worker early, and the result is held. The agent still decides whether to use that work.",
+		"Experimental. System One's workerPrepare site is asked which recipe a dispatch would name first. Only a fitted build's answer starts a worker early, and the result is held. The agent still decides whether to use that work.",
 	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",

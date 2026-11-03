@@ -152,7 +152,7 @@ import {
 	TaskMemoryInformationFlowBlockedError,
 } from "../domains/memory/task-memory-policy.js";
 import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domains/memory/task-memory-status.js";
-import { createCapabilityGate } from "../domains/middleware/capability-gate.js";
+import { type CapabilityMatch, createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -385,7 +385,12 @@ import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibilit
 import { createReloadClasses } from "./reload-classes.js";
 import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
 import { createSystemOneControl, SYSTEM_ONE_SCOPE_ENTRY } from "./system-one-control.js";
-import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
+import {
+	createDecisionUsageTally,
+	createSystemOneHost,
+	createSystemOneRequestAdmission,
+	type TurnPrewarmPrediction,
+} from "./system-one-host.js";
 import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -2011,6 +2016,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	let capabilityGate = createCapabilityGate();
+	let prepareRelevance: ((task: string) => void) | null = null;
 	const bootStdout = (text: string): void => {
 		if (options.terminalLease) options.terminalLease.writeDiagnostic("stdout", text);
 		else process.stdout.write(text);
@@ -3127,6 +3133,43 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// FW-1: task-ranked advice is cheap enough for attended and headless turns;
 	// it names loadable workflows directly and preserves the activation policy.
 	if (resources && skillDiscoveryEnabled) {
+		const rankReminderCapabilities = (task: string): ReadonlyArray<CapabilityMatch> => {
+			const constraints = chat.currentTurnConstraints?.();
+			if (!turnAllowsTool(constraints, "gateway")) return [];
+			const surface = new Set(
+				effectiveToolNames({ registry: toolRegistry, ...(constraints ? { turnConstraints: constraints } : {}) }),
+			);
+			return capabilityGate.rank({
+				kind: "capabilities",
+				task,
+				limit: 3,
+				candidates: toolRegistry
+					.listGateway()
+					.filter((spec) => surface.has(spec.name) && surfaceSpecPlacement(spec, surface) === "gateway")
+					.map((spec) => ({ id: spec.name, description: spec.description })),
+			});
+		};
+		const rankReminderSkills = (task: string): ReadonlyArray<CapabilityMatch> => {
+			getReadySkillCount();
+			return capabilityGate.rank({
+				kind: "skills",
+				task,
+				workspace: process.cwd(),
+				candidates: (readySkillSnapshot?.skills ?? []).map((skill) => ({
+					id: skill.name,
+					description: skill.description,
+					triggers: Array.isArray(skill.metadata.triggers)
+						? skill.metadata.triggers.filter((value): value is string => typeof value === "string")
+						: [],
+				})),
+			});
+		};
+		// The reminder is built before a first-turn ranking could land if it only starts here, so the
+		// same requests start at submit and the reminder takes whatever has finished by then.
+		prepareRelevance = (task) => {
+			rankReminderSkills(task);
+			rankReminderCapabilities(task);
+		};
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
@@ -3135,37 +3178,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					return spec ? surfaceSpecPlacement(spec, null) : "direct";
 				},
 				countModelVisibleSkills: getReadySkillCount,
-				rankCapabilities: (task) => {
-					const constraints = chat.currentTurnConstraints?.();
-					if (!turnAllowsTool(constraints, "gateway")) return [];
-					const surface = new Set(
-						effectiveToolNames({ registry: toolRegistry, ...(constraints ? { turnConstraints: constraints } : {}) }),
-					);
-					return capabilityGate.rank({
-						kind: "capabilities",
-						task,
-						limit: 3,
-						candidates: toolRegistry
-							.listGateway()
-							.filter((spec) => surface.has(spec.name) && surfaceSpecPlacement(spec, surface) === "gateway")
-							.map((spec) => ({ id: spec.name, description: spec.description })),
-					});
-				},
-				rankSkills: (task) => {
-					getReadySkillCount();
-					return capabilityGate.rank({
-						kind: "skills",
-						task,
-						workspace: process.cwd(),
-						candidates: (readySkillSnapshot?.skills ?? []).map((skill) => ({
-							id: skill.name,
-							description: skill.description,
-							triggers: Array.isArray(skill.metadata.triggers)
-								? skill.metadata.triggers.filter((value): value is string => typeof value === "string")
-								: [],
-						})),
-					});
-				},
+				rankCapabilities: rankReminderCapabilities,
+				rankSkills: rankReminderSkills,
 				// The snapshot is verified per epoch and a revocation takes effect on the
 				// next read, so what is about to print is checked again. Only the shown
 				// skills' trees are walked. An unverifiable match is simply not offered.
@@ -3931,6 +3945,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 	);
 	const followUps = createFollowUpTracker((outcome) => systemOneRecorder.outcome(outcome));
+	let holdPredictedWorker: ((prediction: TurnPrewarmPrediction) => void) | null = null;
 	const systemOneHost = createSystemOneHost({
 		systemOne,
 		usage: decisionUsage,
@@ -3950,6 +3965,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				: null,
 		currentSession: currentSessionId,
 		recording: systemOneRecording,
+		onPrediction: (prediction) => holdPredictedWorker?.(prediction),
 	});
 	let lastMemoryPromptRuntimeId: string | undefined;
 	const memoryReader = createMemoryPromptReader({
@@ -3980,8 +3996,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}) === null
 		);
 	};
+	const relevanceIsHosted = (): boolean => {
+		const settings = systemOneSettings();
+		const binding = settings.systemOne.sites.relevance;
+		const name = typeof binding === "string" ? binding : binding?.engine;
+		const engine = name === undefined ? undefined : settings.systemOne.engines[name];
+		const target = settings.targets.find((entry) => entry.id === engine?.target);
+		return engine?.kind === "systemone" && target?.runtime === "typesafe-jev";
+	};
 	const relevanceRanker = createRelevanceRanker({
-		maxPending: 1,
+		// A local accelerator serves one optional ranking at a time; a hosted engine takes the turn's
+		// few catalogs at once, so a second one is not dropped behind the first.
+		maxPending: () => (systemOneSettings().systemOne.sites.relevance !== undefined && relevanceIsHosted() ? 3 : 1),
 		systemOne,
 		flow: () => flowLedger.current(),
 		task: () => systemOneHost.task(),
@@ -4810,13 +4836,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// instead of a "Carry out this plan?" card, which parked unattended
 				// runs (#421), so the close nudge would contradict it there.
 				canAsk: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
-				isPlan: () => {
-					const interpretation = systemOneHost.interpretation();
-					// An undecided intent is no reading: the plan-close keeps its own rule, as without System One.
-					return interpretation === undefined || interpretation.intent === "unknown"
-						? undefined
-						: interpretation.intent === "plan";
-				},
 			}),
 		);
 		// Demo guidance: operator-only capability tips after a turn. Everything it
@@ -4851,26 +4870,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// in between would deliver them to nobody.
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
-	// The prewarm reads the turn reading where the hints do, as the prompt is
-	// built, so a reading that has not landed by then holds no worker. The hold
-	// is queued before the request goes out, so an immediate dispatch can adopt
-	// it; settlement cancels a queued hold first.
-	middleware.registerHook({
-		id: "observer.decision-prewarm",
-		description: "holds the worker a landed turn reading predicts",
-		hooks: ["turn_start"],
-		evaluate(input) {
-			if (input.metadata?.requestContinuation === true) return [];
-			const prediction = systemOneHost.prewarm();
-			if (prediction === null) return [];
-			cancelQueuedSpeculativeHold?.();
-			cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
-				cancelQueuedSpeculativeHold = null;
-				dispatch?.speculate?.(prediction);
-			});
-			return [];
-		},
-	});
+	// The host hands over a prediction when its reading lands, usually while the
+	// main model is still generating, so a reading later than the prompt can still
+	// hold the worker before the dispatch it predicts. Settlement cancels a queued hold.
+	holdPredictedWorker = (prediction) => {
+		cancelQueuedSpeculativeHold?.();
+		cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
+			cancelQueuedSpeculativeHold = null;
+			dispatch?.speculate?.(prediction);
+		});
+	};
 	const chat = createChatLoop({
 		...(acpInterviews ? { eggAsk: askUserBridge } : {}),
 		turnControl,
@@ -4962,6 +4971,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			systemOneScopes.noteOperatorTurn();
 			saveSystemOneScope();
 			systemOneHost.readTurn(input);
+			try {
+				prepareRelevance?.(input.task);
+			} catch {
+				// Preparation is optional; the reminder ranks for itself as it is built.
+			}
 		},
 		readSteer: (input) => systemOneHost.readSteer(input),
 		currentOperatorTask: () => systemOneHost.task(),

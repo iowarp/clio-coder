@@ -1,5 +1,5 @@
 {
-	"description": "Gateway capability catalog modeled on common MCP servers plus Clio's gateway builtins. Each case is a find query phrased the way a model paraphrases a need, with the turn's task, labeled with the capability that serves it. Descriptions are written for this fixture, not copied from any server. Split: a case with no split field or split fit is in the fit split; split holdout was written before any score on it was seen and is scored once against cuts chosen on fit. New cases alternate fit and holdout within each authored class.",
+	"description": "Gateway capability catalog modeled on common MCP servers plus Clio's gateway builtins. Each case is a find query phrased the way a model paraphrases a need, with the turn's task, labeled with the capability that serves it. Descriptions are written for this fixture, not copied from any server. Split: a case with no split field or split fit is in the fit split; split holdout was written before any score on it was seen and is scored once against cuts chosen on fit. New cases alternate fit and holdout within each authored class. A case with expect null is a need nothing in the catalog serves; it is scored only as the negatives of relevance.related. Those cases alternate fit and holdout and were committed before any score on them existed.",
 	"site": "relevance",
 	"use": "capabilities",
 	"catalog": [
@@ -495,6 +495,150 @@
 			"query": "find a skill in the library",
 			"task": "add a review skill",
 			"expect": "clio_library",
+			"split": "holdout"
+		},
+		{
+			"query": "what does HTTP 409 mean?",
+			"task": "what does HTTP 409 mean?",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "fix the off-by-one in backoff",
+			"task": "fix the off-by-one in backoff",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "rename take to dequeue in src/queue.js",
+			"task": "rename take to dequeue in src/queue.js",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "thanks, that's all",
+			"task": "thanks, that's all",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "explain tail recursion in two sentences",
+			"task": "explain tail recursion in two sentences",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "add a 404 test for readJob",
+			"task": "add a 404 test for readJob",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "bump the version in package.json to 1.5.0",
+			"task": "bump the version in package.json to 1.5.0",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "what's the difference between a mutex and a semaphore?",
+			"task": "what's the difference between a mutex and a semaphore?",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "make parseDuration accept hours",
+			"task": "make parseDuration accept hours",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "good morning",
+			"task": "good morning",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "why would someone use a bloom filter?",
+			"task": "why would someone use a bloom filter?",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "delete the unused import in worker.js",
+			"task": "delete the unused import in worker.js",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "update the README install line",
+			"task": "update the README install line",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "reply with exactly: pong",
+			"task": "reply with exactly: pong",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "add input validation to createJob",
+			"task": "add input validation to createJob",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "how does TCP slow start work?",
+			"task": "how does TCP slow start work?",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "guard against an empty POST body",
+			"task": "guard against an empty POST body",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "what is big-O of binary search?",
+			"task": "what is big-O of binary search?",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "change the default port to 8100",
+			"task": "change the default port to 8100",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "nice work, cheers",
+			"task": "nice work, cheers",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "sort this list of names alphabetically",
+			"task": "sort this list of names alphabetically",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "convert 72 fahrenheit to celsius",
+			"task": "convert 72 fahrenheit to celsius",
+			"expect": null,
+			"split": "holdout"
+		},
+		{
+			"query": "what is the capital of Peru?",
+			"task": "what is the capital of Peru?",
+			"expect": null,
+			"split": "fit"
+		},
+		{
+			"query": "write a haiku about queues",
+			"task": "write a haiku about queues",
+			"expect": null,
 			"split": "holdout"
 		}
 	]

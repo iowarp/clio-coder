@@ -36,7 +36,8 @@ export type DecisionTask = (typeof DECISION_TASKS)[number];
  * cannot quietly send a different task to the named engine.
  */
 export const SITE_TASKS: Readonly<Record<SiteId, ReadonlyArray<DecisionTask>>> = {
-	turn: ["intent", "recipe", "clusterSelect"],
+	turn: ["intent"],
+	workerPrepare: ["recipe"],
 	toolCall: ["toolRisk"],
 	toolResult: ["injection"],
 	turnEnd: ["turnEnd"],

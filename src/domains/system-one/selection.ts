@@ -20,7 +20,7 @@ import type { SiteId } from "./types.js";
  * `consult` stays out because its tool sends agent-supplied state and file excerpts, which takes its own
  * `systemOne.sites.consult` entry on every engine.
  */
-export const ACTIVE_PROFILE: ReadonlyArray<SiteId> = ["turn", "toolCall", "relevance", "drafts"];
+export const ACTIVE_PROFILE: ReadonlyArray<SiteId> = ["turn", "workerPrepare", "toolCall", "relevance", "drafts"];
 
 /** Asked only for the dataset: no reader takes these answers, so `use` never binds them. */
 export const RECORD_ONLY_SITES: ReadonlyArray<SiteId> = ["toolResult", "turnEnd", "steer"];

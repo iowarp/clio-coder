@@ -24,20 +24,21 @@ A site declares `id`, a `version`, a hard `deadlineMs`, an optional `moment`, an
 
 | Site | Definitions (moment, version) | Tasks asked | Cut keys read |
 | --- | --- | --- | --- |
-| `turn` | `turn-v2`; moment `recipe`, `turn-recipe-v1` | `intent`, `recipe`, `clusterSelect` | `direct`, `dispatch`, `orientation`, `direction`, `prewarm`, `recipeGroup`, `shapeFloor`, `intentFloor`, `breadthFloor`, `recipeFloor`; `recipeInGroup` at the `recipe` moment |
-| `toolCall` | moment `card` and moment `gate`, both `tool-call-v2` | `toolRisk` | `cardFloor` at `card`, required; `gateRadius` and `gateDestroys` at `gate` |
+| `turn` | `turn-v4` | `intent` | `direct`, `dispatch`, `prewarm`, `architecture`, `direction`, `shape` |
+| `workerPrepare` | `worker-prepare-v1` | `recipe` | `recipe`, required |
+| `toolCall` | moment `card` and moment `gate`, `tool-call-v3` and `tool-call-v2` | `toolRisk` | `cardFloor`, required, `cardOutside` and `cardDestroys` at `card`; `gateRadius` and `gateDestroys` at `gate` |
 | `toolResult` | `tool-result-v2` | `injection` | `instructions` |
 | `turnEnd` | `turn-end-v3` | `turnEnd` | `asksOperator`, `blocksOnDecision`, `blocksOnDecisionFloor` |
-| `relevance` | `relevance-v1`; moment `clusters`, `relevance-cluster-v2` | `relevance`, `clusterSelect` | `ranked` (a validation marker), `related`; `clusters` at the `clusters` moment, required |
+| `relevance` | `relevance-v2`; moment `clusters`, `relevance-cluster-v2` | `relevance`, `clusterSelect` | `ranked` (a validation marker), `related`; `clusters` at the `clusters` moment, required |
 | `consult` | `consult-v1` | `consult` | none |
-| `drafts` | `drafts-v1` | `drafts` | `pick`, required; `soundFloor` |
+| `drafts` | `drafts-v1` | `drafts` | `pick`, required; `sound` |
 | `steer` | `steer-v1` | `steer` | `relationFloor`, `urgencyFloor` |
 
 Each definition lives in one file under `src/domains/system-one/sites/`. `consult` is a factory because the agent supplies the questions. `consult` has no cut and no policy.
 
 One call carries one state and every question about it. The `systemone` engine sends those questions in one request. The `llm` engine sends requests per question and option order or vote, with concurrency bounded by the endpoint's capacity. Every state is capped by code points in [bounds.ts](../../src/domains/system-one/sites/bounds.ts) so a fitted cut was measured on evidence of a known size and a small-window engine never truncates the part that matters. A site's `compact` wordings are short variants for renderers with a declared per-option bound. They carry their own version, which joins the threshold identity of any build read through them.
 
-Two definitions can share an id and differ in `moment`. `toolCall` has `card` (the advisory on an open approval card) and `gate` (the detached yolo reading). `turn` has a second, chained definition for choosing a recipe inside a category. `relevance` has `clusters` for selecting catalog groups. Each moment trips its own breaker and keeps its own answered build, so a slow card never opens the gate's. A site that sets `requiredCut` is skipped on any route whose identity lacks that cut, before any request, and a call skipped for that reason on every route leaves no decision row.
+Two definitions can share an id and differ in `moment`. `toolCall` has `card` (the advisory on an open approval card) and `gate` (the detached yolo reading). `relevance` has `clusters` for selecting catalog groups. Each moment trips its own breaker and keeps its own answered build, so a slow card never opens the gate's. A site that sets `requiredCut` is skipped on any route whose identity lacks that cut, before any request, and a call skipped for that reason on every route leaves no decision row.
 
 ## Engines
 
@@ -91,26 +92,29 @@ In-flight calls are tracked so shutdown can wait a bounded time for a row that a
 
 [calibration.ts](../../src/domains/system-one/calibration.ts) is the one reviewable table of what a build's numbers mean. A cut is keyed by `thresholdIdentity(build, renderer, siteVersion, compactVersion)` ([contract.ts](../../src/domains/system-one/contract.ts)). For the legacy wire and the `llm` prompt the identity is the bare build string. For a bounded renderer it is `<build>+<renderer>@<siteVersion>`, with `/<compactVersion>` appended when a compact wording was read. `FITTED_CUTS` holds `<site>.<key>` entries per identity, each fitted from a labeled run on that exact build with the run cited beside the numbers. `FITTED_CONTRACTS` lists the renderer and site versions a measured table was fitted under, and a measured cut applies only when the call matches exactly, so a reworded site or another rendering goes silent until it is measured again. `cutsFor(identity, site, overrides, contract)` overlays local cuts the factory is handed, never settings, and reports `fitted`, true when any cut exists for the site under the identity. Each action reads its own key, so `fitted` says only that a site has some measurement.
 
-The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` renderer, under the site versions `turn-v2`, `turn-end-v3`, `tool-call-v2`, `tool-result-v2`, `relevance-v1` and `relevance-cluster-v2`. Its note in `calibration.ts` states the rule: a margin derived from the measured run-to-run noise and what a false fire costs, chosen on a fit split and scored once on a held-out split.
+The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` renderer, under the site versions `turn-v4`, `worker-prepare-v1`, `turn-end-v3`, `tool-call-v2` (gate), `tool-call-v3` (card), `tool-result-v2`, `relevance-v2` and `relevance-cluster-v2`. Its note in `calibration.ts` states the rule: a margin derived from the measured run-to-run noise and what a false fire costs, chosen on a fit split and scored once on a held-out split.
 
 | Cut key | Role |
 | --- | --- |
 | `turn.direct` | `[Scope]` hint |
 | `turn.dispatch` | `[Plan]` hint and the expected-dispatch act |
-| `turn.orientation`, `turn.direction` | Orientation and direction acts |
-| `turn.prewarm` | Worker prewarm |
+| `turn.architecture` | `[Explore]` hint |
+| `turn.direction` | Direction act |
+| `turn.prewarm` | Asking `workerPrepare` |
+| `turn.shape` | The mass a shape needs, which the plan hint phrases and a second held worker reads |
+| `workerPrepare.recipe` | The mass a recipe pick needs to hold a worker |
 | `toolCall.gateRadius`, `toolCall.gateDestroys` | Yolo gate escalation, read by the site policy and only recorded by the host |
 | `toolResult.instructions` | Instruction flag, read by the site policy and only recorded by the host |
 | `turnEnd.asksOperator` | Reading that the reply asks the operator, only recorded |
 | `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor` | The two sides of one policy: blocking needs the first, not blocking needs the second or less, and the middle is no decision. Only recorded |
 | `relevance.ranked` | Validation marker, not a threshold. A build without it never reorders a listing |
 | `relevance.related` | The score at which an entry nothing else matched may join a list. Without it, scores only reorder |
-| `turn.shapeFloor`, `turn.intentFloor`, `turn.breadthFloor`, `turn.recipeFloor` | Certainty under which a choice reads as undecided |
 | `toolCall.cardFloor` | Certainty under which the card shows nothing. Required, so a build without it sends no request |
-| `drafts.pick`, `drafts.soundFloor` | The mass a `/draft` recommendation needs and the soundness floor. `pick` is required |
+| `toolCall.cardOutside`, `toolCall.cardDestroys` | Past these the card may say a call reaches outside the workspace, and the ledger that it destroys data |
+| `drafts.pick`, `drafts.sound` | The mass a `/draft` recommendation needs and the score a soundness claim needs. `pick` is required |
 | `steer.relationFloor`, `steer.urgencyFloor` | Certainty under which a steer reading names no choice. Only recorded |
 
-`jev-1.14.0` has no `turn.orientation`, `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor` or `turn.recipeInGroup` cut, because each failed that rule, so those readings only record and a category-first recipe pick holds a worker only under an operator cut.
+`jev-1.14.0` has no `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor`, `drafts.pick` or `drafts.sound` cut, because each failed that rule, so those readings only record or stay silent.
 
 A site that hints, gates or acts must stay silent when `fitted` is false. That state is **shadow mode**: the engine is still asked and the call is fully recorded, but the policy returns no hint, no gate and no act. A keyed threshold is chosen above the highest observed negative with the measured margin, and it accepts missed positives where the classes overlap. Safety sites can only add friction. `FITTED_TEMPERATURES` follows the same rule for LLM builds and is empty until a build is fitted.
 
@@ -141,12 +145,13 @@ The composition root builds one `SystemOne`, one recorder and one host ([system-
 
 | Site | Reader | Degrades to |
 | --- | --- | --- |
-| `turn` | Started once before the prompt is built. The turn controller waits for it, up to the call's own deadline, when orientation or direction could act on it, and no other reader waits; a fitted reading ready in time can inform hints, turn control and prewarm, and a late reading cannot enter the next continuation. A category pick for a recipe is a second call chained after the first | No hints, previous turn-control behavior |
+| `turn` | Started once before the prompt is built. The turn controller waits for it, up to the call's own deadline, when direction could act on it, and no other reader waits; a measured reading ready in time can inform hints and turn control, and a late reading cannot enter the next continuation | No hints, previous turn-control behavior |
+| `workerPrepare` | Chained after a turn reading that predicts a dispatch. A held process is started when it lands, and a reading after settlement holds nothing | The dispatch spawns its own worker |
 | `toolCall` gate | Detached recording as an unrecognized `execute` starts at `yolo`, interactive only; never parks | `yolo` unchanged |
 | `toolCall` card | Approval overlay, polled per frame, never waited on | No advisory line |
 | `toolResult` | Detached recording for `web_fetch`, `web_read` and MCP tool results; never adds a banner. The result's information-flow restrictions travel with the request | No banner beyond the deterministic scan |
 | `turnEnd` | Detached record of the settled turn; no nudge or settlement waits for it | The regular expressions |
-| `relevance` | Skills listing, gateway `find` and memory recall take a finished cached ranking synchronously (32 kept, keyed by catalog, question, binding and flow restrictions); a cache miss starts work without waiting | Local vocabulary order |
+| `relevance` | Skills and capability reminders are ranked at submit. Listings, gateway `find` and memory recall take a finished cached ranking synchronously (32 kept, keyed by catalog, question, binding and flow restrictions); a cache miss starts work without waiting, up to three at once on a hosted engine and one on any other | Local vocabulary order |
 | `consult` | The `consult` tool ([consult.ts](../../src/tools/consult.ts)), registered at startup when bound; waits for the answer up to the deadline because the agent chose to ask | Tool absent |
 | `drafts` | `/draft` overlay, which waits for the judgment up to the deadline. `Enter` on a finished draft appends it to the composer and records a `draft` outcome joined to the judging call by `ref` | Candidates shown unjudged |
 | `steer` | Chat loop, when a message is queued mid-run. Detached record; nothing reads the answer | Nothing changes |
@@ -157,7 +162,7 @@ Every reader wraps its call so a throw degrades to the same fallback. The `toolR
 
 A new engine or a new build of an existing engine (Laya, Julia-1, the Strands Decider, a hosted build) ships in shadow. It cannot hint or act until cuts are fitted for its exact threshold identity, and the gate, result screen, turn-end and steer sites remain record-only. The procedure is:
 
-1. Bind the engine to a site and run `node --import tsx scripts/decision-probe.ts <fixture.json> --engine <name>` against a labeled fixture in `tests/fixtures/decision-cases/` (`turn.json`, `turn-end.json`, `tool-calls.json`, `tool-results.json` or `capabilities.json`). The engine comes from `systemOne.engines` in the operator's settings, or from `--kind`, `--target` and `--model`. Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers. The probe calls the engine live and is never part of CI.
+1. Bind the engine to a site and run `node --import tsx scripts/decision-probe.ts <fixture.json> --engine <name>` against a labeled fixture in `tests/fixtures/decision-cases/` (`turn.json`, `worker-prepare.json`, `drafts.json`, `turn-end.json`, `tool-calls.json`, `tool-results.json` or `capabilities.json`). The engine comes from `systemOne.engines` in the operator's settings, or from `--kind`, `--target` and `--model`. Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers. The probe calls the engine live and is never part of CI.
 2. For each labeled key, read agreement, abstention, wrong and confidently wrong counts, the probability ranges of the positive and negative classes per run, and the suggested cut with its margin to each side. The suggestion is null when the classes overlap.
 3. Choose cuts with `--case-split fit` by the rule in `calibration.ts`, score them once with `--case-split holdout`, add to `FITTED_CUTS` under the printed build only the keys that hold, citing the run beside them, and list the renderer and site versions in `FITTED_CONTRACTS`.
 4. Record real traffic with research capture and export it to compare builds on the operator's own turns.
@@ -187,7 +192,7 @@ A cut from one build says nothing about another build, another vendor, a differe
 | Catalog hierarchy and ranking | [hierarchy.ts](../../src/domains/system-one/hierarchy.ts), [rank.ts](../../src/domains/system-one/rank.ts) | `groupByCategory`, `createRelevanceRanker` |
 | Wire | [systemone-wire.ts](../../src/domains/providers/runtimes/common/systemone-wire.ts), [systemone.ts](../../src/domains/providers/runtimes/protocol/systemone.ts), [inception.ts](../../src/domains/providers/runtimes/cloud/inception.ts) | `postSystemOne`, `postTypedDecisions`, the `systemone` runtime, `mercury-decide` |
 | Doctor rows | [doctor.ts](../../src/domains/lifecycle/doctor.ts) | `systemOneFindings`, `systemOneEngineFindings` |
-| Sites | [turn.ts](../../src/domains/system-one/sites/turn.ts), [tool-call.ts](../../src/domains/system-one/sites/tool-call.ts), [tool-result.ts](../../src/domains/system-one/sites/tool-result.ts), [turn-end.ts](../../src/domains/system-one/sites/turn-end.ts), [relevance.ts](../../src/domains/system-one/sites/relevance.ts), [consult.ts](../../src/domains/system-one/sites/consult.ts), [drafts.ts](../../src/domains/system-one/sites/drafts.ts), [steer.ts](../../src/domains/system-one/sites/steer.ts) | `TURN_SITE`, `TOOL_CALL_CARD_SITE`, `TOOL_CALL_GATE_SITE`, `TOOL_RESULT_SITE`, `TURN_END_SITE`, `RELEVANCE_SITE`, `consultSite`, `DRAFTS_SITE`, `STEER_SITE` |
+| Sites | [turn.ts](../../src/domains/system-one/sites/turn.ts), [tool-call.ts](../../src/domains/system-one/sites/tool-call.ts), [tool-result.ts](../../src/domains/system-one/sites/tool-result.ts), [turn-end.ts](../../src/domains/system-one/sites/turn-end.ts), [relevance.ts](../../src/domains/system-one/sites/relevance.ts), [consult.ts](../../src/domains/system-one/sites/consult.ts), [drafts.ts](../../src/domains/system-one/sites/drafts.ts), [steer.ts](../../src/domains/system-one/sites/steer.ts) | `TURN_SITE`, `WORKER_PREPARE_SITE`, `TOOL_CALL_CARD_SITE`, `TOOL_CALL_GATE_SITE`, `TOOL_RESULT_SITE`, `TURN_END_SITE`, `RELEVANCE_SITE`, `consultSite`, `DRAFTS_SITE`, `STEER_SITE` |
 | Outcomes | [outcomes.ts](../../src/domains/system-one/outcomes.ts) | `observePermissionOutcomes`, `createFollowUpTracker`, `draftTakenOutcome` |
 | Recorder | [index.ts](../../src/domains/system-one/recorder/index.ts), [dataset.ts](../../src/domains/system-one/recorder/dataset.ts) | ledger rows, dataset sample writer, export, `describeBindings` |
 | Opt-in | [selection.ts](../../src/domains/system-one/selection.ts) | `effectiveSystemOne`, `resolveChoice`, `ACTIVE_PROFILE` |
