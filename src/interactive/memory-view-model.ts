@@ -108,6 +108,8 @@ export function memoryLessonDetail(
 				: "Approved; reviewer and approval time were not recorded."
 			: "Not approved.";
 	return [
+		// The pane names the lesson first, so a key pressed on it is never blind.
+		`# ${record.lesson.split("\n")[0]?.trim() || record.id}`,
 		"## Concerns",
 		...memorySubjectLines(record.lesson),
 		"",

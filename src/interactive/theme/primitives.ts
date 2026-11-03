@@ -78,13 +78,15 @@ export type StatusKind = "ok" | "error" | "warning" | "info" | "running" | "queu
 /**
  * The order a row leads its status chips in, worst first, so a narrowing meta
  * drops the reassuring chip and never the one that says something is broken.
+ * A cancelled state (disabled, muted, shadowed, declined) is a standing fact
+ * the operator scans for; queued only says not yet, so it ranks below it.
  */
 const STATUS_SEVERITY: Readonly<Record<StatusKind, number>> = {
 	error: 0,
 	warning: 1,
 	pending: 2,
-	queued: 3,
-	cancelled: 4,
+	cancelled: 3,
+	queued: 4,
 	info: 5,
 	running: 6,
 	ok: 7,

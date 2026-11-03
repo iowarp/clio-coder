@@ -142,11 +142,14 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		// The row text is one line; the pane renders the description as Markdown.
 		const description = sanitizeCallTargetText(ext.description);
 		// The worse of the two states leads, so a narrow row that keeps one chip
-		// keeps the one that says the runtime failed, never only "eligible".
+		// keeps the one that says the runtime failed, never only "eligible". A
+		// runtime that was never started on a copy that is not eligible follows
+		// from the state and is not a chip of its own.
+		const runtimeChip = hasRuntime && (runtime !== undefined || state === "eligible");
 		const stateChips = (theme: ReturnType<typeof clioTheme>): string[] =>
 			[
 				[stateStatus(state), state] as const,
-				...(hasRuntime ? [[runtimeStatus(runtime?.state), `runtime ${runtimeWord}`] as const] : []),
+				...(runtimeChip ? [[runtimeStatus(runtime?.state), `runtime ${runtimeWord}`] as const] : []),
 			]
 				.sort((a, b) => statusSeverity(a[0]) - statusSeverity(b[0]))
 				.map(([kind, text]) => statusChip(theme, kind, text));
