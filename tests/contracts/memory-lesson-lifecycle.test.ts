@@ -1,8 +1,10 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runMemoryCommand } from "../../src/cli/memory.js";
+import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
@@ -11,10 +13,70 @@ import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { proposeInjectedTaskMemory } from "../../src/domains/memory/task-bank-promotion.js";
+import { renderTaskMemoryHandoffSource } from "../../src/domains/memory/task-memory-handoff.js";
 import { runTaskMemoryPolicy, TaskMemoryEndpointPreemptedError } from "../../src/domains/memory/task-memory-policy.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { cwdHash } from "../../src/engine/session.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
+
+test("promote --from-handoff finds the source from any directory and refuses only what it should", async () => {
+	const env = await isolateClioEnv("memory-promote-flow-");
+	const previousCwd = process.cwd();
+	try {
+		const project = realpathSync(mkdtempSync(join(env.dir, "project-")));
+		const elsewhere = realpathSync(mkdtempSync(join(env.dir, "elsewhere-")));
+		const at = "2026-11-03T10:00:00.000Z";
+		const base = { parentTurnId: null, timestamp: at };
+		const session = (id: string, lines: string[]) => {
+			const dir = join(clioStateDir(), "sessions", cwdHash(project), id);
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(
+				join(dir, "meta.json"),
+				JSON.stringify({ id, cwd: project, createdAt: at, endedAt: at, clioCoderVersion: "0.6.8" }),
+			);
+			writeFileSync(join(dir, "current.jsonl"), `${lines.join("\n")}\n`);
+		};
+		const custom = (customType: string) =>
+			JSON.stringify({ ...base, kind: "custom", turnId: customType, customType, data: {} });
+		session("labeled", [custom("clio_coder_flow_restriction")]);
+		session("torn", [custom("noop"), '{"kind":"message","torn', custom("noop2")]);
+		const promote = async (source: string, cwd: string) => {
+			const path = join(env.dir, `${source}.md`);
+			const bank = new TaskMemoryBank();
+			bank.saveKnowledge(`A lesson from ${source} in ${cwd}.`);
+			writeFileSync(
+				path,
+				renderTaskMemoryHandoffSource(bank.snapshot(), {
+					sessionId: source,
+					evidenceRefs: [`session-${source}`],
+					runtimeIds: [],
+					agentIds: [],
+				}),
+			);
+			process.chdir(cwd);
+			return runMemoryCommand(["promote", "--from-handoff", path, "--scope", "repo", "--repository", project]);
+		};
+		const records = () => loadMemoryRecordsSync(clioDataDir()).length;
+		strictEqual(await promote("labeled", elsewhere), 1, "another directory's bucket is searched");
+		strictEqual(records(), 0);
+		strictEqual(await promote("torn", project), 0, "a torn line is not a restriction");
+		strictEqual(records(), 1);
+		strictEqual(await promote("unknown", project), 0, "no rules, nothing to vouch for");
+		strictEqual(records(), 2);
+		mkdirSync(join(project, ".clio-coder"), { recursive: true });
+		writeFileSync(
+			join(project, ".clio-coder", "safety.yaml"),
+			"version: 1\ninformationFlow:\n  sources:\n    - id: s\n      paths: [secrets/]\n      recipients: []\n",
+		);
+		strictEqual(await promote("unknown2", project), 1, "under source rules an unknown source is refused");
+		strictEqual(records(), 2);
+	} finally {
+		process.chdir(previousCwd);
+		env.restore();
+	}
+});
 
 test("a flow-restricted session files no lesson at scope end, and a clean one still does", async () => {
 	const root = mkdtempSync(join(tmpdir(), "memory-flow-"));
