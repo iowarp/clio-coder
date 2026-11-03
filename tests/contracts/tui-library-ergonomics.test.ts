@@ -246,6 +246,25 @@ it("neutralizes terminal controls while preserving Unicode identity and full ins
 	ok(collapse(rows.items[0]?.detail?.(40).join("\n") ?? "").includes(collapse(record.description)));
 });
 
+it("neutralizes terminal controls in every catalog field a row or its detail prints", () => {
+	const data = inventory();
+	const record = data.packages[0];
+	ok(record);
+	const hostile = "\u001b]0;spoofed title\u0007\u001b[2J\u001b[35m";
+	record.requires = [`plugin:dep${hostile}`];
+	record.sourceUrl = `./materio${hostile}`;
+	record.origin = { kind: "bundled", catalog: `/library/registry.yaml${hostile}` };
+	const view = { category: "plugin" as const, mode: "browse" as const, scope: "user" as const };
+	const item = buildLibraryRows({ view, inventory: selectForCategory(data, view) }).items[0];
+	ok(item);
+	const painted = [item.label, item.meta ?? "", ...(item.detail?.(80) ?? [])].join("\n");
+	ok(!painted.includes("\u001b]0;"), "no OSC title reaches the terminal");
+	ok(!painted.includes("\u001b[2J"), "no erase-display reaches the terminal");
+	ok(!painted.includes("\u001b[35m"), "no foreign SGR reaches the terminal");
+	ok(!painted.includes("spoofed title"));
+	match(plain(painted), /plugin:dep/);
+});
+
 it("finds core agents through the real inventory in Installed without broadening audience", async () => {
 	const env = await isolateClioEnv("tui-library-ergonomics-");
 	try {
