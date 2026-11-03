@@ -193,4 +193,5 @@ A cut from one build says nothing about another build, another vendor, a differe
 | Opt-in | [selection.ts](../../src/domains/system-one/selection.ts) | `effectiveSystemOne`, `resolveChoice`, `ACTIVE_PROFILE` |
 | Host | [system-one-host.ts](../../src/entry/system-one-host.ts) | `createSystemOneHost` |
 | Consult tool | [consult.ts](../../src/tools/consult.ts) | `createConsultTool`, `CONSULT_LIMITS` |
-| CLI | [system-one.ts](../../src/cli/system-one.ts) | `systemone status`, `systemone export` |
+| CLI | [system-one.ts](../../src/cli/system-one.ts) | `systemone status`, `use`, `off`, `check`, `export` |
+| Scopes and status | [scopes.ts](../../src/domains/system-one/scopes.ts), [status.ts](../../src/domains/system-one/status.ts), [system-one-control.ts](../../src/entry/system-one-control.ts) | `createSystemOneScopes`, `describeStatus`, `/systemone` |

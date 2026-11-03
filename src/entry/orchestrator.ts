@@ -312,6 +312,7 @@ import { createSystemOne } from "../domains/system-one/index.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
+import { createSystemOneScopes } from "../domains/system-one/scopes.js";
 import { effectiveSystemOne } from "../domains/system-one/selection.js";
 import { TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
@@ -383,6 +384,7 @@ import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibility.js";
 import { createReloadClasses } from "./reload-classes.js";
 import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
+import { createSystemOneControl, SYSTEM_ONE_SCOPE_ENTRY } from "./system-one-control.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 
@@ -3823,8 +3825,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// limit, and the engine applies its own default.
 		return capacity?.limit ?? Number.POSITIVE_INFINITY;
 	};
+	const systemOneScopes = createSystemOneScopes();
+	// `run --systemone` holds for this process, and a headless run has no later override.
+	if (options.headless?.systemOne !== undefined) systemOneScopes.set("session", options.headless.systemOne);
+	// A session is created lazily with its first turn, so a choice made before it waits to be written.
+	let unsavedSystemOneScope: { use: string | null } | null = null;
+	// A task or session override replaces `systemOne.use` for every System One read.
+	const systemOneSettings = (): Readonly<ClioSettings> => {
+		const settings = getCurrentSettings();
+		return effectiveSystemOne(settings, systemOneScopes.current()?.use ?? settings.systemOne.use);
+	};
 	const systemOneCore = createSystemOne({
-		settings: () => effectiveSystemOne(getCurrentSettings()),
+		settings: () => systemOneSettings(),
 		// Every engine request is judged against the restrictions it inherited
 		// before a byte leaves, typed and LLM engines alike. The runner treats a
 		// throw as abstention, so this only ever returns.
@@ -3874,6 +3886,39 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return systemOneCore.run(site, object, merged);
 		},
 	};
+	// A session override lives in that session's ledger, so a resume restores it.
+	const restoreSystemOneScope = (): void => {
+		const rows = readCurrentSessionEntries().filter(
+			(entry) => entry.kind === "custom" && entry.customType === SYSTEM_ONE_SCOPE_ENTRY,
+		);
+		const last = rows.at(-1);
+		const use = last?.kind === "custom" ? (last.data as { use?: unknown } | null)?.use : undefined;
+		systemOneScopes.resetSession(typeof use === "string" ? use : null);
+	};
+	const saveSystemOneScope = (): void => {
+		const meta = session?.current();
+		if (unsavedSystemOneScope === null || !meta) return;
+		session?.appendEntry({
+			kind: "custom",
+			customType: SYSTEM_ONE_SCOPE_ENTRY,
+			parentTurnId: session?.tree(meta.id).leafId ?? null,
+			display: false,
+			data: unsavedSystemOneScope,
+		});
+		unsavedSystemOneScope = null;
+	};
+	const systemOneControl = createSystemOneControl({
+		cwd: () => process.cwd(),
+		settings: () => getCurrentSettings(),
+		scopes: systemOneScopes,
+		runtimes: { get: (id) => providers.getRuntime(id) },
+		recording: systemOneRecording,
+		latencyMs: (site) => decisionUsage.latency(site),
+		persistSession: (use) => {
+			unsavedSystemOneScope = { use };
+			saveSystemOneScope();
+		},
+	});
 	// The judge's 0.8 and 0.6 were never measured, so binding `consult` no longer turns it on.
 	getMemoryLessonJudge = () => null;
 	// How each approval the main agent parked was answered, joined to the card's
@@ -3924,7 +3969,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const settings = getCurrentSettings();
 		return (
 			relevanceStartRefusal({
-				settings: effectiveSystemOne(settings),
+				settings: systemOneSettings(),
 				getTarget: (targetId) => providers.getTarget(targetId),
 				capacities: resolveEndpointCapacities({
 					statuses: providers.list(),
@@ -4020,10 +4065,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.subscribe("session.parked", ({ sessionId }) => {
 		if (session?.current()?.id === sessionId) flushSystemOne();
 		systemOneHost.forgetOperatorTexts();
+		systemOneScopes.resetSession(null);
+		unsavedSystemOneScope = null;
 	});
 	// A resume or a `/tree` switch can keep the session id and still change which
 	// requests precede the next turn, so the kept texts go and the ledger is read once.
-	bus.subscribe("session.reattached", () => systemOneHost.forgetOperatorTexts());
+	bus.subscribe("session.reattached", () => {
+		systemOneHost.forgetOperatorTexts();
+		restoreSystemOneScope();
+	});
 	bus.subscribe("session.turn_switched", () => systemOneHost.forgetOperatorTexts());
 	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
 	const jobHost = createJobHost({
@@ -4647,7 +4697,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// A wait is bounded by the deadline the turn call itself runs under.
 		readInterpretation: async (wait) => {
 			if (wait === undefined) return systemOneHost.interpretation();
-			const binding = getCurrentSettings().systemOne.sites.turn;
+			const binding = systemOneSettings().systemOne.sites.turn;
 			const bindingTimeoutMs = typeof binding === "object" && binding !== null ? binding.timeoutMs : undefined;
 			return systemOneHost.awaitInterpretation(bindingTimeoutMs ?? TURN_SITE.deadlineMs, wait.signal);
 		},
@@ -4909,6 +4959,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// one; cancelling it here keeps it off the endpoint this turn needs. Turn
 			// settle and cancel keep the task, so a continuation may still use them.
 			relevanceRanker.supersede("new operator task");
+			systemOneScopes.noteOperatorTurn();
+			saveSystemOneScope();
 			systemOneHost.readTurn(input);
 		},
 		readSteer: (input) => systemOneHost.readSteer(input),
@@ -4918,6 +4970,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// Calls made mid-turn (gateway ranking, consult, an approval card) belong
 			// to the turn that made them, not to the next one.
 			flushSystemOne();
+			saveSystemOneScope();
 			// The verdict is about the request that just finished; a continuation or
 			// the next turn must not read it.
 			systemOneHost.clearVerdict();
@@ -6160,6 +6213,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return scheduling ? { scheduling } : {};
 		})(),
 		systemOne,
+		systemOneControl,
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		telemetry,
 		chat,

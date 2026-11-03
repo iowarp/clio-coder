@@ -56,7 +56,7 @@ import { setupSteerChannel } from "./steer-channel.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--max-cost-usd <N>] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--max-cost-usd <N>] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
@@ -68,6 +68,7 @@ Flags:
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        main-agent autonomy: default|yolo
+  --systemone <engine|off>  System One for this run: jev, memory, main, an engine, a target, or off
   --read-only              deny every write, command, and delegation; with --agent, the dispatch is read-only
   --record                 save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
@@ -575,6 +576,7 @@ async function executeRunCommand(
 								...(parsed.model !== undefined ? { model: parsed.model } : {}),
 								...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
 								...(parsed.autonomy !== undefined ? { autonomy: parsed.autonomy } : {}),
+								...(parsed.systemOne !== undefined ? { systemOne: parsed.systemOne } : {}),
 								...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 								...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 								...(parsed.failOnNoop ? { failOnNoop: true } : {}),

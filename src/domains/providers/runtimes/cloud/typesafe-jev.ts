@@ -20,13 +20,12 @@ import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { postSystemOne, systemOneBaseUrl } from "../common/systemone-wire.js";
+import { TYPESAFE_DEFAULT_MODEL } from "../typesafe-model.js";
 
 const TYPESAFE_BASE_URL = "https://api.typesafe.ai/v1";
-// The build `FITTED_CUTS` was measured on. `jev-latest` can move to a build with
-// no cuts, and a site then only records. TypeSafe answers this pin though
-// `/models` lists only the moving names, so a known model is not checked against
-// that list.
-const DEFAULT_MODEL = "jev-1.14.0";
+// TypeSafe answers this pin though `/models` lists only the moving names, so a
+// known model is not checked against that list.
+const DEFAULT_MODEL = TYPESAFE_DEFAULT_MODEL;
 const KNOWN_MODELS = [DEFAULT_MODEL, "jev-latest", "jev-preview"];
 
 const defaultCapabilities: CapabilityFlags = {

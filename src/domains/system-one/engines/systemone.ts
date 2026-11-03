@@ -4,6 +4,7 @@
  * in `postSystemOne`; this converts what it returns into contract answers.
  */
 
+import { TYPESAFE_DEFAULT_MODEL } from "../../providers/runtimes/typesafe-model.js";
 import type { DecisionAnswer, DecisionQuestion } from "../../providers/types/inference.js";
 import type { ProbeContext, RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
@@ -66,7 +67,7 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 	const { name, target, runtime, model, host } = input;
 	const decide = runtime.decide;
 	if (decide === undefined) throw new Error(`runtime '${runtime.id}' does not answer typed decisions`);
-	const asked = model ?? target.defaultModel ?? null;
+	const asked = model ?? target.defaultModel ?? (runtime.id === "typesafe-jev" ? TYPESAFE_DEFAULT_MODEL : null);
 	const profile = profileFor(input.profile);
 	// Julia-1's options are counted with its own tokenizer once it is cached; until then the byte proof applies.
 	if (profile.id === "julia-1") void import("../julia-tokenizer.js").then((module) => module.loadJuliaTokenizer());

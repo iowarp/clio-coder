@@ -59,6 +59,9 @@ const EARLIER_REQUESTS = 3;
 /** Turns whose System One spend is still being counted. */
 const COUNTED_TURNS = 8;
 
+/** Answers per site behind the latency `/systemone status` shows. */
+const KEPT_LATENCIES = 32;
+
 export function createSystemOneRequestAdmission(deps: {
 	providers: Pick<ProvidersContract, "getTarget"> & Partial<Pick<ProvidersContract, "getRuntime">>;
 	scheduling?: SchedulingContract;
@@ -193,14 +196,23 @@ export interface DecisionUsageTally {
 	begin(ref: string): void;
 	/** What the counted calls spent, one fact sum per quantity; empty when nothing was counted. */
 	read(ref: string): TurnTokens;
+	/** The median latency of this session's recent answers at a site, or null before any. */
+	latency(site: string): number | null;
 }
 
 export function createDecisionUsageTally(inner: DecisionRecorder): DecisionUsageTally {
 	const counted = new Map<string, Spend>();
+	const latencies = new Map<string, number[]>();
 	return {
 		recorder: {
 			decision(record) {
 				inner.decision(record);
+				if (record.outcome === "answered") {
+					const kept = latencies.get(record.site) ?? [];
+					kept.push(record.latencyMs);
+					if (kept.length > KEPT_LATENCIES) kept.shift();
+					latencies.set(record.site, kept);
+				}
 				const spend = record.ref === undefined ? undefined : counted.get(record.ref);
 				if (spend === undefined) return;
 				const fact = (value: number | undefined): Fact<number> =>
@@ -219,6 +231,11 @@ export function createDecisionUsageTally(inner: DecisionRecorder): DecisionUsage
 				if (counted.size <= COUNTED_TURNS) break;
 				counted.delete(key);
 			}
+		},
+		latency(site) {
+			const kept = latencies.get(site);
+			if (kept === undefined || kept.length === 0) return null;
+			return [...kept].sort((a, b) => a - b)[Math.floor(kept.length / 2)] ?? null;
 		},
 		read(ref) {
 			const spend = counted.get(ref) ?? { input: [], output: [] };

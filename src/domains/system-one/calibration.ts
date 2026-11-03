@@ -132,6 +132,46 @@ export const FITTED_CONTRACTS: Readonly<
 	},
 };
 
+/** Cuts a local measurement adds, keyed like `FITTED_CUTS`. */
+export type LocalCuts = Readonly<Record<string, Readonly<Record<string, number>>>>;
+
+/**
+ * What each cut can do, for saying which actions a build earned. An action
+ * needs every key it reads, so a measured dispatch reading does not earn a
+ * prewarm that also reads an unmeasured recipe pick.
+ */
+const SITE_ACTIONS: Readonly<
+	Partial<Record<SiteId, ReadonlyArray<{ action: string; requires: ReadonlyArray<string> }>>>
+> = {
+	turn: [
+		{ action: "scope hint", requires: ["direct"] },
+		{ action: "plan hint", requires: ["dispatch"] },
+		{ action: "expected dispatch", requires: ["dispatch"] },
+		{ action: "direction", requires: ["direction"] },
+		{ action: "orientation", requires: ["orientation", "breadthFloor", "intentFloor"] },
+		{ action: "worker preparation", requires: ["prewarm", "recipeFloor"] },
+		{ action: "plan close", requires: ["intentFloor"] },
+	],
+	relevance: [
+		{ action: "reordering", requires: ["ranked"] },
+		{ action: "related entries", requires: ["ranked", "related"] },
+		{ action: "large catalogs", requires: ["ranked", "clusters"] },
+	],
+	toolCall: [{ action: "card advisory", requires: ["cardFloor"] }],
+	drafts: [{ action: "draft recommendation", requires: ["pick"] }],
+};
+
+/** The actions `build` has earned at a site. An unnamed build has earned none. */
+export function measuredActions(site: SiteId, build: string | null, local: LocalCuts = {}): ReadonlyArray<string> {
+	if (build === null) return [];
+	const table = (source: LocalCuts): Readonly<Record<string, number>> =>
+		Object.hasOwn(source, build) ? (source[build] ?? {}) : {};
+	const cuts = { ...table(FITTED_CUTS), ...table(local) };
+	return (SITE_ACTIONS[site] ?? [])
+		.filter(({ requires }) => requires.every((key) => cuts[`${site}.${key}`] !== undefined))
+		.map(({ action }) => action);
+}
+
 /** The contract a call ran under: what a measured table must match. */
 export interface CallContract {
 	readonly siteVersion: string;

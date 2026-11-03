@@ -18,3 +18,8 @@ export function credentialsPresent(): Set<string> {
 	}
 	return present;
 }
+
+/** Whether one runtime's key is available, env or stored. It needs no registered runtime, so a CLI command can ask. */
+export function credentialAvailable(runtimeId: string, envVar: string): boolean {
+	return openAuthStorage().status(runtimeId, { explicitEnvVar: envVar, includeFallback: false }).available;
+}

@@ -58,6 +58,8 @@ export interface BootOptions {
 	 */
 	toolLimits?: SessionToolLimits;
 	headless?: {
+		/** `run --systemone`: the one setting for this run, an engine name or `off`. */
+		systemOne?: string;
 		prompt: string;
 		constraints?: TurnConstraints;
 		images?: ReadonlyArray<ImageContent>;

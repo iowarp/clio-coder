@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
@@ -18,9 +18,11 @@ import {
 	createRunner,
 	noteSystemOneCall,
 } from "../../src/domains/system-one/runner.js";
+import { createSystemOneScopes } from "../../src/domains/system-one/scopes.js";
 import { effectiveSystemOne, resolveChoice } from "../../src/domains/system-one/selection.js";
 import { RELEVANCE_CLUSTER_SITE } from "../../src/domains/system-one/sites/relevance.js";
 import { TURN_SITE } from "../../src/domains/system-one/sites/turn.js";
+import { describeStatus } from "../../src/domains/system-one/status.js";
 import type {
 	Answer,
 	DecisionEngine,
@@ -181,6 +183,40 @@ describe("System One runner", () => {
 		noMemory.context.memory.target = null;
 		strictEqual(resolveChoice(noMemory, "memory").kind, "unavailable");
 		strictEqual(resolveChoice(settingsFor(null), "nope").kind, "unavailable");
+	});
+
+	it("expires a task override after the task it covered, and a session override with its session", () => {
+		const scopes = createSystemOneScopes();
+		strictEqual(scopes.current(), null);
+		scopes.set("session", "memory");
+		scopes.set("task", "jev");
+		deepStrictEqual(scopes.current(), { use: "jev", scope: "task" });
+		scopes.noteOperatorTurn();
+		deepStrictEqual(scopes.current(), { use: "jev", scope: "task" });
+		scopes.noteOperatorTurn();
+		deepStrictEqual(scopes.current(), { use: "memory", scope: "session" });
+		scopes.resetSession(null);
+		strictEqual(scopes.current(), null);
+	});
+
+	it("says plainly why a chosen engine will send nothing", () => {
+		const settingsFor = (use: string | null) =>
+			({
+				chat: { target: "chat", model: "chat-model" },
+				context: { memory: { enabled: true, target: null, model: null } },
+				targets: [{ id: "chat", runtime: "openai" }],
+				systemOne: { use, engines: {}, sites: {} },
+			}) as unknown as ClioSettings;
+		const headline = (use: string | null, credentials: string[] = []) =>
+			describeStatus({ settings: settingsFor(use), hasCredential: (_runtime, name) => credentials.includes(name) })
+				.headline;
+		match(headline(null), /^off/);
+		match(headline("off"), /^off/);
+		match(headline("jev"), /^unavailable: TYPESAFE_API_KEY is not set/);
+		match(headline("jev", ["TYPESAFE_API_KEY"]), /^active for measured actions at turn, relevance/);
+		match(headline("main", ["OPENAI_API_KEY"]), /configured but unmeasured.*systemone calibrate main/);
+		match(headline("main", ["OPENAI_API_KEY"]), /adds separate completions on chat\/chat-model/);
+		match(headline("memory"), /^unavailable: context.memory names no target/);
 	});
 
 	it("reads an engine with no measurement for its build as shadow before any request", () => {

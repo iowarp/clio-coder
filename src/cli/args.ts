@@ -34,6 +34,8 @@ export interface RunCliArgs {
 	model?: string;
 	thinking?: JobThinkingLevel;
 	autonomy?: AutonomyLevel;
+	/** The one System One setting for this run: an engine name or `off`. */
+	systemOne?: string;
 	readOnly: boolean;
 	sampling?: RunSamplingArgs;
 	agentId?: string;
@@ -151,6 +153,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 						message: "--autonomy must be default|yolo",
 					});
 			}
+			continue;
+		}
+		if (arg === "--systemone") {
+			const value = need(arg);
+			if (value !== null) parsed.systemOne = value;
 			continue;
 		}
 		if (arg === "--temperature") {

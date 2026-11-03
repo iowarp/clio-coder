@@ -12,10 +12,14 @@
 import type { ClioSettings } from "../../core/config.js";
 import { getRuntimeRegistry } from "../providers/registry.js";
 import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
+import { TYPESAFE_DEFAULT_MODEL } from "../providers/runtimes/typesafe-model.js";
 import type { SiteId } from "./types.js";
 
 /** What the one setting binds. The record-only sites stay out: they spend requests without changing behavior. */
 export const ACTIVE_PROFILE: ReadonlyArray<SiteId> = ["turn", "toolCall", "relevance", "consult", "drafts"];
+
+/** Asked only for the dataset: no reader takes these answers, so `use` never binds them. */
+export const RECORD_ONLY_SITES: ReadonlyArray<SiteId> = ["toolResult", "turnEnd", "steer"];
 
 export const SYSTEM_ONE_OFF = "off";
 
@@ -43,7 +47,8 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 	if (declared !== undefined) return { kind: "engine", name, engine: declared };
 	if (name === "jev") {
 		const target = settings.targets.find((entry) => entry.runtime === "typesafe-jev");
-		const engine: EngineSettings = { kind: "systemone", target: target?.id ?? "jev", profile: "jev" };
+		const model = target?.defaultModel ?? TYPESAFE_DEFAULT_MODEL;
+		const engine: EngineSettings = { kind: "systemone", target: target?.id ?? "jev", model, profile: "jev" };
 		return target !== undefined
 			? { kind: "engine", name, engine }
 			: { kind: "engine", name, engine, impliedTarget: { id: "jev", runtime: "typesafe-jev" } };

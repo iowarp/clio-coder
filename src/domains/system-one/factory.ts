@@ -220,9 +220,9 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 
 	let credentialCheck: { at: number; present: ReadonlySet<string> } | null = null;
 
-	/** Which required key is absent. Sampled every few seconds: building the set reparses the auth store. */
-	function missingKey(target: TargetDescriptor, runtime: RuntimeDescriptor): string | null {
-		const required = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+	/** Which declared runtime key is absent. Sampled every few seconds: building the set reparses the auth store. */
+	function missingKey(runtime: RuntimeDescriptor): string | null {
+		const required = runtime.credentialsEnvVar;
 		if (required === undefined) return null;
 		const now = performance.now();
 		if (credentialCheck === null || now - credentialCheck.at > CREDENTIAL_CHECK_MS) {
@@ -247,7 +247,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			// Declaring the capability and implementing the verb are separate claims,
 			// and a target bound here by mistake is likelier an ordinary chat model.
 			if (!runtime.decide) problem = `runtime '${runtime.id}' does not answer typed decisions`;
-			else problem = missingKey(target, runtime);
+			else problem = missingKey(runtime);
 		} else {
 			problem = llmEngineProblem({
 				target,

@@ -19,6 +19,27 @@ Decision engines come in four tiers. No tier turns on the next one.
 
 A tier 2 model costs no hosted API fee, but it still uses your hardware, and a detached call can compete with the chat model on a shared server. A decision model is small enough to run on a processor the chat model leaves idle, which is what [Placing engines](#placing-engines) is about.
 
+## Choosing per task, session or project
+
+The same choice works at every scope. Narrower wins: built-in off, user settings, trusted project settings, session, task.
+
+```text
+/systemone status
+/systemone use jev --scope task
+/systemone use memory --scope session
+/systemone off --scope task
+clio-coder systemone use jev --scope project
+clio-coder run --systemone jev "<task>"
+clio-coder run --systemone off "<task>"
+clio-coder systemone check jev --live
+```
+
+A task override covers the next submitted task and its continuations and expires when you submit another. A session override is kept in that session's ledger and returns with a resume. `/systemone` defaults to session scope, and `clio-coder systemone use` to user scope. A project write goes to `.clio-coder/settings.local.yaml`, which keeps the usual trust rules. The `consult` tool is registered at startup, so a choice made mid-session reaches it on the next start.
+
+`status` puts each site in one of these states: **off**, **configured but unmeasured** (it names the calibrate command and sends nothing), **active** (it lists the measured actions), **recording** (only for the dataset) or **unavailable** (it says why). `main` and `memory` also state what they add: separate completions, tokens and money or subscription usage, and latency.
+
+`clio-coder systemone check <engine> --live` sends one content-free decision and reports the build that answered. `/models` and doctor's passive check prove only that an endpoint answers. A measurement belongs to the model name the server reports, plus its fingerprint where it gives one, and any change voids it. This cannot detect a checkpoint swapped behind the same name and fingerprint.
+
 ### Measure a tier 2 placement
 
 Clio Coder ships a client for `POST /v1/systemone`, not an inference server or
@@ -311,9 +332,9 @@ clio-coder systemone status
 clio-coder systemone export --out dataset.jsonl [--since 2026-09-01] [--site toolCall]
 ```
 
-`status` prints whether recording is on, the decision and outcome sample counts with the number of sessions and the date range, and where each site is bound (the engine, its kind, the target and model, any deadline, or the reason the binding cannot answer). `export` writes one JSON line per decision joined to the full text of its questions and every outcome recorded for it. `--out` is required, is replaced atomically and may not point into the telemetry directory. `--since` takes a UTC day and `--site` one site id. An export that matches nothing, or that finds question specs missing from the selected days or unreadable rows, says so. `clio-coder systemone --help` prints the usage and exits 0.
+`status` prints each site's state and why, whether recording is on, and the decision and outcome sample counts with the number of sessions and the date range. `export` writes one JSON line per decision joined to the full text of its questions and every outcome recorded for it. `--out` is required, is replaced atomically and may not point into the telemetry directory. `--since` takes a UTC day and `--site` one site id. An export that matches nothing, or that finds question specs missing from the selected days or unreadable rows, says so. `clio-coder systemone --help` prints the usage and exits 0.
 
-`systemone` exits 0 on success, 2 for a usage error (an unknown command or flag, a missing `--out`, a `--since` that is not a day, a `--site` that is not a site id, or an `--out` inside the telemetry directory) and 1 when reading or writing fails. Read an export before sharing it, because it holds the operator's own requests.
+`systemone` exits 0 on success, 2 for a usage error (an unknown command or flag, a missing engine or `--live`, a missing `--out`, a `--since` that is not a day, a `--site` that is not a site id, or an `--out` inside the telemetry directory) and 1 when reading or writing fails. Read an export before sharing it, because it holds the operator's own requests.
 
 ## Doctor rows
 
