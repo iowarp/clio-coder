@@ -4,7 +4,7 @@ System One is an experimental decision layer. Clio Coder asks a fast decision mo
 
 Experimental means that its sites, settings keys and shipped cuts may change between releases. Every surface that shows System One says so: the comment above `systemOne` in the settings file, the `/settings` rows, the GUI's settings group, doctor, the `systemone` CLI help and the approval-card advisory.
 
-It is off until you bind an engine to a site. With nothing bound, Clio Coder's behavior is unchanged. The one exception is the `relevance` site, which Clio Coder binds to a local proactive-memory side model when `systemOne.sites.relevance` is unset; see [`relevance`](#relevance-ranking-skills-capabilities-and-memory). Automatic sites never wait on a decision engine, fitted or not: turn start, tool admission, tool-result delivery, turn settlement and prompt composition never await an answer. The explicit `consult` tool and draft judging can wait up to their deadlines. Each automatic call runs detached, and its answer is used only if it is already available when a reader looks; otherwise it is only recorded. Every failure of a bound engine (timeout, refusal, unusable reply) leaves the unbound behavior in place. The design contract is in [System One Architecture](../architecture/system-one.md).
+It is off until you bind an engine to a site. With nothing bound, Clio Coder's behavior is unchanged. The one exception is the `relevance` site, which Clio Coder binds to a local proactive-memory side model when `systemOne.sites.relevance` is unset; see [`relevance`](#relevance-ranking-skills-capabilities-and-memory). Automatic sites do not hold up the work they judge, with one exception: when a reading of an operator's request could change what the turn controller does, the turn waits for it, up to the `turn` site's deadline, and only while a build with fitted cuts is bound. An unfitted build's first turn waits the same way, because its build is not known until it answers. Tool admission, tool-result delivery, turn settlement and prompt composition never await an answer. The explicit `consult` tool and draft judging can wait up to their deadlines. Each automatic call runs detached, and its answer is used only if it is already available when a reader looks; otherwise it is only recorded. Every failure of a bound engine (timeout, refusal, unusable reply) leaves the unbound behavior in place. The design contract is in [System One Architecture](../architecture/system-one.md).
 
 ## The ladder
 
@@ -85,7 +85,7 @@ The `systemone` runtime assumes a 480-token window, so raise `capabilities.conte
 targets:
   - id: jev
     runtime: typesafe-jev
-    defaultModel: jev-latest
+    defaultModel: jev-1.13.0
 
 systemOne:
   engines:
@@ -209,7 +209,7 @@ An engine answers typed questions for a state. Clio Coder builds one engine per 
 
 ### Engine kind `systemone`
 
-The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-latest`, credential `TYPESAFE_API_KEY`), `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises) or `inception` with the engine's `model: mercury-decide` (Inception's hosted decision model at `/v1/decisions`, credential `INCEPTION_API_KEY`; no build has fitted cuts). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by it. Clio Coder's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
+The target's runtime must implement typed decisions: `typesafe-jev` (a hosted decision engine, default model `jev-1.13.0`, the build Clio Coder's cuts were measured on, credential `TYPESAFE_API_KEY`; `jev-latest` and `jev-preview` move to builds with no cuts, so a site asking them only records), `systemone` (a self-hosted server, with a default 480-token window that `capabilities.contextWindow` raises) or `inception` with the engine's `model: mercury-decide` (Inception's hosted decision model at `/v1/decisions`, credential `INCEPTION_API_KEY`; no build has fitted cuts). Answers are calibrated probabilities, and the engine's `profile` decides which questions it is sent. The answering build is the model name the server reports, for example `jev-1.13.0`, and every cut is keyed by it. Clio Coder's shipped cuts are fitted for the hosted engine's `jev-1.13.0` build. Any other build on the same wire, including a self-hosted one, is validated the same way, by fitting cuts on that exact build. Binding a chat-only runtime with `kind: systemone` is reported as a problem by doctor.
 
 ### Engine kind `llm`
 
@@ -219,7 +219,7 @@ Every request an `llm` engine sends, including schema retries, passes the same p
 
 ## Decision sites
 
-A site is named by the object it judges. One call to a site carries one bounded state and every question about that state. The deadline bounds the call, which nothing waits on except the `consult` tool and the `/draft` judge; `timeoutMs` on the binding replaces the default. How a site is defined and read is in [Sites are keyed by the object they judge](../architecture/system-one.md#sites-are-keyed-by-the-object-they-judge) and [Where sites are read](../architecture/system-one.md#where-sites-are-read).
+A site is named by the object it judges. One call to a site carries one bounded state and every question about that state. The deadline bounds the call, which nothing waits on except the turn controller at `turn`, the `consult` tool and the `/draft` judge; `timeoutMs` on the binding replaces the default. How a site is defined and read is in [Sites are keyed by the object they judge](../architecture/system-one.md#sites-are-keyed-by-the-object-they-judge) and [Where sites are read](../architecture/system-one.md#where-sites-are-read).
 
 | Site | Judges | Default deadline | What its answer does |
 | --- | --- | --- | --- |
@@ -236,7 +236,7 @@ A site is named by the object it judges. One call to a site carries one bounded 
 
 The site asks whether the request is answerable without the workspace, whether it is work for workers, its shape (single, parallel, sequence, council), its intent, whether it asks for an orientation tour or is an undecided follow-up, and which installed recipe a dispatch would name first.
 
-The call starts when you submit and nothing waits for it. Its readers take a reading only if it has landed when they read, and only from a fitted build: the turn controller reads it before the prompt is built, and the hint registration, plan-close and the prewarm read it as the prompt is built. A reading that lands later, or comes from a build without a fitted cut, is only recorded. A canceled turn does not abort the call, so its reading is still recorded. A landed, fitted reading can:
+The call starts when you submit. When orientation or direction could act on the reading, the turn controller waits for it before the prompt is built, for at most the site's deadline (600 ms, or the binding's `timeoutMs`), so a reading that takes that long delays the turn by that long. Nothing else waits. Readers take a reading only if it has landed when they read, and only from a fitted build: the turn controller reads it before the prompt is built, and the hint registration, plan-close and the prewarm read it as the prompt is built. A reading that lands later, or comes from a build without a fitted cut, is only recorded. A canceled turn does not abort the call, so its reading is still recorded. A landed, fitted reading can:
 
 - Add a `[Scope]` hint: the request reads as answerable without inspecting the workspace, so answer directly.
 - Add a `[Plan]` hint: the request reads as work suited to workers, so the delegation rules apply. It is suppressed when the request already names delegation.
@@ -272,7 +272,7 @@ Without a `systemOne.sites.relevance` entry, Clio Coder derives the binding from
 
 Long catalogs are ranked by local vocabulary first. This site scores the pruned entries by meaning, and the caller uses the scores only to reorder a skills listing or gateway result, or to add related entries beside a query's own hits. It never removes an entry and never reorders entries a query matched.
 
-A listing never waits for this site. The ranker answers from rankings that have already finished, kept by catalog, question, binding and the session's flow restrictions. On a miss the listing keeps its order, and one detached call fills the ranking for the next listing that asks the same thing. A build without the `relevance.ranked` marker never reorders anything, and once it is known to be unfitted it is asked only while the dataset is recorded. One call scores up to 256 entries that fit the engine's window. A larger catalog is asked by its categories, which needs a `clusters` cut that no build has yet and entries that carry described categories, so such a listing keeps its order and leaves no decision row.
+A listing never waits for this site. The ranker answers from rankings that have already finished, kept by catalog, question, binding and the session's flow restrictions. On a miss the listing keeps its order, and one detached call fills the ranking for the next listing that asks the same thing. A build without the `relevance.ranked` marker never reorders anything, and once it is known to be unfitted it is asked only while the dataset is recorded. An `llm` engine counts as known to be unfitted before its first request unless `systemOne.cuts` holds a `relevance.ranked` cut for an `llm:` build, so such an engine sends nothing for this site while the dataset is off. One call scores up to 256 entries that fit the engine's window. A larger catalog is asked by its categories, which needs a `clusters` cut that no build has yet and entries that carry described categories, so such a listing keeps its order and leaves no decision row.
 
 ### `consult`: the agent asks directly
 
