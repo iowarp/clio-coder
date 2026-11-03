@@ -4948,6 +4948,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		flushSystemOne,
 		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
+		// The skill writes a plain file that a later session reads with no label; /handoff carries the labels.
+		refuseHandoffSkill: () => {
+			const meta = session?.current();
+			if (meta === undefined || meta === null || !flowLedger.isRestricted(meta.id)) return null;
+			return "context-handoff refused: this session carries an information-flow restriction, and a handoff file carries no label. Use /handoff <goal>, which copies the restrictions into the new session.";
+		},
 		getTaskMemoryHandoffSource: () => {
 			// Memory off stops handoff seeding, and the empty block still told the model to copy it into the handoff.
 			if (!memoryEnabledNow()) return "";

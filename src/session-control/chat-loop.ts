@@ -881,6 +881,8 @@ export interface CreateChatLoopDeps {
 	admitRuntimeFlow?: (runtime: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	/** Labels the information-flow sources that `@file` references inlined into a submitted prompt. */
 	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void;
+	/** Why an operator's context-handoff request may not run in this session, or null. */
+	refuseHandoffSkill?: () => string | null;
 	/**
 	 * Run the compaction flow end-to-end (read entries, resolve model,
 	 * summarize, persist a compactionSummary entry) and return the result,
@@ -2641,6 +2643,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
+				if ((options.pendingSkillRequests ?? []).some((request) => request.name.trim() === "context-handoff")) {
+					const refusal = deps.refuseHandoffSkill?.() ?? null;
+					if (refusal !== null) {
+						emit({
+							type: "notice",
+							level: "warning",
+							surface: "transcript",
+							text: refusal,
+							admission: { reason: "handoff-skill-refused" },
+						});
+						return;
+					}
+				}
 				if (deps.promptSubmit && options.requestContinuation !== true) {
 					const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
 					if (!admissionCurrent()) return;
