@@ -1,5 +1,5 @@
 {
-	"description": "Gateway capability catalog modeled on common MCP servers plus Clio's gateway builtins. Each case is a find query phrased the way a model paraphrases a need, with the turn's task, labeled with the capability that serves it. Descriptions are written for this fixture, not copied from any server.",
+	"description": "Gateway capability catalog modeled on common MCP servers plus Clio's gateway builtins. Each case is a find query phrased the way a model paraphrases a need, with the turn's task, labeled with the capability that serves it. Descriptions are written for this fixture, not copied from any server. Split: a case with no split field or split fit is in the fit split; split holdout was written before any score on it was seen and is scored once against cuts chosen on fit. New cases alternate fit and holdout within each authored class.",
 	"site": "relevance",
 	"use": "capabilities",
 	"catalog": [
@@ -352,6 +352,150 @@
 			"query": "cpu usage last hour",
 			"task": "investigate the latency spike",
 			"expect": "mcp_grafana__query_metrics"
+		},
+		{
+			"query": "merge that pull request",
+			"task": "land the approved fix",
+			"expect": "mcp_github__merge_pull_request",
+			"split": "fit"
+		},
+		{
+			"query": "open issues mentioning the crash",
+			"task": "see if the crash is already reported",
+			"expect": "mcp_github__search_issues",
+			"split": "holdout"
+		},
+		{
+			"query": "message the channel",
+			"task": "tell eng the release is out",
+			"expect": "mcp_slack__post_message",
+			"split": "fit"
+		},
+		{
+			"query": "find what Ana wrote about the outage",
+			"task": "write the postmortem",
+			"expect": "mcp_slack__search_messages",
+			"split": "holdout"
+		},
+		{
+			"query": "my assigned tickets",
+			"task": "plan my day",
+			"expect": "mcp_linear__list_my_tickets",
+			"split": "fit"
+		},
+		{
+			"query": "what tables exist",
+			"task": "learn the database",
+			"expect": "mcp_postgres__list_tables",
+			"split": "holdout"
+		},
+		{
+			"query": "run a select",
+			"task": "count recent signups",
+			"expect": "mcp_postgres__query",
+			"split": "fit"
+		},
+		{
+			"query": "open a url in the browser",
+			"task": "check the staging site",
+			"expect": "mcp_browser__navigate",
+			"split": "holdout"
+		},
+		{
+			"query": "type into the login form",
+			"task": "test sign in",
+			"expect": "mcp_browser__fill_form",
+			"split": "fit"
+		},
+		{
+			"query": "what's on my calendar tomorrow",
+			"task": "plan the week",
+			"expect": "mcp_calendar__list_events",
+			"split": "holdout"
+		},
+		{
+			"query": "email the vendor",
+			"task": "send the contract back",
+			"expect": "mcp_mail__send",
+			"split": "fit"
+		},
+		{
+			"query": "upload the slides",
+			"task": "share the deck with the team",
+			"expect": "mcp_drive__upload_file",
+			"split": "holdout"
+		},
+		{
+			"query": "which pods are running",
+			"task": "check the deployment",
+			"expect": "mcp_k8s__get_pods",
+			"split": "fit"
+		},
+		{
+			"query": "running containers",
+			"task": "debug the compose stack",
+			"expect": "mcp_docker__list_containers",
+			"split": "holdout"
+		},
+		{
+			"query": "recent CI runs",
+			"task": "see if main is green",
+			"expect": "mcp_github__list_workflow_runs",
+			"split": "fit"
+		},
+		{
+			"query": "read a file on GitHub",
+			"task": "check upstream's config",
+			"expect": "mcp_github__get_file_contents",
+			"split": "holdout"
+		},
+		{
+			"query": "new branch on the remote",
+			"task": "start the hotfix",
+			"expect": "mcp_github__create_branch",
+			"split": "fit"
+		},
+		{
+			"query": "react with a thumbs up",
+			"task": "acknowledge the message",
+			"expect": "mcp_slack__add_reaction",
+			"split": "holdout"
+		},
+		{
+			"query": "comment on the ticket",
+			"task": "record what we found",
+			"expect": "mcp_linear__add_ticket_comment",
+			"split": "fit"
+		},
+		{
+			"query": "search our docs for how settings work",
+			"task": "configure the target",
+			"expect": "clio_docs",
+			"split": "holdout"
+		},
+		{
+			"query": "show git history",
+			"task": "see who changed this",
+			"expect": "git",
+			"split": "fit"
+		},
+		{
+			"query": "publish this page for me",
+			"task": "share the report as a page",
+			"expect": "artifact",
+			"split": "holdout"
+		},
+		{
+			"query": "grab that URL's raw response",
+			"task": "inspect the API reply",
+			"expect": "web_fetch",
+			"split": "fit"
+		},
+		{
+			"query": "find a skill in the library",
+			"task": "add a review skill",
+			"expect": "clio_library",
+			"split": "holdout"
 		}
 	]
 }

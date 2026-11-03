@@ -1,0 +1,232 @@
+{
+	"description": "Turns labeled with the recipe chosen among one category's members, for the turn site's recipe moment (TURN_RECIPE_SITE). Split: a case with no split field or split fit is in the fit split; split holdout was written before any score on it was seen and is scored once against cuts chosen on fit. New cases alternate fit and holdout within each authored class.",
+	"site": "turnRecipe",
+	"recipes": {
+		"architect": {
+			"id": "architect",
+			"description": "Designs a change across boundaries and slices it into a sprint. Covers contracts, migrations, and validation gates, and turns an existing plan into a dependency-ordered sprint through its bound sprint-plan skill."
+		},
+		"coder": {
+			"id": "coder",
+			"description": "Implements bounded code changes, repairs, and refactors. Behavior-preserving by default."
+		},
+		"debugger": {
+			"id": "debugger",
+			"description": "Diagnoses failing code, tests, or runs without editing. Reads receipts, logs, and runtime behavior to name the cause."
+		},
+		"documenter": {
+			"id": "documenter",
+			"description": "Writes docs and examples from source. No shell; verification uses declared checks."
+		},
+		"git-master": {
+			"id": "git-master",
+			"description": "Runs bounded git operations end to end. Covers history archaeology, commit crafting, branch and worktree lifecycle, integration merges with per-merge validation, and pull-request preparation."
+		},
+		"oracle": {
+			"id": "oracle",
+			"description": "Shadow advisor that protects consistency with prior decisions and returns the strongest challenge to a question."
+		},
+		"provenance": {
+			"id": "provenance",
+			"description": "Reads receipts, diffs, and telemetry for evidence. Shadow agent for source-backed handoffs."
+		},
+		"researcher": {
+			"id": "researcher",
+			"description": "Researches external docs, standards, and papers. Shadow agent for coding decisions, official documentation, release notes, and academic sources."
+		},
+		"scout": {
+			"id": "scout",
+			"description": "Broad repository reconnaissance with cited findings. Use for codebase orientation, structure and entry-point mapping, or multi-file symbol hunting; spends no main-context tool calls."
+		},
+		"tester": {
+			"id": "tester",
+			"description": "Adds focused deterministic regression and coverage tests."
+		},
+		"verifier": {
+			"id": "verifier",
+			"description": "Runs test, lint, build, review, and release gates. Reports each gate independently."
+		},
+		"wiki-writer": {
+			"id": "wiki-writer",
+			"description": "Plans a repository wiki or writes one wiki page. Works against a supplied plan."
+		},
+		"world-knowledge": {
+			"id": "world-knowledge",
+			"description": "Current open-world discovery, ecosystem comparisons, broad external context, and advisory second opinions. Reports honestly when discovery is unavailable."
+		},
+		"materio-workflow-planner": {
+			"id": "materio-workflow-planner",
+			"description": "Build a resource-aware dependency plan with researcher assumptions and tagged defaults."
+		},
+		"wtfp-argument-verifier": {
+			"id": "wtfp-argument-verifier",
+			"description": "Verify that completed section text actually delivers the claims, evidence, constraints, and connections promised by its plan. Execution summaries are navigation aids, not proof; verdicts must be grounded in the manuscript itself."
+		},
+		"claude-code": {
+			"id": "claude-code",
+			"description": "Claude Code, a peer coding agent reached over the Agent Client Protocol, for handing a whole coding task to it."
+		}
+	},
+	"cases": [
+		{
+			"task": "Have a worker find out why the worker tests SIGKILL.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "debugger"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Get a worker to add tests for the pager.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "tester"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have a worker run every release gate.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "verifier"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Check that my paper's introduction delivers what its plan promised.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "wtfp-argument-verifier"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have a worker add a retry to the webhook sender.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "coder"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Delegate the user guide page for /draft.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "documenter"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have a worker squash these commits.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "git-master"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Regenerate the wiki pages from the code.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "wiki-writer"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have an agent design the schema migration and slice it into a sprint.",
+			"members": ["architect", "oracle"],
+			"expect": {
+				"recipe": "architect"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Ask for a second opinion on whether to drop the evals tree.",
+			"members": ["architect", "oracle"],
+			"expect": {
+				"recipe": "oracle"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have a worker read the OpenAI docs on tool calls.",
+			"members": ["researcher", "world-knowledge"],
+			"expect": {
+				"recipe": "researcher"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "What's the ecosystem saying about bun? Get an agent to survey it.",
+			"members": ["researcher", "world-knowledge"],
+			"expect": {
+				"recipe": "world-knowledge"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Debug the flaky pager test with a worker.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "debugger"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have a worker write the missing unit tests for retry.ts.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "tester"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have a worker confirm lint, typecheck and build all pass.",
+			"members": ["debugger", "tester", "verifier", "wtfp-argument-verifier"],
+			"expect": {
+				"recipe": "verifier"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have a worker implement the new --json flag.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "coder"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have a worker write the release announcement in the docs.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "documenter"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have a worker rebase this branch and tidy the commit messages.",
+			"members": ["coder", "documenter", "git-master", "wiki-writer"],
+			"expect": {
+				"recipe": "git-master"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Have an agent draw up the architecture for the new cache.",
+			"members": ["architect", "oracle"],
+			"expect": {
+				"recipe": "architect"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have an agent poke holes in this decision.",
+			"members": ["architect", "oracle"],
+			"expect": {
+				"recipe": "oracle"
+			},
+			"split": "holdout"
+		}
+	]
+}

@@ -1,5 +1,5 @@
 {
-	"description": "Labeled turns for the turn site. Keys under expect name TurnValue fields: direct, dispatch, orientation and direction are graded as probabilities; shape, intent, breadth and recipe are graded as the winning option, where an unsure engine abstains. Labels say what should happen, not what a past session did. Turns marked verbatim are operator turns from session ledgers; the rest are synthetic controls. A case with recipes true is asked the recipe question over the top-level recipes list, as production does when speculative dispatch is on. Borderline dispatch labels (explore fully, the review-fix-test chain, the three-file comparison) are expected to abstain sometimes. A request that only asks for a plan, or says not to launch anything yet, is dispatch false; a short edit to an earlier plan-only list is intent continue.",
+	"description": "Labeled turns for the turn site. Keys under expect name TurnValue fields: direct, dispatch, orientation and direction are graded as probabilities; shape, intent, breadth and recipe are graded as the winning option, where an unsure engine abstains. Labels say what should happen, not what a past session did. Turns marked verbatim are operator turns from session ledgers; the rest are synthetic controls. A case with recipes true is asked the recipe question over the top-level recipes list, as production does when speculative dispatch is on. Borderline dispatch labels (explore fully, the review-fix-test chain, the three-file comparison) are expected to abstain sometimes. A request that only asks for a plan, or says not to launch anything yet, is dispatch false; a short edit to an earlier plan-only list is intent continue. Split: a case with no split field or split fit is in the fit split; split holdout was written before any score on it was seen and is scored once against cuts chosen on fit. New cases alternate fit and holdout within each authored class.",
 	"site": "turn",
 	"recipes": [
 		{
@@ -337,7 +337,7 @@
 			"task": "I just cloned this repo. Where do I start?",
 			"expect": {
 				"orientation": true,
-				"direction": false,
+				"direction": true,
 				"intent": "inspect",
 				"breadth": "repository"
 			}
@@ -1025,6 +1025,2050 @@
 				"orientation": false,
 				"direction": false
 			}
+		},
+		{
+			"task": "I don't know, what do you recommend?",
+			"previous": "Which part of the project do you want to work on?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "you pick",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "whatever you think is best",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what are my options?",
+			"previous": "Which part of the project do you want to work on?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "no clue, what would you suggest?",
+			"previous": "I need a bit more detail. What are you trying to do?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "hmm, I'm not sure yet",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what would you do first?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "any ideas?",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "I'm stuck, where should I even begin?",
+			"previous": "I need a bit more detail. What are you trying to do?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "I was hoping you could tell me",
+			"previous": "I need a bit more detail. What are you trying to do?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's worth looking at?",
+			"previous": "Which part of the project do you want to work on?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "dunno",
+			"previous": "Which part of the project do you want to work on?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "surprise me",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "give me a few suggestions",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "I haven't decided, what makes sense?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what should we work on next?",
+			"previous": "",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "i'm lost",
+			"previous": "I need a bit more detail. What are you trying to do?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "idk, you tell me",
+			"previous": "Which part of the project do you want to work on?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's the most useful thing you could do right now?",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "can you suggest where to go from here?",
+			"previous": "Done: the lint is clean.",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's next?",
+			"previous": "All three fixes are in and the suite passes.",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "not really sure what I need, can you help me figure it out?",
+			"previous": "I need a bit more detail. What are you trying to do?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "which of those would you pick?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "no preference, what's best for a newcomer?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "help",
+			"previous": "I need a bit more detail. What are you trying to do?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "I don't have anything specific in mind",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "not sure what to do with this repo",
+			"previous": "Hi! What would you like to work on today?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what do you think I should tackle first?",
+			"previous": "Which part of the project do you want to work on?",
+			"expect": {
+				"direction": true,
+				"orientation": false,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "ok go ahead",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "yes please",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "sure",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "fine, do that",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "run the tests",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explain the code",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "explore the repository",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "the second one",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "option b",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "let's do the first",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what does the config loader do?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "which tests are failing?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how do I run the tests?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what should the timeout be set to in retry.ts?",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what should I name this helper?",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "where should this new helper go?",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "should I use pnpm or npm here?",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's the next step in the migration plan you wrote?",
+			"previous": "Step 2 of 5 is done. The reader and the writer remain.",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how do I start the dev server?",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "where do I configure the default model?",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what do you suggest for the retry backoff in webhook.ts?",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "suggest a better name for parseCfg",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "recommend a logging library for this service",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "give me options for fixing the flaky pager test",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "help me fix the failing test",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "help me write the changelog entry",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "not sure why the build fails, can you check?",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "I don't know how this function works, explain answerCertainty",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "no, stop",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "never mind",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "thanks",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "hello",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "good morning",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "cancel that",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "no idea why CI is red, look at the logs",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "I'm not sure the test is right, review tests/pager.test.ts",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "help me understand the dispatch scheduler",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's next on the sprint board in docs/plan.md?",
+			"previous": "",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "undo the last change",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "pick the first option and run it",
+			"previous": "I can explore the repository, run the tests, or explain the code. What would you like?",
+			"expect": {
+				"direction": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "you pick the name, then rename it",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direction": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "walk me through this repo",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "give me a tour of the safety domain",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what am I looking at here?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how is src/domains/memory organized?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "summarize how this codebase is structured",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "walk me through the dispatch subsystem",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "map out this project for me",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explain how the providers area is laid out",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how is this repository organized?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "orient me in src/interactive",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "I'm onboarding onto this project, give me an overview",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "overview of the turn-control domain please",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's the high-level architecture here?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what lives under src/tools and how does it fit together?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "show me around",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "map the gateway subsystem for me",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "orient me in this codebase",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "I need to understand the session-control area before touching it",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what are the main components of this project?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's the structure of the prompts directory and what each part does?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "can you explain what this repo is for and where the important code lives?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "help me understand how the memory domain is structured",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "first time here, what's in this project?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "show me around the tests directory",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "big picture please: what does this repo do and how does it hang together",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how is the worker subsystem put together?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "tell me about this codebase",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "tour of the TUI code",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "where do things live in this repo?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explain the layout of the apps directory and what each app is for",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "area"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how's this project put together?",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "survey the repo and describe the modules",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "help me get my bearings in this project",
+			"expect": {
+				"orientation": true,
+				"direction": false,
+				"breadth": "repository"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's in the scripts directory?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what does src/engine contain?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "list the subdirectories of src/domains",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how many directories are at the root?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "show me the tree of src/tools",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "which directory has the tests?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "does src/domains have a memory folder?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "where do the docs live?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "where is the entry point?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what is the main entry file?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what language is this repo written in?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what license does this project use?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "who maintains this project?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how do I build this project?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how do I run the tests in this repo?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's the default branch?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what does the README say?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "summarize README.md",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "summarize src/core/config.ts",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what does src/tools/bash.ts do?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "explain the loop guard",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how does the loop guard work?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "explain how the retry logic in webhook.ts works",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "add a README section describing the repo layout",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "document the layout of src/domains in docs/",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "reorganize src/tools",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "refactor this repository to use workspaces",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explore whether we can drop the lodash dependency",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "find every caller of readSettings",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explore options for fixing the flaky test",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what is a monorepo?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how are git repositories organized internally?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "give me an overview of how TCP congestion control works",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explain the structure of a B-tree",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's the architecture of Kubernetes?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "give me a tour of Rust's ownership model",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's changed in this repo since yesterday?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's in the last commit?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "who touched src/core most recently?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what files changed on this branch?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "list the packages in the workspace",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "list the top-level folders",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "print the contents of src/domains/safety",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "count the lines of code in src/",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "which domain owns the ledger?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what does the docs/guide folder hold?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's under apps/?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how many tests does this repo have?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's inside the library folder?",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "dump the directory listing of tests/fixtures",
+			"expect": {
+				"orientation": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "show me what's in .github/workflows",
+			"expect": {
+				"orientation": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "What is a closure?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "hello there",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's the average time complexity of quicksort?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "good morning",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "thanks a lot",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Translate 'hello' to French",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Reply with only the word OK",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what does HTTP 429 mean?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "difference between TCP and UDP?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what is idempotency?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what can you do?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "cheers",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what does `git rebase` do in general?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explain what a race condition is",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how do I reverse a string in Python?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "say goodbye",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "write a haiku about compilers",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's 17 times 23?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's the regex for a digit?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "are you there?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what is JSON?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "nice work",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what port does HTTPS use by default?",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "convert 2 hours to minutes",
+			"expect": {
+				"direct": true,
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what model are you using right now?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "which skills do you have installed?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's in my .env?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "did the tests pass?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what's the value of RATE in src/math.ts?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "how do I run the tests here?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "which tools are you allowed to use in this session?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "is my git tree clean?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "thanks, now run the tests",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what does our retry helper do?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "sure, go for it",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "no, the other file",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what version of node is installed?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what's my current target?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "hello, can you fix the build?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what is the max line length in biome.json?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "summarize the last commit",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what time did the last CI run finish?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "how much disk is left on this machine?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "what does my settings.yaml bind the turn site to?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "which agents do you have?",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "yes",
+			"previous": "I found the bug: the pager drops the last row. I can patch the loop bound and add a test. Want me to go ahead?",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "explain what this repo's retry helper does",
+			"expect": {
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "sort them by size",
+			"previous": "Files over 1 MB:\n- a.bin\n- b.bin",
+			"expect": {
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Send a scout to find every use of readSettings and report back.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "scout"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have a worker fix the flaky pager test.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Spin up two agents: one reviews src/tools, the other reviews src/domains.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Use a coder agent to implement the --json flag on doctor.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "coder"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Dispatch the tester agent to add coverage for retry.ts.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "tester"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Run a council on whether to drop the evals tree.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Explore the whole codebase and report all dead modules.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "scout"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Audit every domain under src/domains for imports that cross boundaries, and report back per domain.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Review each of the eight provider runtimes for credential handling.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Fan out workers to update all six adapters to the new schema.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Map the entire repository and hand me a dependency graph of the domains.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "scout"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Delegate the changelog draft to a documenter.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "documenter"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Get the verifier to run every gate before I tag.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "verifier"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have the researcher pull what the docs say about prompt caching.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "researcher"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Ask the oracle whether this plan holds up.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "oracle"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Get scouts to inventory all environment variables across src, scripts and apps.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "scout"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Put a worker on the memory leak in the session ledger while I look at the docs.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Investigate why the whole test suite is slow; split it across workers by directory.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Survey src/interactive, src/session-control and src/engine separately, then compare them.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Send the debugger after the SIGKILL in the worker tests.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "debugger"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Let a sub-agent handle renaming the config type.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "In parallel: check the lint, the typecheck and the build, one worker each.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Use the dispatch tool to start the scout on the gateway.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "scout"
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Have agents explore this repo and write up what each domain does.",
+			"recipes": true,
+			"expect": {
+				"dispatch": true,
+				"direct": false,
+				"recipe": "scout"
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "List which workers you'd use to port the adapters. Don't start them.",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "How would you split this among agents? Just describe it.",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "What does the dispatch tool do?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "How many workers can run at once by default?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "why did the scout fail?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "explain what a council is in Clio",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "What does the scout agent do?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "don't use any agents, fix the typo yourself",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "do this yourself without workers: rename parseCfg",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "fix the null check in src/loader.ts",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "rename the helper in retry.ts",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "add a test for the pager",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "what does retry.ts export?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "show me the worker logs",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "cancel the running scout",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "is a worker still running?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "read src/a.ts and tell me what the first function does",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "run the lint",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "run the typecheck",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "write a one-line doc comment for parseCfg",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "no workers please, just answer: what is the default model?",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "describe the scouts' budget",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "plan the adapters migration; don't run anything",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "Which recipe would you choose for a doc page? Don't launch it.",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "Draft the dispatch call you'd make but do not send it",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
+		},
+		{
+			"task": "list agents",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "holdout"
+		},
+		{
+			"task": "show the last worker's result",
+			"expect": {
+				"dispatch": false
+			},
+			"split": "fit"
 		}
 	]
 }

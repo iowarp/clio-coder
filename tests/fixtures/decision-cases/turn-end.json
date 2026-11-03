@@ -1,5 +1,5 @@
 {
-	"description": "Final assistant messages labeled for the turnEnd site. Keys under expect are question ids, graded as probabilities: asksOperator (ends by asking the operator something), blocksOnDecision (stops on a decision the work is blocked on, so a greeting reply ending in a question is false), announcedUnstarted, claimsVerified, switchedGears (asked only when earlier is present), finishedUnit and midOperation. Cases marked verbatim are real endings from session ledgers, trimmed to the last 1800 characters; the rest are synthetic hard cases: bulleted options with no question mark, Want me to...?, Let me know if..., plain reports, a question inside a fenced block, and Now I'll run the tests. announcements. A key is labeled only where the answer is clear from the message.",
+	"description": "Final assistant messages labeled for the turnEnd site. Keys under expect are question ids, graded as probabilities: asksOperator (ends by asking the operator something), blocksOnDecision (stops on a decision the work is blocked on, so a greeting reply ending in a question is false), announcedUnstarted, claimsVerified, switchedGears (asked only when earlier is present), finishedUnit and midOperation. Cases marked verbatim are real endings from session ledgers, trimmed to the last 1800 characters; the rest are synthetic hard cases: bulleted options with no question mark, Want me to...?, Let me know if..., plain reports, a question inside a fenced block, and Now I'll run the tests. announcements. A key is labeled only where the answer is clear from the message. Split: a case with no split field or split fit is in the fit split; split holdout was written before any score on it was seen and is scored once against cuts chosen on fit. New cases alternate fit and holdout within each authored class.",
 	"site": "turnEnd",
 	"cases": [
 		{
@@ -794,6 +794,383 @@
 				"asksOperator": false,
 				"blocksOnDecision": false
 			}
+		},
+		{
+			"request": "set up the mirror",
+			"message": "Which remote should the mirror push to, `origin` or `backup`? I can't configure it until I know.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "upgrade the parser",
+			"message": "The upgrade breaks the two plugins in `plugins/`. Do you want them dropped or patched? I'm waiting on that before changing anything.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "delete the stale branches",
+			"message": "These nine branches have no upstream. Confirm and I'll delete them; I have not touched any yet.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "add auth to the webhook",
+			"message": "HMAC or bearer token? The rest of the work depends on this choice.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "port the script",
+			"message": "I need the target Python version before I start porting. What should I use?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "reformat the docs",
+			"message": "Should the tables stay in Markdown or move to the generated HTML? Holding here until you say.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "fix the timeout",
+			"message": "I can raise the timeout or add a retry, but they conflict. Pick one and I'll continue.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "rotate the key",
+			"message": "Rotating needs the vault path, which isn't in the repo. What is it?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "rename the package",
+			"message": "The new name clashes with an existing npm package. Tell me which alternative you want before I edit anything.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "merge the sprint",
+			"message": "Two commits conflict in `config.ts`. Whose version should win? I've stopped until you decide.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "clean the data",
+			"message": "I'm about to drop 4,000 rows flagged as duplicates. Is that OK? Nothing has been removed yet.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "fit"
+		},
+		{
+			"request": "publish the docs",
+			"message": "Staging or production? The publish command differs and I won't guess.",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": true
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "add the flag",
+			"message": "The flag is added and documented. Want me to add a test too?",
+			"tools": ["edit"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "hello",
+			"message": "Hey! What are we doing today?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "fix the lint",
+			"message": "All lint errors are fixed. Should I also tidy the imports?",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "run the suite",
+			"message": "All tests pass. Anything else you need?",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "thanks",
+			"message": "Happy to help. Is there anything else?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "write the summary",
+			"message": "Summary is in `notes.md`. Would you like a shorter version?",
+			"tools": ["write"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "hey",
+			"message": "Hello! How can I help?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "rename the file",
+			"message": "Renamed it. Do you want me to commit that?",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "update the readme",
+			"message": "The README is updated. Want me to open a PR for it as well?",
+			"tools": ["edit"],
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "who are you?",
+			"message": "I'm Clio, a coding agent for this repository. What would you like to do?",
+			"expect": {
+				"asksOperator": true,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "fix the retry",
+			"message": "Fixed the retry and added a regression test. The suite passes.",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "what does parseCfg return?",
+			"message": "It returns the parsed settings object, or null when the file is missing.",
+			"tools": ["read"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "add the note",
+			"message": "Added. Let me know if you want anything changed.",
+			"tools": ["edit"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "run the lint",
+			"message": "Lint fails with two errors in `src/a.ts`. I have not fixed them.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "review the plan",
+			"message": "The plan holds. I'd only flag that step 3 needs the new schema first.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "why did it fail?",
+			"message": "Why did the build fail? A missing import in `src/b.ts`. I added it and the build is green now.",
+			"tools": ["edit", "bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "show the prompt",
+			"message": "The file holds:\n\nWhat should I do next?\nWhich tool is best?\n\nI left it as it is.",
+			"tools": ["read"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "delete it",
+			"message": "I couldn't delete it: the path is outside the workspace and the rule refuses it. You can remove it from your shell.",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "start the migration",
+			"message": "I'm starting the migration now with the reader.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "explain caching",
+			"message": "Caching stores a computed result so the next request can skip the work. If you have follow-ups, feel free to ask.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "list the todos",
+			"message": "- wire the deploy step\n- rename the helper\n- update the docs",
+			"tools": ["read"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "commit it",
+			"message": "Committed as a1b2c3d.",
+			"tools": ["git"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "check the config",
+			"message": "The config is valid. No decisions are needed from you here.",
+			"tools": ["read"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "draft the release notes",
+			"message": "Drafted in `notes/release.md`. No further input needed.",
+			"tools": ["write"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "deploy to staging",
+			"message": "Deployed to staging; health checks are green.",
+			"tools": ["bash"],
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "what's the plan?",
+			"message": "Next I would migrate the reader, then the writer. Nothing has started.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
+		},
+		{
+			"request": "try the fix",
+			"message": "The fix didn't work: same crash at line 40. I'm out of ideas without more logs, so I'm stopping here.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "fit"
+		},
+		{
+			"request": "summarize the thread",
+			"message": "The thread settled on HMAC, and Ana owns the follow-up.",
+			"expect": {
+				"asksOperator": false,
+				"blocksOnDecision": false
+			},
+			"split": "holdout"
 		}
 	]
 }
