@@ -541,7 +541,7 @@ test("what ended a stream decides whether its last URL shows", async () => {
 		{ outcome: "abort", outputEndsOpen: true },
 		{ outcome: "timeout", outputEndsOpen: true },
 		{ outcome: "output-cap", outputEndsOpen: true },
-		{ outcome: "nonzero", signal: "SIGKILL", outputEndsOpen: true },
+		{ outcome: "nonzero", aborted: false, timedOut: false, signal: "SIGKILL", outputEndsOpen: true },
 	]) {
 		const panel = killedBashPanel(done, details);
 		strictEqual(plainRows(panel).includes(url), false, details.outcome);
@@ -704,7 +704,7 @@ test("every killed tool result holds each stream's tail, and exit codes tell a k
 	for (const details of [
 		{ outcome: "aborted", aborted: true },
 		{ outcome: "timed-out", timedOut: true },
-		{ outcome: "failed", exitCode: 137 },
+		{ outcome: "failed", aborted: false, timedOut: false, exitCode: 137 },
 	]) {
 		for (const [stdout, stderr] of [
 			["clone https://user:ZQXJ", "(empty)"],
@@ -729,6 +729,7 @@ test("every killed tool result holds each stream's tail, and exit codes tell a k
 	);
 	const verified = panelOf("verify", "verify: command exited with code 137 before judgement: clone https://user:ZQXJ", {
 		aborted: true,
+		timedOut: false,
 		exitCode: 137,
 	});
 	strictEqual(plainRows(verified).match(SECRET_LETTERS), null);
@@ -749,6 +750,8 @@ test("every killed tool result holds each stream's tail, and exit codes tell a k
 	for (const exitCode of [124, 128, 137, 143]) {
 		const panel = killedBashPanel("see https://user:ZQXJ", {
 			outcome: "nonzero",
+			aborted: false,
+			timedOut: false,
 			exitCode,
 			signal: null,
 			outputEndsOpen: true,
@@ -763,7 +766,14 @@ test("every killed tool result holds each stream's tail, and exit codes tell a k
 		strictEqual(shell.match(SECRET_LETTERS), null, `operator ${exitCode}`);
 	}
 	for (const exitCode of [1, 2, 127]) {
-		const panel = killedBashPanel(`see ${url}`, { outcome: "nonzero", exitCode, signal: null, outputEndsOpen: true });
+		const panel = killedBashPanel(`see ${url}`, {
+			outcome: "nonzero",
+			aborted: false,
+			timedOut: false,
+			exitCode,
+			signal: null,
+			outputEndsOpen: true,
+		});
 		strictEqual(plainRows(panel).includes(url), true, String(exitCode));
 		strictEqual(
 			renderBashTranscriptExecution({ command: "run", output: `see ${url}`, exitCode } as never, 400)
@@ -792,6 +802,88 @@ test("every killed tool result holds each stream's tail, and exit codes tell a k
 	};
 	strictEqual(cancelled("Local: http://localhost:5173\n").includes("http://localhost:5173"), true);
 	strictEqual(cancelled("Local: http://localhost:5173").includes("http://localhost:5173"), false);
+});
+
+test("what finished stays shown: an earlier message, a finished stderr line, a tool's own timeout", () => {
+	const url = "http://localhost:8080";
+	for (const stopReason of CUT_OFF) {
+		const fold = createWorkerProgressFold();
+		fold.observe(delta(`Server at ${url}`), 0);
+		fold.observe(message([{ type: "text", text: `Server at ${url}` }], "toolUse"), 1);
+		fold.observe(message([], stopReason), 2);
+		strictEqual(fold.snapshot().tailText, `Server at ${url}`, String(stopReason));
+		fold.restart();
+		strictEqual(fold.snapshot().tailText, `Server at ${url}`, `restart ${stopReason}`);
+	}
+	const tool = (name: string, event: "tool_execution_end" | "tool_execution_update", text: string, details: unknown) => {
+		const panel = createChatPanel({ now: () => 1_000, getOutputStyle: () => "detailed" });
+		const result = { content: [{ type: "text", text }], details };
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: "c", toolName: name, args: {} } as never);
+		panel.applyEvent({
+			type: event,
+			toolCallId: "c",
+			toolName: name,
+			isError: false,
+			...(event === "tool_execution_end" ? { result } : { partialResult: result, args: {} }),
+		} as never);
+		return plainRows(panel);
+	};
+	const progress = { progress: { elapsedMs: 1 } };
+	const running = (stdout: string, stderr: string) =>
+		`run_script: running\n--- stdout tail ---\n${stdout}\n--- stderr tail ---\n${stderr}`;
+	strictEqual(
+		tool("run_script", "tool_execution_update", running("(no output yet)", `Listening on ${url}\n`), progress).includes(
+			url,
+		),
+		true,
+	);
+	strictEqual(
+		tool(
+			"run_script",
+			"tool_execution_update",
+			running("(no output yet)", `Listening on ${url}\nnext line\n`),
+			progress,
+		).includes(url),
+		true,
+	);
+	strictEqual(
+		tool("run_script", "tool_execution_update", running(`Listening on ${url}\n`, "(no output yet)"), progress).includes(
+			url,
+		),
+		true,
+	);
+	strictEqual(
+		tool("run_script", "tool_execution_update", running("(no output yet)", "clone https://user:ZQXJ"), progress).match(
+			SECRET_LETTERS,
+		),
+		null,
+	);
+	strictEqual(
+		tool("run_script", "tool_execution_update", running("clone https://user:ZQXJ", "(no output yet)"), progress).match(
+			SECRET_LETTERS,
+		),
+		null,
+	);
+	const collect = `worker r1 said: Server at ${url}\n\ncollect waited 5ms; the runs keep running normally.`;
+	strictEqual(tool("monitor", "tool_execution_end", collect, { timedOut: true, waitedMs: 5 }).includes(url), true);
+	strictEqual(
+		tool("monitor", "tool_execution_end", collect, {
+			outcome: "failed",
+			exitCode: 137,
+			timedOut: true,
+			waitedMs: 5,
+		}).includes(url),
+		true,
+	);
+	strictEqual(
+		tool("panes", "tool_execution_end", `Local: ${url}\n\nwaited`, {
+			action: "wait",
+			state: "running",
+			timedOut: true,
+		}).includes(url),
+		true,
+	);
 });
 
 test("replay and /resume hide what the live view hid", async () => {

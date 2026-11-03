@@ -295,6 +295,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let settled = false;
 	/** Whether the last text seen belongs to a model message that stopped on purpose. */
 	let streamCompleted = false;
+	/** Whether text has arrived since the last message ended, so a cut can still land inside it. */
+	let textOpen = false;
 	let completed = false;
 	let durable = "";
 	/** True after one assistant message ended and before the next message emits prose. */
@@ -454,6 +456,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			const delta = workerTextDelta(event);
 			if (delta.length > 0) {
 				streamCompleted = false;
+				textOpen = true;
 				const separator = betweenAssistantMessages && tailText.length > 0 && !tailText.endsWith("\n") ? "\n\n" : "";
 				betweenAssistantMessages = false;
 				changed = appendTail(admitDelta(`${separator}${delta}`, nowMs)) || changed;
@@ -475,18 +478,20 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				tailGuard = null;
 				if (delta.length === 0 && tailText.trim().length === 0) {
 					changed = appendTail(durableText) || changed;
+					textOpen = true;
 				}
 				betweenAssistantMessages = true;
 			}
-			if (
-				event.type === "message_end" &&
-				isRecord(event.message) &&
-				event.message.role === "assistant" &&
-				!streamCompleted
-			) {
-				durable = holdUnresolvedUserinfo(durable);
-				dropHeldTail();
-				changed = true;
+			if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
+				if (!streamCompleted) {
+					// The cut belongs to this message: an empty one leaves what an earlier message finished alone.
+					if (durableText.trim().length > 0) durable = holdUnresolvedUserinfo(durable);
+					if (textOpen) {
+						dropHeldTail();
+						changed = true;
+					}
+				}
+				textOpen = false;
 			}
 
 			const action = toolEventAction(event);
@@ -542,7 +547,8 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			pendingActionsById.clear();
 			durable = "";
 			betweenAssistantMessages = false;
-			if (!streamCompleted) dropHeldTail();
+			if (textOpen) dropHeldTail();
+			textOpen = false;
 			settled = false;
 			streamCompleted = false;
 			completed = false;

@@ -1409,32 +1409,34 @@ function exitMeansKilled(code: unknown): boolean {
 function killedWithOpenOutput(result: unknown, text: string): boolean {
 	const details = detailsOf(result);
 	if (details?.outputEndsOpen === false) return false;
-	if (
-		details !== null &&
-		(KILLED_OUTCOMES.has(details.outcome) ||
+	if (details === null) return KILLED_STATUS_RE.test(text.slice(text.lastIndexOf("\n\n") + 2));
+	if (KILLED_OUTCOMES.has(details.outcome) || isPlainObject(details.progress)) return true;
+	// Process results carry both flags. A monitor or pane wait reports only a timeout of its own wait, and a monitor's
+	// exit code is its worker's, so neither says this text was cut (#446).
+	if ("aborted" in details && "timedOut" in details) {
+		return (
 			details.aborted === true ||
 			details.timedOut === true ||
 			typeof details.signal === "string" ||
-			exitMeansKilled(details.exitCode) ||
-			isPlainObject(details.progress))
-	) {
-		return true;
+			exitMeansKilled(details.exitCode)
+		);
 	}
-	if (details !== null && "outcome" in details) return false;
+	if ("outcome" in details) return false;
 	return KILLED_STATUS_RE.test(text.slice(text.lastIndexOf("\n\n") + 2));
 }
 
 /**
- * Where a killed process's output ends depends on the tool. run_script lists each stream's tail, and its trailing lines
- * are not marked apart from stderr, so every stderr line holds. bash ends its output in the paragraph before its status
- * line, and past the cap before the tail note too. A single paragraph ends in the output itself.
+ * Where a killed process's output ends depends on the tool. run_script lists each stream's tail. A running one ends its
+ * text with its stderr, whose last line is what can still grow. A finished one follows stderr with trailing lines not
+ * marked apart from it, so every stderr line holds. bash ends its output in the paragraph before its status line, and
+ * past the cap before the tail note too. A single paragraph ends in the output itself.
  */
-function holdKilledOutput(text: string): string {
+function holdKilledOutput(text: string, running: boolean): string {
 	const lines = text.split("\n");
 	const stderr = lines.lastIndexOf(STDERR_TAIL_MARK);
 	if (stderr > 0 && lines.includes(STDOUT_TAIL_MARK)) {
 		lines[stderr - 1] = holdUnresolvedUserinfo(lines[stderr - 1] ?? "");
-		for (let index = stderr + 1; index < lines.length; index += 1) {
+		for (let index = running ? lines.length - 1 : stderr + 1; index < lines.length; index += 1) {
 			lines[index] = holdUnresolvedUserinfo(lines[index] ?? "");
 		}
 		return lines.join("\n");
@@ -1451,7 +1453,7 @@ function holdKilledOutput(text: string): string {
 function unwrapResultEnvelope(result: unknown): unknown {
 	const unwrapped = resultEnvelopeText(result);
 	return typeof unwrapped === "string" && killedWithOpenOutput(result, unwrapped)
-		? holdKilledOutput(unwrapped)
+		? holdKilledOutput(unwrapped, isPlainObject(detailsOf(result)?.progress))
 		: unwrapped;
 }
 
