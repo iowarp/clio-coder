@@ -24,7 +24,7 @@ reminders, the `# Memory` section, handoff offers, and handoff seeding.
 
 ### Turn memory off
 
-To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, and `/memory` lists each eligible lesson as `off, recall only`, because `memory_recall` can still read it. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
+To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, `/memory` lists each eligible lesson as `off`, and `memory_recall` refuses with `memory is off`. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
 
 ### Inspect the memory bank
 
@@ -202,8 +202,8 @@ grants permission to execute the command. Source:
 `src/domains/memory/intervention.ts` and `src/domains/memory/lesson-projection.ts`.
 
 `/memory` opens on **Lessons**: the reusable lessons eligible for this session,
-what each concerns, whether the main prompt carries it (`off, recall only`
-while memory is off), its evidence and its track record. Task memory, review candidates and diagnostics occupy separate
+what each concerns, whether the main prompt carries it (`off` while memory is
+off), its evidence and its track record. Task memory, review candidates and diagnostics occupy separate
 tabs. Opening the view does not activate memory (`src/interactive/memory-overlay.ts`).
 
 ## Prepare observation notes for compaction
@@ -516,7 +516,11 @@ background model. The step records `information_flow_blocked`, the telemetry row
 carries the admission diagnostic as `refusalReason`, and the session shows one
 `Memory skipped target <id>: <reason>` notice per session. The chat fallback is
 admitted against the same policy, so a restricted session can end with no model
-step at all. See [Information flow](information-flow.md).
+step at all. From its first label on, a restricted session also files no new lesson, starts no
+completed-task retention for a task after the label and promotes no entry, because a durable record carries no
+label and reaches every later route. Text recorded before the label can still be
+filed or gain evidence: history review stops at the label, and a retention already
+running, an interrupted one for a task finished before the label or a record already filed holds only what came before it. See [Information flow](information-flow.md).
 
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its
@@ -782,14 +786,17 @@ Ordinary turns receive no snapshot. The skill writes the handoff to
 private status and secret-shaped values do not cross the export boundary. The
 parser also accepts the older `clio-task-memory` fence language and `version: 1`
 snapshots in handoff files written by earlier builds. Version 1 snapshots seed
-a bank but cannot be promoted, because they carry no source provenance.
+a bank unless the project declares information-flow source rules, and cannot be
+promoted, because they carry no source provenance.
 `clio-coder context reset` removes `.clio-coder/handoffs/`.
 
 When `/resume` restores a session with an id different from the previous one,
 or a resumed session opens at startup, Clio checks only the newest
 `handoff-*.md` by modification time (at most 1,000,000 bytes) and offers
 `/memory seed` if it contains a valid snapshot. Seeding is explicit and
-deduplicated by class and normalized content. It resets injection attribution for
+deduplicated by class and normalized content. The session takes the flow
+restrictions of the snapshot's source session first, and under source rules a
+source whose ledger cannot be read is refused. It resets injection attribution for
 the new entries, and the master kill switch disables both the offer and the
 writes. Navigation that parks, resumes or switches turns in the session clears the
 prior bank before the new session can observe it. `clio-coder memory promote

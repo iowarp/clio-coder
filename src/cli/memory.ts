@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import {
 	approveMemoryRecord,
@@ -17,6 +18,10 @@ import {
 	rejectMemoryRecord,
 	type TaskMemoryHandoffEntry,
 } from "../domains/memory/index.js";
+import { recallApprovedFlowPolicy } from "../domains/safety/flow-policy-snapshot.js";
+import { loadProjectSafetyPolicy } from "../domains/safety/project-policy.js";
+import { FLOW_RESTRICTION_ENTRY_TYPE } from "../domains/session/history.js";
+import { openSession } from "../engine/session.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder memory list
@@ -269,6 +274,14 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			const snapshot = await readReviewedHandoff(handoffPath);
+			const flowRefusal = promotionFlowRefusal(
+				snapshot.source.sessionId,
+				selection.scope === "repo" ? selection.repository.key : process.cwd(),
+			);
+			if (flowRefusal !== null) {
+				printError(`${flowRefusal}; nothing was promoted`);
+				return 1;
+			}
 			const entries = selectHandoffEntries(snapshot, parsed.entryIds);
 			for (const entry of entries) {
 				const result = await proposeMemoryPromotion(
@@ -345,6 +358,36 @@ function scopeSelection(parsed: ParsedMemoryArgs): MemoryScopeSelection | undefi
 	}
 	if (parsed.agentId === undefined) throw new Error("agent scope requires --agent");
 	return { scope: "agent", agent: memoryAgentIdentity(parsed.agentId) };
+}
+
+/** Rules the running policy would hold: the file's, the approved snapshot's, or an unknown set when either cannot be read. */
+function projectDeclaresFlowRules(cwd: string): boolean {
+	const policy = loadProjectSafetyPolicy(cwd);
+	if (policy.path === null) return false;
+	if (!policy.valid || (policy.informationFlow.sources?.length ?? 0) > 0) return true;
+	const recalled = recallApprovedFlowPolicy(dirname(dirname(policy.path)));
+	if (recalled.kind === "unavailable") return true;
+	return recalled.kind === "approved" && (recalled.approved.informationFlow.sources?.length ?? 0) > 0;
+}
+
+/**
+ * A record has no flow label and reaches every later route, so a restricted source promotes nothing. The same answer as
+ * `/memory seed`: any workspace's session is found by id, and under source rules a source that cannot be read is refused.
+ */
+function promotionFlowRefusal(sessionId: string, cwd: string): string | null {
+	let turns: ReadonlyArray<unknown>;
+	try {
+		turns = openSession(sessionId).turns();
+	} catch (error) {
+		if (!projectDeclaresFlowRules(cwd)) return null;
+		const why = error instanceof Error ? error.message : String(error);
+		return `the information-flow provenance of source session ${sessionId} cannot be read (${why}), and this project declares source rules`;
+	}
+	const restricted = turns.some((raw) => {
+		const entry = raw as { kind?: unknown; customType?: unknown } | null;
+		return entry?.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE;
+	});
+	return restricted ? `session ${sessionId} carries an information-flow restriction` : null;
 }
 
 async function readReviewedHandoff(path: string): Promise<ReviewedTaskMemoryHandoffSnapshot> {

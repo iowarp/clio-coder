@@ -42,6 +42,7 @@ import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 const PARTIAL = "[Clio Coder] CANCEL_PARTIAL_ONCE";
 const THOUGHT = "CANCEL_THINKING_ONCE";
+const SKILL_REQUEST = { name: "context-handoff", args: "", source: "slash-command", installed: true } as const;
 const target = { id: "cancellation-fixture", runtime: "litellm", url: "http://fixture.invalid:4000" };
 const model = litellm.synthesizeModel(target, "unknown-cancellation-model", null) as Model<"openai-completions">;
 model.reasoning = true;
@@ -218,7 +219,14 @@ function readFixtureEntries(path: string): SessionEntry[] {
 	return entries;
 }
 
-function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: VisionSidecar, visionCapable = false) {
+function fixture(
+	initialMode: WireMode,
+	readTurn?: () => void,
+	visionSidecar?: VisionSidecar,
+	visionCapable = false,
+	refuseHandoffSkill?: (inlinedPaths: ReadonlyArray<string>) => string | null,
+	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void,
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
@@ -277,6 +285,8 @@ function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: V
 		getSettings: () => settings,
 		...(visionSidecar ? { visionSidecar } : {}),
 		...(readTurn ? { readTurn } : {}),
+		...(refuseHandoffSkill ? { refuseHandoffSkill } : {}),
+		...(labelReferencedPaths ? { labelReferencedPaths } : {}),
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
@@ -657,6 +667,50 @@ it("the real chat loop persists and displays one genuine gateway failure without
 		f.next();
 		await f.loop.submit("Next");
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a refused context-handoff request sends nothing and starts no turn", { timeout: 15_000 }, async () => {
+	const f = fixture("success", undefined, undefined, false, () => "use /handoff");
+	const notices: string[] = [];
+	f.loop.onEvent((event) => {
+		if (event.type === "notice" && event.admission?.reason === "handoff-skill-refused") notices.push(event.text);
+	});
+	try {
+		await f.loop.submit("write the brief", { pendingSkillRequests: [SKILL_REQUEST] });
+		deepStrictEqual(notices, ["use /handoff"]);
+		strictEqual(f.wire().calls(), 0);
+		f.next();
+		await f.loop.submit("Next");
+		strictEqual(f.wire().calls(), 1, "only the skill request is refused");
+	} finally {
+		await f.close();
+	}
+});
+
+it("a refused context-handoff request is judged on the file it inlines and labels nothing", {
+	timeout: 15_000,
+}, async () => {
+	let labeled = false;
+	const f = fixture(
+		"success",
+		undefined,
+		undefined,
+		false,
+		(paths) => (paths.includes("secrets/notes.txt") ? "remove the file" : null),
+		() => {
+			labeled = true;
+		},
+	);
+	try {
+		await f.loop.submit("write the brief", {
+			pendingSkillRequests: [SKILL_REQUEST],
+			workingContextPaths: ["secrets/notes.txt"],
+		});
+		strictEqual(labeled, false);
+		strictEqual(f.wire().calls(), 0);
 	} finally {
 		await f.close();
 	}

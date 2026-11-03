@@ -33,6 +33,10 @@ export interface FlowLedger {
 	refusal(): string | null;
 	/** Record restrictions that just entered the session. Persists before returning when it can. */
 	absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
+	/** What any session's ledger carries, current or not. Throws when that ledger cannot be read. */
+	restrictionsOf(sessionId: string): FlowRestrictionSet | null;
+	/** Whether a session carries a restriction. An unreadable ledger answers true, since the ledger never downgrades on failure. */
+	isRestricted(sessionId: string): boolean;
 }
 
 /** The union of every flow-restriction entry in a session's ledger. */
@@ -142,6 +146,16 @@ export function createFlowLedger(deps: {
 		}
 	};
 
+	const restrictionsOf = (sessionId: string): FlowRestrictionSet | null => {
+		// A label absorbed before the session existed belongs to it from here on, and nothing else has to have asked first.
+		sync();
+		return mergeFlowRestrictions(
+			flowRestrictionsFromEntries(deps.readEntries(sessionId)),
+			known.get(sessionId),
+			...(pending.get(sessionId) ?? []).map((item) => item.set),
+		);
+	};
+
 	return {
 		current() {
 			sync();
@@ -168,5 +182,52 @@ export function createFlowLedger(deps: {
 			}
 			flush();
 		},
+		restrictionsOf,
+		isRestricted(sessionId) {
+			try {
+				return (restrictionsOf(sessionId)?.restrictions.length ?? 0) > 0;
+			} catch {
+				return true;
+			}
+		},
 	};
+}
+
+export interface HandoffSeedFlowDeps {
+	ledger: Pick<FlowLedger, "absorb" | "refusal" | "restrictionsOf">;
+	/** A session to hold the labels. A pending label would land on whichever session opens next, seeded or not. */
+	ensureSession: () => void;
+	hasSourceRules: () => boolean;
+}
+
+/**
+ * What a task-memory seed needs before its first entry reaches the bank. A snapshot is what a restricted session knew,
+ * written where any later session can load it, and each session's ledger is the only authority for what it carries.
+ */
+export function admitHandoffSeedFlow(
+	deps: HandoffSeedFlowDeps,
+	sourceSessionId: string | null,
+): { refusal: string } | { ruleIds: ReadonlyArray<string> } {
+	let labels: FlowRestrictionSet | null;
+	try {
+		if (sourceSessionId === null) throw new Error("the snapshot names no source session");
+		labels = deps.ledger.restrictionsOf(sourceSessionId);
+	} catch (error) {
+		if (!deps.hasSourceRules()) return { ruleIds: [] };
+		const why = error instanceof Error ? error.message : String(error);
+		return {
+			refusal: `its source's information-flow provenance cannot be read (${why}), and this project declares source rules`,
+		};
+	}
+	if (labels === null || labels.restrictions.length === 0) return { ruleIds: [] };
+	try {
+		deps.ensureSession();
+	} catch (error) {
+		return {
+			refusal: `no session could hold its information-flow restrictions (${error instanceof Error ? error.message : String(error)})`,
+		};
+	}
+	deps.ledger.absorb(labels, { tool: "memory-seed" });
+	const refusal = deps.ledger.refusal();
+	return refusal !== null ? { refusal } : { ruleIds: [...new Set(labels.restrictions.map((entry) => entry.ruleId))] };
 }

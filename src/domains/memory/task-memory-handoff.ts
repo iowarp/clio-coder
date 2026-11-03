@@ -67,9 +67,10 @@ export interface TaskMemoryHandoffOffer {
 }
 
 export type TaskMemoryHandoffSeedOutcome =
-	| ({ status: "seeded"; source: string } & TaskMemoryHandoffSeedResult)
+	| ({ status: "seeded"; source: string; flowRuleIds: ReadonlyArray<string> } & TaskMemoryHandoffSeedResult)
 	| { status: "disabled" }
-	| { status: "not-found" };
+	| { status: "not-found" }
+	| { status: "refused"; reason: string };
 
 function exportEntry(entry: TaskMemoryEntry): TaskMemoryHandoffEntry {
 	return {
@@ -240,14 +241,19 @@ export function seedTaskMemoryFromNewestHandoff(
 	bank: TaskMemoryBank,
 	cwd: string,
 	enabled: boolean,
+	/** Refuses the snapshot or labels the session for it, before any entry reaches the bank. */
+	admit?: (snapshot: TaskMemoryHandoffSnapshot) => { refusal: string } | { ruleIds: ReadonlyArray<string> },
 ): TaskMemoryHandoffSeedOutcome {
 	if (!enabled) return { status: "disabled" };
 	const artifact = readNewestTaskMemoryHandoff(cwd);
 	if (artifact === null) return { status: "not-found" };
+	const admission = admit?.(artifact.snapshot) ?? { ruleIds: [] };
+	if ("refusal" in admission) return { status: "refused", reason: admission.refusal };
 	return {
 		status: "seeded",
 		...seedTaskMemoryBank(bank, artifact.snapshot),
 		source: handoffSourceName(artifact.path),
+		flowRuleIds: admission.ruleIds,
 	};
 }
 

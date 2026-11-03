@@ -31,6 +31,8 @@ export interface LessonFeedbackPorts {
 	stateDir(): string;
 	/** The current session and its workspace; a read-only query. */
 	session(): { id: string; cwd: string } | null;
+	/** A session carrying an information-flow restriction files nothing: a record has no label and reaches every later route. */
+	sessionFlowRestricted?(sessionId: string): boolean;
 	/** A gate decision the operator should see. */
 	notice(line: string): void;
 	/** A store failure; never steers a session. */
@@ -374,6 +376,7 @@ export class MemoryLessonFeedback {
 	#propose(entries: ReadonlyArray<TaskMemoryEntry>, kind: "delivered" | "held" | null, scopeSessionId?: string): void {
 		const session = this.#ports.session();
 		const sessionId = scopeSessionId ?? session?.id ?? null;
+		if (sessionId !== null && this.#ports.sessionFlowRestricted?.(sessionId) === true) return;
 		// Ports resolve inside the chain: an unavailable data root is a store failure, never a relative write.
 		const proposal = Promise.resolve()
 			.then(() =>

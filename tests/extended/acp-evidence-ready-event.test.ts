@@ -158,6 +158,39 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 	});
 });
 
+it("ACP shows the client a context-handoff refusal and its pointer to /handoff", async () => {
+	const peer = fakeTransport();
+	let emit: (event: unknown) => void = () => {};
+	const refusedChat: AcpServerChat = {
+		...chat,
+		onEvent: (handler) => {
+			emit = handler;
+			return () => {
+				emit = () => {};
+			};
+		},
+		submit: async () => {
+			emit({
+				type: "notice",
+				level: "warning",
+				surface: "transcript",
+				text: "context-handoff refused: Use /handoff <goal>.",
+				admission: { reason: "handoff-skill-refused" },
+			});
+		},
+	};
+	const served = serveClioAcpAgent({ transport: peer.transport, chat: refusedChat, cwd: process.cwd() });
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+		await peer.call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "hi" }] });
+		ok(JSON.stringify(peer.notifications).includes("Use /handoff <goal>."));
+	} finally {
+		peer.transport.close();
+		strictEqual(await served, 0);
+	}
+});
+
 it("ACP returns a typed context admission refusal without exposing dropped notice prose", async () => {
 	const peer = fakeTransport();
 	let emit: (event: unknown) => void = () => {};

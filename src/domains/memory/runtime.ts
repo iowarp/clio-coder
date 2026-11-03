@@ -63,6 +63,7 @@ export interface MemoryRuntimeInfrastructure {
 	dataDir?(): string;
 	cwd?(): string;
 	lessonSource?(): CompletedLessonSource | null;
+	sessionFlowRestricted?(sessionId: string): boolean;
 	/**
 	 * The completed task a closed session of this workspace ended on, rebuilt
 	 * from its own ledger, or null for another workspace's or an unreadable one.
@@ -214,6 +215,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			return stateDir;
 		},
 		session: () => this.#infrastructure?.currentSession?.() ?? null,
+		sessionFlowRestricted: (sessionId) => this.#infrastructure?.sessionFlowRestricted?.(sessionId) === true,
 		notice: (line) => {
 			try {
 				this.#infrastructure?.notice?.(line);

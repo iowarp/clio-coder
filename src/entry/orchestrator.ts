@@ -132,6 +132,7 @@ import {
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
+	type TaskMemoryHandoffSnapshot,
 	type TaskMemoryModelClient,
 	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
@@ -375,7 +376,7 @@ import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
-import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
+import { admitHandoffSeedFlow, createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
 import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
@@ -2924,8 +2925,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		observerHistoryTokens: () =>
 			memoryObservationCapacity(providers, effectiveSettingsForDispatch?.() ?? getCurrentSettings()),
 		lessonSource: () => {
+			// A retained lesson carries no label and reaches every later session, whatever route it was reviewed under.
+			const meta = session?.current();
+			if (meta && flowLedger.isRestricted(meta.id)) return null;
 			return memoryActiveEntries()?.lesson ?? null;
 		},
+		sessionFlowRestricted: (sessionId) => flowLedger.isRestricted(sessionId),
 		closedLessonSource: (sessionId) => {
 			const ledger = sessionLedgersForRoots(clioStateDir(), [memoryWorkspaceRoot()]).find(
 				(candidate) => candidate.sessionId === sessionId,
@@ -2933,7 +2938,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (!ledger) return null;
 			const read = parseSessionEntries(readFileSync(ledger.path, "utf8"), ledger.path);
 			const active = filterEntriesToActivePath(read.entries, undefined);
-			// A restricted ledger is reviewed only under its own session's flow admission.
+			// A restricted ledger is never reviewed; see lessonSource.
 			if (
 				read.errors.length > 0 ||
 				active.some((entry) => entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE)
@@ -4106,6 +4111,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Read-only recall over the stores the main prompt draws from, under the
 		// same repository and runtime gates; the agent scope stays with workers.
 		memoryRecall: {
+			enabled: memoryEnabledNow,
 			onRecall: (ids) => memoryOwner.recordRecall(ids),
 			bank: () => taskMemoryBank.snapshot(),
 			records: () => loadMemoryRecordsSync(clioDataDir()),
@@ -4186,8 +4192,32 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
+	const admitHandoffSeed = (snapshot: TaskMemoryHandoffSnapshot) =>
+		admitHandoffSeedFlow(
+			{
+				ledger: flowLedger,
+				ensureSession: () => {
+					if (!session || session.current()) return;
+					const settings = getCurrentSettings();
+					session.create({
+						cwd: process.cwd(),
+						...(settings.chat.target ? { target: settings.chat.target } : {}),
+						...(settings.chat.model ? { model: settings.chat.model } : {}),
+					});
+					persistCurrentThinkingLevel();
+					taskBoard.snapshot();
+				},
+				hasSourceRules: () => (safety?.policy?.informationFlow?.().rules.length ?? 0) > 0,
+			},
+			snapshot.version === 2 ? snapshot.source.sessionId : null,
+		);
 	const seedCurrentTaskMemoryFromHandoff = () => {
-		return seedTaskMemoryFromNewestHandoff(taskMemoryBank, process.cwd(), getCurrentSettings().context.memory.enabled);
+		return seedTaskMemoryFromNewestHandoff(
+			taskMemoryBank,
+			process.cwd(),
+			getCurrentSettings().context.memory.enabled,
+			admitHandoffSeed,
+		);
 	};
 	if (resumedSessionAtBoot) {
 		const offer = getTaskMemorySeedOffer();
@@ -4918,6 +4948,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		flushSystemOne,
 		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
+		// The skill writes a plain file that a later session reads with no label; /handoff carries the labels.
+		refuseHandoffSkill: (inlinedPaths) => {
+			// Read through current(): labels absorbed before a session exists have no session id to ask about.
+			if ((flowLedger.current()?.restrictions.length ?? 0) === 0 && flowLedger.refusal() === null) {
+				const inlinedLabels =
+					inlinedPaths.length > 0 ? (safety?.policy?.flowRestrictionsForPaths?.(inlinedPaths, process.cwd()) ?? null) : null;
+				return inlinedLabels === null
+					? null
+					: "context-handoff refused: this request references a file under an information-flow restriction, and a handoff file carries no label. Nothing was sent and this session stays unrestricted. Send the request without that file.";
+			}
+			return `context-handoff refused: this session carries an information-flow restriction, and a handoff file carries no label. ${
+				options.headless
+					? "A headless run has no /handoff; hand off from an interactive session, where /handoff <goal> copies the restrictions into the new session."
+					: "Use /handoff <goal>, which copies the restrictions into the new session."
+			}`;
+		},
 		getTaskMemoryHandoffSource: () => {
 			// Memory off stops handoff seeding, and the empty block still told the model to copy it into the handoff.
 			if (!memoryEnabledNow()) return "";
@@ -5429,6 +5475,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 									taskBoard.snapshot();
 								},
 								getDecisionBoard: () => decisionBoard.snapshot(),
+								absorbFlow: (set) => flowLedger.absorb(set, { tool: "handoff" }),
 							}),
 						}
 					: {}),
@@ -5697,6 +5744,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								taskBank: () => taskMemoryBank.snapshot(),
 								currentSession: () => session.current(),
 								dataDir: clioDataDir(),
+								sessionFlowRestricted: (sessionId) => flowLedger.isRestricted(sessionId),
 							}),
 						}
 					: {}),
@@ -6171,6 +6219,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		beforeShellEntryRecorded,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
+		absorbFlow: (set) => flowLedger.absorb(set, { tool: "handoff" }),
+		sessionFlowRestricted: (sessionId) => flowLedger.isRestricted(sessionId),
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),
 		userTasks,
 		getTaskMemoryStatus: () => {
