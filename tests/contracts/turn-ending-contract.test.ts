@@ -125,7 +125,9 @@ it("continues only an armed plan that has not asked or changed files, once", () 
 	rule.evaluate({
 		hook: "after_tool",
 		toolName: ToolNames.AskUser,
-		toolArgs: { questions: [{ question: "How should we proceed?", options: [{ label: "Keep the plan (Recommended)" }] }] },
+		toolArgs: {
+			questions: [{ question: "How should we proceed?", options: [{ label: "Keep the plan (Recommended)" }] }],
+		},
 	});
 	deepStrictEqual(rule.evaluate({ hook: "turn_end", text: "Plan kept.", metadata: { stopReason: "stop" } }), []);
 	start();
