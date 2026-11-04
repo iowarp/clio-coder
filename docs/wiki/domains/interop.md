@@ -1,375 +1,142 @@
 ---
-title: "Domains interop"
-summary: "How Clio detects installed coding agents (Claude Code, Codex, OpenCode, Pi, Antigravity and others), projects their resources into portable Clio packages, and wires them as ACP delegation peers behind an explicit consent record."
+title: "Foreign agent interop: detection, import and adoption"
+summary: "How Clio detects locally installed foreign coding agents, inventories their resources, and plans, applies or releases the import of Claude Code, Codex and bare-skill packages as foreign-trust Clio library packages. Read this before changing detection, package normalization, or the library import flow."
 sources:
   - "src/domains/interop/index.ts"
-  - "src/domains/interop/registry.ts"
   - "src/domains/interop/detect.ts"
+  - "src/domains/interop/registry.ts"
   - "src/domains/interop/inventory.ts"
-  - "src/domains/interop/projection.ts"
-  - "src/domains/interop/adopt.ts"
   - "src/domains/interop/foreign.ts"
+  - "src/domains/interop/adopt.ts"
   - "src/domains/interop/import.ts"
-  - "src/domains/interop/consent.ts"
-  - "src/domains/interop/peer-modes.ts"
-  - "src/domains/interop/state.ts"
+  - "src/domains/interop/projection.ts"
 symbols:
-  - "INTEROP_AGENT_KINDS"
+  - "InteropDomainModule"
   - "detectInteropAgents"
+  - "resolveOnPath"
+  - "INTEROP_AGENT_KINDS"
   - "discoverInteropInventory"
+  - "detectForeignPlugin"
+  - "projectForeignPlugin"
+  - "planLibraryImport"
+  - "applyLibraryImport"
+  - "releaseLibraryImport"
+  - "libraryImportPlanSummary"
+  - "renderLibraryImportPlan"
+  - "preparePortablePackage"
+  - "prepareForeignPackage"
+  - "unmetRequirements"
   - "planInteropAdoption"
   - "applyInteropAdoption"
-  - "prepareForeignPackage"
-  - "acceptInteropAgents"
-  - "peerModeCapabilities"
 tests:
-  - "tests/extended/interop-boundary.test.ts"
+  - "tests/extended/library-import.test.ts"
   - "tests/extended/interop-adoption.test.ts"
-  - "tests/contracts/external-cli-connectors.test.ts"
 invariants:
-  - "Foreign agents' home and project directories are read-only for Clio: every registered agent's own paths appear in foreignAgentDirs(), and the safety policy blocks writes there at every posture."
-  - "Adopted and imported resources are published with trust \"foreign\" and remain unusable until integrations.projectResources.trustProjectImports is enabled."
-  - "A standing delegation decision only suppresses re-proposal while the detection fingerprint it was made against still holds; a changed binary path or version re-proposes the agent."
-  - "Detection never runs a foreign agent's work command and never reads under a foreign session, history, cache, or state directory; version probes run in a scratch HOME with sandboxed XDG directories."
+  - "A library import plan is installable only when the reviewed source has a recognized manifest or a bare SKILL.md, the package id is not already installed in the requested scope, and no package requirement is unmet; otherwise the plan action is blocked."
+  - "Applying an import refuses without explicit approval, and refuses when the source tree fingerprint or the re-prepared package digest differs from the reviewed plan."
+  - "A root plugin.json always takes precedence over hidden vendor manifests; two hidden vendor manifests without an explicit format are ambiguous and yield no format."
+  - "Applying a library import always releases the plan's retained source, whether the apply installs, refuses or throws."
+  - "Installed foreign packages carry foreign trust and import provenance; the trust gate setting is reported as admission data, not as proof of runtime availability."
+  - "Detection never starts a foreign agent's work command; version probes run with a scratch HOME and a 2000 ms timeout."
 validate:
-  - "pnpm run test:file -- tests/extended/interop-boundary.test.ts"
+  - "pnpm run test:file -- tests/extended/library-import.test.ts"
+  - "pnpm run test:file -- tests/extended/interop-adoption.test.ts"
 ---
 
-# Domains interop
+# Foreign agent interop: detection, import and adoption
 
-The interop domain is Clio's peer-adoption surface. It answers three questions about
-external coding agents that live on the same machine: which ones are installed
-(`detect.ts`), what safe content they own that Clio can take a data-only copy of
-(`inventory.ts`, `projection.ts`, `adopt.ts`, `import.ts`, `foreign.ts`), and how an
-operator consents to wiring one of them as an ACP delegation peer
-(`consent.ts`, `peer-modes.ts`). It owns no model calls and never starts a foreign
-session; everything it reports is a fact about disk state plus the operator's recorded
-decisions.
+This area lets Clio see which foreign coding agents are installed on the host and bring their skills, agents, prompts and plugin packages into Clio's own library. A reader needs it when changing how a foreign agent is detected, how a Claude Code or Codex plugin is normalized, or how the explicit `library import` flow plans, applies and releases a package.
 
-The domain is composed through `src/domains/interop/index.ts`, which exports the
-`InteropDomainModule` built from `InteropManifest` (name `interop`, `dependsOn:
-["config"]`) and `createInteropBundle` in `src/domains/interop/extension.ts`. The
-bundle exposes the `InteropContract` (`detect`, `lastReport`, `proposals`,
-`configured`, `accept`, `decline`), read by the interactive overlay in
-`src/interactive/overlays/interop.ts` and by the CLI in `src/cli/configure-interop.ts`
-and `src/cli/interop.ts`.
+## What this area does
 
-## The registry is the single source of truth
+The domain has three responsibilities, each with a separate module:
 
-`INTEROP_AGENT_KINDS` in `src/domains/interop/registry.ts` is a pure-data table of the
-nine known peers in preference order: `claude-code`, `codex`, `opencode`, `gemini`,
-`copilot`, `cursor`, `antigravity`, `pi`, and the `agents` convention (`.agents`
-skills shared across hosts). Each entry carries the executables to resolve
-(`binaryNames`), the home and project directories the agent owns, its skill and
-prompt roots, project-relative instruction files, and three launch facts: an ACP
-recipe (`acp`), a headless runtime id (`headlessRuntimeId`), and the resources-domain
-labels used when counting discovered skills (`skillSource`, `adoptionProvider`).
+1. **Detection.** `detectInteropAgents` in `src/domains/interop/detect.ts` resolves each known agent's binary on `PATH` and its user install directory, optionally probes the version, and optionally runs a resource inventory. It returns an `InteropReport` of `InteropAgentRecord` values. It keeps standing consent decisions from the previously recorded report so a declined agent is not re-proposed on every run.
+2. **Inventory.** `discoverInteropInventory` in `src/domains/interop/inventory.ts` walks a known agent's user and project roots (described by the `INVENTORIES` layouts in `src/domains/interop/registry.ts`) and returns the discovered skills, agents, prompts, hooks, MCP declarations and plugin items.
+3. **Import and adoption.** The `src/domains/interop/foreign.ts`, `src/domains/interop/adopt.ts` and `src/domains/interop/import.ts` modules detect a package's format from its manifest, convert its markdown components into Clio's schema, and publish the result through the library install seam with foreign trust.
 
-The registry order is load-bearing: `interopSourceRank` breaks skill-source ties by
-this index, so a symlinked skill resolves to the same winner on every machine.
-`foreignAgentDirs()` derives the write-protected list from the same table, including
-`legacyUserDirs` and `legacyProjectDirs` entries such as `~/.antigravitycli/` and
-`.antigravitycli/`.
+Two anchor modules sit beside these: `src/domains/interop/projection.ts` holds shared path-safety and fingerprint helpers (`safeName`, `tree`, `reviewFingerprint`, `digest`), and `src/domains/interop/index.ts` re-exports the public surface and binds `InteropDomainModule`, which wires the manifest and `createInteropBundle` from `src/domains/interop/extension.ts`.
 
-A second table, `INVENTORIES`, attaches per-agent discovery layout to five kinds
-(`claude-code`, `codex`, `antigravity`, `copilot`, `opencode`): the user root,
-project roots, resource roots with expected extensions (for example `opencode` adds
-`agent/`, `command/`, and executable `plugins/`/`tools/` roots), declaration files for
-hooks and MCP servers (`settings.json` `hooks` key, `.mcp.json` `mcpServers`), plugin
-directories and manifest file names, an optional installed-registry file, and an
-evidence-only `listCommand`. The two tables are joined by a map spread at the bottom
-of the registry, so `INTEROP_AGENT_KINDS` entries carry `inventory` only when
-extended.
+## Agent registry
+
+`INTEROP_AGENT_KINDS` in `src/domains/interop/registry.ts:110:INTEROP_AGENT_KINDS` is the ordered list of known agents (Claude Code, Codex and the others declared there). Its order is documented as load-bearing: equal-precedence skill roots break ties by this index, so a symlinked skill resolves the same way on every machine. Each entry names binaries, a user directory, project skill and prompt roots, and an optional `inventory` key. The `INVENTORIES` table in the same file maps agent ids to `InteropInventoryLayout` objects that list markdown roots (`skills`, `agents`, `commands`), declarations (`settings.json`, `.mcp.json`, `hooks/hooks.json`, and similar), plugin directories and plugin manifest names. `interopAgentUserDir` resolves an agent's home from its `homeEnv` variable when set, which is why detection passes `process.env` through.
 
 ## Detection flow
 
-`detectInteropAgents` (`src/domains/interop/detect.ts`) probes every registered kind
-and returns an `InteropReport` (`version: 1`, `detectedAt`, per-agent facts). For each
-kind it:
+`detectInteropAgents` (`src/domains/interop/detect.ts:173:detectInteropAgents`) is called from several surfaces: `src/cli/interop.ts`, `src/cli/interop-inspect.ts`, `src/cli/configure-interop.ts`, `src/interactive/overlays/interop.ts` and `src/domains/lifecycle/doctor.ts`. The sequence inside it is:
 
-1. Resolves the binary with `resolveOnPath`, which walks `$PATH` with `accessSync` and
-   never spawns a shell. Unreadable directories flip the result to `unknown` rather
-   than guessing `absent`.
-2. Checks the agent's home directory for an install root (`installDirOf`), honoring
-   the per-agent `homeEnv` override (e.g. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-   `ANTIGRAVITY_HOME`).
-3. Verifies the ACP adapter with `adapterPresence`: an `npx -y pkg@version` recipe is
-   only `present` when the exact pinned version exists in the local
-   `node_modules`; a different global executable or a version mismatch reports
-   `unknown`. `npx` is never run during detection.
-4. Optionally runs a bounded `--version` probe (`probeVersion: true`) for a binary that
-   already resolved. The probe runs in a `mkdtempSync` scratch directory that becomes
-   `HOME`/`USERPROFILE`, with every XDG and per-agent env variable redirected into it,
-   a 2000 ms timeout, and a 4 KiB output cap, so host and project profiles stay
-   read-only.
-5. Optionally discovers the inventory (`inventory: true`) via
-   `discoverInteropInventory`, which overwrites `skillCount` and `projectArtifacts`
-   with real counts.
+- The binary is resolved with `resolveOnPath`. Absolute names are checked directly. Relative names are searched on `PATH` without a shell. An unreadable directory is reported as `unknown`, not `absent`.
+- When `probeVersion` is true, the probe for each present binary starts first and all probes run concurrently. `probeVersion` runs the binary with `--version` in a scratch `HOME`, with a 2000 ms timeout and a 4096-byte output cap, using `runCommandVector` from `src/core/safe-exec.ts`.
+- When `inventory` is true and the agent has an inventory layout, `discoverInteropInventory` supplies `skillCount` and `projectArtifacts`. Without a probe, a version is kept only if the prior record refers to the same binary.
+- An agent is kept in the report when it is detected, or unconditionally when an inventory was requested and the agent has one.
+- Prior `decision`, `decidedAt` and `decidedFingerprint` fields are copied from the previous report, and each record gets a fingerprint from `interopFingerprint`.
 
-A record is `detected()` when the binary is present, the install directory exists, or
-skill/project artifacts were counted. The proposal fingerprint
-(`interopFingerprint`) hashes kind id, binary path, version, and the exact ACP recipe,
-deliberately excluding skill and artifact counts so that adding a foreign skill does
-not re-propose an already-declined agent. Prior decisions from the recorded report
-(`state.ts`) are merged into each new record.
+ACP adapter presence is determined without running `npx`. `adapterPresence` (`src/domains/interop/detect.ts:66:adapterPresence`) looks for a local `node_modules` copy of the recipe's npm package under the working directory, read from its `package.json` (the package name is the recipe's `npmPackage` value, and the check is at the pinned version), and otherwise returns `unknown`.
 
-Downstream, `src/domains/interop/state.ts` persists the report as
-`interop.json` under Clio's state directory (`clioStateDir()`). `readInteropReport`
-parses it defensively: an unreadable or wrong-version file degrades to `null`, which
-the domain treats as "propose nothing" rather than acting on a half-read decision
-record.
+## Import flow
 
-## Resource discovery and projection
+The library import path is `planLibraryImport` → optional `applyLibraryImport` → `releaseLibraryImport`, exposed through `src/domains/interop/import.ts`. The CLI and any later TUI use the same seam.
 
-`discoverInteropInventory` (`src/domains/interop/inventory.ts`) walks the declared
-roots only — never sessions, history, or executable modules. It applies hard bounds:
-4096 files, 2 MiB per file (`inventoryText`), and 12 directory levels; symbolic links
-are listed as `unknown` and never followed. It records skills (any `SKILL.md`),
-agents and prompts by frontmatter or TOML name, hooks and MCP server declarations by
-name only (the comment notes configuration values can carry credentials, so only keys
-are stored), and plugins, including marketplace evidence for `claude-code`
-(`plugins/installed_plugins.json`), `codex` (`plugins/cache` with
-`cacheMarketplace`), and `copilot` (local `directory` marketplaces resolved through
-`.claude-plugin/marketplace.json`).
+`planLibraryImport(input, options)` (`src/domains/interop/import.ts:95:planLibraryImport`):
 
-Projection turns host text into Clio recipe bytes through three helpers in
-`src/domains/interop/projection.ts`:
+- Resolves `input` either as a GitHub source (`parsePluginGithubSource`) or as a local path, and fetches it into a staging root through `fetchPluginSource` from `src/domains/plugins/catalog.ts`.
+- Computes a full-tree `reviewFingerprint` of the staged root.
+- Calls `prepare`, which runs `detectForeignPlugin` and then one of `preparePortablePackage`, `prepareBareSkillPackage` or `prepareForeignPackage` according to the detected format. A `none` detection throws, and the throw is caught and recorded as a blocking reason.
+- Checks `unmetRequirements` for the package's declared requirements, and refuses a package whose id is already installed in the same scope.
+- Returns a plan whose `action` is `install` or `blocked`, with `files`, `digest`, `destination`, `origin` and `reviewFingerprint` filled in when a package was prepared.
 
-- `projectSkill` parses the skill directory's `SKILL.md` frontmatter, drops every key
-  in `HOST_SKILL_KEYS` (host execution policy: `allowed-tools`, `hooks`, `mcpServers`,
-  `model`, `context`, etc.), injects `clio-coder: { audit: "unknown" }`, and relocates
-  the files under `skills/<id>/`. It reports omitted frontmatter keys and companion
-  files that retained text references (`requiredOmissions`).
-- `projectAgent` accepts Markdown or TOML agent definitions and rewrites them into a
-  read-only Clio recipe: `capabilityClass: "read-only"`, required tool `read` with
-  optional `grep`/`find`/`ls`, a 24-toolCall budget, and tags `["interop"]`. Every
-  frontmatter key other than name, description, and (when binding) skills is reported
-  as omitted; host tools, permissions, model and sandbox settings never survive.
-- `projectPrompt` keeps only `description` and the argument hint
-  (`PROMPT_KEYS`), rewriting the command as a Clio prompt recipe.
+`applyLibraryImport(plan, approved, options)` (`src/domains/interop/import.ts:182:applyLibraryImport`) is the only path that writes:
 
-`safeName` normalizes identifiers to lowercase alphanumerics with hyphens, capped at
-45 characters. `tree` bounds the source walk (16 MiB, 2048 files, depth 12, no
-symlinks) and, in `dataOnly` mode, drops executables and `FORBIDDEN_PARTS` (hooks,
-output-styles, scripts, tools, node_modules, .git, vendor manifest directories) into
-an `omitted` list instead of failing. `digest` hashes the projected file map;
-`reviewFingerprint` hashes the whole source tree including paths, modes, hidden
-manifests, and omitted files, so a policy change cannot slip past review by keeping
-the projected text equal.
+- Without `approved`, it returns `published: false` with the diagnostic "Approval required; nothing installed."
+- A plan that is not `install`, or that lacks `files` or `digest`, returns its reasons instead of installing.
+- It recomputes `reviewFingerprint` over the source root. A mismatch throws "Source changed after review", which is converted to a diagnostic.
+- It re-prepares the source and requires both the reviewed digest and the current digest to match the plan. Otherwise it throws "Plan changed after review".
+- It writes the reviewed files into a temporary staging directory, reads the manifest with `readPluginManifest`, and calls `installInteropPackage` with `trust: "foreign"`, the `expectedId`, the `expectedDigest`, and the plan's `origin`.
+- On a published result it runs `validateLibraryPackage` on the installed root and returns the validation as a separate field.
+- The `finally` block removes the staging directory and always calls `releaseLibraryImport`, which invokes the plan's `cleanup`.
 
-## Adoption: inventory item to portable package
+The `admission` field of the result reports `trust: "foreign"`, the gate name `integrations.projectResources.trustProjectImports`, and `gateEnabled` set to the caller's `trustProjectImports` value or `"unknown"`. The module documentation states that publication, validation and runtime admission are separate facts. Component availability is reported by the inventory, not by this result.
 
-`planInteropAdoption` (`src/domains/interop/adopt.ts`) takes a host id and an
-`InteropInventory` and produces an `InteropAdoptionPlan` whose entries are either
-`install` or `skip` with a reason. The flow per inventory item:
+`libraryImportPlanSummary` strips `files` and `cleanup` so a plan can be serialized. `renderLibraryImportPlan` produces the human-readable review text, including `CONVERT`, `UNSUPPORTED` and `SKIP` lines for each outcome.
 
-1. Executable kinds (`hook`, `mcp`, `executable`) and unsupported kinds are skipped
-   with the reason that they are executable configuration or presentation data.
-2. The item is projected through `prepared`, which for plugins calls
-   `detectForeignPlugin` (`src/domains/interop/foreign.ts`) and then either
-   `preparePortablePackage` or `prepareForeignPackage`, and for loose skills/agents/
-   prompts calls `projectSkill`/`projectAgent`/`projectPrompt` and wraps the result in
-   a synthetic `plugin.json`.
-3. `unmetRequirements` verifies every declared requirement is already installed in the
-   target scope and, for foreign packages, that a vendor dependency's satisfied
-   package actually came from an import of the same vendor format (a same-named
-   native package does not satisfy a vendor dependency).
-4. Duplicate detection compares skill content digests (`normalizedSkillHash`), prompt
-   bodies, package id/version, and full resource content digests against installed
-   plugins and Clio's own skill and prompt roots; collisions are skipped, never
-   replaced.
-5. The projected `plugin.json` gains an `ai.iowarp.clio.interop` extension block
-   recording host, source path, scope, format, and `untrusted: true`.
+Focused coverage in `tests/extended/library-import.test.ts` exercises this flow. Its test "normalizes a Claude-only package, installs it with import provenance, and leaves the source untouched" calls `planLibraryImport(root, { cwd, scope: "user" })`, asserts `plan.action === "install"`, `plan.format === "claude-code"` and `plan.detection.manifestPath === ".claude-plugin/plugin.json"`, asserts that the plan summary omits `files` and `cleanup`, then calls `applyLibraryImport(plan, true, { trustProjectImports: false })` and asserts `published === true` with installed id `claude-pack`. Other cases in the same file cover a bare skill (`plan.format === "agent-skill"`), a bare skill with a `scripts/` directory that is blocked, a root plugin.json that takes precedence over a hidden manifest, and a broken portable manifest that blocks apply. Those tests were read for their assertions; they were not executed for this page.
 
-`preparePortablePackage` refuses to silently change the meaning of a portable package:
-it throws when a retained recipe references an omitted companion file, when a
-package's declared kind has no projectable public component, or when recipe content
-fails library validation. `prepareForeignPackage` normalizes Claude Code and Codex
-plugin formats through `projectForeignPlugin`, which reads vendor manifests
-(`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`), maps vendor dependencies
-to `plugin:<name>` requirements, and lists every host feature it will never activate
-(`unsupported`): hooks, MCP servers, LSP, apps, monitors, output styles, scripts,
-tools, and host settings. `detectForeignPlugin` gives the root `plugin.json` absolute
-precedence; two hidden vendor manifests are ambiguous and require an explicit format.
+## Format detection
 
-`applyInteropAdoption(plan, approved)` enforces the review boundary: it refuses when
-`approved` is false; it re-runs `prepared` on the source and throws when the current
-digest differs from the reviewed one ("Source or plan changed after review"); it
-re-checks requirements; it stages the reviewed bytes into a `mkdtempSync` directory;
-and it publishes through `installInteropPackage` (`src/domains/interop/install.ts`),
-which is a thin seam over `installLibraryPackage` in the plugins domain with
-`trust: "foreign"` and an `interopOrigin` recording host, source, format, and
-marketplace. The staging directory is removed in a `finally` block.
+`detectForeignPlugin` (`src/domains/interop/foreign.ts:42:detectForeignPlugin`) applies a fixed order, documented in its comment:
 
-## Library import: explicit foreign package seam
+- `FOREIGN_MANIFESTS` lists `plugin.json` (portable), `.claude-plugin/plugin.json` (claude-code) and `.codex-plugin/plugin.json` (codex).
+- A root `plugin.json` always wins. If it is not a regular file, a diagnostic is produced and the format remains `portable`. An explicit `--format` is ignored with a diagnostic, and hidden vendor manifests are reported as ignored.
+- With no hidden manifest, a root `SKILL.md` yields `agent-skill`. Otherwise the result is `none`, with a diagnostic that lists nested skill directories when there are any.
+- With one hidden manifest, its format is used. With two and no explicit format, the result is `none` and `ambiguous: true`. An explicit format selects the matching hidden manifest, or returns `none` with the names of the manifests that are present.
 
-`src/domains/interop/import.ts` provides a second entry point for packages the
-operator points at explicitly (`clio-coder library import`):
-`planLibraryImport` fetches a local path or GitHub source, computes the full-tree
-`reviewFingerprint`, projects the package through the same portable/foreign routes,
-and returns a `LibraryImportPlan` that retains the fetched bytes and a `cleanup`
-callback. `applyLibraryImport` refuses drift by re-fingerprinting the source and
-re-projecting it, then publishes with `trust: "foreign"` and reports publication,
-native validation, and trust admission as three separate facts. The admission fact
-names the gate setting
-`integrations.projectResources.trustProjectImports`, whose default is `false`
-(`src/core/defaults.ts`); `libraryImportPlanSummary` strips the reviewed bytes and
-cleanup callback so plans stay JSON-safe.
+`projectForeignPlugin` (`src/domains/interop/foreign.ts:250:projectForeignPlugin`) converts a vendor manifest and its components into a `ForeignPluginProjection`. Each component becomes a `ForeignResourceOutcome` with `status` set to `converted` or `unsupported`, along with any omitted frontmatter fields and omitted files.
 
-## ACP delegation and the consent model
+## Adoption of portable, bare-skill and foreign packages
 
-Wiring a detected peer as a delegation agent is a consent flow, not a side effect of
-detection. `interopProposals` (`src/domains/interop/consent.ts`) filters a report down
-to agents that (a) have an ACP recipe in the registry, (b) are `present`, (c) are not
-already in `settings.integrations.externalAgents.entries`, and (d) have no standing
-decision whose `decidedFingerprint` still matches the record's fingerprint. A declined
-agent whose binary or version moved therefore comes back as a fresh proposal.
+`src/domains/interop/adopt.ts` provides the preparers used by `prepare` in `src/domains/interop/import.ts`:
 
-`acceptInteropAgents(ids, report)` builds each proposal's delegation entry with
-`delegationEntryForKind`, which takes the registry's ACP recipe and applies the
-operator's global timeouts plus `toolGovernance: "clio-coder-policy"`. The entry is
-appended to `integrations.externalAgents.entries` under the shared settings lock
-(re-read on each update, so two concurrent acceptors cannot drop each other's entry),
-and the decision is recorded with `acceptInteropAgents`'s state-file lock in
-`updateRecords`, which merges the caller's report with stored records before writing
-so an earlier decision in the same review is never erased by a stale report copy.
-`declineInteropAgents` records the same fields with `decision: "declined"` and wires
-nothing.
+- `preparePortablePackage` (`src/domains/interop/adopt.ts:62:preparePortablePackage`) reads a root `plugin.json` package and writes a normalized `plugin.json` into the result files.
+- `prepareBareSkillPackage` (`src/domains/interop/adopt.ts:165:prepareBareSkillPackage`) handles a directory whose root is a `SKILL.md`.
+- `prepareForeignPackage` (`src/domains/interop/adopt.ts:205:prepareForeignPackage`) handles Claude Code and Codex manifests.
+- `unmetRequirements` (`src/domains/interop/adopt.ts:323:unmetRequirements`) checks each requirement against installed, loadable packages in the scope. When a vendor is given, a same-named native package does not satisfy a vendor dependency unless its install record shows import or interop provenance with the same format. Dependency cycles are reported.
 
-The consent semantics the overlay and CLI show the operator:
+`planInteropAdoption` and `applyInteropAdoption` in `src/domains/interop/adopt.ts` (`src/domains/interop/adopt.ts:371` and `src/domains/interop/adopt.ts:545`) form a second plan/apply pair for resources discovered inside an installed host agent. Their behavior is not traced in this page beyond their names and signatures, so no claims are made about their branch logic here.
 
-- `INHERITED_PROJECT_CONTEXT = "none"`: a wired peer inherits no project context; the
-  key is omitted from the written entry precisely so it tracks that default. The peer
-  receives task text only, never the project projection.
-- `toolGovernance: "clio-coder-policy"`: Clio mediates permission requests the ACP
-  peer reports; the peer's own tool surface is not fully observable.
-- `needsNetworkInstall` on a proposal flags that the pinned adapter is not locally
-  verified, so `npx` may fetch it on first delegation.
-
-Downstream, the agents domain consumes the same entries:
-`src/domains/agents/extension.ts` synthesizes an `AgentSpec` for each
-`integrations.externalAgents.entries` item (source `custom`, description naming the
-command) and lists them alongside discovered recipes, so `/delegate <id> <task>`
-reaches the peer. `assertAgentIdNamespace` rejects discovered recipes whose ids clash
-with wired peer ids.
-
-## Peer mode projection
-
-`peerModeCapabilities` (`src/domains/interop/peer-modes.ts`) turns one detected record
-into launch choices without starting anything. It emits up to three modes, each with a
-status (`ready`/`experimental`/`unavailable`), a reason, a setup action, and the Clio
-command that would reach it:
-
-- **acp**: unavailable until the binary is present, an ACP delegation entry exists, and
-  `record.adapter === "present"`; then experimental, because launch is configured but
-  authentication and permission behavior need a live task probe.
-- **headless**: unavailable until the binary is present and at least one configured
-  target uses the kind's `headlessRuntimeId`; target ids are explicit, never inferred
-  from a runtime id alone.
-- **pane**: an interactive handoff through a Herdr pane host; `ready` only when the
-  binary is present and the pane host is observably available (`paneAvailable` is
-  `null` for static inspectors, which reports `experimental`).
-
-`isInteropHeadlessRuntime` is the registry's membership test for worker runtimes.
-
-## Trust boundary for project-adopted resources
-
-Adoption and import never grant trust. Installed records carry `trust: "foreign"`
-(origin kind `interop` or `import`), and the resources domain marks foreign skills and
-prompts `trusted: false` until the operator enables
-`integrations.projectResources.trustProjectImports`. The contract tests in
-`tests/extended/interop-boundary.test.ts` demonstrate both halves of the boundary:
-the safety policy engine blocks `Write` to `.claude/settings.json` with reason
-`path-policy:noWritePaths` under every posture while allowing `Read` of
-`.claude/skills/x/SKILL.md`, and loose compatibility prompts discovered from foreign
-roots stay discovery-only (`expandPromptTemplateInput` refuses them with a refusal
-naming the template). Once the trust setting flips, imported package content is
-admitted; loose compatibility roots that were never explicitly imported remain
-inactive, as the prompt loader's refusal text states.
-
-```mermaid
-flowchart TD
-    A[clio-coder interop inspect / adopt] --> B[detectInteropAgents]
-    B --> C[INTEROP_AGENT_KINDS registry]
-    B --> D[state.ts interop.json]
-    B --> E[discoverInteropInventory]
-    E --> F[planInteropAdoption]
-    F --> G[preparePortablePackage / prepareForeignPackage]
-    G --> H[applyInteropAdoption]
-    H --> I[installInteropPackage]
-    I --> J[installLibraryPackage trust=foreign]
-    B --> K[interopProposals]
-    K --> L[acceptInteropAgents]
-    L --> M[integrations.externalAgents.entries]
-    M --> N[agents domain /delegate]
-    J --> O[trustProjectImports gate]
-```
+`src/domains/interop/projection.ts` supplies the helpers the preparers depend on: `safeName` and `FORBIDDEN_PARTS` for path-safe names, `DATA_EXTENSIONS` for text-only data, `tree` for walking a source, `reviewFingerprint` and `digest` for the fingerprints compared at apply time, and `prose` for text handling. The fingerprint is what enforces that the reviewed bytes equal the bytes applied.
 
 ## Extension seams
 
-- **New peer**: add an entry to `INTEROP_AGENT_KINDS` in `src/domains/interop/registry.ts`
-  (binary names, directories, ACP recipe, runtime id). Detection, consent, and
-  `foreignAgentDirs` pick it up automatically.
-- **New discovery layout**: add an `INVENTORIES` entry; only kinds with one gain
-  `discoverInteropInventory` support (`inventory` becomes `unknown` with a diagnostic
-  otherwise). The CLI's `adopt` subcommand already restricts hosts to kinds with an
-  inventory (`claude-code`, `codex`, `antigravity`, `copilot`, `opencode`).
-- **New foreign format**: extend `FOREIGN_MANIFESTS` and `projectForeignPlugin` in
-  `src/domains/interop/foreign.ts`; the adoption and import routes share both, so one
-  change covers both entry points.
-- **Host keys that must never cross the boundary**: extend `HOST_SKILL_KEYS` and
-  `FORBIDDEN_PARTS` in `src/domains/interop/projection.ts`.
-- **Wiring surface**: the overlay reads only the `InteropContract`; new interactive
-  views go through `src/domains/interop/index.ts` exports, never internal modules.
-
-## Focused tests
-
-`tests/extended/interop-adoption.test.ts` is the adoption contract suite. Representative
-cases: `detectInteropAgents({ inventory: true, probeVersion: true })` against a fake
-`claude` binary that writes marker files proves the version probe touches neither the
-foreign home nor the project; a fake `codex-acp` at version `1.12.0` reports the
-adapter `unknown` while `1.10.0` reports `present`, pinning the adapter check to the
-exact registry version; adoption of a `.claude/agents/review.md` with `tools:
-Bash,Write` and `hooks: dangerous` yields an installed recipe containing `read-only`
-and none of the dangerous text; a Claude marketplace plugin records origin
-`{ kind: "interop", host: "claude-code", marketplace: "test-market" }` and leaves the
-source bytes untouched; a portable bundle whose prompt text references omitted
-`actions/*.json` companions is refused with "references omitted companions"; and a
-requirement that is disabled at approval time blocks the install ("re-check after
-approval").
-
-`tests/extended/interop-boundary.test.ts` pins the consent and write-boundary
-contracts: accepting `codex` and declining `opencode` in one review persist
-independently and leave the proposal list empty; the safety engine blocks writes to
-`.claude/` at postures `undefined` and `"confirmed"` while allowing reads;
-`foreignAgentDirs()` covers legacy Antigravity roots; and foreign compatibility
-prompts are discovery-only.
-
-`tests/contracts/external-cli-connectors.test.ts` exercises `peerModeCapabilities`
-for `codex` and the external CLI runtimes that headless delegation targets.
+- A new agent is added by appending an entry to `INTEROP_AGENT_KINDS` in `src/domains/interop/registry.ts`. If it has an inventory, add a matching key to `INVENTORIES` with its roots and declarations. Preserve the list order, because it is a tie-breaker for skill precedence.
+- A new vendor manifest format is added to `FOREIGN_MANIFESTS` in `src/domains/interop/foreign.ts`, which also requires extending `ForeignPackageFormat` in `src/domains/plugins/types.ts` and the preparers in `src/domains/interop/adopt.ts`. This page did not inspect `src/domains/plugins/types.ts` in full, so the exact type change is unverified.
+- Consent decisions and the interop report are persisted through `readInteropReport` and `writeInteropReport` from `src/domains/interop/state.ts`. That module was re-exported by `src/domains/interop/index.ts` but was not read for this page.
 
 ## Things to watch when editing
 
-- Registry order is load-bearing for skill-source tie-breaking; do not reorder
-  `INTEROP_AGENT_KINDS` without checking `interopSourceRank` consumers.
-- `INTEROP_AGENT_KINDS` entries without an `INVENTORIES` layout are intentional
-  (e.g. `pi`, `agents`); do not "complete" them, or `discoverInteropInventory` will
-  start walking roots the registry never declared.
-- The detection fingerprint excludes `skillCount`/`projectArtifacts` on purpose;
-  adding them there will make declined agents re-propose every time a foreign skill
-  appears.
-- `reviewFingerprint` and `digest` guard the plan/apply boundary; any change that
-  alters projection output must keep the apply-time re-projection byte-identical, or
-  `applyInteropAdoption` will report "Source or plan changed after review".
-- `HOST_SKILL_KEYS`, `PROMPT_KEYS`, and `FORBIDDEN_PARTS` are the allow/deny lists for
-  host execution policy; a new host key that reaches a recipe frontmatter survives to
-  install and is silently trusted.
-- `unmetRequirements` is consulted twice (plan and apply); vendor-provenance checks
-  require the installed package's origin to be an `import`/`interop` record of the
-  same format — a hand-installed native package with the right id will not satisfy a
-  vendor dependency.
-- The interop state file is versioned (`version: 1`) and parses defensively; new
-  record fields need a corresponding parser in `parseAgent` (`state.ts`), otherwise
-  they vanish on read.
-- Tests in `tests/extended/` run only under `pnpm run test:full`, never in CI; a
-  regression that belongs in CI belongs in `tests/contracts/` instead.
+- Apply depends on two fingerprints. Changing how `reviewFingerprint` or `digest` covers files, modes or omitted entries changes which edits count as drift.
+- `applyLibraryImport` must keep releasing the plan in its `finally` block. Its own comment states that apply always releases the plan. The caller contract depends on this.
+- `detectInteropAgents` copies consent decisions from the prior report. Dropping that copy causes declined agents to be proposed again.
+- Version probes run a foreign binary. The scratch `HOME` and the timeout are the only guards in `probeVersion`, so do not widen the environment passed to it.
+- `unmetRequirements` treats a same-named native package as insufficient for a vendor requirement. Relaxing that check changes the trust boundary between native and imported packages.
+
+Related pages: the plugin library that stores installed packages is documented in [Domains plugins](plugins.md), and the trust and admission gate is covered in [Domains safety](safety.md). The CLI entry points are in [Cli](../cli.md).

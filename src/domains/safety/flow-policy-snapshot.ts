@@ -14,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync, unlinkSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import {
@@ -25,6 +25,7 @@ import {
 } from "../../core/workspace-trust.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { InformationFlowPolicyInput } from "./information-flow.js";
+import { loadProjectSafetyPolicy } from "./project-policy.js";
 
 export interface ApprovedFlowPolicy {
 	readonly policyHash: string;
@@ -173,4 +174,14 @@ export function rememberApprovedFlowPolicy(
 	} catch (error) {
 		return `approved information-flow snapshot could not be written (${error instanceof Error ? error.message : String(error)})`;
 	}
+}
+
+/** Rules the running policy would hold: the file's, the approved snapshot's, or an unknown set when either cannot be read. */
+export function projectDeclaresFlowRules(cwd: string): boolean {
+	const policy = loadProjectSafetyPolicy(cwd);
+	if (policy.path === null) return false;
+	if (!policy.valid || (policy.informationFlow.sources?.length ?? 0) > 0) return true;
+	const recalled = recallApprovedFlowPolicy(dirname(dirname(policy.path)));
+	if (recalled.kind === "unavailable") return true;
+	return recalled.kind === "approved" && (recalled.approved.informationFlow.sources?.length ?? 0) > 0;
 }

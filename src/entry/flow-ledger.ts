@@ -16,9 +16,14 @@
  * are retried on a session switch; persistence is retried on every later call.
  */
 
+import type { MemoryCommitScope } from "../domains/memory/commit-state.js";
+import type { CompletedLessonSource } from "../domains/memory/history-review.js";
+import { completedLessonSource } from "../domains/memory/index.js";
 import type { FlowRestrictionSet } from "../domains/safety/index.js";
 import { isFlowRestrictionSet, mergeFlowRestrictions } from "../domains/safety/index.js";
 import type { SessionContract } from "../domains/session/index.js";
+import { parseSessionEntries } from "../domains/session/index.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 
 export const FLOW_RESTRICTION_ENTRY_TYPE = "clio_coder_flow_restriction";
 
@@ -50,6 +55,28 @@ function flowRestrictionsFromEntries(entries: ReadonlyArray<unknown>): FlowRestr
 		if (isFlowRestrictionSet(data)) sets.push(data);
 	}
 	return mergeFlowRestrictions(...sets);
+}
+
+/**
+ * The completed task a closed session's ledger offers for lesson review, or null. The label check reads the whole
+ * ledger, not the active path: the session's restriction is one union, so a label on an abandoned branch still restricts
+ * it, as `isRestricted` answers for a live session.
+ */
+export function closedSessionLessonSource(
+	ledgerText: string,
+	ledgerPath: string,
+	sessionId: string,
+	root: string,
+): { scope: MemoryCommitScope; source: CompletedLessonSource } | null {
+	const read = parseSessionEntries(ledgerText, ledgerPath);
+	if (
+		read.errors.length > 0 ||
+		read.entries.some((entry) => entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE)
+	)
+		return null;
+	const active = filterEntriesToActivePath(read.entries, undefined);
+	const source = completedLessonSource(active, root);
+	return source ? { scope: { sessionId, branchAnchorTurnId: active.at(-1)?.turnId ?? null }, source } : null;
 }
 
 export function createFlowLedger(deps: {

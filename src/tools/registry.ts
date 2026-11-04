@@ -68,7 +68,7 @@ import { YOLO_FLOOR_REASON_PREFIX } from "../domains/safety/yolo-floor.js";
 import type { WorkspaceSnapshotOutcome, WorkspaceSnapshotRequest } from "../domains/workspace-snapshots/store.js";
 import { type WorkspaceSnapshotTrigger, workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
 import type { ImageContent } from "../engine/types.js";
-import { approvalGiver, withApprovalNote } from "./approval-note.js";
+import { approvalGiver, gateReasonText, withApprovalNote } from "./approval-note.js";
 import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
@@ -1984,7 +1984,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			entry.resolve(
 				guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ??
 					parkDenial(
-						parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason),
+						parkAnsweredBlockedVerdict(entry.decision, entry.call.tool, loopReason ?? reason, entry.meta.gateReason),
 						reason,
 						options?.denied,
 						options?.unattended,
@@ -2949,6 +2949,7 @@ function parkAnsweredBlockedVerdict(
 	decision: SafetyDecision,
 	tool: string,
 	reason: string,
+	gateReason?: string,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
 	const guidance = headlessDenialGuidance(decision, reason);
 	const detail = [reason];
@@ -2961,6 +2962,9 @@ function parkAnsweredBlockedVerdict(
 					? undefined
 					: decision.rejection.short;
 		if (cause) detail.push(cause);
+		// A card would name what parked it, and headless has no card, so the denial says it.
+		const gate = gateReasonText(gateReason);
+		if (gate !== "") detail.push(`why it needed a decision: "${gate}"`);
 		detail.push("This call was denied; no approval is pending.");
 		if (guidance !== null) detail.push(guidance);
 	}
@@ -3194,6 +3198,11 @@ function buildToolHookInput(
 			metadata.resultFingerprint = createHash("sha256").update(result.output).digest("hex");
 			metadata.resultBytes = Buffer.byteLength(result.output, "utf8");
 		}
+		// Unlike the stagnation identity this covers a failing result too: a poll
+		// that exits nonzero while it waits still reports new information (#445).
+		const outcomeText = result.kind === "ok" ? result.output : result.kind === "error" ? result.message : null;
+		if (typeof outcomeText === "string")
+			metadata.outcomeFingerprint = createHash("sha256").update(outcomeText).digest("hex");
 	}
 
 	const input: MiddlewareHookInput = {

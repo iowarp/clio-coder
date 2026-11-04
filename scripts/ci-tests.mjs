@@ -35,6 +35,7 @@ export const coreTests = [
 	"configure-routing",
 	"mcp-config-trust",
 	"url-userinfo-hold",
+	"url-credential-surfaces",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

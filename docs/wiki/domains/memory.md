@@ -1,191 +1,110 @@
 ---
-title: "Domains memory"
-summary: "Session-scoped task memory bank for background intervention, durable approved memory store for cross-session retrieval, and the promotion bridge between them."
+title: "Memory domain: lessons, task bank and guardian"
+summary: "How the memory domain keeps a task bank during a session, lets a routed model propose reminders and lessons at turn boundaries, files approved lessons into the durable store, and runs a background guardian between turns. Read this before changing memory records, intervention triggers, policy outcomes, or the guardian loop."
 sources:
   - "src/domains/memory/index.ts"
-  - "src/domains/memory/task-bank.ts"
+  - "src/domains/memory/runtime.ts"
+  - "src/domains/memory/intervention.ts"
   - "src/domains/memory/task-memory-policy.ts"
-  - "src/domains/memory/store.ts"
-  - "src/domains/memory/operations.ts"
-  - "src/domains/memory/promotion.ts"
-  - "src/domains/memory/proposal.ts"
-  - "src/domains/memory/task-memory-handoff.ts"
+  - "src/domains/memory/guardian.ts"
+  - "src/domains/memory/lesson-feedback.ts"
   - "src/domains/memory/validate.ts"
-  - "src/domains/memory/types.ts"
-  - "src/domains/memory/prompt-section.ts"
-  - "src/domains/memory/relevance.ts"
-  - "src/domains/memory/memory-events.ts"
-  - "src/domains/memory/task-bank-promotion.ts"
-  - "src/domains/memory/task-memory-spend.ts"
-  - "src/domains/memory/task-memory-status.ts"
 symbols:
-  - "TaskMemoryBank"
+  - "MemoryRuntime"
+  - "createMemoryInterventionRegistration"
   - "runTaskMemoryPolicy"
-  - "proposeMemoryPromotion"
-  - "proposeMemoryFromEvidence"
-  - "selectMemoryForPrompt"
+  - "createMemoryGuardian"
+  - "MemoryLessonFeedback"
   - "validateMemoryRecord"
-  - "taskMemoryHandoffSnapshot"
-  - "seedTaskMemoryBank"
+  - "validateMemoryStore"
 tests:
-  - "tests/extended/memory-scope.test.ts"
-  - "tests/extended/memory-session-isolation.test.ts"
+  - "tests/contracts/memory-lesson-lifecycle.test.ts"
 invariants:
-  - "Task bank entries are session-scoped and in-memory; only promoted entries enter the durable store"
-  - "Durable memory records require human approval before retrieval into prompts"
-  - "Repository-scoped records match only on exact canonical repository path identity"
-  - "Status entries are private: never rendered to the action agent, never exported to handoff snapshots"
+  - "A lesson offered for a task is counted as delivered only after the host reports the reminder in a submitted request; producing the offer alone records nothing (tests/contracts/memory-lesson-lifecycle.test.ts, offerLessonsForTask and acknowledgeSubmission)."
+  - "An offer for the same lesson is made at most once per session in the exercised case of the lifecycle test."
+  - "A flow-restricted session files no lesson at scope end, while an unrestricted session files the same lesson (tests/contracts/memory-lesson-lifecycle.test.ts)."
+  - "runTaskMemoryPolicy returns a silent result with reason scope_changed when the signal is aborted or the scope is no longer current, before any model call."
+  - "A model response that is not a readable operation step produces a malformed decision and does not apply its operations."
 validate:
-  - "pnpm run test:file -- tests/extended/memory-scope.test.ts"
-  - "pnpm run test:file -- tests/extended/memory-session-isolation.test.ts"
+  - "node --test tests/contracts/memory-lesson-lifecycle.test.ts"
 ---
 
-# Domains memory
+# Memory domain: lessons, task bank and guardian
 
-## What this area does
+This domain holds the memory that Clio carries across a task and across sessions. A reader needs it when changing how reminders are offered to the model, how a model's bank edits are applied, how approved lessons are stored, or how the background guardian decides to run. The entry point for the rest of the program is `src/domains/memory/index.ts`, which re-exports the public surface of the modules below. The domain is large (44 source files under `src/domains/memory`), so this page covers the central workflows and links the adjacent pages rather than auditing every file.
 
-The memory domain manages two distinct stores with a promotion bridge between them. The **task memory bank** (`TaskMemoryBank` in `src/domains/memory/task-bank.ts`) is per-session, in-memory execution memory that the background intervention middleware reads and writes on every step. It holds three classes: a private `status` entry tracking the policy's progress model, `knowledge` entries for facts, and `procedural` entries for procedures and failure lessons. The bank is capped (20 knowledge, 30 procedural by default) and evicts oldest entries when a cap is exceeded.
+## What the area does
 
-The **durable memory store** (`src/domains/memory/store.ts`, `src/domains/memory/operations.ts`) persists approved, evidence-linked memory records to `<dataDir>/memory/records.json`. These records carry scopes (`global`, `repo`, `runtime`, `agent`, and others), applicability conditions, confidence scores, and provenance. Retrieval filters by approval status, scope, and active identity before token-budget and item-count selection.
+- **Task bank per session.** `MemoryRuntime` owns a `TaskMemoryBank` (`bank` field in `src/domains/memory/runtime.ts`). Model policy steps read the bank and apply their operations to it through `applyOperations`, which calls `saveKnowledge`, `saveProcedural`, `updateStatus`, and `deleteEntry` on the bank.
+- **Turn-boundary intervention.** `createMemoryInterventionRegistration` in `src/domains/memory/intervention.ts` builds the registration that the orchestrator binds into the middleware chain. It decides when a policy step is worth running (trigger reasons include `interval`, `tool_error_streak`, `loop_signal`, `turn_end`, and `idle_review`) and carries deliveries and outcomes back to the feedback layer.
+- **Policy step.** `runTaskMemoryPolicy` in `src/domains/memory/task-memory-policy.ts` builds a user prompt from the task, the bank, kept lessons and the trajectory, sends it through a `TaskMemoryModelClient`, reads operations and an optional reminder from the response, applies the operations, and returns a result with one of the decisions `silent`, `injected`, `gated`, `timeout`, or `malformed`.
+- **Lesson feedback and filing.** `MemoryLessonFeedback` in `src/domains/memory/lesson-feedback.ts` tracks proposals, delivered reminders, and scope-end lessons, and files them into the durable lesson store under the data directory.
+- **Background guardian.** `createMemoryGuardian` in `src/domains/memory/guardian.ts` runs a wake-and-tick loop between turns. It runs observation and task-maintenance steps and mines history through a `HistoryReviewSource`.
+- **Store validation.** `validateMemoryRecord` and `validateMemoryStore` in `src/domains/memory/validate.ts` check the shape of persisted records and the store file.
 
-The **promotion bridge** (`src/domains/memory/promotion.ts`, `src/domains/memory/proposal.ts`, `src/domains/memory/task-bank-promotion.ts`) converts task-bank entries or evidence findings into durable records that require human approval before they enter any prompt.
+## Ownership and composition
 
-## Ownership
+- `src/domains/memory/runtime.ts:MemoryRuntime` is the composition owner. Its `contract` field is the read-only view handed to other domains: prompt selection, observation status, task snapshot, intervention status, guardian state, and retention status. `configure` takes a `MemoryRuntimeInfrastructure` (settings, `cwd`, `dataDir`, `stateDir`, `currentSession`, notices, and diagnostics).
+- `createIntervention` on `MemoryRuntime` wraps `createMemoryInterventionRegistration` and rebinds its callbacks: delivered entries, durable-lesson outcomes, delivery outcomes, knowledge reviews, retired kept lessons and scope end are each forwarded to `#feedback` and then to the caller's own callback. A second call throws `memory intervention already bound`. The wrapper also sets `deferBoundaryPolicy` to `this.#controller !== null`, so a boundary step waits only for a job actually in flight.
+- `startGuardian` on `MemoryRuntime` builds `createMemoryGuardian` with `getKeptLessons` and `onHistoryLessons` pointed at the runtime, then the caller's dependencies, and `observations: this`. A second call throws `memory guardian already bound`.
+- The orchestrator is the caller of both bindings: `src/entry/orchestrator.ts` constructs `new MemoryRuntime()` (around line 2204), calls `memoryOwner.createIntervention({...})` (around line 2762), and calls `memoryOwner.startGuardian({...})` (around line 2802).
 
-| File | Key symbols | Role |
-|------|-------------|------|
-| `src/domains/memory/index.ts` | re-exports all public API | Domain entry point |
-| `src/domains/memory/task-bank.ts` | `TaskMemoryBank`, `TaskMemoryEntry`, `TaskMemorySnapshot` | Session-scoped in-memory bank |
-| `src/domains/memory/task-memory-policy.ts` | `runTaskMemoryPolicy`, `TaskMemoryModelClient`, `TaskMemoryPolicyDecision` | Background intervention engine |
-| `src/domains/memory/store.ts` | `loadMemoryRecords`, `writeMemoryRecords`, `upsertMemoryRecord`, `readMemoryStoreSnapshot` | Durable store I/O |
-| `src/domains/memory/operations.ts` | `approveMemoryRecord`, `rejectMemoryRecord`, `eligibleMemoryRecords`, `canonicalMemoryRepositoryIdentity` | Record lifecycle and eligibility |
-| `src/domains/memory/promotion.ts` | `proposeMemoryPromotion`, `memoryRecordFromPromotion`, `validateMemoryScopeSelection` | Task-bank-to-store bridge |
-| `src/domains/memory/proposal.ts` | `proposeMemoryFromEvidence`, `memoryRecordFromEvidence` | Evidence-to-store bridge |
-| `src/domains/memory/task-memory-handoff.ts` | `taskMemoryHandoffSnapshot`, `seedTaskMemoryBank`, `parseTaskMemoryHandoffSnapshot` | Cross-session handoff |
-| `src/domains/memory/validate.ts` | `validateMemoryRecord`, `validateMemoryStore` | Schema validation |
-| `src/domains/memory/types.ts` | `MemoryRecord`, `MemoryScope`, `MemoryRetrievalOptions` | Core types |
-| `src/domains/memory/prompt-section.ts` | `selectMemoryForPrompt`, `renderMemoryPromptSection`, `buildMemoryPromptSection` | Prompt injection selection |
-| `src/domains/memory/relevance.ts` | `rankMemoryByRelevance`, `rankMemoryByPrecomputedScore` | Relevance ranking |
-| `src/domains/memory/memory-events.ts` | `createTaskMemoryTelemetrySink`, `taskMemoryBankDelta` | Step telemetry |
-| `src/domains/memory/task-bank-promotion.ts` | `proposeInjectedTaskMemory` | Auto-promotion on injection |
-| `src/domains/memory/task-memory-spend.ts` | `foldTaskMemorySpend`, `readTaskMemorySpendSummary` | Lifetime cost aggregation |
-| `src/domains/memory/task-memory-status.ts` | `TaskMemoryOperatorStatus`, `describeTaskMemoryActivity` | Operator-facing projections |
+## Intervention and the policy step
 
-## Control flow: background intervention
+The path from a trigger to an injected reminder runs in four stages.
 
-The primary runtime flow is the background memory intervention, driven by `runTaskMemoryPolicy` in `src/domains/memory/task-memory-policy.ts`.
+1. **Caller and arguments.** The intervention calls `runTaskMemoryPolicy(bank, client, input)`, where `input` is a `TaskMemoryPolicyInput` carrying the task text, trajectory, `maxTokens`, `timeoutMs`, `signal`, `isCurrent`, `workspaceRoot`, `contextLostAt`, `deterministicTrigger`, `suppressIntervention`, `previousReminder`, and an optional `pass`.
+2. **Deadlines and scope.** `runTaskMemoryPolicy` takes `timeoutMs` from `positiveInteger(input.timeoutMs, TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS)`. It returns `silent` with reason `scope_changed` before any model call if the signal is already aborted or `isCurrent()` is false.
+3. **Model call.** The completion is raced against a timer and the abort signal. A timeout resolves to `timeout` with reason `deadline` and aborts the request. A transport error that is a timeout resolves to `timeout` with reason `timed_out`. Other client errors resolve to `silent` with reason `client_error`.
+4. **Response gating.** A parsed response with a context reminder is checked in order: a rejected reminder (`invalid_reminder`), a missing reminder (`model_silent`), an over-budget reminder (`over_budget`), suppression, a duplicate of the previous reminder, an uncited reminder on a non-deterministic trigger (`uncited`), a reminder that cites a resolved failure (`resolved_failure`), a repeated failure without a failure lesson (`no_repeated_failure`), a reminder whose paths are not in the current workspace (`invalid_path`), and a cadence reminder without lost context (`no_lost_context`). Only a reminder that survives these checks returns `injected` with reason `intervened`.
 
-1. **Trigger**: The middleware calls `runTaskMemoryPolicy(bank, client, input)` where `input.task` is the current task description, `input.trajectory` is the recent tool-call history, and `input.deterministicTrigger` indicates whether the step is mandatory (e.g., post-compaction) or opportunistic.
+Operations are applied before the reminder checks. `resolveOperations` drops `delete` operations whose id names nothing in the bank, and rewrites an unresolvable `save_lesson` id into a plain lesson. `applyOperations` then writes the surviving operations to the bank. A reminder that is then gated still keeps the applied bank edits; the code comments say so explicitly.
 
-2. **Prompt construction**: `buildMemoryInterventionUserPrompt` (from `src/domains/prompts/memory-intervention.ts`) receives the task (truncated to 2000 chars), the bank's rendered content via `bank.render(input.maxTokens)`, and the trajectory as JSON (truncated to 4000 chars by `renderTrajectory`).
+Producing a reminder is not delivery. The `injected` result only proposes the reminder. The intervention counts cited entries as delivered when the host reports the reminder in a submitted request.
 
-3. **Model call**: The `TaskMemoryModelClient.complete()` method is called with a system prompt, user prompt, token budget, and abort signal. The call races against a timeout (default 60s, pinned by `TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS`) and an external cancellation signal.
+### Focused test: offer, submission, delivery
 
-4. **Response parsing**: `readPolicyStep` parses the model's XML-like envelope. It locates `<operations>...</operations>` by tracking JSON bracket depth (not tag position), parses the operation array, and reads the optional `<context_for_action>` reminder. Structural violations reject the batch; unrecognized `op` verbs are dropped individually.
+`tests/contracts/memory-lesson-lifecycle.test.ts` contains a test titled "a lesson the task plainly asks about is offered once, only when the prompt lacks it and nothing else matches". It builds a registration with a kept lesson `{ id: "mem-port", text: "The GUI demo box serves the app on port 47811." }` and a second unrelated kept lesson. It asserts:
 
-5. **Operation application**: `resolveOperations` reconciles the model's operation list against the bank's current state, repairing invented entry IDs. `applyOperations` then calls `bank.updateStatus`, `bank.saveKnowledge`, `bank.saveProcedural`, or `bank.deleteEntry` for each resolved operation.
+- For a task about a changelog typo, `offerLessonsForTask` returns the empty string.
+- For the port question with `mem-port` already in the section (the callback returns true), it returns the empty string.
+- For the port question with no match, the offer begins `Memory: [mem-port] (operator-approved) The GUI demo box`, and does not include `mem-log`.
+- Before submission, the delivered list is empty.
+- After `acknowledgeSubmission` receives a reminder containing the offer, the result kinds are `["durable_lesson"]` and the delivered list is `["mem-port"]`.
+- A second identical request returns the empty string.
 
-6. **Reminder gating**: If a reminder was produced, it is checked for over-budget length, duplication, citation validity (spontaneous reminders must cite bank entries), resolved-failure detection, and workspace path existence. Passing reminders are recorded via `bank.recordInjection(citedIds)`.
+This test exercises the offer and acknowledgement surface of the registration. It does not exercise the policy model call.
 
-7. **Telemetry**: The result is settled through `settle()`, which reports to `input.onEnvelope` (when tracing is enabled) and returns a `TaskMemoryPolicyResult` with decision, reason, token counts, and the usage row.
+## Lesson filing and the flow restriction
 
-## Control flow: memory retrieval for prompts
+`MemoryLessonFeedback.scopeEnd` receives the lessons from a closing scope and files them through `#fileHistoryEntries`, `#propose`, and the store helpers. The feedback layer checks `sessionFlowRestricted(sessionId)` from its ports; in `src/domains/memory/runtime.ts` that port is wired to `this.#infrastructure?.sessionFlowRestricted?.(sessionId) === true`.
 
-When the context domain builds a prompt, it calls `buildMemoryPromptSection` or `selectMemoryForPrompt` from `src/domains/memory/prompt-section.ts`:
+`tests/contracts/memory-lesson-lifecycle.test.ts` has a test titled "a flow-restricted session files no lesson at scope end, and a clean one still does". It creates one `MemoryLessonFeedback` with `sessionFlowRestricted` returning true and one with false, calls `scopeEnd({ sessionId: "s", lessons: [lesson] })` on each, awaits `whenSettled()`, and asserts that the restricted store holds 0 records and the clean store holds 1 record. The same test file has a second test that calls `runMemoryCommand(["promote", "--from-handoff", ...])` with a `safety.yaml` information-flow rule. That test shows that under source rules an unknown source is refused and that the rules come from the named repository, not the working directory.
 
-1. `eligibleMemoryRecords` (in `src/domains/memory/operations.ts`) filters records by: `approved === true`, non-empty `evidenceRefs`, no `regressions`, scope membership, and identity match (repository, runtime, agent). Repository matching requires `record.repository.key === activeRepository.key` where both are canonical absolute paths.
+## Guardian loop
 
-2. Relevance ranking (optional): `rankMemoryByRelevance` scores candidates by task-term overlap (weight 1), path overlap (weight 8), and symbol overlap (weight 4). One zero-score legacy-priority record gets a fallback slot at position 1. `rankMemoryByPrecomputedScore` applies an external async-resolved ranking on top.
+`createMemoryGuardian` in `src/domains/memory/guardian.ts` exposes `state()`, `wake(reason)`, `reset()`, and `dispose()`. `wake` accepts `turn-start`, `turn-end`, `step-settled`, `settings`, or `ready`. It schedules a tick with `setTimeout` and calls `unref` on the timer. A wake that arrives during a running tick sets `wakePending`, and the tick schedules a zero-delay follow-up when it finishes.
 
-3. Budget enforcement: `ceilChars(section.length)` is compared against `tokenBudget` (default 400). Selection stops when the next record would exceed the budget or the item limit (default 5).
+The step checks `deps.enabled()` first and sets the state to `off` when memory is not enabled. `reset()` increments the generation, aborts the controller, clears the timer and the history source, and resets the backoff counters. A tick that finishes for a retired generation does not reschedule itself. The guardian's history work is bounded by `HISTORY_READ_BYTES_PER_WAKE` and `HISTORY_UNANSWERED_LIMIT`, whose values are declared at the top of `src/domains/memory/guardian.ts`. The guardian calls `deps.observations.runIdleStep` and `deps.live.runIdleStep` as part of this loop; the exact order of those calls within `step` was read only partially and is not described here.
 
-## Boundaries and lifecycle ordering
+## Store validation
 
-**Session isolation**: The task bank is cleared when the session changes. The middleware's `getSettings` callback checks `sessionId !== bankSessionId` and calls `bank.clear()`, which resets status, knowledge, procedural, and the ID counter. Late-arriving model completions from the old session are blocked by `isCurrent()` checks in `runTaskMemoryPolicy`, which return `scope_changed` without applying any operations.
-
-**Status privacy**: `TaskMemoryBank.render()` never includes the `status` entry, because a mid-turn reminder must not expose the policy's private progress model. The only exception is `renderRestoredState()`, which is called after compaction destroyed the agent's working state and hands status back with priority.
-
-**Approval gate**: Durable records start with `approved: false`. `eligibleMemoryRecords` filters on `record.approved`, so unapproved records never enter any prompt. Approval is a separate operator action via `approveMemoryRecord`.
-
-**Repository identity**: `canonicalMemoryRepositoryIdentity` resolves symlinks and returns `null` for missing or non-canonical paths. A repo-scoped record without a `repository` field never enters any repository prompt. A repo-scoped record with a mismatched repository key is excluded.
-
-**Content redaction**: Both handoff rendering (`renderTaskMemoryHandoffSnapshot`) and promotion (`memoryRecordFromPromotion`) call `redactSecretsText` from `src/domains/evidence/redact.ts`. Existing `[redacted:*]` markers are preserved by masking them with private-use Unicode tokens before redaction, then restoring them afterward.
-
-## Extension seams
-
-**New memory scopes**: Add the scope to `MEMORY_SCOPES` in `src/domains/memory/types.ts`, add its rank to `scopeRank` in `src/domains/memory/store.ts`, and handle it in `scopeApplicability` and `applyScopeIdentity` in `src/domains/memory/promotion.ts`. The prompt-section defaults (`MEMORY_PROMPT_DEFAULT_SCOPES`) control which scopes are eligible for chat-loop injection.
-
-**New operation verbs**: The policy's `readOperations` function in `src/domains/memory/task-memory-policy.ts` recognizes `update_status`, `save_knowledge`, `save_procedural`, and `delete`. Adding a new verb requires adding a case there, a matching method on `TaskMemoryBank`, and a corresponding branch in `applyOperations`.
-
-**New relevance signals**: `rankMemoryByRelevance` in `src/domains/memory/relevance.ts` scores by term, path, and symbol overlap. New signals require adding a weight to `MEMORY_RELEVANCE_WEIGHTS` and a matching feature extraction in the candidate mapping.
-
-**New trigger types**: `TaskMemoryTelemetryTrigger` in `src/domains/memory/memory-events.ts` lists the valid trigger reasons. Adding one requires updating the `TRIGGERS` set and the telemetry record parser.
-
-## Focused tests
-
-**`tests/extended/memory-scope.test.ts`** demonstrates:
-- Repository-scoped records are excluded when `activeRepository` is `null` or a different repository, while global records always pass.
-- Promotion from a task-bank entry produces an unapproved record with `approved: false`, redacted content (`[redacted:assignment]` replaces the secret), and provenance linking back to the source session and entry.
-- Handoff snapshots exclude private status entries, redact secrets, use the `clio-coder-task-memory` fence language (with legacy `clio-task-memory` also parseable), and seed into a target bank with deduplication (second seed reports `seeded: 0, skipped: 2`).
-
-**`tests/extended/memory-session-isolation.test.ts`** demonstrates:
-- A memory completion from session A that arrives after the session has switched to B does not populate session B's bank, does not deliver a reminder, and does not propose memory under session B's identity.
-- Session transitions (new, resume, roundtrip, fork, branch) abort the in-flight model call, clear the bank, and prevent late-arriving completions from writing.
-- `isCurrent()` returning `false` blocks bank writes even when the model call completed successfully.
-- Operator cancellation via `AbortSignal` revokes a pending step without erasing already-completed knowledge.
-- Provider usage arriving after the policy deadline is recorded exactly once through `onStepUsage`.
-
-## Data flow diagram
-
-```mermaid
-flowchart TB
-    subgraph SessionScoped["Session-scoped (in-memory)"]
-        TB[TaskMemoryBank] -->|render| Policy[runTaskMemoryPolicy]
-        Policy -->|saveKnowledge/saveProcedural/updateStatus| TB
-        Policy -->|recordInjection| TB
-        TB -->|snapshot| Handoff[taskMemoryHandoffSnapshot]
-    end
-
-    subgraph Durable["Durable store (records.json)"]
-        Store[(records.json)] -->|loadMemoryRecords| Ops[operations.ts]
-        Ops -->|eligibleMemoryRecords| Select[selectMemoryForPrompt]
-        Select -->|renderMemoryPromptSection| Prompt[Context domain]
-    end
-
-    subgraph Bridges["Promotion bridges"]
-        TB -->|proposeInjectedTaskMemory| Promo[proposeMemoryPromotion]
-        Evidence[Evidence domain] -->|proposeMemoryFromEvidence| Promo
-        Promo -->|upsertMemoryRecord| Store
-        Handoff -->|seedTaskMemoryBank| TB
-        Handoff -->|parseTaskMemoryHandoffSnapshot| CLI[CLI memory promote]
-        CLI -->|proposeMemoryPromotion| Store
-    end
-
-    subgraph Telemetry["Telemetry (steps.jsonl)"]
-        Policy -->|settle| Telem[createTaskMemoryTelemetrySink]
-        Telem -->|appendFileSync| Ledger[(steps.jsonl)]
-        Ledger -->|foldTaskMemorySpend| Spend[TaskMemorySpendSummary]
-    end
-```
+`validateMemoryRecord` and `validateMemoryStore` in `src/domains/memory/validate.ts` reject unexpected fields and collect issues with paths. `validateMemoryStore` requires `version` to equal `MEMORY_VERSION` and `records` to be an array, and validates each record with `readMemoryRecord`. `readMemoryRecord` requires the id to match the pattern `mem-` followed by sixteen lowercase hexadecimal characters (`ID_PATTERN`) and checks the scope against `MEMORY_SCOPES`. Optional approval, observations and repository identity are read by `readOptionalApproval`, `readOptionalObservations` and `readOptionalMemoryRepositoryIdentity`. The store module (`src/domains/memory/store.ts`) and the record types (`src/domains/memory/types.ts`) were not inspected.
 
 ## Things to watch when editing
 
-- **`TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS` must equal the settings default in `src/core/defaults.ts`**. A contract test pins the pair. Changing one without the other means any path that misses the settings object silently gets a different timeout.
+- `MemoryRuntime.createIntervention` and `startGuardian` each accept one binding per runtime instance and throw on a second call. A change that creates a second registration per runtime will fail at runtime.
+- `runTaskMemoryPolicy` applies bank operations before its reminder gates run. A gated outcome still leaves the bank edits in place. Changes to the gate order change which edits persist.
+- A reminder that counts as delivered depends on the host's submission callback, not on the policy's `injected` decision. Changes to `acknowledgeSubmission` or `onInjectedEntries` affect delivery counts.
+- The flow restriction in `MemoryLessonFeedback` is read through `sessionFlowRestricted`. Filing of restricted scopes is covered by the lifecycle test above only for the scope-end path.
+- The guardian keeps its state in closures inside `createMemoryGuardian`. Its generation counter, not the timer alone, decides whether a finished tick may reschedule.
 
-- **`readPolicyStep` uses bracket-depth counting, not tag matching**, to find the end of the operations array. A session working on the memory tier can write the envelope's own grammar into operation content, which breaks `indexOf`/`lastIndexOf` tag searches. Do not replace the depth counter with a simpler search.
+## Related pages
 
-- **`renderTrajectory` drops whole steps to fit the budget** rather than truncating individual fields, except when a single step exceeds the limit. The alternative (string slicing) corrupted JSON mid-token.
+- [Core](../core.md) and [Domains safety](safety.md) cover the sandbox and information-flow rules that the feedback and promotion code consult.
+- [Domains context](context.md) and [Domains middleware](middleware.md) are the callers that wire memory into prompt sections and middleware hooks; this page does not trace those callers.
+- [Domains session](session.md) describes the session lifecycle that supplies `currentSession` and scope-end events.
 
-- **The task bank's `#evictOldest` sorts by `lastTouchedAt` then `createdAt` then ID**. `render()` sorts by `lastTouchedAt` descending (newest first) and filters by `kinds`. These are different orderings for different purposes.
+## Coverage notes
 
-- **`validateMemoryRecord` enforces scope-identity coupling**: repo scope requires a repository identity, runtime scope requires a runtime identity, agent scope requires an agent identity. A mismatch produces a validation error.
-
-- **`canonicalMemoryRepositoryIdentity` returns `null` for missing paths**. A repo-scoped record whose repository no longer exists is excluded from retrieval, which is intentional fail-closed behavior.
-
-- **The handoff snapshot parser (`parseTaskMemoryHandoffSnapshot`) rejects version 2 entries that lack timestamps**. Legacy version 1 entries are accepted without them. The CLI's `memory promote` command requires version 2 snapshots and throws on version 1.
-
-- **`foldTaskMemorySpend` counts `endpoint_busy` skips separately from llm steps**. The `hitRate` denominator is `llmSteps`, not total steps, so a machine with a permanently busy endpoint shows 0% hit rate rather than a division-by-zero or inflated rate.
-
-- **`taskMemoryTelemetryRecord` uses `nonNegativeInteger` (coercing invalid values to 0) while `parseTaskMemoryTelemetryRecord` uses `isNonNegativeInteger` (rejecting invalid values)**. The writer is lenient because telemetry is observational; the parser is strict because it validates external data.
-
-- **The `exactOptionalPropertyTypes` convention applies throughout**: optional fields are passed with `...(x !== undefined ? { x } : {})`, never `x: undefined`. This is visible in `validate.ts` where optional fields are conditionally spread.
+Not inspected: `src/domains/memory/store.ts`, `types.ts`, `contract.ts`, `src/domains/memory/task-bank.ts`, the remainder of `src/domains/memory/intervention.ts` beyond the trigger and offer surface, and the full `src/domains/memory/guardian.ts` step ordering. Behavior described for those areas is limited to what the anchor sources reference.

@@ -113,6 +113,24 @@ export async function inspectRunEvidence(stateDir: string, runId: string): Promi
 }
 
 /**
+ * The information-flow restrictions a run's settled record carries: the set it inherited plus what it read, kept apart
+ * from `RunEvidence` because only a caller about to carry the run's words somewhere durable asks. `known` is false when
+ * the run never settled, so no record holds them.
+ */
+export async function inspectRunFlowProvenance(
+	stateDir: string,
+	runId: string,
+): Promise<{ sessionId: string | null; restricted: boolean; known: boolean }> {
+	const record = await readRunRecordAsync(stateDir, runId);
+	const settled = record?.settled ?? null;
+	return {
+		sessionId: record?.row.sessionId ?? null,
+		restricted: (settled?.flowRestrictions?.restrictions.length ?? 0) > 0,
+		known: settled !== null,
+	};
+}
+
+/**
  * Every run scope on this host, newest settlement first; a run that never settled sorts last. `skip` leaves out runs a
  * caller already holds without opening their scopes.
  */

@@ -36,6 +36,7 @@ import {
 	cutHeadGuard,
 	dropCutHead,
 	headGuardAfter,
+	holdCutOffText,
 	holdUnresolvedUserinfo,
 	messageStopCompleted,
 } from "../safety/redaction.js";
@@ -485,7 +486,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			if (event.type === "message_end" && isRecord(event.message) && event.message.role === "assistant") {
 				if (!streamCompleted) {
 					// The cut belongs to this message: an empty one leaves what an earlier message finished alone.
-					if (durableText.trim().length > 0) durable = holdUnresolvedUserinfo(durable);
+					if (durableText.trim().length > 0) durable = holdCutOffText(durable);
 					if (textOpen) {
 						dropHeldTail();
 						changed = true;

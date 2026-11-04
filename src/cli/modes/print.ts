@@ -39,6 +39,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -227,11 +228,18 @@ export function recordBlockedAttempt(
 		stats.blockedAttemptsTruncated += 1;
 		return;
 	}
-	const reason = attempt.reason;
+	// A reason can quote the refused call, and redacted ahead of its bound, which could cut a password out of the pattern's sight (#446).
+	const reason = attempt.reason === undefined ? undefined : redactUrlCredentials(attempt.reason);
 	stats.blockedAttempts.push(
-		reason !== undefined && reason.length > BLOCKED_ATTEMPT_REASON_MAX_CHARS
-			? { ...attempt, reason: `${reason.slice(0, BLOCKED_ATTEMPT_REASON_MAX_CHARS)}…` }
-			: attempt,
+		reason === undefined
+			? attempt
+			: {
+					...attempt,
+					reason:
+						reason.length > BLOCKED_ATTEMPT_REASON_MAX_CHARS
+							? `${reason.slice(0, BLOCKED_ATTEMPT_REASON_MAX_CHARS)}…`
+							: reason,
+				},
 	);
 }
 
@@ -266,7 +274,8 @@ function assistantError(message: AgentMessage | undefined): string | null {
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted") return null;
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
-	if (typeof raw === "string" && raw.length > 0) return raw;
+	// A provider's error can quote the URL it failed on, and from here it reaches stderr, the frame and the run record (#446).
+	if (typeof raw === "string" && raw.length > 0) return redactUrlCredentials(raw);
 	return stopReason === "aborted" ? "request aborted" : "provider returned an error";
 }
 
@@ -288,17 +297,18 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	}
 	if (event.type === "notice") {
 		if (event.surface !== "transcript") return current;
+		const text = redactUrlCredentials(event.text);
 		// Every admission notice ends the turn before the provider is called. Only
 		// the image case used to count as a failure, so an empty home's "not
 		// configured" notice was chased by "provider stream ended without an
 		// assistant response", which blamed a provider nobody had reached.
 		if (event.admission !== undefined) {
-			return { ...current, lastNotice: event.text, error: event.text, admissionRefused: true };
+			return { ...current, lastNotice: text, error: text, admissionRefused: true };
 		}
 		if (event.key === "turn.interrupted") {
-			return { ...current, lastNotice: event.text, abortReason: event.text };
+			return { ...current, lastNotice: text, abortReason: text };
 		}
-		return { ...current, lastNotice: event.text };
+		return { ...current, lastNotice: text };
 	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
@@ -964,7 +974,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			}
 		}
 		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {
-			process.stderr.write(`clio-coder run: ${event.text}\n`);
+			process.stderr.write(`clio-coder run: ${redactUrlCredentials(event.text)}\n`);
 		}
 		recordToolEnd(runStats, event);
 		if (event.type === "message_end") {
@@ -1054,6 +1064,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	options.deadline?.settle();
 
 	const endedAt = new Date().toISOString();
+	// Every exit of the answer. A reply the token limit stopped can end inside a URL, which a terminating tool's result cannot (#446).
+	const settledAnswer = (answer: string): string =>
+		redactFinalUrlCredentials(answer, result.sawTerminatingToolResult || !result.outputExhausted);
 	let terminal: HeadlessTerminalOutcome = {
 		exitCode: 0,
 		outcome: "succeeded",
@@ -1105,7 +1118,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			"clio-coder run: output token limit reached (stopReason=length); generation incomplete. Consider resuming with a narrower task, lower reasoning effort, or a larger output budget.";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
-		if (mode === "text" && result.text.length > 0) stdoutMessage = result.text;
+		if (mode === "text" && result.text.length > 0) stdoutMessage = settledAnswer(result.text);
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
@@ -1145,12 +1158,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// result is the answer and any assistant text before it is mid-workflow
 			// chatter the model never offered as a reply. Printing that chatter instead
 			// hands the operator a dangling "let me try..." for a turn that succeeded.
-			stdoutMessage =
-				result.sawTerminatingToolResult && result.terminatingToolText.length > 0
-					? result.terminatingToolText
-					: result.text.length > 0
-						? result.text
-						: null;
+			const answer =
+				result.sawTerminatingToolResult && result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
+			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		}
 	}
 	const exitCode = terminal.exitCode;
@@ -1162,7 +1172,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			startedAt,
 			endedAt,
 			exitCode,
-			text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
+			text: settledAnswer(result.sawTerminatingToolResult ? result.terminatingToolText : result.text),
 			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
 			// The run's own verdict, so a host bridge reads why the run ended,
 			// and which calls a headless run refused, without parsing prose.

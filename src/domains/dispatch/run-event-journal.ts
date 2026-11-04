@@ -54,6 +54,8 @@ export interface RunEventJournalFacts {
 	reason?: string;
 	/** Tokens one model call processed (input, cache reads, output, cache writes). */
 	tokens?: number;
+	/** How the model's message ended, on its `message_end` line; the feed reads it to settle held prose (#446). */
+	stopReason?: string;
 }
 
 /** Everything on a feed row except the `seq`/`at` envelope each store adds. */

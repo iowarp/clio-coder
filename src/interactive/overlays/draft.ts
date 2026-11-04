@@ -1,4 +1,5 @@
 import { skinEpoch } from "../theme/tokens.js";
+
 /**
  * `/draft` overlay: the candidates as they denoise.
  *
@@ -8,6 +9,7 @@ import { skinEpoch } from "../theme/tokens.js";
  * `/btw`, nothing here reaches the session.
  */
 
+import { redactStreamingUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import {
 	type Component,
 	isKeyRelease,
@@ -123,7 +125,9 @@ function markdownLines(phase: Extract<DraftCandidatePhase, { kind: "drafted" }>,
 	const cached = renderedDrafts.get(phase);
 	if (cached && cached.width === width && cached.epoch === skinEpoch()) return cached.lines;
 	const theme = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
-	const lines = new Markdown(phase.text.trim(), 0, 0, theme).render(width).map((line) => line.trimEnd());
+	const lines = new Markdown(redactUrlCredentials(phase.text).trim(), 0, 0, theme)
+		.render(width)
+		.map((line) => line.trimEnd());
 	renderedDrafts.set(phase, { width, epoch: skinEpoch(), lines });
 	return lines;
 }
@@ -134,7 +138,8 @@ function selectedText(state: DraftOverlayState, width: number, maxLines: number)
 	const phase = state.candidates[state.selected];
 	if (!phase) return [];
 	if (phase.kind === "failed") return wrapTextWithAnsi(theme.fg("error", phase.reason), width);
-	const text = phase.text.trim();
+	// The trim would hide the whitespace that closes an open URL, so the streaming hold reads the raw text first (#446).
+	const text = (phase.kind === "drafted" ? phase.text : redactStreamingUrlCredentials(phase.text)).trim();
 	if (text.length === 0) return [theme.fg("annotation", "…")];
 	// A streaming candidate is a diffusion frame: noise until it settles, so it
 	// reads dim until its round completes. A settled one renders as the

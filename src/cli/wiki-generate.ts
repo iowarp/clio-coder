@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
@@ -42,7 +42,7 @@ import {
 } from "../domains/context/wiki/source-content.js";
 import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import { createDispatchDomainModule, DISPATCH_INTENT_PATH_LIST_CAP } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { callLevelUpstreamResponses, type RunResult } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
@@ -469,6 +469,21 @@ function explicitWikiDeadline(options: ModelWikiGenerateOptions): WikiDeadline |
  * throws: a failed page must not take down the pages around it, and whatever
  * the run wrote before it stopped is already on disk.
  */
+/**
+ * A broad page can cite more files than a dispatch intent may name. Widen the deepest
+ * files to their directories until the list fits, so the repair keeps a narrow read scope.
+ */
+export function repairReadRoots(artifactPath: string, sources: readonly string[]): string[] {
+	const depth = (path: string): number => path.replace(/\/$/, "").split("/").length;
+	let roots = [...new Set(sources)];
+	while (roots.length >= DISPATCH_INTENT_PATH_LIST_CAP) {
+		const deepest = Math.max(...roots.map(depth));
+		if (deepest <= 1) return [artifactPath, "."];
+		roots = [...new Set(roots.map((path) => (depth(path) === deepest ? asDirectoryPathBoundary(dirname(path)) : path)))];
+	}
+	return [artifactPath, ...roots];
+}
+
 async function runWikiDispatch(input: {
 	dispatch: DispatchContract;
 	cwd: string;
@@ -495,7 +510,7 @@ async function runWikiDispatch(input: {
 		const repair = input.repairSources !== undefined;
 		const writeRoots = repair && input.artifactPath ? [input.artifactPath] : [asDirectoryPathBoundary(stagingRoot)];
 		const scope = declaredScopeIntent({
-			readRoots: repair && input.artifactPath ? [input.artifactPath, ...(input.repairSources ?? [])] : ["."],
+			readRoots: repair && input.artifactPath ? repairReadRoots(input.artifactPath, input.repairSources ?? []) : ["."],
 			writeRoots,
 		});
 		if (!scope.ok) throw new Error(`${scope.reason}: ${scope.message}`);
@@ -978,7 +993,14 @@ async function generateWikiWithDocumenter(
 	signal?.throwIfAborted();
 	writeWikiPlanFile(input.outputDir, plan);
 
-	const queue = pendingPages(plan, input.retryPending);
+	const onlyPages = input.onlyPages ? new Set(input.onlyPages) : null;
+	if (onlyPages) {
+		const unknown = [...onlyPages].filter((path) => !plan.pages.some((page) => page.path === path));
+		if (unknown.length > 0) {
+			throw new Error(`wiki --pages names paths the plan does not hold: ${unknown.join(", ")}`);
+		}
+	}
+	const queue = pendingPages(plan, input.retryPending).filter((page) => !onlyPages || onlyPages.has(page.path));
 	if (queue.length === 0) {
 		const pending = plan.pages.filter((page) => page.status !== "written").length;
 		input.progress?.({

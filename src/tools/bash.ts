@@ -6,6 +6,7 @@ import {
 	type BashCommandResult,
 	bashSecretValues,
 	combineBashOutput,
+	combineLiveBashOutput,
 	runBashCommand,
 } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
@@ -133,9 +134,11 @@ function bashResultDetails(
 	result: Awaited<ReturnType<typeof runBashCommand>>,
 	rawOutput: string,
 	outcome: "success" | "nonzero" | "timeout" | "abort" | "output-cap",
+	elapsedMs?: number,
 ): ToolResultDetails {
 	return {
 		outcome,
+		...(elapsedMs === undefined ? {} : { elapsedMs }),
 		// `message` trims the output, and a killed process's last line releases only if whitespace finished it (#446).
 		outputEndsOpen: /\S$/u.test(rawOutput),
 		exitCode: result.exitCode,
@@ -366,23 +369,24 @@ export const bashTool: ToolSpec = {
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
-					options.onUpdate?.(shapeBashProgress(mask(combineBashOutput(progress)), progress.outputBytes, outputPolicy));
+					const output = combineLiveBashOutput({ stdout: mask(progress.stdout), stderr: mask(progress.stderr) });
+					options.onUpdate?.(shapeBashProgress(output, progress.outputBytes, outputPolicy));
 				};
 			}
 			const startedAt = performance.now();
 			const captured = await runBashCommand(args.command, runOptions);
+			const elapsedMs = Math.round(performance.now() - startedAt);
 			const result = { ...captured, stdout: mask(captured.stdout), stderr: mask(captured.stderr) };
 			const { error, aborted, timedOut, outputCapped } = result;
 			const rawOutput = combineBashOutput(result);
 			const output = rawOutput.trim();
 			if (aborted) {
 				const abortCause = options?.abortCause?.() ?? null;
-				const elapsedMs = Math.round(performance.now() - startedAt);
 				const status = bashAbortStatus(elapsedMs, timeout, abortCause);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
-					details: { ...bashResultDetails(result, rawOutput, "abort"), elapsedMs, abortCause },
+					details: { ...bashResultDetails(result, rawOutput, "abort", elapsedMs), abortCause },
 				};
 			}
 			if (timedOut) {
@@ -395,7 +399,7 @@ export const bashTool: ToolSpec = {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
 					details: {
-						...bashResultDetails(result, rawOutput, "timeout"),
+						...bashResultDetails(result, rawOutput, "timeout", elapsedMs),
 						...(lastActiveTest === null ? {} : { lastActiveTest }),
 					},
 				};
@@ -407,13 +411,13 @@ export const bashTool: ToolSpec = {
 					options?.shellSandbox === undefined ? null : mainSandboxWriteHint(rawOutput, options.shellSandbox);
 				const status = `bash: command failed (exit ${code ?? "?"})${sandboxHint === null ? "" : `\n${sandboxHint}`}`;
 				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
-				return { kind: "error", message, details: bashResultDetails(result, rawOutput, "nonzero") };
+				return { kind: "error", message, details: bashResultDetails(result, rawOutput, "nonzero", elapsedMs) };
 			}
 			const body = rawOutput.length > 0 ? rawOutput : "(no output)";
 			return {
 				kind: "ok",
 				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}`,
-				details: bashResultDetails(result, rawOutput, "success"),
+				details: bashResultDetails(result, rawOutput, "success", elapsedMs),
 			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

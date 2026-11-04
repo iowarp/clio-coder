@@ -1,7 +1,7 @@
 When Clio Coder runs inside Herdr, a terminal multiplexer, it can open panes of its own beside the conversation: a file browser below, a live view of workers on the right, and a small radio. Each is a dock. One key shows or hides it, and hiding keeps it running.
 
-::: note Experimental in v0.6.0
-Panes are off by default and need Herdr. Hiding docks, the live worker dashboard, and music are new in v0.6.0. Keys, commands, and settings may change. Herdr has no Windows build.
+::: note Experimental in v0.6.8
+Panes need the Herdr pane host. On Linux and macOS the first bare `clio-coder` asks once whether to open a workspace, and `interface.panes.enabled: off` stops asking. Music is off until you enable it. Keys, commands, and settings may change. Herdr has no Windows build.
 :::
 
 ::: needs
@@ -64,11 +64,11 @@ The model cannot touch the player unless you also set `integrations.music.agentC
 ::: limits
 - Docks need Herdr with a recent protocol; an older Herdr can open panes but cannot hide them.
 - Station lookup by name and the streams themselves use the network.
-- `/peer` opens another coding agent in a pane for you to work in. It is a handoff with no managed receipt.
+- `/peer` opens another coding agent in a pane for you to work in. It is a handoff with no run record.
 :::
 
 ::: next
 - [Files and terminal panes guide](/docs/guide/panes-and-files.html)
 - [Coordinate the coding agents you already use](/tutorials/coordinate-your-coding-agents.html)
-- [Remote workers and clusters](/experimental/remote-workers-and-clusters.html)
+- [Work from a laptop with remote workers](/tutorials/work-from-a-laptop-with-remote-workers.html)
 :::

@@ -7,7 +7,12 @@
  * every pattern here has to stay linear in its input.
  */
 
-import { URL_USERINFO_RE, urlUserinfoHoldsSecret } from "../safety/redaction.js";
+import {
+	secretUrlParamValues,
+	URL_USERINFO_RE,
+	URL_USERNAME_TOKEN_RE,
+	urlUserinfoHoldsSecret,
+} from "../safety/redaction.js";
 
 export interface RedactionTally {
 	count: number;
@@ -33,6 +38,7 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	// Shares its pattern with display redaction so the two hide the same text (#446). It runs first because the
 	// assignment value below would swallow the `@` and host of `https://u:token=abcdefgh@h`.
 	{ kind: "url-userinfo", re: URL_USERINFO_RE },
+	{ kind: "url-username", re: URL_USERNAME_TOKEN_RE },
 	{
 		kind: "pem",
 		re: /-----BEGIN [A-Z0-9 ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK)-----[\s\S]*?(?:-----END [A-Z0-9 ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK)-----|$)/g,
@@ -141,7 +147,7 @@ export function redactSecretsText(
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
 			if (pattern.kind === "url-userinfo") {
-				if (!urlUserinfoHoldsSecret(String(match[1]), String(match[2]))) return String(match[0]);
+				if (!urlUserinfoHoldsSecret(String(match[2]))) return String(match[0]);
 				tally.count += 1;
 				return `${String(match[1])}[redacted:url-userinfo]@`;
 			}
@@ -158,7 +164,24 @@ export function redactSecretsText(
 			return `[redacted:${pattern.kind}]`;
 		});
 	}
-	return out;
+	return redactUrlParams(out, tally);
+}
+
+/**
+ * The display rule's query values, which the assignment pattern above misses when they are short or hold a `;`. It runs last,
+ * so a value that pattern already hid keeps its marker, and a journal never shows what a screen hides (#446).
+ */
+function redactUrlParams(text: string, tally: RedactionTally): string {
+	const out: string[] = [];
+	let copied = 0;
+	for (const { start, end } of secretUrlParamValues(text)) {
+		if (!urlUserinfoHoldsSecret(text.slice(start, end))) continue;
+		tally.count += 1;
+		out.push(text.slice(copied, start), "[redacted:url-param]");
+		copied = end;
+	}
+	out.push(text.slice(copied));
+	return out.join("");
 }
 
 /**
@@ -205,12 +228,17 @@ export function redactSecretSegments(segments: string[], tally: RedactionTally):
 	for (const pattern of SECRET_PATTERNS) {
 		for (const match of joined.matchAll(new RegExp(pattern.re.source, pattern.re.flags))) {
 			const userinfo = pattern.kind === "url-userinfo";
-			if (userinfo && !urlUserinfoHoldsSecret(match[1] ?? "", match[2] ?? "")) continue;
+			if (userinfo && !urlUserinfoHoldsSecret(match[2] ?? "")) continue;
 			const keepsHead = userinfo || pattern.kind === "assignment" || pattern.kind === "jwt";
 			const start = match.index + (keepsHead ? (match[1]?.length ?? 0) : 0);
 			ranges.push({ start, end: match.index + match[0].length - (userinfo ? 1 : 0), kind: pattern.kind });
 			tally.count += 1;
 		}
+	}
+	for (const { start, end } of secretUrlParamValues(joined)) {
+		if (!urlUserinfoHoldsSecret(joined.slice(start, end))) continue;
+		ranges.push({ start, end, kind: "url-param" });
+		tally.count += 1;
 	}
 	ranges.sort((a, b) => a.start - b.start || b.end - a.end);
 	let offset = 0;

@@ -1,5 +1,6 @@
 import { formatFooterTokens } from "../core/display-units.js";
 import type { JobRecord } from "../core/job-types.js";
+import { jobPollFailure } from "../core/job-types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { Text } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
@@ -82,6 +83,7 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 	const job = jobs[0];
 	if (!job) return null;
 	const delivery = job.delivery?.state;
+	const pollFailure = job.state === "active" ? jobPollFailure(job) : null;
 	const running = job.active !== null || delivery === "running";
 	const state =
 		job.persistenceError !== null
@@ -92,13 +94,18 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 					? `${job.delivery?.kind === "main_turn" ? "analysis" : "notice"} ${delivery === "running" ? "running" : "waiting"}`
 					: job.state === "paused"
 						? `paused${running ? " · running" : ""}`
-						: running
-							? "running"
-							: job.state === "terminal"
-								? "settling"
-								: "waiting";
+						: pollFailure !== null
+							? "failing"
+							: running
+								? "running"
+								: job.state === "terminal"
+									? "settling"
+									: "waiting";
 	const theme = clioTheme();
-	const tone = job.cancelRequested || job.state === "paused" || job.persistenceError !== null ? "warning" : "annotation";
+	const tone =
+		job.cancelRequested || job.state === "paused" || job.persistenceError !== null || pollFailure !== null
+			? "warning"
+			: "annotation";
 	// State leads so a narrow rail keeps "paused" or "not saved". Ids and
 	// pending reasons stay with `/loop status`; navigation stores its raw park
 	// code as the reason.
@@ -109,13 +116,15 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 		return true;
 	};
 	const counter = job.spec.count === null ? `${job.settled} settled` : `${job.settled}/${job.spec.count}`;
-	const dueAt = state === "waiting" ? job.nextDueAt : null;
+	const dueAt = (state === "waiting" || state === "failing") && !running ? job.nextDueAt : null;
 	if (dueAt !== null) {
 		const filled = Math.min(6, Math.max(0, Math.floor((1 - (dueAt - now) / job.spec.intervalMs) * 6)));
 		const meter =
 			theme.fg("composerRail", GLYPH.meterFull.repeat(filled)) + theme.fg("border", GLYPH.meterEmpty.repeat(6 - filled));
 		if (!append(`${meter} · ${counter}`)) append(counter);
 	} else append(counter);
+	if (pollFailure !== null)
+		append(`last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}`);
 	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
 	if (dueAt !== null) append(dueAt <= now ? "due now" : `in ${formatCompactMs(dueAt - now)}`);
 	return theme.base(tone, fitFooterText(text, width, "…"));

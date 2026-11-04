@@ -1,156 +1,189 @@
 ---
-title: "Architecture"
-summary: "How Clio Coder composes its entry points, domain modules, tool surface, and worker runtime into a single coding agent process, and the static import rules that keep those layers decoupled."
+title: "Command-line surfaces, boot, and tool composition"
+summary: "How the clio-coder binary routes a command to its handler, boots the orchestrator, and composes the gateway, context and data tools; read this to find which surface owns a request before changing it."
 sources:
-  - "src/core/domain-loader.ts"
-  - "src/entry/orchestrator.ts"
   - "src/cli/index.ts"
-  - "src/engine/types.ts"
-  - "src/tools/registry.ts"
-  - "src/worker/entry.ts"
-  - "tests/boundaries/check-boundaries.ts"
+  - "src/cli/acp.ts"
+  - "src/entry/orchestrator.ts"
+  - "src/engine/acp/server.ts"
+  - "src/tools/core-bootstrap.ts"
+  - "src/tools/gateway/index.ts"
+  - "src/tools/context/index.ts"
+  - "src/tools/data/index.ts"
+  - "src/domains/semantic-app/index.ts"
+  - "src/domains/context/bootstrap.ts"
 symbols:
+  - "main"
+  - "dispatch"
+  - "COMMAND_HANDLERS"
   - "bootOrchestrator"
-  - "loadDomains"
+  - "serveClioAcpAgent"
   - "createGatewayTool"
   - "createContextTool"
-  - "createBackgroundMemoryModelClient"
+  - "inspectData"
+  - "detectDataFormat"
 tests:
-  - "tests/contracts/domain-lifecycle.test.ts"
-  - "tests/boundaries/check-boundaries.ts"
-  - "tests/contracts/gateway-authority.test.ts"
+  - "tests/contracts/gateway-unknown-capability.test.ts"
+  - "tests/contracts/gateway-refusal-source.test.ts"
+  - "tests/contracts/data-csv.test.ts"
 invariants:
-  - "Only `src/engine/**` may value-import `@earendil-works/pi-*` packages; all other layers consume erased shapes from `src/engine/types.ts`."
-  - "`src/worker/**` never value-imports `src/domains/**` except the provider runtime registry, builtin descriptors, and plugin loader modules used to rehydrate runtimes from stdin."
-  - "`src/domains/<x>/**` never imports `src/domains/<y>/extension.ts` for `y != x`; cross-domain access goes through the contract exported from `src/domains/<y>/index.ts`."
-  - "`src/tools/**` never imports `src/interactive/**` because the tool substrate is surface-agnostic and shared across headless, interactive, ACP, and worker runs."
-  - "The chat loop's turn modules (`src/interactive/turn-*.ts`, `chat-loop.ts`) never import `src/entry/**`; composition flows one direction from entry point to loop."
-  - "External runtime importers outside the Stage 0 closure may reach `src/interactive/**` and `src/engine/**` only through seams declared in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`."
+  - "A bare subcommand name not present in COMMAND_HANDLERS fails with exit code 2 and writes the help text to stderr, before any command module is imported."
+  - "--demo, --autonomy, --allow-tools and --delegate-tools placed before a subcommand are refused with exit code 2 for every subcommand that would not honor them; the run and acp subcommands require them after the subcommand name."
+  - "An unknown gateway capability name is refused with the same message whether it is excluded from a restricted surface or does not exist, so existence cannot be probed on a restricted surface."
+  - "detectDataFormat returns null for an explicit format outside the supported set, and an explicit format overrides extension and content sniffing."
 validate:
-  - "node --import tsx tests/boundaries/check-boundaries.ts"
+  - "node --test tests/contracts/gateway-unknown-capability.test.ts"
+  - "node --test tests/contracts/data-csv.test.ts"
 ---
 
-# Architecture
+# Command-line surfaces, boot, and tool composition
 
-## What this repository is
+This page is the map of the repository's runtime surfaces. A reader needs it to find which
+entry point receives a request (a shell command, an ACP client, or the model's tool calls)
+and which module owns the next step. Behavior is described at the level of the modules
+inspected for this page; detailed behavior of each area lives on its own page.
 
-Clio Coder is a coding agent for HPC and scientific software, built by IOWarp and the Gnosis Research Center at Illinois Tech. The package (`@iowarp/clio-coder`) provides an interactive terminal interface for repository work, a headless single-turn runner, an ACP v1 agent over stdio, and a local graphical interface. It orchestrates configured model targets and dispatches bounded workers as subprocesses. The [authored architecture](../architecture/architecture.md) defines the maintained contracts for these layers.
+## What the repository is
 
-## Top-level composition
+The package `@iowarp/clio-coder` is a terminal coding agent for scientific software. Its
+source is organized under `src/`: `src/cli` holds the command-line surface, `src/entry`
+the orchestrator that boots a session, `src/engine` the protocol and worker engines
+(including the Agent Client Protocol server under `src/engine/acp`), `src/tools` the tool
+surfaces the model calls, and `src/domains` the feature areas. The `apps/` directory holds
+the graphical application, whose server and client entries are `apps/clio-coder-gui/server/main.ts`
+and `apps/clio-coder-gui/client/main.tsx`. Those are discovery entries; this page does not
+trace the GUI.
 
-The source tree is organized into eight functional layers under `src/` plus an application under `apps/`:
+## Command routing
 
-| Layer | Path | Role |
-|-------|------|------|
-| Core infrastructure | `src/core/` | Event bus, config, domain loader, shared state |
-| Engine boundary | `src/engine/` | The only code that touches `@earendil-works/pi-*` |
-| Domains | `src/domains/` | Independent business modules (context, dispatch, safety, providers, etc.) |
-| Tools | `src/tools/` | Surface-agnostic tool specifications and execution |
-| Interactive | `src/interactive/` | TUI rendering, chat loop, overlays, keybinding |
-| Entry | `src/entry/` | Boot composition root and mode wiring |
-| Worker | `src/worker/` | Subprocess runtime for dispatched workers |
-| CLI | `src/cli/` | Argument parsing, subcommand dispatch, boot options |
-| GUI app | `apps/clio-coder-gui/` | Optional alpha web application |
+The compiled binary runs `src/cli/index.ts`. Its `main(argv)` function does the following,
+in order, as read from source:
 
-## Domain module system
+1. Checks the Node version through `nodeVersionError`.
+2. Splits global flags with `extractGlobalFlags`, which is given `isCommandToken` so that
+   flags are recognized before and after the subcommand name.
+3. Handles `--help`/`-h` and `--version`/`-v` without loading a command module.
+4. Refuses boot-only flags placed before a subcommand. `--demo`, `--autonomy` and
+   `--allow-tools`/`--delegate-tools` each produce a message and exit code 2 when a
+   subcommand is present. The `run` and `acp` subcommands are told to take those flags
+   after the subcommand name.
+5. Runs `unhonoredBootFlag` against the subcommand, treating `dev` by the command it
+   names in its first argument.
+6. With no subcommand, enables the boot compile cache and imports `src/cli/clio.ts`, which runs
+   the interactive session through `runClioCommand`. With a subcommand, it calls `dispatch`.
 
-The composition backbone is the manifest-driven domain loader in `src/core/domain-loader.ts`. Every domain exports a `DomainModule` with a `manifest` (declaring its name and `dependsOn` list) and a `createExtension(context)` factory. The loader:
+`dispatch` looks the name up in `COMMAND_HANDLERS`, a `Map` of handlers declared in the
+same file. Each handler dynamically imports its own module, so only that command's graph
+loads. An unknown name prints `unknown subcommand` to stderr, writes the help text to
+stderr, and returns 2. The `acp` handler enables the boot compile cache and calls
+`runAcpCommand`. The `run` handler does the same and calls `runClioRun`. The `worker`
+handler is internal: it imports `src/worker/entry.ts` and is used when a worker is launched
+on a remote install.
 
-1. Topologically sorts modules by their dependency manifests.
-2. Instantiates each in order, passing a `DomainContext` that exposes the shared event bus and `getContract<T>(name)`.
-3. Calls `extension.start()` and stores the resulting contract under the domain name.
-4. On shutdown, calls `stop()` in reverse dependency order, unwinding bus listeners and releasing resources.
+The `acp` path in `src/cli/acp.ts` is the one place where a remote client attaches to the
+harness. `parseAcpFlags` accepts `--cwd`, `--permission-timeout`, `--allow-tools`, and
+`--delegate-tools`, rejecting anything else with a message. `runAcpCommand` changes into
+the pinned directory, takes over stdout, creates the stdio transport, and builds an
+`createAcpHandshake` declaring the capabilities the server advertises. It then calls
+`serveDeferredAcp`, whose `boot` callback calls `runClioCommand` with `acp` set to the
+transport and handshake. The handshake is answered before the orchestrator boots, so the
+client's advertised surface can decide which tools the boot builds.
 
-The orchestrator in `src/entry/orchestrator.ts` (`bootOrchestrator`) composes all domain modules for a production boot. The module list includes Config, Extensions, Plugins, Interop, Resources, Share, Context, Providers, Safety, Prompts, Agents, Middleware, Session, Observability, Scheduling, and conditionally Mux (panes) and Dispatch. Each domain receives a `DomainContext` whose `getContract` returns only the query-only contract from previously loaded domains, never the full extension, enforcing the cross-domain boundary.
+```mermaid
+flowchart TD
+  bin["clio-coder argv"] --> main["src/cli/index.ts main"]
+  main -->|no subcommand| clio["cli/clio.ts runClioCommand"]
+  main -->|subcommand| dispatch["dispatch via COMMAND_HANDLERS"]
+  dispatch -->|acp| acpcli["cli/acp.ts runAcpCommand"]
+  dispatch -->|run| run["cli/run.ts runClioRun"]
+  acpcli --> deferred["engine/acp deferred-boot serveDeferredAcp"]
+  deferred --> clio
+  clio --> boot["entry/orchestrator.ts bootOrchestrator"]
+```
 
-The focused test in `tests/contracts/domain-lifecycle.test.ts` verifies three lifecycle guarantees:
-- A failed domain startup releases its listeners and earlier dependencies in reverse order.
-- A rejected domain factory unwinds started dependencies.
-- Concurrent shutdown callers await one cleanup, and stopped contracts are withdrawn.
+## Orchestrator boot
 
-## Entry points and process modes
+`bootOrchestrator` in `src/entry/orchestrator.ts` is the composition root. It records the
+boot surface (`acp`, `run` or `tui`), installs signal handlers through the termination
+coordinator, calls `ensureClioState`, applies pending migrations, converts the workspace
+`.clio-coder/` directory, and then assembles providers, tools, sessions and telemetry.
+Those steps are not traced in full here. The entry points the other surfaces depend on
+are `serveClioAcpAgent` (called from the orchestrator at the ACP serve point) and the
+background memory and compaction factories defined in the same file. Each of those is an
+area of its own; see the links below.
 
-Three process modes share the domain loader:
+The orchestrator also keeps a `BootResult` interface that is the value the surfaces
+receive once the boot completes. This page does not inspect its fields.
 
-1. **Interactive** (`src/cli/index.ts` → `src/cli/clio.ts` → `src/entry/orchestrator.ts`): Opens the TUI via the terminal lease, boots all domains, creates the chat loop, and runs the interactive session. The Stage 0 shell (terminal lease) answers the terminal immediately while Stage 1 hydrates, yielding at each phase boundary via `bootPhaseBoundary`.
+## Tool surfaces
 
-2. **Headless** (`clio-coder run`): Loads the same domains, resolves the model target, and runs a single main-agent turn via `runHeadlessMainAgent` from `src/cli/modes/print.ts`.
+Three tools are the entry points the model sees for secondary capabilities. Each is
+registered in `src/tools/core-bootstrap.ts`.
 
-3. **ACP** (`clio-coder acp`): Serves the ACP v1 protocol over stdio via `serveClioAcpAgent` in `src/engine/acp/server.ts`. The CLI dispatches this through the `COMMAND_HANDLERS` map in `src/cli/index.ts`, dynamically importing each subcommand's module to avoid cold module-load tax.
+**Gateway.** `createGatewayTool` in `src/tools/gateway/index.ts` defines a single fixed
+schema with the operations `find`, `describe`, `call` and `chain` (`GATEWAY_OPS`). The
+`call` operation takes a `capability` name and an `args` record. Discovery grants no
+authority: the gateway forwards to the registry, so a call runs under the named
+capability's own admission. `src/tools/core-bootstrap.ts` constructs it with the shared `registry`
+and optional `mcpCapabilities`, `rankCapabilities` and `onCapabilityCalled` dependencies.
+When a capability is not registered, `unknownCapabilityMessage` returns one of two
+messages: on a restricted surface it lists admitted names, and otherwise it lists the
+registered tools. The focused test `tests/contracts/gateway-unknown-capability.test.ts`
+builds a gateway over `createWorkerToolRegistry()` and asserts that `edit`, `shell`,
+`terminal` and `mkdir` produce the same refusal under `allowedTools: ["read", "grep"]`,
+while `shell` on an unrestricted surface reports `no such capability "shell"; registered
+tools: ...` and does not contain `admitted capabilities`.
 
-The GUI server in `apps/clio-coder-gui/server/main.ts` runs a Hono-based HTTP application that spawns worker hosts for reads and operations, connects to an ACP supervisor, and exposes session, workspace, and service endpoints over REST.
+**Context.** `createContextTool` in `src/tools/context/index.ts` accepts the scopes
+`workspace`, `settings`, `skills`, `recall`, `budget` and `semantic`. The `docs` and
+`library` scopes return an error that names the gateway replacement, so those reads go
+through the gateway. `run` reserves an observation budget with `reserveObservation`
+before any scope handler runs; if the budget is exhausted it returns
+`observationBudgetExhausted` without doing the scope's work. `src/tools/core-bootstrap.ts` builds
+the schema with `createContextToolSurface` before the lazy import, so the advertised
+schema does not change if settings change before first use. `src/domains/context/bootstrap.ts`
+is the separate project-instruction generator. It is not a tool; its own page covers it.
 
-## Engine boundary
+**Data.** `src/tools/data/index.ts` exports `detectDataFormat`, `inspectData`,
+`selectData` and `validateData`. `detectDataFormat` checks an explicit format first, then
+the file extension, then the first bytes of the file. A SQLite magic header yields
+`sqlite`; a leading `{` or `[` yields `json`, or `jsonl` when the second line also opens a
+value; a tab on the first line yields `tsv`; a comma, semicolon or pipe yields `csv`.
+Unknown content returns null. `tests/contracts/data-csv.test.ts` exercises this with
+`detectDataFormat(file("x.csv", "{}"), "json")` expecting `json`,
+`detectDataFormat(join(dir, "x.csv"), "yaml")` expecting `null`, and
+`detectDataFormat(file("lines.txt", '{"a": 1}\n{"a": 2}\n'))` expecting `jsonl`.
 
-The file `src/engine/types.ts` is the single re-export point for engine package types consumed by the rest of the codebase. It exposes erased shapes like `EngineModel` (which is `PiModel<PiApi>`), `AgentMessage`, `Usage`, and TUI types. The comment in that file states the rule explicitly: "Importing engine package types from anywhere else in the codebase violates the engine boundary."
+## Semantic application boundary
 
-The boundary checker in `tests/boundaries/check-boundaries.ts` enforces this as rule 1: no file outside `src/engine/**` may import `@earendil-works/pi-*` at all, not even type-only imports (since the 0.83.0 rework). Domains take erased engine shapes from `src/engine/types.ts` instead.
-
-## Tool surface and gateway
-
-The tool system lives in `src/tools/`. Tools are defined as `ToolSpec` objects registered in a `ToolRegistry`. The gateway tool (`src/tools/gateway/index.ts`, exported as `createGatewayTool`) provides a unified `find`/`describe`/`call` interface through which the model reaches secondary capabilities that are not attached directly to the model's tool surface. A gateway call resolves the capability and invokes it through the registry under the capability's own name, so safety, skill policy, autonomy mapping, and audit all apply identically to a direct call.
-
-The context tool (`src/tools/context/index.ts`, exported as `createContextTool`) provides `workspace`, `settings`, `skills`, `recall`, and `budget` scopes. The `skills` scope handles the skill activation policy including pending-request gates, drift detection, and marketplace rows. The `docs` and `library` scopes are gateway capabilities (`clio_docs`, `clio_library`).
-
-The data tool (`src/tools/data/index.ts`) exports `inspectData`, `selectData`, and `validateData` for CSV/TSV, JSON, and JSON Lines files. Format detection follows an explicit-argument → extension → content-sniffing cascade, and each function streams the file, returning a JSON-serializable result or a typed refusal.
-
-## Worker runtime
-
-Workers run as separate Node.js subprocesses launched by the dispatch domain. The worker entry point (`src/worker/entry.ts`) reads a `WorkerSpec` JSON document from stdin, rehydrates the runtime descriptor from the runtime registry, and dispatches to `startWorkerRun` from the engine boundary. Workers emit NDJSON events on stdout and communicate with the orchestrator through a control lane.
-
-The worker boundary is strict: `src/worker/**` may only value-import from `src/domains/providers/plugins.ts`, `src/domains/providers/registry.ts`, and `src/domains/providers/runtimes/builtins.ts` (the provider runtime rehydration modules). All other domain imports must be type-only. This rule is enforced as rule 2 in the boundary checker.
-
-## Data flow: a headless turn
-
-For a `clio-coder run "<task>"` invocation:
-
-1. `src/cli/index.ts` parses flags, dispatches to the `run` handler, which dynamically imports `src/cli/run.ts`.
-2. `src/cli/run.ts` calls `bootOrchestrator` with headless options.
-3. `bootOrchestrator` in `src/entry/orchestrator.ts` loads all domains via `loadDomains`, resolves the model target through the Providers contract, and registers background memory routing.
-4. The chat loop (`src/session-control/chat-loop.ts`) executes the turn, invoking tools through the registry.
-5. Tool results pass through the observation budget system (`src/tools/observation.ts`) for per-turn byte caps.
-6. The session domain persists entries to the JSONL ledger.
-7. On completion, the termination coordinator drains dispatch and closes all extensions in reverse order.
-
-## Enforced boundaries
-
-Six static import rules are checked by `tests/boundaries/check-boundaries.ts`:
-
-| Rule | Constraint |
-|------|-----------|
-| 1 | `src/engine/**` is the only code that may value-import `@earendil-works/pi-*`; all other layers use erased shapes from `src/engine/types.ts`. |
-| 2 | `src/worker/**` never value-imports `src/domains/**` except provider runtime rehydration modules. |
-| 3 | `src/domains/<x>` never imports `src/domains/<y>/extension.ts` for `y != x`; use the contract from `src/domains/<y>/index.ts`. |
-| 4 | `src/tools/**` never imports `src/interactive/**`; the tool substrate is surface-agnostic. |
-| 5 | Chat loop turn modules never import `src/entry/**`; composition flows one direction. |
-| 6 | External runtime importers reach `src/interactive/**` and `src/engine/**` only through declared seams in `STAGE0_SEAMS`. |
-
-The Stage 0 closure (owned by `src/interactive/terminal-lease.ts`) is held to 32 chunks, 1,400,000 total bytes, and 350,000 Clio source bytes by `tests/contracts/instant-shell-import-graph.test.ts`. Rule 6 protects this budget by preventing external importers from dragging the Stage 0 closure into their own module graph.
-
-## Extension seams
-
-New capabilities are added at specific seams:
-
-- **New domain module**: Export a `DomainModule` from `src/domains/<name>/index.ts` with a manifest and `createExtension`. Register it in the orchestrator's `loadDomains` array. The module receives a `DomainContext` and returns a `DomainBundle` with an extension (lifecycle) and a contract (query surface).
-
-- **New tool**: Define a `ToolSpec` with `name`, `description`, `parameters` (TypeBox schema), `baseActionClass`, and `run`. Register it in the tool bootstrap (`src/tools/bootstrap.ts`). Tools marked as "direct" are attached to the model surface; others are reachable through the gateway.
-
-- **New CLI subcommand**: Add an entry to the `COMMAND_HANDLERS` map in `src/cli/index.ts` that dynamically imports a new module from `src/cli/`. The dynamic import is literal so tsup can split it into its own chunk.
-
-- **New worker runtime**: Register a `RuntimeDescriptor` in `src/domains/providers/runtimes/builtins.ts`. The worker rehydrates it from stdin via `src/worker/runtime-registry.ts`.
-
-- **New MCP server**: Declare the server in the project's MCP configuration. The gateway's MCP capability source (`src/tools/gateway/mcp-capabilities.ts`) discovers it and exposes its tools as capabilities.
+`src/domains/semantic-app/index.ts` is the application boundary for the optional semantic
+index. `openSemanticRoute` requires a configured and usable semantic setting, resolves the
+target from the settings, and builds an embedding profile. `openSemanticApp` then adds
+allowed media roots from the configured inboxes. The module's comment states that no model
+is contacted at startup. The media path check in `providerInput` requires the canonical
+path to be inside an allowed root and rejects symbolic links. Those checks are read from
+source; no focused test for them was located.
 
 ## Things to watch when editing
 
-- **Engine boundary is absolute.** Since the 0.83.0 rework, there is no type-only exception to rule 1. If a domain needs a new engine type, add the re-export to `src/engine/types.ts` in the same commit as the consumer.
+- A new subcommand needs an entry in `COMMAND_HANDLERS` in `src/cli/index.ts`. A command
+  that is only listed in `helpText` is not dispatchable.
+- A boot flag added to `main` must also be handled by `unhonoredBootFlag` or it can be
+  silently dropped before a subcommand. The code comments in `main` give this as the
+  reason for refusing the flags.
+- The ACP handshake capability list in `src/cli/acp.ts` is what the client sees before the
+  orchestrator boots. Changing a capability there changes what the boot is told to build.
+- The gateway's restricted-surface message is deliberately identical for excluded and
+  unknown names. Changing the message shape should keep the assertions in
+  `tests/contracts/gateway-unknown-capability.test.ts` true.
 
-- **Domain contract is the only cross-domain surface.** A domain's `extension.ts` may hold internal state, event subscriptions, and side effects. Other domains must go through the contract from `index.ts`. The boundary checker (rule 3) fails the build if a domain reaches into another's extension.
+## Related pages
 
-- **The gateway is not a second authority.** A `gateway(op="call")` goes through the same registry invocation as a direct tool call. The safety net, skill policy, autonomy mapping, parking, before/after hooks, and audit row all apply under the capability's own name. If you add a tool, its action class and approval behavior are the same whether called directly or through the gateway.
-
-- **Stage 0 is a cold-start budget, not a code-quality rule.** Adding a new reacher to `src/interactive/**` from outside the Stage 0 closure requires a declared seam in `STAGE0_SEAMS` with a reason. The seam's own closure must stay off the Stage 0 modules, or the instant shell's chunk graph splits.
-
-- **Worker subprocesses are process-isolated by design.** They have their own tool registry, their own session ledger mirror, and their own event bus. The orchestrator never observes worker tool calls directly; worker skill activations fold into the session ledger only through the dispatch terminal payload. Code that assumes shared state between orchestrator and worker will fail.
-
-<!-- clio-coder:wiki unresolved sources: src/engine/**, src/worker/**, src/domains/**, src/domains/<x>, src/domains/<y>/extension.ts, src/domains/<y>/index.ts, src/tools/**, src/interactive/**, src/entry/**, src/domains/<name>/index.ts -->
+- [CLI modes](cli/modes.md) and [CLI](cli.md) describe the command surfaces in detail.
+- [Entry](entry.md) covers the orchestrator.
+- [Engine ACP](engine/acp.md) covers the ACP server.
+- [Tools gateway](tools/gateway.md), [Tools context](tools/context.md) and
+  [Tools data](tools/data.md) cover the tool surfaces.
+- [Domains context](domains/context.md) covers the bootstrap generator.
+- [Domains semantic](domains/semantic.md) covers the semantic index.
+- [Tests contracts](tests/contracts.md) covers the contract tests named above.

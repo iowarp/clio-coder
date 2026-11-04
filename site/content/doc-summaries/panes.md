@@ -1,6 +1,6 @@
 ## Add a file browser or companion shell
 
-The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation. Panes are experimental, off by default, and need a reachable **Herdr** session; the normal terminal works without them.
+The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation. Panes are experimental and need the **Herdr** pane host. On Linux and macOS, the first bare `clio-coder` in an interactive terminal asks once whether to open a workspace, and nothing is downloaded or opened before you answer yes. Set `interface.panes.enabled: off` to stop asking; the normal terminal works without panes.
 
 Install the pane host and file browser explicitly:
 
@@ -9,7 +9,7 @@ clio-coder tools install herdr
 clio-coder tools install yazi
 ```
 
-Start Herdr, open a pane in your project, then run:
+To join a Herdr session you already started, open a pane in your project, then run:
 
 ```sh
 clio-coder --with-panes

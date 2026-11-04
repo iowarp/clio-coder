@@ -401,6 +401,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"run.aborted": { ...keep("source", "elapsedMs"), runId: "id", startedAt: "id" },
 	"turn.aborted": keep("source"),
 	"job.clock_resumed": { ...keep("boundMs"), jobId: "id" },
+	"turn.continued": { ...keep("cause", "attempt", "cap"), jobId: "id" },
 	"agent.status_changed": {
 		...keep("phase", "prevPhase", "elapsedFromStart", "watchdogTier", "attempt"),
 		toolName: "tool",

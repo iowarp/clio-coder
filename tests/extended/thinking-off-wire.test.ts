@@ -1,10 +1,11 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
+import { createHttpChannel } from "../../src/domains/system-one/engines/llm-wire.js";
 
 const effortLevelsQuirks = {
 	thinking: {
@@ -274,5 +275,32 @@ describe("thinking off reaches the wire", () => {
 			kbHit: nemotronLightning,
 		});
 		strictEqual(lightningResolved.request.chatTemplateKwargs?.force_nonempty_content, true);
+	});
+});
+
+describe("System One's thinking switch reaches the wire", () => {
+	it("sends both spellings to Lemonade, which fronts backends that read different ones", async (t) => {
+		const bodies: Array<Record<string, unknown>> = [];
+		const fetchMock = mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+			bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+			return new Response(JSON.stringify({ choices: [{ message: { content: "A" } }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		});
+		t.after(() => fetchMock.mock.restore());
+		const channel = createHttpChannel({
+			engine: "test",
+			target: { id: "zbook", runtime: "lemonade", url: "http://127.0.0.1:13305/api/v1" } as never,
+			runtime: { id: "lemonade", auth: "none" } as never,
+			model: "m",
+			baseUrl: "http://127.0.0.1:13305/api/v1",
+			host: { auth: undefined, credentialsPresent: () => new Set<string>() } as never,
+			signal: new AbortController().signal,
+		});
+		await channel.batch({ system: "s", user: "u" }, {}, 1);
+		strictEqual(bodies.length, 1);
+		strictEqual(bodies[0]?.reasoning_effort, "none");
+		deepStrictEqual(bodies[0]?.chat_template_kwargs, { enable_thinking: false });
 	});
 });

@@ -70,6 +70,12 @@ export type TurnPreparationPhase = "idle" | "preparing" | "compacting";
 /** A local request stage must stay distinct from an invoked stream stall (#424). */
 export type PreInvocationStage = "transform" | "auth" | "budget admission" | "admission";
 
+export interface TurnStop {
+	cause: "retries_exhausted" | "compaction";
+	reason: string;
+	retryAfterMs?: number;
+}
+
 export interface ChatTurnState {
 	/** Live agent runtime; built or hot-swapped by turn-runtime. */
 	runtime: AgentRuntime | null;
@@ -123,6 +129,10 @@ export interface ChatTurnState {
 	 * Cleared with `synthesisToolLock`.
 	 */
 	toolBudgetLock: boolean;
+	/** Continuations spent since the operator's last prompt (#445). */
+	yoloContinuations: number;
+	/** A way this turn ended that nobody asked for and another turn could get past; a yolo continuation reads it (#445). */
+	turnStop: TurnStop | null;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
@@ -175,6 +185,8 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		interruptedCall: null,
 		synthesisToolLock: false,
 		toolBudgetLock: false,
+		turnStop: null,
+		yoloContinuations: 0,
 		toolProseAbortReason: null,
 		streamStallReason: null,
 		streamStallStage: null,

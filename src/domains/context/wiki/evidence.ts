@@ -229,7 +229,15 @@ export function validateWikiPageEvidence(input: WikiPageEvidenceInput): WikiPage
 		return { ok: false, reasons, allReasons, resolvedDependencies: [] };
 	}
 	const { body, metadata } = readWikiPage({ pagePath: input.pagePath, content: input.content });
-	const coverageGaps = metadata.coverage_gaps ?? [];
+	// A list left in the body would otherwise publish as prose and escape this check.
+	const strayGaps = /^coverage_gaps:\n((?:[ \t]*- .*\n?)+)/m.exec(body.replace(/^```[\s\S]*?^```/gm, ""))?.[1] ?? "";
+	const coverageGaps = [
+		...(metadata.coverage_gaps ?? []),
+		...strayGaps
+			.split("\n")
+			.map((line) => line.replace(/^\s*- /, "").replace(/^"|"$/g, ""))
+			.filter(Boolean),
+	];
 	for (const gap of coverageGaps) fail(`Coverage gap: ${gap}`);
 	if (input.wikiLinks) {
 		const links = repairWikiLinks(input.pagePath, body, input.wikiLinks);

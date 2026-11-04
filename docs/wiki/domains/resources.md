@@ -1,210 +1,311 @@
 ---
-title: "Domains resources"
-summary: "How Clio discovers, loads, and validates skills, prompt templates, and library packages, and the plan/apply/verify lifecycle that installs and removes them."
+title: "Resources: skills, prompt templates and library packages"
+summary: "How Clio discovers, trusts, loads and expands skills and prompt templates, and how the library catalog and its lifecycle sit beside them. Read this before changing discovery roots, trust gates, slash-command expansion or library package handling."
 sources:
   - "src/domains/resources/index.ts"
-  - "src/domains/resources/extension.ts"
   - "src/domains/resources/loader.ts"
-  - "src/domains/resources/contract.ts"
-  - "src/domains/resources/library.ts"
-  - "src/domains/resources/library-actions.ts"
-  - "src/domains/resources/library-inventory.ts"
-  - "src/domains/resources/library-validation.ts"
-  - "src/domains/resources/library-types.ts"
-  - "src/domains/resources/collision.ts"
-  - "src/domains/resources/common-loader.ts"
-  - "src/domains/resources/package-references.ts"
+  - "src/domains/resources/extension.ts"
   - "src/domains/resources/skills/loader.ts"
   - "src/domains/resources/skills/catalog-view.ts"
-  - "src/domains/resources/skills/lexical-match.ts"
-  - "src/domains/resources/skills/availability.ts"
-  - "src/domains/resources/skills/content-hash.ts"
-  - "src/domains/resources/skills/provenance-pin.ts"
   - "src/domains/resources/prompts/loader.ts"
+  - "src/domains/resources/library.ts"
+  - "src/domains/resources/library-actions.ts"
+  - "src/domains/resources/library-validation.ts"
+  - "src/domains/resources/library-inventory.ts"
 symbols:
   - "ResourcesDomainModule"
+  - "createResourcesDomainModule"
   - "createResourcesBundle"
   - "createResourcesLoader"
   - "loadSkills"
+  - "defaultSkillRoots"
+  - "modelVisibleSkills"
+  - "skillCatalogValidity"
+  - "parseSkillCommand"
+  - "expandSkillInvocationInput"
+  - "parsePendingSkillRequests"
+  - "loadPromptTemplates"
+  - "parsePromptCommand"
+  - "expandPromptTemplateInput"
+  - "promptTemplateDisplayText"
   - "buildSkillCatalogView"
-  - "planLibraryLifecycle"
-  - "applyLibraryLifecycle"
-  - "readLibraryInventory"
-  - "validateLibraryPackage"
   - "discoverLibrary"
+  - "planLibraryLifecycle"
+  - "validateLibraryPackage"
 tests:
-  - "tests/contracts/skills-catalog-view.test.ts"
-  - "tests/contracts/skill-install.test.ts"
-  - "tests/contracts/prompt-skill-policy.test.ts"
-  - "tests/extended/library-lifecycle.test.ts"
-  - "tests/extended/library-inventory.test.ts"
+  - "tests/extended/prompt-display-only.test.ts"
+  - "tests/contracts/skills-catalog-budget.test.ts"
 invariants:
-  - "A SKILL.md must carry YAML frontmatter with a description, or it is not loaded; a file over MAX_SKILL_BYTES (1 MiB) is refused as a payload rather than a document."
-  - "One synchronous plugin discovery pass reuses each installed tree's verified digest; a listing that crosses an await re-verifies from disk."
-  - "A library commit that the writer reports as durable is never rolled back by a later read-back verification failure; the step stays committed with a verification error attached."
-  - "The unfiltered model-facing skills listing is byte-identical to the renderer it replaced, because narrowing and fitting are caller opt-ins and the footer protocol is reserved first."
+  - "A skill file larger than 1 MiB is rejected at load with a warning diagnostic and produces no skill; the file is read only up to one byte past the limit."
+  - "A loaded skill is model-visible through modelVisibleSkills only when it is trusted and does not set disable-model-invocation."
+  - "A prompt template from a foreign (non-Clio) root, or an imported package template that is untrusted, is not expanded; expandPromptTemplateInput returns expanded: false with a refusal that carries the reason."
+  - "A prompt template marked display-only (boolean true or yes under display-only, or true under displayOnly) expands to a display payload and never to a model-bound substituted body, provided it is trusted and loaded."
+  - "A prompt template whose name matches a reserved built-in slash command is dropped with a collision diagnostic, in loadPromptTemplates."
+  - "Skill and prompt expansion is triggered only by a leading slash command; plain text returns unchanged, and parsePendingSkillRequests returns no pending requests."
 validate:
-  - "pnpm run test:file -- tests/contracts/skills-catalog-view.test.ts"
+  - "pnpm run test:file -- tests/extended/prompt-display-only.test.ts"
+  - "pnpm run test:file -- tests/contracts/skills-catalog-budget.test.ts"
 ---
 
-# Domains resources
+# Resources: skills, prompt templates and library packages
+
+The resources domain is the part of Clio that finds the instructions a user or a package
+supplies, decides which of them the model may see or run, and expands a typed slash command
+into the text that reaches a turn. A reader needs this page when changing where skills or
+prompts are read from, when a skill or template does not appear or does not expand as expected,
+or when touching the library catalog and its install and validation lifecycle.
 
 ## What this area does
 
-`src/domains/resources` is the library of distributable, loadable resources Clio can discover and reason about: skills, prompt templates, agent recipes, and fleet contracts, together with the package machinery that installs, pins, validates, and removes them. The domain does two kinds of work that are kept separate. The first is a runtime read surface: it discovers what skills and prompt templates exist on the machine, resolves collisions between duplicate names, and renders the model-facing skills listing. The second is a mutation surface: it plans library operations as reviewed, per-package steps, applies them through the shared plugin writers, and reads the result back to prove what actually changed.
+The domain entry is `ResourcesDomainModule` and `createResourcesDomainModule`
+(`src/domains/resources/index.ts`). Both attach `createResourcesBundle`
+(`src/domains/resources/extension.ts:createResourcesBundle`) as the extension factory. The bundle
+builds a `createResourcesLoader` (`src/domains/resources/loader.ts:createResourcesLoader`) and
+exposes it through the `ResourcesContract` methods: `skills`, `skillsForDisplay`,
+`skillsStillVerified`, `parsePendingSkillRequests`, `prompts`, `promptsForDisplay`,
+`expandPromptTemplate` and `reload`.
 
-The read surface is exposed as a domain contract and is consumed by the context tool and the CLI. The mutation surface is consumed by the `/library` overlay and the `clio-coder library` subcommand. The two never share mutable state; the inventory is a body-free projection that composes the existing readers and never fetches, executes, reloads, or writes.
+The skill trust option comes from the config domain. `createResourcesBundle` reads
+`integrations.projectResources.trustProjectImports` through the `config` contract and passes it
+as `trustProjectCompatRoots` for both skills and prompts (`src/domains/resources/extension.ts:skillOptions`). The
+same flag gates foreign roots and untrusted imported packages in both loaders.
 
-## Ownership and entry points
+The loader has two read modes. `skills(cwd)` and `prompts(cwd)` read with plugin tree
+verification. `skillsForDisplay` and `promptsForDisplay` pass `verifyPluginTrees: false`, so the
+listing comes from the committed plugin snapshot without walking installed trees
+(`src/domains/resources/loader.ts:createResourcesLoader`, the `skillsForDisplay` and
+`promptsForDisplay` methods).
 
-The domain is registered as a `DomainModule` in `src/domains/resources/index.ts`. The constant `ResourcesDomainModule` carries `ResourcesManifest` and `createResourcesBundle`; the function `createResourcesDomainModule(options)` returns a module bound to a `ResourceLoaderOptions` so a caller can inject the cwd and per-call skill options.
+`src/domains/resources/loader.ts` also owns the two-step expansion path for prompts. Its
+`expandPromptTemplate` method first lists templates without plugin verification and returns
+early when the command name is absent from that listing. It reloads with verification only when
+the name is present (`loader.ts`, `expandPromptTemplate`). Plain text without a leading slash
+returns before any listing.
 
-The manifest in `src/domains/resources/manifest.ts` declares `name: "resources"` and `dependsOn: ["config"]`. The dependency is real: `createResourcesBundle` in `src/domains/resources/extension.ts` reads the `config` contract to pull `integrations.projectResources.trustProjectImports` and folds it into the skill loader options through `skillOptions`.
+## Skills
 
-The contract itself is `ResourcesContract` in `src/domains/resources/contract.ts`. It exposes six operations: `skills(cwd)`, `parsePendingSkillRequests(text, cwd, options)`, `prompts(cwd)`, `promptsForDisplay(cwd)`, `expandPromptTemplate(text, cwd)`, and `reload()`. The runtime behind it is `createResourcesLoader` in `src/domains/resources/loader.ts`.
+### Discovery and precedence
 
-Key modules and their symbols:
+`loadSkills` (`src/domains/resources/skills/loader.ts:loadSkills`) wraps `loadSkillsInPass` in
+`withPluginDiscoveryPass`, so each installed plugin tree is verified once per catalog load.
+`loadSkillsInPass` uses `input.roots` when supplied, returns no roots when `disableDiscovery` is
+true, and otherwise calls `defaultSkillRoots`. It then loads every root and every
+`explicitSkillPaths` entry, dedupes canonical paths, resolves collisions, sorts winners by name,
+and appends requirement diagnostics (`src/domains/resources/skills/loader.ts:loadSkillsInPass`).
 
-- `src/domains/resources/library.ts`: discovery and single-package install planning. `discoverLibrary`, `resolveLibraryRequirements`, `classifyLibraryRequirements`, `planLibraryInstall`, `commitLibraryInstallPlan`, `installLibraryPlan`, `resolveLibraryPackage`, `planLibraryUpdate`, `syncLibrary`, and the state predicates `libraryEntryInstalled`, `libraryEntryPin`, `libraryEntryDrift`.
-- `src/domains/resources/library-actions.ts`: the lifecycle. `planLibraryLifecycle`, `applyLibraryLifecycle`, `verifyLibraryStep`, `releaseLibraryLifecycle`, `retryLibraryRefresh`, `libraryImportOutcome`, and the `LibraryOperation` union `"install" | "update" | "enable" | "disable" | "remove"`.
-- `src/domains/resources/library-inventory.ts`: the body-free projection. `readLibraryInventory`, `inspectLibraryCopy`, `classifyLibraryOrigin`, `libraryCopyState`, `libraryResourceKey`, `parseLibraryResourceKey`, and `LIBRARY_INVENTORY_LIMITS`.
-- `src/domains/resources/library-validation.ts`: `validateLibraryPackage`, which scans one installed copy's skills, prompts, agents, fleets, and declared components.
-- `src/domains/resources/library-types.ts`: the shared kind taxonomy. `LIBRARY_KINDS`, `LIBRARY_RESOURCE_KINDS`, `LibraryPackageEntry`, and `LibraryProvidedResource`.
-- `src/domains/resources/skills/loader.ts`: skill discovery. `loadSkills`, `defaultSkillRoots`, `modelVisibleSkills`, `skillCatalogValidity`, `parsePendingSkillRequests`, and the constants `SKILL_PRECEDENCE`, `MAX_SKILL_BYTES`, `SKILL_ACTIVATION_BODY_CAP_BYTES`.
-- `src/domains/resources/skills/catalog-view.ts`: `buildSkillCatalogView`, the model-facing listing with query filtering, ranking, and byte-budget fitting.
-- `src/domains/resources/prompts/loader.ts`: prompt discovery. `loadPromptTemplates`, `expandPromptTemplateInput`, `parsePromptCommand`, `promptTemplateDisplayText`.
-- `src/domains/resources/collision.ts`: `resolveResourceCollisions`, the shared name-collision resolver.
-- `src/domains/resources/common-loader.ts`: `defaultScopedResourceRoots`, `splitYamlFrontmatter`, `sourceInfoForRoot`, and `COMPAT_RESOURCE_PRECEDENCE`.
-- `src/domains/resources/package-references.ts`: `resolvePackageReferences` and `resolvePackagePathReference`, which expand `${pluginRoot}` and `${component:…}` markers inside plugin-owned bodies.
+`defaultSkillRoots` (`src/domains/resources/skills/loader.ts:defaultSkillRoots`) returns roots from lowest to highest
+precedence, as its doc comment states: plugin skills; discovery-only user compatibility roots
+from the interop registry; the Clio user root under the config directory; the same agents'
+project roots, also discovery-only; and the Clio project root at `.clio-coder/skills`. The
+precedence constants are in `SKILL_PRECEDENCE` (`src/domains/resources/skills/loader.ts`): package 10, userCompat 20,
+user 30, projectCompat 40, project 50, cli 60. Interop compatibility roots are created with
+`trusted: false` and `foreign: true`. The Clio project root sets `strictContainment: true`, so a
+repository whose root is a symlink cannot move the containment boundary to the link target.
 
-## The runtime contract and how a caller uses it
+A source checkout adds a narrow self-development tier inside `defaultSkillRoots`. When
+`detectClioCoderRepo` finds a repository and the working directory is not its root, names owned
+by installed packages are excluded before the self-development skills under
+`library/skills/meta` are added. The exclusion keeps a disabled or not-yet-reloaded package's
+name from being taken by a source fallback.
 
-The context tool is the principal read-side caller. In `src/tools/context/index.ts`, `runSkillsScope` composes the domain in four steps. It calls `loadSkills({ cwd, ...deps.getSkillLoaderOptions?.() })`, filters the result with `modelVisibleSkills(list.items)`, pulls disk install state with `installedSkillPackages(list.items, cwd, trust)`, and finally renders the view with `buildSkillCatalogView({ skills: visible, packages, marketplace, drifted, marketplaceOffered, modelActivation, query, limit, offset, capBytes, relevance })`. The reservation's `callCapBytes` is forwarded as the byte budget, and the view's `nextOffset` drives the tool's continuation notice.
+### Trust and model visibility
 
-`createResourcesLoader` in `src/domains/resources/loader.ts` is the seam that turns the loaders into a contract. It threads `cwd` and the optional `skills()` accessor through every call. The loader shares one trust decision across kinds: `promptOptions` copies `trustProjectCompatRoots` from the skill options, so a project compatibility root is the same trust decision whichever kind is read out of it. The `promptsForDisplay` path passes `verifyPluginTrees: false` to `loadPromptTemplates`, which takes package roots from the committed plugin snapshot without re-verifying each tree; expansion never passes it, so a drifted or revoked template can show but never runs.
+Each `Skill` carries `trusted`, `disableModelInvocation`, `source`, `scope` and `precedence`
+(`src/domains/resources/skills/loader.ts`, the `Skill` interface). `loadSkillFile` sets `trusted` from
+`root.trusted ?? true` and `disableModelInvocation` from the frontmatter. `modelVisibleSkills`
+returns only skills where `skill.trusted && !skill.disableModelInvocation`
+(`src/domains/resources/skills/loader.ts:modelVisibleSkills`). For foreign roots, `projectCompatTrusted` returns true
+only when the explicit `trustProjectCompatRoots` input is true. For plugin roots the trust is
+`root.trust !== "foreign" || trustProject`, so a foreign plugin root is trusted only under the
+same explicit flag (`src/domains/resources/skills/loader.ts:defaultSkillRoots`).
 
-Both `parsePendingSkillRequests` and `expandPromptTemplate` short-circuit before paying for a full resource walk. The loader checks `parseSkillCommand(text) === null` first, and `parsePromptCommand(text) === null` for prompts, so an ordinary submit that names no slash command does not list the whole catalog.
+### Size gates and the activation cap
 
-## Skills: discovery, precedence, and the model-facing view
+`loadSkillFile` reads through `readRegularSkillFile`, which opens the file with `O_NONBLOCK` when
+the platform defines it, refuses anything that is not a regular file, and reads at most
+`MAX_SKILL_BYTES + 1` bytes (`src/domains/resources/skills/loader.ts:readRegularSkillFile`). When the read exceeds
+`MAX_SKILL_BYTES`, `loadSkillFile` returns no candidate and a warning that names the size and the
+limit. The same function refuses content that contains a NUL byte or is not valid UTF-8 round
+trip, with a warning and no candidate. A file that loads but is larger than
+`SKILL_ACTIVATION_BODY_CAP_BYTES` (50 KiB) still loads, and a warning states that activation
+delivers at most that many bytes. The doc comment on `SKILL_ACTIVATION_BODY_CAP_BYTES` says it
+mirrors a limit in the tool substrate and is asserted equal by a contract test. this page did not
+read that contract, so that equality is unverified here.
 
-`loadSkills` in `src/domains/resources/skills/loader.ts` is wrapped by `withPluginDiscoveryPass` (imported from `src/domains/plugins/discovery-pass.ts`), so one load verifies each installed plugin tree once for the whole pass. Inside the pass, `loadSkillsInPass` gathers candidates from every root, dedupes canonical file paths, resolves name collisions, and sorts winners by name.
+The focused test `tests/contracts/skills-catalog-budget.test.ts` calls `loadSkills({ cwd })` and
+looks up an installed skill by name. this page did not read its assertions, so the size-gate
+behavior above is grounded in source only.
 
-The default root set is built by `defaultSkillRoots` and is lowest-to-highest precedence:
+### Validity for the catalog
 
-1. Clio's own source-checkout self-development skills, when the cwd is a Clio repo and the skill is not already installed (precedence `SKILL_PRECEDENCE.package - 1`).
-2. Enabled plugin skill roots, precedence 10.
-3. User compatibility roots, one per interop agent kind, precedence 20, `trusted: false`.
-4. The Clio user root `<config>/skills`, precedence 30, trusted.
-5. Project compatibility roots, precedence 40, `trusted: false`.
-6. The Clio project root `.clio-coder/skills`, precedence 50, trusted.
+`skillCatalogValidity` (`src/domains/resources/skills/loader.ts:skillCatalogValidity`) is the rule that the library
+validation path applies to a loaded `SkillList`. In order it reports `load-error` for any error
+diagnostic, `collision` for any collision diagnostic, `unloadable-file` for a warning whose path
+did not load, and `no-skills` for an empty list; otherwise it is valid. Its doc comment says the
+CLI and the GUI both use this one rule. This page did not trace those callers, so only the
+function's own ordering is described here.
 
-Compatibility roots come from `INTEROP_AGENT_KINDS` in `src/domains/interop/registry.ts` rather than a local list, so adding an agent to that table teaches every reader about it at once. Explicit paths load at precedence 60 (`SKILL_PRECEDENCE.cli`).
+### Slash-command expansion
 
-Each `SKILL.md` is loaded by `loadSkillFile`. A file over `MAX_SKILL_BYTES` (1 MiB) is refused because `loadSkills` runs on every `context(scope="skills")` call and reads and hashes each file whole. A file over `SKILL_ACTIVATION_BODY_CAP_BYTES` (50 KiB) loads but carries a warning that activation delivers at most that much. Missing description is the only hard rejection; every other problem loads with a warning. The skill's `hash` is the sha256 of the raw file; `normalizedHash` is the sha256 after stripping install-lifecycle provenance frontmatter via `normalizedSkillHash` in `src/domains/resources/skills/content-hash.ts`, so an installed copy compares equal to its audited source regardless of install timestamps.
+`parseSkillCommand` (`src/domains/resources/skills/loader.ts:parseSkillCommand`) recognizes only input whose trimmed
+text starts with `/skill `. It returns the first whitespace-delimited token as the name and the
+trailing text as `args`. `expandSkillInvocationInput` returns `expanded: true`, with the skill,
+`text` equal to the args, and `triggeredBy: "slash-command"`, when a loaded skill has that name.
+Otherwise it returns `expanded: false`.
 
-Name collisions are resolved by `resolveSkillCollisions`. `compareSkillCandidates` ranks by trust first, then by whether the skill is owned (`plugin`, `clio-coder`, `cli`, or `path`), then by `precedence`, then by the interop registry's own agent rank, then by path. This ordering means an untrusted compatibility copy cannot hide an admitted native skill and then disappear from model-visible discovery. `modelVisibleSkills` filters to `skill.trusted && !skill.disableModelInvocation`.
+`parsePendingSkillRequests` (`src/domains/resources/skills/loader.ts:parsePendingSkillRequests`) classifies a `/skill`
+name. An installed skill that is trusted, or whose source is `plugin` or `clio-coder`, yields a
+pending request with `installed: true` and its file path. A name listed by
+`installedSkillNames` but not loaded yields `installed: true` with no path. A name found in
+`getMarketplaceSkills` yields `source: "marketplace"` and `installed: false`. Any other name yields
+`installed: false` with source `slash-command`.
 
-`skillCatalogValidity` is the single rule `clio-coder library validate` applies. A scanned file that produced no loaded skill is malformed, a collision drops a skill, and any hard error fails; benign warnings attach to a file that still loaded, so they do not fail validation. The reasons are ordered `load-error`, `collision`, `unloadable-file`, `no-skills`.
+The `createResourcesLoader` method `parsePendingSkillRequests` (`loader.ts`) checks
+`parseSkillCommand` first and returns an empty request list for plain text, so an ordinary submit
+does not load the catalog. The reserved argument `SKILL_SURFACE_CLEAR_ARG` is `"off"`
+(`src/domains/resources/skills/loader.ts`). Its doc comment says `/skill off` clears a session tool surface rather than
+naming a skill. The code that clears the surface is not covered on this page.
 
-`buildSkillCatalogView` in `src/domains/resources/skills/catalog-view.ts` renders the model-facing listing. It guarantees two properties. First, an unfiltered, uncut view is byte-identical to the renderer it replaced, because narrowing and fitting are caller opt-ins and a ranked or clipped default would decide for the model which skills it is allowed to know about. Second, the footer always survives: the footer is the reply protocol, the one line a model acts on, so it is reserved first and rows are fitted into what is left. Rows are built in four kind blocks (`ready`, `session`, `package`, `marketplace`) in that order, which is also the order overflow drops them. A query runs `selectRows`, which tries lexical `all` matching and falls back to `any`, reporting the chosen `matchMode`. Ranking runs after the query and never removes a row. Bisection then finds the largest row count that fits `capBytes`; a zero-row page is measured separately because it carries a different message than a one-row page.
+### Catalog view
+
+`buildSkillCatalogView` (`src/domains/resources/skills/catalog-view.ts:buildSkillCatalogView`)
+builds the paged and optionally filtered listing. this page read only its entry and listing
+constants, not the body. The doc comments say it backs `context(scope="skills")`; that caller
+and the paging details are not verified here.
 
 ## Prompt templates
 
-`loadPromptTemplates` in `src/domains/resources/prompts/loader.ts` discovers prompt roots with `defaultPromptTemplateRoots`, which shares `defaultScopedResourceRoots` from `src/domains/resources/common-loader.ts` and appends user and project compatibility roots from `INTEROP_AGENT_KINDS`. Template names are the root-relative path with colons replacing separators, so a file in a subdirectory becomes a namespaced command. A template that cannot run because a load-time failure left it with no usable body is still loaded, with `unavailable` set to the reason; invoking it then reports that reason instead of "not a command" (issue #245). `expandPromptTemplateInput` refuses an unavailable template before anything else and before the trust check, because there is no body here to be trusted or untrusted. `display-only: true` templates render locally and send nothing to a model.
+### Discovery
 
-## The inventory projection
+`loadPromptTemplates` (`src/domains/resources/prompts/loader.ts:loadPromptTemplates`) uses
+`input.roots` when supplied and otherwise `defaultPromptTemplateRoots`. That function adds two
+kinds of root. Clio's scoped roots come from `defaultScopedResourceRoots("prompts", ...)` and are
+trusted when the root is trusted or `trustProjectCompatRoots` is set. Interop user and project
+prompt roots from the agent registry are added with `trusted: false` and `foreign: true`
+(`src/domains/resources/prompts/loader.ts:defaultPromptTemplateRoots`).
 
-`readLibraryInventory` in `src/domains/resources/library-inventory.ts` is the one body-free projection of three separate facts: catalog packages (install targets), installed scoped copies (state), and actual recipe resources (what the loaders really see). It composes the existing readers and never fetches, executes, reloads, or writes. The module docblock states it as a rule: the package and recipe readers never call back into this module.
+`loadPromptRoot` walks the root with an explicit stack. It refuses a root that is a symbolic link
+or not a directory, ignores symbolic links inside it, and sorts entries by name. `loadPromptFile`
+accepts only `.md` files. A template's name is its path relative to the root, with path
+separators replaced by `:`. A file whose path escapes the root is dropped with a warning
+(`src/domains/resources/prompts/loader.ts:loadPromptFile`).
 
-The inventory is bounded by `LIBRARY_INVENTORY_LIMITS`. The `Bounded` class is an append-only list that refuses rows past its cap, so traversal, not a final slice, enforces the bound. The `truncated` flags on the result tell a consumer when the evidence is partial. `readLibraryInventory` is wrapped in `withPluginDiscoveryPass` so one inventory read verifies every plugin tree once.
+A file that exists but cannot be read, or a plugin template whose package-root references do not
+resolve, is kept as an `unavailable` template rather than dropped. The refusal then carries the
+reason to the operator (`src/domains/resources/prompts/loader.ts:unavailableTemplate`, `resolvePackageRootReferences`).
 
-`classifyLibraryOrigin` is the single rule shared by CLI, context, and UI that turns evidence into a `LibraryOrigin` and an optional `format`. It reads discovery, install, and adoption evidence only; author metadata never reaches it. `libraryCopyState` is the one copy-state projection shared with lifecycle verification, mapping an `InstalledPlugin` to `"loadable" | "disabled" | "shadowed" | "invalid" | "incompatible" | "damaged"`.
+Frontmatter is parsed by `splitOptionalFrontmatter`. Recognized keys are `description`,
+`argument-hint` or `argumentHint`, `allowed-tools`, `delegated-tools`, and `display-only` or
+`displayOnly`. `booleanField` returns the flag only for a JSON boolean. The display-only test
+below includes a case where the value is a string, and it is treated as unset.
 
-`libraryResourceKey` builds a key of the form `${kind}:${name}@${sourceId}#${relativePath}`, and `parseLibraryResourceKey` and `keyMatches` round-trip and compare it. The relative path is resolved against a chain of anchors (owner root, then core package root, then config dir, then project cwd, then home) so that two same-name files under one root stay distinct.
+Duplicate names are resolved by `resolveResourceCollisions` with a rank that favors trusted
+templates and then package, config or project sources. A winner whose name is in `reservedNames`
+is dropped with a collision diagnostic (`src/domains/resources/prompts/loader.ts:loadPromptTemplates`). The winners are
+sorted by name.
 
-## Library lifecycle
+### Expansion
 
-The mutation surface is a reviewed plan applied per package above the atomic package writers. `planLibraryLifecycle` in `src/domains/resources/library-actions.ts` builds a `LibraryLifecyclePlan` with one step per package, and `applyLibraryLifecycle` applies the steps in order. Planning stages sources and writes nothing; apply rechecks reviewed facts inside each writer's lock, keeps every committed write when a later step fails, releases every staged source, and reports disk/state verification, actual recipe admission, and host refresh as separate facts.
+`parsePromptCommand` (`src/domains/resources/prompts/loader.ts:parsePromptCommand`) trims leading whitespace, requires a
+leading `/`, and rejects an empty name or a name containing `/`. It returns the name and the
+remainder with one delimiter stripped after the name. A CRLF pair counts as one delimiter.
 
-The planning branch depends on the operation. For `install`, it resolves the package, classifies requirements, and refuses if a requirement is absent from every index or is a cycle. Unsatisfied dependencies are staged as their own install steps before the target, and `earlier` is threaded through `expectedFor` so a plan cannot stale itself. For `update`, it resolves the installed entry and calls `planLibraryUpdate`, refusing on local changes unless `force` is set and refusing interop packages that require a new reviewed adoption. For `enable`, `disable`, and `remove`, it projects `newlyBrokenDependents` and refuses when a change would break a dependent that was not already broken.
+`expandPromptTemplateInput` (`src/domains/resources/prompts/loader.ts:expandPromptTemplateInput`) decides the outcome
+in this order:
 
-Staged sources are tracked by plan id in the module-level `staged` Map. `retain` stores them at plan time, and `releaseLibraryLifecycle` releases every staged source and writes nothing; it is idempotent and runs in the `finally` of `applyLibraryLifecycle`.
+1. No template with that name: `expanded: false` with the input untouched.
+2. `unavailable` is set: `expanded: false` with a `refusal` that carries the load-time reason.
+   This check runs before the trust check.
+3. Not trusted: `expanded: false` with a `refusal` and a warning diagnostic. A package template
+   is told to review it and enable `integrations.projectResources.trustProjectImports`. A
+   template from another agent is told to import it with `interop adopt` or `library import`.
+4. `displayOnly`: `expanded: false` with a `display` payload whose text is
+   `promptTemplateDisplayText(template)`.
+5. Otherwise `expanded: true`, with `text` produced by `substituteArgs(template.content, args,
+   command.rest)`, where `args` comes from `parseCommandArgs`.
 
-`applyStep` holds the peer-scope lock when the peer plugin directory exists, so a cross-scope operation cannot race with another scope's writer. The writer error codes `stale_plan`, `locked`, `refused`, `verification`, and `writer` map to a `next` hint through `nextFor`. A `PluginWriterRefusal` with code `dependents` becomes a `refused` outcome. After a durable commit, `annotateVerification` reads the copy back with `verifyLibraryStep`; a read-back failure attaches a `verification` error but never turns the commit into a failed step.
+`promptTemplateDisplayText` (`src/domains/resources/prompts/loader.ts:promptTemplateDisplayText`) returns the content of
+the first fenced block when one exists, and otherwise the whole trimmed body.
 
-`verifyLibraryStep` reads back one copy as four facts: the tree (`present`, `absent`, or `changed` against the recorded digest), the install record (`recorded`, `absent`, or `unreadable`), the copy state, and the actual recipe admission read from `readLibraryInventory` filtered to the package's sources. `effective` reports the surviving effective copy across scopes.
+`createResourcesLoader.expandPromptTemplate` (`loader.ts`) calls `expandPromptTemplateInput`
+after the two-step listing described above, so an unknown command never triggers a full plugin
+walk.
 
-After commits, `applyLibraryLifecycle` calls `retryLibraryRefresh` once. A refresh failure does not undo the commits; it is reported separately. After a successful refresh, each committed outcome is re-annotated with `post-refresh` evidence.
+### Focused test
 
-```mermaid
-sequenceDiagram
-  participant Caller as caller (overlay / CLI)
-  participant Plan as planLibraryLifecycle
-  participant Apply as applyLibraryLifecycle
-  participant Writer as plugin writer (installPlugin / enablePlugin / removePlugin)
-  participant Verify as verifyLibraryStep
-  participant Refresh as LibraryRefreshHost
+`tests/extended/prompt-display-only.test.ts` builds a package root with three templates:
+`help.md` with `display-only: true` and a fenced block, `status.md` with `display-only: yes`, and
+`notes.md` with `displayOnly: true` and no fence. Its first test asserts that `display-only` is
+read as a boolean, that `displayOnly` is accepted, and that `display-only: yes` leaves the flag
+false. Its second test calls `expandPromptTemplateInput("/materio:help  extra args", templates)`
+and asserts `expanded: false`, a `display.text` equal to the fenced block, `args` equal to
+`["extra", "args"]`, no `refusal`, and `text` equal to the untouched input. It asserts that
+`notes` displays its whole body, and that a template without the flag expands for the model with
+the argument substituted. Both assertions were read. The test file also contains a
+third test that exercises the TUI reference card; that test was not read in full.
 
-  Caller->>Plan: LibraryLifecycleRequest
-  Plan->>Plan: resolve entry, classify requirements, stage sources
-  Plan-->>Caller: LibraryLifecyclePlan (steps + expected facts)
-  Caller->>Apply: applyLibraryLifecycle(plan, {refresh})
-  loop each step until aborted
-    Apply->>Writer: runWriter(step) under peer-scope lock
-    Writer-->>Apply: PluginMutationResult (durable commit)
-    Apply->>Verify: verifyLibraryStep(identity, cwd, "pre-refresh")
-    Verify-->>Apply: tree / record / resources / effective
-    Apply->>Apply: annotateVerification (error does not undo commit)
-  end
-  Apply->>Apply: releaseLibraryLifecycle(plan) in finally
-  Apply->>Refresh: retryLibraryRefresh(cwd, refresh)
-  Refresh-->>Apply: refreshed / failed / not-applicable
-  alt refresh.status == "refreshed"
-    Apply->>Verify: annotateVerification(..., "post-refresh")
-  end
-  Apply-->>Caller: LibraryApplyResult (outcomes + refresh)
-```
+Note that the test's `status.md` case uses `display-only: yes`. The loader source
+only accepts a JSON boolean for `display-only`, so the flag is false for that template. The test
+asserts that outcome.
 
-## Validation
+## Library packages
 
-`validateLibraryPackage` in `src/domains/resources/library-validation.ts` is the explicit, deep read of one installed copy. It reads a disabled, shadowed, or damaged copy too, which the runtime loaders never do; it is the inspection the listing deliberately avoids. It first reads the plugin manifest, then scans the declared resource roots for skills (through `loadSkills` and `skillCatalogValidity`), prompts (through `loadPromptTemplates`), agents (parsing each recipe and checking bound skills stay inside the plugin), and fleets (parsing the contract and collecting prerequisites). It then verifies declared components and reports prerequisites such as commands and agents a fleet step requires.
+`discoverLibrary` (`src/domains/resources/library.ts:discoverLibrary`) reads the library catalog
+and returns `LibraryEntry` records. `resolveLibraryRequirements` and `planLibraryInstall` are
+also defined in `src/domains/resources/library.ts`. this page did not read their bodies, so their behavior is not
+described here beyond their names.
 
-## Extension seams
+`src/domains/resources/library-actions.ts` defines the lifecycle request and plan types. `LibraryLifecycleRequest`
+carries an operation, a package reference, an optional scope and flags such as `withRequirements`
+(`src/domains/resources/library-actions.ts`, the `LibraryLifecycleRequest` interface). `planLibraryLifecycle`
+(`src/domains/resources/library-actions.ts:planLibraryLifecycle`) is the planner for the lifecycle operations. For
+`install`, it resolves the package, classifies its requirements against the discovered catalog,
+and refuses before any staging in two cases. A requirement that is inactive refuses with
+`library_requirement_inactive`. A missing requirement refuses with `library_requirement_missing`
+unless `withRequirements` is set. A refused plan records a step with `source.staged: false` and
+no expected copies, so the plan does not fetch anything. Otherwise each unsatisfied dependency
+becomes an earlier install step before the requested package. `applyLibraryLifecycle` is defined
+later in the same file, but this page does not read it, so the apply ordering and its verification
+are not described here.
 
-A new library package kind is added in `src/domains/resources/library-types.ts` by extending `LibraryEntryKind` and `LIBRARY_KINDS`, and, for a resource kind, `LibraryResourceKind` and `LIBRARY_RESOURCE_KINDS`. The inventory gains a reader for it in `readLibraryInventoryInPass`, and the validation gains a scan in `validateLibraryPackage`. The lifecycle does not need a new operation for a new kind; it addresses packages by `kind:name` ref.
+`validateLibraryPackage` (`src/domains/resources/library-validation.ts:validateLibraryPackage`)
+returns per-component records and diagnostics for a package root. The `src/domains/resources/library-actions.ts`
+planner and `src/domains/resources/library.ts` call it on candidate roots. `src/domains/resources/library-inventory.ts` defines
+`readLibraryInventory`, which runs inside `withPluginDiscoveryPass`, and it classifies copies.
+The inventory and validation bodies were not read, so their rules are not described
+here beyond these call relationships.
 
-A new agent compatibility root is taught to the skills and prompts loaders by adding the agent to `INTEROP_AGENT_KINDS` in `src/domains/interop/registry.ts`; the loaders read that table, so there is no second list to update in the domain.
-
-A new library operation is added to the `LibraryOperation` union in `src/domains/resources/library-actions.ts` and branched in `planLibraryLifecycle`; the writer dispatch is in `runWriter`.
-
-## Enforced boundaries and lifecycle ordering
-
-The discovery pass enforces that each installed plugin tree is verified once per synchronous pass. `withPluginDiscoveryPass` in `src/domains/plugins/discovery-pass.ts` keeps a module-level `active` pass; `passPluginCandidate` and `passPluginSnapshot` memoize within it. The body must be synchronous; an awaited continuation runs after the pass closes and reads from disk again. This is why `loadSkills` and `readLibraryInventory` wrap their bodies in it.
-
-The peer-scope lock enforces cross-scope ordering during a lifecycle write. `applyStep` holds the peer's lock via `withPluginScopeLock` when the peer directory exists, so an `install` or `remove` on one scope cannot race with another scope's writer for the same package.
-
-The staged-source registry enforces that a planned source is either applied or released. `retain` stores it, `runWriter` fetches it by plan id, and `releaseLibraryLifecycle` in the `finally` of `applyLibraryLifecycle` releases any that were not applied.
-
-Skill containment is enforced by `escapesContainment` in `src/domains/resources/skills/loader.ts`. A discovered entry whose real path leaves the root's containing scope is refused, because the escape is invisible in every path the operator is later shown. The anchor is the workspace for a project root and the home directory for a user root; `strictContainment` additionally forbids relocating the containment through a symlink.
-
-## Focused tests
-
-`tests/contracts/skills-catalog-view.test.ts` asserts the model-facing listing. It carries `renderSkillsListBeforeChange`, a verbatim copy of the previous `renderSkillsList` from `src/tools/context/index.ts`, as the oracle, and asserts the new `buildSkillCatalogView` output is byte-identical to it for the default unfiltered view. The test fixtures build skills with `source: "clio-coder"`, `scope: "user"`, `trusted: true`, and marketplace entries with `origin: "catalog"`. It exercises the query filter, the `matchMode`, and the byte-budget fitting that replaced whole-string head truncation.
-
-`tests/contracts/skill-install.test.ts` asserts the skill loader's boundaries. Its cases include `refuses repository sources that escape their clone`, `installs a complete directory atomically and records content provenance`, `preserves the installed copy when a forced replacement is invalid`, `loads an explicit skill path and carries it through request and activation provenance`, and `loads a trusted manual-only skill only after the operator names it`.
-
-`tests/contracts/prompt-skill-policy.test.ts` asserts that compiled skill instructions agree with actual session-skill admission at each autonomy level. It builds a fixture skill with `allowed-tools: [read]` and drives the context tool with `getSkillLoaderOptions: () => ({ disableDiscovery: true, explicitSkillPaths: [path] })`, then checks `context.run({ scope: "skills", name: "fixture-skill" })` against the autonomy level's activation policy.
-
-`tests/extended/library-lifecycle.test.ts` asserts the lifecycle ordering. The case `retains committed dependency writes, lists unattempted work and refreshes after a partial batch` installs a target with two dependencies, mutates the second dependency's source after review so its writer refuses the pinned digest, and asserts the outcomes are `["committed", "failed", "unattempted"]`, that the first committed dependency is retained, and that refresh runs once after the partial batch. The case `keeps a durable commit when read-back verification fails and still refreshes` corrupts the state file during refresh and asserts the outcome stays `committed` with an `error.code === "verification"`, `verification.record === "unreadable"`, and the committed tree still on disk. The case `fails fast with a locked code while another scope operation holds the peer lock` holds the peer lock and asserts the removal returns `error.code === "locked"`.
-
-`tests/extended/library-inventory.test.ts` asserts the inventory projection. It builds a fixture plugin with one skill, one prompt, and one fleet, and checks the resource counts, the origin classification, and the copy inspection. The cases exercise `duplicateSkill` and `brokenPrompt` options to confirm the inventory reports shadowed and invalid rows.
+The public surface for these modules is re-exported from `src/domains/resources/index.ts`.
 
 ## Things to watch when editing
 
-- The byte-budget fitting in `buildSkillCatalogView` is monotone only over row counts of one or more. A zero-row page is not on that curve because it alone carries the "this row is too large, open it directly" sentence. Changing the scaffolding text or the zero-row message can break the bisection, which starts at `low = 1`.
-- The discovery pass is module-level state. `withPluginDiscoveryPass` refuses to nest (`if (active) return body()`), so a synchronous loader called from inside a pass reuses the memo, but any `await` between loaders closes the pass and forces a re-verify. A new loader that reads plugin trees must call `withPluginDiscoveryPass` at its top level or it will re-walk every tree per call.
-- `skillCatalogValidity` and the context tool's listing are two callers of the same loaders. A rule that drifts between the terminal and the GUI is worse than no verdict, so keep the verdict in one place. The test `skills-catalog-view.test.ts` pins the default view byte-for-byte; changing section headers, the interop note, or the activation protocol line breaks it.
-- Provenance stripping in `normalizedSkillHash` recognizes lifecycle keys both at the top level and one level down inside a top-level `clio-coder:` block, and registry identity (`registry-id`, `registry-url`) is deliberately not stripped. Adding a new install-lifecycle frontmatter key requires adding it to `PROVENANCE_KEYS` in `src/domains/resources/skills/content-hash.ts`, or an install timestamp will read as drift.
-- The lifecycle never releases a staged source on a refused plan's step that was never staged. `installStep` calls `retain` only for steps that pass the requirement check, and a refusal before staging pushes a step without a staged source. `runWriter` throws if a plan has no staged source, so keep the refusal path from staging.
-- `library-inventory.ts` caps are enforced during traversal by `Bounded.push`. A caller that wants a filtered view must apply the filter before the cap (the code does `if (packageMatches(...) && !packages.push(record)) break`), because a final slice after the cap would drop admitted rows in favor of unadmitted ones.
-- The inventory's `keyPath` anchor chain resolves relative paths against owner root first, then core, config, project, and home. A new resource kind that carries a file path must either supply an owner or land under one of those anchors, or it falls back to `path.basename` and loses its relative path.
+- Trust is decided in several places. A foreign root must stay `trusted: false`. Changing that
+  requires matching changes in `projectCompatTrusted`, the `trusted` expression in
+  `defaultPromptTemplateRoots`, and the refusal branches of `expandPromptTemplateInput`. Those
+  three locations were read.
+- Plugin verification has a display variant. `skillsForDisplay` and `promptsForDisplay` pass
+  `verifyPluginTrees: false`, and `defaultSkillRoots` and `defaultPromptTemplateRoots` both
+  choose the committed snapshot when that flag is false.
+- `SKILL_ACTIVATION_BODY_CAP_BYTES` is documented as mirroring a constant in the tool substrate.
+  Confirm that contract before changing the value.
+- Slash-command names are matched exactly against the listing. Changes to `parsePromptCommand` or
+  `parseSkillCommand` change which input reaches the catalog at all.
+
+## Related pages
+
+Skill activation after a pending request, and the tool surface a skill declares, are outside
+this domain. See the [tools](../tools.md) page for the tool substrate, and the
+[interactive](../interactive.md) page for where display payloads render.
+
+## Coverage notes
+
+Behavior described above was read from `src/domains/resources/index.ts`,
+`src/domains/resources/loader.ts`, `src/domains/resources/extension.ts`,
+`src/domains/resources/skills/loader.ts` (the root, trust, size-gate, validity and slash-command
+functions), `src/domains/resources/prompts/loader.ts` (root discovery, file loading, display and
+expansion), the entry of `src/domains/resources/skills/catalog-view.ts`, the lifecycle request and
+planner in `src/domains/resources/library-actions.ts`, and the type declarations of
+`src/domains/resources/library.ts` and `src/domains/resources/library-validation.ts`. The bodies of
+`discoverLibrary`, `resolveLibraryRequirements`, `planLibraryInstall`, `applyLibraryLifecycle`,
+`validateLibraryPackage`, `readLibraryInventory`, and the catalog-view body were not read in this
+pass.

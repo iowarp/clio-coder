@@ -1,7 +1,7 @@
 Clio Coder lets you choose the model connection around your project. Start with the place your code is allowed to go, then choose a model and runtime that can do the task. A local GPU, a model server, an institutional gateway, and a cloud API are different deployment choices.
 
 ::: note Version scope
-This guide describes v0.6.0. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
+This guide describes v0.6.8. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
 :::
 
 ::: needs
@@ -86,7 +86,7 @@ A worker running on your machine against a remote model server is still a local 
 
 ## Choose capabilities deliberately
 
-Clio Coder supports more than one kind of model interaction. Its Inception runtime serves [Mercury diffusion language models](/experimental/diffusion-models.html) as chat models with tool calling. Optional, experimental [System One engines](/experimental/system-one-decisions.html) answer typed questions at fixed decision sites. Neither replaces a chat model or is required to get started.
+Clio Coder supports more than one kind of model interaction. Its Inception runtime serves [Mercury diffusion language models](/tutorials/diffusion-models.html) as chat models with tool calling. Optional, experimental [System One routes](/research/system-one-decisions.html) answer typed questions an agent asks through `consult`. Neither replaces a chat model or is required to get started.
 
 Vision support depends on the model and the route. A model advertised as multimodal is not enough if the bridge does not carry images: the managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges are text-only. Check what the route accepts before attaching a screenshot.
 

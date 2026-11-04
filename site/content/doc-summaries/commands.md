@@ -25,9 +25,15 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | `/model` | Model picker; apply to this session or save for the project or globally |
 | `/settings` | Settings, grouped by area |
 | `/config` | Guided setup, applied to this session |
-| `/library` | Skills, prompts, agents, fleets, and plugins |
+| `/library` | Skills, prompts, agents, playbooks, and plugins |
 | `/context` | Context usage and pending handoffs |
 | `/usage` | Session usage and supported subscription quotas |
+| `/rewind` | Preview and restore this session's file snapshots |
+| `/rename [name]` | Name the session so `/resume` can find it |
+| `/branch [name]` | Start a separate session at the newest assistant turn |
+| `/loop <interval> <task>` | Run a task as a fresh turn on a schedule while the session is idle |
+| `/reload` | Reload settings, Library resources, and extension runtimes |
+| `/restart` | Save the session and restart into it |
 | `/resume` | Previous conversations; `/resume <id>` reopens one directly |
 | `/tree` | Conversation history and branches |
 | `/new` | A fresh conversation |

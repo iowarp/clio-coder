@@ -117,6 +117,14 @@ const SIZE_ONLY_ARG_KEYS = new Set(["limit", "offset", "max_bytes", "context"]);
 
 /** Minimum time a pending collect must have blocked to earn another repeat epoch. */
 const COLLECT_BLOCKED_EPOCH_MS = 5_000;
+
+/**
+ * A bash call that ran this long spent real time rather than tokens, so a slow
+ * identical command is a poll and not a spiral. The maintainer chose this for
+ * every autonomy level knowing a slow identical command no longer trips the
+ * guard; the tool budget and the cost ceiling still bound it (#445).
+ */
+const BASH_REPEAT_CREDIT_MS = 5_000;
 /**
  * Same-shape calls with byte-identical results tolerated before the next one
  * is blocked. Two identical results already prove the size knobs are not
@@ -628,6 +636,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const mutationEpochByTurn = new Map<string, number>();
 	/** Successful collect snapshots only; a lower pending count advances this call's repeat epoch. */
 	const monitorCollectProgress = new Map<string, { pendingCount: number; epoch: number }>();
+	/** Per turn and bash call: the repeat epoch a slow run or a changed result earned, and the last result seen (#445). */
+	const bashRepeatCredit = new Map<string, { epoch: number; lastResult: string | null }>();
 	/**
 	 * Turns whose tool use is locked to synthesis after reaching the block
 	 * budget. Key present means locked; the value carries the block that tripped
@@ -725,6 +735,31 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		return (
 			details?.timedOut === true && typeof details.waitedMs === "number" && details.waitedMs >= COLLECT_BLOCKED_EPOCH_MS
 		);
+	};
+
+	const bashRepeatCreditKey = (turnKey: string, args: Readonly<Record<string, unknown>> | undefined): string =>
+		`${turnKey}\0${callIdentity(ToolNames.Bash, args as Record<string, unknown> | undefined)}`;
+
+	/** Grant the next repeat of this bash call a new epoch; true when it ran long enough to clear the stagnation streak too. */
+	const recordBashRepeatCredit = (input: MiddlewareHookInput): boolean => {
+		if (input.toolName !== ToolNames.Bash) return false;
+		const key = bashRepeatCreditKey(input.turnId ?? NO_TURN_BUCKET, input.toolArgs);
+		const previous = bashRepeatCredit.get(key);
+		const elapsedMs = input.toolResultDetails?.elapsedMs;
+		const ranLong = typeof elapsedMs === "number" && elapsedMs >= BASH_REPEAT_CREDIT_MS;
+		const outcome = input.metadata?.outcomeFingerprint;
+		const lastResult = typeof outcome === "string" ? outcome : null;
+		const changed =
+			previous !== undefined && previous.lastResult !== null && lastResult !== null && previous.lastResult !== lastResult;
+		if (previous === undefined) {
+			while (bashRepeatCredit.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
+				const oldest = bashRepeatCredit.keys().next().value;
+				if (typeof oldest !== "string") break;
+				bashRepeatCredit.delete(oldest);
+			}
+		}
+		bashRepeatCredit.set(key, { epoch: (previous?.epoch ?? 0) + (ranLong || changed ? 1 : 0), lastResult });
+		return ranLong;
 	};
 
 	const recordMonitorCollectProgress = (input: MiddlewareHookInput): void => {
@@ -976,7 +1011,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					kind: "block_tool",
 					reason:
 						`tool-call budget exhausted: ${callsThisTurn} tool calls in this turn reached the hard ceiling ` +
-						`(${turnBudget.hard}); the turn is being stopped. Summarize what you found and wait for the operator.`,
+						`(${turnBudget.hard}); the turn is being stopped. Summarize what you found and end your reply.`,
 					severity: "hard-block",
 				},
 			];
@@ -997,7 +1032,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
 						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
 						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
-						`propose, and wait for the operator.`,
+						`propose, and end your reply.`,
 					severity: "hard-block",
 				},
 			];
@@ -1296,6 +1331,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				}
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
+				if (recordBashRepeatCredit(input)) stagnationByTurn.delete(turnKey);
 				const effects = [...crossArgumentResultEffects(input), ...readCoverageEffects(input), ...readEofEffects(input)];
 				if (
 					options.toolBudgetAdvisory &&
@@ -1555,9 +1591,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					input.toolName === ToolNames.Monitor && input.toolArgs?.mode === "collect"
 						? (monitorCollectProgress.get(monitorCollectKey(turnKey, input.toolArgs))?.epoch ?? 0)
 						: null;
+				const creditEpoch =
+					input.toolName === ToolNames.Bash
+						? (bashRepeatCredit.get(bashRepeatCreditKey(turnKey, input.toolArgs))?.epoch ?? 0)
+						: 0;
 				const repeatKey =
 					collectEpoch === null
-						? `${turnKey}|${epoch}|${fingerprint}`
+						? `${turnKey}|${epoch}|${creditEpoch}|${fingerprint}`
 						: `${turnKey}|${epoch}|collect:${collectEpoch}|${fingerprint}`;
 				const verdict = options.safety.observeLoop(repeatKey, now);
 				if (verdict.looping) {

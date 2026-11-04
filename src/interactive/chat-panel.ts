@@ -8,11 +8,15 @@ import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import {
+	holdCutOffText,
 	holdUnresolvedStrings,
 	holdUnresolvedUserinfo,
 	messageStopCompleted,
+	RedactedStringProjection,
 	redactSecretString,
 	redactStreamingSecretString,
+	redactStreamingUrlCredentials,
+	redactUrlCredentials,
 } from "../domains/safety/redaction.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
@@ -196,6 +200,8 @@ type TextSegment = {
 	finalized: boolean;
 	/** Cached prose policy for live, replayed and rewritten model output. */
 	prose?: AssistantProseProjection;
+	/** URL credentials stay off screen; the segment's own text stays whole for the ledger and the next turn (#446). */
+	secrets?: RedactedStringProjection;
 	/** The segment's stock Markdown component and the source it last rendered. */
 	markdown?: { view: Markdown; source: string; epoch: number };
 	/** Reuse wrapped rows while another entry streams or its clock advances (#428). */
@@ -700,9 +706,14 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
  * each one rewrites arbitrary positions, so nothing here is cached.
  */
 function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: number): string[] {
-	const source = sanitizeAssistantProse(seg.text);
-	const head = sanitizeAssistantProse(seg.text.slice(0, settled));
-	const tail = source.slice(head.length);
+	// A frame rewrites arbitrary positions, so redaction can move what follows the settled mark. The two tones split where the
+	// redacted texts stop agreeing (#446).
+	const source = redactStreamingUrlCredentials(sanitizeAssistantProse(seg.text));
+	const settledText = redactStreamingUrlCredentials(sanitizeAssistantProse(seg.text.slice(0, settled)));
+	let shared = 0;
+	while (shared < settledText.length && source.charCodeAt(shared) === settledText.charCodeAt(shared)) shared += 1;
+	const head = source.slice(0, shared);
+	const tail = source.slice(shared);
 	const lines: string[] = [];
 	const headLines = head.split("\n");
 	const tailLines = tail.split("\n");
@@ -852,7 +863,8 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	if (cached !== undefined) return cached;
 	const startedAt = seg.finalized ? 0 : performance.now();
 	seg.prose ??= new AssistantProseProjection();
-	const prose = seg.prose.project(seg.text, seg.finalized);
+	seg.secrets ??= new RedactedStringProjection(redactUrlCredentials);
+	const prose = seg.secrets.project(seg.prose.project(seg.text, seg.finalized), seg.finalized);
 	if (seg.markdown === undefined || seg.markdown.epoch !== skinEpoch())
 		seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose, epoch: skinEpoch() };
 	else if (seg.markdown.source !== prose) {
@@ -1914,7 +1926,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (open === null) return;
 		open.finalized = true;
 		// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
-		if (!completed) open.text = holdUnresolvedUserinfo(open.text);
+		if (!completed) open.text = holdCutOffText(open.text);
 		invalidateEntryCache(entry);
 	};
 
@@ -2904,7 +2916,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						assistant.segments.splice(messageStart, 0, {
 							kind: "thinking",
 							// A replay reaches here too, so an aborted message hides what its live view hid (#446).
-							text: messageCompleted ? thinking : holdUnresolvedUserinfo(thinking),
+							text: messageCompleted ? thinking : holdCutOffText(thinking),
 							at: stamp(),
 							finalized: true,
 						});
@@ -2916,6 +2928,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// must be replaced, not kept alongside a duplicate segment.
 				const sanitized = (event as { lockedSynthesisSanitized?: unknown }).lockedSynthesisSanitized === true;
 				if (text.length > 0) canonicalizeMessageText(assistant, text, sanitized);
+				if (!messageCompleted) {
+					// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
+					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
+					for (const segment of assistant.segments.slice(messageStart))
+						if (segment.kind === "text") segment.text = holdCutOffText(segment.text);
+					invalidateEntryCache(assistant);
+				}
 				if (terminalError.length > 0) appendErrorSegment(assistant, terminalError);
 				markDirty();
 				return;

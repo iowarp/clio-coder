@@ -45,7 +45,7 @@ import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
-import { projectDispatchJsonEvent } from "./modes/json-stream.js";
+import { createJsonCredentialScrub, projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonAgentFrame } from "./modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
@@ -842,9 +842,10 @@ async function runDispatch(
 		// a human reader and stay --json-only.
 		let accumulatedText = "";
 		let lastAssistantText = "";
+		const credentials = createJsonCredentialScrub();
 		for await (const event of handle.events) {
 			if (parsed.json) {
-				writeAgentFrame(projectDispatchJsonEvent(event));
+				for (const frame of credentials.scrub(projectDispatchJsonEvent(event))) writeAgentFrame(frame);
 				continue;
 			}
 			const e = event as { type?: string; text?: string };
@@ -870,7 +871,13 @@ async function runDispatch(
 		}
 		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
 		if (parsed.json) {
-			writeAgentFrame({ type: "result", result: receipt, ...(recording !== undefined ? { recording } : {}) });
+			for (const frame of credentials.finish<RunJsonAgentFrame>(receipt.exitCode === 0)) writeAgentFrame(frame);
+			for (const frame of credentials.scrub<RunJsonAgentFrame>({
+				type: "result",
+				result: receipt,
+				...(recording !== undefined ? { recording } : {}),
+			}))
+				writeAgentFrame(frame);
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 			process.stdout.write(formatDispatchHumanOutput(answer, receipt));

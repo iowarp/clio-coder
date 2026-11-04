@@ -181,10 +181,10 @@ export function formatTargetLabel(
 export function formatCompactMs(value: number): string {
 	const ms = Math.max(0, Math.round(value));
 	if (ms < 1000) return `${ms}ms`;
-	const seconds = ms / 1000;
-	return seconds < 60
-		? `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
-		: `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
+	if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+	// Round before splitting, or 59.6s of a minute prints as `179m60s` (#445).
+	const seconds = Math.round(ms / 1000);
+	return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
 /**

@@ -2,7 +2,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ceilChars } from "../session/context-accounting.js";
-import { pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
+import {
+	type MemoryMutationOptions,
+	mutateMemoryRecords,
+	pruneStaleMemoryRecords,
+	sortMemoryRecords,
+	updateMemoryRecord,
+} from "./store.js";
 import type {
 	MemoryAgentIdentity,
 	MemoryRecord,
@@ -25,6 +31,28 @@ export async function rejectMemoryRecord(
 	now: Date = new Date(),
 ): Promise<MemoryRecord> {
 	return updateMemoryRecord(dataDir, memoryId, (record) => rejectRecord(record, now));
+}
+
+/** Reject several records under one store lock, skipping any already rejected. Returns the ids this call rejected. */
+export async function rejectMemoryRecords(
+	dataDir: string,
+	memoryIds: ReadonlySet<string>,
+	now: Date = new Date(),
+	options: MemoryMutationOptions = {},
+): Promise<string[]> {
+	return mutateMemoryRecords(
+		dataDir,
+		(records) => {
+			const rejected: string[] = [];
+			const next = records.map((record) => {
+				if (!memoryIds.has(record.id) || record.rejectedAt !== undefined) return record;
+				rejected.push(record.id);
+				return rejectRecord(record, now);
+			});
+			return rejected.length > 0 ? { records: next, result: rejected } : { result: rejected };
+		},
+		options,
+	);
 }
 
 export async function pruneStaleMemory(dataDir: string, now: Date = new Date()): Promise<MemoryRecord[]> {

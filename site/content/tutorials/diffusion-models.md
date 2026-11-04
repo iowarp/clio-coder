@@ -1,7 +1,7 @@
 Most language models write an answer one token at a time. A diffusion language model starts from a rough version of the whole answer and refines it in a few passes. Clio Coder can use Inception's Mercury models this way, for chat and for workers, with tool calling.
 
 ::: note Version scope
-The `inception` runtime has shipped since v0.5.3 and is unchanged in v0.6.0. It is listed under Experimental because the frame-by-frame display exists only in the terminal, and because diffusion models are less tested on long agentic work than the models most people use.
+The `inception` runtime has shipped since v0.5.3 and this article describes v0.6.8. The frame-by-frame display exists only in the terminal, and diffusion models are less tested on long agentic work than the models most people use.
 :::
 
 ::: needs
@@ -21,16 +21,16 @@ clio-coder configure
 Or add the target directly:
 
 ```sh
-clio-coder targets add --id mercury --runtime inception --model mercury-2.5 --api-key-env INCEPTION_API_KEY
+clio-coder targets add --id mercury --runtime inception --model mercury-3 --api-key-env INCEPTION_API_KEY
 ```
 
-The runtime lists `mercury-2.5`, `mercury-2`, and `mercury-edit-2`. Setup reads each model's context window and output limit from the provider's model list, and fails if the model you named is not on it.
+The runtime lists `mercury-3`, its default, `mercury-2.5`, `mercury-2`, and `mercury-edit-2`. Setup reads each model's context window and output limit from the provider's model list, and fails if the model you named is not on it.
 
 ## What you see
 
 In the terminal, each update from the model carries the whole answer so far. Clio Coder replaces the visible text on every frame instead of appending to it, and dims the part that is still changing. There is no progress gauge, because the provider reports none until the last frame.
 
-Tool calls, permission cards, `/view`, and receipts work as they do with any chat model. Headless runs, workers, the desktop app, and editors connected over ACP receive an ordinary stream of text.
+Tool calls, permission cards, `/view`, and run records work as they do with any chat model. Headless runs, workers, the desktop app, and editors connected over ACP receive an ordinary stream of text.
 
 ## Where it fits
 
@@ -47,5 +47,5 @@ Try it on a task you can check before trusting it with a long one. This page mak
 ::: next
 - [Choose a model for your project](/tutorials/choose-model-for-your-project.html)
 - [Connection guide](/docs/guide/configuration-and-targets.html)
-- [System One decisions and parallel drafts](/experimental/system-one-decisions.html)
+- [Bring a fast decision model with System One](/research/system-one-decisions.html)
 :::

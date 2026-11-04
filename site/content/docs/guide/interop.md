@@ -17,7 +17,7 @@ In the terminal, `/interop` shows available connections. Supported managed modes
 - `/run --target <target> <agent> <task>` uses a configured headless target.
 - `/peer <peer> <brief>` opens an interactive Herdr pane.
 
-Managed ACP and headless runs record results and receipts. A pane is an interactive handoff and does not produce a managed receipt. For a headless task, `--worktree` preserves a Git task branch for review; it does not confine the peer's filesystem or network access.
+Managed ACP and headless runs record results in sealed run records. A pane is an interactive handoff and does not produce a run record. For a headless task, `--worktree` preserves a Git task branch for review; it does not confine the peer's filesystem or network access.
 
 A peer that runs its own tool loop is refused write-capable work unless you trust it with `trustedUnmediated: true` in your user settings: on the target for a headless peer, or on its external-agent entry for an ACP peer.
 

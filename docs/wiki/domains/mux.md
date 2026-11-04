@@ -1,481 +1,175 @@
 ---
-title: "Domains mux"
-summary: "The pane multiplexing layer: the herdr socket client, dock controller for managed panes, Yazi file-manager integration, protocol floors, and the ownership rule that confines every mutating call to panes Clio created."
+title: "Command-line surfaces: the pane layer (mux)"
+summary: "How Clio Coder drives terminal panes through a herdr server: the best-effort runtime contract, managed dock placement, workspace launch, peer prompt delivery, the panes vocabulary and the managed Yazi profile. Read this before changing any pane, dock, launcher or peer-to-peer prompt behavior."
 sources:
   - "src/domains/mux/index.ts"
   - "src/domains/mux/contract.ts"
   - "src/domains/mux/socket-client.ts"
   - "src/domains/mux/dock-controller.ts"
+  - "src/domains/mux/workspace/launch.ts"
+  - "src/domains/mux/peer-inbox.ts"
   - "src/domains/mux/operations.ts"
-  - "src/domains/mux/pane-registry.ts"
-  - "src/domains/mux/detect.ts"
-  - "src/domains/mux/protocol.ts"
-  - "src/domains/mux/yazi/session.ts"
+  - "src/domains/mux/yazi/profile.ts"
 symbols:
+  - "createMuxDomainModule"
   - "createMuxRuntime"
+  - "MuxContract"
   - "createMuxClient"
   - "createDockController"
-  - "createPaneRegistry"
-  - "detectMux"
-  - "muxSupportsMethod"
-  - "createYaziSession"
-  - "createPanesRuntime"
-  - "createPanesTool"
+  - "planDockOpen"
+  - "DOCK_SPECS"
+  - "launchWorkspace"
+  - "deliverPeerPrompt"
+  - "parsePeerPromptRequest"
+  - "PANES_PRESETS"
+  - "resolvePanesPresetId"
+  - "inspectYaziProfile"
+  - "ensureYaziProfile"
 tests:
-  - "tests/contracts/panes-tool.test.ts"
-  - "tests/extended/panes-watch.test.ts"
   - "tests/extended/panes-files.test.ts"
-  - "tests/contracts/legacy-naming-retired.test.ts"
+  - "tests/extended/session-title-typed-input.test.ts"
+  - "tests/contracts/panes-tool.test.ts"
 invariants:
-  - "Every mutating contract method checks the pane registry first; a pane Clio did not create is never closed, renamed, focused, or reported on."
-  - "A mux failure never throws at a caller; every method degrades to a fallback value and the caller sees `available() === false`."
-  - "The dock controller never steals focus; `pane.split` is always called with `focus: false`."
-  - "Preset panes are the only utility panes the model tool may open; arbitrary argv stays operator-only through `/panes open`."
+  - "Every method on the pane runtime contract is best-effort: when the layer is absent or a transport or timeout error occurs, the call returns its fallback (null, false, or empty) and does not throw to the caller."
+  - "A deliverPeerPrompt call returns not-delivered without writing a request when the inbox owner's paneId or socketPath does not match the request, or when the owner process is not verified alive."
+  - "A stale inbox token from a retired conversation cannot create a new conversation in the receiving session (session-title-typed-input test)."
+  - "planDockOpen refuses a dock before any split is sent when the anchor axis times half the slot's minCells is below that floor."
+  - "The panes preset name yazi resolves to the files preset, and unknown names resolve to null."
 validate:
-  - "pnpm test -- --grep panes"
+  - "pnpm run test:file -- tests/extended/panes-files.test.ts"
+  - "pnpm run test:file -- tests/extended/session-title-typed-input.test.ts"
+  - "pnpm run test:file -- tests/contracts/panes-tool.test.ts"
+  - "pnpm run typecheck"
 ---
 
-# Domains mux
+# Command-line surfaces: the pane layer (mux)
 
-The mux domain is the pane multiplexing layer that Clio uses to talk to a **herdr** terminal
-pane-host server over a Unix domain socket. It owns three concerns: a newline-delimited-JSON
-socket client that is the only module in the tree that reads herdr wire shapes, a dock
-controller that manages the geometry of Clio's own docked panes (the workers-view and the
-files pane), and a Yazi file-manager integration that opens and tracks a Yazi instance in a
-herdr pane. The domain enforces a strict **ownership rule**: every mutating method in the
-contract checks the pane registry before touching a pane, so Clio never closes, renames,
-focuses, reports state on, or sends input to a pane it did not create.
+The mux domain is the layer that puts Clio Coder's own surfaces into terminal panes. It talks to a herdr server over a Unix domain socket, places managed docks beside Clio's anchor pane, starts a Clio workspace when none is running, delivers prompts from one Clio to another through a file inbox, and prepares a managed Yazi profile. A reader needs this page when changing pane behavior, adding a dock slot, touching `/panes`, or debugging why a pane call returned nothing.
 
-## Ownership and entry points
+## What this area does
 
-The domain entry point is `createMuxDomainModule` in
-`src/domains/mux/index.ts`, which returns a `DomainModule` whose `createExtension` calls
-`createMuxBundle` in `src/domains/mux/extension.ts`. The extension runs the detection ladder
-once at boot, builds a `MuxClient` from the socket that answers a `ping`, and hands both to
-`createMuxRuntime` in `src/domains/mux/contract.ts`. The runtime exposes a `MuxContract`
-(the cross-domain surface) plus `start`/`stop` lifecycle handles that the domain extension
-drives.
+The pane layer is best-effort by design. The contract file states that every method is best-effort and that a mux failure never fails a dispatch and never throws at a caller. The runtime enforces this in an `attempt` wrapper that runs one interaction, returns a fallback on any error, and marks the link unhealthy only for transport or timeout errors (`src/domains/mux/contract.ts:createMuxRuntime`).
 
-The runtime is composed only when `src/entry/panes-activation.ts` resolves the activation
-ladder to an active rung. The orchestrator dynamically imports `src/entry/with-panes.ts`
-(which statically re-exports `createMuxDomainModule` and the interactive glue) only then; a
-plain `clio-coder` boot never loads any mux code. A built-graph contract test
-(`tests/contracts/instant-shell-import-graph.test.ts`) pins that the default boot chunk
-carries no mux domain code.
+The area has these parts:
 
-### Pane registry: the ownership gate
+- A module factory that the domain loader calls (`src/domains/mux/index.ts:createMuxDomainModule`).
+- A runtime contract with pane open, close, read, prompt, interrupt and layout methods (`src/domains/mux/contract.ts:MuxContract`).
+- A socket client that speaks newline-delimited JSON to the herdr server (`src/domains/mux/socket-client.ts:createMuxClient`).
+- Dock geometry and lifecycle for managed panes (`src/domains/mux/dock-controller.ts`).
+- A workspace launcher for the embedded rung (`src/domains/mux/workspace/launch.ts:launchWorkspace`).
+- A peer prompt inbox (`src/domains/mux/peer-inbox.ts`).
+- The operator and model pane vocabulary (`src/domains/mux/operations.ts`).
+- The managed Yazi profile (`src/domains/mux/yazi/profile.ts`).
 
-`createPaneRegistry` in `src/domains/mux/pane-registry.ts` holds an insertion-ordered `Map`
-of `MuxPaneRecord` entries keyed by pane id. Every mutating path in `contract.ts` asks the
-registry first:
+The `cliamp/` subdirectory is listed in the assigned scope but was not read for this page. The `workspace/` directory also contains `config.ts` and `src/domains/mux/workspace/exit-marker.ts`, which were not read; their behavior is described here only as far as `src/domains/mux/workspace/launch.ts` calls them.
 
-- `closePane` calls `registry.owns(paneId)` and returns `false` if the registry does not
-  hold the pane.
-- `focusPane`, `zoomPane`, and `closePane` all check `registry.owns` before touching the
-  wire.
-- `reportSelf` writes to Clio's own hosting pane without a registry check because that pane
-  is Clio's own, not one it created for the user.
+## Module factory and runtime contract
 
-The registry is fed by `openUtilityPane` (which calls `registry.record` after a successful
-split), by `adoptPane` (which records a pane carried over from a previous session), and by
-`forget`/`reconcile` on `pane.closed`/`pane.exited` events and after a reconnect. The
-`pane.moved` event is handled specially: herdr rewrites the pane id on a move, so the
-contract's `onEvent` handler forgets the old id and re-records the new one, preserving
-ownership across the user's reorganization.
+`createMuxDomainModule` returns a `DomainModule<MuxContract>` whose `createExtension` calls `createMuxBundle(context, options)` from `src/domains/mux/extension.ts` (`src/domains/mux/index.ts:createMuxDomainModule`). The `extension.ts` body was not read, so how the bundle decides gating is not described here. The index file also re-exports the public surface: the contract types, `createMuxRuntime`, dock helpers, the socket client, the Yazi event stream and profile helpers, and `createYaziSession`.
 
-### Detection ladder
+`createMuxRuntime` takes a `MuxDetection`, a nullable `MuxClient`, an optional log and an optional clock (`src/domains/mux/contract.ts:MuxRuntimeOptions`). It constructs a dock controller only when all three hold: a client is present, the detection carries an anchor pane id, and the server reports the `layout.export` method through `muxSupportsMethod` (`src/domains/mux/contract.ts:createMuxRuntime`). It passes a `leaveZoom` callback only when the server supports `pane.zoom`. When any condition fails, the dock controller is `null` and the dock tier answers false or empty.
 
-`detectMux` in `src/domains/mux/detect.ts` implements the three-rung capability ladder:
+Health is tracked by two values. `healthy` starts as `client !== null`. A transport or timeout `MuxError` sets `healthy` to false and records `probeHealthAt` as the current time plus `DEGRADE_COOLDOWN_MS` (5 seconds). `usable()` returns false while stopped, when there is no client, or when mode is `none`; otherwise it returns `healthy || now() >= probeHealthAt`. Non-transport errors are logged at debug level and do not change health (`src/domains/mux/contract.ts:createMuxRuntime`).
 
-1. **`off`**: `HERDR_ENV` is not set or the user chose `off`. No file descriptor is opened.
-2. **`embedded`**: refused as `none` with `refused: true` because embedded pane hosting is
-   not implemented. The detection carries the reason "embedded pane hosting is not
-   implemented; use auto or guest".
-3. **`guest`**: requires `HERDR_ENV=1`, a connectable socket, and a `ping` answered inside
-   one second. Socket candidates are resolved in the order `HERDR_SOCKET_PATH`, then
-   `$XDG_CONFIG_HOME/herdr/sessions/$HERDR_SESSION/herdr.sock`, then
-   `$XDG_CONFIG_HOME/herdr/herdr.sock`.
+Ownership is marked with metadata tokens. Every Clio-created pane is tagged with `clio_coder_owner=clio-coder:mux`. The legacy key `clio_owner=clio:mux` is still matched when reading ownership, so panes left by an older session are still recognized (`src/domains/mux/contract.ts:hasOwnedPaneToken`, with the constants above it). Token values are cut to 80 characters, the herdr limit (`src/domains/mux/contract.ts:token`).
 
-The `MuxDetection` result carries `self` (Clio's own pane location from
-`HERDR_WORKSPACE_ID`/`HERDR_TAB_ID`/`HERDR_PANE_ID`) and the live `MuxClient` from the
-ping, so the caller inherits a warm socket rather than reconnecting.
+## Socket client
 
-## The herdr socket client
+`createMuxClient` is in `src/domains/mux/socket-client.ts`. The file header describes the connection model: one connection per request for ordinary calls, and a separate long-lived kind for subscriptions. The client exposes typed methods such as `ping`, `snapshot`, `paneSplit`, `paneMove`, `layoutExport`, `layoutSetSplitRatio` and the `worktree*` family (`src/domains/mux/socket-client.ts:MuxClient`). Each response is parsed by a `read*` function that validates the shape and throws a `MuxError` on malformed input, for example `readPane`, `readSnapshot` and `readLayoutNode`. The `connectSocket`, `readJsonLines` and line-size limit (`MAX_LINE_BYTES`) helpers handle the wire. The `paneMove` method is gated on herdr protocol 14 and `layoutExport` and layout ratio changes on protocol 17, as their doc comments state.
 
-`createMuxClient` in `src/domains/mux/socket-client.ts` is the only module that reads herdr
-wire shapes. It exposes a `MuxClient` interface covering discovery (`ping`, `snapshot`,
-`paneCurrent`, `paneList`), pane control (`paneSplit`, `paneClose`, `paneRename`,
-`paneLayout`, `paneFocus`, `paneZoom`, `paneSendText`, `paneReportAgent`,
-`paneReportMetadata`), layouts (`layoutExport`, `layoutSetSplitRatio`), worktrees
-(`worktreeList`, `worktreeCreate`, `worktreeOpen`, `worktreeRemove`), and notifications
-(`notificationShow`).
+## Managed docks
 
-The client uses two connection kinds:
-
-1. **One connection per request.** herdr's `handle_connection` reads exactly one request
-   line, writes the response, and closes. Each call gets a monotonic id and checks the
-   echoed id. A call with no response inside its budget rejects with
-   `MuxRequestTimeout`. Connect failures back off with a capped exponential delay
-   (`DEFAULT_BACKOFF`: 250ms initial, 5000ms max, factor 2).
-
-2. **One dedicated connection per `events.subscribe` stream.** herdr acknowledges once and
-   then pushes event lines forever. After a subscription reconnect the client refetches
-   `session.snapshot` and hands it to the resync handler.
-
-All wire shapes are mapped into the Clio types from `types.ts` by reader functions
-(`readPane`, `readTab`, `readSnapshot`, `readTabGeometry`, `readLayoutTree`, etc.) that
-throw `MuxError("protocol", …)` on missing required fields. Unknown fields are ignored,
-which is herdr's stated forward-compatibility rule.
-
-### Protocol floors
-
-`protocol.ts` defines `MUX_METHOD_MIN_PROTOCOL`: a record mapping gated wire methods to
-the minimum herdr protocol version that supports them. Notification, pane-control, layout,
-and worktree methods require protocol 17; worktree methods require protocol 10.
-`muxSupportsMethod` returns `false` for a `null` server (detection never completed a
-handshake), which is the `none` rung. The contract checks floors before calling gated
-methods: `focusPane` requires `pane.focus`, `notify` requires `notification.show`,
-`worktreeCreate` requires `worktree.create`, etc. Below the floor the method degrades to
-the documented fallback (e.g. `null` for `worktreeCreate`, `false` for `worktreeRemove`).
-
-### Error classification
-
-`types.ts` defines `MuxErrorKind` and `muxErrorKind` to classify server error codes into
-Clio failure kinds. The mapping handles `agent_blocked`, `agent_prompt_stalled`,
-`feature_disabled`, `invalid_params` (including `invalid_request`), and `not_found`, with
-suffix and prefix fallbacks. Anything unmatched stays `unknown`, carrying the server's raw
-code through untouched.
-
-## The dock controller
-
-`createDockController` in `src/domains/mux/dock-controller.ts` owns the geometry and
-lifecycle of Clio's two managed dock slots: `workers` (to the right of the anchor) and
-`files` (below it). The controller owns geometry only; ownership stays in the pane
-registry and error swallowing stays in the contract's `attempt` wrapper.
-
-### Dock specifications
-
-`DOCK_SPECS` is a fixed record:
+A dock is a Clio-owned pane placed at a fixed position relative to the anchor pane. `DOCK_SPECS` in `src/domains/mux/dock-controller.ts` defines four slots, each with a direction, a default share and a minimum cell floor:
 
 | Slot | Direction | Default share | Min cells |
-|------|-----------|---------------|-----------|
-| `workers` | `right` | 0.34 | 48 |
-| `files` | `down` | 0.3 | 12 |
-
-`DOCK_MAX_SHARE` is 0.5: a dock may never take more than half the axis, whatever the share
-asks. `SHARE_EPSILON` is 0.02: observed-vs-applied share differences below this are
-rounding, not a user drag.
-
-### Reconciliation logic
-
-Three rules run through the reconciliation:
-
-1. **A user action is a decision.** A resize observed via `layout.updated` that does not
-   match what Clio last applied becomes the new target. A closed dock stays closed. A
-   moved dock is followed to its new id.
-
-2. **Clio's own corrections must not read as user actions.** Every applied share is
-   remembered (`lastAppliedShare`) and an observation matching it (or the target) within
-   `SHARE_EPSILON` is a no-op.
-
-3. **Opening never steals focus.** `pane.split` is always called with `focus: false`.
-   Focus and zoom live on the contract and only ever run on explicit request.
-
-### Open flow
-
-`open` first checks if the slot already has a pane (idempotence). If not, it reads the
-anchor's rect from `paneLayout`, calls `planDockOpen` to decide whether the dock fits and
-with what split ratio, and then calls `paneSplit` with `targetPaneId` set to the anchor.
-After the split, one converge pass re-reads the layout and applies a corrected ratio if
-the dock landed below its cell floor. Refusal happens in `planDockOpen` before any split
-reaches the wire, so a too-small terminal never flashes a sliver pane.
-
-### Event handling
-
-The contract's `onEvent` handler feeds the dock controller:
-
-- `layout.updated`: `docks.noteLayoutUpdated(geometry)` updates target shares.
-- `pane.moved`: `docks.notePaneMoved(previousPaneId, paneId, tabId)` follows the dock to
-  its new id.
-- `pane.closed`/`pane.exited`: `docks.notePaneGone(paneId)` removes the dock state.
-
-## The Yazi integration
-
-The Yazi file manager runs in a herdr pane as a "companion" (persistent, follows Clio's
-cwd) or a "chooser" (one-shot selection). The integration lives in
-`src/domains/mux/yazi/`:
-
-- **`session.ts`**: `createYaziSession` opens a Yazi process in a mux pane. It resolves
-  the `yazi` and `ya` binaries through the toolchain ladder, generates a managed profile
-  if requested, creates transport files (`.stream`, `.chooser`, `.cwd`) under
-  `<cache>/yazi/sessions/`, and calls `mux.openUtilityPane` with the Yazi argv. In
-  companion mode it starts a `YaziEventStream` that polls the stream file for `cd` and
-  `clio-coder-pick` DDS events. In chooser mode it polls the chooser file for paths.
-  Transport files are removed on close and swept if stale (older than 24 hours).
-
-- **`profile.ts`**: `ensureYaziProfile` materializes a deterministic Yazi profile
-  (yazi.toml, keymap.toml, theme.toml, init.lua, and a vendored `git.yazi` plugin) under
-  `<cache>/yazi/profile/`. The profile is stamped with yazi version, Clio version, ya path,
-  and SHA-256 hashes of the asset tree and theme. Regeneration happens only when the stamp
-  changes. A scratch HOME is used to validate the profile with `yazi --debug` before
-  promoting it.
-
-- **`event-stream.ts`**: `createYaziEventStream` is a poll-tail reader for a bounded DDS
-  stdout file. It parses `cd` events (which carry the new cwd and the Yazi instance id)
-  and `clio-coder-pick` events (which carry a list of paths). The stream stops on
-  `pane-gone`, `file-missing`, or `size-cap` (default 1 MiB).
-
-- **`theme.ts`**: `renderYaziTheme` and `renderHerdrThemeBlock` generate TOML theme
-  blocks from Clio's color tokens.
-
-The `createYaziSession` function uses `dock: { slot: "files" }` when calling
-`mux.openUtilityPane`, which routes through the dock controller. Below the layout tier
-(protocol < 17) the dock degrades to a plain split.
-
-## Control flow: opening a utility pane
-
-The end-to-end flow for `/panes open shell`:
-
-```mermaid
-sequenceDiagram
-    participant Operator
-    participant SlashCmd as slash-commands.ts
-    participant PanesRT as panes-runtime.ts
-    participant Mux as MuxContract (contract.ts)
-    participant Registry as MuxPaneRegistry
-    participant Docks as DockController
-    participant Client as MuxClient (socket-client.ts)
+| --- | --- | --- | --- |
+| `workers` | right | 0.34 | 40 |
+| `extension` | down | 0.3 | 12 |
+| `files` | down | 0.3 | 12 |
+| `music` | down | 0.05 | 18 |
 
-    Operator->>SlashCmd: /panes open shell
-    SlashCmd->>PanesRT: open({ preset: "shell" })
-    PanesRT->>PanesRT: resolveBinaryPath("bash") → /bin/bash
-    PanesRT->>Mux: openUtilityPane({ argv: ["/bin/bash", "-l"], cwd, label: "shell" })
-    Mux->>Mux: attempt("openUtilityPane", ...)
-    Mux->>Client: paneSplit({ direction: "right", targetPaneId: anchor, cwd, focus: false })
-    Client-->>Mux: MuxPane { paneId: "p1", ... }
-    Mux->>Registry: record(paneRecord({ paneId: "p1", ... }, { purpose: "utility", label: "shell" }))
-    Mux->>Client: paneReportMetadata({ paneId: "p1", tokens: { clio_coder_owner: "clio-coder:mux", role: "utility" } })
-    Mux->>Client: paneSendText({ paneId: "p1", text: "exec '/bin/bash' '-l'\n" })
-    Mux-->>PanesRT: { paneId: "p1", tabId: "t1", workspaceId: "w1" }
-    PanesRT-->>SlashCmd: { status: "opened", label: "shell", paneId: "p1" }
-    SlashCmd-->>Operator: opened the shell pane (p1).
-```
+The source comment explains that the spec is fixed per slot rather than derived from terminal width, and the `workers` floor follows the fleet dashboard's 40-column layout.
 
-Key points in the flow:
+`planDockOpen(anchorRect, spec, requestedShare?)` decides fit before anything reaches the wire. It computes the axis length for the spec's direction. If `axis * DOCK_MAX_SHARE < spec.minCells`, it returns `{ refused }` with a message naming the slot. Otherwise it clamps the requested share with `clampDockShare` (non-finite or non-positive values fall back to the workers default, and the value is capped at `DOCK_MAX_SHARE` = 0.5), raises it to `spec.minCells / axis` if needed, and returns the wire `ratio` as `1 - share`, since the dock is the second child (`ratioForDockShare`).
 
-- **Preset probing before split**: `panes-runtime.ts` probes the binary through the
-  toolchain ladder before calling `openUtilityPane`. A missing binary returns a
-  `missing-binary` result without ever splitting a pane.
+`createDockController` keeps a map of slot states. Its `applyShare` re-exports the layout tree for the dock's tab on each call and derives the split path with `deriveSplitPath`. The source comment says the path is never cached because user splits and moves invalidate it. `deriveSplitPath` walks the tree and returns the boolean path to the split separating the anchor from the dock, or `null` when no such split exists. The controller's public methods are `open`, `hide`, `show`, `adopt`, `noteLayoutUpdated`, `notePaneGone`, `notePaneMoved`, `paneIds` and `clear` (`src/domains/mux/dock-controller.ts:DockController`). The method bodies below `createDockController` were not read in full, so details of `hide`, `show` and the adoption path are not described beyond their interface comments.
 
-- **Shell-quoting**: `contract.ts` shell-quotes each argv element with POSIX single-quoting
-  (`'…'` with `'` escaped as `'\''`) and sends the command via `paneSendText` as
-  `exec <argv>\n`. The `exec` replaces the shell so the pane exits with the program and
-  emits `pane.exited` for reconciliation.
+Caller: `createMuxRuntime` is the only constructor of the controller inside `src/domains/mux/contract.ts`. The contract's `openUtilityPane` request type carries an optional `dock: { slot, share, hidden }` field, documented as the managed placement path that requires the layout tier (`src/domains/mux/contract.ts:MuxOpenUtilityPaneRequest`).
 
-- **Owner token**: every Clio-created pane carries `clio_coder_owner: clio-coder:mux` and
-  `role: <purpose>` metadata tokens, so `adoptPane` can find surviving panes after a
-  restart and `clio-coder doctor` can find orphans.
+## Workspace launch
 
-- **Best-effort contract**: the `attempt` wrapper catches all errors and returns the
-  fallback value. A mux failure never fails a dispatch.
+`launchWorkspace(options)` in `src/domains/mux/workspace/launch.ts` is the embedded rung: the pane host Clio starts for itself. Its flow, as read from the function body:
 
-## Ownership boundaries and lifecycle
+1. `resolveHost(options, writeWorkspaceConfig())` prepares the host. A throw returns `{ status: "fallback", reason }`.
+2. `openWorkspace(host)` runs inside `withStateFileLock(lockTarget, ...)`. A refusal or lock failure returns `fallback` with a reason.
+3. The launcher spawns the herdr client with `--session` and inherits stdio. From that point the terminal belongs to the client.
+4. A poll interval (`EXIT_POLL_MS`) checks for an exit marker file for the Clio pane. Every `WORKSPACE_CHECK_EVERY` ticks it asks `stillOwnsWorkspace`. Either signal calls `detach(attach)`.
+5. On `spawnError`, the launcher undoes what it created (`undoLaunch`) under the lock, closes the client and returns `fallback`. Undo is skipped for a workspace the launch reattached to.
+6. On normal exit, a clean Clio quit with a single remaining pane closes the workspace and removes the marker. Otherwise, `stopServerIfEmpty` decides whether the server stops. The result is `{ status: "closed", exitCode, workspaceLeftRunning }`.
 
-### The ownership rule in code
+Two things are stated in the source and reflected in the code: the launcher process never boots Clio itself (the file header), and SIGINT is ignored while the client owns the terminal (`process.on("SIGINT", ignore)`).
 
-Every mutating method in `contract.ts` begins with an ownership check:
+## Peer prompt inbox
 
-```typescript
-// closePane
-if (!registry.owns(paneId)) return false;
+`deliverPeerPrompt(request)` in `src/domains/mux/peer-inbox.ts` hands a prompt to another Clio that this one opened. The file header states the reason: typing into a peer's terminal cannot be made safe, so the channel is a file inbox. The sequence in the function body:
 
-// focusPane
-if (!registry.owns(paneId)) return false;
+1. Reject a `requestId` that does not match `REQUEST_ID` (a UUID shape) with `not-delivered`.
+2. Reject a non-finite or negative `timeoutMs`.
+3. Resolve the inbox directory from the token with `peerInboxDir`. A null result is `unavailable`.
+4. Read the owner record with `readPeerInboxOwner` and require `owner.paneId === request.paneId` and `owner.socketPath === request.socketPath`.
+5. If an earlier receipt exists for the id, return it.
+6. Require `peerInboxOwnerState(owner) === "alive"`. Any other state is `unavailable`.
+7. Validate the text with `validPeerPromptText`. The source limit is `PEER_PROMPT_MAX_BYTES` = 8192 bytes.
+8. Write the request atomically with `safeResourceWrite` at mode 0600, under `requests/<id>`.
+9. Poll for a receipt every `RECEIPT_POLL_MS` (100 ms) until the deadline or abort. On timeout or abort, unlink the request. If the unlink succeeds and no claim exists, the result is `not-delivered` with "taken back unread"; otherwise it is `unconfirmed`.
 
-// zoomPane
-if (!registry.owns(paneId)) return false;
-```
+The `unavailable` helper is the central distinction. When the caller supplied a `requestId`, a failure is reported as `unconfirmed`, because an earlier copy may already have been admitted. Without a `requestId`, the same failure is `not-delivered`.
 
-The only documented exception is `reportSelf`, which writes to Clio's own hosting pane
-(`detection.self.paneId`) without a registry check. This is the pane Clio runs in, not
-one Clio created for the user.
+Caller: the `panes` surface in `tests/contracts/panes-tool.test.ts` imports the function, and `tests/extended/session-title-typed-input.test.ts` drives it with a stale token. Production callers were not traced beyond the import list, so this page does not name them.
 
-### Lifecycle ordering
+The focused test `tests/extended/session-title-typed-input.test.ts` passes the initial inbox token, `paneId: "w1:p2"`, `socketPath: "/owned.sock"`, and a 300 ms timeout after an explicit empty `/new` has retired that generation. It asserts the result status is `not-delivered`, that the session still has no current conversation, and that no prompt was sent. This shows the stale-token rejection path. The assertion that the stale result is `not-delivered` relies on the token having no live inbox, which is the case the test sets up.
 
-1. **Detection** (`detectMux`) runs once at boot, before any panes module loads.
-2. **Runtime creation** (`createMuxRuntime`) builds the registry, dock controller (if
-   protocol ≥ 17 and an anchor pane exists), and the contract object.
-3. **Subscription** (`runtime.start`) subscribes to `pane.closed`, `pane.exited`, and—if
-   docks are active—`pane.moved` and `layout.updated`. The `onResync` handler reconciles
-   the registry against a fresh snapshot after any reconnect.
-4. **Shutdown** (`runtime.stop`) closes the subscription, clears handlers, closes all dock
-   panes, and closes the client. Docks close with the session; unmanaged utility panes
-   stay open (policy #272).
+## Pane vocabulary
 
-### Degrade and retry
+`src/domains/mux/operations.ts` is a leaf module that defines the operator and model pane vocabulary. `PANES_PRESETS` lists three presets: `files` (probes the `yazi` binary, install hint `clio-coder tools install yazi`), `logs` (`tail`) and `shell` (`bash`). `PANE_PEER_IDS` lists the fixed interactive peers: `clio`, `claude-code`, `codex`, `opencode`, `antigravity` and `pi`. The source comment says the pane tool never accepts an executable name.
 
-The `attempt` wrapper tracks health: a transport or timeout error sets `healthy = false`
-and a cooldown (`DEGRADE_COOLDOWN_MS` = 5000ms) before probing again. The `usable()`
-predicate checks `stopped`, `client !== null`, `detection.mode !== "none"`, and the
-health/cooldown state. Below the cooldown, all methods return their fallback without
-touching the socket.
+`resolvePanesPresetId` returns the canonical id for a name, accepting the retired alias `yazi` through `PANES_PRESET_ALIASES`, and returns `null` for anything else. The focused test `tests/extended/panes-files.test.ts` asserts `PANES_PRESET_IDS` equals `["files", "logs", "shell"]`, that the alias map equals `{ yazi: "files" }`, that `resolvePanesPresetId("yazi")` and `resolvePanesPresetId("files")` both return `"files"`, and that `"htop"` returns `null`. The same test file checks the model-facing schema's `preset` enum.
 
-## Extension seams
+The `PanesOperations` interface (`src/domains/mux/operations.ts:PanesOperations`) is the single operations surface that the `/panes` command and the `panes` tool drive, as the file header states. The bodies of those command and tool callers were not read for this page.
 
-### Adding a new preset
+## Managed Yazi profile
 
-Presets are defined in `PANES_PRESETS` in `src/domains/mux/operations.ts`. To add one:
+`src/domains/mux/yazi/profile.ts` maintains a Clio-owned Yazi configuration under the cache directory. `yaziProfileDir` returns the profile path without creating the cache root. `inspectYaziProfile` builds the expected inputs with `expected(options)`: the asset directory, `src/domains/mux/yazi/assets/yazi.toml`, the keymap rendered with `renderYaziKeymap(yaPath)`, the theme from `renderYaziTheme()`, and a stamp of Yazi version, Clio version, `yaPath`, the SHA-256 of the asset tree and the SHA-256 of the theme. It reads the stored stamp with `readStamp` and compares it with `sameStamp`, which requires all five fields to match, and checks the profile files exist with `profileFilesExist`. The result is one of the `YaziProfileState` values: `current`, `stale`, `missing` or `generation-failed`. Inspection does not write.
 
-1. Append an entry to `PANES_PRESETS` with `id`, `binary`, `summary`, and `installHint`.
-2. The `PanesPresetId` type and `PANES_PRESET_IDS` derive automatically.
-3. `panes-runtime.ts` `presetArgv` needs a branch for the new preset (for `shell` it
-   returns `[binaryPath, "-l"]`; for `logs` it returns `[binaryPath, "-n", "200", "-F",
-   journalPath]`; the new preset returns its argv).
-4. `panes-tool-surface.ts` automatically picks up the new id in the `preset` enum.
+`ensureYaziProfile` (`src/domains/mux/yazi/profile.ts:ensureYaziProfile`) is the generating path. The function body beyond its signature was not read, so this page does not describe its write sequence or when it returns null.
 
-### Adding a new wire method floor
+The focused test `tests/contracts/doctor-yazi-repair.test.ts` imports from this area, and the grep for profile symbols matched it. Its assertions were not read for this page.
 
-To gate a new herdr method on a protocol floor:
+## Enforced boundaries
 
-1. Add the method name to `MuxGatedMethod` in `src/domains/mux/protocol.ts`.
-2. Add the floor to `MUX_METHOD_MIN_PROTOCOL`.
-3. Check `muxSupportsMethod(detection.server, "<method>")` in the contract before calling.
-
-### Adding a new dock slot
-
-To add a third dock slot:
-
-1. Add an entry to `DOCK_SPECS` in `dock-controller.ts` with `slot`, `direction`,
-   `defaultShare`, and `minCells`.
-2. The `DockSlot` type and `bySlot` map derive from the record key.
-3. `contract.ts` `openUtilityPane` routes `request.dock.slot` to `docks.open`.
-
-### Yazi profile customization
-
-The Yazi profile is regenerated only when the stamp changes. To customize the profile:
-
-1. Modify the assets in `src/domains/mux/yazi/assets/` (yazi.toml, init.lua, plugins/).
-2. The `assetSha256` in the stamp changes, triggering regeneration on next open.
-3. `theme.toml` and `keymap.toml` are rendered from Clio's tokens at generation time.
-
-## Focused tests
-
-### `tests/contracts/panes-tool.test.ts`
-
-This test drives the `panes` tool through the session registry over a fake mux that
-records every request. It demonstrates:
-
-- **One pane per preset**: a second `/panes open shell` focuses the existing pane instead
-  of splitting again. The test asserts `f.calls` equals
-  `["open:shell:/bin/bash -l:/workspace", "focus:p1", "close:p1"]`.
-- **Refusal of argv**: `{ action: "open", preset: "shell", argv: ["rm", "-rf", "/"] }`
-  returns an error before the fake mux sees it. `f.calls` remains empty.
-- **Missing binary**: with `bash: null`, the open returns a `missing-binary` error with
-  the install hint, and `f.calls` remains empty.
-- **Watch pane**: attaching a `PanesWatchController` and calling `show` with a matching
-  agent id routes through the controller, returning `watching` with the run id.
-
-### `tests/extended/panes-watch.test.ts`
-
-This test drives the watch pane through the **real socket client** (a live `createMuxClient`
-talking to a `node:net` server) and the real mux runtime. It demonstrates:
-
-- **Structured error preservation**: when the fake herdr server returns a structured
-  error (`{ code: "layout_capacity", message: "tab limit reached: 8 panes" }`), the watch
-  result preserves the kind, code, method, and message. The test verifies five error
-  shapes: structured, empty, code-only, literal unknown message, and literal unknown code
-  and message.
-- **Refusal isolation**: a structured refusal (e.g. `feature_disabled`) is kept separate
-  from a later independent successful watch. The test asserts `f.calls` is empty after
-  the refusal, proving no wire request was sent.
-
-### `tests/extended/panes-files.test.ts`
-
-This test drives the files pane surface through the real Yazi session and bridge. It
-demonstrates:
-
-- **Preset aliasing**: `resolvePanesPresetId("yazi")` returns `"files"` (the alias from
-  0.4.0/0.4.1).
-- **Dock geometry**: opening the files pane with `dock: { slot: "files", share: 0.3 }`
-  routes through the dock controller. The test verifies the dock's `targetShare` is
-  clamped and the `paneSplit` call carries the correct ratio.
-- **Transport file lifecycle**: `sweepStaleTransportFiles` removes `.stream`, `.chooser`,
-  and `.cwd` files older than 24 hours.
-
-### `tests/contracts/legacy-naming-retired.test.ts`
-
-This test verifies the ownership token:
-
-- A new pane carries only `clio_coder_owner: clio-coder:mux` (the canonical token),
-  never `clio_owner: clio:mux` (the released token).
-- `adoptPane` still finds and adopts a pane carrying the released `clio_owner` token, so
-  a pane an older 0.4 session left open is found and cleaned up.
-
-### `tests/extended/pane-remedies.test.ts`
-
-This test verifies detection remedies:
-
-- **Embedded refusal**: `detectMux({ enabled: "embedded", env: {} })` returns
-  `mode: "none"`, `refused: true`, and the reason "embedded pane hosting is not
-  implemented; use auto or guest".
-- **Files pane disabled**: with `interface.panes.files.enabled: false`,
-  `panes.open({ preset: "yazi" })` returns a refusal naming the canonical key.
-- **Slash command inactive**: running `/panes` without the panes extension prints the
-  notice "panes are inactive: this session started without them. Restart with
-  `clio-coder --with-panes`".
+- The contract never throws to its callers. Non-transport errors do not change health. Transport and timeout errors mark the runtime degraded for 5 seconds (`src/domains/mux/contract.ts:createMuxRuntime`).
+- Ownership: only panes that carry an owner token are acted on by the runtime's pane methods, and `closePane` refuses a pane Clio did not create (`src/domains/mux/contract.ts:MuxContract` doc comment). The per-method check bodies were not read.
+- Peer delivery binds the inbox to pane and server identity before writing (`src/domains/mux/peer-inbox.ts:deliverPeerPrompt`).
+- Dock refusal happens before a split reaches the wire (`src/domains/mux/dock-controller.ts:planDockOpen`).
 
 ## Things to watch when editing
 
-1. **The ownership check is the first line of every mutating method.** If you add a new
-   mutating method to `MuxContract`, the first thing it must do is
-   `if (!registry.owns(paneId)) return false;` (or equivalent). The test
-   `tests/contracts/legacy-naming-retired.test.ts` pins that the released token is never
-   written, only read.
+- The `attempt` wrapper is the only place that converts errors into fallbacks. A new contract method that calls `client` directly, outside `attempt`, would throw to its caller.
+- `DOCK_SPECS` values are tied to the rendered layouts the source comments describe (the workers floor to the fleet dashboard, the music floor to cliamp's spectrum height). Changing a floor changes the refusal threshold in `planDockOpen`.
+- The peer inbox distinguishes `not-delivered` from `unconfirmed` based on whether a `requestId` was supplied. Callers that retry must pass the same id.
+- The owner token constants and the legacy keys are both read by ownership checks. Removing the legacy match would stop recognizing panes left by older sessions, as the comment in `src/domains/mux/contract.ts` says.
+- The `cliamp/` and `src/domains/mux/workspace/config.ts` files were not read for this page; edits there are not covered by the behavior described here.
 
-2. **`pane.split` always uses `focus: false`.** The dock controller and the contract's
-   `openUtilityPane` both pass `focus: false`. If you change this, the dock will steal
-   focus from the operator's shell on every open, violating rule 3 of the reconciliation
-   logic.
+## Related pages
 
-3. **The `attempt` wrapper is the only error-swallowing layer.** Every method in
-   `contract.ts` routes through `attempt`. If you add a new method that talks to the
-   socket, wrap it in `attempt` with the appropriate fallback. The `degrade` function
-   inside `attempt` sets `healthy = false` and a cooldown on transport/timeout errors.
+- [Interactive surfaces](../interactive/surfaces.md) and [Interactive renderers](../interactive/renderers.md) cover the consumers of the pane vocabulary only at the level of their names; this page did not inspect them.
+- [Session control](../session-control.md) is referenced by the session-title test above; its contents were not read for this page.
 
-4. **Protocol floors are checked against `detection.server`, not the wire response.** The
-   `muxSupportsMethod` function takes the server info from the handshake, not the current
-   response. If a server updates its protocol mid-session, the floor check will not see
-   it until the next detection.
+## Coverage gaps
 
-5. **The Yazi profile is validated with `yazi --debug` before promotion.** `ensureYaziProfile`
-   spawns `yazi --debug` in a scratch HOME and checks the output for config error markers.
-   If you change the profile assets, test with the actual Yazi binary, not just the TOML
-   parser. The test `tests/contracts/doctor-yazi-repair.test.ts` pins that a generation
-   failure is retained until a profile successfully regenerates.
+The following central workflows were not inspected in full:
 
-6. **`exactOptionalPropertyTypes` is on.** When building optional request objects (e.g.
-   `MuxSplitRequest`, `MuxOpenUtilityPaneRequest`), use the spread pattern
-   `...(x !== undefined ? { x } : {})` rather than `x: undefined`. This is enforced by
-   the TypeScript compiler and the boundary checker.
-
-7. **The dock controller never caches the split path.** `applyShare` re-derives the split
-   path from a fresh `layoutExport` on every resize. If you add caching, the path may go
-   stale after a user move, and the share will be applied to the wrong split.
-
-8. **Transport files are per-session and worthless once the session ends.** `createYaziSession`
-   removes `.stream`, `.chooser`, and `.cwd` files on close. If you add new transport
-   files, add them to the `removeTransportFiles` cleanup and the `sweepStaleTransportFiles`
-   regex, or `<cache>/yazi/sessions` will grow without bound.
-
-9. **The panes tool has no `argv` field and never will.** The tool's schema in
-   `panes-surface.ts` has no `argv` parameter. `panes-tool.ts` explicitly refuses any
-   request that contains an `argv` field. If you need to run a command in a pane, use the
-   `/panes open <command>` slash command, not the tool.
-
-10. **The `role` token is what `adoptPane` finds after a restart.** `openUtilityPane`
-    writes `tokens: { role: token(purpose) }` alongside the owner token. `adoptPane`
-    scans a fresh snapshot for panes carrying Clio's owner token and a matching `role`
-    token. If you change the purpose system, update the adoption path or surviving panes
-    will not be re-adopted.
-
-<!-- clio-coder:wiki unresolved sources: tests/extended/pane-remedies.test.ts -->
+- The bodies of `createMuxBundle` in `src/domains/mux/extension.ts`, which decides how the module's gating reaches the runtime.
+- The body of `ensureYaziProfile` (write sequence and failure return) and the remaining methods of the dock controller (`hide`, `show`, `adopt`).
+- The per-method owner checks inside `createMuxRuntime`, and the `paneRecord` and registry reconciliation.
+- Production callers of `deliverPeerPrompt` and `launchWorkspace`, beyond the test imports.

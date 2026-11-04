@@ -1,4 +1,11 @@
-import type { JobChangedPayload, JobControlAction, JobCreateInput, JobOwner, JobRecord } from "../../core/job-types.js";
+import type {
+	JobChangedPayload,
+	JobControlAction,
+	JobCreateInput,
+	JobOwner,
+	JobRecord,
+	TurnContinuationCause,
+} from "../../core/job-types.js";
 
 export type * from "../../core/job-types.js";
 
@@ -28,6 +35,8 @@ export interface JobRunResult {
 	costUsd?: number | null;
 	errorClass?: "infrastructure" | "permission" | "execution";
 	retryAfterMs?: number;
+	/** The loop guard ended this main turn; the turn itself may still read as succeeded (#445). */
+	stoppedBy?: "tool_budget" | "loop_guard";
 }
 export interface JobRunnerPorts {
 	isCurrent(owner: JobOwner): boolean;
@@ -54,12 +63,13 @@ export interface JobControllerOptions {
 	onChange?: (payload: JobChangedPayload) => void;
 	onError?: (error: Error) => void;
 	/**
-	 * Lets a job continue once when its default clock ended a main turn that no
-	 * later occurrence would pick up (#445). Absent means never.
+	 * Lets a job continue a main turn that stopped with nobody behind it and that
+	 * no later occurrence would pick up, and keeps it from pausing on repeated
+	 * infrastructure failures (#445). Absent means never.
 	 */
-	clockResume?: {
+	continuation?: {
 		allowed(job: JobRecord): boolean;
-		resumed(job: JobRecord, boundMs: number): void;
+		resumed(job: JobRecord, boundMs: number, cause: TurnContinuationCause): void;
 	};
 }
 export interface JobController {

@@ -1,7 +1,7 @@
 Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact Clio Coder build if needed, verify its project and model route, then choose where the first bounded task runs.
 
 ::: note Version scope
-This guide describes the v0.6.0 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
+This guide describes the v0.6.8 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
 :::
 
 ::: needs
@@ -124,7 +124,7 @@ When a verified node suits substantial work and no preference or pin exists, Cli
 
 A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
-Remote workers retain default worker authority even when the coordinator uses yolo. Worker slots limit concurrency; they do not create a scheduler allocation. On a university or laboratory cluster, use an approved execution environment. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling.
+Remote workers run under their own permits. The safety judge does not answer for a remote placement, so at `default` a remote worker's ordinary ask is denied. Worker slots limit concurrency; they do not create a scheduler allocation. On a university or laboratory cluster, use an approved execution environment. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling.
 
 ## Return edits from an independent checkout
 
@@ -134,23 +134,40 @@ Clio creates a matching branch and worktree on the node at the approved baseline
 
 The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
 
-Transfer, verification and application failures preserve the node branch for recovery. The receipt names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
+Transfer, verification and application failures preserve the node branch for recovery. The run record names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
 
 ## Follow the result
 
-Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/experimental/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
+Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/tutorials/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
 
 SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio Coder has verified.
+
+## On a cluster
+
+```sh
+curl -fsSL https://coder.iowarp.ai/install.sh | sh
+```
+
+The installer needs no root, refuses to run under sudo, and brings a private Node.js 24. On x64 login nodes with glibc from 2.17 to 2.27 it selects a compatible Node.js build. Behind a proxy, export `https_proxy` first; the cluster guide lists the variables for mirrored and offline installs.
+
+That private Node.js is not added to `PATH`. A node installed this way already has Clio Coder, so skip `fleet nodes install` there and keep its version equal to your client's.
+
+Clio Coder does not submit jobs for its own workers. Scheduler work goes through the clio-kit Slurm tools, which the agent calls to submit, list, describe, and cancel jobs, each with your approval.
 
 ::: limits
 - SSH access, exact Clio Coder version and the same absolute project path remain prerequisites.
 - Project dependencies and datasets need your own staging; there is no arbitrary repository sync or path mapping.
 - Independent-checkout edits require isolated task worktrees and the existing verification and application gates.
 - Institutional access rules and schedulers still govern where work may run.
+- Worker slots limit concurrency. They are not an allocation, and a login node is not a compute node.
+- A remote worker sandboxes its commands only when bubblewrap is present on that node.
+- A worker that uses a cloud model sends its input to that provider from the node.
 :::
 
 ::: next
 - [Your first session with Clio Coder](/tutorials/first-session.html)
 - [Fleet guide](/docs/guide/fleet-dispatch.html)
+- [Install on a cluster](/docs/guide/hpc-clusters.html)
+- [Slurm workflows](/docs/guide/slurm.html)
 - [Install Clio Coder](/#start)
 :::

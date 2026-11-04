@@ -35,6 +35,7 @@ export {
 	type DispatchMemoryRoute,
 	dispatchMemoryRuntimeId,
 } from "./dispatch-section.js";
+export { memoryFlowSweepNotice, sweepRestrictedMemory } from "./flow-sweep.js";
 export {
 	evaluateMemoryGate,
 	MEMORY_GATE_HELD_SESSIONS,
