@@ -1,4 +1,10 @@
 import { factKnownValue } from "../../core/telemetry/known.js";
+import {
+	messageStopCompleted,
+	redactStreamingUrlCredentials,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
+} from "../../domains/safety/redaction.js";
 /**
  * Projection from chat-loop events to the headless `--json` wire stream.
  *
@@ -96,6 +102,80 @@ export interface HeadlessJsonProjector {
 	project(event: ChatLoopEvent): RunJsonChatLoopFrame[];
 }
 
+/** Rewrite every string in a value. A value with nothing to rewrite comes back as itself. */
+function mapStrings(value: unknown, map: (text: string) => string, depth = 0): unknown {
+	if (typeof value === "string") return map(value);
+	if (depth > 32) return value;
+	if (Array.isArray(value)) {
+		const items = value.map((item) => mapStrings(item, map, depth + 1));
+		return items.every((item, index) => item === value[index]) ? value : items;
+	}
+	if (!isRecord(value)) return value;
+	const entries = Object.entries(value).map(([key, item]) => [key, mapStrings(item, map, depth + 1)] as const);
+	return entries.every(([key, item]) => item === value[key]) ? value : Object.fromEntries(entries);
+}
+
+const isDeltaType = (type: unknown): boolean => type === "text_delta" || type === "thinking_delta";
+
+/**
+ * URL credentials off a JSON stream, whose reader appends deltas and cannot take one back, so a delta waits in a filter
+ * and every other string is redacted whole. A frame whose delta is held stays unwritten until it has text (#446).
+ */
+export function createJsonCredentialScrub(): {
+	scrub<T>(frame: T): T[];
+	finish<T>(completed: boolean): T[];
+} {
+	const open = new Map<string, { filter: UrlCredentialStreamFilter; frame: (delta: string) => unknown }>();
+	const finish = (completed: boolean): unknown[] => {
+		const frames: unknown[] = [];
+		for (const { filter, frame } of open.values()) {
+			const rest = filter.end(completed);
+			if (rest.length > 0) frames.push(frame(rest));
+		}
+		open.clear();
+		return frames;
+	};
+	const through = (key: string, delta: string, frame: (delta: string) => unknown): unknown[] => {
+		const entry = open.get(key) ?? { filter: new UrlCredentialStreamFilter(), frame };
+		open.set(key, { ...entry, frame });
+		const safe = entry.filter.push(delta);
+		return safe.length > 0 ? [frame(safe)] : [];
+	};
+	const scrub = (frame: unknown): unknown[] => {
+		if (!isRecord(frame)) return [mapStrings(frame, redactUrlCredentials)];
+		if (isDeltaType(frame.type)) {
+			const field = typeof frame.delta === "string" ? "delta" : "text";
+			const delta = frame[field];
+			if (typeof delta === "string") {
+				return through(`${String(frame.type)}:${String(frame.contentIndex ?? "")}`, delta, (safe) => ({
+					...frame,
+					[field]: safe,
+				}));
+			}
+		}
+		const inner = frame.assistantMessageEvent;
+		if (frame.type === "message_update" && isRecord(inner)) {
+			const { partial, ...rest } = inner;
+			const held = mapStrings(partial, (text) => redactStreamingUrlCredentials(text));
+			const shape = (delta: string): unknown => ({
+				...frame,
+				assistantMessageEvent: { ...rest, delta, ...(partial !== undefined ? { partial: held } : {}) },
+			});
+			if (isDeltaType(inner.type) && typeof inner.delta === "string") {
+				return through(`update:${String(inner.type)}:${String(inner.contentIndex ?? "")}`, inner.delta, shape);
+			}
+			return [mapStrings(frame, (text) => redactStreamingUrlCredentials(text))];
+		}
+		if (isRecord(frame.message)) {
+			const completed = messageStopCompleted(frame.message.stopReason);
+			return [...finish(completed), mapStrings(frame, (text) => redactStreamingUrlCredentials(text, completed))];
+		}
+		const ended = frame.type === "agent_end" ? finish(false) : [];
+		return [...ended, mapStrings(frame, redactUrlCredentials)];
+	};
+	return { scrub: scrub as <T>(frame: T) => T[], finish: finish as <T>(completed: boolean) => T[] };
+}
+
 /**
  * The stateful half of the headless projection. A gateway call's end frame
  * carries no arguments, and a refused capability's result carries no
@@ -105,23 +185,23 @@ export interface HeadlessJsonProjector {
  */
 export function createHeadlessJsonProjector(): HeadlessJsonProjector {
 	const capabilities = new Map<string, string>();
-	return {
-		project(event) {
-			let projected = projectHeadlessJsonEvent(event);
-			if (projected === null) return [];
-			if (projected.type === "tool_execution_start" && projected.via === VIA_GATEWAY) {
-				capabilities.set(projected.toolCallId, projected.toolName);
-			}
-			if (event.type !== "tool_execution_end" || projected.type !== "tool_execution_end") return [projected];
-			const started = capabilities.get(event.toolCallId);
-			capabilities.delete(event.toolCallId);
-			if (started !== undefined && projected.via !== VIA_GATEWAY) {
-				projected = { ...projected, toolName: started, via: VIA_GATEWAY };
-			}
-			const steps = gatewayChainSteps(event.toolName, event.result);
-			return [projected, ...steps.flatMap((step) => chainStepFrames(event.toolCallId, step))];
-		},
+	const credentials = createJsonCredentialScrub();
+	const project = (event: ChatLoopEvent): ReturnType<HeadlessJsonProjector["project"]> => {
+		let projected = projectHeadlessJsonEvent(event);
+		if (projected === null) return [];
+		if (projected.type === "tool_execution_start" && projected.via === VIA_GATEWAY) {
+			capabilities.set(projected.toolCallId, projected.toolName);
+		}
+		if (event.type !== "tool_execution_end" || projected.type !== "tool_execution_end") return [projected];
+		const started = capabilities.get(event.toolCallId);
+		capabilities.delete(event.toolCallId);
+		if (started !== undefined && projected.via !== VIA_GATEWAY) {
+			projected = { ...projected, toolName: started, via: VIA_GATEWAY };
+		}
+		const steps = gatewayChainSteps(event.toolName, event.result);
+		return [projected, ...steps.flatMap((step) => chainStepFrames(event.toolCallId, step))];
 	};
+	return { project: (event) => project(event).flatMap((frame) => credentials.scrub(frame)) };
 }
 
 /** One settled chain step as the start/end pair a direct call of its capability would have produced. */

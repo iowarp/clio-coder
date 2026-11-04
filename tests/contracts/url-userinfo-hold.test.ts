@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { createJsonCredentialScrub } from "../../src/cli/modes/json-stream.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
@@ -293,6 +294,30 @@ test("what an append-only stream sends joins to the one-shot output and never sh
 	strictEqual(prose.push("https"), "https");
 	strictEqual(prose.push("://u:ZQ"), "");
 	strictEqual(prose.push("XJ@h "), "://u:[redacted]@h ");
+});
+
+test("a JSON stream sends no URL credential in a delta, a message or a result", () => {
+	const scrub = createJsonCredentialScrub();
+	const frames = [
+		{ type: "text_delta", contentIndex: 0, delta: "clone https://u:ZQ" },
+		{ type: "text_delta", contentIndex: 0, delta: "XJ@h/r and http://h" },
+		{
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "ok ", partial: { text: "https://u:ZQ" } },
+		},
+		{ type: "message_end", message: { stopReason: "stop", content: [{ type: "text", text: "https://u:ZQXJ@h" }] } },
+		{ type: "text_delta", contentIndex: 0, delta: "cut https://u:ZQ" },
+		{ type: "message_end", message: { stopReason: "aborted", content: [{ type: "text", text: "cut https://u:ZQ" }] } },
+		{ type: "result", result: { output: { text: "postgres://u:ZQXJ@h/db" } } },
+	].flatMap((frame) => scrub.scrub<unknown>(frame));
+	const wire = JSON.stringify(frames);
+	strictEqual(leaked(wire, "").join(""), "", wire);
+	const deltas = frames.flatMap((frame) => {
+		const row = frame as { type?: string; delta?: string };
+		return row.type === "text_delta" ? [row.delta ?? ""] : [];
+	});
+	strictEqual(deltas.join(""), "clone https://u:[redacted]@h/r and http://hcut https://u:");
+	ok(wire.includes("postgres://u:[redacted]@h/db"), wire);
 });
 
 function proseFrame(panel: ChatPanel): string {
