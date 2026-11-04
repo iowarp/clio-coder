@@ -25,13 +25,7 @@ const { values } = parseArgs({
 const browser = await chromium.launch({ executablePath: values.chrome, headless: true });
 const results = [];
 try {
-	for (const path of [
-		"/",
-		"/docs.html",
-		"/learn.html",
-		"/research.html",
-		...values.paths.split(",").filter(Boolean),
-	]) {
+	for (const path of ["/", "/docs.html", "/learn.html", "/research.html", ...values.paths.split(",").filter(Boolean)]) {
 		const context = await browser.newContext({
 			viewport: { width: 390, height: 844 },
 			deviceScaleFactor: 2,

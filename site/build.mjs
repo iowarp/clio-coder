@@ -592,9 +592,7 @@ for (const item of articles) {
 		["Written for", `v${item.versionScope ?? product.version}`],
 		[
 			"Works in",
-			(item.interfaces ?? (item.collection.id === "research" ? ["Terminal"] : ["Terminal", "Desktop alpha"])).join(
-				" · ",
-			),
+			(item.interfaces ?? (item.collection.id === "research" ? ["Terminal"] : ["Terminal", "Desktop alpha"])).join(" · "),
 		],
 		["Basis", item.basis ?? "Documented workflow"],
 	]
