@@ -1,6 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { clioStateDir } from "../../src/core/xdg.js";
+import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
+import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { holdUnresolvedUserinfo, redactSecretString, redactUrlCredentials } from "../../src/domains/safety/redaction.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Secrets draw on letters nothing else here uses, so one leaked character is enough to fail.
 const SECRET_LETTERS = /[ZQXJ]/u;
@@ -56,4 +61,50 @@ test("a frame releases what a closing quote settled and still holds what a quote
 	strictEqual(holdUnresolvedUserinfo("https://me@corp.com:hunter"), "https://me@corp.com:");
 	strictEqual(holdUnresolvedUserinfo("https://me@corp.com:8080/x"), "https://me@corp.com:8080/x");
 	strictEqual(holdUnresolvedUserinfo("https://me@corp.com:hunter2@ho"), "https://me@corp.com:hunter2@");
+});
+
+const MESSAGE_STOP: RunEventJournalBody = { kind: "event", type: "message_end", stopReason: "stop" };
+
+/** Feed a run through the writer and read back the text of its rows. */
+function feedText(runId: string, ...items: (string | RunEventJournalBody)[]): string[] {
+	for (const item of items) {
+		appendRunFeed(runId, typeof item === "string" ? { kind: "event", type: "text", detail: item } : item);
+	}
+	return readFileSync(runFeedPath(runId, clioStateDir()), "utf8")
+		.trim()
+		.split("\n")
+		.map((raw) => JSON.parse(raw) as { type?: string; detail?: string })
+		.filter((row) => row.type === "text")
+		.map((row) => row.detail ?? "");
+}
+
+test("a run feed keeps every word of compact JSON longer than its carry", async () => {
+	const env = await isolateClioEnv("url-surfaces-feed-");
+	try {
+		const body = "p".repeat(3000);
+		const head = `{"u":"https://x.io","d":"${body}`;
+		const tail = '","e":1} and the next words follow ';
+		strictEqual(feedText("compact", head, body, tail, MESSAGE_STOP).join(""), head + body + tail);
+		const credential = `{"u":"https://u:ZQXJ@h/x","d":"${body}`;
+		const rows = feedText("compact-secret", credential, body, tail, MESSAGE_STOP).join("");
+		ok(!SECRET_LETTERS.test(rows), rows.slice(0, 80));
+		ok(rows.endsWith(body + tail), rows.slice(-60));
+	} finally {
+		env.restore();
+	}
+});
+
+test("a run feed bound never leaves a secret query value without its name", async () => {
+	const env = await isolateClioEnv("url-surfaces-feed-");
+	try {
+		const long = "a".repeat(4090);
+		const rows = feedText("query", `https://h/?x=${long}&token=ZQXJZQXJ`, "ZQXJZQXJ&y=1 and the rest follows here ", MESSAGE_STOP);
+		ok(!rows.join("\n").match(SECRET_LETTERS), JSON.stringify(rows.map((row) => row.slice(-40))));
+		ok(rows.join("").endsWith("&y=1 and the rest follows here "), rows.join("").slice(-60));
+		ok(rows.join("").includes(long));
+		const value = feedText("long-value", `https://h/?token=ZQ${"X".repeat(5000)}`, "ZQXJZQXJ more words to follow ", MESSAGE_STOP);
+		ok(!value.join("\n").match(SECRET_LETTERS), JSON.stringify(value.map((row) => row.slice(0, 60))));
+	} finally {
+		env.restore();
+	}
 });

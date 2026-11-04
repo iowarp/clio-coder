@@ -307,8 +307,16 @@ export interface CutHeadGuard {
 	token: string;
 }
 
-/** Whether a cut at the end of this text would leave a piece of a URL's authority on each side (#446). */
-export const OPEN_AUTHORITY_END_RE = new RegExp(String.raw`:\/?$|:\/\/${stringRun(String.raw`[^\s/"]`)}"?$`, "u");
+// `https:`, `https:/`, `https://u` or `?token=abc`, each of which goes on to name a secret or hold one.
+const OPEN_CREDENTIAL_END_RE = new RegExp(
+	String.raw`:\/?$|:\/\/${stringRun(String.raw`[^\s/"]`)}"?$|${SECRET_URL_PARAM_NAME_RE.source}[^=\s&#]*=[^&#\s]*$`,
+	"iu",
+);
+
+/** Whether a cut at the end of this text would leave a piece of a credential on each side, neither of which matches (#446). */
+export function endsInOpenCredential(text: string): boolean {
+	return OPEN_CREDENTIAL_END_RE.test(text);
+}
 
 const CUT_TOKENS = 2;
 const NAME_TAIL_CHARS = 64;

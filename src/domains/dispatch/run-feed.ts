@@ -39,6 +39,7 @@ import type { CutHeadGuard } from "../safety/redaction.js";
 import {
 	cutHeadGuard,
 	dropCutHead,
+	endsInOpenCredential,
 	headGuardAfter,
 	holdUnresolvedUserinfo,
 	messageStopCompleted,
@@ -53,8 +54,8 @@ export const RUN_FEED_CAP_BYTES = 2 * 1024 * 1024;
 export const RUN_FEED_READ_TAIL_BYTES = 256 * 1024;
 /** Prose a text row may hold back while it waits for a word boundary. */
 const TEXT_CARRY_MAX_CHARS = 4096;
-/** What a carry cut at its bound can end in and still go on to name a password: `https:`, `https:/` or `https://u`. */
-const OPEN_AUTHORITY_END_RE = /:\/?$|:\/\/[^\s/]*$/u;
+/** The most of a query parameter a bound keeps back whole, so a value's name stays on the row with its value (#446). */
+const QUERY_PARAM_KEEP_CHARS = 1024;
 /** Rows that follow a finished text block in every runtime, so no URL spans them and the carry goes out whole. */
 const TEXT_BLOCK_END_EVENTS: ReadonlySet<string> = new Set([
 	"thinking",
@@ -234,6 +235,13 @@ function holdBack(text: string): { head: string; tail: string } {
 	return { head: text.slice(0, cut), tail: text.slice(cut) };
 }
 
+/** Where a bound cuts an outgrown carry: ahead of a short final query parameter, whose name a later row could not recognize. */
+function carryBoundCut(carry: string): number {
+	const param = Math.max(carry.lastIndexOf("&"), carry.lastIndexOf("?"));
+	if (param <= 0 || carry.length - param > QUERY_PARAM_KEEP_CHARS || /\s/u.test(carry.slice(param))) return carry.length;
+	return param;
+}
+
 /**
  * What a row means for prose still held back. Only a message that stopped on purpose releases it, as everywhere else (#446).
  * A cut-off message, a new attempt in the same stream or the run's end leaves any open URL unresolved for good. A message
@@ -273,10 +281,13 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 			state.carryAt = head.length > 0 ? at : state.carryAt;
 			if (state.carry.length > TEXT_CARRY_MAX_CHARS) {
 				// One run outgrew the carry. A piece of a URL on each side of this row would match nothing (#446).
-				const shown = holdUnresolvedUserinfo(state.carry);
-				if (shown !== state.carry || OPEN_AUTHORITY_END_RE.test(state.carry)) state.headGuard = cutHeadGuard();
+				const split = carryBoundCut(state.carry);
+				const bounded = state.carry.slice(0, split);
+				const shown = holdUnresolvedUserinfo(bounded);
+				const open = shown !== bounded || endsInOpenCredential(bounded);
+				if (open) state.headGuard = cutHeadGuard();
 				writeBounded(path, state, { kind: "event", type: "text", detail: shown }, state.carryAt);
-				state.carry = "";
+				state.carry = open ? "" : state.carry.slice(split);
 			}
 			return;
 		}
