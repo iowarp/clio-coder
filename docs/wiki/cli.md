@@ -1,340 +1,173 @@
 ---
 title: "Command-line surfaces"
-summary: "The argument-parsing and subcommand-dispatch entry point for every Clio Coder CLI surface, the configure wizard and target-selection flows, the headless main-agent runner, and the fleet authoring/execution and read-only run-viewer commands."
+summary: "How the clio-coder binary routes a subcommand to its handler, and what the main command modules under src/cli own. Read this before adding a subcommand, changing global flag handling, or tracing a run, configure, targets, upgrade, wiki or fleet view invocation."
 sources:
   - "src/cli/index.ts"
-  - "src/cli/run.ts"
-  - "src/cli/modes/print.ts"
   - "src/cli/configure.ts"
   - "src/cli/configure-onboarding.ts"
   - "src/cli/targets.ts"
-  - "src/cli/fleet.ts"
+  - "src/cli/wiki-generate.ts"
+  - "src/cli/run.ts"
+  - "src/cli/upgrade.ts"
   - "src/cli/fleet-view.ts"
-  - "src/cli/usage.ts"
+symbols:
+  - "main"
+  - "dispatch"
+  - "COMMAND_HANDLERS"
+  - "unhonoredBootFlag"
+  - "runConfigureCommand"
+  - "runOnboardingWizard"
+  - "runTargetsCommand"
+  - "runClioRun"
+  - "runUpgradeCommand"
+  - "modelWikiGenerate"
+  - "withWikiDispatchLifecycle"
+  - "runFleetView"
 tests:
-  - "tests/extended-smoke/cli-core.test.ts"
-  - "tests/contracts/targets-use-unused-model.test.ts"
-  - "tests/contracts/settings-target-wizard.test.ts"
-  - "tests/boundaries/check-boundaries.ts"
+  - "tests/contracts/cli-ignored-flags.test.ts"
+  - "tests/contracts/upgrade-command.test.ts"
 invariants:
-  - "Every subcommand is a literal dynamic import through the `COMMAND_HANDLERS` map in `src/cli/index.ts`, so a bare `clio-coder --version` pays for its own module graph and nothing else."
-  - "`--api-key`, `--no-context-files`, `--no-skills`, and `--skill` are honored only by the `run` and `acp` subcommands; `--with-panes`/`--no-panes` are honored by no subcommand at all."
-  - "The headless `clio-coder run` text mode keeps stdout the assistant's answer alone; the session id and any failure go to stderr."
-  - "The configure onboarding wizard persists nothing until the operator chooses Save at the review step; every earlier answer lives only in the in-memory `Answers` object."
+  - "A subcommand name is dispatched only if it is a key of COMMAND_HANDLERS in src/cli/index.ts; unknown names exit 2 with usage on stderr, and a retired name such as context-init is not dispatchable."
+  - "Global boot flags such as --api-key, --no-skills and --with-panes placed before a subcommand are refused with exit 2 unless the command is run or acp (for the non-panes flags); the refusal names the flag and the command and does not echo the key."
+  - "runClioRun refuses --turn-mode, --allow-tools, --delegate-tools and --no-delegate combined with --agent, and refuses fleet dispatch flags without --agent."
+  - "parseUpgradeArgs rejects --restart combined with --json or --post-install, and rejects --rollback combined with --post-install, --refresh-runtime or --restart."
+  - "runConfigureCommand refuses --edit when stdin or stdout is not a TTY, and refuses setup flags without --runtime or --id when stdin is not a TTY."
+  - "withWikiDispatchLifecycle drains dispatch and stops domains once, on normal completion or on SIGINT, SIGTERM or SIGHUP, and forces process exit after a 2000ms shutdown budget."
 validate:
-  - "node --import tsx tests/boundaries/check-boundaries.ts"
-  - "pnpm test:file tests/extended-smoke/cli-core.test.ts"
+  - "pnpm run test:file tests/contracts/cli-ignored-flags.test.ts"
+  - "pnpm run test:file tests/contracts/upgrade-command.test.ts"
+  - "pnpm run typecheck"
 ---
 
 # Command-line surfaces
 
-## What this area does
+The `clio-coder` binary is a single entry, `src/cli/index.ts`, that parses global flags, then routes the first subcommand token to a handler. Each handler lives in its own `src/cli` module and is loaded with a dynamic import, so a command's code is not loaded unless it runs. Read this page when you need to know which module owns a subcommand, how global flags are validated before dispatch, or how the main command modules (`run`, `configure`, `targets`, `upgrade`, `wiki` generation and `fleet view`) start their work. Behavior specific to other areas, such as the agent runtime or the provider layer, belongs to the owning pages linked below.
 
-The `src/cli` area is every command-line surface Clio Coder ships as the
-`clio-coder` binary. It owns argument parsing, global-flag extraction, and the
-subcommand dispatch table in `src/cli/index.ts`, then delegates to one module
-per command: the interactive boot hand-off, the headless single-turn runner,
-the configure wizard and target setup, target listing and role selection,
-fleet authoring and execution, the read-only fleet run viewer, and the
-cross-session usage analyzer. It does not own the domain logic those commands
-drive; it parses, preflights, and hands control to the composition root and the
-domain modules.
+## Entry and routing
 
-The area's central design decision is cold-start cost. `package.json` maps the
-`clio-coder` bin to `dist/cli/index.js`, whose entry is `main` at
-`src/cli/index.ts:168`. `main` sets `process.title`, sets the `AI_AGENT`
-environment marker, parses only the top-level flags statically, and then routes
-every subcommand through a literal dynamic `import(...)` inside the
-`COMMAND_HANDLERS` map. The comment at `src/cli/index.ts:168` states this is the
-"highest-value cut of the cold module-load tax," and the map doubles as the
-command-recognition source used by the global value flags.
+`src/cli/index.ts` defines `COMMAND_HANDLERS`, a `Map<string, CommandHandler>` keyed by subcommand name. Each entry is an async arrow that dynamically imports one module and calls its exported runner. Examples: `configure` calls `runConfigureCommand` from `src/cli/configure.ts`, `targets` calls `runTargetsCommand` from `src/cli/targets.ts`, `upgrade` calls `runUpgradeCommand` from `src/cli/upgrade.ts`, and `run` calls `runClioRun` from `src/cli/run.ts`. The `fleet` entry routes `fleet nodes` and `fleet land` to their own modules and everything else to `src/cli/fleet.ts`. The `worker` entry is internal: it imports `src/worker/entry.ts`, which runs the worker stream server.
 
-## Ownership and entry points
+`main(argv)` in the same file runs in this order:
 
-| Surface | Entry symbol | File |
-|---------|--------------|------|
-| Process entry + dispatch | `main` | `src/cli/index.ts:168` |
-| Headless turn command | `runClioRun` | `src/cli/run.ts:309` |
-| Headless main-agent runner | `runHeadlessMainAgent` | `src/cli/modes/print.ts:624` |
-| Configure wizard + settings | `runConfigureCommand` | `src/cli/configure.ts:2281` |
-| First-run onboarding steps | `runOnboardingWizard` | `src/cli/configure-onboarding.ts:974` |
-| Target list/use/profile | `runTargetsCommand` | `src/cli/targets.ts:178` |
-| Fleet authoring + execution | `runFleetCommand` | `src/cli/fleet.ts:829` |
-| Fleet run viewer | `runFleetView` | `src/cli/fleet-view.ts:681` |
-| Usage analyzer | `runUsageCommand` | `src/cli/usage.ts:303` |
+1. It checks the Node version against `MIN_NODE` (`[22, 19, 0]`) and returns 1 with a message if the runtime is older.
+2. It calls `extractGlobalFlags(argv, isCommandToken)`, from `src/cli/argv.ts`. A global flag error returns 2.
+3. It handles `--help`, `-h`, and `--version` before any dispatch.
+4. It builds `bootOptions` from `--api-key`, `--no-context-files`, `--no-skills`, `--skill`, and the panes flags. `--demo`, `--autonomy`, and the tool-limit flags are refused when they appear before a subcommand, because the message tells the operator to place them after it.
+5. `unhonoredBootFlag` refuses a boot flag that the named command does not read. `BOOT_OPTION_COMMANDS` is `run` and `acp`. `--with-panes` and `--no-panes` are refused for every command, since they apply to the interactive session only.
+6. With no subcommand, `main` calls `runClioRun`'s sibling `runClioCommand` from `src/cli/clio.ts` to start the interactive session. Otherwise it calls `dispatch(subcommand, subArgs, bootOptions)`.
 
-The dispatch table `COMMAND_HANDLERS` (a `Map<string, CommandHandler>`) in
-`src/cli/index.ts` holds one handler per subcommand; each handler is a closure
-whose body is a literal `await import("./<name>.js")`. `extensions` and `ext`
-share one handler; `export` and `import` share one. A `dev` prefix resolves to
-the same handlers as the unprefixed names via a second `dispatch` call. Retired
-names (`context-init`, `context-index`, `context-clear`) stay in the
-`RETIRED_SUBCOMMANDS` set so the top-level value flags cannot swallow them as a
-flag value and boot a different mode.
+`dispatch` looks up the handler. If none exists it prints `unknown subcommand`, writes the help text to stderr, and returns 2. If one exists, it calls `installHumanStdoutHandler` and then the handler, and converts an incomplete-installation error into a repair message with exit 1. The `dev` entry routes to `dispatch` again with the nested subcommand, after checking `DEV_COMMANDS`.
 
-## How data and control flow
+```mermaid
+flowchart TD
+  A[argv] --> B[extractGlobalFlags]
+  B --> C{subcommand?}
+  C -- no --> D[runClioCommand interactive]
+  C -- yes --> E[unhonoredBootFlag and option checks]
+  E --> F[dispatch]
+  F --> G{COMMAND_HANDLERS has name?}
+  G -- no --> H[unknown subcommand, exit 2]
+  G -- yes --> I[dynamic import of command module]
+```
 
-### Headless turn (`clio-coder run "<task>"`)
+Two details of the dispatcher are constrained by the code itself. `isCommandToken` is the same map, so a top-level value flag such as `--api-key` cannot consume a command name as its value. `RETIRED_SUBCOMMANDS` keeps `context-init`, `context-index`, and `context-clear` as tokens that cannot be dispatched. Adding a subcommand therefore means adding one entry to `COMMAND_HANDLERS`, and that is the only place the name is recognized.
 
-The full path is:
+The focused test `tests/contracts/cli-ignored-flags.test.ts` runs `src/cli/index.ts` in a scratch home. Its table asserts that `--with-panes run hello` and `--no-panes acp` each exit 2 with a stderr message naming the flag and the command, and that `--api-key k-123 doctor` exits 2 without echoing the key. A separate case asserts that `--no-context-files --no-skills run --help` still exits 0, which shows that `run` keeps the boot options it honors.
 
-1. `main` in `src/cli/index.ts:168` extracts global flags (`--api-key`,
-   `--no-context-files`, `--no-skills`, `--skill`, `--with-panes`,
-   `--no-panes`, `--autonomy`, `--demo`) and dispatches `run`.
-2. `run`'s handler calls `enableBootCompileCache`, then dynamically imports
-   `src/cli/run.ts` and invokes `runClioRun(subArgs, bootOptions)`.
-3. `runClioRun` (`src/cli/run.ts:309`) parses the run flags, arms `--timeout` as
-   a coordinated-shutdown deadline, assembles the prompt from message tokens,
-   piped stdin, and `@file` references, and runs a headless slash preflight that
-   refuses interactive commands and answers display-only templates.
-4. For the main-agent path it calls `takeOverStdout`, then `runClioCommand`
-   (`src/cli/clio.ts`) with a `headless: { prompt, mode, jsonEvents, ... }`
-   bundle. `runClioCommand` boots the orchestrator via `bootOrchestrator`
-   (`src/entry/orchestrator.ts`), which loads the domain modules and resolves
-   the model target.
-5. The orchestrator calls `runHeadlessMainAgent` (`src/cli/modes/print.ts:624`)
-   on the created chat loop. That function subscribes to `chat.onEvent`, folds
-   tool outcomes and usage into a `HeadlessMainAgentReceiptStats`, submits the
-   prompt, and seals a receipt into the run ledger through
-   `recordHeadlessMainAgentReceipt`.
+## Run: headless turns and fleet dispatch
 
-`runHeadlessMainAgent` is the wrapper that owns the run's accounting; the
-`ChatLoop` it receives does the turn. The `HeadlessShutdownHooks` interface it
-accepts defaults to the process termination coordinator, so `--timeout`, a
-SIGTERM, and a normal settle all seal the same receipt through one path.
+`src/cli/run.ts` exports `runClioRun(args, options)`. It calls `parseRunCliArgs` from `src/cli/args.ts`, then `withRunFailureReporting`, then `executeRunCommand`. A `FileReferenceError` raised during execution is written as a diagnostic and returns exit 2.
 
-### Fleet run viewer (`clio-coder fleet view <runId>`)
+`executeRunCommand` runs inside `withRunOverrides`, which carries one-run overrides (`maxContextTokens`, and sampling only when `--agent` is set) through a scoped transport so worker subprocesses inherit them. Then it applies these checks in order:
 
-`runFleetView` (`src/cli/fleet-view.ts:681`) is the read-only surface an
-operator uses over SSH or inside a workers-view pane:
+- `--help` prints `HELP` to stdout, or to stderr when `--json` is set, and returns 0.
+- Parser diagnostics of type `error` print `USAGE` to stderr and return 2.
+- Fleet dispatch flags without `--agent` return 2 (`hasDispatchOnlyOptions`).
+- `--read-only` without `--agent` sets `constraints.readOnly` on the main-agent task scope.
+- `--turn-mode`, `--allow-tools`, `--delegate-tools`, or `--no-delegate` combined with `--agent` return 2.
+- `--session` combined with `--continue` returns 2.
 
-1. It parses `--follow`, `--watch`, `--all`, and four `--*`-dir overrides, then
-   `applyViewDirs` pins the already-resolved layout into `process.env` before
-   any read.
-2. It computes `fleetInspectionScope(all)` so `--all` widens the inspection
-   across projects; without it the view is scoped to this project.
-3. For a run id it calls `resolveRunId` (exact ledger id first, then a unique
-   prefix), then `loadRunViewModel`, which reads the ledger envelope, the run
-   event journal at `<state>/runs/<runId>/events.ndjson`, and the sealed
-   receipt. The transcript is capped at `TRANSCRIPT_LIMIT = 400`
-   (`src/cli/fleet-view.ts:78`).
-4. `renderRunView` is a pure function over `RunViewModel`; the snapshot path
-   joins its lines onto stdout and exits.
-5. With `--follow` (or `--watch <selection-file>`) the command enters an
-   alternate-screen loop that re-reads the journal at `POLL_MS = 250`
-   (`src/cli/fleet-view.ts:76`) until the terminal line lands, then stays open
-   until `q`. The `--watch` loop re-reads the selection file each poll, so the
-   TUI retargets this process through one atomic file write with no socket
-   traffic.
+The remaining path through `executeRunCommand` and `runDispatch` (around `src/cli/run.ts:618`) is not covered by this page's inspection. The focused tests that exercise these flags are listed under [Focused tests](#focused-tests).
 
-A fleet root id (`fleet-<hex>`, prefixed by `FLEET_ROOT_PREFIX` at
-`src/cli/fleet-view.ts:406`) is not a run: it renders the step index from the
-durable record under `<state>/fleet-runs/<rootId>.json` instead, one line per
-step naming the run id to view next.
+## Configure and onboarding
 
-### Target role selection (`clio-coder targets use <id>`)
+`src/cli/configure.ts` exports `runConfigureCommand(argv, inStream, outStream, startsChat)`. The first branch is `--gui-host`, which fixes the child transport used by the GUI: it calls `ensureRegistryPopulated` and then `runBrowserConfigure` from `src/cli/configure-browser.ts`. Otherwise the arguments are parsed by `parseSetupArgs`. A parse error prints the error and `HELP` and returns 2. Then:
 
-`runTargetsCommand` (`src/cli/targets.ts:178`) routes the `use` subcommand to
-`runUse`, which:
+- `--edit` requires TTY streams on both ends, otherwise it returns 2. It then calls `editSettings` with a `ConfigurePrompts` instance.
+- `--json` writes `readSettings()` as indented JSON to the output stream and returns 0.
+- `--list` calls `printRuntimeList` and returns 0.
+- `--interop` calls `runInteropReview`.
+- A positional runtime argument is refused with a message pointing to `clio-coder auth login` and `configure --runtime`.
+- `--runtime` is looked up in `getRuntimeRegistry()`. An unknown id returns 2 with a suggestion from `closestRuntimeId`.
 
-1. Parses the target id and the role flags (`--model`,
-   `--orchestrator-model`, `--background-model`, `--fleet-model`,
-   `--fleet-target`).
-2. Calls `unusedSharedModelReason`, which refuses `--model` when the role flags
-   select a specific role and name its own model — the focused test in
-   `tests/contracts/targets-use-unused-model.test.ts` pins the exact message
-   `--model 'dynamo/new' would not be used` and the remediation
-   `--orchestrator-model 'dynamo/new'`.
-3. Calls `useTargetInSettings` (`src/core/config.ts`) to mutate a draft copy of
-   the settings, returning the roles it touched.
-4. For each selected role, verifies the chosen model against the runtime's live
-   inventory through `resolveSupportedWireModels`, refusing a model the target
-   does not advertise (exit 1) and warning when it cannot verify offline.
-5. Commits the draft with one `updateSettings` call, so a refusal cannot
-   partially update another role.
+When `--runtime` is given together with a target setup flag (`--id`, `--url`, `--model`, `--api-key`, `--gateway`, `--lifecycle`, and others), the call runs `runNonInteractive`. When a setup flag or `--runtime` is given without a TTY and the spec is incomplete, the call returns 2 with a message naming the missing `--runtime` or `--id`. Otherwise it constructs a `ConfigurePrompts` and calls `runInteractive`. A `ConfigureNavigation` exit returns 0 if at least one target exists in settings, and otherwise goes to `firstRunCancelled`.
 
-### Configure onboarding (`clio-coder configure`)
+`src/cli/configure-onboarding.ts` holds the first-run wizard. `canRunOnboarding(streams)` returns whether both streams are selectable terminals. When it is false the caller keeps a numbered readline flow. `runOnboardingWizard(streams, options, host?)` builds a `Wizard` object, with `select` and `text` bound either to a supplied `ConfigureWizardHost` or to the prompt helpers, and an `Answers` record. Its options are `mode: "first" | "add"` with an optional runtime and `startsChat`, or `mode: "edit"` with a target. `startsChat` is set only in `first` or `add` mode.
 
-`runConfigureCommand` (`src/cli/configure.ts:2281`) branches on TTY. On a
-terminal with no targets it launches `runConfigLauncher`, which offers
-Quick Connect, Settings, and Diagnostics. The first-run path instead runs
-`runOnboardingWizard` (`src/cli/configure-onboarding.ts:974`).
+The `Answers` type comments state that every field is typed `| undefined` because the repository compiles with `exactOptionalPropertyTypes`, and that going back a step clears the answers that depended on the one changed.
 
-The wizard is a list of steps (`STEPS` at `src/cli/configure-onboarding.ts:924`):
-`category`, `runtime`, `target-id`, `credential`, `credential-value`, `url`,
-`detected-runtime`, `model`, `thinking`, `context-window`,
-`antigravity-colleague`, and `review`. Each step draws its prompt, erases it
-once answered, and leaves one row on a lifecycle rail saying what was chosen.
-Escape moves the cursor back one step and `writer.rewindTo(mark)` erases the
-rail rows the step left behind, so the screen is the answers so far plus the
-question at hand. Steps that do not apply (`applies(answers)` false) are skipped
-in whichever direction the cursor is moving.
+## Targets
 
-Nothing persists until `finish` runs: `applyAnswers` mutates a preview of
-`readSettings()`, `validateSettings` throws a `SettingsValidationError` if the
-preview is invalid, and only then does `updateSettings` write. The focused test
-`tests/contracts/settings-target-wizard.test.ts` demonstrates this with
-`ScriptedWizard` — a subclass of `TargetWizardSurface` that drives the same
-select/text prompts — asserting that a cancel at the review step leaves
-`readSettings()` unchanged and that a late probe cancel cannot save a target.
+`src/cli/targets.ts` exports `runTargetsCommand(args)`. It dispatches on the first argument to `runList`-style helpers and the profile operations (`runProfileSet`, `runProfileRemove`, `runProfileRename`, `runProfileBind`, `runProfileUnbind`, `runProfileBindings`), as well as `runUse`, `runRemove`, `runRename`, `runConvert`, and `runFleet`. Each subcommand has its own argument parser (`parseListArgs`, `parseUseArgs`, `parseWorkerArgs`, `parseProfileRemoveArgs`, and others). `wantsHelp(args)` treats `--help` anywhere in a subcommand's arguments as a request for usage, so `use --help` prints `USE_USAGE` and does not look up a target named `--help`.
 
-## Enforced boundaries and lifecycle ordering
+Listing renders a table through `formatTargetTable`. `tableWidths` fits the `TABLE_COLUMNS` to the terminal width, shrinking columns in `TABLE_SHRINK_ORDER` and growing them in `TABLE_GROW_ORDER`. Each row is produced by `targetTableRow(providers, status)`, which uses the provider contract.
 
-### Global flag ownership
+This page does not trace the `runUse` write path or the settings mutations beyond the function signatures, so their persistence behavior is not described here.
 
-`BOOT_OPTION_COMMANDS` (`src/cli/index.ts:136`) is the set `{"run", "acp"}`.
-`unhonoredBootFlag` (`src/cli/index.ts:140`) returns a refusal for the first
-boot flag a subcommand cannot honor. The effect is that `--api-key K fleet run`
-fails with a message naming the flag and the command, rather than running on
-the configured key with no word said. `--with-panes`/`--no-panes`
-(`PANES_FLAGS`) are refused for every subcommand because they apply only to the
-interactive session.
+## Upgrade
 
-### Headless stdout contract
+`src/cli/upgrade.ts` exports `runUpgradeCommand(argv, dependencies)`. The `dependencies` argument is a `Partial<UpgradeDependencies>` merged over `DEFAULT_DEPENDENCIES`, which names the real implementations (`inspectInstallation`, `lookUpAvailableVersion`, `runNpmInstall`, `runInstallerUpgrade`, `runPostInstallUpgrade`, `runBackgroundRestart`, `runPending`, `runRestart`) and `isInteractive`. The dependency seam lets tests substitute each step; `tests/contracts/upgrade-command.test.ts` builds its own `runUpgradeCommand` call with `inspectInstallation`, `lookUpAvailableVersion` returning version `99.0.0`, and `runPending` returning an empty result.
 
-`runHeadlessMainAgent` (`src/cli/modes/print.ts:624`) owns the stdout contract
-for the main-agent path. In text mode the session id is written to stderr the
-moment it exists (`writeTextSessionId`), and the final answer — either the
-assistant's text or, for a terminating tool, the tool's result line — is the
-only thing written to stdout. The comment states that printing mid-workflow
-chatter instead would hand the operator a dangling "let me try..." for a turn
-that succeeded. The focused test
-`tests/extended-smoke/cli-core.test.ts` asserts this with `--json-events
-terminal`, checking the event stream carries `session`, `turn_start`,
-`agent_end`, and `turn_end` frames and that the receipt seals with `outcome:
-"succeeded"`.
+Flow of `runUpgradeCommand`:
 
-### Configure save-once rule
+1. `parseUpgradeArgs(argv)` parses the flags `--dry-run`, `--channel` (one of `CHANNELS`), `--skip-migrations`, `--post-install`, `--json`, `--restart`, `--refresh-runtime`, `--rollback`, and `--help`. Unknown arguments throw, and the caller returns 2. `--restart` cannot combine with `--json` or `--post-install`, and `--rollback` cannot combine with `--post-install`, `--refresh-runtime`, or `--restart`.
+2. `--restart` without `--dry-run` requires an interactive terminal (`deps.isInteractive()`), otherwise it returns 2 and prints the resume hint.
+3. `resolveClioDirs()` and `clioDirLayoutProblems(dirs)` are checked. Unsafe layout returns 2.
+4. For `--post-install` on a fresh home, `initializeClioHome()` runs before migrations are recorded.
+5. `deps.inspectInstallation()` determines the installation method. When the installer recorded a channel and `--channel` was not passed, that recorded channel is used.
+6. `--rollback` is accepted only for the `installer` installation kind.
 
-The onboarding wizard's `Answers` object is the only place an answer lives until
-Save. The repo compiles with `exactOptionalPropertyTypes`, so each field is
-explicitly `| undefined`; going back a step clears the answers that depended on
-the one being changed by assigning `undefined`. The focused test
-`tests/contracts/settings-target-wizard.test.ts` proves that a cancel at the
-review step and a cancel during a probe both leave settings unchanged, and that
-the "Add remains a draft until Save" assertion holds across the whole flow.
+The rest of the flow, covering the registry lookup, npm install, installer upgrade, pending migrations and restart, is in `src/cli/upgrade.ts` beyond the lines inspected here.
 
-### Fleet run zero-side-effect preflight
+## Wiki generation
 
-`runFleetCommand` (`src/cli/fleet.ts:829`) for the `run` subcommand performs a
-preflight that validates the fleet graph, resolves every step's target and
-model, and rejects missing or unresolvable targets before any write or model
-call. The help text in `fleet.ts` states the preflight is "zero side effects":
-a validation failure exits 2 and touches nothing.
+`src/cli/wiki-generate.ts` provides the model-backed documenter used by the context wiki command. `resolveDocumenterModelId(route)` loads the config, resources and providers domains, resolves a target and model through the worker profile bound to `WIKI_AGENT_ID`, then the fleet default, then the first configured target, and canonicalizes the model id against the provider status. Any missing piece returns `UNRESOLVED_DOCUMENTER_MODEL`, and the domains are always stopped in `finally`.
 
-### Fleet view receipt integrity
+`modelWikiGenerate(options)` returns a `WikiGenerate` function. With `options.dispatch` supplied, it calls `generateWikiWithDocumenter` directly and does not own the lifecycle. Without it, it calls `loadWikiDispatch()` and wraps the work in `withWikiDispatchLifecycle({ dispatch, stop }, ...)`. The `finally` block always emits a `generate` progress event with the invocation usage.
 
-`evidenceLine` in `src/cli/fleet-view.ts` authenticates the receipt against the
-ledger envelope through `inspectRunReceiptTrustStatus` before any of its fields
-are shown. A receipt that fails integrity contributes its failure reason and
-nothing else; the task text and journal event details are sanitized and bounded
-through `sanitizeBounded` because they cross the operator/worker trust seam.
+`withWikiDispatchLifecycle` registers handlers for SIGINT, SIGTERM and SIGHUP. On a signal it aborts the signal passed to `generateWikiWithDocumenter`, runs `close` (dispatch `drain`, then domain `stop`) under a 2000ms `runWithBudget`, and calls `process.exit` with 130, 143 or 129. Without a signal, `close` runs after generation completes. Cleanup failures are reported with `writeShutdownNotice` and rethrown when there is no earlier failure. The handlers are removed in `finally`.
 
-## Extension seams
+This page does not read `generateWikiWithDocumenter` itself, so this page does not describe what the documenter writes.
 
-- **New CLI subcommand**: add an entry to `COMMAND_HANDLERS` in
-  `src/cli/index.ts` whose body is a literal dynamic `import("./<name>.js")`.
-  The literal form is load-bearing — the comment at the map states that
-  "every dynamic import stays a literal so tsup can split command graphs" — and
-  that adding a command in one place cannot leave a global flag free to swallow
-  it as a value.
+## Fleet view
 
-- **New configure wizard step**: add a `Step` object to the `STEPS` array at
-  `src/cli/configure-onboarding.ts:924`. The step's `applies` closure decides
-  whether it shows, and its `run` closure must return one of the `StepOutcome`
-  values (`next`, `back`, `quit`, `cancel`, `credential`). The order in the
-  array is the forward direction; going back rewinds the rail to the step's
-  row.
+`src/cli/fleet-view.ts` exports `runFleetView(args)`. It parses arguments with `parseViewArgs`. A string result is an argument error: it writes the message to stderr, writes `HELP` to stdout, and returns 2. `--help` returns 0. `applyViewDirs(parsed.dirs)` is applied before the run is resolved, and `fleetInspectionScope(parsed.all)` sets the scope.
 
-- **New headless mode**: the headless runner is `src/cli/modes/print.ts`,
-  alongside `json-stream.ts` and `jsonl.ts`. A new mode that needs the chat
-  loop but different output (e.g. a different JSON projection) would live in
-  this directory and be called from `src/cli/run.ts`.
+Dispatch by identifier:
 
-- **New fleet view projection**: `loadRunViewModel` builds the
-  `RunViewModel`, and `renderRunView` is the pure renderer. A new view (e.g. a
-  combined transcript or a different column layout) adds a projection function
-  over the same model, following the pattern of `renderWatchView` and
-  `renderFleetRunView`.
+- `--watch` with a selection path: when stdin or stdout is not a TTY, the selected run's snapshot is printed once and the call returns 0. Otherwise `runWorkersDashboard` from `src/cli/fleet-board.ts` is loaded and run.
+- A fleet root id (prefix `FLEET_ROOT_PREFIX`) is resolved with `resolveFleetRootId`. An unknown or ambiguous root fails with exit code from `fail`. `--json` on a root is refused, and `--follow` on a root prints the index with a stderr note. The index is rendered with `renderFleetRunView`.
+- Any other id is resolved with `resolveRunId` against the run ledger. An unknown or ambiguous id fails. `loadRunViewModel` produces the snapshot, which `--json` writes as indented JSON.
 
-- **New fleet inspection scope**: `fleetInspectionScope` (imported from
-  `src/cli/fleet-project-scope.ts`) returns a scope object with `seesRun` and
-  `seesRoot`. Widening or narrowing what `fleet view` and `fleet status` can see
-  means changing that scope, which both the run resolver and the fleet-root
-  resolver consume.
+The remaining rendering and follow loop are not traced on this page.
 
 ## Focused tests
 
-- `tests/extended-smoke/cli-core.test.ts` spawns the built binary
-  (`dist/cli/index.js`) against a mock OpenAI-compatible server. It asserts
-  `--version` prints the package version, `--help` routes usage to stdout with
-  exit 0, an unknown subcommand exits 2 with the error on stderr, `doctor
-  --fix` creates a fresh home, `configure --runtime openai-compat` without
-  `--id` exits 2, `configure` with `q` input exits 130, and a full
-  `--json-events terminal` run seals a receipt with `outcome: "succeeded"` and
-  `agentId: "main-agent"`. It also asserts the `targets use` role flags update
-  only their own role and name only that role, and that rejecting an
-  unadvertised model is atomic (no partial write).
-
-- `tests/contracts/targets-use-unused-model.test.ts` calls `runTargetsCommand`
-  and `useTargetInSettings` directly. It demonstrates that `--model` combined
-  with `--fleet-target`/`--fleet-model` is refused with a message naming the
-  flag that would be unused and the remediation, and that the same call works
-  once `--model` is moved to `--orchestrator-model`.
-
-- `tests/contracts/settings-target-wizard.test.ts` drives the wizard through a
-  `ScriptedWizard` subclass of `TargetWizardSurface`. It demonstrates the
-  save-once rule (cancel leaves settings unchanged), the late-probe-cancel
-  guard (cancel during a probe cannot save), the text-prompt validation and
-  back navigation, and that the settings overlay mounts Add and Edit as docked
-  prompts.
-
-- `tests/boundaries/check-boundaries.ts` is the import-boundary checker. Rule
-  6 specifically governs the CLI: a CLI file may reach `src/interactive/**` and
-  `src/engine/**` only through a seam declared in `STAGE0_SEAMS`. The declared
-  seams for the CLI include `src/engine/tui-primitives.ts` (used by
-  `src/cli/fleet-view.ts`), `src/session-control/slash-commands.ts` (used by
-  `src/cli/run.ts`), and `src/engine/oauth.ts` (used by `configure` and
-  `auth`).
+- `tests/contracts/cli-ignored-flags.test.ts` covers the global-flag refusals (`--api-key k-123 doctor`, `-nc fleet status`, `--with-panes run hello`, `--no-panes acp`) against the real entry, the `parseRunCliArgs` diagnostic for `--with-panes`, and `share export --dry-run` writing no archive.
+- `tests/contracts/upgrade-command.test.ts` drives `runUpgradeCommand` through injected dependencies and an installed-prefix fixture.
+- Other tests that reference these entry points, found by search across `tests/`, include `tests/contracts/run-cost-ceiling.test.ts`, `tests/contracts/targets-use-unused-model.test.ts`, `tests/contracts/dispatch-recording-surface.test.ts`, `tests/extended/upgrade-lifecycle.test.ts`, and `tests/extended/package-manager-upgrade.test.ts`. This page does not read these files, so they are listed for routing only and their cases are not described.
 
 ## Things to watch when editing
 
-- **The literal dynamic import is the code-splitting contract.** Changing a
-  `COMMAND_HANDLERS` entry from a literal `import("./x.js")` to a variable or
-  computed path breaks tsup's chunk splitting and defeats the cold-start design.
-  The comment at the map in `src/cli/index.ts` states this explicitly.
+- A new subcommand belongs in `COMMAND_HANDLERS` with a literal dynamic import. The map is also the source for `isCommandToken`, so the name is protected from being consumed by a value flag in the same change.
+- A new boot flag that a command reads must be added to `BOOT_OPTION_COMMANDS` or the flag will be refused for that command. Flags not in that set are refused for every other command.
+- `runConfigureCommand`'s non-TTY checks are what keep a non-interactive invocation from writing the initial settings template and exiting 0. Keep those checks ahead of the wizard.
+- The `Answers` fields are `| undefined` by design, so do not replace them with optional properties under `exactOptionalPropertyTypes`.
 
-- **`runHeadlessMainAgent` owns the receipt seal.** The seal is idempotent:
-  `sealed` is set to the promise on first call, and both the turn's completion
-  path and the coordinated-shutdown drain hook race to it. Reordering the seal
-  or adding a second seal path will lose usage on interrupted runs. The comment
-  at `src/cli/modes/print.ts:624` explains that the drain hook is registered
-  after the composition root's chat drain hook so the stats folded are final.
+## Related pages
 
-- **The onboarding wizard's rail is a line-count contract.** `railWriter`
-  counts lines that went through it and rewinds with a terminal erase sequence.
-  A step that writes to the output stream without going through the
-  `writer.stream` proxy breaks the rewind math, and the next back-navigation
-  will leave stale text on screen.
-
-- **`fleet view`'s import boundary is load-bearing.** The file imports
-  `ProcessTerminal` and `TuiAltScreen` from `src/engine/tui-primitives.ts`,
-  never from the `src/engine/tui.ts` barrel. The comment at the top of
-  `src/cli/fleet-view.ts` states that an edge to the barrel breaks the Stage 0
-  instant-shell chunk budget. Adding a TUI primitive import from the barrel
-  will fail the boundary check.
-
-- **The headless stdout contract is asserted by tests.** `tests/extended-smoke/cli-core.test.ts`
-  checks the exact event stream and receipt fields for a `--json-events
-  terminal` run. Changing the text-mode stdout behavior (e.g. printing the
-  session id to stdout, or printing mid-workflow chatter) will break the test
-  and the contract the comment at `src/cli/modes/print.ts:624` describes.
-
-- **`targets use` validation is atomic by design.** The model validation loop
-  in `runUse` (`src/cli/targets.ts`) checks every selected role against the
-  runtime's live inventory before calling `updateSettings`. A failure in any
-  role exits 1 and writes nothing. The focused test
-  `tests/contracts/targets-use-unused-model.test.ts` asserts this atomicity
-  with `strictEqual(readFileSync(path, "utf8"), before)`.
-
-<!-- clio-coder:wiki unresolved sources: src/interactive/**, src/engine/** -->
+- [Interactive surfaces](interactive/surfaces.md) for the interactive session started when no subcommand is given.
+- [Cli modes](cli/modes.md) for the mode modules that the interactive and print paths use.
+- [Domains dispatch](domains/dispatch.md) for the dispatch runtime that `run` and wiki generation use.
+- [Domains providers](domains/providers.md) for the target and model resolution used by `targets` and the wiki documenter.
+- [Domains lifecycle](domains/lifecycle.md) for the installation detection and migrations used by `upgrade`.

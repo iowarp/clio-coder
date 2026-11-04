@@ -1,187 +1,118 @@
 ---
-title: "Dispatch domain"
-summary: "How Clio resolves, admits, executes, and finalizes worker runs: the dispatch bundle's contract, routing decisions, fleet execution, and gate-decision persistence."
+title: "Dispatch domain: fleet runs, workers, routing and verification"
+summary: "Overview of the dispatch domain under src/domains/dispatch: how a fleet run is driven, how native worker processes are spawned and supervised, how a route decision is sealed, and how host verification checks are run and recorded. Read this to find the owning file for a dispatch behavior before editing it."
 sources:
   - "src/domains/dispatch/index.ts"
-  - "src/domains/dispatch/extension.ts"
-  - "src/domains/dispatch/types.ts"
-  - "src/domains/dispatch/route-decision.ts"
   - "src/domains/dispatch/fleet-run.ts"
-  - "src/domains/dispatch/execution-scheduler.ts"
+  - "src/domains/dispatch/worker-spawn.ts"
+  - "src/domains/dispatch/route-decision.ts"
+  - "src/domains/dispatch/host-verification.ts"
+  - "src/domains/dispatch/types.ts"
   - "src/domains/dispatch/gate-decisions.ts"
-  - "src/domains/dispatch/validation.ts"
-  - "src/domains/dispatch/manifest.ts"
+  - "src/domains/dispatch/extension.ts"
 symbols:
-  - "DispatchDomainModule"
   - "createDispatchDomainModule"
-  - "createDispatchBundle"
-  - "decideRoute"
-  - "fixedRouteDecision"
-  - "RouteDecisionV1"
-  - "RouteCandidate"
   - "executeFleetRun"
   - "planFleetResume"
-  - "ExecutionSchedulerAdapter"
-  - "executePlan"
-  - "GateDecisionArtifact"
-  - "decideReviewGate"
-  - "parseCompeteGateResult"
-  - "validateJobSpec"
-  - "JobSpec"
-  - "RunEnvelope"
-  - "RunReceipt"
-  - "RunOutcome"
-  - "RunLineage"
-  - "RunGateProvenance"
+  - "spawnNativeWorker"
+  - "spawnWorkerProcess"
+  - "decideRoute"
+  - "runHostVerification"
+  - "createBatchVerificationGate"
 tests:
-  - "tests/contracts/dispatch-admission.test.ts"
-  - "tests/contracts/route-readiness-reads.test.ts"
-  - "tests/extended/route-identity-keying.test.ts"
+  - "tests/extended/host-verification-batch.test.ts"
 invariants:
-  - "Every admitted runtime kind enters through the native worker subprocess; the worker entry rehydrates the runtime descriptor and delegates behind the engine boundary."
-  - "Hard constraints eliminate: a candidate the admission chain rejected can never appear as selected or in approvedFallbacks at any posture."
-  - "The route decision is deterministic: decisionHash covers the inputs, not the wall clock, so equal inputs produce an equal hash and offline replay reproduces it."
-  - "Every run that reaches finalization gets exactly one outcome, resolved at the single finalization point in extension.ts via resolveRunOutcome()."
-  - "A dispatch reads only the receipts written since the previous readiness window, not the full ledger."
+  - "A fleet run acquires the workspace fleet lock before it claims its verdict or writes a root record, so a refused run leaves no durable trace (executeFleetRun in src/domains/dispatch/fleet-run.ts)."
+  - "runHostVerification returns undefined when no resolved checks are declared, and reports status skipped with reason worker_not_successful without executing checks when the worker did not succeed."
+  - "decideRoute in active mode throws posture-floors-unsatisfiable when no admissible candidate clears the posture floors; shadow and fixed modes do not throw for that condition."
+  - "spawnNativeWorker forwards the caller's full SpawnOptions to spawnWorkerProcess, except the workerEntryPath field it consumes itself."
 validate:
-  - "pnpm run ci"
+  - "pnpm run test:file -- tests/extended/host-verification-batch.test.ts"
 ---
 
-# Dispatch domain
+# Dispatch domain: fleet runs, workers, routing and verification
 
-The dispatch domain owns the lifecycle of a worker run from `DispatchRequest` through admission, spawning, event-pumping, and receipt finalization. It resolves a `DispatchRequest` to a `TargetDescriptor` plus `RuntimeDescriptor` plus wire model id via the providers contract, gates admission on safety scopes, concurrency, budget, and capability flags, then spawns a native worker subprocess that reports back over a structured event stream. The domain is pure data plus orchestration: the worker process is the only place that speaks the Pi SDK protocol, and the dispatch bundle in the orchestrator process reads that stream, meters tokens, collects tool stats, and seals the receipt.
+The dispatch domain is the part of Clio Coder that turns a request or a compiled fleet plan into executed work. A reader needs this page when changing how a fleet run is started or resumed, how a worker child process is launched and supervised, how a route is chosen and recorded, or how declared host checks decide a run's verification status. This page is an overview. Each workflow is owned by a file listed below, and the detailed behavior of those files is documented on their own pages where they exist.
 
-The domain manifest at `src/domains/dispatch/manifest.ts` declares dependencies on `config`, `safety`, `agents`, `providers`, `middleware`, `prompts`, and `scheduling`. Every other domain reaches dispatch through `src/domains/dispatch/index.ts`, which re-exports the public surface: `DispatchDomainModule`, `createDispatchDomainModule`, and the `createDispatchBundle` extension factory.
+## What the domain contains
 
-## Entry point and registration
+`src/domains/dispatch/index.ts` is the public surface. It exports `DispatchDomainModule`, a constant whose `createExtension` is `createDispatchBundle` from `src/domains/dispatch/extension.ts`, and `createDispatchDomainModule(options)`, which passes caller options through to `createDispatchBundle` as `DispatchBundleOptions`. The same file re-exports the helpers other layers use, including `executeFleetRun`, `planFleetResume`, `runHostVerification`, `workspaceFingerprint`, `readGateDecisionArtifacts`, and the run-record readers.
 
-`DispatchDomainModule` is the `DomainModule` object that the core `DomainLoader` consumes during composition. It carries the `DispatchManifest` and a `createExtension` function that delegates to `createDispatchBundle`. The factory `createDispatchDomainModule(options)` wraps the extension in a closure that forwards the `DispatchBundleOptions` to `createDispatchBundle` at bundle-creation time.
+The main owning files are:
 
-The three composition roots that construct a dispatch bundle are:
+- `src/domains/dispatch/fleet-run.ts`: drives one compiled fleet plan to completion. Exports `executeFleetRun`, `planFleetResume`, `fleetPlanWaveIndex`, and the input and outcome types (`ExecuteFleetRunInput`, `FleetRunOutcome`, `FleetRunStepEvent`, `FleetRunStepOutcome`, `FleetResumePlan`).
+- `src/domains/dispatch/worker-spawn.ts`: orchestrator-side subprocess spawner for the native worker. Exports `spawnNativeWorker` and `spawnWorkerProcess` and the `SpawnOptions`, `SpawnedWorker`, and `WorkerProcessCleanup` types.
+- `src/domains/dispatch/route-decision.ts`: builds and evaluates the sealed `RouteDecisionV1` artifact through `decideRoute`, `fixedRouteDecision`, `evaluateRouteDecision`, and `routeOutcomeMetrics`.
+- `src/domains/dispatch/host-verification.ts`: runs declared checks after a worker finishes, through `runHostVerification`, and provides `createBatchVerificationGate` for batched runs.
+- `src/domains/dispatch/types.ts`: the run record types, including `RunStatus`, `RunOutcomeCode`, `RunResult`, `RunHostVerification`, and `RunHostVerificationCheck`.
+- `src/domains/dispatch/gate-decisions.ts`: gate decision artifact types (`GateDecisionArtifact`, `GateDecisionOutcome`, `ReviewGateResult`, `CompeteGateResult`) and the reader and verifier exported through `src/domains/dispatch/index.ts`.
+- `src/domains/dispatch/extension.ts`: the bundle that composes the domain. It is the largest file in the area and holds the admission, dynamic prompt, and target-capability helpers.
 
-- `src/entry/orchestrator.ts` (interactive mode)
-- `src/cli/run.ts` (headless `clio-coder run`)
-- `src/cli/fleet.ts` (headless fleet CLI)
+## Fleet run execution
 
-The `makeDispatchBundle` helper in `tests/harness/dispatch.ts` mirrors the same construction for test bundles.
+`executeFleetRun` in `src/domains/dispatch/fleet-run.ts` is the single entry point the documentation describes for driving a compiled fleet plan. Its only documented caller in this tree is the fleet command: `src/cli/fleet.ts` calls `planFleetResume` for a resume request and then `executeFleetRun` with the compiled `plan`, a registered emergency seal callback, and the other run inputs. The orchestrator in `src/entry/orchestrator.ts` and the joint route resolver in `src/domains/dispatch/joint-route-resolver.ts` also reference this area; their call sites were not read.
 
-## The dispatch contract
+The control flow in `executeFleetRun` is:
 
-`createDispatchBundle` in `src/domains/dispatch/extension.ts` returns a `DomainBundle<DispatchContract>`. The contract object (visible from line 7602 onward in `extension.ts`) exposes:
+1. It calls `acquireFleetWorkspaceLock` with the workspace root and the fleet root id. The comment at that line states that the lock is taken before the root claims its verdict or writes a record, so a refused run leaves no durable trace.
+2. It registers an emergency seal with `input.registerEmergencySeal`, if the caller supplied one, so forced shutdown can persist the run's final state and release the lock.
+3. It opens the root telemetry journal with `openFleetRootTelemetry`. If that fails, the function throws an error whose message begins `fleet root telemetry journal unavailable`.
+4. It calls `input.onStarted` and then `runFleetHoldingWorkspace`, which keeps the lock for the whole run.
+5. In its `finally` block it closes the root telemetry, releases the lock, and unregisters the emergency seal. A failed lock release is reported through `input.onNotice` and does not throw.
 
-- `dispatch(req: DispatchRequest)` — the primary entry point. It validates the request, resolves the route, admits the run against capacity and budget, spawns a worker, pumps events, finalizes the receipt, and returns a `RunReceipt` via `run.finalPromise`.
-- `dispatchBatch(batch: DispatchBatchRequest)` — the parallel-batch path used by the fleet execution plan.
-- `preview(req)` — a side-effect-free route preview used by speculative dispatch.
-- `planAgentSelection(input)` — resolves the agent-selection decision for a route decision.
-- `routeCandidates(req)` — enumerates the route candidates for a dispatch.
-- `reservations` — a set of prepare/release/rollback operations for dispatch capacity reservations.
-- `speculate(prediction)` / `releaseSpeculative(reason)` — manages held worker processes for speculative dispatch.
-- `listRuns(status)` / `getRun(runId)` — reads from the in-memory ledger.
-- `observedRunWrites(runId)` / `observedRunWriteAttribution(runId)` — returns the write-targets this process finalized.
-- `assignments` — get/getStored/flushWrites for assignment records.
-- `drainMember(runId)` — awaits all pending work for a run member.
-- `abort(runId, reason)` — cancels a live or queued run.
+Inside `runFleetHoldingWorkspace`, the run record is written with `writeFleetRun` before any step is dispatched. The run claims its assignment verdict with `claimAssignmentVerdict(fleetRootId, "fleet")` before the root record exists. Each step dispatches under the root id as lineage root, so the run, not the last step, settles the verdict. Step dispatch events are appended to the fleet event journal as `step_dispatched`, and the run ends with a `fleet_sealed` event carrying `succeeded`, `failed`, or `aborted`. Replayed steps, supplied through `input.resume.replayed`, do not produce a `step_dispatched` event.
 
-The `DispatchContract` type is defined in `src/domains/dispatch/contract.ts` and is the typed interface every caller sees.
+`planFleetResume` in the same file returns either `{ ok: true, replayed }`, where `replayed` maps step ids to prior `ExecutionStepResult` values, or a refusal. The comparison uses the stored plan's step identities (`stepIdentity`, `withoutEndpoint`, `canonicalPath`) and the stored variables (`sortedVars`). The fleet command maps the `fleet-name` refusal reason to its own message; the other refusal reasons were not read.
 
-## Data flow through a dispatch call
+## Worker spawning
 
-A call to `dispatch(req)` follows this path:
+`spawnNativeWorker` in `src/domains/dispatch/worker-spawn.ts` starts a worker child. Its inputs are a `WorkerSpec` and optional `SpawnOptions`. It resolves the entry script from `opts.workerEntryPath`, or from `dist/worker/entry.js` under the package root by default. It strips `workerEntryPath` from the options and forwards the remaining options to `spawnWorkerProcess`, with `env` set to `withCompileCacheEnvironment(opts?.env ?? process.env)`. The code comment states that the function forwards the whole option set so callbacks a caller passed are not dropped.
 
-1. **Validation.** `validateJobSpec` in `src/domains/dispatch/validation.ts` validates the raw spec. It rejects unknown keys, enforces type constraints, checks that `failover: "approved"` carries `allowedCandidates`, validates `pipelineInput`, `predecessorHandoffs`, `lineage`, `gate`, `plan`, `competeStance`, and the dispatch-intent compatibility classification. On success it returns `{ ok: true, spec: JobSpec }`.
+`spawnWorkerProcess` calls `launchWorkerChild`, which runs the child with `stdio` set to three pipes, the given `cwd`, the environment from `withClioAgentEnvironment`, and `detached: true`. The comment in that function says the worker leads its own process group so abort escalation covers descendants. `attachWorkerChannel` then writes the spec to the child and wires the two protocol lanes. It reads its timing from `WorkerProcessOptions` with defaults `DEFAULT_SHUTDOWN_GRACE_MS`, `DEFAULT_ATTESTATION_GRACE_MS`, and `WORKER_ANNOUNCE_DEADLINE_MS`. Line framing is handled by `createLineReader`. The cleanup bound is `WORKER_PROCESS_CLEANUP_BOUND_MS`. The detailed protocol behavior of these lanes was not traced in full.
 
-2. **Route resolution.** The bundle calls `planActiveRoute` or `resolveJointRoute` (via `active-route-planner.ts` / `joint-route-resolver.ts`) to resolve the target, runtime, and wire model id. The providers contract supplies `resolveRuntimeTarget` and `resolveEndpointCapacities`.
+`withCompileCacheEnvironment` enables the Clio compile cache once per process and passes the cache directory to the child through `workerCompileCacheEnvironment`. The comment explains that `NODE_COMPILE_CACHE` is the only control Node reads early enough for the worker's static graph.
 
-3. **Admission.** `admit` in `src/domains/dispatch/admission.ts` checks global concurrency, per-endpoint capacity, budget, and safety scope. The `createCapacityAdmissionController` manages slot leases. A `foregroundEndpointBlock` test in `tests/contracts/dispatch-admission.test.ts` demonstrates the deadlock guard: a run that needs the same endpoint already held by a foreground stream is refused without spending the queue timeout.
+## Route decisions
 
-4. **Worker spawn.** `spawnNativeWorker` in `src/domains/dispatch/worker-spawn.ts` creates the subprocess. The worker spec (`WorkerSpec` from `src/worker/spec-contract.ts`) carries the serialized runtime descriptor, prompt composition, tool surface, budget, and protected-artifact state.
+`decideRoute` in `src/domains/dispatch/route-decision.ts` takes a `RouteDecisionInput` with a `mode` (`fixed`, `shadow`, or `active`), a `posture`, and a list of `candidates`, each carrying a hard `rejection` (or null), an `estimate`, and an `activeReadiness` flag. The function does the following:
 
-5. **Event pump.** `startDispatchEventPump` in `src/domains/dispatch/event-pump.ts` reads the worker's NDJSON stdout stream. The pump folds events into the `RunEnvelope` (token meters, tool stats, steering provenance, finish-contract entries) and collects tool-call statistics via `recordToolStart`/`recordToolFinish` in `tool-stats.ts`.
+- It counts candidates whose `rejection` is not null and records `hard-filter-rejected-N` in the reason codes.
+- In `active` mode only, it removes candidates whose `activeReadiness.ready` is false and records `active-readiness-excluded-N`.
+- It keeps candidates that clear the posture floors through `clearsPostureFloors`. If none clear them, it records `posture-floors-unsatisfiable`. In `active` mode it throws `route decision: posture-floors-unsatisfiable`. In `shadow` mode the failed floor is reported without changing execution.
+- It ranks the remaining candidates. The enumeration order of the caller is the stable tie break.
 
-6. **Finalization.** `resolveRunOutcome` in `src/domains/dispatch/outcome.ts` resolves the terminal `RunOutcome` from the worker's exit code, heartbeat status, and termination evidence. The receipt is sealed via `withReceiptIntegrity` in `src/domains/telemetry/seal.ts`, which computes the sha256 digest over the receipt's canonical JSON payload.
+The comment on `decideRoute` states that at `manual` posture the operator named the route, so the executed route is selected and the alternates are recorded but never promoted. `fixedRouteDecision` is the separate constructor for the fixed path. `evaluateRouteDecision` compares a decision with a `RouteRealizedOutcome` to produce a `RouteEvaluation`. The routing types are the `RouteCandidate`, `RouteDecisionV1`, and `RouteRegret` interfaces in the same file. The test coverage for route decisions was not located; a repository-wide search for `decideRoute` and the reason codes above in `tests` returned no matches, and the search did not cover `.clio-coder`.
 
-7. **Ledger write.** `writeFleetRun` in `src/domains/dispatch/state.ts` appends the `RunEnvelope` to the `runs.json` ledger and writes the sealed `RunReceipt` to `receipts/<runId>.json`.
+## Host verification
 
-## Route decision
+`runHostVerification` in `src/domains/dispatch/host-verification.ts` takes a `runId`, a `request` whose `resolvedVerification` lists checks, a `workerSuccessful` flag, an optional `stateDir`, `env`, and `onDiagnostic`. It behaves as follows:
 
-`decideRoute` in `src/domains/dispatch/route-decision.ts` is the pure function that selects a route. It operates on `RouteDecisionInput` and returns a `RouteDecisionV1`. The algorithm:
+- If `resolvedVerification` is undefined or empty, it returns `undefined`, and no check runs.
+- If `workerSuccessful` is false, it returns `{ status: "skipped", reason: "worker_not_successful", checks: [] }` without executing any check.
+- Otherwise it runs each resolved check in order through `runResolvedCheck`, collects each result's `check` record, and returns `status: "verified"` when every check has `exitCode` 0 and `status: "rejected"` otherwise.
 
-1. **Hard filters.** Candidates with a non-null `rejection` are excluded from the admissible set. The count of rejected candidates is recorded as a `reasonCode`.
-2. **Active readiness.** In `active` mode, candidates whose `activeReadiness.ready` is false are further excluded.
-3. **Posture floors.** `clearsPostureFloors` filters candidates whose estimate does not satisfy the posture's quality/cost/latency floors.
-4. **Scoring and ranking.** `scoreRoute` assigns a score to each admissible candidate. `compareRankedRoutes` orders them. For gate routes, a secondary sort breaks ties in favor of routes independent of the subject being graded (via `gateRouteCorrelation`).
-5. **Dominated elimination.** `dominatesRoute` marks candidates that are strictly dominated by another on all cost-quality-latency axes.
-6. **Selection.** In `manual` posture the executed route is selected. In `shadow` mode the best admissible candidate is recorded but never affects execution. In `active` mode the best candidate replaces the executed route.
+`runResolvedCheck` passes results through `judgeResolvedCheck`, and it consults a memo file under the state directory (`memoPath`, `readMemo`, `storeMemoEntry`) keyed by `memoKey`. `workspaceFingerprint` and `checkedTree` identify the workspace state the memo is valid for. `implicatedPaths` extracts path-like tokens from a failing check's output. `createBatchVerificationGate` groups participants of a batch and uses `checkDedupeKey` to deduplicate identical checks. `compareHostVerificationBase` compares the current checkout against a base revision through dependency manifests (`DEPENDENCY_MANIFESTS`). The memo, batching, and base-comparison logic is not described beyond these names, because the full bodies of those functions were not read.
 
-The `RouteCandidate` interface names the whole operational tuple: `agentId`, `specFingerprint`, `executionRole`, `targetId`, `modelId`, `runtimeId`, `nodeId`, `thinkingLevel`, `toolSignature`, `promptCompositionHash`, `endpointIdentityHash`, and `settingsFingerprint`. The candidate key (`routeCandidateKey`) hashes these fields so two routes that differ in any one are distinct.
+The focused test is `tests/extended/host-verification-batch.test.ts`. Its `check` helper builds a `ResolvedCheck` whose `argv` is `process.execPath` with an inline script that appends `ran` to a log file, prints a message to stderr, and exits with the given `exitCode`. Its `member` helper builds a `BatchVerificationParticipant` from a scratch project, a declared scope intent, and `workerSuccessful`. The file imports `runHostVerification`, `createBatchVerificationGate`, `compareHostVerificationBase`, `hostVerificationRejection`, and `workspaceFingerprint`, and the `runCount` helper counts executions recorded in the log. The individual assertions beyond setup were not read, so no specific assertion outcome is claimed here.
 
-`fixedRouteDecision` is a failure-isolated fallback: when the route observer or its durable inputs fail, callers seal this exact one-candidate decision so a receipt never loses its routing evidence.
+## Callers and dependencies
 
-## Fleet execution
+Upstream, `src/cli/fleet.ts` is the inspected caller of `executeFleetRun` and `planFleetResume`. `src/entry/orchestrator.ts` and `src/domains/dispatch/joint-route-resolver.ts` reference the spawn and route functions per a repository search; those call sites were not read. Downstream, the fleet run imports the workspace lock, the telemetry journal, the assignment store, and the state writer (`writeFleetRun`), and host verification imports the sandbox availability helper and the verify catalog (`src/tools/verify/catalog.ts`, `src/tools/verify/scripts.ts`), as shown by the imports in the focused test. The test imports from `src/core/sandbox/availability.ts` and `src/tools/verify/scripts.ts`.
 
-`executeFleetRun` in `src/domains/dispatch/fleet-run.ts` is the single fleet-run execution path. It drives a compiled `ExecutionPlan` through the `ExecutionSchedulerAdapter` and returns a `FleetRunOutcome`. The plan can contain agent steps, code steps, and loop constructs. The scheduler in `src/domains/dispatch/execution-scheduler.ts` (`executePlan`) handles wave-based parallelism, predecessor handoffs, and loop repair cycles.
+## Related pages
 
-`planFleetResume` in the same file produces a `FleetResumePlan` for a partially completed fleet run. It diffs the prior run record against the current plan and identifies which steps can be replayed from their sealed receipts versus which must be re-executed.
-
-The `ExecutionSchedulerAdapter` interface exposes `preflight`, `reserve`, `run`, and optionally `runCode`. The orchestrator supplies the adapter's `run` as the dispatch bundle's `dispatch` method. `runCode` is the deterministic code-step path that takes no worker reservation.
-
-## Gate decisions
-
-`src/domains/dispatch/gate-decisions.ts` manages the durable evidence for review and compete gates. Worker receipts seal before a reviewer verdict or judge winner can be parsed, so the coordinator writes a separate integrity-covered `GateDecisionArtifact` that links the decider receipt to every subject receipt.
-
-The lifecycle is:
-
-1. **Stage.** `stagePendingGateOutput` writes a `PendingGateOutputRecord` as soon as the reviewer/judge event stream settles. At this point the decider receipt may still be finalizing, so the run id is durable but its receipt digest is not yet known.
-2. **Resolve.** `resolvePendingGateDecision` binds the staged output to the now-sealed receipt and parsed outcome. `decideReviewGate` applies the coordinator's review policy: a pass or terminal-cycle fail is the verdict; a non-terminal fail earns a `revise` outcome with findings threaded to the next builder.
-3. **Materialize.** `materializePendingGateDecision` writes the final `GateDecisionArtifact` to `gate-decisions/<id>.json` and clears the pending WAL record.
-
-`verifyGateDecisionArtifact` checks the semantic validity and sha256 integrity digest. `readGateDecisionArtifacts` and `readGateDecisionArtifactsForRunIds` discover trusted decisions from receipt identities.
-
-`parseCompeteGateResult` validates a judge's answer: the winner must be an integer 1..candidateCount, and the result must carry typed checks with evidence.
-
-## Validation
-
-`validateJobSpec` in `src/domains/dispatch/validation.ts` is a pure function that accepts unknown input and returns `{ ok: true, spec: JobSpec }` or `{ ok: false, errors: string[] }`. It enforces:
-
-- **Known keys only.** Any key not in the `KNOWN_KEYS` set is rejected.
-- **Briefing bounds.** `DISPATCH_BRIEFING_MAX_BYTES` is 12,000 for external callers; `INTERNAL_DISPATCH_BRIEFING_MAX_BYTES` is 64 KiB for `requestOrigin: "internal"` callers.
-- **Failover consistency.** `failover: "approved"` requires non-empty `allowedCandidates`; `failover: "automatic"` is rejected on plan-approved dispatches.
-- **Write roots.** When `writeRoots` is present, it must be a non-empty array of non-empty strings. The validator resolves them against the job's `cwd`.
-- **Intent compatibility.** The dispatch-intent migration rules are classified here via `classifyDispatchIntentCompatibility`, so the compatibility table is true of every dispatch path (fleet, CLI, ACP, extension).
-
-## Types
-
-`src/domains/dispatch/types.ts` defines the shared run and receipt types:
-
-- **`RunStatus`** — the ledger row's status: `queued`, `running`, `completed`, `failed`, `interrupted`, `stale`, or `dead`.
-- **`RunOutcome`** — the terminal outcome taxonomy: `succeeded`, `failed`, `timed_out`, `stalled`, `canceled`, `denied_by_policy`, `spawn_failed`. `RETRYABLE_OUTCOMES` is the set `{failed, timed_out, stalled, spawn_failed}`.
-- **`RunLineage`** — proof-of-work lineage. Retries inherit `rootRunId` and increment `attempt`; nested dispatch increments `depth` and resets `attempt`.
-- **`RunEnvelope`** — the live ledger record, kept in `runs.json`.
-- **`RunReceipt`** — the per-run artifact sealed under `receipts/<runId>.json`.
-- **`RunGateProvenance`** — review/compete gate provenance sealed into the receipt. References point backward: a reviewer references the builder it reviewed, a revise builder references the reviewer whose findings it received.
-- **`RunReceiptIntegrity`** — the receipt integrity version 20, with `algorithm: "sha256"` and a `digest` field. The version constant is annotated against this type, so bumping one without the other is a compile error.
-
-## Tests
-
-**`tests/contracts/dispatch-admission.test.ts`** demonstrates the admission boundary: `foregroundEndpointBlock` refuses a same-endpoint foreground deadlock without spending the queue timeout, and ordinary worker saturation remains queueable.
-
-**`tests/contracts/route-readiness-reads.test.ts`** proves that a dispatch reads only the receipts written since the previous readiness window. It patches `fs.readFileSync` to count reads, then asserts that the first `readinessWindow()` reads 13 files (runs.json + 12 receipts), and subsequent windows on an unchanged ledger cost zero file reads.
-
-**`tests/extended/route-identity-keying.test.ts`** demonstrates that prompt-wording edits preserve the quality denominator (all six observations remain visible), that model/target/node/runtime/spec/role/thinking changes start a fresh bucket, and that behavior-changing drift (tool surface, endpoint) invalidates the bucket without sharding it.
-
-## Extension seams
-
-- **`DispatchBundleOptions`** — the options bag passed to `createDispatchBundle`. It controls worker spawning (`spawnWorker`), held-worker management (`spawnHeldWorker`), node resolution (`resolveNode`), heartbeat specs, resilience cooldowns, settings access, session identity, protected-artifact state, reproducibility collection, route observation, and event journaling.
-- **`ExecutionSchedulerAdapter`** — the adapter interface that `executePlan` calls to preflight, reserve, run, and optionally run code steps. The orchestrator implements it; tests provide stubs.
-- **`RouteDecisionInput`** — the input to `decideRoute`. New routing policies are added by extending the `posture` vocabulary and the `scoreRoute`/`clearsPostureFloors` functions in `route-policy.ts`.
-- **`JobSpec`** — the validated dispatch request. New fields are added to the `KNOWN_KEYS` set in `validation.ts` and to the `JobSpec` interface.
+- [Architecture](../architecture.md) covers the overall layering.
+- [Session control](../session-control.md) and [Engine](../engine.md) cover adjacent execution surfaces that were not inspected.
+- [Domains safety](safety.md) covers the admission and boundary policy that dispatch consumes.
+- [Tools verify](../tools/verify.md) covers the project check catalog used by host verification.
 
 ## Things to watch when editing
 
-- **Receipt integrity digest.** The `RunReceiptIntegrity` version is 20. Bumping it without updating the `receipt-integrity.ts` constant is a compile error, but adding a field to `RunReceipt` without accounting for it in the canonical JSON serialization changes every digest. The `withReceiptIntegrity` function must cover the new field.
-- **The `exactOptionalPropertyTypes` flag is on.** Pass optional fields with `...(x !== undefined ? { x } : {})`, never `x: undefined`.
-- **Worker stdout is the NDJSON bulk lane.** One stray `console.log` in worker code corrupts the protocol. Call `drainStdout()` before exit.
-- **Gate decisions are append-only.** A `GateDecisionArtifact` is sealed with a sha256 digest. Mutating it invalidates the evidence chain. Use `stagePendingGateDecision` / `materializePendingGateDecision` for the atomic write.
-- **`validateJobSpec` is the single gate.** Every dispatch path (fleet, CLI, ACP, extension) goes through it. Adding a field without adding it to `KNOWN_KEYS` breaks every caller. The intent-compatibility classification is also classified here, so a change to the compatibility table requires updating this validator.
-- **The route decision hash is deterministic.** `decisionHash` covers the inputs, not the wall clock. Do not add a timestamp or random value to the decision input.
-- **`fixedRouteDecision` is the last-resort fallback.** When the route observer fails, callers seal this one-candidate decision. Do not add new failure modes that skip it, or receipts will lack routing evidence.
+- `executeFleetRun` takes the workspace lock before claiming the assignment verdict, and the code comments say a refused run must leave no durable trace. Moving the root record write or the verdict claim ahead of the lock changes that property.
+- `decideRoute` treats `active` and `shadow` differently for `posture-floors-unsatisfiable`: active throws, shadow reports. Any change to that branch changes execution behavior, not only the recorded explanation.
+- `spawnNativeWorker` strips only `workerEntryPath` before forwarding options. Adding a new field that the function should consume itself must be handled there, or it reaches `spawnWorkerProcess` unchanged.
+- `runHostVerification` marks a run `verified` only when every check exits 0. A worker that did not succeed never reaches check execution.
+
+## Coverage notes
+
+This overview traced the fleet run entry and its lock and verdict ordering, the native spawn options forwarding, the route decision posture branch, and the host verification entry and skip branch. The fleet event journal, the worker protocol lanes, the route evaluation metrics, the memo and batch gate internals, and the gate decision readers were located but not read in full, and this page does not describe their behavior.

@@ -1,159 +1,187 @@
 ---
-title: "Domains scheduling"
-summary: "The scheduling domain owns three things: the session cost budget that scores spend against a ceiling, the fleet node registry that turns N machines into one pinnable capacity pool, and the local-capacity resolver that sizes worker concurrency under fleet.concurrency."
+title: "Scheduling: budget gating, local capacity, fleet registry and recurring jobs"
+summary: "The scheduling domain owns the session spend ceiling that gates paid requests, the local and global worker limits, the fleet node registry, and the durable recurring-job controller. Read this page before changing any of those behaviors."
 sources:
   - "src/domains/scheduling/index.ts"
-  - "src/domains/scheduling/contract.ts"
   - "src/domains/scheduling/extension.ts"
+  - "src/domains/scheduling/contract.ts"
   - "src/domains/scheduling/budget.ts"
-  - "src/domains/scheduling/cluster.ts"
   - "src/domains/scheduling/local-capacity.ts"
+  - "src/domains/scheduling/cluster.ts"
+  - "src/domains/scheduling/job-controller.ts"
+  - "src/domains/scheduling/job-model.ts"
+  - "src/domains/scheduling/job-store.ts"
   - "src/domains/scheduling/manifest.ts"
 symbols:
-  - "SchedulingDomainModule"
   - "createSchedulingBundle"
+  - "createSchedulingDomainModule"
   - "createBudgetState"
-  - "createFleetRegistry"
-  - "createLocalCapacitySampler"
-  - "resolveGlobalConcurrency"
+  - "sessionCeilingReached"
+  - "SessionCostCeilingError"
   - "resolveLocalConcurrency"
+  - "createLocalCapacitySampler"
+  - "createFleetRegistry"
+  - "createJobController"
+  - "createJobStore"
+  - "normalizeJobSpec"
+  - "matchesJobPredicate"
 tests:
+  - "tests/contracts/telemetry-budget-records.test.ts"
   - "tests/contracts/local-capacity.test.ts"
-  - "tests/extended/fleet-lifecycle.test.ts"
+  - "tests/contracts/job-tool.test.ts"
 invariants:
-  - "The session budget verdict is advisory: dispatch records it on every reservation but never denies a reservation from it."
-  - "A fleet node is classified offline after two consecutive channel failures and is restored by a later channel success."
-  - "Under fleet.concurrency: auto the global worker pool caps at AUTO_MAX_WORKERS (8) while only the local node is sized from host CPU and memory."
+  - "A session ceiling of 0 means no ceiling; admitPaidRequest returns without a flush or seed when the effective ceiling is 0."
+  - "With a positive ceiling, a paid request whose settled spend plus additional cost reaches the ceiling is held until a ceiling raise, or rejected with SessionCostCeilingError when waitForRaise is false."
+  - "A numeric fleet.concurrency setting is used exactly for the global pool and the local node; under auto, the local limit is the minimum of the 8-worker cap, usable CPUs, and memory-derived limits."
+  - "A fleet node is classified offline after two consecutive channel failures and returns online on the next channel success."
+  - "A stored job record whose specification hash or normalized specification does not match is rejected on read, and a job from a different owner session or workspace is not returned by scoped lookups."
 validate:
   - "pnpm run test:file -- tests/contracts/local-capacity.test.ts"
+  - "pnpm run test:file -- tests/contracts/telemetry-budget-records.test.ts"
+  - "pnpm run test:file -- tests/contracts/job-tool.test.ts"
 ---
 
-# Domains scheduling
+# Scheduling: budget gating, local capacity, fleet registry and recurring jobs
 
-The scheduling domain is where Clio answers two questions that are easy to conflate: how much of this session's money is left to spend, and how many workers may run on each machine in the fleet. It bundles a session budget state, a fleet node registry, and a local-capacity resolver, and exposes them to the rest of the system through a small contract that the [Dispatch domain](dispatch.md) consumes to size and place new runs.
+The scheduling domain is the part of Clio Coder that decides whether the next paid model request or worker dispatch may proceed. A reader needs this page when changing the session spend ceiling, the `fleet.concurrency` worker limit, the fleet node registry that dispatch places work against, or the recurring job controller that runs `job` tool schedules. Routing for the tool surface that drives jobs is covered in [tools.md](../tools.md), and the dispatch consumers are covered in [domains/dispatch.md](dispatch.md).
 
-## What this area does
+## What the domain does
 
-`SchedulingDomainModule` in `src/domains/scheduling/index.ts` is the domain's entry point. It carries `SchedulingManifest` (from `src/domains/scheduling/manifest.ts`) and `createSchedulingBundle`. The manifest declares the domain `scheduling` with `dependsOn: ["config", "observability"]`, which is why the bundle reads its ceiling from the `config` contract and its session spend from the `observability` contract.
+The domain is wired by `createSchedulingBundle` in `src/domains/scheduling/extension.ts`, which returns a `DomainBundle<SchedulingContract>`. The bundle exposes four groups of behavior through `SchedulingContract` (`src/domains/scheduling/contract.ts`):
 
-The module exposes a `DomainModule` whose `createExtension` is `createSchedulingBundle` (in `src/domains/scheduling/extension.ts`). That function builds the three components, wires them together, and returns a `DomainBundle<SchedulingContract>` whose `contract` is the surface other domains read.
+1. Budget gating: `ceilingUsd`, `preflight`, `admitPaidRequest`, `setRunCostCap`, and `runCostCap`.
+2. Worker capacity: `maxWorkers` and `localCapacity`.
+3. Fleet state: the `fleet` registry.
+4. Recurring jobs: `createJobController` and `createJobStore` are exported from `src/domains/scheduling/index.ts` and are used by the entry layer, not by the bundle contract itself.
 
-## What owns it
+The manifest in `src/domains/scheduling/manifest.ts` declares the domain as `name: "scheduling"` with `dependsOn: ["config", "telemetry"]`. The bundle throws at construction if the `config` contract is absent.
 
-| File | Owns |
-|---|---|
-| `src/domains/scheduling/index.ts` | `SchedulingDomainModule`, re-exports `BudgetVerdict` and `SchedulingContract` |
-| `src/domains/scheduling/manifest.ts` | `SchedulingManifest` (`name: "scheduling"`, `dependsOn: ["config", "observability"]`) |
-| `src/domains/scheduling/extension.ts` | `createSchedulingBundle`, `SchedulingBundleOptions`, the budget-alert event subscription, `syncBudget` |
-| `src/domains/scheduling/budget.ts` | `BudgetState`, `BudgetVerdict`, `createBudgetState`, `checkCeiling`, `raise` |
-| `src/domains/scheduling/cluster.ts` | `FleetRegistry`, `createFleetRegistry`, `LOCAL_NODE_ID`, `NODE_DEATH_FAILURE_THRESHOLD` (2), `FleetNodeSnapshot` |
-| `src/domains/scheduling/local-capacity.ts` | `resolveGlobalConcurrency`, `resolveLocalConcurrency`, `createLocalCapacitySampler`, `observeHostCapacityFacts`, the sizing constants |
-| `src/domains/scheduling/contract.ts` | `SchedulingContract`, `BudgetPreflight` |
+## Ownership by file
 
-## Session budget state
+| Path | Responsibility | Key symbols |
+| --- | --- | --- |
+| `src/domains/scheduling/index.ts` | Public barrel; exposes `SchedulingDomainModule` and `createSchedulingDomainModule`. | `SchedulingDomainModule`, `createSchedulingDomainModule` |
+| `src/domains/scheduling/extension.ts` | Composes budget, capacity sampler, fleet registry and admission. | `createSchedulingBundle`, `SchedulingBundleOptions` |
+| `src/domains/scheduling/contract.ts` | Type of the contract consumers import. | `SchedulingContract`, `BudgetPreflight` |
+| `src/domains/scheduling/budget.ts` | Ceiling arithmetic, run caps, stop-text rendering, the stop error class. | `createBudgetState`, `sessionCeilingReached`, `runCostCeilingUsd`, `createRunCostCap`, `SessionCostCeilingError`, `readBudgetBlock`, `describeBudgetBlock` |
+| `src/domains/scheduling/local-capacity.ts` | Resolves `fleet.concurrency` for the local node and the global pool. | `resolveGlobalConcurrency`, `resolveLocalConcurrency`, `createLocalCapacitySampler`, `describeHostCapacity` |
+| `src/domains/scheduling/cluster.ts` | Fleet node registry with per-node online/offline state. | `createFleetRegistry`, `FleetRegistry`, `LOCAL_NODE_ID` |
+| `src/domains/scheduling/job-controller.ts` | Recurring job state machine: admission, execution, settlement, recovery, control. | `createJobController` |
+| `src/domains/scheduling/job-model.ts` | Pure job normalization, predicates, evidence shaping and timeouts. | `normalizeJobSpec`, `jobEvidence`, `matchesJobPredicate`, `jobExecutionTimeoutMs`, `jobIsComplete` |
+| `src/domains/scheduling/job-store.ts` | Per-session JSON job store with a file lock and revision check. | `createJobStore`, `validateRecord` |
 
-`createBudgetState(initialCeilingUsd)` in `src/domains/scheduling/budget.ts` throws on a negative ceiling and returns a closure over a mutable `ceiling`. The three operations are:
+The public types for jobs live in `src/domains/scheduling/job-types.ts`, which the barrel re-exports with `export type *`. This page does not read that file in depth; its field names are used here only as they appear in `src/domains/scheduling/job-controller.ts` and `src/domains/scheduling/job-model.ts`.
 
-- `ceilingUsd` (getter): current ceiling.
-- `checkCeiling(currentUsd)`: returns `"over"` when spend is above the ceiling, `"at"` when equal, and `"under"` when below.
-- `raise(newCeilingUsd)`: rejects a ceiling lower than the current one and otherwise replaces it.
+## Budget gating
 
-The ceiling is seeded from `settings.safety.limits.sessionCostUsd` (default `5`, defined in `src/core/defaults.ts`). The module docstring in `budget.ts` states the division of labor directly: "Scheduling preflight exposes that spend and ceiling to dispatch reservations for accounting; the allocator does not enforce this session ceiling." Dispatch separately enforces an explicit per-request intent cost ceiling against the route estimate.
+### Entry and state
 
-## Local-capacity resolver
+`createSchedulingBundle` reads the initial ceiling from `config.get().safety.limits.sessionCostUsd` and creates a `BudgetState` with `createBudgetState`. `syncBudget` re-reads the ceiling on every check, from the `getSettings` option when provided and from the config snapshot otherwise, and rebuilds the state when the value changes. The comment in `src/domains/scheduling/extension.ts` explains why `getSettings` exists: a session override such as the `clio-coder run --max-cost-usd` ceiling lives in the session's effective settings view, not in the config snapshot.
 
-`src/domains/scheduling/local-capacity.ts` is "the one resolver for `fleet.concurrency`" (per its docstring). The setting is `"auto" | number`.
+`createBudgetState` (in `src/domains/scheduling/budget.ts`) rejects a negative initial ceiling and returns a `BudgetState` whose `checkCeiling` returns `"under"` when the ceiling is 0, `"over"` above it, `"at"` on equality, and `"under"` otherwise.
 
-`resolveGlobalConcurrency(configured)` returns `AUTO_MAX_WORKERS` (the constant `8`) when the setting is `undefined` or `"auto"`, otherwise `Math.max(1, Math.floor(configured))`. This is the cap on the *global* worker pool.
+### Admission flow for a paid request
 
-`resolveLocalConcurrency(configured, facts, clioHeldBytes)` resolves the limit for the implicit local node:
-- A numeric setting returns `{ limit: resolveGlobalConcurrency(configured), bound: "configured" }`, ignoring host facts.
-- Under `"auto"` it builds a candidate list `[{ limit: AUTO_MAX_WORKERS, bound: "cap" }, { limit: Math.max(1, Math.floor(facts.cpus)), bound: "cpu" }, { limit: workersFor(facts.availableMemoryBytes + clioHeldBytes), bound: "memory" }]` and appends a `cgroup` candidate when `facts.cgroupAvailableBytes !== null`. It then returns the candidate with the smallest `limit` (ties keep the earlier input), so a host that fits the cap reports `"cap"`.
+`admitPaidRequest` is the gate paid calls go through. Its caller passes `waitForRaise`, an optional `additionalUsd` (a number or a function), `getCeilingUsd`, `contextTokens`, `onBlocked`, `telemetry` and `signal`. The control flow inside its `for (;;)` loop is:
 
-`workersFor(bytes)` computes `Math.max(1, Math.floor((bytes - OS_MEMORY_RESERVE_BYTES) / WORKER_MEMORY_ESTIMATE_BYTES))`. The two sizing constants are `WORKER_MEMORY_ESTIMATE_BYTES = 1 GiB` (four times the observed 160–270 MB worker RSS, to absorb compiler/test-suite children) and `OS_MEMORY_RESERVE_BYTES = 2 GiB` (left for the OS, orchestrator, and local inference servers).
+1. `syncBudget()` and read the ceiling, from `getCeilingUsd` when supplied.
+2. If the ceiling is positive, read `settledSpend()`. This calls `telemetry.settledSessionSpend()` so the read model is flushed before the comparison. A zero ceiling skips this read entirely.
+3. Re-read `additionalUsd`, then compute `spend = settled + additional`.
+4. If `sessionCeilingReached(spend, ceilingUsd)` is false, the request is admitted. If a hold was in progress, `recordHold` journals the outcome as `raised`, `cleared` or `removed`, and the function returns.
+5. Otherwise, if `signal` is already aborted, the hold is journaled as `aborted` and the signal reason is thrown.
+6. On the first block, a `BudgetAlertPayload` is built, passed to `onBlocked`, emitted on the bus as `budget.alerted`, and a `budget.crossed` telemetry event is emitted at most once per session and ceiling value.
+7. If `waitForRaise` is false, the hold is journaled as `refused` and a `SessionCostCeilingError` is thrown.
+8. If `waitForRaise` is true, the loop waits 250 ms (honoring abort) and retries from step 1.
 
-`createLocalCapacitySampler(options)` wraps a pure resolver in rate-limited sampling: it samples host facts at most once per `HOST_SAMPLE_INTERVAL_MS` (30,000 ms by default). Each sample also captures the `activeLocalWorkers` count, and `resolve("auto")` adds those workers back as `activeWorkers * WORKER_MEMORY_ESTIMATE_BYTES`, so the limit does not collapse as the fleet it admitted starts running. A numeric setting short-circuits before any sampling.
+`sessionCeilingReached` in `src/domains/scheduling/budget.ts` returns false whenever the ceiling is 0, so zero means no ceiling everywhere it is read.
 
-`observeHostCapacityFacts()` reads `node:os`: `availableParallelism()` for CPUs (respecting affinity masks such as a Slurm cpuset), `freemem()` for available memory, and `process.constrainedMemory()` / `process.availableMemory()` for the cgroup limit. The comment notes that `constrainedMemory()` reports an unbounded sentinel when no cgroup limit applies, so only a limit below physical memory constrains anything.
+The raise attribution inside `recordHold` uses `ceilingChange`, which is set by a listener on `config.onChange("hotReload", ...)` and on the `config.session_changed` bus event, both wired in `start()`. A raise is attributed to a source only when the change's ceiling matches the raised value and the change arrived after the hold began. Otherwise the event carries no `raisedBy`, which the code comments state explicitly.
 
-## Fleet node registry
+### Error and stop text
 
-`createFleetRegistry(getNodes, options)` in `src/domains/scheduling/cluster.ts` turns N machines into one addressable, pinnable capacity pool. Node configuration comes from the `getNodes` thunk (a `() => ReadonlyArray<FleetNodeSettings>`), which is read fresh on every call so settings edits apply on the next dispatch. Runtime state (channel health and last-seen observations) lives in a `Map<string, NodeRuntimeState>` owned by the registry.
+`SessionCostCeilingError` has `name` set to `"SessionCostCeilingError"` and a message that begins with the reason string `budget_ceiling`. When a `RunCostCap` is supplied and the ceiling is at or above the cap's ceiling, the message names the `--max-cost-usd` cap; otherwise it names `safety.limits.sessionCostUsd`. `describeBudgetBlock` builds the operator notice for a stop, with level `"warn"` for `at` and `"error"` for `over`.
 
-Key behaviors:
-- `LOCAL_NODE_ID` is `"local"`. The implicit local node is always first in `list()` and is never declared in settings. Its `maxWorkers` and `capacityBound` come from the `localCapacity` thunk (which the bundle binds to `localCapacity.resolve(fleet.concurrency)`); SSH nodes declare their own `maxWorkers` and report `capacityBound: null`.
-- `hasRemoteNodes()` is true when at least one node is configured.
-- `recordChannelFailure(id, reason)` increments `consecutiveFailures`; when the node is `online` and failures reach `NODE_DEATH_FAILURE_THRESHOLD` (2), it flips to `offline` with a `stateReason` naming the failure count. It returns the resulting state.
-- `recordChannelSuccess(id)` resets `consecutiveFailures`, stamps `lastSeenMs`, and restores an `offline` node to `online`.
-- `seen(id)` records a last-seen timestamp for staleness display only. The module docstring is explicit that staleness is advisory: "an idle node is never auto-offlined for silence, because no signal is expected from a node with no work."
-- `bindActiveWorkers(source)` and `activeWorkers(nodeId)` hold the durable lease-derived usage. Until a source is bound, snapshots report zero rather than inventing a process-local count.
+### Existing test coverage
 
-The docstring distinguishes *online* from *dispatch-eligible*: "online, channel healthy as far as this registry knows. Nodes start online; dispatch eligibility additionally requires a passing doctor preflight (durable, checked at placement)."
+`tests/contracts/telemetry-budget-records.test.ts` exercises this path end to end against the scheduling contract. The first case holds a call with `waitForRaise: true` and `contextTokens: 900`, then changes the settings ceiling to 5 through the change listener with source `settings-ui`; the test asserts that the held call's `budget.held` record has `outcome: "raised"`, `raisedToUsd: 5`, `raisedBy: "settings-ui"`, and a positive `waitedMs`. A subsequent call with `waitForRaise: false` against a ceiling of 1 with spend 1.25 is asserted to be refused, and the `budget.crossed` record is asserted to carry `level: "over"`, `spendUsd: 1.25`, `ceilingUsd: 1` and `contextTokens: 900`. A second test in the same file (around its `stop` helper) asserts the admitted-or-rejected message for paid calls that do not wait.
 
-## How dispatch uses the scheduling contract
+## Worker capacity
 
-The [Dispatch domain](dispatch.md) is the primary upstream caller. Its manifest declares `dependsOn: [..., "scheduling"]` (`src/domains/dispatch/manifest.ts`), and its extension reads the contract with `context.getContract<SchedulingContract>("scheduling")` (`src/domains/dispatch/extension.ts:2647`).
+### Global pool and local node
 
-**Budget preflight is recorded, not a denial gate.** When dispatch builds a reservation it calls `scheduling.preflight()` inside `reservationCapacitySnapshot` (`src/domains/dispatch/extension.ts:2812`) and stores `budget: { currentUsd: preflight.currentUsd, ceilingUsd: preflight.ceilingUsd }` on the `ReservationCapacitySnapshot` (`src/domains/dispatch/extension.ts:2833`). The reservation allocator in `src/domains/dispatch/reservation-store.ts` sums the recorded cost into `ReservationAllocation.budgetUsd`, but its comment is unambiguous: "Cost estimates remain recorded in the allocation, but do not deny useful work." So the session budget never stops a reservation; it is advisory.
+`resolveGlobalConcurrency` in `src/domains/scheduling/local-capacity.ts` returns `AUTO_MAX_WORKERS` (8) when the setting is absent or `"auto"`, and otherwise `Math.max(1, Math.floor(configured))`.
 
-**The hard per-request cost gate is separate.** `assertBudgetAdmitsRoute` (`src/domains/dispatch/extension.ts:2877`) computes a conservative route estimate and compares it to `req.routingIntent?.maxCostUsd`; if the estimate exceeds the intent ceiling it calls `denyDispatchForBudget`, which audits a denied `dispatch` tool call (`reasonCode: "budget-ceiling"`) and throws. This gate enforces the per-request intent ceiling, not the session budget from scheduling.
+`resolveLocalConcurrency` returns the configured number as `{ limit, bound: "configured" }` when the setting is numeric. Under `auto` it builds candidates: the 8-worker cap, the usable CPU count, the memory-derived limit from `availableMemoryBytes + clioHeldBytes`, and, when `cgroupAvailableBytes` is not null, a cgroup-derived limit. It returns the smallest candidate, and ties keep the earlier candidate, so the cap wins on a host that fits it. The memory limit uses `workersFor(bytes) = max(1, floor((bytes - 2 GiB reserve) / 1 GiB estimate))`.
 
-**The session budget surfaces as a `budget.alert` event.** The scheduling bundle subscribes to `BusChannels.DispatchEnqueued` in `createSchedulingBundle.start()` (`src/domains/scheduling/extension.ts`). On each enqueue it calls `evaluate()`, which syncs the budget from settings and reads `observability?.sessionCost()`, then emits `BusChannels.BudgetAlert` with `{ level, currentUsd, ceilingUsd }` whenever the verdict is not `"under"`. The `BudgetAlertPayload` docstring in `src/core/telemetry/live-events.ts` notes the event is "Informational in v0.x: scheduling never rejects the enqueue, so the interactive notice is the operator's only signal."
+`createLocalCapacitySampler` caches a host sample for `HOST_SAMPLE_INTERVAL_MS` (30 seconds by default). Each sample stores the count of active local workers at sampling time, and `resolve` adds `activeWorkers * WORKER_MEMORY_ESTIMATE_BYTES` back to the memory facts before resolving. This is why the local limit does not shrink as Clio's own workers start.
 
-**Capacity sizing flows into placement.** Dispatch reads `scheduling.maxWorkers?.()` for the global capacity (`configuredGlobalCapacity`, `src/domains/dispatch/extension.ts:2885`) and `scheduling.localCapacity?.().limit` for the local node (`configuredLocalCapacity`, `src/domains/dispatch/extension.ts:2890`), falling back to resolving `fleet.concurrency` directly when the contract method is absent. It also reads `scheduling.ceilingUsd()` to expose `costCeilingUsd()` on the dispatch contract (`src/domains/dispatch/extension.ts:7615`), and binds the durable lease usage reader back into the registry with `scheduling.fleet?.bindActiveWorkers(createNodeLeaseUsageReader(...))` (`src/domains/dispatch/extension.ts:2739`).
+`describeHostCapacity` produces the operator sentence and states explicitly that GPU, VRAM and model fit are not checked.
 
-## The dispatch-to-scheduling control flow
+### Bundle wiring
 
-```mermaid
-sequenceDiagram
-    participant D as Dispatch (extension)
-    participant S as Scheduling contract
-    participant O as Observability
-    participant R as Reservation store
+Inside `createSchedulingBundle`, the sampler is created with `activeLocalWorkers: () => fleet.activeWorkers(LOCAL_NODE_ID)`, and the fleet registry is created with a `localCapacity` callback that calls the sampler. The contract's `maxWorkers` returns the global pool and `localCapacity` returns the local resolution. Both read `config.get().fleet.concurrency` at call time.
 
-    D->>S: preflight()
-    S->>O: sessionCost()
-    O-->>S: currentUsd
-    S-->>D: { verdict, currentUsd, ceilingUsd }
-    D->>R: reservationCapacitySnapshot(budget)
-    R-->>D: record (budget recorded, not denied)
-    D->>D: assertBudgetAdmitsRoute(intent maxCostUsd)
-    Note over D: hard gate — per-request intent ceiling,
-    separate from the session budget
-```
+### Existing test coverage
 
-## Data model
+`tests/contracts/local-capacity.test.ts` covers the resolver directly. Its cases include `resolveLocalConcurrency("auto", host({ availableMemoryBytes: 2.5 * GiB }))` clamped to one worker, a cgroup limit of 5 GiB sizing before host memory, a CPU count of 2 clamping the result, and `resolveLocalConcurrency(3, tiny)` returning `{ limit: 3, bound: "configured" }` regardless of host facts. A further case checks that the sampler does not lower its limit as Clio's own workers start, and another that an SSH node stays unclamped while the local node is clamped. These tests use injected host facts, not real host sampling.
 
-A `FleetNodeSnapshot` (in `src/domains/scheduling/cluster.ts`) is the registry's read shape for one machine: `id`, `host`, `kind: "local" | "ssh"`, `state: "online" | "offline"`, `stateReason`, `activeWorkers`, `maxWorkers`, `capacityBound` (which input bound `maxWorkers`, `null` for SSH nodes), `labels`, and `lastSeenAt`.
+## Fleet registry
 
-The local-capacity resolver returns a `LocalCapacity` of `{ limit, bound }` where `bound: "configured" | "cpu" | "memory" | "cgroup" | "cap"`. `describeLocalCapacity` renders a short phrase like `"memory-bound at 2"` for operator surfaces (it returns `null` for `"configured"` and `"cap"`).
+`createFleetRegistry` in `src/domains/scheduling/cluster.ts` keeps an in-memory `Map` of runtime state per node id. The node configuration is read through the `getNodes` callback on every call, so settings edits apply to the next dispatch. `list()` returns the implicit local node first and then each configured SSH node.
 
-## Focused tests
+Channel health is tracked by `recordChannelFailure` and `recordChannelSuccess`. Two consecutive failures (`NODE_DEATH_FAILURE_THRESHOLD = 2`) move an online node to offline and set `stateReason` to a message naming the failure count and the reason. `recordChannelSuccess` resets the failure count, updates `lastSeenAt`, and moves an offline node back to online. The comment in `src/domains/scheduling/cluster.ts` states that idle nodes are not auto-offlined for silence; staleness is advisory only.
 
-`tests/contracts/local-capacity.test.ts` is the contract-level guard for sizing. Representative cases:
-- `resolveLocalConcurrency("auto", host({ availableMemoryBytes: 2.5 * GiB }))` asserts `limit: 1, bound: "memory"` (low-memory host clamps to one local worker).
-- `resolveLocalConcurrency("auto", host({ cgroupAvailableBytes: 5 * GiB }))` asserts `limit: 3, bound: "cgroup"` (cgroup limit sizes before host memory).
-- `resolveLocalConcurrency("auto", host({ cpus: 2 }))` asserts `limit: 2, bound: "cpu"`.
-- `resolveLocalConcurrency("auto", host())` (32 CPUs / 64 GiB) asserts `limit: AUTO_MAX_WORKERS, bound: "cap"` (host fits the cap).
-- `resolveLocalConcurrency(3, tiny)` asserts `limit: 3, bound: "configured"` (numeric setting is exact regardless of host facts).
-- A sampler test ("does not lower the limit as Clio's own workers start") seeds 8 GiB / 0 workers → limit 6, then drops available memory by 5 worker estimates while raising active workers to 5 and advances the injected clock inside and past `intervalMs`; it asserts the limit stays 6 and that sampling happened only once per interval and once per worker add-back.
-- A dispatch test ("admits SSH work past a clamped local node without shrinking the global pool") builds a dispatch bundle with `localCapacity: () => ({ limit: 1, bound: "memory" })`, then asserts `reservations.prepare` for two parallel local members throws `/node 'local' capacity exceeded \(2\/1\)/u` while three parallel SSH members on a node with `maxWorkers: 3` succeeds.
+`activeWorkers` is not owned here. The registry reports zero until a dispatch-side source is bound through `bindActiveWorkers`, and the comment on that method says dispatch owns the capacity leases.
 
-`tests/extended/fleet-lifecycle.test.ts` exercises the cluster registry's failure accounting. Its "places by durable usage and excludes a failed node on failover" case calls `createFleetRegistry(() => settings.fleet.nodes, { activeWorkers })`, then asserts that two consecutive `recordChannelFailure("blade", ...)` calls return `"offline"` on the second, and that the placement resolver then reroutes a failed node's work to another node with `reason: "node classified dead"`.
+For an SSH node, `snapshotFor` attaches `verification` from `fleetPreflightVerdict` in `src/domains/dispatch/fleet-preflight.ts`. That call is a dispatch import; this page does not read it.
 
-## Extension seams
+## Recurring jobs
 
-- **Adding a node kind or a new sizing input:** the `resolveLocalConcurrency` candidate list in `src/domains/scheduling/local-capacity.ts` is the single place where a new `LocalCapacityBound` participates; add a candidate to the array and it competes for the minimum like the existing `cap`/`cpu`/`memory`/`cgroup` entries.
-- **Changing how the session budget is scored:** `createBudgetState` and `checkCeiling` in `src/domains/scheduling/budget.ts` are the only place the `"under" | "at" | "over"` verdict is produced. The dispatch gate (`assertBudgetAdmitsRoute`) and the alert event (`extension.ts`) both consume that verdict, so a change there propagates to both.
-- **New alert side-effects:** `createSchedulingBundle.start()` is the one subscription to `BusChannels.DispatchEnqueued`; the verdict logic lives in the `evaluate()` closure.
-- **New per-node capability:** `FleetRegistryOptions` and `createFleetRegistry`'s `snapshotFor` are where a local node's capacity differs from an SSH node's declared capacity.
+### Spec normalization
+
+`normalizeJobSpec` in `src/domains/scheduling/job-model.ts` is the only constructor of a job specification. It rejects unknown keys, requires `intervalMs` between 1000 and the 31-day maximum, accepts a `command` runner (with `argv` of 1 to 128 literal strings and an optional `executableSha256`) or a `main` runner (with a prompt up to 8192 bytes), and rejects any other runner kind. `count` defaults to 5 when no `deadlineAt` is given, and to null otherwise. `timeoutMs` defaults to 60 seconds for command runners and to one hour for main runners.
+
+A typed JSON `until` predicate is only permitted with a command runner. An `onMatch` of `main_turn` requires that a predicate is present. `jobSpecHash` is the SHA-256 of the JSON-serialized normalized spec.
+
+`matchesJobPredicate` walks `predicate.path` through own properties and then applies `exists`, `eq`, `ne`, or ordered comparisons, which apply only to finite numbers.
+
+### Controller lifecycle
+
+`createJobController` in `src/domains/scheduling/job-controller.ts` holds an in-memory `records` map, a `live` map of running executions, and a single `setTimeout` timer driven by `schedule()`. Its public `JobController` API is `create`, `control`, `list`, `get`, `recover`, `retire`, `close`, and `tick`.
+
+Creation flows as follows. `create` normalizes the owner (the `cwd` must be absolute and is resolved with `realpathSync`), calls `recover(owner)` to load and classify persisted rows, normalizes the spec, builds a `JobRecord` with `state: "active"` and `nextDueAt: createdAt`, runs `authorization(job, "create")`, and only then sets `nextDueAt` to the current time and calls `store.write(job, null)`. The comment in the code states that the first run is due immediately after admission and never before it.
+
+`tick` is the scheduling loop. For each owned, non-cleanup-blocked record it enforces the deadline, enforces the execution timeout by setting `clockExpired` and aborting the live execution with `JobClockExpired`, pauses records whose owner is no longer current, reserves a new `pending` occurrence when `nextDueAt` has passed, and launches a `delivery` or `run` execution when no execution is live and retry backoff permits.
+
+`launch` checks capacity before starting. A command-runner occurrence is denied when any owned record has unresolved cleanup. Main-turn occupancy is limited to one per owner; command occupancy is limited to two. When capacity is full, the job is set to `wait` and retried after `POLL_MS` (250 ms). Otherwise the controller calls `options.ports.admit`, then `options.ports.run` or `options.ports.deliver`. The runner acknowledges start through `context.start`, which calls `startExecution` and commits `state: "running"` before the job's `starts` counter increments.
+
+`settle` produces the evidence and moves the record. Its branches, in order, are: a non-started execution is re-queued or denied; a `deferred` outcome after start becomes `failed`; an identical successful command result against the prior successful occurrence is recorded as `noop`; a clock-expired run may queue a single `clockResume`, bounded by `JOB_CLOCK_RESUME_CAP` (1). A matching `until` predicate on a succeeded or noop run with complete JSON sets `reason: "condition"` and queues a delivery. Otherwise a count-exhausted record becomes `terminal`; a `permission` error pauses; an `infrastructure` error or a `timed_out` outcome increments `consecutiveFailures`, pauses after three, and otherwise schedules retry at the greater of the interval, an exponential backoff capped at 300 seconds, and `retryAfterMs`.
+
+`recover` reads the store for an owner and classifies each stored record whose `process.instanceId` is not this controller's. A record whose owning process is not alive, judged by `processAlive` and `processBirthToken`, is committed as `paused` with `pendingReason: "owner exited; explicit resume required"`. An interrupted active occurrence is recorded in history as `interrupted`, and a running delivery is marked `failed` and not replayed.
+
+`control` implements `cancel`, `stop`, `pause` and `resume`. Resume is refused when a live execution exists, when the record's reason is terminal and not `condition`, or when count is exhausted. Resume runs `authorization` again and bumps `generation` so any in-flight execution from the prior generation settles without advancing the job.
+
+### Persistence
+
+`createJobStore` in `src/domains/scheduling/job-store.ts` keeps one JSON file per session-and-cwd pair. The file name is the SHA-256 of `[sessionId, cwd]`, and the directory is `join(clioStateDir(), "jobs")` unless `rootDir` is supplied. `read` enforces an 8 MiB file limit and a 32-job limit per session, and `validateRecord` re-validates every stored record: the spec must re-normalize to the stored spec with the same hash, the history cannot exceed `JOB_HISTORY_LIMIT` (10), and each record must be under 256 KiB.
+
+`write` runs under `withStateFileLockSync` with a 100 ms timeout. It compares the stored record's `revision` with `expectedRevision`, rejects a changed `specHash` or `createdAt`, and rejects a new record when the session holds 32 jobs and no complete job can be evicted. The file is written with `safeResourceWrite` at mode `0600`.
+
+`createJobController` calls `store.write(draft, job.revision)` inside `commit`. A persistence failure keeps the prior in-memory revision, sets `persistenceError`, suspends execution for that record, and rethrows.
+
+### Callers
+
+Entry-layer callers are `src/entry/job-host.ts` and `src/entry/orchestrator.ts`, and `src/tools/job.ts` is the tool surface. `src/session-control/turn-runtime.ts` and `src/session-control/chat-loop.ts` also reference the controller, as does `src/domains/dispatch/extension.ts`. This page did not trace those callers line by line, so their wiring is described here only by the reference list above.
+
+### Existing test coverage
+
+`tests/contracts/job-tool.test.ts` is the focused test for the job tool surface and was located by search for `createJobController`; this page did not read its cases, so no assertion from it is cited here. Searching across `tests/` for `createJobController`, `createJobStore`, and `admitPaidRequest` returned the six files listed above; the three cited in the frontmatter were read at the level of their matched lines only.
 
 ## Things to watch when editing
 
-- **The session budget is advisory.** The `budget.ts` docstring and the `reservation-store.ts` comment both state that dispatch records the budget but does not deny from it. If you change the budget to gate reservations, you are changing the contract documented in two separate modules, and the `budget.alert` docstring in `src/core/telemetry/live-events.ts` ("scheduling never rejects the enqueue") stops being true.
-- **`AUTO_MAX_WORKERS` is both the `auto` global pool and the local-node cap.** It is used as the first `cap` candidate in `resolveLocalConcurrency` and as the return of `resolveGlobalConcurrency` for `undefined`/`"auto"`. Raising it changes the global pool and the auto local node together.
-- **`WORKER_MEMORY_ESTIMATE_BYTES` is doubled in effect.** It is the divisor in `workersFor` and the add-back multiplier in `createLocalCapacitySampler.resolve`. The sampler test relies on the add-back preserving the limit, so changing one without the other breaks that invariant.
-- **`NODE_DEATH_FAILURE_THRESHOLD` (2) is a consecutive-failure counter.** It resets only on `recordChannelSuccess`. A node flapping between success and failure never accumulates, which is the intended behavior, not a bug to "fix" with a sliding window.
-- **Node config is read live via the `getNodes` thunk.** The registry does not cache node settings; it calls `getNodes()` on every `list()`, `get()`, `config()`, and `hasRemoteNodes()`. Do not memoize the settings array outside the registry expecting the registry to see a later settings edit.
-
-<!-- clio-coder:wiki unresolved links: domains/dispatch.md -->
+- Zero means no ceiling for `sessionCostUsd`, and `sessionCeilingReached` and `createBudgetState.checkCeiling` both depend on that. Any new comparison against the ceiling must go through these helpers, as the `src/domains/scheduling/budget.ts` comments direct.
+- `admitPaidRequest` reads `additionalUsd` after the settled-spend read on every retry. Moving that read before the settled fold can count a settling call twice; the code comment at that site describes the intended order.
+- `ceilingChange` attribution only applies when the change timestamp is at or after the hold start. A change that arrives earlier is not credited to the hold, and an unexplained raise is recorded without `raisedBy`.
+- The job store's file layout and `validateRecord` are an integrity boundary. A schema change to `JobRecord` requires updating `validateRecord` in `src/domains/scheduling/job-store.ts`, or stored records fail to load.
+- `FleetRegistry` runtime state is in memory. Offline classification does not persist across processes. Durable capacity is owned by the dispatch domain, as the file header comment states.
+- The 250 ms wait in `admitPaidRequest` is a polling interval, not an event subscription. Changing it changes how quickly a raise is noticed.

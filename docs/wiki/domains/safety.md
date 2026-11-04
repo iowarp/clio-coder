@@ -1,403 +1,121 @@
 ---
-title: "Domains safety"
-summary: "The safety domain classifies tool calls into action classes, evaluates them against damage-control rules, path policies, and project policy, maps them to autonomy dispositions, and audits every decision to a daily-rotated NDJSON ledger."
+title: "Safety gates, admission and the safety judge"
+summary: "How Clio Coder decides whether a tool call runs, asks, or is refused: the policy engine's net verdict, the shared admission evaluator, the safety judge at default autonomy, and the finish contract. Read this before changing any gate, autonomy level, or the judge."
 sources:
   - "src/domains/safety/index.ts"
-  - "src/domains/safety/extension.ts"
-  - "src/domains/safety/contract.ts"
   - "src/domains/safety/policy-engine.ts"
-  - "src/domains/safety/action-classifier.ts"
-  - "src/domains/safety/autonomy.ts"
-  - "src/domains/safety/audit.ts"
+  - "src/domains/safety/admission.ts"
+  - "src/domains/safety/safety-judge.ts"
   - "src/domains/safety/finish-contract.ts"
-  - "src/domains/safety/finish-contract-registration.ts"
-  - "src/domains/safety/project-policy.ts"
-  - "src/domains/safety/validation-contract.ts"
-  - "src/domains/safety/protected-artifacts.ts"
-  - "src/domains/safety/path-policy.ts"
-  - "src/domains/safety/default-path-policy.ts"
-  - "src/domains/safety/damage-control.ts"
-  - "src/domains/safety/rule-pack-loader.ts"
-  - "src/domains/safety/scope.ts"
-  - "src/domains/safety/loop-detector.ts"
-  - "src/domains/safety/run-effects.ts"
-  - "src/domains/safety/rigor.ts"
-  - "src/domains/safety/protected-artifacts-registration.ts"
+symbols:
+  - "evaluateAdmission"
+  - "createSafetyPolicyEngine"
+  - "createSafetyJudge"
+  - "assessFinishContract"
+  - "AdmissionDisposition"
+  - "OperatorYoloScope"
+  - "OperatorDefaultScope"
 tests:
   - "tests/contracts/safety-gates.test.ts"
-  - "tests/contracts/test-runner-vocabulary.test.ts"
-  - "tests/contracts/symlink-escape.test.ts"
+  - "tests/contracts/safety-judge.test.ts"
   - "tests/contracts/finish-contract-limitation.test.ts"
-  - "tests/extended/validation-contract.test.ts"
 invariants:
-  - "A safety-net block is final at every autonomy level; the autonomy mapping never overrides a block."
-  - "The finish contract engages only when the recent window contains a successful mutation receipt and no validation evidence and no successful limitation receipt."
-  - "The validation contract loader returns a discriminated union on every path; it never throws."
-  - "The audit writer never propagates write errors to the caller; safety must not kill the admission hot path."
-  - "Write-root confinement is lexical and does not chase symlinks, so a symlink inside a root that points outside is not detected by the write-root check alone."
+  - "A hard block from the policy engine on any capability or effect denies the whole call before any ask or allow elsewhere is considered, as implemented in evaluateAdmission step 1."
+  - "A worker's main-issued grant discharges only an ordinary worker autonomy ask; a safety-net or tool-confirmation rail returns an operator-approval ask that a main grant cannot clear."
+  - "Under the operator's yolo scope with no authorization, evaluateAdmission returns allow after the hard limits, without consulting confirmation rails or autonomy mapping."
+  - "The finish contract's decision uses receipts in the recent window only; a limitation receipt that is an errored tool result does not settle the contract."
+  - "The safety judge returns a park with a no-verdict cause when it has no route, times out, is aborted, errors, or returns unparsable output; it never returns a verdict it did not parse."
 validate:
-  - "pnpm run test:file -- tests/contracts/safety-gates.test.ts"
-  - "pnpm run test:file -- tests/contracts/test-runner-vocabulary.test.ts"
-  - "pnpm run test:file -- tests/contracts/symlink-escape.test.ts"
-  - "pnpm run test:file -- tests/contracts/finish-contract-limitation.test.ts"
-  - "pnpm run test:file -- tests/extended/validation-contract.test.ts"
+  - "pnpm run test:file tests/contracts/safety-gates.test.ts"
+  - "pnpm run test:file tests/contracts/safety-judge.test.ts"
+  - "pnpm run test:file tests/contracts/finish-contract-limitation.test.ts"
 ---
 
-# Domains safety
+# Safety gates, admission and the safety judge
 
-The safety domain owns every layer of Clio's tool-call safety stack: action classification, damage-control rule matching, path-policy enforcement, project-policy validation, autonomy-level mapping, NDJSON audit recording, the finish-contract completion gate, and the scientific validation contract loader. It composes these into a single `SafetyContract` that the tool registry, the worker subprocess, the ACP delegation mediator, and the Claude SDK tool-safety bridge all consume through one interface.
-
-## Ownership and entry points
-
-The domain module entry point is `SafetyDomainModule` in `src/domains/safety/index.ts`, which exposes `createSafetyBundle` from `src/domains/safety/extension.ts`. The bundle returns a `DomainBundle<SafetyContract>` containing the lifecycle extension (bus subscriptions, audit writer, policy engine) and the contract object that callers depend on.
-
-```mermaid
-flowchart TD
-    A["Tool call arrives"] --> B["SafetyContract.evaluate(call, posture)"]
-    B --> C["SafetyPolicyEngine.evaluate"]
-    C --> D["Classify + damage-control match"]
-    D --> E{"Write-root confinement?"}
-    E -->|"escape"| F["block: write-root"]
-    E -->|"pass"| G{"Git destructive / block rule?"}
-    G -->|"yes"| H["block"]
-    G -->|"no"| I{"Project policy valid?"}
-    I -->|"invalid + execute"| J["block: project-policy-invalid"]
-    I -->|"valid"| K["Path policy + trust/skill checks"]
-    K --> L{"Path block?"}
-    L -->|"yes"| M["block: path-policy"]
-    L -->|"no"| N{"Authored ask rule?"}
-    N -->|"yes"| O{"Confirmed?"}
-    O -->|"yes"| P["allow"]
-    O -->|"no"| Q["ask"]
-    N -->|"no"| R{"System modify?"}
-    R -->|"yes"| S{"Yolo/confirmed?"}
-    S -->|"yes"| P
-    S -->|"no"| Q
-    R -->|"no"| T["Bash net evaluation"]
-    T --> U["Autonomy mapping: mapAutonomy"]
-    U --> V["Final disposition: allow/ask/deny"]
-```
-
-The `SafetyContract` interface in `src/domains/safety/contract.ts` declares the full public surface:
-
-- `classify(call)` — pure classification, no audit, no bus events.
-- `evaluate(call, posture?)` — full evaluation: classify + damage-control match + decision; writes the safety-net audit row and emits `BusChannels.SafetyBlocked` on a block.
-- `observeLoop(key, now?)` — loop-detection verdict.
-- `scopes` — readonly specs for `readonly`, `workspace`, and `confirmed`.
-- `isSubset(worker, orchestrator)` — scope containment check for dispatch admission.
-- `policy.metadata(posture?)` — immutable safety policy metadata for receipts and audit replay.
-- `audit.recordToolCall(input)` — the registry's hook for autonomy-level final dispositions.
-- `audit.recordCompletionContract(input)` — the finish-contract's hook for turn_end decisions.
-
-Key symbols by file:
-
-| File | Key symbols |
-|---|---|
-| `src/domains/safety/policy-engine.ts` | `createSafetyPolicyEngine`, `SafetyPolicyDecision`, `SafetyPolicyEngine`, `SafetyPolicyEngineOptions`, `BUILTIN_ALLOWLIST`, `TEST_RUNNER_COMMANDS`, `PROJECT_SCRIPT_COMMANDS`, `WRITE_ROOT_REFUSED_TOOLS`, `evaluateBashPolicy`, `evaluateWriteRoots`, `matchesRepositoryCommand` |
-| `src/domains/safety/action-classifier.ts` | `classify`, `ActionClass`, `Classification`, `ClassifierCall`, `GIT_DESTRUCTIVE_PATTERNS`, `SYSTEM_MODIFY_PATTERNS`, `SYSTEM_WRITE_ROOT_PREFIXES`, `SYSTEM_WRITE_EXEMPT_PREFIXES`, `normalizeCallPaths` |
-| `src/domains/safety/autonomy.ts` | `mapAutonomy`, `AutonomyLevel`, `AutonomyDisposition`, `autonomyFromUserInput`, `AUTONOMY_EXPOSURES` |
-| `src/domains/safety/decision-events.ts` | `toolDecidedPayload`, `completionEvaluatedPayload`, `safetyJudgedPayload` |
-| `src/domains/safety/finish-contract.ts` | `assessFinishContract`, `FinishContractAssessment`, `FinishContractInput`, `recentEntries`, `typedValidationSummary`, `DEFAULT_RECENT_ENTRY_LIMIT` |
-| `src/domains/safety/finish-contract-registration.ts` | `createFinishContractRegistration`, `FINISH_CONTRACT_REGISTRATION_ID`, `HIGH_RIGOR_REVALIDATION_MESSAGE` |
-| `src/domains/safety/project-policy.ts` | `loadProjectSafetyPolicy`, `LoadedProjectSafetyPolicy`, `ProjectCommandPolicy` |
-| `src/domains/safety/validation-contract.ts` | `loadValidationContract`, `parseValidationContractText`, `describeValidationContract`, `ValidationContractLoadResult`, `VALIDATION_CONTRACT_CAPS`, `VALIDATION_CONTRACT_YAML_PATHS` |
-| `src/domains/safety/path-policy.ts` | `compilePathPolicy`, `evaluatePathPolicy`, `CompiledPathPolicy`, `PathPolicyDecision` |
-| `src/domains/safety/default-path-policy.ts` | `DEFAULT_DAMAGE_CONTROL_PATH_POLICY`, `OPERATOR_PATH_POLICY`, `mergePathPolicyInputs` |
-| `src/domains/safety/damage-control.ts` | `match`, `DamageControlRule`, `DamageControlRuleset`, `DamageControlMatch` |
-| `src/domains/safety/rule-pack-loader.ts` | `getCachedDefaultRulePacks`, `RulePacks`, `PackId` |
-| `src/domains/safety/protected-artifacts.ts` | `extractCommandWriteTargets`, `extractCommandDeleteTargets`, `detectValidationCommand`, `toolMutationPaths`, `scanShellLike`, `scanShellLikeDeep` |
-| `src/domains/safety/protected-artifacts-registration.ts` | `createProtectedArtifactsRegistration`, `ProtectedArtifactsRegistration` |
-| `src/domains/safety/scope.ts` | `READONLY_SCOPE`, `WORKSPACE_SCOPE`, `CONFIRMED_SCOPE`, `isSubset` |
-| `src/domains/safety/loop-detector.ts` | `createLoopState`, `observe`, `LoopDetectorState`, `LoopVerdict` |
-| `src/domains/safety/run-effects.ts` | `RunEffects`, `createRunEffectsRecorder` |
-| `src/domains/safety/rigor.ts` | `Rigor`, `resolveRigor`, `rigorResolution`, `parseRigorOverride` |
+This area decides, for every tool call, whether it runs, is parked for a person or for the main agent, or is refused. A reader needs it when changing a permission rule, an autonomy level, the path or command policy, the judge's behavior, or the end-of-turn validation gate.
 
 ## What this area does
 
-The safety domain separates two orthogonal axes of control:
+Four cooperating layers make the decision:
 
-1. **The safety net** (level-independent): hard blocks and confirm rails that apply at every autonomy level. This axis owns damage-control rule matching (`damage-control.ts`), path-policy enforcement (`path-policy.ts`), project-policy validation (`project-policy.ts`), trust and skill authority checks, and the write-root confinement for worker runs.
+1. The policy engine (`src/domains/safety/policy-engine.ts`) judges one call at a time and returns a net verdict of `allow`, `ask`, or `block`, together with classification, reason code and policy metadata.
+2. The admission evaluator (`src/domains/safety/admission.ts`, `evaluateAdmission`) combines the net verdicts of a call's capability and effects, applies hard permit limits, confirmation rails and autonomy mapping, and returns an `AdmissionDisposition` of `allow`, `deny`, or `ask`. The module header states that native registry admission, the Claude SDK bridge and the ACP mediator all decide through this one evaluator.
+3. The safety judge (`src/domains/safety/safety-judge.ts`, `createSafetyJudge`) is a model-based reviewer consulted for asks at default autonomy.
+4. The finish contract (`src/domains/safety/finish-contract.ts`, `assessFinishContract`) decides, at turn end, whether a turn that mutated the workspace recorded validation evidence or a limitation receipt.
 
-2. **The autonomy axis** (level-dependent): an ordered dial (`default` → `yolo`) that controls which action classes trigger the approval flow versus run immediately versus auto-deny. This axis runs *after* the safety net; a net block is final, and the mapping applies only to level-dependent rows that passed the net.
+`src/domains/safety/index.ts` is the domain entry. It exports `SafetyDomainModule`, which pairs `SafetyManifest` with `createSafetyBundle` from `extension.ts`, and re-exports the autonomy, finish-contract, information-flow, path-policy, rigor and validation-contract surfaces. Among its importers are the CLI entries and the orchestrator under `src/entry/`.
 
-The finish contract and the validation contract are separate subsystems that ride on the same audit ledger and share the same mutation vocabulary (`extractCommandWriteTargets`, `detectValidationCommand`, `toolMutationPaths` from `protected-artifacts.ts`).
+## Policy engine
 
-## The admission flow
+`createSafetyPolicyEngine(options)` builds an engine bound to a workspace cwd. Its options carry rule packs, a project policy, write roots and read-exempt roots. The returned `SafetyPolicyEngine` exposes `evaluate(call, posture?, scope?)`, `readablePath`, `writeTargetViolation`, `metadata`, `informationFlow` and `flowRestrictionsFor`.
 
-### Entry point: the tool registry
+The engine's own construction is central to its behavior. At build time it resolves the cwd's git control paths, reads the project policy and gates it through trust, compiles the path policy with Clio's credential store and skills root added as zero-access and read-only entries, and sources base damage-control rules once. Those are the inputs every later `evaluate` call uses.
 
-The primary caller is `src/tools/registry.ts:602`. The `admit` function calls `deps.safety.evaluate(call, posture)`, where `posture` is derived from the autonomy level: a one-shot grant sets `"confirmed"`, yolo level sets `"yolo"`, and default sets `undefined`.
+The `scope` argument to `evaluate` is an `OperatorScope`: either `OperatorYoloScope` (`level: "yolo"`) or `OperatorDefaultScope` (`level: "default"`, with `sandbox` and `snapshots` booleans). Its interface comments describe what each scope changes. Under yolo, only the floor, operator-authored rules and run ceilings block, and nothing asks. Under default, the floor and path and authority rails still block, former damage-control blocks ask, and contained shell calls run without the asks their command text would raise. The `SafetyPolicyDecision` interface records `shellSandbox`, `recoverable`, `runsWorkspaceCode`, `readScope` and `gitControl` on decisions that a later step reads.
 
-```
-registry.admit(call)
-  → deps.safety.evaluate(call, posture)
-    → activePolicyEngine().evaluate(call, posture)   // extension.ts:277
-      → createSafetyPolicyEngine().evaluate(call, posture)  // policy-engine.ts:269
-```
+## Admission: the shared evaluator
 
-### The policy engine's evaluation stages
+`evaluateAdmission(input: AdmissionInput)` is the single decision function. Its input carries the `principal` (`"main"` or `"worker"`), the `effects` array (each a `ClassifierCall`, required to be non-empty), an optional `capability`, an explicit absolute `cwd`, the `safety` port, the autonomy level, the operator's scope objects, constraints, an optional `authorization` and the `hookDrift` guard.
 
-`createSafetyPolicyEngine` in `src/domains/safety/policy-engine.ts:269` returns an object with `evaluate`, `readablePath`, and `metadata`. The `evaluate` method runs through the following stages in order, each of which can short-circuit to a final `block`, `ask`, or `allow`:
+Its branch order, read from the source, is:
 
-1. **Normalize and classify.** `normalizeCallPaths` strips leading `@` and folds Unicode spaces in path arguments; `classify` maps `(tool, args)` to an `ActionClass` (`read`, `write`, `execute`, `dispatch`, `system_modify`, `git_destructive`, or `unknown`).
+1. The cwd must be absolute. A relative cwd returns a `context` deny.
+2. Every effect is evaluated through `input.safety.evaluate`. A `block` on the capability or any effect returns a `safety_net` deny immediately. An empty effects list returns a `no_effects` deny.
+3. Hard permit limits: a read-only run denies any call that is not a pure read, any confirmation rail, any outside-workspace read, any net ask, or a skill activation (`read_only`). A tool outside the turn's or run's allowed tools denies with `tool_scope`. Skill-disabled and skill-surface checks deny with `skills_disabled` and `skill_surface`.
+4. Under true yolo (`operatorYolo` defined), the function returns `allow` at this point. The comment in the source says no confirmation rail, Git allowance or autonomy mapping asks at that level.
+5. If the operator's default scope is set and the hook-drift guard reports a changed git hook for a call that runs hooks outside the sandbox, the call becomes an operator-only `git-hooks-changed` ask.
+6. Confirmation rails. A net ask becomes a `safety-net` ask with `approvalAuthority: "operator"`. A `confirmationRuleId` becomes a `tool-confirmation` ask. Only an operator authorization for the same action class clears these.
+7. A `git_destructive` effect that is not a snapshot-recoverable discard is either asked (under the operator's default scope, through a `safety-net` ask) or denied with `git_destructive`.
+8. Autonomy mapping, per effect, in order. For a worker, `workerGitObligation` decides Git effects by the permit's Git allowance. Under the operator's default, snapshot-recoverable effects and contained effects are skipped. A worker's typed write to a git control path asks the main agent. Otherwise `mapAutonomy(level, actionClass, options)` decides; `allow` continues, and `ask` becomes an `autonomy` ask whose authority is `main` for a worker and `operator` for the main agent.
+9. If every effect passes, the function returns `allow`, with `authorized` set when a main grant was honored.
 
-2. **Damage-control scan.** `damageControlScans(call)` extracts the command string(s) to scan; for content-bearing tools (`Write`, `Edit`, `Artifact`, `Dispatch`, `Tasks`) it scans only the destination path, while for bash and verify it scans the full command plus `shellCommandSegments` and `normalizedGitCommands`. `matchSourcedRule` matches the scanned strings against the base rule pack from `damage-control-rules.yaml`.
+The `authorization` argument is a structured `AdmissionAuthorization` with an `issuer` (`"main"` or `"operator"`) and an `actionClass`. The source notes that an authorization covers only the same action class, and that a `main` issuer does not clear operator rails.
 
-3. **Write-root containment.** `evaluateWriteRoots` checks whether a write-class tool's target escapes the permitted `writeRoots`. Under active write-root confinement, execute-class tools (`bash`, `verify`, `run_script`) and `dispatch` are blocked outright (`isWriteConfinementEscape`), because they can mutate the filesystem outside the roots.
+Admission is exercised through the registry. The focused test `tests/contracts/safety-gates.test.ts`, case "keeps a safety-net confirmation rail operator-only so a main-issued grant cannot clear it", builds a worker registry at default autonomy and invokes `gcloud iam policies list` through bash. It asserts the park has `approvalAuthority` `"operator"`, that a `main` grant leaves the call parked with `executed` at 0, and that `evaluateAdmission` gives `ask` with `operator` authority for that call. For an ordinary worker call `frobnicate --all`, it asserts the ask is `autonomy:main`, and that a `main` grant for `execute` yields `allow`. A main-principal call to the same ordinary command asks with `operator` authority.
 
-4. **Git destructive and block rules.** If the classification or the damage-control match is `git_destructive`, or the match has `block: true`, the call is a hard block. An explicit `ask: true` damage-control rule (`askRule`) is deferred to a later stage.
+The yolo case in the same file, "yolo clears ordinary confirmation rails while damage control still decides", covers the other side of the same boundary (test body not read in full for this page).
 
-5. **Project policy validity.** If `.clio-coder/safety.yaml` is invalid and the tool is an execution tool (`bash`, `verify`), the call is blocked with reason `project-policy-invalid`.
+## Safety judge
 
-6. **Trust and skill authority.** `invokesTrustMutation` detects `config trust` commands. `skillMutationReason` checks whether the command mutates Clio's settings, workspace trust records, or skill roots.
+`createSafetyJudge(deps)` returns a `SafetyJudgeSeat` with a `review(subject)` method. It is consulted for an ask, not for every call. `review` returns `{ kind: "skip" }` when the judge is disabled in config or when `operatorOnlyAsk(subject)` applies. Otherwise it builds a prompt from operator messages, call arguments and consequence sentences, and calls `deps.complete` with `SAFETY_JUDGE_SCHEMA`, under a timeout (`SAFETY_JUDGE_TIMEOUT_MS`) and an output-token cap.
 
-7. **Path policy.** `evaluateProjectPathPolicy` compiles and evaluates the merged path policy (defaults + project + operator) against the call's targets. A block here uses reason codes like `path-policy:zeroAccessPaths` or `path-policy:readOnlyPaths`.
+The outcomes are:
 
-8. **Bash zero-access read scan.** `evaluateBashZeroAccessRead` scans bash command tokens for zero-access paths (e.g., `cat .env`), blocking them. The only carve-out is `grep -sq "^NAME=" <file>` (exit-code-only presence check).
+- No route (`config.target` null): `noVerdict("no-route")`, which parks.
+- Timeout, abort, or error from `complete`: `noVerdict` with cause `timeout`, `aborted` or `error`, which parks.
+- Output that `parseSafetyJudgeAnswer` cannot parse: `noVerdict("unparsable")`, which parks.
+- Escalation state: after repeated blocks (`SAFETY_JUDGE_CONSECUTIVE_BLOCKS`, `SAFETY_JUDGE_TOTAL_BLOCKS`), the judge parks with `escalated` and does not consult again for that session.
 
-9. **Library confirm.** Managed library changes (`invokesClioSkillMutation`) are confirmed by `confirmed` posture or admitted by `yolo`, otherwise they ask in default.
+Session state (consecutive and total block counts) resets when the session identifier changes. Journal and transcript hooks are wrapped so a failing `record` or `note` cannot change a verdict.
 
-10. **Authored ask rail.** If `askRule` matched a damage-control rule with `ask: true` and `block` is not true, the confirmed posture allows; otherwise it asks.
+Focused test `tests/contracts/safety-judge.test.ts` covers this through the registry. Its case "an allow runs the call without parking it" stubs the judge with `answer("allow", "operator-named", ...)` and an unrecognized bash command, and asserts `verdict.kind` is `"ok"`, the command ran once and no park occurred. Its case "a block returns the judge's refusal and never parks or runs" stubs `answer("block", "publish", ...)` and asserts `verdict.kind` is `"blocked"`, `verdict.denial?.code` is `"safety-judge:publish"`, and nothing ran or parked. Later cases in the same file assert park counts, the number of prompts across repeated asks, and operator-message bounding.
 
-11. **System modify confirm.** `system_modify` action class asks in default, allows in yolo and confirmed.
+Judge configuration is read through `resolveSafetyJudgeConfig(settings)`. `tests/contracts/safety-judge.test.ts` also asserts the `safety.judge` settings shape with an `allow` list and a `deny` list. The `allow` and `deny` lists are read as operator-authored rules.
 
-12. **Bash net evaluation.** `evaluateBashPolicy` (policy-engine.ts:805) is the bash-specific net: empty commands, cwd escapes, hidden content (variable substitution, command substitution), project policy commands, `&&` chains, test runners, project scripts, built-in allowlist, and sequencing operators. It returns an `execRecognition` tag (`"recognized"` or `"unrecognized"`) that the autonomy mapping uses.
+## Finish contract
 
-13. **Read scope escape.** For read-class tools, `readScopeEscape` checks whether the path resolves outside the workspace and outside Clio's own readable roots. The net passes; the `readScope: "outside-workspace"` flag lets the autonomy mapping ask in default.
+`assessFinishContract(input)` is a pure function over session ledger entries. Its doc comment fixes the decision order:
 
-### The autonomy mapping
+1. No mutating receipt in the recent window gives `ok` with `no_mutation`.
+2. Validation evidence present gives `ok` with `validation_evidence` and a bounded scope advisory.
+3. A successful `limitation` receipt gives `ok` with `explicit_limitation`.
+4. Prose-only writes or only non-source removals give `ok` with `prose_only` or `deletion_only`.
+5. Otherwise the result is `engage` with `unvalidated_mutation`, carrying `FINISH_CONTRACT_ADVISORY_MESSAGE`.
 
-After the safety net passes, `src/tools/registry.ts` calls `mapAutonomy` from `src/domains/safety/autonomy.ts`. The function takes `level` (`default` or `yolo`), `actionClass`, and options (`executeRecognized`, `dispatchPlanScale`, `exposure`, `readOutsideWorkspace`). The mapping:
+The window is capped by `DEFAULT_RECENT_ENTRY_LIMIT` (80 entries since the last user message). The source says the assistant's prose does not enter the decision.
 
-- `git_destructive` → `"deny"` (defensive; the net blocks it first).
-- `read` with `readOutsideWorkspace` at default → `"ask"`; at yolo → `"allow"`.
-- `read` → `"allow"`.
-- `write` → `"allow"` at both levels.
-- `dispatch` with `dispatchPlanScale` at default → `"ask"`; at yolo → `"allow"`.
-- `execute` with `executeRecognized !== false` → `"allow"`; unrecognized at default → `"ask"`, at yolo → `"allow"`.
-- `unknown` → `"ask"` at default, `"allow"` at yolo.
-- `system_modify` → `"ask"` at default, `"allow"` at yolo.
-
-The registry then records the final disposition through `safety.audit.recordToolCall`.
-
-### Worker safety
-
-`src/engine/worker-tools.ts:55` `createWorkerSafety(options)` builds a worker-local `SafetyContract` that owns its own policy engine (with `writeRoots` confinement), per-run loop-detector state, and protected artifact state. The worker does not share the orchestrator's loop detector or audit writer.
-
-### ACP and Claude SDK bridges
-
-- `src/engine/acp/tool-mediator.ts:592` calls `safety.evaluate` for delegated tool calls.
-- `src/engine/claude/tool-safety.ts:238` calls `safety.classify` and `safety.evaluate` for the Claude SDK tool-safety bridge.
-
-## The finish contract
-
-### Assessment
-
-`assessFinishContract` in `src/domains/safety/finish-contract.ts:112` is a pure function that reads only ledger receipts. It looks at the recent window (capped at `DEFAULT_RECENT_ENTRY_LIMIT = 80` entries, bounded by the last user message) and returns a discriminated union:
-
-```
-ok/no_mutation          — no successful mutation receipt in the window
-ok/validation_evidence  — validation evidence present
-ok/explicit_limitation  — successful limitation receipt present
-engage/unvalidated_mutation — mutation without evidence or limitation
-```
-
-The decision order is:
-
-1. `mutatingReceipts(window)` — paths from successful write/edit/artifact receipts and bash write/delete targets.
-2. `collectValidationEvidence(window, acceptanceChecks, workspaceRoot)` — validation command runs (`detectValidationCommand`), verify check runs, passed dispatch receipts, protected-artifact records.
-3. `collectLimitationEvidence(window)` — successful `limitation` tool calls (non-error `tool_result`).
-4. If rigor is `"high"`, it additionally requires that every check in `activeAcceptance.verification` has passing evidence or a limitation receipt naming the exact check id.
-
-### Registration
-
-`createFinishContractRegistration` in `src/domains/safety/finish-contract-registration.ts:67` packages the assessor as a middleware hook registration for `turn_end`. On a settled stop turn with non-empty final text, it reads session entries, resolves rigor, and calls `assessFinishContract`. On `engage`:
-
-- At normal rigor: injects a `warn` reminder.
-- At high rigor: if verification tools are available, emits `request_continuation` with `HIGH_RIGOR_REVALIDATION_MESSAGE`; otherwise injects a warning.
-
-Every decision (ok or engage) is written to the audit ledger via `recordDecision`, which calls `options.recordDecision` (wired in production to `safety.audit.recordCompletionContract`).
-
-## The project policy
-
-`loadProjectSafetyPolicy` in `src/domains/safety/project-policy.ts` reads `.clio-coder/safety.yaml` from the workspace (searching upward). It validates the YAML against a strict schema:
-
-- Root keys: `version`, `commands`, `tasks`, `disableDefaultPathPolicy`, `zeroAccessPaths`, `readOnlyPaths`, `noWritePaths`, `noDeletePaths`.
-- `version` must be `1`.
-- Command entries have `id`, `command`, `cwd`, `timeoutMs`, `maxOutputBytes`, `actionClass`, `shellOperators`, `env`, `requireConfirmation`, `rationale`, `owner`, `comment`.
-- Path entries must be relative to the policy root, cannot be absolute, and cannot escape with `..`.
-
-An invalid policy returns `valid: false` with `errors`; the policy engine treats this as a fail-closed condition for execution tools.
-
-## The path policy
-
-`compilePathPolicy` in `src/domains/safety/path-policy.ts` compiles a `PathPolicyInput` into sorted entries. The policy engine merges three layers:
-
-1. `DEFAULT_DAMAGE_CONTROL_PATH_POLICY` from `default-path-policy.ts` — zero-access paths (`.env`, `~/.ssh/`, `*.pem`, `credentials.yaml`, etc.), read-only paths (`.clio-coder/safety.yaml`, `node_modules/`, `dist/`, etc.), no-write paths (foreign agent dirs), and no-delete paths (`CLAUDE.md`, `LICENSE`, `README.md`, etc.).
-2. The project policy's path entries (gated on validity).
-3. `OPERATOR_PATH_POLICY` — operator authority that survives every project-local exemption.
-
-`evaluatePathPolicy` resolves each target path (chasing symlinks via `canonicalizeRawPath`) and checks it against entries sorted by kind (`zeroAccessPaths` → `readOnlyPaths` → `noWritePaths` → `noDeletePaths`). The first matching entry that blocks the operation wins.
-
-## The damage-control rule pack
-
-`getCachedDefaultRulePacks` in `src/domains/safety/rule-pack-loader.ts` loads `damage-control-rules.yaml` (schema v2) from the package root. The v2 schema stores rules in a named `base` pack. Rules are compiled by `compileDamageControlRule` in `rule-compiler.ts` into `DamageControlRule` objects with a `RegExp` pattern, an action class, and a `block` flag. The rule pack is cached in module scope.
-
-## Rigor resolution
-
-`rigorResolution` in `src/domains/safety/rigor.ts` resolves the effective rigor for a turn. Rigor is orthogonal to the autonomy permission levels: autonomy says what an agent may touch; rigor says what evidence "done" requires.
-
-The resolution order is:
-
-1. **Explicit override** (`"high"` or `"normal"`): always wins. Sourced from the `CLIO_CODER_RIGOR` env var via `parseRigorOverride`.
-2. **Validation contract**: if the workspace's scientific-validation contract parses under the version-1 schema, rigor is `high`. The contract path is recorded in the resolution.
-3. **Markdown advisory**: if only `VALIDATION.md` exists (no YAML), rigor stays `normal` with a diagnostic noting the advisory prose.
-4. **Invalid contract**: if the YAML contract exists but fails to parse, rigor stays `normal` with a diagnostic.
-5. **Default**: `normal` with source `"none"`.
-
-This means the evidence bar is derived from what the repo actually declares, not from a filename or a global toggle. A contract that fails to parse is diagnosed and leaves rigor at `normal`.
-
-## The validation contract
-
-`loadValidationContract` in `src/domains/safety/validation-contract.ts` reads the workspace's scientific validation contract from `.clio-coder/validation.yaml` (or `validation.yml`). It is a strict version-1 loader:
-
-- `VALIDATION_CONTRACT_CAPS` defines hard limits: `fileBytes: 256 KB`, `textBytes: 4096`, `notesBytes: 16 KB`, `artifacts: 256`, `validators: 128`, `modules: 64`, `mapEntries: 256`, `mapKeyBytes: 256`.
-- The schema requires `version: 1` at the root, with optional `task`, `runtime`, `artifacts`, `validators`, and `notes`.
-- `runtime.kind` must be one of `"local"`, `"slurm"`, `"mpi"`, `"other"`.
-- `artifacts` entries require `path`, with optional `format`, `expected_dimensions`, `expected_attributes`, `numerical_tolerances`, and `preserve`.
-- `numerical_tolerances.ulp` is capped at `MAX_ULP_TOLERANCE` from `tools/verify/numeric.ts`.
-
-The loader never throws; every failure is a `{ ok: false, path, reason }` value. A `VALIDATION.md` without YAML is reported present and advisory.
-
-## Audit recording
-
-`src/domains/safety/decision-events.ts` builds the structural payloads of `tool.decided`, `completion.evaluated` and `safety.judged`; the safety extension emits them through the telemetry hub into the deciding scope's journal.
-
-The writer is a discriminated union over `kind`:
-- `tool_call` — emitted by `safety.evaluate()` for every classified tool call.
-- `permission` — one-shot tool/action confirmation requests and resolutions.
-- `abort` — `BusChannels.RunAborted` events.
-- `session_park` / `session_resume` — session lifecycle events.
-- `agent_status_change` — alarmable agent-status transitions.
-- `completion_contract` — finish-contract decisions.
-
-Strings are truncated at `MAX_STRING_LEN = 200`; keys matching `REDACT_KEY_RE` (password, token, secret, key, auth, credential) are redacted.
-
-## The action classifier
-
-`classify` in `src/domains/safety/action-classifier.ts` is a pure function with no I/O and no state. It maps `(tool, args)` to an `ActionClass`:
-
-- **Read class:** `read`, `grep`, `find`, `ls`, `evidence`, `web_read`, `web_fetch` (GET/HEAD), `git`, `code_nav`, `self_compact`, `context`, `clio_docs`, `clio_library`, `data`, `gateway`, `monitor`, `ask_user`, `credential_present`, `tasks`, `ledger`, `panes`, `limitation`, `decide`, `consult`, `vision`.
-- **Write class:** `write`, `edit`, `artifact`, `configure_clio`, and `web_fetch` with outward arguments.
-- **Execute class:** `bash`, `verify`, `run_script`.
-- **Dispatch class:** `dispatch`, `steer`, and `panes` with `action: "handoff"`.
-- **Harness extensions:** classified as `execute`.
-
-For bash calls, the classifier additionally:
-1. Matches `GIT_DESTRUCTIVE_PATTERNS` (force push, reset --hard, checkout -- ., branch -D).
-2. Matches `SYSTEM_MODIFY_PATTERNS` (sudo, rm -rf /, apt install, brew install, systemctl, chmod, chown).
-3. Scans write targets in the command (`bashPathReasons`) for system-root or outside-cwd paths, escalating to `system_modify`.
-
-For write-class tools, `writePathClass` checks the target against `SYSTEM_WRITE_ROOT_PREFIXES` (`/etc`, `/usr`, `/var`, `/bin`, `/sbin`, `/run`, `/private/etc`, `/private/var`) with exemptions for `SYSTEM_WRITE_EXEMPT_PREFIXES` (`/var/tmp`, `/var/folders`, `/private/var/tmp`, `/private/var/folders`). Paths outside the workspace (`~`-prefixed or unresolvable) also escalate to `system_modify`.
-
-## Extension points
-
-### Adding a new damage-control rule
-
-Rules are added to the `base` pack in `damage-control-rules.yaml` (schema v2). The rule pack loader compiles them at load time. The policy engine matches them in rule order (first match wins). A rule with `ask: true` and `block` not true becomes a confirm rail; a rule with `block: true` is a hard block.
-
-### Adding a new no-prompt command
-
-Test runners are added to `TEST_RUNNER_COMMANDS` in `src/domains/safety/policy-engine.ts:169`. Project scripts are added to `PROJECT_SCRIPT_COMMANDS` at line 192. Both are regex lists. The `test-runner-vocabulary.test.ts` test enforces that every `TEST_RUNNER_COMMANDS` id maps to a `detectValidationCommand` label; the test fails if they drift.
-
-### Adding a new path policy entry
-
-Project-authored path entries go in `.clio-coder/safety.yaml` under `zeroAccessPaths`, `readOnlyPaths`, `noWritePaths`, or `noDeletePaths`. Built-in defaults are in `DEFAULT_DAMAGE_CONTROL_PATH_POLICY` in `src/domains/safety/default-path-policy.ts`. Operator-level entries are in `OPERATOR_PATH_POLICY`.
-
-### Adding a new autonomy option
-
-The `AutonomyMappingOptions` interface in `src/domains/safety/autonomy.ts` is the extension point. The registry passes `executeRecognized`, `dispatchPlanScale`, `exposure`, and `readOutsideWorkspace`. New options are added to this interface and passed by the registry's `admit` function.
-
-### Adding a new audit record kind
-
-A new accountability record is a journal event declared in `src/core/telemetry/events.ts` with a payload builder in `src/domains/safety/decision-events.ts`.
-
-## Focused tests
-
-### `tests/contracts/safety-gates.test.ts`
-
-This is the comprehensive safety gate boundary test. It creates a `SafetyPolicyEngine` in an isolated scratch environment and tests:
-
-- Hard-blocking zero-access paths (`read .env`, `write credentials.yaml`, `bash ": > .env"`) before confirmation or ask rails.
-- The interaction between `mapAutonomy` and the policy engine: `executionDisposition` returns `"allow"`, `"ask"`, or `"block"` depending on the level and the decision.
-- Write-root confinement: a worker safety with `writeRoots` confines writes to the declared roots.
-- Symlink escape classification: writes through escaping symlinks classify as `system_modify`.
-- Project policy command recognition: a valid `.clio-coder/safety.yaml` allows declared commands.
-
-### `tests/contracts/test-runner-vocabulary.test.ts`
-
-This test enforces that `TEST_RUNNER_COMMANDS` and `PROJECT_SCRIPT_COMMANDS` stay in sync with `detectValidationCommand` labels. It asserts:
-
-- Every `VALIDATION_COMMAND_LABELS` key has a corresponding `TEST_RUNNER_COMMANDS` entry.
-- Every test runner spelling is recognized by the policy engine as `allow` with `execRecognition: "recognized"`.
-- Project scripts are `allow` with `execRecognition: "unrecognized"`, which maps to `ask` at default and `allow` at yolo.
-- Command substitution and unsafe destinations keep their safety rails (`node --test $(cat f)` is not allowed).
-- `cd build && ctest` is recognized as a chain (`bash-recognized-chain`).
-
-### `tests/contracts/symlink-escape.test.ts`
-
-This test verifies that the policy engine and classifier handle symlink escapes correctly:
-
-- A write through a dangling escaping link classifies as `system_modify` with reason `write-path-outside-cwd`.
-- The registry's end-to-end flow refuses the write and leaves nothing outside the root.
-- A read through an escaping link into a zero-access path is blocked by the path policy.
-- A link loop at the target or in a parent component fails closed.
-- `bash-cwd-escape` blocks a bash call with a cwd that is a link loop.
-
-### `tests/contracts/finish-contract-limitation.test.ts`
-
-This test verifies the finish contract's decision order:
-
-- A mutation plus a successful `limitation` receipt settles `ok/explicit_limitation`.
-- An errored `limitation` call leaves no receipt, so the contract engages.
-- Prose like "not verified" without a limitation receipt does not satisfy the contract.
-- A limitation receipt from before the last user message is ignored.
-- Validation evidence takes precedence over a limitation receipt.
-- A successful native Node test receipt settles the contract; a failed test does not.
-
-### `tests/extended/validation-contract.test.ts`
-
-This test verifies the validation contract loader:
-
-- The documented example contract (a NetCDF climate output contract with slurm runtime, 4 nodes, 64 ranks, and 2 artifacts) parses under the version-1 schema.
-- Cap violations (file size, text length, map entries) produce diagnostics.
-- A `VALIDATION.md` without YAML is reported present and advisory.
-- `parseValidationContractText` rejects unknown fields, invalid versions, and missing required fields.
+Focused test `tests/contracts/finish-contract-limitation.test.ts` covers this. Its case "engages on prose such as 'not verified' when no limitation receipt exists" builds a mutation window followed by an assistant message reading "Edited src/thing.ts. Tests: not run. This change is not verified and could not be tested.", and asserts `kind` `engage` with reason `unvalidated_mutation`. Its case "still engages when the limitation call errored, so a rejected call leaves no receipt" asserts `engage` when the limitation tool result is an error. Its case "settles ok/explicit_limitation on a mutation plus a successful limitation receipt" asserts `ok`, with the evidence kind `limitation`.
 
 ## Things to watch when editing
 
-- **Rule order is precedence.** In `matchSourcedRule` (policy-engine.ts), the outer loop stays over the rules and each one is offered every scan candidate. A rule fires on the first candidate it matches, which can only add matches, never reorder or drop one. Reordering rules in `damage-control-rules.yaml` changes behavior.
+- The autonomy level for a worker is taken from `workerExecuteAutonomy` only when it is `"yolo"`. Otherwise it is the default level. Main-principal autonomy comes from `input.autonomy`.
+- Under true yolo, `evaluateAdmission` returns `allow` before the confirmation rails, Git allowance and autonomy mapping. Any new rail intended to ask under yolo must be placed before that return.
+- `authorization.issuer` decides which rails a grant clears. Changing the `covers` or `authorized` logic in `evaluateAdmission` changes what an operator or main grant can discharge; the safety-gates test case above is the existing check on that boundary.
+- The policy engine caches resolved git controls and recomputes them only after a call that may have rewritten git config (`gitControlsStale`). Changes to that path affect typed-write admission for workers.
+- The judge's escalation counters and the finish contract's window both have fixed limits. Changing them changes when a session stops consulting the judge or which receipts count.
+- Decision records referenced by the code were not inspected for this page, so no decision references are cited here.
 
-- **The autonomy mapping never overrides a block.** A `block` from the safety net is final at every level. The `mapAutonomy` function in `autonomy.ts` only applies to level-dependent rows after the net passed.
+## Coverage and limits of this page
 
-- **Write-root confinement is lexical.** `evaluateWriteRoots` uses `path.resolve` and `pathBoundaryCovers` without chasing symlinks. A symlink inside a root that points outside is not detected here; the classifier's `writePathClass` and the path policy's `canonicalizeRawPath` catch those separately.
-
-- **The finish contract reads only ledger receipts.** The assistant's prose never enters the decision. A limitation counts only as a `limitation` tool_call paired with a non-error tool_result inside the same window the mutation scan uses.
-
-- **The validation contract loader never throws.** Every failure is a `{ ok: false, path, reason }` value. Rigor resolution, verifier authoring, doctor, and the startup hint all read the contract through this module.
-
-- **The audit writer never propagates errors.** Write errors are logged to stderr and swallowed. Safety must not kill the admission hot path.
-
-- **The test runner vocabulary test is a synchronization guard.** If you add a new test runner command to `TEST_RUNNER_COMMANDS`, you must also add a corresponding `ValidationCommandLabel` to `detectValidationCommand` in `protected-artifacts.ts`, or the test will fail.
-
-- **The damage-control rule pack is cached.** `getCachedDefaultRulePacks` stores the parsed rules in module scope. Changes to `damage-control-rules.yaml` require a restart to take effect.
-
-- **The project policy is fail-closed for execution tools.** If `.clio-coder/safety.yaml` is invalid, `loadProjectSafetyPolicy` returns `valid: false`, and the policy engine blocks `bash` and `verify` calls with reason `project-policy-invalid`.
-
-- **The path policy merges three layers in a specific order.** `DEFAULT_DAMAGE_CONTROL_PATH_POLICY` → project policy → `OPERATOR_PATH_POLICY`. The operator layer survives every project-local exemption.
-
-- **The read-scope escape check only runs in non-confirmed posture.** `readScopeEscape` is called only when `posture !== "confirmed"`. A confirmed one-shot grant bypasses the read-scope ask.
-
-- **The `&&` chain recognition is limited to 6 segments.** `CHAIN_MAX_SEGMENTS = 6` in `policy-engine.ts` caps the number of `&&`-separated segments. Chains longer than this are unrecognized.
-
-- **The bash zero-access read scan has one carve-out.** `grep -q` or `grep -sq` with a `^NAME=`-shaped pattern and a single file argument is allowed. This is the safe protocol the credentials skill teaches for exit-code-only presence checks.
+The focused tests named above were read at the case level, but the bodies of several cases (for example the yolo case in `tests/contracts/safety-gates.test.ts`) were not read in full. The policy engine's evaluate body (`evaluateBashPolicy` and its path rails) and `mapAutonomy` in `autonomy.ts` were outlined but not traced line by line. Protected-artifact detection (`protected-artifacts.ts`), command consequence descriptions (`src/domains/safety/command-consequence.ts`) and information-flow compilation (`src/domains/safety/information-flow.ts`) are described here only at the level of their exported names. Their owning pages should be consulted for detail.

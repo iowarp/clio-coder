@@ -1,232 +1,147 @@
 ---
-title: "Core: settings schema, layered configuration, bus contracts, safe exec, and session routing"
-summary: "The shared foundation modules under src/core that every domain depends on: the one strict settings schema and its layered merge, the event-bus channel registry with payload contracts, the sandboxed subprocess runner, the session-local routing state machine, and the workspace file enumerator."
+title: "Core runtime: settings, trust, safe execution and run records"
+summary: "Describes the src/core leaf modules that load layered settings, gate project-supplied files behind operator consent, run commands through the sandbox-aware exec helpers, and record run provenance. Read this when changing how settings are resolved, how a command is spawned, or where run evidence is written."
 sources:
-  - "src/core/config.ts"
-  - "src/core/defaults.ts"
   - "src/core/settings-layers.ts"
-  - "src/core/telemetry/live-events.ts"
+  - "src/core/workspace-trust.ts"
   - "src/core/safe-exec.ts"
-  - "src/core/settings-controls.ts"
-  - "src/core/workspace-files.ts"
-  - "src/core/session-routing.ts"
+  - "src/core/bash-exec.ts"
+  - "src/core/run-records.ts"
+  - "src/core/config.ts"
 symbols:
-  - "ClioSettings"
-  - "DEFAULT_SETTINGS"
+  - "readLayeredSettings"
   - "readStrictLayeredSettings"
-  - "BusChannels"
-  - "BusPayloadMap"
+  - "updateLayeredSettings"
+  - "projectSurfaceTrust"
   - "runCommandVector"
-  - "createProcessGroupCleanup"
-  - "SETTING_CONTROLS"
-  - "applyControlValue"
-  - "enumerateWorkspaceFiles"
-  - "enumerateWorkspaceFilesAsync"
-  - "SessionRoutingState"
-  - "seedSessionRouting"
-  - "applySessionRouting"
-  - "commitRoutingPatch"
-  - "routingPatchForId"
+  - "runBashCommand"
+  - "createRunRecord"
 tests:
-  - "tests/contracts/settings-controls.test.ts"
+  - "tests/contracts/trust-gate.test.ts"
   - "tests/contracts/safe-exec-streaming.test.ts"
+  - "tests/contracts/bash-exec-settlement.test.ts"
 invariants:
-  - "Every domain reads settings through the single strict schema in src/core/config.ts; the config domain wraps it with watcher, hot-reload, and event emission."
-  - "Project settings layers strip credential-bearing keys and the safety.autonomy leaf; only user settings and operator flags may set those."
-  - "The event bus performs no runtime payload validation; subscribers that consume data crossing a process boundary must keep validating."
-  - "Session routing patches are applied to session-local state first, then written through to saved settings; a persist that throws puts the route back before rethrowing."
-  - "The safe-exec runner always spawns children in a new process group on POSIX and signals the group (not just the leader) for timeout, cancellation, and output-cap kills."
+  - "Project settings and project.local settings are read only when the project surface snapshot verdict is trusted; otherwise their layer blob is dropped and a trust notice is recorded as an issue."
+  - "Operator-only safety keys (scratchRoots, sandboxPassEnv, sandboxUnixSockets, unattendedAfterSeconds, yoloAccepted, judge) and trustedUnmediated are stripped from project layers, with an issue recorded for each."
+  - "A bash command that would run in the main session without a sandbox plan is refused with a not-spawned result rather than executed."
+  - "A run record directory is refused if the records root resolves outside the workspace root, and a pre-existing directory with the same run id is an error."
+validate:
+  - "pnpm exec node --test dist/tests/contracts/trust-gate.test.js"
+  - "pnpm exec node --test dist/tests/contracts/safe-exec-streaming.test.js"
+  - "pnpm exec node --test dist/tests/contracts/bash-exec-settlement.test.js"
 ---
 
-# Core
+# Core runtime: settings, trust, safe execution and run records
 
-The `src/core/` directory holds the shared foundation modules that every Clio domain depends on. These are not domain-specific; they provide the settings schema, layered configuration merge, event-bus contracts, sandboxed subprocess execution, session-local routing state, and workspace file enumeration. The config domain at `src/domains/config/index.ts` wraps the core settings layer with a watcher, hot-reload dispatch, and event emission, but the schema itself and the atomic file write/lock machinery live here in core.
+`src/core` holds the leaf modules that the rest of the codebase depends on before any domain starts. A reader needs this page when changing how effective settings are computed, when a project file is allowed to take effect, how a shell or argv command is spawned, or what provenance a `run_script` execution leaves on disk.
 
-## Ownership
+## What this area does
 
-| Module | Responsibility | Key entry points |
-|--------|---------------|------------------|
-| `src/core/config.ts` | The one strict settings schema: read, validate, write, cross-process lock | `readSettings`, `validateSettings`, `updateSettings`, `applySettingsDelta`, `withSettingsLock` |
-| `src/core/defaults.ts` | Shipped default values and the machine-readable YAML mirror | `DEFAULT_SETTINGS`, `DEFAULT_SETTINGS_YAML`, all `*Settings` interfaces |
-| `src/core/settings-layers.ts` | Four-layer merge (built-in < user < project < project.local < CLI) with credential stripping and trust verification | `readLayeredSettings`, `readStrictLayeredSettings`, `updateLayeredSettings`, `updateProjectLocalSettings` |
-| `src/core/telemetry/live-events.ts` | Canonical event-bus channel names and compile-time payload contracts | `BusChannels`, `BusPayloadMap`, `BusPayloadMapCoversAllChannels` |
-| `src/core/safe-exec.ts` | Sandbox subprocess runner with process-group teardown, output capping, UTF-8 boundary handling | `runCommandVector`, `createProcessGroupCleanup`, `buildSafeToolEnv`, `createRetainedStreamWindow` |
-| `src/core/settings-controls.ts` | UI-facing settings catalog with labels, descriptions, and value parsing/validation | `SETTING_CONTROLS`, `applyControlValue`, `settingControl` |
-| `src/core/workspace-files.ts` | Git-first workspace file enumeration with bounded fallback walk | `enumerateWorkspaceFiles`, `enumerateWorkspaceFilesAsync`, `filterWorkspaceFileCandidates` |
-| `src/core/session-routing.ts` | Session-local routing state, patches, diffs, and effective-view composition | `seedSessionRouting`, `applySessionRouting`, `commitRoutingPatch`, `routingPatchForId`, `diffRouting` |
+- **Layered settings.** `src/core/settings-layers.ts` builds the effective settings from up to four file layers plus a source map. Its header describes the precedence order as built-in, then user `settings.yaml`, then project `.clio-coder/settings.yaml`, then `.clio-coder/settings.local.yaml`. CLI flags are listed as a fifth origin in the `SettingsOrigin` type.
+- **Project trust.** `src/core/workspace-trust.ts` stores operator consent for privilege-bearing project files (safety, hooks, settings, extensions, plugins). The settings loader consults it before reading a project layer.
+- **Command execution.** `src/core/safe-exec.ts` spawns argv vectors with a filtered environment, a cwd confined to the workspace, a timeout, output capture and bounded streaming. `src/core/bash-exec.ts` builds on the same sandbox plan logic to run shell command strings.
+- **Run provenance.** `src/core/run-records.ts` creates a per-run directory under the project records tree and captures file hashes and output references into a manifest.
+- **Settings schema validation.** `src/core/config.ts` holds the `ClioSettings` type (derived from `DEFAULT_SETTINGS`), the `validateSettings` path, and the issue and error types used to report failures.
 
-## Settings schema and validation
+## Ownership and key symbols
 
-`src/core/config.ts` defines the single strict schema for all Clio settings. The type `ClioSettings` is `typeof DEFAULT_SETTINGS`, meaning the shape of the settings object is determined by the defaults in `src/core/defaults.ts`. There is exactly one schema: the file on disk and the in-memory shape use the same version-2 key names (`targets`, `chat.target`, `fleet.permissions.mode`, etc.).
+| Concern | Path | Principal symbols |
+| --- | --- | --- |
+| Layer merge, operator-only key stripping, read/update | `src/core/settings-layers.ts` | `readLayeredSettings`, `readStrictLayeredSettings`, `updateLayeredSettings`, `updateProjectLocalSettings`, `settingsSourceFor`, `OPERATOR_ONLY_SAFETY_KEYS`, `stripProjectRuntimeTrust` |
+| Trust verdicts and approvals | `src/core/workspace-trust.ts` | `projectSurfaceTrust`, `hasProjectSurfaceTrust`, `captureProjectSurface`, `recordProjectSurfaceTrust`, `revokeProjectSurfaceTrust`, `captureProjectInstallBaseline` |
+| Vector command execution | `src/core/safe-exec.ts` | `runCommandVector`, `buildSafeToolEnv`, `resolveSafeCwd`, `createRetainedStreamWindow`, `createProcessGroupCleanup`, `runStagingCommandSync` |
+| Shell command execution | `src/core/bash-exec.ts` | `runBashCommand`, `buildToolEnv`, `bashSpawnPlan`, `createBashOutputProgressController` |
+| Run directories and manifests | `src/core/run-records.ts` | `createRunRecord`, `landRunRecordsRoot`, `assertRunRecordIntact`, `captureFileRef`, `captureOutputRef`, `writeRunManifest`, `sweepRunRecords` |
+| Schema and issues | `src/core/config.ts` | `ClioSettings`, `SettingsIssue`, `SettingsValidationError`, `formatSettingsIssues`, `reportSettingsWarnings` |
 
-`validateSettings(raw: unknown)` at `src/core/config.ts:1296` clones `DEFAULT_SETTINGS` and walks the raw input, accumulating `SettingsIssue` entries for every unknown key, type violation, retired value, and schema violation. It does not throw; it returns `{ settings, issues }`. `readSettings()` wraps `validateSettings` and throws `SettingsValidationError` when issues exist.
+`src/core/defaults.ts` and `src/core/settings-controls.ts` are the other anchor sources for this area. They define the default values and the per-setting UI metadata. This page does not trace them in detail.
 
-The write path is locked and atomic. `updateSettings(mutate)` at `src/core/config.ts:2315` runs under `withSettingsLock`, which acquires an advisory file lock on `settings.yaml`. Inside the lock it re-reads the freshest saved document, applies the mutator, re-validates through the schema, and persists the delta via `safeResourceWrite` (temp file + rename). `applySettingsDelta(saved, before, after)` writes only the keys the mutation actually changed, so materialized defaults never leak into a file that never had them.
+## How settings are read
 
-`updateSavedSettingsDocument(mutate)` at `src/core/config.ts:2278` is the lower-level writer used by the layered settings system; it runs the mutator inside the same lock but skips the schema revalidation because the layered system does its own validation against the project layers before calling it.
+`readLayeredSettings(cwd, options)` in `src/core/settings-layers.ts` is the central read path. It never throws. The flow is:
 
-### Defaults and the YAML mirror
+1. `readRawLayer("user", userFile, issues)` reads the user `settings.yaml`, or `options.userPath` when provided.
+2. `prepareProjectLayers(cwd, issues, user.blob)` resolves the project root, captures a project surface snapshot with `captureProjectSurface(cwd, "settings")`, and reads both project files. If `snapshot.verdict !== "trusted"`, each project layer returns with `blob: undefined` and a `projectSurfaceTrustNotice` is pushed as an issue. Otherwise the blob is passed through the project stripping functions (`stripProjectAutonomy`, `stripProjectRuntimeTrust`, `stripProjectOperatorSafety`, `stripProjectTelemetry`) and then `stripCredentials`.
+3. `validateLayerStack(user, prepared, issues)` deep-merges the layers with `mergeLayersWithSources`, which records the origin of each leaf. It then runs `validateSettings` on the merged result. Invalid leaves fall back to schema defaults, and their source is re-attributed to `"built-in"`.
+4. The function returns `settings`, `sources`, `issues`, and a `layers` array describing each layer's path and presence.
 
-`src/core/defaults.ts` exports `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML`. The YAML string is a hand-mirrored human-readable version of the same object; the two must stay in sync. `DEFAULT_SETTINGS` covers chat routing, fleet configuration, context management, safety limits, interface settings, and integrations. All fleet guardrail values are sourced from `GUARDRAIL_DEFAULTS` in `src/core/guardrails.ts`.
+`readStrictLayeredSettings` calls `readLayeredSettings` and then throws `SettingsValidationError` only when there are issues whose origin is `user`. Project-layer issues stay diagnostics. The `STRICT_USER_ISSUES` symbol carries the strict validation of the raw user document for this check.
 
-The change recipe for adding a settings key requires updating `DEFAULT_SETTINGS`, `DEFAULT_SETTINGS_YAML`, the `unknownKeys` list in `src/core/config.ts`, the `classify.ts` timing map, and two documentation tables. Missing any of these causes validation to reject user files that contain the key or causes the key to be silently classified as restart-required.
+### Operator-only keys and runtime trust
 
-## Layered settings
+`OPERATOR_ONLY_SAFETY_KEYS` in `src/core/settings-layers.ts` lists the `safety.*` keys that a project layer may not set: `scratchRoots`, `sandboxPassEnv`, `sandboxUnixSockets`, `unattendedAfterSeconds`, `yoloAccepted`, and `judge`. `stripProjectOperatorSafety` removes each present key, pushes an issue with `origin` and a `safety.<key>` path, and returns the cleaned blob. `stripProjectRuntimeTrust` does the same for `trustedUnmediated` on `targets[]` entries and `integrations.externalAgents.entries[]`. The code comments state the reason: a repository could otherwise grant itself write authority or hand its commands the operator's tokens.
 
-`src/core/settings-layers.ts` implements the four-layer precedence merge:
+### Writing settings
 
-```
-built-in  <  user settings.yaml  <  project .clio-coder/settings.yaml
-        <  project .clio-coder/settings.local.yaml  <  CLI flags
-```
+`updateLayeredSettings(cwd, mutate)` persists a mutation into the user layer. It validates the saved user document, re-layers it with the current project files, applies the mutator to a clone of the effective settings, validates the candidate, and computes the next saved document with `applySettingsDelta`. It then re-runs `validateLayerStack` on the result and throws `"a higher-precedence project setting prevents this settings update"` when the resulting effective settings differ from the candidate. `updateProjectLocalSettings` is the counterpart that writes `settings.local.yaml`.
 
-Layering happens on the raw parsed YAML blobs so each effective leaf can be attributed to the layer that set it, then the merged blob is validated against the one strict schema. `readLayeredSettings(cwd)` returns a `LayeredSettings` object with the effective settings, per-leaf source attribution (`sources`), issues, and layer presence. `readStrictLayeredSettings(cwd)` adds a strict launch gate: it re-validates the user layer alone and throws `SettingsValidationError` if the user file has schema violations, even when the project layers would mask them.
+Focused test: `tests/contracts/trust-gate.test.ts`, test `S3-01: approved safety, settings, and hooks take effect, and changed bytes restore defaults`. It writes a `settings.yaml` containing `chat.retry.streamStallMs: 60000`, asserts `readLayeredSettings(workspace).settings.chat.retry.streamStallMs` equals 60000 once the settings surface is approved, then appends a comment to the file and asserts the value reverts to 180000 after the verdict becomes `"changed"`. The test also asserts that a `.env` read is blocked before approval and allowed after.
 
-Project layers are committed team configuration and must stay secrets-free. `stripCredentials` recursively walks project-layer blobs and removes keys whose lowercase form is in `CREDENTIAL_KEYS` (`auth`, `apikey`, `api_key`, `token`, `secret`, `password`). `stripProjectAutonomy` removes `safety.autonomy` from project layers because autonomy is operator-owned. Both record a diagnostic issue explaining the removal.
+## Trust verdicts
 
-`updateLayeredSettings(cwd, mutate)` at `src/core/settings-layers.ts:343` atomically persists a mutation into the user layer while preserving references to project-only targets. It re-layeres the candidate with the same project files before writing, and refuses a mutation that a higher-precedence project leaf would silently override.
+`src/core/workspace-trust.ts` describes itself as the authority store that must be a core leaf, because the settings loader runs before domains start. Its verdict type is `"trusted" | "untrusted" | "changed"`. The surfaces are `"safety" | "hooks" | "settings" | "extensions" | "plugins"`, and the package surfaces `"extensions"` and `"plugins"` use identity hashes rather than byte hashes.
 
-`updateProjectLocalSettings(cwd, mutate)` at `src/core/settings-layers.ts:385` persists a project-local mutation in `settings.local.yaml`. It verifies the project settings surface is already trusted (or both files are absent), writes under a state-file lock, and then re-reads the effective stack to confirm the save was not overridden by another layer.
+- `captureProjectSurface(workspaceRoot, surface)` reads the surface files, hashes them with `sha256`, and compares the result against the stored record.
+- `recordProjectSurfaceTrust` writes an approval for the current content hash. `revokeProjectSurfaceTrust` removes it.
+- `projectSurfaceTrust` and `hasProjectSurfaceTrust` return the verdict or a boolean for a given root.
 
-## Event bus contracts
+The trust test above confirms that a comment-only change produces the `"changed"` verdict. That is the behavior the code comment describes: any byte change requires fresh consent.
 
-`src/core/telemetry/live-events.ts` is the canonical registry of event-bus channel names and their payload contracts. `BusChannels` is a const object with one key per channel (e.g., `BusChannels.ConfigHotReload = "config.hotReload"`). Downstream code imports from this file rather than hard-coding string literals so renames are a single edit.
+Records are kept under `workspaceTrustDirectory()`. This page did not trace the record file location beyond that function name.
 
-`BusPayloadMap` is a type that maps each channel to its payload interface. The shared bus types `emit`/`on` against this map, so payload drift between an emitter and this file is a compile error. The type `BusPayloadMapCoversAllChannels` is an exhaustiveness tripwire: adding a member to `BusChannels` without registering its payload in `BusPayloadMap` fails to typecheck.
+## Command execution
 
-The bus performs no runtime validation. The types describe what in-process emitters send; subscribers that consume data which crossed a process boundary (worker/ACP event streams) must keep validating at runtime.
+### `runCommandVector` (argv)
 
-Key payload contracts include:
-- `ConfigChangePayload` for hot-reload, next-turn, and restart-required settings changes.
-- `PermissionRequestedPayload` / `PermissionResolvedPayload` for operator permission flows.
-- `LoopBlockedPayload` for the identical-call loop guard escalation.
-- `DispatchRunIdentity`, `DispatchCompletedPayload`, `DispatchFailedPayload` for the dispatch lifecycle.
-- `AgentStatusChangedPayload` for interactive agent phase transitions.
+`runCommandVector(file, args, options)` in `src/core/safe-exec.ts` returns a Promise of `SafeCommandResult`. The order of operations observed in the source is:
 
-## Safe subprocess execution
+1. `resolveSafeCwd(options.cwd, options.workspaceRoot)` resolves the working directory and throws `cwd escapes workspace root` when the resolved path is outside the root.
+2. Timeout and kill-grace values are clamped with `clampTimerDelayMs`. Output limits come from `options.maxOutputBytes` or `SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES`.
+3. When `options.output` (a `SafeCommandOutputSink`) is supplied, two `createRetainedStreamWindow` instances retain head and tail bytes per stream. Otherwise the code captures the full stream up to the cap.
+4. The environment is built by `buildSafeToolEnv(options.env)`, which copies only the keys in `ENV_ALLOWLIST`, adds caller-supplied keys whose names match `^[A-Z_][A-Z0-9_]*$`, and sets `AI_AGENT`.
+5. If `options.shellSandbox` is set, `planMainSandboxSpawn` is used. Otherwise `planSandboxedSpawn` is used. A `refused` plan resolves immediately with a not-spawned result.
 
-`src/core/safe-exec.ts` provides the sandboxed subprocess runner used by new tool subprocesses and the ACP transport. The primary entry point is `runCommandVector(file, args, options)`.
+`buildSafeToolEnv` is a direct, documented filter. Its unit-level behavior is not separately covered by a test in the sources read for this page.
 
-Key behaviors:
-- **Process group management**: On POSIX, the child is spawned with `detached: true` so it leads its own process group. `createProcessGroupCleanup` at `src/core/safe-exec.ts:279` opens a bounded cleanup window: SIGTERM, grace period, SIGKILL, then a bounded wait for the group to disappear. Every signal follows an existence probe (`kill(-pgid, 0)`) in the same synchronous step; the first observation that the group is gone (ESRCH) closes the window for good.
-- **Output capping**: Without an output sink, combined stdout+stderr is capped at `SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES` (600 KB). With a sink, the cap does not apply; instead `createRetainedStreamWindow` keeps a bounded head-and-tail rendering (default 4 KB head, 16 KB tail).
-- **UTF-8 boundary handling**: `trimIncompleteUtf8Suffix` and `trimLeadingUtf8Continuation` drop partial UTF-8 sequences at the window boundaries so the retained text decodes cleanly.
-- **Environment allowlist**: `buildSafeToolEnv` copies only `ENV_ALLOWLIST` variables from the parent process, plus caller-supplied extra variables. Provider keys and Clio gates are deliberately absent.
-- **CWD confinement**: `resolveSafeCwd` resolves the child's working directory and throws if it escapes the workspace root.
+Focused test: `tests/contracts/safe-exec-streaming.test.ts` drives `runCommandVector` directly through `producer(chunks, chunkBytes)` and `threeSpacedBlocks()`. The second helper ignores SIGTERM and writes three 1 KiB blocks 150 ms apart so that output from later chunks is still received after the first kill. The file also imports `createRetainedStreamWindow` and the `SAFE_EXEC_DEFAULT_RETAIN_*` constants, which indicates that the retained-window behavior is tested in the same file.
 
-## Session routing
+### `runBashCommand` (shell string)
 
-`src/core/session-routing.ts` manages session-local routing state. Saved settings are shared by every Clio process; live routing for a running session is owned by the process that is running it. Each process seeds its routing from saved settings at boot via `seedSessionRouting(saved)`, which extracts `chat`, `context.memory`, and `fleet.default` into a `SessionRoutingState`.
+`runBashCommand(command, options)` in `src/core/bash-exec.ts` runs a command through the resolved bash binary:
 
-`applySessionRouting(saved, routing)` produces the effective settings view: the shared snapshot with the session's routing fields overlaid. Every UI surface that displays routing must read through this view.
+1. `bashShellPath()` resolves the shell. When it returns `null`, the function returns `notSpawnedResult` with an install hint.
+2. `bashSpawnPlan()` supplies the spawn mode and a filtered environment through `buildToolEnv`. The argv is `[shell, "-o", "pipefail", plan.mode, command]`. The code comment explains that `pipefail` keeps an upstream failure visible through output filters such as `tail`, and that a caller can opt out with `set +o pipefail`.
+3. The same sandbox branch as `runCommandVector` applies. A `sandboxed` plan replaces the environment with `scrubSandboxEnv(plan.source, sandbox.env, plan.source).env`, so credential variables are removed before the sandbox starts.
+4. The child is spawned detached on non-Windows platforms with `stdio: ["ignore", "pipe", "pipe"]`. Abort or timeout sends SIGTERM to the process group, then SIGKILL after a grace period if processes remain. A drain timer destroys the stdio pipes when a descendant outside the group keeps them open.
 
-`commitRoutingPatch(routing, patch, persist, onChange)` at `src/core/session-routing.ts:103` moves the live route, then persists it. If persist throws, the route is rolled back before rethrowing. `routingPatchForId(path, settings)` builds the routing patch for a single /settings edit. `diffRouting(prev, next)` computes a field-level diff of the routing surface between two settings blobs, used to absorb routing edits made through whole-settings writers.
+Focused test: `tests/contracts/bash-exec-settlement.test.ts` calls `runBashCommand` with `timeoutMs: 3_600_000` and an `AbortController`. It aborts after 200 ms and races the result against a timer. The command is `echo kept; setsid sleep 60 & echo $! > <pidFile>; sleep 60`, which places a descendant in its own session. The test name and assertions are what settle the abort case; this page did not read the full assertion block beyond the call shape.
 
-`planResumedRouting(route, settings, pinned)` at `src/core/session-routing.ts:180` plans the live-route change that resuming a session implies: it restores the session's recorded route instead of the saved default, and returns a notice when the recorded target is no longer configured.
+### Callers
 
-`applyOverrides(base, overrides)` at `src/core/session-routing.ts:271` applies session-local overrides for non-routing settings, returning the base untouched when there are no overrides so the common path stays allocation-free.
+`runCommandVector` has many callers across the tree. Examples from a repository search include `src/tools/safe-exec.ts:77`, `src/tools/verify/scripts.ts:472`, `src/tools/data/sqlite.ts:215`, and `src/tools/harness-extensions.ts:110`. `runBashCommand` is called from `src/tools/bash.ts:373`, which passes the command text and `runOptions` built from the tool arguments. Callers that run inside a dispatched worker pass `shellSandbox` so that the worker's OS sandbox applies, as the source comments state (decision reference Q8 in those comments).
 
-## Workspace file enumeration
+## Run records
 
-`src/core/workspace-files.ts` enumerates the visible file set for a workspace. `enumerateWorkspaceFiles(cwd)` first tries `git ls-files -z --cached --others --exclude-standard`; when Git is unavailable it falls back to a bounded filesystem walk via `fallbackFilesWalk`, a step generator that yields once per processed entry. The generator enforces `DEFAULT_WORKSPACE_FALLBACK_LIMITS` (100k entries, 64 depth, 64 MB path bytes, 5 s time) and throws `WorkspaceEnumerationLimitError` or `WorkspaceEnumerationIncompleteError` when the contract is exceeded.
+`src/core/run-records.ts` writes provenance for `run_script` executions. Constants define the layout: `RUN_RECORDS_RELATIVE_DIR`, `RUN_MANIFEST_FILENAME`, `RUN_STDOUT_FILENAME`, `RUN_STDERR_FILENAME`, and `RUN_MANIFEST_VERSION`.
 
-`enumerateWorkspaceFilesAsync(cwd, cooperate)` is the non-blocking variant: the `git ls-files` subprocess runs async, and both the per-path lstat validation and the non-Git fallback walk yield cooperatively through a `WorkspaceEnumerationTick` (a structurally compatible cooperative slicer). The time limit meters the walk's own accumulated work rather than wall clock, so a busy event loop cannot fail an enumeration that did no more work than its budget allows.
+- `landRunRecordsRoot(workspaceRoot)` resolves the records root with `realpathSync` and `canonicalizePath`. It returns `{ inside: false, reason }` when the root resolves outside the workspace or onto the workspace root itself.
+- `createRunRecord(workspaceRoot, runId)` throws when the landing is not inside. It also throws when the run directory already exists. After `mkdirSync`, it re-checks the real path and the directory's `lstat`, and throws when the directory moved during creation. It returns the paths and an identity record (`realDir`, `dev`, `ino`).
+- `assertRunRecordIntact(paths)` is the check before writing a manifest. It guards against a replaced or relinked directory, because a script runs with Clio's own file access.
+- `captureFileRef` and `captureOutputRef` hash files up to `RUN_FILE_HASH_MAX_BYTES`. `HashObservation` and `RunHashOmission` record omissions such as `too-large`, `cancelled`, and `unreadable`.
+- `writeRunManifest` writes the manifest, and `sweepRunRecords(workspaceRoot, { keep })` prunes old records, with `RUN_RECORDS_DEFAULT_KEEP` as the default retention count.
 
-`WORKSPACE_EXCLUDED_DIRS` lists directories omitted even when Git tracks files beneath them: `.git`, `node_modules`, `dist`, `build`, `coverage`, `__pycache__`, `.clio-coder`, `.claude`, `.codex`, `.superpowers`, and others.
-
-## UI settings controls
-
-`src/core/settings-controls.ts` provides the UI-facing catalog of setting controls. `SETTING_CONTROLS` is a readonly array derived from the default settings schema via `collectControlPaths`, which walks `DEFAULT_SETTINGS` and emits one control per leaf. Each control carries a `path`, `label`, `description`, `help`, optional `choices`, a `kind` (`boolean` | `number` | `string` | `list` | `json`), `optional`, and `readOnly` flags.
-
-`applyControlValue(settings, path, text)` at `src/core/settings-controls.ts:594` parses and validates a user-entered value against the control's kind, choices, and cross-field constraints. It performs registry-backed eligibility checks (e.g., a chat target must be an HTTP/native runtime), enforces target/model pair invariants, and runs the full schema validation before committing. Invalid values throw and leave the original settings untouched.
-
-`settingsV2PathForRow(id)` maps legacy v1 settings-center IDs to canonical v2 paths, ensuring the UI shows and persists only canonical paths while maintaining backward-compatible navigation.
-
-## Data and control flow
-
-### Settings read path
-
-```
-Config domain boot
-  -> readStrictLayeredSettings(cwd)         // src/core/settings-layers.ts
-     -> readRawLayer("user", userFile)      // src/core/settings-layers.ts
-     -> prepareProjectLayers(cwd)           // reads project + project.local
-        -> captureProjectSurface(cwd)       // trust verification
-        -> stripCredentials / stripProjectAutonomy
-     -> mergeLayersWithSources([user, project, project.local])
-     -> validateSettings(merged)            // src/core/config.ts
-        -> Issues accumulator
-        -> cloneValue(DEFAULT_SETTINGS)     // src/core/defaults.ts
-  -> ConfigContract.get()                   // src/domains/config/extension.ts
-     -> returns the validated snapshot
-```
-
-### Settings write path (updateSettings)
-
-```
-Config domain update(mutate)
-  -> updateLayeredSettings(cwd, mutate)     // src/core/settings-layers.ts
-     -> updateSavedSettingsDocument(mutate) // src/core/config.ts
-        -> withStateFileLockSync(lockfile)
-           -> readSettings()                // strict gate
-           -> readSavedDocument()
-           -> persistSettings(mutate(clone(saved)))
-              -> safeResourceWrite          // temp + rename
-     -> validateLayerStack(user, project, local)
-     -> deepEquals check against project layers
-  -> ConfigContract.update returns effective settings
-  -> diffSettings(prev, next)               // src/domains/config/classify.ts
-  -> dispatch("hotReload"/"nextTurn"/"restartRequired")
-     -> bus.emit(BusChannels.ConfigHotReload, payload)  // src/core/telemetry/live-events.ts
-```
-
-### Session routing flow
-
-```
-Session boot
-  -> seedSessionRouting(saved)              // src/core/session-routing.ts
-     -> extracts chat, context.memory, fleet.default
-  -> applySessionRouting(saved, routing)    // effective view for this session
-
-Routing change (e.g., Shift+Tab)
-  -> createRoutingGestures(deps).cycleThinking()
-     -> deps.apply({ orchestrator: { thinkingLevel: next } }, "session")
-        -> applyRoutingPatch(routing, patch)
-        -> persist()                         // write-through to settings.yaml
-           -> if persist throws: applyRoutingPatch(routing, prior); onChange(); rethrow
-```
+No focused test for `src/core/run-records.ts` was located. The name search across `tests/` matched only the other contract files listed above, and none of them was read for this page. This is a coverage gap for the run-record workflow.
 
 ## Extension seams
 
-- **Adding a settings key**: Add to `DEFAULT_SETTINGS` in `src/core/defaults.ts`, mirror in `DEFAULT_SETTINGS_YAML`, add to the `unknownKeys` allowlist in `src/core/config.ts`, classify timing in `src/domains/config/classify.ts`, and add rows to the documentation tables.
-- **Adding a bus channel**: Add a member to `BusChannels` in `src/core/telemetry/live-events.ts` and register its payload in `BusPayloadMap`. The `BusPayloadMapCoversAllChannels` exhaustiveness check will fail if either is forgotten.
-- **Adding a UI control**: The control catalog in `src/core/settings-controls.ts` is derived from the schema automatically. For custom labels and help, add entries to `SETTINGS_LABELS_BY_ID`, `SETTINGS_DESCRIPTIONS_BY_ID`, and `SETTINGS_HELP_BY_ID`. For structured JSON controls, add the path to the `STRUCTURED` set.
-- **Adding a workspace exclusion**: Add the directory name to `WORKSPACE_EXCLUDED_DIRS` in `src/core/workspace-files.ts`.
-
-## Focused tests
-
-### `tests/contracts/settings-controls.test.ts`
-
-This test file demonstrates the control catalog's contract:
-- Every shared control has a TUI home and accepts its shipped value: iterates `SETTING_CONTROLS` and verifies each control's path appears in the TUI's `buildSettingItems` output, and that applying the shipped default value via `applyControlValue` does not throw.
-- Invalid typed values leave the original intact: exercises `applyControlValue` with invalid inputs (unknown autonomy, NaN retries, bad target refs, malformed JSON) and asserts the original settings are unchanged.
-- Changing a role connection clears only that role's previous model override: sets `chat.target` to "second" and asserts `chat.model` becomes null while `fleet` is untouched.
-- Saved edits preserve unrelated fields: uses `isolateClioEnv` to write settings via `saveControl` and re-reads to verify the delta was applied correctly.
-
-### `tests/contracts/safe-exec-streaming.test.ts`
-
-This test file exercises the streaming output path of `runCommandVector`:
-- Uses a node one-liner that writes fixed-size chunks to stdout and a single line to stderr.
-- Validates the retained head-and-tail window rendering, the `omitted` byte count, and the `[... N bytes omitted ...]` marker.
-- Tests output-cap kills when no sink is provided, and sink-based streaming when a `SafeCommandOutputSink` is supplied.
+- **New operator-only setting.** Add the key to `OPERATOR_ONLY_SAFETY_KEYS` (for a `safety.*` key) in `src/core/settings-layers.ts`. The existing stripping function applies it to project layers without further change. The schema itself lives in `src/core/config.ts`.
+- **New trusted project surface.** `ProjectTrustSurface` in `src/core/workspace-trust.ts` is a closed union, and `SURFACES` lists its members. Adding a surface requires the surface file lists (`surfaceEntries`, `surfaceRoot`) and the verdict logic in `captureProjectSurface` to handle it. This page did not read every branch of that logic.
+- **New command runner.** Build on `runCommandVector` for argv commands, or on `runBashCommand` for shell strings. Pass `workspaceRoot` and `cwd` explicitly, and pass `shellSandbox` when the call runs inside a worker or contained main-session path.
 
 ## Things to watch when editing
 
-- **Keep `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML` in sync.** The change recipe in the repository guidance explicitly requires both in the same change. A divergence causes `clio-coder doctor` to report schema drift.
-- **The `settingsRemedy` function in `src/core/config.ts` is the single voice for settings failure guidance.** Both `SettingsValidationError` and `formatSettingsIssues` call it. Changing the wording here changes operator-facing diagnostics in both the error object and the runtime reload notice.
-- **Credential stripping in project layers is recursive and case-insensitive.** `CREDENTIAL_KEYS` checks `key.toLowerCase()`, so adding a new credential key name means adding it to the set in `src/core/settings-layers.ts`. The diagnostic message is fixed ("credentials are not allowed in project settings; key ignored").
-- **The safe-exec process-group cleanup window has a residual hazard documented in its own doc comment.** Linux keeps a PGID reserved while any member of the group lives, so a signal can only reach an unrelated group if every member dies between the probe and the signal that immediately follows it. This is accepted and documented.
-- **The `BusPayloadMapCoversAllChannels` type is a compile-time tripwire.** Adding a channel to `BusChannels` without its payload entry will cause a typecheck failure. Do not suppress the tripwire.
-- **Session routing patches are applied to session state first, then written through.** `commitRoutingPatch` rolls back on persist failure. Any new routing gesture must go through this function to preserve the rollback invariant.
-- **The workspace fallback walk's time limit meters accumulated walk time, not wall clock.** `fallbackFilesWalk` receives an `elapsedMs()` callback; the sync driver passes `performance.now() - startedAt`, the async driver passes accumulated active time. Changing this contract affects both drivers.
-- **`applySettingsDelta` only writes keys that changed.** A mutation that sets a key to the same value it already has will not write that key to the file. This prevents materialized defaults from leaking into user files that never had them.
+- `readLayeredSettings` must not throw. Its callers depend on the never-throws contract, and the strict variant is the only place that throws for user-layer problems.
+- Any change to project stripping has to keep the issue entry for each stripped key, because the trust and safety UI reads those issues. Removing an entry from `OPERATOR_ONLY_SAFETY_KEYS` makes a project value take effect.
+- Byte-level changes to a trusted surface invalidate its approval. The trust test confirms this for a trailing comment.
+- `buildSafeToolEnv` and `buildToolEnv` are the environment filters. Credentials are removed by `scrubSandboxEnv` only on the sandboxed path in `runBashCommand`. A change to the plain spawn path changes what the command can see, so review both branches.
+- `resolveSafeCwd` rejects paths that escape the workspace root. A relative cwd that includes `..` is resolved against the root before the check.
