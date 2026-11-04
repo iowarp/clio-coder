@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { pricesCalls } from "../../core/telemetry/pricing.js";
 import { calculatePricingCostUsd, type resolveEffectivePricing } from "../providers/catalog.js";
-import type { LlmRequestUsage } from "./engines/shared.js";
+import type { LlmRequestUsage } from "../providers/one-shot.js";
 import type { KeyMeasurement, LabelTally, SiteMeasurement } from "./measurement.js";
 import { TOOL_CALL_CARD_SITE, TOOL_CALL_RUNGS, type ToolCallObject } from "./sites/tool-call.js";
 import {

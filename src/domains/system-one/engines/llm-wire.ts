@@ -15,14 +15,15 @@ import {
 	responseFormatFor,
 	responseSchemaDialectFor,
 } from "../../../core/response-schema.js";
+import type { LlmRequestUsage, OneShotPort } from "../../providers/one-shot.js";
+import { LlmAdmissionRefused } from "../../providers/one-shot.js";
 import { probeJson } from "../../providers/probe/http.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
-import type { OneShotPort } from "../factory.js";
 import type { Prompt } from "./llm-prompt.js";
 import { voteSchema } from "./llm-prompt.js";
-import type { EngineHost, LlmRequestUsage } from "./shared.js";
-import { errorText, LlmAdmissionRefused, resolveToken } from "./shared.js";
+import type { EngineHost } from "./shared.js";
+import { errorText, resolveToken } from "./shared.js";
 
 /** Ceiling for one HTTP request; the runner's deadline arrives as the abort signal and wins. */
 const HTTP_CEILING_MS = 120_000;

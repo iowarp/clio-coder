@@ -13,9 +13,9 @@ import { basename, dirname, join } from "node:path";
 import { fsyncDirectory } from "../../../core/safe-resource-write.js";
 import { createRedactionTally } from "../../evidence/redact.js";
 import { readJournaledContent } from "../../telemetry/index.js";
+import { scrub, scrubbed } from "../scrub.js";
 import type { SiteId } from "../types.js";
 import type { DatasetDecisionRow, DatasetOutcomeRow } from "./dataset.js";
-import { scrub, scrubbed } from "./scrub.js";
 
 export interface ExportOptions {
 	readonly stateDir: string;

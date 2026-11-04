@@ -12,6 +12,7 @@
  * question would then depend on its siblings.
  */
 
+import { LlmAdmissionRefused } from "../../providers/one-shot.js";
 import { certaintyFromMass } from "../answers.js";
 import { temperatureFor } from "../calibration.js";
 import type { Answer, Question } from "../types.js";
@@ -20,7 +21,6 @@ import { letterIndex, MAX_LETTERED_OPTIONS, optionItems, renderPrompt, TOURNAMEN
 import type { Scheduler } from "./llm-schedule.js";
 import type { Channel, ChannelUsage, TokenLogprob } from "./llm-wire.js";
 import { ChatHttpError } from "./llm-wire.js";
-import { LlmAdmissionRefused } from "./shared.js";
 
 /** Votes per group in answer mode: odd, so a two-way split has a winner. */
 export const VOTES = 5;

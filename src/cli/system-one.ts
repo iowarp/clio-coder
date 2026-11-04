@@ -4,7 +4,7 @@ import { canonicalizePath } from "../core/path-canonical.js";
 import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
-import type { LlmRequestAdmission, OneShotPort } from "../domains/system-one/index.js";
+import type { LlmRequestAdmission, OneShotPort } from "../domains/providers/one-shot.js";
 import { exportToFile, isDay, summarizeDataset } from "../domains/system-one/recorder/index.js";
 import type { DecisionRecord, SiteId } from "../domains/system-one/types.js";
 import { SITE_IDS } from "../domains/system-one/types.js";
@@ -292,7 +292,7 @@ async function runCalibrate(
 	const { batchRequestKey } = await import("../domains/system-one/engines/llm.js");
 	const { resolveEffectivePricing } = await import("../domains/providers/catalog.js");
 	const { renderUsdSpend } = await import("../core/telemetry/render.js");
-	const { createSystemOneRequestAdmission } = await import("../entry/system-one-host.js");
+	const { createSideRequestAdmission } = await import("../entry/side-request-admission.js");
 	const { indexMeasurements, LABEL_POLICY_VERSION, readMeasurement, writeMeasurement } = await import(
 		"../domains/system-one/measurement.js"
 	);
@@ -338,7 +338,7 @@ A site's holdout is skipped when no key passes its fit.
 		getRuntime(id: string): { id: string } | null;
 	};
 	const spend = { usd: 0, unpriced: false };
-	const admit = createSystemOneRequestAdmission({
+	const admit = createSideRequestAdmission({
 		providers: deps.providers as never,
 		telemetry: { settledSessionSpend: async () => ({ usd: spend.usd }) } as never,
 		getCeilingUsd: () => settings.safety.limits.sessionCostUsd,

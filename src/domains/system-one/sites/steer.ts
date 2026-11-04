@@ -11,6 +11,8 @@
  * site, so a fitted build cannot appear until one is measured.
  */
 
+import type { SteerRelation, SteerUrgency } from "../../../core/steering-vocabulary.js";
+import { STEER_RELATIONS, STEER_URGENCIES } from "../../../core/steering-vocabulary.js";
 import { chosen } from "../answers.js";
 import { pick } from "../questions.js";
 import type { SiteDefinition } from "../types.js";
@@ -22,22 +24,6 @@ const MAX_MESSAGE_CHARS = 800;
 const MAX_TASK_CHARS = 400;
 /** Code points of the assistant's latest text, from its tail, which is what the operator is reacting to. */
 const MAX_PREVIOUS_CHARS = 400;
-
-export const STEER_RELATIONS = {
-	correction: "Corrects, narrows or redirects the work in progress: a different file, approach, scope or constraint",
-	addition: "Adds to the current task without changing its direction: one more thing to cover on the same work",
-	newTask: "Asks for something unrelated to the work in progress, a separate task of its own",
-	stop: "Tells the assistant to stop, wait, hold, or undo what it is doing right now",
-	question: "Asks about the work, the code or the plan without asking for a change",
-} as const;
-export type SteerRelation = keyof typeof STEER_RELATIONS;
-
-export const STEER_URGENCIES = {
-	now: "Must land before anything else the assistant does; waiting for the current step to finish would waste work",
-	nextSlot: "Should land before the assistant's next decision, once the current step finishes",
-	endOfTurn: "Can wait until the current task is complete",
-} as const;
-export type SteerUrgency = keyof typeof STEER_URGENCIES;
 
 const RELATION_QUESTION = pick("How does `message` relate to the work in `task`?", STEER_RELATIONS);
 const URGENCY_QUESTION = pick("How soon should `message` reach the assistant?", STEER_URGENCIES);

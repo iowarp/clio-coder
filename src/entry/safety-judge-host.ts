@@ -9,6 +9,7 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { modelEndpointKey, registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
+import type { OneShotPort } from "../domains/providers/one-shot.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import {
 	createSafetyJudge,
@@ -20,7 +21,6 @@ import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import type { OneShotPort } from "../domains/system-one/index.js";
 
 /** Ledger entry type of a judge block or escalation; recorded, never shown or sent to a model. */
 export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";

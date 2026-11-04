@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
+import type { OneShotPort } from "../../src/domains/providers/one-shot.js";
 import anthropicRuntime from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -11,7 +12,6 @@ import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js"
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
-import type { OneShotPort } from "../../src/domains/system-one/index.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
 import { createRunner } from "../../src/domains/system-one/runner.js";
 import type { DecisionEngine, DecisionRecord, SiteDefinition } from "../../src/domains/system-one/types.js";
@@ -19,7 +19,7 @@ import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
-import { createSystemOneRequestAdmission } from "../../src/entry/system-one-host.js";
+import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 
 /**
@@ -79,7 +79,7 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 	const telemetry: Pick<TelemetryContract, "acquireTelemetrySession"> = {
 		acquireTelemetrySession: journals.acquire,
 	};
-	const admit = createSystemOneRequestAdmission({
+	const admit = createSideRequestAdmission({
 		providers: { getTarget: (id) => (id === target.id ? target : null) },
 		scheduling: scheduling as SchedulingContract,
 		telemetry: telemetry as unknown as TelemetryContract,

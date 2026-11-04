@@ -7,9 +7,9 @@
  */
 
 import { homedir } from "node:os";
-import type { RedactionTally } from "../../evidence/redact.js";
-import { createRedactionTally, headForRedaction, redactSecretsDeep, redactSecretsText } from "../../evidence/redact.js";
-import { cutHeadGuard, dropCutHead, isSecretArgKey, redactSecretString } from "../../safety/redaction.js";
+import type { RedactionTally } from "../evidence/redact.js";
+import { createRedactionTally, headForRedaction, redactSecretsDeep, redactSecretsText } from "../evidence/redact.js";
+import { cutHeadGuard, dropCutHead, isSecretArgKey, redactSecretString } from "../safety/redaction.js";
 
 /** One row's serialized state is capped here; the rest is dropped and flagged. */
 export const STATE_MAX_BYTES = 16 * 1024;

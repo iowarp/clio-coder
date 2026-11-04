@@ -19,9 +19,10 @@
 
 import { performance } from "node:perf_hooks";
 import type { SystemOneMode } from "../../../core/defaults.js";
+import type { OneShotPort } from "../../providers/one-shot.js";
+import { LlmAdmissionRefused } from "../../providers/one-shot.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
-import type { OneShotPort } from "../factory.js";
 import type { Answer, DecisionEngine, EngineReply, EngineRequest } from "../types.js";
 import {
 	BATCH_PROMPT_VERSION,
@@ -39,7 +40,7 @@ import { createScheduler } from "./llm-schedule.js";
 import type { AnsweredIdentity, Channel } from "./llm-wire.js";
 import { chatBaseUrl, createHttpChannel, createOneShotChannel, hasChatWire } from "./llm-wire.js";
 import type { EngineHost } from "./shared.js";
-import { errorText, LlmAdmissionRefused } from "./shared.js";
+import { errorText } from "./shared.js";
 
 /** Concurrent requests when the host cannot say how many the endpoint serves. */
 const DEFAULT_ENDPOINT_CAPACITY = 4;

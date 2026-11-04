@@ -1,13 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { ClioSettings } from "../../core/config.js";
 import { ToolNames } from "../../core/tool-names.js";
-import { TOOL_CALL_RUNGS } from "../system-one/sites/tool-call.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import type { AdmissionAskSource, ApprovalAuthority } from "./admission.js";
 import { describeMainCallConsequences } from "./call-consequence.js";
 import type { SafetyDecision } from "./contract.js";
 import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
+import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 

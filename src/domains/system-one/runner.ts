@@ -17,7 +17,7 @@ import { cutsFor, validationOf } from "./calibration.js";
 import type { DecisionTask } from "./contract.js";
 import { primaryTask, SITE_TASKS, thresholdIdentity } from "./contract.js";
 import { validateQuestion } from "./questions.js";
-import { clearedSiteObject, scrub } from "./recorder/scrub.js";
+import { clearedSiteObject, scrub } from "./scrub.js";
 import type {
 	Answer,
 	CallOutcome,

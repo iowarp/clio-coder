@@ -10,8 +10,8 @@
 import { createHash } from "node:crypto";
 import { createRedactionTally } from "../../evidence/redact.js";
 import { redactSecretString } from "../../safety/redaction.js";
+import { scrub } from "../scrub.js";
 import type { Answer, CallOutcome, DecisionRecord, EngineKind, RouteRecord, SiteId } from "../types.js";
-import { scrub } from "./scrub.js";
 
 export interface SessionRow {
 	readonly callId: string;

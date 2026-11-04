@@ -15,6 +15,7 @@ import type { EventPayload } from "../../../core/telemetry/events.js";
 import type { RedactionTally } from "../../evidence/redact.js";
 import { createRedactionTally } from "../../evidence/redact.js";
 import { specHash } from "../questions.js";
+import { boundState, scrub, scrubbed } from "../scrub.js";
 import type {
 	Answer,
 	CallOutcome,
@@ -25,7 +26,6 @@ import type {
 	RouteRecord,
 	SiteId,
 } from "../types.js";
-import { boundState, scrub, scrubbed } from "./scrub.js";
 
 /** A process that cannot record must not hold rows without bound. */
 const MAX_HELD = 512;

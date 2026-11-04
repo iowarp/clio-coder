@@ -215,6 +215,7 @@ import {
 } from "../domains/providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
+import type { LlmRequestAdmission, OneShotPort } from "../domains/providers/one-shot.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -307,7 +308,7 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import type { LlmRequestAdmission, OneShotPort, SystemOneInstance } from "../domains/system-one/index.js";
+import type { SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne } from "../domains/system-one/index.js";
 import { createMeasurementReader } from "../domains/system-one/measurement.js";
 import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
@@ -385,13 +386,9 @@ import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibility.js";
 import { createReloadClasses } from "./reload-classes.js";
 import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
+import { createSideRequestAdmission } from "./side-request-admission.js";
 import { createSystemOneControl, SYSTEM_ONE_SCOPE_ENTRY } from "./system-one-control.js";
-import {
-	createDecisionUsageTally,
-	createSystemOneHost,
-	createSystemOneRequestAdmission,
-	type TurnPrewarmPrediction,
-} from "./system-one-host.js";
+import { createDecisionUsageTally, createSystemOneHost, type TurnPrewarmPrediction } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -3823,10 +3820,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null;
 		},
 	};
-	const admitSystemOneRequest = createSystemOneRequestAdmission(systemOneAdmissionDeps);
+	const admitSystemOneRequest = createSideRequestAdmission(systemOneAdmissionDeps);
 	const safetyJudgeOneShot = createSystemOneOneShot(
 		providers,
-		createSystemOneRequestAdmission({ ...systemOneAdmissionDeps, role: "safety-judge" }),
+		createSideRequestAdmission({ ...systemOneAdmissionDeps, role: "safety-judge" }),
 	);
 	const systemOneEndpointCapacity = (targetId: string): number => {
 		const target = providers.getTarget(targetId);

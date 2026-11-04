@@ -10,13 +10,14 @@
 import { createHash } from "node:crypto";
 import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../providers/contract.js";
+import type { LlmRequestAdmission, OneShotPort } from "../providers/one-shot.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { cutsFor, FITTED_CUTS } from "./calibration.js";
 import type { DecisionTask } from "./contract.js";
 import { SITE_TASKS } from "./contract.js";
 import { createLlmEngine, llmEngineProblem } from "./engines/llm.js";
-import type { EngineHost, LlmRequestAdmission } from "./engines/shared.js";
+import type { EngineHost } from "./engines/shared.js";
 import { createSystemOneEngine } from "./engines/systemone.js";
 import type { MeasurementIndex } from "./measurement.js";
 import { profileFor } from "./profiles.js";
@@ -36,24 +37,6 @@ import type {
 	Verdict,
 } from "./types.js";
 import { SITE_IDS } from "./types.js";
-
-/**
- * One tool-free completion through a runtime that has no chat-completions
- * wire (subscription and CLI-backed ones). The composition root supplies it
- * because only the engine layer may speak to those runtimes, and the answer
- * is text: an LLM engine behind a port can vote but cannot read logprobs.
- */
-export type OneShotPort = (request: {
-	/** The System One engine asking, passed through to request admission (#434). */
-	engine?: string;
-	targetId: string;
-	model: string | null;
-	system: string;
-	user: string;
-	schema?: object;
-	maxTokens: number;
-	signal: AbortSignal;
-}) => Promise<{ text: string; usage?: { input: number; output: number }; model?: string }>;
 
 export interface SystemOneDeps {
 	settings: () => Readonly<ClioSettings>;

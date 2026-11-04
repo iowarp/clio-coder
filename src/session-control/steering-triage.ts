@@ -15,8 +15,8 @@
  * rows this writes and the rows the site writes read the same labels.
  */
 
-import type { SteerRelation, SteerUrgency } from "../domains/system-one/sites/steer.js";
-import { STEER_RELATIONS, STEER_URGENCIES } from "../domains/system-one/sites/steer.js";
+import type { SteerRelation, SteerUrgency } from "../core/steering-vocabulary.js";
+import { STEER_RELATIONS, STEER_URGENCIES } from "../core/steering-vocabulary.js";
 import type { QueuedChatMessage, QueuedMessageKind } from "./turn-queues.js";
 
 export const TRIAGE_SCHEMA_NAME = "clio_coder_steering_triage";
