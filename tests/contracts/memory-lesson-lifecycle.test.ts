@@ -107,6 +107,47 @@ test("a flow-restricted session files no lesson at scope end, and a clean one st
 	}
 });
 
+test("a lesson the task plainly asks about is offered once, only when the prompt lacks it and nothing else matches", () => {
+	const delivered: string[] = [];
+	const port = "The GUI demo box serves the app on port 47811.";
+	const memory = createMemoryInterventionRegistration({
+		bank: new TaskMemoryBank(),
+		getKeptLessons: () => [
+			{ id: "mem-port", text: port },
+			{ id: "mem-log", text: "Changelog entries for GUI-only changes go under a GUI subheading." },
+		],
+		onDurableLessonOutcomes: (outcome) => delivered.push(...outcome.delivered),
+	});
+	const task = "What port did we settle on for the GUI demo box?";
+	try {
+		strictEqual(
+			memory.offerLessonsForTask("Fix the GUI port typo in the changelog.", () => false),
+			"",
+		);
+		strictEqual(
+			memory.offerLessonsForTask(task, (id) => id === "mem-port"),
+			"",
+			"the section already carries it",
+		);
+		const offer = memory.offerLessonsForTask(task, () => false);
+		match(offer, /^Memory: \[mem-port\] \(operator-approved\) The GUI demo box/u);
+		strictEqual(offer.includes("mem-log"), false);
+		deepStrictEqual(delivered, [], "producing the offer proves nothing");
+		deepStrictEqual(
+			memory.acknowledgeSubmission([`<system-reminder>\n${offer}\n</system-reminder>`]).map((o) => o.kind),
+			["durable_lesson"],
+		);
+		deepStrictEqual(delivered, ["mem-port"]);
+		strictEqual(
+			memory.offerLessonsForTask(task, () => false),
+			"",
+			"once per session",
+		);
+	} finally {
+		memory.dispose();
+	}
+});
+
 test("an approved command lesson surfaces once at the first non-documentation edit and holds on the command's success", () => {
 	const delivered: string[] = [];
 	const held: string[] = [];

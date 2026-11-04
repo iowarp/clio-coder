@@ -41,6 +41,7 @@ import {
 	taskMemoryBankDelta,
 } from "./memory-events.js";
 import { sharesInvocationTarget } from "./recipes.js";
+import { lessonsForTask } from "./relevance.js";
 import type { MemoryRestorationInput } from "./restoration.js";
 import { redactForMemoryRoute } from "./secret-text.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "./task-bank.js";
@@ -419,6 +420,12 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	acknowledgeSubmission(texts: ReadonlyArray<string>): ReadonlyArray<MemoryInterventionOffer>;
 	/** Produced reminders are waiting for a submission receipt. */
 	hasPendingOffers(): boolean;
+	/**
+	 * Reminder text for approved lessons this turn's task plainly asks about and
+	 * the prompt does not carry, or "" when there are none. It is a typed offer:
+	 * delivery accounting starts when the text appears in an admitted request.
+	 */
+	offerLessonsForTask(task: string, carried: (id: string) => boolean): string;
 	/** Invalidate pending content and discard all transient session/branch state. */
 	reset(): void;
 	/** Invalidate immediately without waiting for the model; refuse further work. */
@@ -654,6 +661,20 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				acknowledged.push(pending.offer);
 			}
 			return acknowledged;
+		},
+		offerLessonsForTask(task, carried) {
+			if (disposed || !settings().enabled) return "";
+			try {
+				const lessons = lessonsForTask(
+					task,
+					keptLessons().filter((lesson) => !carried(lesson.id)),
+				);
+				const [effect] = deliverDurableLessons("durable_lesson_task", lessons);
+				return effect?.kind === "annotate_tool_result" ? effect.message : "";
+			} catch {
+				// The section and memory_recall still stand; a turn never fails on this.
+				return "";
+			}
 		},
 		reset,
 		dispose(): void {
@@ -1902,7 +1923,12 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * submits the annotation, not here.
 	 */
 	function deliverDurableLessons(
-		trigger: "durable_lesson" | "durable_lesson_variant" | "durable_lesson_verify" | "durable_lesson_subject",
+		trigger:
+			| "durable_lesson"
+			| "durable_lesson_variant"
+			| "durable_lesson_verify"
+			| "durable_lesson_subject"
+			| "durable_lesson_task",
 		candidates: ReadonlyArray<KeptLesson>,
 	): ReadonlyArray<MiddlewareEffect> {
 		const budget = settings().maxTokens * 4;

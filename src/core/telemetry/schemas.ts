@@ -1959,6 +1959,7 @@ export const MemoryStepDecidedSchema = Type.Object(
 				"durable_lesson_variant",
 				"durable_lesson_verify",
 				"durable_lesson_subject",
+				"durable_lesson_task",
 				"turn_end",
 				"post_compaction",
 				"idle_review",

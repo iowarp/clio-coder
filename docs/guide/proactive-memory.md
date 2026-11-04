@@ -816,7 +816,7 @@ endpoint and target. There is no separate memory step log; see
 
 Every record has:
 
-- `triggerReasons`: one or more of `interval`, `tool_error_streak`, `loop_signal`, `repeated_failure`, `durable_lesson`, `durable_lesson_variant`, `durable_lesson_verify`, `durable_lesson_subject`, `turn_end`, `post_compaction`, `idle_review`, `manual`;
+- `triggerReasons`: one or more of `interval`, `tool_error_streak`, `loop_signal`, `repeated_failure`, `durable_lesson`, `durable_lesson_variant`, `durable_lesson_verify`, `durable_lesson_subject`, `durable_lesson_task`, `turn_end`, `post_compaction`, `idle_review`, `manual`;
 - `tier`: `rules` or `llm`;
 - `bankDelta`: per-class (`status`, `knowledge`, `procedural`) added, updated, and deleted entry counts;
 - `decision`: `silent`, `injected`, `gated`, `timeout`, `malformed`, or `dropped`;

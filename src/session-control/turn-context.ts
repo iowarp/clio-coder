@@ -2863,7 +2863,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					),
 				];
 				const statuses = ids.length > 0 ? deps.getMemoryRecordStatuses?.(ids) : undefined;
-				return memorySectionDelta(compiled, liveMemorySection, framed, statuses);
+				const delta = memorySectionDelta(compiled, liveMemorySection, framed, statuses);
+				// Only here is the frozen section known, so a record it already carries
+				// is never repeated. A prewarm compile has no turn to answer.
+				const lessons =
+					beforeSend && memoryTurn !== null
+						? deps.memoryCommitBridge?.offerLessonsForTask(
+								memoryTurn.taskText,
+								(id) => ids.includes(id) || framed.some((text) => text.includes(`[${id}]`)),
+							)
+						: "";
+				return [delta, lessons ?? ""].filter((part) => part.length > 0).join("\n");
 			};
 			const frozenInputs = withMemory(frozenMemory);
 			const key = promptKey(frozenInputs);

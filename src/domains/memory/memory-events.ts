@@ -23,6 +23,8 @@ export type TaskMemoryTelemetryTrigger =
 	| "durable_lesson_verify"
 	/** The session read, changed or ran a repository file an approved lesson names. */
 	| "durable_lesson_subject"
+	/** The turn's task plainly asked about an approved lesson the prompt's section did not carry. */
+	| "durable_lesson_task"
 	| "turn_end"
 	| "post_compaction"
 	/** The idle guardian reviewed completed activity or repository history between turns. */

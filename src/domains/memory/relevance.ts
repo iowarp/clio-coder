@@ -70,6 +70,47 @@ export function memoryTerms(value: string): string[] {
 	);
 }
 
+/**
+ * Words that say nothing about a record's subject. Kept apart from STOP_WORDS,
+ * which would otherwise move every score the section and recall rank by.
+ */
+const FUNCTION_WORDS = new Set(
+	"about after again all also any been before being but can could did does doing done down each few get got had has have having her here him his how its just more most nor not now off once one only other our out over own she should some such than their them then there these they too under until very was were what where which while who whom why will would you your don didn doesn isn wasn won sure please need want let give make set say tell thing things know think".split(
+		" ",
+	),
+);
+const TASK_LESSON_MIN_TERMS = 3;
+const TASK_LESSON_MIN_COVERAGE = 0.5;
+const TASK_LESSON_LIMIT = 2;
+/** A pasted log or file cannot be about one lesson, and matching stays cheap at turn start. */
+const TASK_TEXT_LIMIT = 4_096;
+
+function subjectTerms(value: string): string[] {
+	return memoryTerms(value).filter((term) => term.length >= 3 && !FUNCTION_WORDS.has(term));
+}
+
+/**
+ * The lessons a task is plainly asking about: at least three subject terms in
+ * the lesson's own text covering at least half of the task's. Conditions, keys
+ * and evidence do not count, because promotion writes repository paths and
+ * session ids there. Precision over recall: a miss costs what it cost before
+ * this existed, and a false hit puts unrelated text in the turn's request.
+ */
+export function lessonsForTask<T extends { readonly text: string }>(task: string, lessons: ReadonlyArray<T>): T[] {
+	if (task.length > TASK_TEXT_LIMIT) return [];
+	const terms = subjectTerms(task);
+	if (terms.length < TASK_LESSON_MIN_TERMS) return [];
+	return lessons
+		.map((lesson) => {
+			const own = new Set(subjectTerms(lesson.text));
+			return { lesson, matched: terms.filter((term) => own.has(term)).length };
+		})
+		.filter(({ matched }) => matched >= TASK_LESSON_MIN_TERMS && matched / terms.length >= TASK_LESSON_MIN_COVERAGE)
+		.sort((a, b) => b.matched - a.matched)
+		.slice(0, TASK_LESSON_LIMIT)
+		.map(({ lesson }) => lesson);
+}
+
 function pathKey(value: string): string {
 	return normalized(value).replaceAll("\\", "/").replace(/^\.\//, "");
 }
