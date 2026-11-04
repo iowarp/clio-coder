@@ -47,6 +47,8 @@ function jobContinuationCount(job: JobRecord): string {
 
 function jobContinuationPreamble(job: JobRecord): string {
 	if (job.delivery?.continuation === undefined) return "";
+	if (job.delivery.continuation === "job_exhausted")
+		return `[Clio Coder] Job ${job.id} ran out of its ${job.spec.count} starts and its condition never matched. The follow-up below was written for a match and does not apply yet. Read the last poll in the observation. If the polls were failing, fix why first. If the wait is still worth continuing, create another job or poll again, and otherwise say so and stop.\n\n`;
 	const count = jobContinuationCount(job);
 	return `[Clio Coder] The previous turn of this job stopped: ${job.delivery.reason ?? "it was interrupted"}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop.${count === "" ? "" : ` This is continuation ${count}.`}\n\n`;
 }
@@ -178,6 +180,8 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 	): Promise<JobRunResult> => {
 		const continuing = phase === "delivery" && context.job.delivery?.continuation !== undefined;
 		const continuationCount = jobContinuationCount(context.job);
+		const continuationAction =
+			context.job.delivery?.continuation === "job_exhausted" ? "Waking the main turn" : "Continuing that turn";
 		const chat = deps.chat();
 		if (!chat?.submitMachineTurn)
 			return { outcome: "deferred", summary: "This host has no fresh machine-turn admission seam." };
@@ -197,7 +201,7 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 			...(constraints === undefined ? {} : { constraints }),
 			...(continuing
 				? {
-						notice: `job ${context.job.id}: ${context.job.delivery?.reason ?? "its turn was interrupted"}. Continuing that turn because autonomy is yolo${continuationCount === "" ? "" : ` (${continuationCount})`}; no new run is starting.`,
+						notice: `job ${context.job.id}: ${context.job.delivery?.reason ?? "its turn was interrupted"}. ${continuationAction} because autonomy is yolo${continuationCount === "" ? "" : ` (${continuationCount})`}; no new run is starting.`,
 					}
 				: {}),
 			isAdmissionCurrent: () => deps.isCurrent(context.job.owner) && !context.signal.aborted,

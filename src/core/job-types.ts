@@ -53,14 +53,17 @@ export type TurnContinuationCause =
 	| "tool_budget"
 	| "loop_guard"
 	| "retries_exhausted"
-	| "compaction";
+	| "compaction"
+	| "job_exhausted";
 /**
  * One job or one operator turn gets this many continuations after a failure stop; a turn that dies that often is not a
  * slow turn. A tool budget crossing is a checkpoint and does not count, or a steady poll would run out of them within
  * hours. The cost ceiling and the loop guard bound it instead (#445).
  */
 export const TURN_CONTINUATION_CAP = 3;
-export const continuationCountsAgainstCap = (cause: TurnContinuationCause): boolean => cause !== "tool_budget";
+/** A job runs out of starts once, so that wake has nothing to cap. */
+export const continuationCountsAgainstCap = (cause: TurnContinuationCause): boolean =>
+	cause !== "tool_budget" && cause !== "job_exhausted";
 /** Wait before continuing a turn that failed, so a provider outage has time to clear (#445). */
 const TURN_CONTINUATION_FAILURE_DELAYS_MS = [60_000, 300_000, 900_000] as const;
 export function turnContinuationDelayMs(attempt: number, retryAfterMs?: number): number {

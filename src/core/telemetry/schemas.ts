@@ -1452,7 +1452,15 @@ export const TurnAbortedSchema = Type.Object(
 export const JobClockResumedSchema = Type.Object({ jobId: ExistingId, boundMs: duration }, closed);
 export const TurnContinuedSchema = Type.Object(
 	{
-		cause: vocabulary(["clock", "failure", "tool_budget", "loop_guard", "retries_exhausted", "compaction"]),
+		cause: vocabulary([
+			"clock",
+			"failure",
+			"tool_budget",
+			"loop_guard",
+			"retries_exhausted",
+			"compaction",
+			"job_exhausted",
+		]),
 		attempt: count,
 		cap: count,
 		jobId: Type.Optional(ExistingId),

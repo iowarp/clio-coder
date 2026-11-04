@@ -138,6 +138,17 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		result: JobRunResult,
 	): TurnContinuationCause | null {
 		if (evidence.cleanupUnresolved || job.generation !== execution.generation) return null;
+		if (execution.kind === "run" && job.spec.runner.kind === "command") {
+			// The turn that made this job ended waiting on its match, so without this nothing ever wakes it (#445).
+			const exhausted =
+				job.spec.until !== null &&
+				job.spec.onMatch.kind === "main_turn" &&
+				job.state === "active" &&
+				job.spec.count !== null &&
+				job.starts >= job.spec.count &&
+				(execution.forced === null || execution.clockExpired === true);
+			return exhausted && options.continuation?.allowed(job) === true ? "job_exhausted" : null;
+		}
 		let cause: TurnContinuationCause | null = null;
 		if (execution.clockExpired === true) cause = job.spec.timeoutDefaulted === true ? "clock" : null;
 		else if (execution.forced !== null) cause = null;
@@ -161,6 +172,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		loop_guard: "the loop guard locked its tools",
 		retries_exhausted: "provider retries ran out",
 		compaction: "context compaction failed",
+		job_exhausted: "it ran out of its starts before its condition matched",
 	};
 	function queueContinuation(
 		draft: JobRecord,

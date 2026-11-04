@@ -285,6 +285,108 @@ describe("job continuation at yolo (#445)", () => {
 		strictEqual(executions.length, 2);
 	});
 
+	const pollJob = {
+		intervalMs: 1000,
+		count: 2,
+		runner: { kind: "command" as const, argv: ["node", "--version"] },
+		until: { path: ["state"], op: "ne" as const, value: "pending" },
+		onMatch: { kind: "main_turn" as const, prompt: "CI settled, fix or report" },
+	};
+	const polls = (json: unknown[], delivered: string[]): Partial<JobRunnerPorts> => {
+		let index = 0;
+		return {
+			run: async (context) => {
+				context.start();
+				const value = json[Math.min(index++, json.length - 1)];
+				return value === null
+					? { outcome: "failed", summary: "exit 1", errorClass: "execution" }
+					: { outcome: "succeeded", summary: "polled", json: value };
+			},
+			deliver: async (context) => {
+				context.start();
+				delivered.push(context.job.delivery?.continuation ?? "match");
+				return DONE;
+			},
+		};
+	};
+
+	it("wakes the main turn once when a poll job runs out of starts without a match", async () => {
+		const delivered: string[] = [];
+		const host = make(polls([{ state: "pending" }], delivered));
+		const job = await host.create(pollJob, owner);
+		for (let i = 0; i < 2; i++) await advance(host, 1000);
+		deepStrictEqual(resumed, [{ cause: "job_exhausted", attempt: 0 }]);
+		for (let i = 0; i < 3; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["job_exhausted"], "the wake runs once");
+		const final = host.get(job.id, owner);
+		strictEqual(final?.clockResumes, undefined);
+		strictEqual(final?.reason, "count");
+		strictEqual(final?.delivery?.state, "delivered");
+	});
+
+	it("wakes it too when every poll failed, which is when the turn most needs to know", async () => {
+		const delivered: string[] = [];
+		const host = make(polls([null], delivered));
+		await host.create(pollJob, owner);
+		for (let i = 0; i < 4; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["job_exhausted"]);
+	});
+
+	it("delivers an ordinary follow-up when the last poll matches", async () => {
+		const delivered: string[] = [];
+		const host = make(polls([{ state: "pending" }, { state: "failure" }], delivered));
+		await host.create(pollJob, owner);
+		for (let i = 0; i < 4; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["match"]);
+		deepStrictEqual(resumed, []);
+	});
+
+	it("leaves a poll job's end silent below yolo, without a follow-up, or with starts left", async () => {
+		yolo = false;
+		const delivered: string[] = [];
+		const attended = make(polls([{ state: "pending" }], delivered));
+		const job = await attended.create(pollJob, owner);
+		for (let i = 0; i < 3; i++) await advance(attended, 1000);
+		strictEqual(attended.get(job.id, owner)?.reason, "count");
+		deepStrictEqual(delivered, []);
+		await controller?.close();
+
+		yolo = true;
+		const noFollowUp = make(polls([{ state: "pending" }], delivered));
+		const { onMatch: _onMatch, ...withoutFollowUp } = pollJob;
+		await noFollowUp.create(withoutFollowUp, owner);
+		for (let i = 0; i < 3; i++) await advance(noFollowUp, 1000);
+		deepStrictEqual(delivered, []);
+		deepStrictEqual(resumed, []);
+		await controller?.close();
+
+		const running = make(polls([{ state: "pending" }], delivered));
+		await running.create({ ...pollJob, count: 5 }, owner);
+		for (let i = 0; i < 3; i++) await advance(running, 1000);
+		deepStrictEqual(resumed, []);
+	});
+
+	it("says the follow-up does not apply and hands over the last poll", async () => {
+		const { ports, requests } = runtimePorts([{}]);
+		const host = make({
+			...ports,
+			admit: async () => ({ status: "ready" }),
+			run: async (context) => {
+				context.start();
+				return { outcome: "failed", summary: "KeyError: FAKE_CI_ARM", errorClass: "execution" };
+			},
+		});
+		await host.create(pollJob, owner);
+		for (let i = 0; i < 4; i++) await advance(host, 1000);
+		strictEqual(requests.length, 1);
+		const [wake] = requests;
+		match(wake?.text ?? "", /ran out of its 2 starts and its condition never matched/u);
+		match(wake?.text ?? "", /does not apply yet/u);
+		match(wake?.text ?? "", /KeyError: FAKE_CI_ARM/u);
+		ok(!wake?.text.includes("The previous turn of this job stopped"));
+		match(wake?.notice ?? "", /Waking the main turn because autonomy is yolo; no new run is starting/u);
+	});
+
 	function runtimePorts(results: readonly Partial<ReturnType<typeof machineResult>>[]) {
 		const requests: MachineTurnRequest[] = [];
 		const chat = {
