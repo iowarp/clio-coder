@@ -1,8 +1,8 @@
 [
   {
     "slug": "system-one-decisions",
-    "title": "System One decisions and parallel drafts",
-    "description": "Bind a small decision model to fixed points in a session, starting with a judge that ranks the candidates from /draft.",
+    "title": "Bring a fast decision model with System One",
+    "description": "Name one route to give the agent a consult tool, a screen beside the safety judge, and optional steering triage, with limits stated up front.",
     "category": "Decision engines",
     "time": "5 min",
     "author": "The Clio Coder team",

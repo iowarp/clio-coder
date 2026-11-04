@@ -1,86 +1,93 @@
-System One is an optional decision layer. At a few fixed points in a session, Clio Coder can ask a small, fast model a typed question, such as "which of these drafts answers the request best?", and get back probabilities instead of prose. It never answers you, never edits files, and never removes an approval.
+System One lets you bring a small decision model to Clio Coder. You name a route with one setting, and the main agent gets one tool, `consult`, that asks typed questions or screens a long list of things the agent has not read. The same route can also read web and MCP results beside the safety judge, and triage messages you queue during a run.
 
 ::: note Experimental in v0.6.8
-System One is off until you bind a decision site to an engine. Settings, `clio-coder doctor`, and `/usage` label it experimental. Site names, engine options, and the settings format may change between releases.
+System One is off until you name a route, and its keys and tool may change between releases. `consult` is unproven: nothing yet shows that agents reach for it or that it speeds anything up. Between a third and more than half of filter matches can be wrong on the query sets tried so far.
 :::
 
 ::: needs
-- Clio Coder 0.6.7 with a working chat model.
-- One engine: a chat target you already configured, a self-hosted `systemone` server, or a hosted decision engine account.
-- A reason to try it. Nothing else in Clio Coder depends on System One.
+- A working chat model. System One never replaces it.
+- A route to name: a hosted engine with `TYPESAFE_API_KEY`, a decision server you run, or a chat target you already use.
 :::
-
-## What a decision site is
-
-A site is one place where Clio Coder asks a question. Each site has a deadline in milliseconds or seconds. A site that is unbound, late, or failing behaves as if System One did not exist, and three timeouts in a row pause that engine for five minutes.
-
-::: compare
-| Site | What it reads | What it can do |
-| --- | --- | --- |
-| `drafts` | The candidates from `/draft` | Rank them and mark unsound ones |
-| `toolCall` | A one-line, redacted summary of a pending command | Add an advisory line to the approval card |
-| `turn` | Your request at the start of a turn | Hint scope and orientation, for a fitted engine only |
-| `relevance` | Skill, capability, and memory catalogs | Reorder them |
-| `consult` | A typed question from the agent | Answer it, up to three times a turn |
-| `toolResult`, `turnEnd`, `steer` | Web and MCP output, the finished reply, queued messages | Record a reading only |
-:::
-
-## Start with drafts
-
-`/draft` asks your active chat model for several answers to one request, in parallel, and shows them side by side. It works without System One. Binding the `drafts` site adds a judge.
 
 ::: steps
-### Bind the site to a chat target
-
-Add this to your settings file, using the name of a target you already have. `/settings` lists System One under Advanced, then Experimental.
+### Name a route
 
 ```yaml title=settings.yaml
 systemOne:
-  engines:
-    chat:
-      kind: llm
-      target: my-chat-target
-  sites:
-    drafts: chat
+  use: jev
 ```
 
-### Ask for drafts
+Or from the shell:
 
-```text
-/draft 3 Write the commit message for the staged change.
+```sh
+clio-coder systemone use jev
 ```
 
-The count is 2 to 4 and defaults to 3. Candidates differ by sampling temperature, or by a different angle in the prompt for models that refuse a temperature.
+This takes effect on the next start. A list such as `jev,memory` is a failover order, and a route you did not name is never used. For one headless run, pass `--systemone jev` to `clio-coder run`.
 
-### Read the ranking, then choose
+### Check it
 
-Each candidate gets a row with a probability bar. The judge's choice is marked **picked**, and a candidate it finds incorrect or incomplete is marked **judged unsound**. Enter places the selected draft in the composer without sending it. Escape closes the view.
+```sh
+clio-coder systemone status
+clio-coder systemone check jev --live
+```
+
+`status` says whether System One is on, what each route reaches, what a bound route sends, and why a route cannot run. `check --live` sends one content-free decision and reports the build that answered. `/systemone` shows the same status in a session.
+
+### See what the agent can do with it
+
+`consult` is a direct tool in the main session, limited to three calls a turn. Workers do not get it. The agent decides when to call it, so you may see few calls or none.
 :::
 
-::: result Without a judge
-With no `drafts` binding, the candidates still appear and the view says they were not judged. The ranking is a model's assessment of the text. It did not run your tests.
+::: result What you should see
+`status` names your route as on, and `check --live` reports a build. This shows the route answers. It says nothing about whether its answers are good on your repository, and nothing measures your engine for you.
 :::
 
-## Choose an engine
+## Choose a route
 
-An `llm` engine is any chat target, and is the quickest way to try a site. Each question costs two model requests when the target returns token probabilities and five when it does not. Those requests pass the same cost ceiling as the rest of the session and appear in `/usage` as System One calls.
+::: compare
+| Route | What answers | What it returns |
+| --- | --- | --- |
+| `jev` | A hosted engine, with no `targets` entry needed | Real probabilities |
+| A declared engine | A decision server you run, with a named profile | What its profile declares |
+| `memory` | The model in `context.memory` | One label per question |
+| `main` or a chat target | A chat route you already have | One label per question |
+:::
 
-A `systemone` engine is a server built for these questions: a hosted decision engine, or a `systemone` server you run. The guide lists the supported engine profiles and where to place each one.
+Label routes have no real probabilities, so a filter match from them has no score. They also never drive the judge screen, and a stop label from them never interrupts a run.
 
-## Shadow first
+## What each use does
 
-An engine acts on the `turn` and `relevance` sites only when Clio Coder has measured confidence thresholds, called cuts, for that exact model build. Without cuts the engine runs in shadow: its answers are recorded and change nothing. The approval advisory, `consult`, and `/draft` show any engine's answer and name the build that gave it.
+**Filter.** `consult` scores up to 256 items against one criterion, and only ids and scores enter the agent's context. A file reaches the model as its path and a digest of its leading comment, exports, and imports, so a filter misses behavior inside a body. Treat it as a way to narrow a list, then read what it returns. Use `grep` to find behavior.
 
-`clio-coder doctor` prints one row per bound site and per engine. To keep a local dataset of decisions and outcomes, set `telemetry.mode: research` and `telemetry.research.content: true`, record consent with `clio-coder telemetry consent`, then use `clio-coder systemone status` and `clio-coder systemone export --out <file>`. Rows are redacted, kept 30 days by default, and stay on your machine.
+**Questions.** `consult` also asks one to four typed questions: yes or no, pick, or rate. It returns numbers, never a chosen option. The agent decides. On something the agent already read, the model knows less than the agent does.
 
-::: limits Know what leaves your machine
-- State is redacted before any engine sees it, but a hosted engine still receives request text and bounded tool output. A local server keeps that data on your machine.
-- A probability is advice. Approvals, permissions, and checks work the same with System One on or off.
-- An `llm` engine spends tokens on every question.
+**Judge screen.** When the safety judge reviews a main-session call, System One reads recent web and MCP results and asks whether they instruct an AI agent. It can only tighten: a judge allow becomes a card that names the source, and a block stays a block. It runs only on routes that declare real probabilities.
+
+**Steering triage.** With `chat.steering.triage.enabled` on, each queued message gets two typed picks: how it relates to the work and how soon it should land. Triage is off by default.
+
+## Where your data goes
+
+A hosted route receives what these uses send: file digests and heads, chunks of a result, web and MCP result text, and queued messages. Naming a route enables the judge screen too, so result text can leave the machine at judge time. State is redacted first, and redaction is best effort. Use a route you run yourself when that matters.
+
+## Turn it off
+
+```sh
+clio-coder systemone off
+```
+
+Off is the default, and it sends no request and adds nothing to the prompt or the tool list. A failed ask returns nothing, and the agent carries on as if System One were absent.
+
+::: limits Boundaries
+- It is not a safety net. The deterministic safety rules and the judge decide, and no use removes a confirmation.
+- A filter miss is not proof either, especially when `carried.partial` is above zero.
+- Profiles declare how a model family's numbers are read. They make no accuracy claim, and there are no fitted thresholds.
+- Clio Coder ships a client for these wires, not an inference server.
+- The fixed decision sites, `/draft` judging, and the decision dataset from earlier releases are gone. `clio-coder doctor --fix` removes their retired settings.
 :::
 
 ::: next
-- <a href="<!-- source-blob -->/docs/guide/system-one.md">System One guide in the repository</a>
-- [Choose a model for your project](/tutorials/choose-model-for-your-project.html)
+- [The full System One guide](https://github.com/iowarp/clio-coder/blob/main/docs/guide/system-one.md)
 - [Diffusion models in the terminal](/experimental/diffusion-models.html)
+- [Let Clio Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
 :::
