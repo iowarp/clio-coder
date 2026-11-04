@@ -1308,7 +1308,7 @@ function boundRawValue(value: unknown, depth: number, key?: string, parentKey?: 
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		const bounded: Record<string, unknown> = {};
 		for (const [entryKey, entry] of Object.entries(value)) {
-			bounded[entryKey] = boundRawValue(entry, depth + 1, entryKey, key);
+			bounded[redactUrlCredentials(entryKey)] = boundRawValue(entry, depth + 1, entryKey, key);
 		}
 		return bounded;
 	}
@@ -1369,7 +1369,8 @@ function toolLocations(toolName: string | undefined, args: unknown, cwd: string)
 	if (!isRecord(args)) return null;
 	const path = args.path;
 	if (typeof path !== "string" || path.length === 0) return null;
-	return [{ path: boundString(resolvePath(cwd, path), ACP_MAX_LOCATION_PATH_BYTES) }];
+	// Ahead of resolving, which folds the `//` of a URL the pattern reads (#446).
+	return [{ path: boundString(resolvePath(cwd, redactUrlCredentials(path)), ACP_MAX_LOCATION_PATH_BYTES) }];
 }
 
 function utf8Bytes(value: string): number {
@@ -1845,14 +1846,14 @@ function handleChatEvent(
 		const snapshot: AcpToolCallSnapshot = {
 			rawInput: boundRawRecord(event.args),
 			...(locations !== null ? { locations } : {}),
-			title: boundString(capability ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+			title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
 			kind: toolKind(chainSteps.length > 0 ? toolName : capability),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
 		sendUpdate(transport, sessionId, active, {
 			sessionUpdate: "tool_call",
 			toolCallId,
-			name: toolName ?? "tool",
+			name: redactUrlCredentials(toolName ?? "tool"),
 			title: snapshot.title,
 			kind: snapshot.kind,
 			status: "in_progress" satisfies AcpToolCallStatus,
@@ -1893,7 +1894,7 @@ function handleChatEvent(
 			{
 				sessionUpdate: "tool_call_update",
 				toolCallId,
-				title: started?.title ?? boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+				title: started?.title ?? boundString(redactUrlCredentials(toolName ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
 				kind: started?.kind ?? toolKind(toolName),
 				status: toolStatus(event),
 				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
@@ -2040,7 +2041,8 @@ function safeStoredString(value: unknown, maxBytes: number, fallback = ""): stri
 		const codePoint = character.codePointAt(0);
 		safe += codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f) ? " " : character;
 	}
-	return boundString(safe, maxBytes);
+	// Everything stored that reaches a client passes here, and redacted ahead of its bound, which could cut a password's scheme off (#446).
+	return boundString(redactUrlCredentials(safe), maxBytes);
 }
 
 function safeStoredIdentifier(value: unknown, maxBytes: number): string | null {
@@ -2180,9 +2182,10 @@ function replayMessageChunks(
 	frames: AcpReplayFrame[],
 	sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk",
 	texts: ReadonlyArray<string>,
+	completed = true,
 ): void {
 	for (const text of texts) {
-		const shown = sessionUpdate === "user_message_chunk" ? text : redactUrlCredentials(text);
+		const shown = sessionUpdate === "user_message_chunk" ? text : redactFinalUrlCredentials(text, completed);
 		for (const chunk of chunkText(shown, ACP_MAX_CHUNK_BYTES)) {
 			if (chunk.length === 0) continue;
 			frames.push({ update: { sessionUpdate, content: textContent(chunk) } });
@@ -2223,10 +2226,7 @@ function replayShellLine(entry: BashExecutionEntry): AcpReplayFrame[] {
 	const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
 	const toolCallId = `shell_${entry.turnId}`;
 	const stored: unknown = entry.command;
-	const command = safeStoredString(
-		typeof stored === "string" ? redactUrlCredentials(stored) : stored,
-		ACP_MAX_SHELL_COMMAND_BYTES,
-	);
+	const command = safeStoredString(stored, ACP_MAX_SHELL_COMMAND_BYTES);
 	const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
 	const output = shellOutputTail(redactFinalUrlCredentials(entry.output, !entry.cancelled));
 	return [
@@ -2357,8 +2357,10 @@ function prepareAcpReplay(
 		if (entry.role === "assistant") {
 			current.stopReason = payload?.stopReason === "toolUse" ? "error" : mapAcpStopReason(payload?.stopReason);
 			const blocks = replayTextBlocks(entry);
-			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking);
-			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text);
+			// Stored text ends where the live stream did, and a message that stopped short can end inside a URL (#446).
+			const completed = messageStopCompleted(payload?.stopReason);
+			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking, completed);
+			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text, completed);
 			continue;
 		}
 		if (entry.role === "tool_call") {
@@ -3005,7 +3007,7 @@ function installPermissionBridge(input: {
 		// re-derive the tier and the consequence from a tool name it cannot
 		// classify.
 		const facts = decisionFactsForPermission({
-			tool: call.tool,
+			tool: redactUrlCredentials(call.tool),
 			actionClass: decision.classification.actionClass,
 			axis: meta.axis.startsWith("net:")
 				? { kind: "safety-net", ruleId: meta.axis.slice("net:".length) || "unknown" }
@@ -3128,9 +3130,11 @@ function installPermissionBridge(input: {
 								toolCall: {
 									toolCallId,
 									title: boundString(
-										decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
-											? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
-											: call.tool,
+										redactUrlCredentials(
+											decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
+												? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
+												: call.tool,
+										),
 										ACP_MAX_TOOL_TITLE_BYTES,
 									),
 									kind: toolKind(call.tool),
