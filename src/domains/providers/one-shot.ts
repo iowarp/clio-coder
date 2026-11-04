@@ -57,6 +57,25 @@ export type OneShotPort = (request: {
 	signal: AbortSignal;
 }) => Promise<{ text: string; usage?: { input: number; output: number }; model?: string }>;
 
+/**
+ * What a port request adds to its round. A System One ask names its engine, typed triage
+ * included, and holds its reply where the runtime can. The safety judge names none, so its
+ * request stays as it is until holding it has been measured on the models it runs on. An
+ * ask's items differ from one ask to the next, so a cache write on one is rarely read back.
+ */
+export function oneShotRoundOptions(request: Parameters<OneShotPort>[0]): {
+	responseSchema?: { name: string; schema: Record<string, unknown> };
+	holdReply?: boolean;
+	cacheRetention?: "none";
+} {
+	return {
+		...(request.schema !== undefined
+			? { responseSchema: { name: "system_one_vote", schema: request.schema as Record<string, unknown> } }
+			: {}),
+		...(request.engine !== undefined ? { holdReply: true, cacheRetention: "none" as const } : {}),
+	};
+}
+
 /** What a port reports: a cached prompt is still input the model read, which is what a chat wire's prompt count says. */
 export function oneShotTokens(usage: {
 	readonly input: number;

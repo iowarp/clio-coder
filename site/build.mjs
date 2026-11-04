@@ -32,10 +32,10 @@ const tutorials = JSON.parse(await read("content/tutorials.json"));
 if (values.review)
 	for (const item of JSON.parse(await read("content/drafts/review-catalog.json")).articles)
 		tutorials.push({ ...item, draft: true });
-const experimental = JSON.parse(await read("content/experimental.json"));
+const research = JSON.parse(await read("content/research.json"));
 const collections = [
 	{ id: "tutorials", label: "Tutorials", listing: "/learn.html", items: tutorials },
-	{ id: "experimental", label: "Experimental", listing: "/experimental.html", items: experimental },
+	{ id: "research", label: "Research", listing: "/research.html", items: research },
 ];
 const articles = collections.flatMap((collection) =>
 	collection.items.map((item) => ({
@@ -175,7 +175,7 @@ function head(path, title, description, type = "WebPage") {
 	};
 	const page = graph["@graph"][1];
 	if (type === "Article" || type === "TechArticle") {
-		page.headline = title.replace(/ — Clio Coder(?: tutorials| experimental| docs)?$/, "");
+		page.headline = title.replace(/ — Clio Coder(?: tutorials| research| docs)?$/, "");
 		page.mainEntityOfPage = url;
 		page.author = {
 			"@type": article?.author === "The Clio team" || !article ? "Organization" : "Person",
@@ -193,7 +193,7 @@ function head(path, title, description, type = "WebPage") {
 		const crumbs = [
 			{ name: "Clio Coder", path: "/" },
 			...(parent ? [parent] : []),
-			{ name: title.replace(/ — Clio Coder(?: tutorials| experimental| docs)?$/, ""), path },
+			{ name: title.replace(/ — Clio Coder(?: tutorials| research| docs)?$/, ""), path },
 		];
 		graph["@graph"].push({
 			"@type": "BreadcrumbList",
@@ -246,7 +246,7 @@ function shell(html, path, title, description, type) {
 	const active = path.startsWith("/docs/")
 		? "/docs.html"
 		: (articles.find((item) => item.url === path)?.collection.listing ?? path);
-	const header = mast.replace(/href="(\/|\/docs.html|\/learn.html|\/experimental.html)"/g, (all, href) =>
+	const header = mast.replace(/href="(\/|\/docs.html|\/learn.html|\/research.html)"/g, (all, href) =>
 		href === active ? `${all} aria-current="page"` : all,
 	);
 	let number = 0;
@@ -592,9 +592,7 @@ for (const item of articles) {
 		["Written for", `v${item.versionScope ?? product.version}`],
 		[
 			"Works in",
-			(item.interfaces ?? (item.collection.id === "experimental" ? ["Terminal"] : ["Terminal", "Desktop alpha"])).join(
-				" · ",
-			),
+			(item.interfaces ?? (item.collection.id === "research" ? ["Terminal"] : ["Terminal", "Desktop alpha"])).join(" · "),
 		],
 		["Basis", item.basis ?? "Documented workflow"],
 	]
@@ -657,7 +655,7 @@ for (const collection of collections) {
 		`${collection.label} — Clio Coder`,
 		collection.id === "tutorials"
 			? "Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces."
-			: "Explore experimental Clio Coder workflows, their setup, and their current limits before trying them in your project.",
+			: "Open research questions in Clio Coder: what is known and measured so far, a first experiment for each, and how the team, students, and outside researchers can join.",
 	);
 }
 
@@ -675,7 +673,7 @@ await writeFile(
 );
 await cp(join(root, "robots.txt"), join(out, "robots.txt"));
 console.log(
-	`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials, ${experimental.length} experimental articles).`,
+	`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials, ${research.length} research pages).`,
 );
 
 // Stable bootstraps follow released assets even while the rest of the site awaits a redeploy.

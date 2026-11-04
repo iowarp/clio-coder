@@ -594,6 +594,8 @@ export type SideQuestionOutcome =
 export interface ChatLoop {
 	/** Live operator adapters call this before expansion; internal submits never discover eggs. */
 	discoverOperatorEgg?(text: string, ask?: AskUserHandler): Promise<boolean>;
+	/** Whether these skill requests are refused in this session, with the notice shown. An install offer asks this first. */
+	refuseSkillRequests?(requests: ReadonlyArray<PendingSkillRequest>, inlinedPaths: ReadonlyArray<string>): boolean;
 	activeEggs?(): readonly string[];
 	eggsCommand?(action: "status" | "off", id?: string): string;
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
@@ -1119,6 +1121,24 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		for (const listener of listeners) {
 			listener(event);
 		}
+	};
+
+	const refuseSkillRequests = (
+		requests: ReadonlyArray<PendingSkillRequest>,
+		inlinedPaths: ReadonlyArray<string>,
+	): boolean => {
+		if (!requests.some((request) => request.name.trim() === "context-handoff")) return false;
+		// The file this request inlines is judged, not labeled: a refused request sends nothing, so it labels nothing.
+		const refusal = deps.refuseHandoffSkill?.(inlinedPaths) ?? null;
+		if (refusal === null) return false;
+		emit({
+			type: "notice",
+			level: "warning",
+			surface: "transcript",
+			text: refusal,
+			admission: { reason: "handoff-skill-refused" },
+		});
+		return true;
 	};
 
 	const emitFooterNotice = (level: ChatNoticeEvent["level"], text: string, key: string): void => {
@@ -2314,6 +2334,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		eggsCommand: eggs.command,
 		discoverOperatorEgg: (text, ask) =>
 			deps.headless ? Promise.resolve(false) : eggs.discover(text, ask ?? deps.eggAsk),
+		refuseSkillRequests,
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 
@@ -2492,20 +2513,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
-				if ((options.pendingSkillRequests ?? []).some((request) => request.name.trim() === "context-handoff")) {
-					// The file this request inlines is judged, not labeled: a refused request sends nothing, so it labels nothing.
-					const refusal = deps.refuseHandoffSkill?.(options.workingContextPaths ?? []) ?? null;
-					if (refusal !== null) {
-						emit({
-							type: "notice",
-							level: "warning",
-							surface: "transcript",
-							text: refusal,
-							admission: { reason: "handoff-skill-refused" },
-						});
-						return;
-					}
-				}
+				if (refuseSkillRequests(options.pendingSkillRequests ?? [], options.workingContextPaths ?? [])) return;
 				if (deps.promptSubmit && options.requestContinuation !== true) {
 					const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
 					if (!admissionCurrent()) return;
