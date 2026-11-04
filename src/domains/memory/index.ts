@@ -43,6 +43,7 @@ export {
 	type MemoryObservationInput,
 	recordMemoryObservations,
 } from "./guardian-gate.js";
+export { memoryFlowSweepNotice, sweepRestrictedMemory } from "./flow-sweep.js";
 export { completedLessonSource } from "./history-review.js";
 export { type LessonSubject, lessonSubject } from "./lesson-evidence.js";
 export {

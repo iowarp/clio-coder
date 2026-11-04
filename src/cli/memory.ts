@@ -1,5 +1,4 @@
 import { readFile, stat } from "node:fs/promises";
-import { dirname } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { inspectRunFlowProvenance } from "../domains/evidence/index.js";
 import {
@@ -19,8 +18,7 @@ import {
 	rejectMemoryRecord,
 	type TaskMemoryHandoffEntry,
 } from "../domains/memory/index.js";
-import { recallApprovedFlowPolicy } from "../domains/safety/flow-policy-snapshot.js";
-import { loadProjectSafetyPolicy } from "../domains/safety/project-policy.js";
+import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { FLOW_RESTRICTION_ENTRY_TYPE } from "../domains/session/history.js";
 import { openSession } from "../engine/session.js";
 import { printError, printOk } from "./shared.js";
@@ -368,16 +366,6 @@ function scopeSelection(parsed: ParsedMemoryArgs): MemoryScopeSelection | undefi
 	}
 	if (parsed.agentId === undefined) throw new Error("agent scope requires --agent");
 	return { scope: "agent", agent: memoryAgentIdentity(parsed.agentId) };
-}
-
-/** Rules the running policy would hold: the file's, the approved snapshot's, or an unknown set when either cannot be read. */
-function projectDeclaresFlowRules(cwd: string): boolean {
-	const policy = loadProjectSafetyPolicy(cwd);
-	if (policy.path === null) return false;
-	if (!policy.valid || (policy.informationFlow.sources?.length ?? 0) > 0) return true;
-	const recalled = recallApprovedFlowPolicy(dirname(dirname(policy.path)));
-	if (recalled.kind === "unavailable") return true;
-	return recalled.kind === "approved" && (recalled.approved.informationFlow.sources?.length ?? 0) > 0;
 }
 
 /**

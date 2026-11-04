@@ -124,6 +124,7 @@ import {
 	createTaskMemoryTrace,
 	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
+	memoryFlowSweepNotice,
 	MemoryRuntime,
 	markMemoryOffRecording,
 	memoryStatus,
@@ -136,6 +137,7 @@ import {
 	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
+	sweepRestrictedMemory,
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
@@ -282,6 +284,7 @@ import type { SessionContract, SessionMeta } from "../domains/session/contract.j
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
+import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
 import { observationCheckpoint, observationSourceUnits, SessionDomainModule } from "../domains/session/index.js";
 import {
@@ -2705,6 +2708,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		else writeDiagnostic(`[clio-coder:memory] ${line}\n`);
 	};
 	const memoryDiagnostic = (line: string): void => writeDiagnostic(`[clio-coder:memory] ${line}\n`);
+	// Held for the interactive shell, whose notices do not exist yet at this point in boot.
+	let memorySweepNotice: string | null = null;
+	// Before the first prompt compiles, with memory on or off: a record withdrawn only while memory is on would come back
+	// when it is turned on mid-session. A failure costs this boot nothing and the next boot tries again.
+	try {
+		const swept = await sweepRestrictedMemory(clioDataDir(), clioStateDir(), {
+			sessionFirstLabelAt: (sessionId) =>
+				readFlowSessionEntries(sessionId).reduce<string | null>((first, entry) => {
+					const at = (entry as { timestamp?: unknown }).timestamp;
+					const stamp = typeof at === "string" ? at : new Date(0).toISOString();
+					return first === null || stamp < first ? stamp : first;
+				}, null),
+			repositoryDeclaresFlowRules: projectDeclaresFlowRules,
+		});
+		if (swept !== null && swept.length > 0) {
+			const message = memoryFlowSweepNotice(swept.length);
+			if (interactive) memorySweepNotice = message;
+			else memoryDiagnostic(message);
+		}
+	} catch (error) {
+		memoryDiagnostic(
+			`restricted lesson sweep did not finish and will run again next boot: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	const memoryFlowNoticedSessions = new Set<string | null>();
 	const admitMemoryFlow: AdmitBackgroundModelFlow = (destination) => {
 		const refusal = admitModelFlow(destination);
@@ -5858,6 +5885,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		getTaskMemorySeedOffer,
+		takeMemorySweepNotice: () => {
+			const notice = memorySweepNotice;
+			memorySweepNotice = null;
+			return notice;
+		},
 		seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
 		stateDir: clioStateDir(),
 		dataDir: clioDataDir(),

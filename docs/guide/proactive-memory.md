@@ -527,6 +527,14 @@ carries a label or its dispatching session does. Text recorded before the label 
 filed or gain evidence: history review stops at the label, and a retention already
 running, an interrupted one for a task finished before the label or a record already filed holds only what came before it. See [Information flow](information-flow.md).
 
+Releases before 0.6.8 could file a restricted session's lessons with no label. The first boot of 0.6.8 or later
+checks the store once, before the first prompt compiles and with memory on or off. It rejects a record whose
+source session took a label at or before the record was filed. In a repository whose project declares source rules
+it also rejects a record whose source session is gone, unreadable or never recorded. One notice gives the count.
+A rejected record stays on disk and reaches no route: review it with `clio-coder memory list` and restore one with
+`clio-coder memory approve <id>`. A marker at `<stateDir>/memory/flow-sweep-v1.json` keeps the check from running
+again, and a boot that cannot finish it continues normally and tries again next time.
+
 A runtime notice names the selected chat fallback and its reason. Routing stays
 session-local and does not edit saved settings. Each attempted call records its
 own known usage under its actual target/model and emits its own telemetry outcome;
