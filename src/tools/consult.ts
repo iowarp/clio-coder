@@ -69,7 +69,7 @@ export const CONSULT_LIMITS = {
 	filterItems: 256,
 	/** Code points of one `items` or `capabilities` entry. */
 	filterItemChars: 240,
-	/** Code points of one file head or output chunk under a filter. */
+	/** Code points of one output chunk, or of one file's path and head together, under a filter. */
 	filterHeadChars: 512,
 	/** Item text across one filter. */
 	filterTotalChars: CONSULT_FILTER_MAX_CHARS,
@@ -135,7 +135,7 @@ export const consultParameters = Type.Object({
 			),
 			paths: Type.Optional(
 				Type.Array(Type.String(), {
-					description: `source files: workspace paths or globs; the first ${CONSULT_LIMITS.filterHeadChars} characters of each file are read.`,
+					description: `source files: workspace paths or globs; each file's path and the start of its text are read, ${CONSULT_LIMITS.filterHeadChars} characters together.`,
 				}),
 			),
 			path: Type.Optional(Type.String({ description: "source output: the offload path a truncated result named." })),
@@ -518,8 +518,13 @@ class FilterGathering {
 		return `over the ${CONSULT_LIMITS.filterItems}-item limit`;
 	}
 
-	/** The id comes back to the agent and the text goes to the engine, so both are checked here. */
-	add(id: string, text: unknown, chars: number, whole = true): boolean {
+	/**
+	 * The id comes back to the agent and the text goes to the engine, so both are checked here.
+	 * `named` puts the id on the item's first line inside the same `chars`, because a file's head
+	 * is often all imports and its path says what it is. `charsRead` counts the text alone, so a
+	 * match never overstates how much of the file the engine saw, and an empty text stays empty.
+	 */
+	add(id: string, text: unknown, chars: number, whole = true, named = false): boolean {
 		if (this.full) {
 			this.skip(this.overLimit);
 			return false;
@@ -533,9 +538,10 @@ class FilterGathering {
 			return false;
 		}
 		const redacted = redactSecretsText(text, createRedactionTally());
-		const shown = headOf(redacted, chars);
+		const label = named ? `${id}\n` : "";
+		const shown = headOf(redacted, chars - codePoints(label));
 		this.offered += 1;
-		this.items[id] = shown;
+		this.items[id] = `${label}${shown}`;
 		this.charsRead[id] = codePoints(shown);
 		if (!whole || shown !== redacted) this.partial.add(id);
 		return true;
@@ -619,7 +625,7 @@ async function gatherFiles(
 				gathering.skip(file.reason);
 				continue;
 			}
-			if (gathering.add(file.key, file.text, CONSULT_LIMITS.filterHeadChars, file.whole)) {
+			if (gathering.add(file.key, file.text, CONSULT_LIMITS.filterHeadChars, file.whole, true)) {
 				gathering.realPaths.push(file.real);
 				spent += Buffer.byteLength(file.text, "utf8");
 			}

@@ -358,7 +358,7 @@ describe("contracts/consult tool", () => {
 			source: "files",
 			paths: ["src/*.ts", "**/cache.ts", ".env", "../outside/secret.txt", "src/missing.ts"],
 		});
-		deepStrictEqual(payload.matches, [{ id: "src/cache.ts", score: 0.9, charsRead: 512 }]);
+		deepStrictEqual(payload.matches, [{ id: "src/cache.ts", score: 0.9, charsRead: 512 - "src/cache.ts\n".length }]);
 		deepStrictEqual(payload.read, { capChars: 512, whole: 1, partial: 1 });
 		strictEqual(payload.offered, payload.scored + payload.unscored);
 		strictEqual(payload.scored, 2);
@@ -383,16 +383,39 @@ describe("contracts/consult tool", () => {
 		ok(!sent.includes("node_modules"));
 	});
 
+	it("carries a file's path inside the head's cap, and never scores an empty file on its path alone", async () => {
+		const fits = `export const fits = 1;${"y".repeat(512 - 22 - "src/fits.ts\n".length)}`;
+		const over = `${fits}z`;
+		writeFileSync(join(workspace, "src", "fits.ts"), fits);
+		writeFileSync(join(workspace, "src", "over.ts"), over);
+		writeFileSync(join(workspace, "src", "empty.ts"), " \n");
+		const engine = typed();
+		const payload = await filter(bound([engine]), {
+			criterion: "names a component",
+			source: "files",
+			paths: ["src/fits.ts", "src/over.ts", "src/empty.ts"],
+		});
+		const sent = Object.values(engine.asked[0]?.questions ?? {}).map((question) => JSON.stringify(question));
+		strictEqual(sent.length, 2);
+		ok(sent[0]?.includes(JSON.stringify(`src/fits.ts\n${fits}`).slice(1, -1)));
+		ok(sent[1]?.includes(JSON.stringify(`src/over.ts\n${fits}`).slice(1, -1)));
+		ok(!sent[1]?.includes(`${fits}z`));
+		deepStrictEqual(payload.read, { capChars: 512, whole: 1, partial: 1 });
+		deepStrictEqual(payload.skipped, { "empty or not text": 1 });
+	});
+
 	it("splits one offloaded result into line ranges, and refuses any other path", async () => {
 		const text = Array.from({ length: 40 }, (_, index) => (index === 20 ? "cache miss" : `line ${index}`)).join("\n");
 		const path = writeToolOffload(text, { sessionId: "s1" } as Parameters<typeof writeToolOffload>[1]);
 		ok(path);
-		const registry = bound([typed()]);
+		const engine = typed();
+		const registry = bound([engine]);
 		const payload = await filter(
 			registry,
 			{ criterion: "reports a failure", source: "output", path, chunkLines: 16 },
 			{ sessionId: "s1" },
 		);
+		ok(!JSON.stringify(engine.asked[0]?.questions).includes("Item: L1-16"), "a chunk's line range says nothing about it");
 		strictEqual(payload.matches[0]?.id, "L17-32");
 		strictEqual(payload.scored, 3);
 		deepStrictEqual(payload.read, { capChars: 512, whole: 3, partial: 0 });
