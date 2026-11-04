@@ -158,5 +158,107 @@
     "source": "write-an-extension-with-declared-capabilities.md",
     "basis": "Documented workflow",
     "versionScope": "0.6.8"
+  },
+  {
+    "slug": "diffusion-models",
+    "title": "Diffusion models in the terminal",
+    "description": "Connect Inception's Mercury models for chat and workers, and watch an answer refine as a whole instead of arriving token by token.",
+    "category": "Models",
+    "time": "3 min",
+    "author": "The Clio Coder team",
+    "source": "diffusion-models.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "status": "Available since 0.5.3, terminal display only",
+    "interfaces": [
+      "Terminal"
+    ]
+  },
+  {
+    "slug": "panes-and-docks",
+    "title": "Panes and docks: files, workers, and music",
+    "description": "Inside Herdr, show and hide a file browser, a live worker dashboard, and a focus radio beside the conversation with one key each.",
+    "category": "Terminal workspace",
+    "time": "5 min",
+    "author": "The Clio Coder team",
+    "source": "panes-and-docks.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "status": "Experimental, off by default, needs Herdr",
+    "interfaces": [
+      "Terminal"
+    ]
+  },
+  {
+    "slug": "information-flow-rules",
+    "title": "Keep named files with the models you chose",
+    "description": "Declare which paths and tool results may reach which model targets, approve the policy, and see a request to any other destination refused.",
+    "category": "Safety",
+    "time": "4 min",
+    "author": "The Clio Coder team",
+    "source": "information-flow-rules.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "status": "Advanced, opt-in, new in 0.6.0",
+    "interfaces": [
+      "Terminal"
+    ]
+  },
+  {
+    "slug": "semantic-context-and-recordings",
+    "title": "Search your project by meaning and record worker runs",
+    "description": "Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker's evidence.",
+    "category": "Context",
+    "time": "5 min",
+    "author": "The Clio Coder team",
+    "source": "semantic-context-and-recordings.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "status": "Beta, off by default, new in 0.6.2",
+    "interfaces": [
+      "Terminal"
+    ]
+  },
+  {
+    "slug": "run-on-a-local-model",
+    "title": "Run Clio Coder on a local model",
+    "description": "Connect a local server with no account or key, check what Clio Coder learned about it, and see what else to check if code must stay on your machine.",
+    "category": "Model choice",
+    "time": "5 min",
+    "source": "run-on-a-local-model.md",
+    "author": "The Clio Coder team",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ]
+  },
+  {
+    "slug": "submit-a-slurm-job",
+    "title": "Submit a Slurm job through Clio Coder",
+    "description": "Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with your approval before it reaches the scheduler.",
+    "category": "Scientific software",
+    "time": "5 min",
+    "source": "submit-a-slurm-job.md",
+    "author": "The Clio Coder team",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ]
+  },
+  {
+    "slug": "pre-register-a-benchmark",
+    "title": "Pre-register a benchmark before you measure",
+    "description": "Use the experiment-protocol skill to lock thresholds, tolerances, and verdict conditions into a contract you commit before any result exists.",
+    "category": "Scientific software",
+    "time": "5 min",
+    "source": "pre-register-a-benchmark.md",
+    "author": "The Clio Coder team",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ]
   }
 ]

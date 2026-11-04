@@ -35,9 +35,9 @@ const primary = [
 	"/",
 	"/docs.html",
 	"/learn.html",
-	"/experimental.html",
-	...JSON.parse(await readFile(join(site, "content/experimental.json"), "utf8")).map(
-		(item) => `/experimental/${item.slug}.html`,
+	"/research.html",
+	...JSON.parse(await readFile(join(site, "content/research.json"), "utf8")).map(
+		(item) => `/research/${item.slug}.html`,
 	),
 	"/tutorials/first-session.html",
 	"/tutorials/desktop-and-terminal.html",
