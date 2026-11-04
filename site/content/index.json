@@ -274,5 +274,54 @@
       "Locate or separate installation state",
       "Credentials and terminal behavior"
     ]
+  },
+  {
+    "path": "guide/system-one.md",
+    "source": "docs/guide/system-one.md",
+    "title": "System One",
+    "group": "Reference",
+    "excerpt": "Bring a decision model, name a route, and read its limits.",
+    "summary": "system-one.md",
+    "headings": [
+      "What it is",
+      "Name a route",
+      "What to expect"
+    ]
+  },
+  {
+    "path": "guide/information-flow.md",
+    "source": "docs/guide/information-flow.md",
+    "title": "Information flow",
+    "group": "Reference",
+    "excerpt": "Keep named files away from destinations you did not choose.",
+    "summary": "information-flow.md",
+    "headings": [
+      "What it does",
+      "Declare and approve"
+    ]
+  },
+  {
+    "path": "guide/semantic-context.md",
+    "source": "docs/guide/semantic-context.md",
+    "title": "Semantic context",
+    "group": "Everyday use",
+    "excerpt": "Search your project by meaning with a local embedding route.",
+    "summary": "semantic-context.md",
+    "headings": [
+      "What it does",
+      "Set it up and search"
+    ]
+  },
+  {
+    "path": "guide/built-in-agents.md",
+    "source": "docs/guide/built-in-agents.md",
+    "title": "Agents",
+    "group": "Everyday use",
+    "excerpt": "See the agents you can dispatch and add your own.",
+    "summary": "agents.md",
+    "headings": [
+      "See the agents",
+      "Add your own"
+    ]
   }
 ]
