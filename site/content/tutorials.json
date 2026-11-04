@@ -22,6 +22,17 @@
     "basis": "Product tour with 0.6.0 development captures"
   },
   {
+    "slug": "let-it-work-with-containment-and-rewind",
+    "title": "Let Clio Coder work without watching every call",
+    "description": "Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.",
+    "category": "Safety and autonomy",
+    "time": "7 min",
+    "author": "The Clio Coder team",
+    "source": "let-it-work-with-containment-and-rewind.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.7"
+  },
+  {
     "slug": "temperature-calibration",
     "title": "A numerical change, checked with Clio Coder",
     "description": "Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification.",
