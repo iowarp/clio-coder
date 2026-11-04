@@ -11,8 +11,8 @@
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
-    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a></nav>
-    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
   </div>
 </header>
 <main class="page docs-layout" id="content">
@@ -22,22 +22,29 @@
 <details class="doc-nav-group"><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
 <a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
-<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
 <details class="doc-nav-group" open><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html" aria-current="page">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
-<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Workers and fleets</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/76224d7a76d8be7094ed18976eea0fc9f7405816/docs/guide/fleet-dispatch.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/fleet-dispatch.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#delegate-a-focused-task">Delegate a focused task</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Workers and fleets</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/docs/guide/fleet-dispatch.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/fleet-dispatch.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#delegate-a-focused-task">Delegate a focused task</a>
 <a href="#follow-the-work">Follow the work</a>
 <a href="#permissions-sandbox-and-merges">Permissions, sandbox, and merges</a>
-<a href="#compose-a-fleet-when-you-need-one">Compose a fleet when you need one</a></details><h1 id="workers-and-fleets">Workers and fleets</h1>
+<a href="#run-a-playbook-when-you-need-one">Run a playbook when you need one</a>
+<a href="#give-workers-mcp-tools">Give workers MCP tools</a></details><h1 id="workers-and-fleets">Workers and fleets</h1>
 <p>Assign focused tasks and combine workers into a workflow.</p>
 <h2 id="delegate-a-focused-task">Delegate a focused task</h2>
 <p>A worker handles a bounded task while Clio Coder keeps the main conversation. Start with an explicit goal, files it may change, and the checks it should report.</p>
@@ -49,20 +56,25 @@ clio-coder run &quot;Inspect the parser&#39;s test coverage and report gaps. Do 
 <div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">@&lt;agentId-or-runId-prefix&gt; Focus on empty input and report the existing tests.</code></pre></div>
 <p>A steering message first reports queued, then received when the worker acknowledges it. Some external runtimes have no live steering channel; the interface identifies that limit. Review each run&#39;s recorded result before using its conclusions.</p>
 <h2 id="permissions-sandbox-and-merges">Permissions, sandbox, and merges</h2>
-<p>Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental <code>sandbox-exec</code> profile on macOS. With the default <code>safety.sandbox: auto</code>, they run unsandboxed when no sandbox works; <code>required</code> refuses them instead, and <code>off</code> disables it. <code>safety.sandboxNetwork: true</code> allows network access. Your own session&#39;s commands are not sandboxed.</p>
+<p>Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental <code>sandbox-exec</code> profile on macOS. With the default <code>safety.sandbox: auto</code>, they run unsandboxed when no sandbox works; <code>required</code> refuses them instead, and <code>off</code> disables it. <code>safety.sandboxNetwork: true</code> allows network access. At <code>default</code> your own session&#39;s shell commands run in the same kind of sandbox; at <code>yolo</code> they do not, and workers keep theirs. A worker&#39;s ordinary asks go to the safety judge by default (<code>fleet.permissions.mode: judge</code>).</p>
 <p>When a worker&#39;s task branch would merge with a failing or unrun check, the terminal asks first with a <strong>Merge task branch?</strong> card showing the branch, changed paths, and the check. The card opens on <strong>Keep branch</strong>. Headless and ACP runs always keep the branch.</p>
-<h2 id="compose-a-fleet-when-you-need-one">Compose a fleet when you need one</h2>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder fleet list
-clio-coder fleet status</code></pre></div>
-<p>Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one.</p>
+<h2 id="run-a-playbook-when-you-need-one">Run a playbook when you need one</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder playbook list
+clio-coder fleet run sdlc --var task=&quot;Add empty-input handling to the parser&quot;
+clio-coder fleet status
+clio-coder fleet land</code></pre></div>
+<p>A playbook combines workers into a workflow such as a review gate, competing solutions, or a council. The fleet runs it. Copy a builtin with <code>clio-coder playbook new &lt;name&gt; --from sdlc</code>, check it with <code>clio-coder playbook validate &lt;name&gt;</code>, and inspect the approval preview before starting. <code>fleet land</code> lists, previews, and lands the task branches a run kept. See <a href="/tutorials/run-a-playbook-and-land-it.html">the playbook tutorial</a>.</p>
+<h2 id="give-workers-mcp-tools">Give workers MCP tools</h2>
+<p>A recipe names exact <code>mcp_&lt;id&gt;__&lt;tool&gt;</code> capabilities, and admission refuses an untrusted or stale server. Check a server with <code>clio-coder mcp test &lt;id&gt;</code> and grant one project server with <code>clio-coder mcp trust &lt;id&gt;</code>. Add <code>--network</code> to allow it network inside the worker sandbox.</p>
 <p>Remote native workers use SSH and need the same Clio Coder version and the project at the same absolute path on each node. Add a node with <code>clio-coder fleet nodes add</code>, or in the terminal under <code>/settings fleet</code>.</p>
 <p>A node receives work only after <code>clio-coder fleet nodes test &lt;id&gt; --record</code> passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.</p>
-<p>Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipe contracts, and failure recovery.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-version="0.6.7" data-source-ref="76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-commit="76224d7a76d8be7094ed18976eea0fc9f7405816">Guide to v0.6.7</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+<p>Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipes, and failure recovery.</p>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#delegate-a-focused-task">Delegate a focused task</a>
 <a href="#follow-the-work">Follow the work</a>
 <a href="#permissions-sandbox-and-merges">Permissions, sandbox, and merges</a>
-<a href="#compose-a-fleet-when-you-need-one">Compose a fleet when you need one</a></aside>
+<a href="#run-a-playbook-when-you-need-one">Run a playbook when you need one</a>
+<a href="#give-workers-mcp-tools">Give workers MCP tools</a></aside>
 </main><footer class="colophon page">
   <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>

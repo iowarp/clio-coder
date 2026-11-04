@@ -7,11 +7,13 @@
   <url><loc>https://coder.iowarp.ai/docs/guide/commands-and-modes.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/tool-usage.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/context-continuity.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/proactive-memory.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/panes-and-files.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/gui.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/resource-library.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/plugins.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/harness-extensions.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/interop.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/slurm.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/doctor.html</loc></url>
@@ -19,8 +21,16 @@
   <url><loc>https://coder.iowarp.ai/docs/guide/quality-policy.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/configuration-reference.html</loc></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/environment-variables.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/system-one.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/information-flow.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/semantic-context.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/built-in-agents.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/first-session.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/desktop-and-terminal.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/run-a-playbook-and-land-it.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/see-what-a-session-cost-and-what-a-run-did.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/temperature-calibration.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/coordinate-your-coding-agents.html</loc></url>
@@ -28,12 +38,20 @@
   <url><loc>https://coder.iowarp.ai/tutorials/check-a-change-against-your-repository.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/add-skills-and-plugins-deliberately.html</loc></url>
   <url><loc>https://coder.iowarp.ai/tutorials/work-from-a-laptop-with-remote-workers.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental/system-one-decisions.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental/diffusion-models.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental/panes-and-docks.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental/remote-workers-and-clusters.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental/information-flow-rules.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental/semantic-context-and-recordings.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/write-an-extension-with-declared-capabilities.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/diffusion-models.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/panes-and-docks.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/information-flow-rules.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/semantic-context-and-recordings.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/run-on-a-local-model.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/submit-a-slurm-job.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/pre-register-a-benchmark.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research/system-one-decisions.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research/sealed-run-records.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research/proactive-memory.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research/context-and-retrieval.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research/fleets-and-local-models.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research/scientific-and-hpc-workflows.html</loc></url>
   <url><loc>https://coder.iowarp.ai/learn.html</loc></url>
-  <url><loc>https://coder.iowarp.ai/experimental.html</loc></url>
+  <url><loc>https://coder.iowarp.ai/research.html</loc></url>
 </urlset>

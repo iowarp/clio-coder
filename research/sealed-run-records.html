@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Can an agent run be a scientific record? — Clio Coder research</title><meta name="description" content="What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/research/sealed-run-records.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/research/sealed-run-records.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/research/sealed-run-records.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/research/sealed-run-records.html"><meta property="og:title" content="Can an agent run be a scientific record? — Clio Coder research"><meta property="og:description" content="What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Can an agent run be a scientific record? — Clio Coder research"><meta name="twitter:description" content="What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"Article","@id":"https://coder.iowarp.ai/research/sealed-run-records.html#page","name":"Can an agent run be a scientific record? — Clio Coder research","description":"What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder.","url":"https://coder.iowarp.ai/research/sealed-run-records.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Can an agent run be a scientific record?","mainEntityOfPage":"https://coder.iowarp.ai/research/sealed-run-records.html","author":{"@type":"Person","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/research/sealed-run-records.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/research/sealed-run-records.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Research","item":"https://coder.iowarp.ai/research.html"},{"@type":"ListItem","position":3,"name":"Can an agent run be a scientific record?","item":"https://coder.iowarp.ai/research/sealed-run-records.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html" aria-current="page">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html" aria-current="page">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/research.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All research</a><p class="guide-review">Open question. The records have shipped; no study exists yet.</p><p class="eyebrow"><span class="chapter">Reproducible agent science</span>10 min read</p><h1>Can an agent run be a scientific record?</h1><p class="lede">What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.8</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Read from source; first experiment not yet run</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#the-question">The question</a>
+<a href="#what-is-known-so-far">What is known so far</a>
+<a href="#why-it-matters">Why it matters</a>
+<a href="#directions-to-work-on">Directions to work on</a>
+<a href="#use-clio-coder-on-it-today">Use Clio Coder on it today</a>
+<a href="#first-experiment">First experiment</a>
+<a href="#how-to-join">How to join</a></details><p>What would it take to treat an agent run as a scientific record that someone else can check? Clio Coder already writes a sealed record of each run. Nobody has yet studied what those records can support as evidence, how much two runs of one task differ, or what a reader in another lab would still need.</p>
+<aside class="guide-note"><p class="eyebrow">Open question, described for v0.6.8</p><p>The records and commands on this page have shipped. The research use of them is new. No reproducibility study exists yet, so this page has no outcome numbers, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.</p>
+</aside><h2 id="the-question">The question</h2>
+<ul>
+<li><strong>Repeatability.</strong> Given the same task, repository, and model, how far apart are the results of repeated runs, and which recorded facts explain the difference?</li>
+<li><strong>Sufficiency.</strong> What must a shared record contain before an outside reader can judge a claim about a run without re-running it?</li>
+<li><strong>Method.</strong> Can sealed records carry a controlled comparison between agent configurations well enough to publish?</li>
+</ul>
+<h2 id="what-is-known-so-far">What is known so far</h2>
+<p>These are facts about the design, read from the source at this version. They are not study results.</p>
+<p>A finished run writes its settlement, its result object, and an assessment, then seals them. A seal records a SHA-256 hash chain over the journal, plus the size and hash of every journal segment and stored object. <code>clio-coder telemetry verify</code> checks all of that using only the scope&#39;s own files, so it works on any machine.</p>
+<p><strong>What a seal shows.</strong> The record&#39;s files match their manifest and the chain is intact, so damage and partial edits are caught.</p>
+<p><strong>What a seal does not show.</strong> The chain is unkeyed and carries no signature, so someone with the files could write a consistent new record, and a seal cannot say who produced it. Verification also runs nothing. A verified seal says the record is intact, and leaves open whether the agent&#39;s work was correct or would come out the same again.</p>
+<p>Other parts of the design matter to a researcher:</p>
+<ul>
+<li>Unknowns stay unknown. A missing token count reads as not recorded instead of zero, and a dropped or refused record leaves a gap record behind.</li>
+<li>An assessment keeps trust states separately, including whether a run&#39;s claims were grounded in commands that actually ran.</li>
+<li>Sharing has three profiles. <code>content-free</code> is the default, <code>structural</code> adds structure such as prompt and tool-schema manifests, and <code>research</code> adds content captured under consent.</li>
+<li>A share re-applies secret redaction, and below <code>research</code> it keeps only allowlisted fields and anonymizes identities. Redaction is best effort.</li>
+</ul>
+<h2 id="why-it-matters">Why it matters</h2>
+<p>A success rate and a description of the setup leave a reader unable to see what an agent did, what it cost, or which results were lost along the way. A record format that keeps those facts, and says plainly when one is missing, could raise the standard of evidence.</p>
+<p>Every other page in this section depends on the answer. A study of decision models, memory, or compaction is only as good as the records behind it, and the variance between repeated runs sets how many episodes such a study needs.</p>
+<h2 id="directions-to-work-on">Directions to work on</h2>
+<p><strong>Measure run-to-run variance.</strong> Model output varies, and so does what the agent chooses to read. A baseline spread for rounds, cost, and accepted results on a few task types would give every later study its sample size.</p>
+<p><strong>Decide what provenance needs.</strong> An unkeyed chain suits integrity on your own machine. A shared claim may need more, such as a signature or a published digest. Designing that, and testing whether it is worth its cost, is open work.</p>
+<p><strong>Test what a reader can conclude.</strong> Give someone a <code>content-free</code> archive and a claim. Find out which claims they can check, which need <code>structural</code> or <code>research</code>, and what is still missing.</p>
+<p><strong>Build the analysis layer.</strong> Clio Coder exposes JSON reads over its journals, and it has no comparison tool. A small script that folds two sets of runs into a paired table would help every study here.</p>
+<h2 id="use-clio-coder-on-it-today">Use Clio Coder on it today</h2>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="run-a-task-and-read-its-record">Run a task and read its record</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder run --agent &lt;agent-id&gt; --json &quot;&lt;task&gt;&quot;
+clio-coder telemetry inspect --run &lt;run-id&gt; --json
+clio-coder telemetry cost --run &lt;run-id&gt; --json</code></pre></div>
+<p><code>clio-coder agents</code> lists the agents. For a supported local or OpenAI-compatible runtime, <code>--temperature</code> sets the sampler for one run. The JSON stream ends with a result frame, and the run has its own scope.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="verify-it">Verify it</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder telemetry verify --run &lt;run-id&gt;
+clio-coder fleet verify &lt;run-id&gt; --json</code></pre></div>
+<p><code>telemetry verify</code> reports the seal. <code>fleet verify</code> also reads the settlement and reports the mismatch kind when a seal fails.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="share-it">Share it</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder telemetry share --run &lt;run-id&gt; --profile content-free --dry-run
+clio-coder telemetry share --run &lt;run-id&gt; --profile content-free --out run.tar.gz
+clio-coder telemetry verify run.tar.gz</code></pre></div>
+<p>Nothing is uploaded. Read the <code>--dry-run</code> output before you send an archive to anyone. On another machine, <code>clio-coder telemetry import run.tar.gz</code> verifies the archive and places it for reading.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">04</span><div><h3 id="capture-more-deliberately">Capture more, deliberately</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 4"><code class="language-sh">clio-coder telemetry consent --workspace &lt;dir&gt;</code></pre></div>
+<p>Set <code>telemetry.mode: research</code> and turn on the <code>telemetry.research</code> flags you need. Content capture also needs consent for that workspace. Research capture is capped at 256 MiB per session, and a refusal leaves a gap record.</p>
+</div></li></ol><h2 id="first-experiment">First experiment</h2>
+<aside class="guide-note"><p class="eyebrow">Proposed, not yet run</p><p>Nobody has run this protocol. If you do, the spread you measure is the first baseline this project has.</p>
+</aside><p><strong>Measure the spread of one small task.</strong></p>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="fix-the-setup">Fix the setup</h3>
+<p>Choose a small repository with a test suite, and a task whose result those tests can accept or reject. Commit the starting state. Fix the model, route, and Clio Coder version, and write them down.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="run-it-ten-times">Run it ten times</h3>
+<p>Run the task ten times, each from a clean checkout of the same commit. Pass <code>--temperature 0</code> as well if your route supports it, then repeat the set without it if you have the budget.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="fold-the-records">Fold the records</h3>
+<p>For each run, read <code>telemetry inspect --run &lt;run-id&gt; --json</code> and <code>telemetry cost --run &lt;run-id&gt; --json</code>. Tabulate tool calls, tokens, cost, duration, stop reason, and whether the tests accepted the result. Report the median and the range.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">04</span><div><h3 id="check-it-from-outside">Check it from outside</h3>
+<p>Share two runs with <code>--profile content-free</code>, then give the archives and your table to a colleague on another machine. Record what they could verify and what they had to take on trust.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">05</span><div><h3 id="report-it">Report it</h3>
+<p>Open a GitHub issue with the setup, the table, and your colleague&#39;s notes. Ten runs is a small sample, so say so.</p>
+</div></li></ol><p>Needs: any chat route and a repository with tests. A local model server avoids API keys and spend. A second machine is only needed for the last step.</p>
+<h2 id="how-to-join">How to join</h2>
+<p>Open a GitHub issue on <a href="https://github.com/iowarp/clio-coder/issues">the repository</a> saying what you want to try, before or after you run it, and read the <a href="https://github.com/iowarp/clio-coder/blob/main/CONTRIBUTING.md">contributor guide</a> for code changes. Negative results and replications are welcome.</p>
+<section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>A seal shows integrity of the record. It is not proof of correctness, authorship, or repeatability.</li>
+<li>Share profiles reduce what leaves your machine, and redaction is best effort, so read what you are about to share.</li>
+<li>Publish numbers and methods. Do not attach another person&#39;s session content without their agreement.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/tutorials/see-what-a-session-cost-and-what-a-run-did.html">See what a session cost and what a run did <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/research/system-one-decisions.html">Can a small decision model improve an agent&#39;s work? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/research.html">All open questions <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#the-question">The question</a>
+<a href="#what-is-known-so-far">What is known so far</a>
+<a href="#why-it-matters">Why it matters</a>
+<a href="#directions-to-work-on">Directions to work on</a>
+<a href="#use-clio-coder-on-it-today">Use Clio Coder on it today</a>
+<a href="#first-experiment">First experiment</a>
+<a href="#how-to-join">How to join</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio Coder team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

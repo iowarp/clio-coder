@@ -11,8 +11,8 @@
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
-    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a></nav>
-    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
   </div>
 </header>
 <main class="page docs-layout" id="content">
@@ -22,19 +22,25 @@
 <details class="doc-nav-group" open><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
 <a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
-<a href="/docs/guide/quality-policy.html" aria-current="page">Require project checks</a></details>
+<a href="/docs/guide/quality-policy.html" aria-current="page">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
 <details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
-<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Require project checks</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/76224d7a76d8be7094ed18976eea0fc9f7405816/docs/guide/quality-policy.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/quality-policy.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#tell-clio-coder-what-checked-means-in-your-project">Tell Clio Coder what “checked” means in your project</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Require project checks</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/docs/guide/quality-policy.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/quality-policy.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#tell-clio-coder-what-checked-means-in-your-project">Tell Clio Coder what “checked” means in your project</a>
 <a href="#run-the-declared-checks">Run the declared checks</a>
 <a href="#review-freshness">Review freshness</a></details><h1 id="require-project-checks">Require project checks</h1>
 <p>Choose the declared checks a change requires and inspect verification freshness.</p>
@@ -57,7 +63,7 @@ rules:
 <p>A valid policy selects high rigor by default, which requests continuation for outstanding checks when recovery is possible. Setting <code>CLIO_CODER_RIGOR=normal</code> makes the assessment advisory. Neither mode grants additional execution authority.</p>
 <p>Snapshots need Git and a workspace at the repository root. They cover tracked and nonignored untracked source, not external datasets, installed dependencies, or running services. Use domain-specific checks for those requirements. The full guide explains bounded snapshots and permitted limitations.</p>
 <p>Try <a href="/tutorials/temperature-calibration.html">the calibration example</a> to see a declared check and its actual result.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-version="0.6.7" data-source-ref="76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-commit="76224d7a76d8be7094ed18976eea0fc9f7405816">Guide to v0.6.7</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#tell-clio-coder-what-checked-means-in-your-project">Tell Clio Coder what “checked” means in your project</a>
 <a href="#run-the-declared-checks">Run the declared checks</a>
 <a href="#review-freshness">Review freshness</a></aside>

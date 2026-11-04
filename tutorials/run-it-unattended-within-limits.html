@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Run it unattended within limits — Clio Coder tutorials</title><meta name="description" content="Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html"><meta property="og:title" content="Run it unattended within limits — Clio Coder tutorials"><meta property="og:description" content="Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Run it unattended within limits — Clio Coder tutorials"><meta name="twitter:description" content="Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html#page","name":"Run it unattended within limits — Clio Coder tutorials","description":"Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one.","url":"https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Run it unattended within limits","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html","author":{"@type":"Person","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Run it unattended within limits","item":"https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Safety and autonomy</span>7 min read</p><h1>Run it unattended within limits</h1><p class="lede">Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.8</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Documented workflow</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a></details><p>You can start a task and leave. Headless <code>clio-coder run</code> does one turn with nobody attached, and the limits you set are enforced. This guide covers a bounded headless run, a read-only one, the timeouts that apply when you walk away from an open session, and scheduled turns.</p>
+<aside class="guide-note"><p class="eyebrow">Version scope</p><p>This guide describes v0.6.8. A headless run has no one to ask: it denies whatever the safety judge does not allow, and <code>ask_user</code> is not available.</p>
+</aside><section class="guide-needs"><h2 id="before-you-start">Before you start</h2>
+<ul>
+<li>Clio Coder installed, with a connected model.</li>
+<li>A Git repository, and a task you can state completely in one prompt.</li>
+</ul>
+</section><ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="put-your-decisions-in-the-prompt">Put your decisions in the prompt</h3>
+<p>The judge reads only your prompt in a headless run, so name the actions the job needs:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder run --max-cost-usd 2 --timeout 1800 \
+  &quot;Fix the failing parser test, run the test check, and commit on this branch. Do not push.&quot;</code></pre></div>
+<p><code>--max-cost-usd</code> caps the priced spend this run adds. Reaching it stops the run and its workers with exit 4 and <code>budget_ceiling</code>. Calls already in flight can pass the cap, and unpriced routes cannot be bounded, so pair it with <code>--timeout</code>, which exits 124 on expiry. The session ceiling, 5 USD by default, still applies.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="ask-a-question-that-cannot-change-anything">Ask a question that cannot change anything</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder run --read-only &quot;Which modules have no tests? Report paths.&quot;</code></pre></div>
+<p><code>--read-only</code> is an enforced ceiling on the main agent, not a request. It denies calls other than reads inside the workspace.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="stream-it-to-another-program">Stream it to another program</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder run --json &quot;Summarize the last five commits.&quot;</code></pre></div>
+<p>The stream opens with a <code>session</code> header carrying its schema version, and a run that fails before any output still ends with a <code>turn_end</code> frame. Continue later with <code>--continue</code> or <code>--session &lt;id prefix&gt;</code>.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">04</span><div><h3 id="walk-away-from-an-open-session">Walk away from an open session</h3>
+<p>In the terminal, an unanswered permission card is denied after <code>safety.unattendedAfterSeconds</code> (300 by default) and the turn continues. A question takes its recommended option. Any key stops the countdown. When you return, <code>/decisions</code> shows what was chosen, and the exit summary counts it on an <code>Unattended</code> line.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">05</span><div><h3 id="schedule-turns-while-idle">Schedule turns while idle</h3>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 4"><code class="language-text">/loop 30m Check the nightly build log and report anything new.
+/loop 5m --command make check
+/loop list</code></pre></div>
+<p>A loop runs only while its conversation is idle and never replays missed runs. The <code>--command</code> form polls a program directly, with no shell.</p>
+</div></li></ol><section class="guide-result"><p class="eyebrow"><span class="chapter">What you should see</span></p><p>A finished turn with its exit code, not a parked prompt. An exit of 4 means the cost ceiling stopped it. <code>clio-coder telemetry why-stopped &lt;session&gt;</code> explains a stop afterward.</p>
+</section><div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>When you want</th>
+<th>Use</th>
+<th>What still stops it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>One bounded task</td>
+<td><code>clio-coder run</code> at <code>default</code></td>
+<td>Judge, sandbox, cost ceiling, timeout</td>
+</tr>
+<tr>
+<td>A long job in a container</td>
+<td><code>clio-coder run --autonomy yolo</code></td>
+<td>The floor, your rules, ceilings, the loop guard, the tool budget</td>
+</tr>
+<tr>
+<td>A recurring check</td>
+<td><code>/loop</code> in an open session</td>
+<td>Pause or stop it; needs the session to stay open</td>
+</tr>
+</tbody></table></div>
+</div><section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>A contained command starts without credential variables and cannot open secret files, so name tools that need them. Clio Coder may rerun with <code>unsandboxed: true</code>, which the judge reviews.</li>
+<li><code>yolo</code> does not carry over from <code>settings.yaml</code> to a headless run. It comes only from that run&#39;s own <code>--autonomy yolo</code>, and it exits 2 as root outside a detected container.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/tutorials/let-it-work-with-containment-and-rewind.html">Let Clio Coder work without watching every call <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#before-you-start">Before you start</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio Coder team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

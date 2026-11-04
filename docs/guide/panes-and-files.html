@@ -11,8 +11,8 @@
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
-    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a></nav>
-    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
   </div>
 </header>
 <main class="page docs-layout" id="content">
@@ -22,28 +22,34 @@
 <details class="doc-nav-group" open><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
 <a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html" aria-current="page">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
-<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
 <details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
-<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Files and terminal panes</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/76224d7a76d8be7094ed18976eea0fc9f7405816/docs/guide/panes-and-files.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/panes-and-files.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#add-a-file-browser-or-companion-shell">Add a file browser or companion shell</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Files and terminal panes</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/docs/guide/panes-and-files.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/panes-and-files.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#add-a-file-browser-or-companion-shell">Add a file browser or companion shell</a>
 <a href="#use-the-files-pane">Use the files pane</a>
 <a href="#docks-hide-instead-of-closing">Docks hide instead of closing</a></details><h1 id="files-and-terminal-panes">Files and terminal panes</h1>
 <p>Attach files and open companion terminal panes.</p>
 <h2 id="add-a-file-browser-or-companion-shell">Add a file browser or companion shell</h2>
-<p>The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation. Panes are experimental, off by default, and need a reachable <strong>Herdr</strong> session; the normal terminal works without them.</p>
+<p>The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation. Panes are experimental and need the <strong>Herdr</strong> pane host. On Linux and macOS, the first bare <code>clio-coder</code> in an interactive terminal asks once whether to open a workspace, and nothing is downloaded or opened before you answer yes. Set <code>interface.panes.enabled: off</code> to stop asking; the normal terminal works without panes.</p>
 <p>Install the pane host and file browser explicitly:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder tools install herdr
 clio-coder tools install yazi</code></pre></div>
-<p>Start Herdr, open a pane in your project, then run:</p>
+<p>To join a Herdr session you already started, open a pane in your project, then run:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder --with-panes</code></pre></div>
 <p>The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your Clio Coder settings:</p>
 <div class="code-block"><p class="code-label eyebrow">YAML</p><pre tabindex="0" aria-label="Code example 3"><code class="language-yaml">interface:
@@ -82,7 +88,7 @@ clio-coder tools install yazi</code></pre></div>
 </tr>
 </tbody></table></div>
 <p>Use <code>clio-coder --no-panes</code> to turn integration off for one terminal session. For editor and agent connections, see <a href="/docs/guide/interop.html">interoperability</a>.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-version="0.6.7" data-source-ref="76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-commit="76224d7a76d8be7094ed18976eea0fc9f7405816">Guide to v0.6.7</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#add-a-file-browser-or-companion-shell">Add a file browser or companion shell</a>
 <a href="#use-the-files-pane">Use the files pane</a>
 <a href="#docks-hide-instead-of-closing">Docks hide instead of closing</a></aside>

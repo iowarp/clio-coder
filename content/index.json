@@ -76,10 +76,23 @@
     "excerpt": "Resume conversations, manage context, and prepare a handoff.",
     "headings": [
       "Pick up a conversation",
+      "Find sessions from the shell",
       "Keep long work focused",
       "Recover an interrupted handoff"
     ],
     "url": "/docs/guide/context-continuity.html"
+  },
+  {
+    "path": "guide/proactive-memory.md",
+    "title": "Memory and lessons",
+    "group": "Everyday use",
+    "excerpt": "See what Clio Coder remembers, approve lessons, or turn memory off.",
+    "headings": [
+      "What memory does",
+      "See and approve lessons",
+      "Turn it off or route it elsewhere"
+    ],
+    "url": "/docs/guide/proactive-memory.html"
   },
   {
     "path": "guide/panes-and-files.md",
@@ -115,7 +128,8 @@
       "Delegate a focused task",
       "Follow the work",
       "Permissions, sandbox, and merges",
-      "Compose a fleet when you need one"
+      "Run a playbook when you need one",
+      "Give workers MCP tools"
     ],
     "url": "/docs/guide/fleet-dispatch.html"
   },
@@ -142,6 +156,19 @@
       "Choose the right kind of extension"
     ],
     "url": "/docs/guide/plugins.html"
+  },
+  {
+    "path": "guide/harness-extensions.md",
+    "title": "Extensions",
+    "group": "Extend Clio Coder",
+    "excerpt": "Install and write extensions that declare what they may do.",
+    "headings": [
+      "Plugin or extension",
+      "Manage extensions",
+      "What an extension can add",
+      "Write one"
+    ],
+    "url": "/docs/guide/harness-extensions.html"
   },
   {
     "path": "guide/interop.md",
@@ -227,5 +254,50 @@
       "Credentials and terminal behavior"
     ],
     "url": "/docs/guide/environment-variables.html"
+  },
+  {
+    "path": "guide/system-one.md",
+    "title": "System One",
+    "group": "Reference",
+    "excerpt": "Bring a decision model, name a route, and read its limits.",
+    "headings": [
+      "What it is",
+      "Name a route",
+      "What to expect"
+    ],
+    "url": "/docs/guide/system-one.html"
+  },
+  {
+    "path": "guide/information-flow.md",
+    "title": "Information flow",
+    "group": "Reference",
+    "excerpt": "Keep named files away from destinations you did not choose.",
+    "headings": [
+      "What it does",
+      "Declare and approve"
+    ],
+    "url": "/docs/guide/information-flow.html"
+  },
+  {
+    "path": "guide/semantic-context.md",
+    "title": "Semantic context",
+    "group": "Everyday use",
+    "excerpt": "Search your project by meaning with a local embedding route.",
+    "headings": [
+      "What it does",
+      "Set it up and search"
+    ],
+    "url": "/docs/guide/semantic-context.html"
+  },
+  {
+    "path": "guide/built-in-agents.md",
+    "title": "Agents",
+    "group": "Everyday use",
+    "excerpt": "See the agents you can dispatch and add your own.",
+    "headings": [
+      "See the agents",
+      "Add your own"
+    ],
+    "url": "/docs/guide/built-in-agents.html"
   }
 ]

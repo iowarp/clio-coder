@@ -11,8 +11,8 @@
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
-    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a></nav>
-    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
   </div>
 </header>
 <main class="page docs-layout" id="content">
@@ -22,19 +22,25 @@
 <details class="doc-nav-group"><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
 <a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
-<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
 <details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
-<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install Clio Coder</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/76224d7a76d8be7094ed18976eea0fc9f7405816/README.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="README.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install">Install</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Install Clio Coder</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/README.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="README.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#install">Install</a>
 <a href="#confirm-the-installation">Confirm the installation</a>
 <a href="#open-a-project">Open a project</a>
 <a href="#update-roll-back-and-remove">Update, roll back and remove</a>
@@ -81,7 +87,7 @@ clio-coder</code></pre></div>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 10"><code class="language-sh">clio-coder gui --open</code></pre></div>
 <p>The browser has its own <strong>Guided setup</strong>; configuring in the terminal first is optional.</p>
 <h2 id="update-roll-back-and-remove">Update, roll back and remove</h2>
-<p>Interactive sessions show a quiet footer hint when a newer release exists, and <code>/upgrade</code> reviews and applies it from inside the terminal. From the shell, update with the tool that installed it:</p>
+<p>Installer installs update themselves in the background, at most once a day. On Linux and macOS, npm, pnpm, bun, and volta installs whose prefix you own update after an interactive session quits and no other process of that install remains. Set <code>interface.autoUpdate: false</code> or <code>CLIO_CODER_AUTO_UPDATE=0</code> to keep only the notice. <code>/upgrade</code> reviews an update from inside the terminal. From the shell, update with the tool that installed it:</p>
 <div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
 <thead>
 <tr>
@@ -93,7 +99,7 @@ clio-coder</code></pre></div>
 <tbody><tr>
 <td>Installer</td>
 <td><code>clio-coder upgrade</code>. The new version installs beside the current one and must start before the launcher switches to it.</td>
-<td><code>clio-coder uninstall --remove-binary</code></td>
+<td><code>clio-coder uninstall</code></td>
 </tr>
 <tr>
 <td>npm</td>
@@ -107,8 +113,8 @@ clio-coder</code></pre></div>
 </tr>
 </tbody></table></div>
 <p>The installer keeps the previous version. <code>clio-coder upgrade --rollback</code> makes it current again. An install made with an exact <code>--version</code> stays pinned to that version until you run the installer with <code>--version latest</code>.</p>
-<p>If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version&#39;s own <code>doctor --fix</code> command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.</p>
-<p><code>clio-coder uninstall</code> removes your settings, credentials, sessions and caches, and the desktop app&#39;s background service, so it previews what it will delete and asks first. Add <code>--keep-config</code> to keep settings and credentials, or <code>--dry-run</code> to only look. Removing the program with npm or bun keeps those files. Project <code>.clio-coder/</code> directories are never removed.</p>
+<p>If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version&#39;s own <code>doctor --fix</code> command to run.</p>
+<p><code>clio-coder uninstall</code> removes your settings, credentials, sessions and caches, the launcher, the desktop app&#39;s background service, and for an installer install the managed Node and every package version. It previews what it will delete and asks first, and it stops with exit 1 while a session is open on this state directory. Add <code>--keep-binary</code> to keep the program, <code>--keep-config</code> to keep settings and credentials, or <code>--dry-run</code> to only look. Removing the program with npm or bun keeps those files. Project <code>.clio-coder/</code> directories are never removed.</p>
 <p>If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at <code>https://github.com/iowarp/clio-coder/releases/latest/download/install.sh</code>.</p>
 <h2 id="give-clio-coder-a-useful-first-task">Give Clio Coder a useful first task</h2>
 <p>Start with a request that lets you assess its understanding of your project:</p>
@@ -126,7 +132,7 @@ clio-coder</code></pre></div>
 </ul>
 <h2 id="when-you-need-more-detail">When you need more detail</h2>
 <p>These web guides cover the essentials. Detailed documentation ships with Clio Coder; ask Clio to look up its bundled guide for the feature you&#39;re using. Each page also links to its full source guide.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-version="0.6.7" data-source-ref="76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-commit="76224d7a76d8be7094ed18976eea0fc9f7405816">Guide to v0.6.7</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install">Install</a>
 <a href="#confirm-the-installation">Confirm the installation</a>
 <a href="#open-a-project">Open a project</a>

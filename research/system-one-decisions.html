@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Can a small decision model improve an agent&#39;s work? — Clio Coder research</title><meta name="description" content="System One&#39;s open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/research/system-one-decisions.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/research/system-one-decisions.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/research/system-one-decisions.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/research/system-one-decisions.html"><meta property="og:title" content="Can a small decision model improve an agent&#39;s work? — Clio Coder research"><meta property="og:description" content="System One&#39;s open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Can a small decision model improve an agent&#39;s work? — Clio Coder research"><meta name="twitter:description" content="System One&#39;s open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"Article","@id":"https://coder.iowarp.ai/research/system-one-decisions.html#page","name":"Can a small decision model improve an agent's work? — Clio Coder research","description":"System One's open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment.","url":"https://coder.iowarp.ai/research/system-one-decisions.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Can a small decision model improve an agent's work?","mainEntityOfPage":"https://coder.iowarp.ai/research/system-one-decisions.html","author":{"@type":"Person","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/research/system-one-decisions.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/research/system-one-decisions.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Research","item":"https://coder.iowarp.ai/research.html"},{"@type":"ListItem","position":3,"name":"Can a small decision model improve an agent's work?","item":"https://coder.iowarp.ai/research/system-one-decisions.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html" aria-current="page">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html" aria-current="page">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/research.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All research</a><p class="guide-review">Open question. System One is off by default.</p><p class="eyebrow"><span class="chapter">Decision models</span>12 min read</p><h1>Can a small decision model improve an agent&#39;s work?</h1><p class="lede">System One&#39;s open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.8</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Small samples; first experiment not yet run</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#the-question">The question</a>
+<a href="#what-is-measured-so-far">What is measured so far</a>
+<a href="#why-it-matters">Why it matters</a>
+<a href="#directions-to-work-on">Directions to work on</a>
+<a href="#use-clio-coder-on-it-today">Use Clio Coder on it today</a>
+<a href="#first-experiment">First experiment</a>
+<a href="#how-to-join">How to join</a></details><p>Can a small, fast decision model make a coding agent&#39;s work better? System One is where Clio Coder asks that question. You bring a model that answers typed questions, and Clio Coder gives the agent a <code>consult</code> tool, a screen beside the safety judge, and optional triage of queued messages.</p>
+<p>The plumbing has shipped. Whether it helps is still open, and the evidence so far is thin.</p>
+<aside class="guide-note"><p class="eyebrow">Open question, described for v0.6.8</p><p>System One is off until you name a route, and its keys and tool may change between releases. The team, students, and outside researchers are welcome to work on it. All samples below are small, and every experiment on this page is proposed and not yet run.</p>
+</aside><h2 id="the-question">The question</h2>
+<p>Three questions sit inside the big one, and each could come back negative.</p>
+<ul>
+<li><strong>Trajectories.</strong> With a decision model bound, does the agent take a better path through a task: fewer wrong turns, fewer rounds, and the same or better accepted result?</li>
+<li><strong>Question formation.</strong> Which questions can a small model answer usefully, and what must the question carry for that to happen?</li>
+<li><strong>Training.</strong> Could a model trained on agent work outperform a general one on these questions?</li>
+</ul>
+<h2 id="what-is-measured-so-far">What is measured so far</h2>
+<p>These were measured on the current design, on small samples. They show what the parts do. None of them shows that System One improves an agent&#39;s work.</p>
+<div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Measurement</th>
+<th>Result</th>
+<th>Sample</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Filter recall on a file digest, on Jev</td>
+<td>0.77, 0.82, 0.92</td>
+<td>Three sets of 6 queries</td>
+</tr>
+<tr>
+<td>Filter recall on the first 512 characters, on Jev</td>
+<td>0.65, 0.35, 0.92</td>
+<td>The same three sets</td>
+</tr>
+<tr>
+<td>Filter recall by query type</td>
+<td>0.92 for what a file is for; at best 0.58 for how it behaves</td>
+<td>The same sets</td>
+</tr>
+<tr>
+<td>Judge screen, on a real Haiku judge</td>
+<td>Parked 8 of 8 injected pages</td>
+<td>8 pages</td>
+</tr>
+<tr>
+<td>Judge screen latency</td>
+<td>Screen 104 to 157 ms; judge verdict 938 to 1370 ms</td>
+<td>The same run</td>
+</tr>
+<tr>
+<td>Steering triage, how a message relates to the work</td>
+<td>105 of 105</td>
+<td>The relation pick only</td>
+</tr>
+<tr>
+<td><code>consult</code> calls with Jev bound</td>
+<td>0 calls</td>
+<td>12 real Haiku sessions, 6 with Jev bound</td>
+</tr>
+</tbody></table></div>
+</div><p>Read those together. A digest holds up better than a file&#39;s opening characters on two of the three sets and ties on the third. It finds what a file is for and misses much of what a file does, which fits a digest that never carries the body.</p>
+<p>Precision is weak. Between a third and more than half of filter matches can be wrong, so a filter can narrow a list and cannot settle anything.</p>
+<h3 id="filter-across-routes">Filter across routes</h3>
+<p>These also ran on the current design. They are small samples, and the query sets were regression sets, so they were not independent of the work being tested.</p>
+<div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 2" tabindex="0"><table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Recall</th>
+<th>Precision</th>
+<th>Median latency</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Haiku, as a chat route</td>
+<td>0.81</td>
+<td>0.68</td>
+<td>2.5 s</td>
+<td>Labels</td>
+</tr>
+<tr>
+<td>Jev</td>
+<td>0.85</td>
+<td>0.47</td>
+<td>163 ms</td>
+<td>Probabilities</td>
+</tr>
+<tr>
+<td>A self-hosted chat model</td>
+<td>0.87</td>
+<td>0.67</td>
+<td>6.3 s</td>
+<td>Labels</td>
+</tr>
+</tbody></table></div>
+</div><p>On 3 fresh queries, with about 3 samples, Haiku scored recall 0.83 and precision 1.00, and Jev scored recall 0.50 and precision 0.26. Those figures moved a long way from the table above, which shows how unstable these numbers are. Do not rank the routes from them.</p>
+<p>Jev and other engines whose profile declares real probabilities return a score. Any chat route returns one label per question, so its match has no score, and it never drives the judge screen.</p>
+<h3 id="what-the-screen-result-covers">What the screen result covers</h3>
+<p>The screen result covers injected pages only, and it says nothing about how often the screen would park an honest page.</p>
+<p>The most important number is the last row. Given the tool, the agent did not call it once. Nothing has measured a benefit from <code>consult</code>, because none of the measured sessions used it on its own.</p>
+<h3 id="one-earlier-run-on-a-design-that-no-longer-exists">One earlier run, on a design that no longer exists</h3>
+<p>An on/off evaluation ran the older fixed-site design, where Clio Coder asked its own questions at fixed points in a turn. That design is gone, and so is the run&#39;s raw data. Only these numbers remain, so nobody can reanalyze them.</p>
+<p>The run used build <code>jev-1.14.0</code> with Haiku as the main model, over 24 episodes per arm. Total time with System One on was 1.237 times total time with it off, meaning slower, with an interval of 1.037 to 1.484. Acceptance was 24 of 24 per arm. Hints fired on 4 of 32 turns and changed no rounds.</p>
+<p>Do not read that as a verdict on <code>consult</code> or on decision models in general. It says that one design cost time and bought nothing visible on that sample.</p>
+<h2 id="why-it-matters">Why it matters</h2>
+<p>A main model is slow and expensive for the small judgments an agent makes constantly: which file to open, whether a web page is trying to instruct it, whether a queued message means stop.</p>
+<p>The judge screen numbers show a decision can return in about a tenth of a verdict&#39;s time. If small decisions like these can steer the larger model, long agent work gets cheaper and safer.</p>
+<p>The clock is a poor measure of that. A decision that adds a second and saves a wrong branch is a win that total time can hide, and a saved second that leads the agent astray is a loss. That is why the direction below is to evaluate on trajectories.</p>
+<h2 id="directions-to-work-on">Directions to work on</h2>
+<h3 id="evaluate-on-trajectories">Evaluate on trajectories</h3>
+<p>Define what a better path means and measure it per episode: rounds, tool calls, files read and then never used, repeated failed commands, cost, and whether the result was accepted. Clio Coder journals each decision without its content, so the outcome, latency, route, and answering build can be set against the rest of the run.</p>
+<p>Agents did not reach for <code>consult</code>, so a first result may be about adoption: what tool description or prompting makes an agent use it when it would help, and whether forcing the call helps at all.</p>
+<h3 id="form-better-questions">Form better questions</h3>
+<p><code>consult</code> asks yes-or-no, pick, or rate questions over a small state, and it filters lists against one criterion.</p>
+<p>Each engine declares what it can carry, and a question that does not fit abstains instead of being cut down. Open work includes what to put in a digest so that behavior queries improve, how to phrase criteria, and which of an agent&#39;s choices are worth asking about.</p>
+<h3 id="bring-a-model-and-one-day-train-one">Bring a model, and one day train one</h3>
+<p>You can bring a model today. A server that answers <code>POST /v1/systemone</code> becomes a route, and a named capability profile says how its numbers are read. Profiles make no accuracy claim, and there are no fitted thresholds, so a comparison across engines would be new evidence.</p>
+<p>Training is an open research direction with no plan or timeline. There is no training data: the decision dataset from earlier releases was removed, and today&#39;s journal keeps decision records without content. Building an opt-in dataset is part of the work, including what consent it needs, what to redact, and what counts as a correct label.</p>
+<h2 id="use-clio-coder-on-it-today">Use Clio Coder on it today</h2>
+<p>You need a working chat model, since System One never replaces it, and a route to name. Off is the default and sends nothing.</p>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="name-a-route">Name a route</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder systemone use jev
+clio-coder systemone status
+clio-coder systemone check jev --live</code></pre></div>
+<p><code>status</code> says what each route reaches and sends. <code>check --live</code> sends one content-free decision and reports the build that answered, which shows the route works and says nothing about its quality. A choice takes effect on the next start. For one headless run, pass <code>--systemone</code>:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder run --systemone jev &quot;&lt;task&gt;&quot;
+clio-coder run --systemone off &quot;&lt;task&gt;&quot;</code></pre></div>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="choose-what-answers">Choose what answers</h3>
+<ul>
+<li><code>jev</code> is a hosted engine that needs <code>TYPESAFE_API_KEY</code> and returns real probabilities.</li>
+<li>A declared engine is a decision server you run, with a named profile.</li>
+<li><code>memory</code>, <code>main</code>, or a chat target answer with one label per question. They have no real probabilities, so a filter match has no score and they never drive the judge screen.</li>
+</ul>
+<p>A hosted route receives file digests and heads, chunks of results, web and MCP result text, and queued messages. Redaction is best effort. Use a route you run yourself when that matters.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="read-what-happened">Read what happened</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder telemetry timeline &lt;session-id&gt;
+clio-coder telemetry inspect &lt;session-id&gt; --json</code></pre></div>
+<p>The timeline includes each System One decision. Use <code>clio-coder telemetry inspect --run &lt;run-id&gt;</code> for a dispatched or headless run.</p>
+</div></li></ol><h2 id="first-experiment">First experiment</h2>
+<aside class="guide-note"><p class="eyebrow">Proposed, not yet run</p><p>Nobody has run this protocol. If you do, the result is useful whichever way it comes out.</p>
+</aside><p><strong>Score the filter on a repository you know.</strong> This extends the measurements above to new code, adds precision, and needs an afternoon.</p>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="write-the-labels-before-you-run-anything">Write the labels before you run anything</h3>
+<p>Pick a repository you know well. Write 12 queries, six about what a file is for and six about what a file does in its body. For each query, list by hand the files that should match.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="run-each-query-through-consult">Run each query through <code>consult</code></h3>
+<p>Ask for the filter form directly, one query per headless run, so the agent&#39;s choice not to call the tool does not get in the way:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 4"><code class="language-sh">clio-coder run --systemone jev &quot;Call consult with a files filter over src/**. Criterion: &lt;query&gt;. Use limit 32. Report the matches and do nothing else.&quot;</code></pre></div>
+<p>One filter carries at most 256 items and returns at most 32 matches, so scope <code>paths</code> to fit and keep each hand-labelled list shorter than that.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="score-it">Score it</h3>
+<p>For each query, compute recall and precision against your labels, separately for the two query types. Note <code>carried.partial</code> and which items carried a digest or a head.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">04</span><div><h3 id="report-it">Report it</h3>
+<p>Open a GitHub issue with the repository&#39;s language and size, the build <code>check --live</code> reported, your query types, and the scores. Include your sample size and leave out anything private.</p>
+</div></li></ol><p>Needs: <code>TYPESAFE_API_KEY</code> for Jev, or your own decision server. A label route can also run this, though it returns no scores, so a comparison with Jev is a second result.</p>
+<p>A natural second experiment, also proposed and not yet run, is a small paired on/off study: the same task and the same model, repeated with <code>--systemone jev</code> and <code>--systemone off</code>, scored on the trajectory measures above. It needs tasks whose result can be accepted or rejected mechanically, and enough repeats to report an interval.</p>
+<h2 id="how-to-join">How to join</h2>
+<p>Open a GitHub issue on <a href="https://github.com/iowarp/clio-coder/issues">the repository</a> saying what you want to try, before or after you run it, and read the <a href="https://github.com/iowarp/clio-coder/blob/main/CONTRIBUTING.md">contributor guide</a> for code changes. Negative results and replications are welcome.</p>
+<section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>System One is not a safety net. The deterministic safety rules and the judge decide, the screen can only tighten, and no use removes a confirmation.</li>
+<li>A filter miss is not proof, especially when <code>carried.partial</code> is above zero.</li>
+<li>Clio Coder ships a client for these wires and no inference server.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/system-one.md">The full System One guide <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/research/sealed-run-records.html">Can an agent run be a scientific record? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/let-it-work-with-containment-and-rewind.html">Let Clio Coder work without watching every call <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#the-question">The question</a>
+<a href="#what-is-measured-so-far">What is measured so far</a>
+<a href="#why-it-matters">Why it matters</a>
+<a href="#directions-to-work-on">Directions to work on</a>
+<a href="#use-clio-coder-on-it-today">Use Clio Coder on it today</a>
+<a href="#first-experiment">First experiment</a>
+<a href="#how-to-join">How to join</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio Coder team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

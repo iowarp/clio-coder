@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Memory and lessons — Clio Coder docs</title><meta name="description" content="See what Clio Coder remembers, approve lessons, or turn memory off."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/docs/guide/proactive-memory.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/docs/guide/proactive-memory.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/docs/guide/proactive-memory.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/proactive-memory.html"><meta property="og:title" content="Memory and lessons — Clio Coder docs"><meta property="og:description" content="See what Clio Coder remembers, approve lessons, or turn memory off."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Memory and lessons — Clio Coder docs"><meta name="twitter:description" content="See what Clio Coder remembers, approve lessons, or turn memory off."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/proactive-memory.html#page","name":"Memory and lessons — Clio Coder docs","description":"See what Clio Coder remembers, approve lessons, or turn memory off.","url":"https://coder.iowarp.ai/docs/guide/proactive-memory.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"Memory and lessons","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/proactive-memory.html","author":{"@type":"Organization","name":"The Clio team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/proactive-memory.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/proactive-memory.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Memory and lessons","item":"https://coder.iowarp.ai/docs/guide/proactive-memory.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main class="page docs-layout" id="content">
+  <aside class="docs-sidebar" aria-label="Documentation"><details class="docs-menu"><summary>Browse documentation</summary><div class="docs-menu-body"><a class="docs-home" href="/docs.html">Clio Coder docs</a><label class="search-label" for="doc-search">Find a guide</label><input id="doc-search" type="search" placeholder="Search topics…" aria-describedby="search-status" /><p class="search-status" id="search-status" role="status"></p><ul class="search-hits" id="search-hits"></ul><noscript><p class="caption">Browse the guides below. Search requires JavaScript.</p></noscript><div id="all-docs"><details class="doc-nav-group" open><summary>Start</summary><a href="/docs.html">Install Clio Coder</a>
+<a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>
+<a href="/docs/guide/configuration-and-targets.html">Connect a model</a></details>
+<details class="doc-nav-group" open><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
+<a href="/docs/guide/tool-usage.html">Tools and permissions</a>
+<a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html" aria-current="page">Memory and lessons</a>
+<a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
+<a href="/docs/guide/gui.html">The desktop app</a>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
+<details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<a href="/docs/guide/resource-library.html">Skills and resources</a>
+<a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
+<a href="/docs/guide/interop.html">Editors and other agents</a>
+<a href="/docs/guide/slurm.html">Slurm workflows</a></details>
+<details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
+<a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
+<a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Memory and lessons</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/docs/guide/proactive-memory.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/proactive-memory.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#what-memory-does">What memory does</a>
+<a href="#see-and-approve-lessons">See and approve lessons</a>
+<a href="#turn-it-off-or-route-it-elsewhere">Turn it off or route it elsewhere</a></details><h1 id="memory-and-lessons">Memory and lessons</h1>
+<p>See what Clio Coder remembers, approve lessons, or turn memory off.</p>
+<h2 id="what-memory-does">What memory does</h2>
+<p>Clio Coder keeps task memory for a session: requirements, environment facts, failed attempts, and diagnoses. A rules tier runs without model calls. With no memory route of its own, the model tier uses your chat route within that route&#39;s cost, quota, or speed budget, so a default install spends some model calls on memory.</p>
+<h2 id="see-and-approve-lessons">See and approve lessons</h2>
+<p>Open <code>/memory</code> to see the lessons this session can reach, pending and rejected records beside approved ones, and what each one concerns. From the shell:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder memory list</code></pre></div>
+<p>Memory also keeps commands a completed task proved to work, from its own run records, and offers them when a later session touches the same files. A repository lesson becomes standing guidance only after it is approved.</p>
+<h2 id="turn-it-off-or-route-it-elsewhere">Turn it off or route it elsewhere</h2>
+<p>Set <code>context.memory.enabled: false</code>, or use <code>/settings</code> → <strong>Context &amp; Memory</strong> → <strong>Proactive memory</strong>. Off means off: the <code># Memory</code> section leaves main and worker prompts, and history review reads nothing from a session that ran with memory off. To run memory on its own route, set both <code>context.memory.target</code> and <code>context.memory.model</code>.</p>
+<p>Memory gives reminders; it does not replace reading the code or running the checks. See the full guide for how reminders are selected and when a lesson is promoted.</p>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#what-memory-does">What memory does</a>
+<a href="#see-and-approve-lessons">See and approve lessons</a>
+<a href="#turn-it-off-or-route-it-elsewhere">Turn it off or route it elsewhere</a></aside>
+</main><footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>

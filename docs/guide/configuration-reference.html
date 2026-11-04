@@ -11,8 +11,8 @@
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
-    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a></nav>
-    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
   </div>
 </header>
 <main class="page docs-layout" id="content">
@@ -22,19 +22,25 @@
 <details class="doc-nav-group"><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
 <a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
-<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
 <details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group" open><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html" aria-current="page">Configuration essentials</a>
-<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Configuration essentials</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/76224d7a76d8be7094ed18976eea0fc9f7405816/docs/guide/configuration-reference.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/configuration-reference.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#prefer-the-settings-center">Prefer the Settings Center</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Configuration essentials</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/docs/guide/configuration-reference.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/configuration-reference.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#prefer-the-settings-center">Prefer the Settings Center</a>
 <a href="#know-where-a-change-is-saved">Know where a change is saved</a>
 <a href="#look-up-an-exact-key">Look up an exact key</a></details><h1 id="configuration-essentials">Configuration essentials</h1>
 <p>Find settings layers, save scopes, and the full configuration reference.</p>
@@ -69,12 +75,13 @@
 </tbody></table></div>
 <p>Find the resolved locations on your machine:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder paths --json</code></pre></div>
-<p><code>safety.sandbox</code> (<code>auto</code>, <code>required</code>, <code>off</code>) and <code>safety.sandboxNetwork</code> control the OS sandbox for dispatched native workers&#39; commands. Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys in project settings are ignored. Project saves require trusted project settings.</p>
+<p><code>safety.sandbox</code> (<code>auto</code>, <code>required</code>, <code>off</code>) and <code>safety.sandboxNetwork</code> control the OS sandbox for dispatched native workers&#39; commands and for your own session&#39;s shell commands at <code>default</code>. Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys in project settings are ignored. Project saves require trusted project settings.</p>
 <p>Saved routes seed a new session. A settings write from another process does not redirect a conversation already running; use that session&#39;s model controls.</p>
 <h2 id="look-up-an-exact-key">Look up an exact key</h2>
 <p>The full reference covers supported settings keys, defaults, CLI flags, project file ownership, and MCP trust. Use <strong>Read the full guide</strong> above or ask Clio Coder to retrieve the relevant bundled documentation before editing YAML.</p>
 <p>Settings validation is strict. For an older installation, <code>clio-coder upgrade</code> applies the registered migration and preserves a version-1 backup. For connection and installation diagnostics, use <a href="/docs/guide/doctor.html">doctor</a>.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-version="0.6.7" data-source-ref="76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-commit="76224d7a76d8be7094ed18976eea0fc9f7405816">Guide to v0.6.7</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+<p>A session started in a repository subdirectory reads the repository&#39;s <code>.clio-coder/</code> settings, agents, skills, rules, hooks, and MCP servers. Clio Coder writes an allow-list <code>.clio-coder/.gitignore</code>, so authored files can be committed while generated files stay out. A blanket <code>.clio-coder/</code> rule in your own <code>.gitignore</code> still hides them.</p>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#prefer-the-settings-center">Prefer the Settings Center</a>
 <a href="#know-where-a-change-is-saved">Know where a change is saved</a>
 <a href="#look-up-an-exact-key">Look up an exact key</a></aside>

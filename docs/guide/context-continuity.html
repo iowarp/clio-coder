@@ -11,8 +11,8 @@
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
-    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a></nav>
-    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/experimental.html">Experimental</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
   </div>
 </header>
 <main class="page docs-layout" id="content">
@@ -22,25 +22,34 @@
 <details class="doc-nav-group" open><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
 <a href="/docs/guide/context-continuity.html" aria-current="page">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
-<a href="/docs/guide/quality-policy.html">Require project checks</a></details>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Agents</a></details>
 <details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
-<a href="/docs/guide/environment-variables.html">Environment essentials</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Save and resume work</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/76224d7a76d8be7094ed18976eea0fc9f7405816/docs/guide/context-continuity.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/context-continuity.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#pick-up-a-conversation">Pick up a conversation</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Save and resume work</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/b03cc76108370bd04c10cd1d4636ecd02c64c1ba/docs/guide/context-continuity.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/context-continuity.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#pick-up-a-conversation">Pick up a conversation</a>
+<a href="#find-sessions-from-the-shell">Find sessions from the shell</a>
 <a href="#keep-long-work-focused">Keep long work focused</a>
 <a href="#recover-an-interrupted-handoff">Recover an interrupted handoff</a></details><h1 id="save-and-resume-work">Save and resume work</h1>
 <p>Resume conversations, manage context, and prepare a handoff.</p>
 <h2 id="pick-up-a-conversation">Pick up a conversation</h2>
-<p>In the terminal, use <code>/resume</code> to choose a previous session. On the desktop, open a saved conversation from <strong>Overview</strong> or <strong>Sessions</strong>. Saved history lets you continue with the context of earlier work.</p>
-<p>Use <code>/tree</code> to inspect terminal conversation branches and <code>/fork</code> to branch from an assistant turn. On the desktop, open <strong>Branches</strong> in the Session column. Branches let you explore another direction while preserving the earlier conversation.</p>
+<p>In the terminal, use <code>/resume</code> to choose a previous session, or <code>/rename</code> first so you can resume it by name. On the desktop, open a saved conversation from <strong>Overview</strong> or <strong>Sessions</strong>. Saved history lets you continue with the context of earlier work.</p>
+<p>Use <code>/tree</code> to inspect terminal conversation branches, <code>/fork</code> to branch from an assistant turn, and <code>/branch [name]</code> to start a separate session at the newest turn without a picker. <code>/tree</code> rewinds the conversation; <code>/rewind</code> restores files. On the desktop, open <strong>Branches</strong> in the Session column. Branches let you explore another direction while preserving the earlier conversation.</p>
+<h2 id="find-sessions-from-the-shell">Find sessions from the shell</h2>
+<p><code>clio-coder session list</code> shows open sessions on this state directory, from any host that shares it, with host, pid, and last heartbeat. <code>clio-coder session terminate &lt;id&gt;</code> asks the owning process to exit.</p>
 <h2 id="keep-long-work-focused">Keep long work focused</h2>
 <p>Open <code>/context</code> to inspect context usage, output reservation, remaining headroom, and any pending handoff. Clio Coder compacts a long native session automatically when context use crosses its configured threshold, or you can request a focused summary:</p>
 <div class="code-block"><pre tabindex="0" aria-label="Code example 1"><code class="language-text">/context compact Keep the objective, decisions, changed files, test results, and remaining work.</code></pre></div>
@@ -51,8 +60,9 @@
 /context recover &lt;handoffId&gt; deliver</code></pre></div>
 <p>Choose <code>reduce</code> when the reduction has not committed and another attempt remains; choose <code>deliver</code> when a validated commit exists. If the continuation still cannot fit, compact more history first.</p>
 <p>A restarted process records an interrupted handoff as paused and waits for your recovery command. A fork receives earlier notes as recall; it does not inherit permission to resume the parent&#39;s handoff.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-version="0.6.7" data-source-ref="76224d7a76d8be7094ed18976eea0fc9f7405816" data-source-commit="76224d7a76d8be7094ed18976eea0fc9f7405816">Guide to v0.6.7</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-version="0.6.8" data-source-ref="b03cc76108370bd04c10cd1d4636ecd02c64c1ba" data-source-commit="b03cc76108370bd04c10cd1d4636ecd02c64c1ba">Guide to v0.6.8</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#pick-up-a-conversation">Pick up a conversation</a>
+<a href="#find-sessions-from-the-shell">Find sessions from the shell</a>
 <a href="#keep-long-work-focused">Keep long work focused</a>
 <a href="#recover-an-interrupted-handoff">Recover an interrupted handoff</a></aside>
 </main><footer class="colophon page">

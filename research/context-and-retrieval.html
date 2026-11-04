@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>What does an agent lose when its context is reduced? — Clio Coder research</title><meta name="description" content="Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/research/context-and-retrieval.html"><link rel="alternate" hreflang="en" href="https://coder.iowarp.ai/research/context-and-retrieval.html"><link rel="alternate" hreflang="x-default" href="https://coder.iowarp.ai/research/context-and-retrieval.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/research/context-and-retrieval.html"><meta property="og:title" content="What does an agent lose when its context is reduced? — Clio Coder research"><meta property="og:description" content="Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive."><meta property="og:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="What does an agent lose when its context is reduced? — Clio Coder research"><meta name="twitter:description" content="Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
+<meta name="robots" content="index,follow,max-image-preview:large"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/"},{"@type":"Article","@id":"https://coder.iowarp.ai/research/context-and-retrieval.html#page","name":"What does an agent lose when its context is reduced? — Clio Coder research","description":"Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive.","url":"https://coder.iowarp.ai/research/context-and-retrieval.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","headline":"What does an agent lose when its context is reduced?","mainEntityOfPage":"https://coder.iowarp.ai/research/context-and-retrieval.html","author":{"@type":"Person","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"image":"https://coder.iowarp.ai/assets/social-card.png","breadcrumb":{"@id":"https://coder.iowarp.ai/research/context-and-retrieval.html#breadcrumbs"}},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/research/context-and-retrieval.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Research","item":"https://coder.iowarp.ai/research.html"},{"@type":"ListItem","position":3,"name":"What does an agent lose when its context is reduced?","item":"https://coder.iowarp.ai/research/context-and-retrieval.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html" aria-current="page">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install Clio Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html" aria-current="page">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install Clio Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/research.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All research</a><p class="guide-review">Open question. Cost is measured; fidelity is not.</p><p class="eyebrow"><span class="chapter">Context</span>8 min read</p><h1>What does an agent lose when its context is reduced?</h1><p class="lede">Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.8</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Read from source; first experiment not yet run</dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#the-question">The question</a>
+<a href="#what-is-known-so-far">What is known so far</a>
+<a href="#why-it-matters">Why it matters</a>
+<a href="#directions-to-work-on">Directions to work on</a>
+<a href="#use-clio-coder-on-it-today">Use Clio Coder on it today</a>
+<a href="#first-experiment">First experiment</a>
+<a href="#how-to-join">How to join</a></details><p>When an agent&#39;s conversation is reduced to fit a model&#39;s window, what gets lost, and what does that loss cost later? Clio Coder has several ways to reduce context and an optional index for finding things by meaning. It measures size and cost carefully. It does not yet measure whether the agent still knows what it needs.</p>
+<aside class="guide-note"><p class="eyebrow">Open question, described for v0.6.8</p><p>Compaction has shipped and is on by default. Semantic context is a beta feature that is off by default. This page has no fidelity numbers because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.</p>
+</aside><h2 id="the-question">The question</h2>
+<ul>
+<li><strong>Fidelity.</strong> Which facts survive a summary, and which kinds are most often dropped: constraints, decisions, file paths, or test results?</li>
+<li><strong>Policy.</strong> When should a system evict old material, summarize it, or keep it, given what each choice does to the model&#39;s cache and to the next request&#39;s cost?</li>
+<li><strong>Retrieval.</strong> Does search by meaning help an agent find the right material, compared with the <code>grep</code> and code map it already has?</li>
+</ul>
+<h2 id="what-is-known-so-far">What is known so far</h2>
+<p>These are facts about the design at this version. They are not study results.</p>
+<p>Automatic reduction normally starts at 80% of the effective window, or earlier at a 200,000-token ceiling. Working-set eviction runs first, then summarization if that is not enough. The default eviction policy is <code>structural-v2</code>. Summaries follow a fixed checkpoint shape: goal, constraints and preferences, progress, key decisions, next steps, and critical context.</p>
+<p>Clio Coder records whether a reduction gained anything. A summary that would not shrink the context is discarded, its cost stays in the totals, and an identical later automatic request makes no call. The journals also separate what a call read from cache and what it had to send again, so the cost side can be measured precisely.</p>
+<p>The quality side has no measure. A checkpoint can be small, valid, and missing the one constraint that matters, and nothing would notice.</p>
+<p>Semantic context can index code maps, wiki pages, approved memory, evidence, and registered folders with a local embedding model. Its <code>--qualify</code> check confirms that a route accepts requests and returns vectors of the right shape. It does not check retrieval quality.</p>
+<h2 id="why-it-matters">Why it matters</h2>
+<p>Long tasks now routinely outlive a model&#39;s window. A summary is a lossy step in the middle of every one of them, and its failures look like the model being forgetful or careless later on. A fidelity benchmark would let anyone compare summarizers, prompts, and policies with something better than impressions.</p>
+<p>Cost matters too. A reduction can also break the model&#39;s cache, so the cheapest-looking choice in the moment can be expensive over the following turns.</p>
+<h2 id="directions-to-work-on">Directions to work on</h2>
+<p><strong>Build a fidelity benchmark.</strong> Plant facts of known types in a real session, reduce it, then probe. Open sets of sessions and probes would be useful to other agent projects as well.</p>
+<p><strong>Compare summarizers and instructions.</strong> <code>context.compaction.model</code> can name a smaller model, and <code>/context compact &lt;what to keep&gt;</code> directs a summary. Does a cheap model lose more, and does stating what to keep actually help?</p>
+<p><strong>Compare policies on total cost.</strong> Vary <code>context.compaction.threshold</code>, <code>context.compaction.maxTokens</code>, and the working-set policy, then measure cost and cache behavior over a whole task.</p>
+<p><strong>Evaluate retrieval on real questions.</strong> Label a set of questions about a repository, then compare semantic search with <code>grep</code> and the code map on recall and on how many tool calls the agent spends.</p>
+<h2 id="use-clio-coder-on-it-today">Use Clio Coder on it today</h2>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="inspect-and-reduce">Inspect and reduce</h3>
+<p>Open <code>/context</code> for usage, the output reserve, headroom, and any pending handoff. Then reduce with a stated purpose:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 1"><code class="language-text">/context compact Keep the objective, decisions, changed files, test results, and remaining work.</code></pre></div>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="read-the-cost">Read the cost</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder telemetry cache &lt;session-id&gt; --json
+clio-coder telemetry cost &lt;session-id&gt; --json
+clio-coder telemetry timeline &lt;session-id&gt; --json</code></pre></div>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="try-semantic-search">Try semantic search</h3>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder semantic configure --help
+clio-coder semantic refresh
+clio-coder semantic search &quot;Which run produced the delayed oscillation?&quot; --limit 5</code></pre></div>
+<p>This needs a local embedding route. The <a href="/tutorials/semantic-context-and-recordings.html">semantic context tutorial</a> walks through setup.</p>
+</div></li></ol><h2 id="first-experiment">First experiment</h2>
+<aside class="guide-note"><p class="eyebrow">Proposed, not yet run</p><p>Nobody has run this protocol. Its materials would become the start of a shared benchmark.</p>
+</aside><p><strong>How many planted facts survive one summary?</strong></p>
+<ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="plant-the-facts">Plant the facts</h3>
+<p>Write 20 short facts, five each of four types: a constraint, a decision with its reason, a specific file path, and a test result. State them to the agent across the first part of a real coding session, then keep working until the session holds plenty of other material.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="reduce-the-same-session-two-ways">Reduce the same session two ways</h3>
+<p>Use <code>/fork</code> to branch the session before reducing. Run <code>/context compact</code> with no instructions on one branch, and with instructions naming what to keep on the other.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="probe">Probe</h3>
+<p>Ask each branch the same 20 questions, one per fact, and tell it not to open any file. Score each answer as correct, wrong, or missing, and have someone else grade a sample.</p>
+</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">04</span><div><h3 id="report-it">Report it</h3>
+<p>Open a GitHub issue with the survival rate by fact type for each branch, the model used, and the session size before and after. One session is an anecdote, so say so, and repeat it if you can.</p>
+</div></li></ol><p>Needs: any chat route, and a session long enough to reduce. A local model server avoids keys. Leave the session content out of what you publish unless you may share it.</p>
+<h2 id="how-to-join">How to join</h2>
+<p>Open a GitHub issue on <a href="https://github.com/iowarp/clio-coder/issues">the repository</a> saying what you want to try, before or after you run it, and read the <a href="https://github.com/iowarp/clio-coder/blob/main/CONTRIBUTING.md">contributor guide</a> for code changes. Negative results and replications are welcome.</p>
+<section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>A probe measures recall on request. An agent may still fail to apply a fact it can recite.</li>
+<li>Similarity finds candidates. It is not proof of a result.</li>
+<li>Telling a model not to open files limits what it does only as far as it follows that instruction, so check the tool calls.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/tutorials/keep-long-coding-tasks-on-track.html">Keep a long coding task on track <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/docs/guide/context-continuity.html">Context continuity guide <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/semantic-context-and-recordings.html">Search your project by meaning and record worker runs <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#the-question">The question</a>
+<a href="#what-is-known-so-far">What is known so far</a>
+<a href="#why-it-matters">Why it matters</a>
+<a href="#directions-to-work-on">Directions to work on</a>
+<a href="#use-clio-coder-on-it-today">Use Clio Coder on it today</a>
+<a href="#first-experiment">First experiment</a>
+<a href="#how-to-join">How to join</a></aside></div><div class="tutorial-end"><p class="caption">By The Clio Coder team · Clio Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific software.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</body></html>
