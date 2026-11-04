@@ -93,6 +93,7 @@ import {
 import {
 	messageStopCompleted,
 	redactSecretString,
+	redactStreamingUrlCredentials,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../domains/safety/redaction.js";
@@ -1721,7 +1722,8 @@ function sendToolProgress(
 	const engineId = eventString(event, "toolCallId");
 	const toolCallId = engineId === undefined ? null : openWireIdFor(active, engineId);
 	if (toolCallId === null) return;
-	const text = boundString(outputText(event.partialResult), ACP_MAX_CHUNK_BYTES);
+	// Each frame replaces the last, so the hold can release later, and the bound runs after it could cut a password (#446).
+	const text = boundString(redactStreamingUrlCredentials(outputText(event.partialResult)), ACP_MAX_CHUNK_BYTES);
 	if (text.length === 0) return;
 	const sent = progress.calls.get(toolCallId);
 	const sentAt = progress.now();

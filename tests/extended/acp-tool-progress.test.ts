@@ -131,6 +131,28 @@ function progressText(update: Record<string, unknown>): string {
 }
 
 describe("contracts/acp streams a running tool's cumulative output only to a client that opted in", () => {
+	it("keeps URL credentials out of progress frames, and an open URL back until it resolves (#446)", async () => {
+		const turn = await runTurn({
+			optIn: true,
+			script: ({ emit, advance }) => {
+				emit(TOOL_START);
+				for (const snapshot of [
+					"clone https://user:hunter2",
+					"clone https://user:hunter2@host/x done",
+					"see http://h:8080/health\n",
+				]) {
+					advance(1000);
+					emit(progressEvent(snapshot));
+				}
+				emit(TOOL_END);
+			},
+		});
+		strictEqual(
+			turn.progress.map(progressText).join("|"),
+			"clone https://user:|clone https://user:[redacted]@host/x done|see http://h:8080/health\n",
+		);
+	});
+
 	it("sends no in-progress frames to a client that did not opt in, and still sends the terminal update", async () => {
 		const turn = await runTurn({
 			optIn: false,
