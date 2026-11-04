@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
+import { inspectRunFlowProvenance } from "../domains/evidence/index.js";
 import {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
@@ -256,12 +257,21 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 			// The ledger row words and scopes the lesson; the run's sealed evidence carries its claims (#434).
 			const { openLedger } = await import("../domains/dispatch/state.js");
 			const row = openLedger().get(evidenceId);
+			const selection = scopeSelection(parsed);
+			const flowRefusal = await evidenceFlowRefusal(
+				evidenceId,
+				selection?.scope === "repo" ? selection.repository.key : (row?.cwd ?? process.cwd()),
+			);
+			if (flowRefusal !== null) {
+				printError(`${flowRefusal}; nothing was proposed`);
+				return 1;
+			}
 			const result = await proposeMemoryFromEvidence(
 				dataDir,
 				clioStateDir(),
 				evidenceId,
 				{ task: row?.task ?? null, cwd: row?.cwd ?? null },
-				scopeSelection(parsed),
+				selection,
 			);
 			renderProposal(result.record, result.created);
 			return 0;
@@ -388,6 +398,18 @@ function promotionFlowRefusal(sessionId: string, cwd: string): string | null {
 		return entry?.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE;
 	});
 	return restricted ? `session ${sessionId} carries an information-flow restriction` : null;
+}
+
+/**
+ * A lesson from evidence words the run's task and findings, and a record has no flow label. The run's settled record holds
+ * what the run carried, and its dispatching session answers as a promotion's source does.
+ */
+async function evidenceFlowRefusal(runId: string, cwd: string): Promise<string | null> {
+	const flow = await inspectRunFlowProvenance(clioStateDir(), runId);
+	if (flow.restricted) return `run ${runId} carries an information-flow restriction`;
+	if (!flow.known && projectDeclaresFlowRules(cwd))
+		return `the information-flow provenance of run ${runId} cannot be read, and this project declares source rules`;
+	return flow.sessionId === null ? null : promotionFlowRefusal(flow.sessionId, cwd);
 }
 
 async function readReviewedHandoff(path: string): Promise<ReviewedTaskMemoryHandoffSnapshot> {

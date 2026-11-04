@@ -518,7 +518,8 @@ carries the admission diagnostic as `refusalReason`, and the session shows one
 admitted against the same policy, so a restricted session can end with no model
 step at all. From its first label on, a restricted session also files no new lesson, starts no
 completed-task retention for a task after the label and promotes no entry, because a durable record carries no
-label and reaches every later route. Text recorded before the label can still be
+label and reaches every later route. `clio-coder memory propose --from-evidence` refuses the same way when the run
+carries a label or its dispatching session does. Text recorded before the label can still be
 filed or gain evidence: history review stops at the label, and a retention already
 running, an interrupted one for a task finished before the label or a record already filed holds only what came before it. See [Information flow](information-flow.md).
 
