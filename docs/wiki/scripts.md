@@ -1,278 +1,134 @@
 ---
-title: "Scripts"
-summary: "Checkout-only tooling under scripts/: the drift/lint gate, the library and skill pinning pipeline, the release qualification gate, the Pi API surface diff, and the operator-run System One calibration tool."
+title: "Command-line maintenance scripts"
+summary: "The repository's scripts/ directory: release gates, publication and dev-snapshot tooling, skill and marketplace generators, the hygiene lint, and TUI benchmarks. Read this page to find which script owns a release, catalog or lint check and how it is invoked."
 sources:
   - "scripts/check-hygiene.ts"
+  - "scripts/release-publish.mjs"
   - "scripts/pin-skills.ts"
-  - "scripts/pin-library.ts"
-  - "scripts/generate-library-marketplace.ts"
+  - "scripts/bench-tui-feedback.ts"
+  - "scripts/native-install.cjs"
   - "scripts/check-release.mjs"
-  - "scripts/release-candidate.mjs"
-  - "scripts/pi-surface-diff.ts"
-  - "scripts/release-version-policy.mjs"
-  - "scripts/release-manifest.json"
+  - "scripts/bench-tui.ts"
+  - "scripts/generate-library-marketplace.ts"
+  - "package.json"
 symbols:
+  - "publicationPlan"
+  - "snapshotPayload"
+  - "compareVersions"
+  - "forwardedTags"
+  - "verifyQualificationRecord"
+  - "PinSkillsOptions"
   - "pinSkillsCatalog"
-  - "generateLibraryMarketplace"
   - "renderLibraryMarketplace"
-  - "configurationReferenceMembership"
-  - "releaseVersionErrors"
-  - "readmeInstallVersion"
-  - "buildPiSurfaceSnapshot"
-  - "comparePiSurfaceSnapshots"
+  - "generateLibraryMarketplace"
+  - "portabilityVerdict"
 tests:
-  - "tests/contracts/release-boundary.test.ts"
+  - "tests/contracts/native-install-hardening.test.ts"
+  - "tests/contracts/installed-package-ci.test.ts"
   - "tests/extended/library-portability.test.ts"
-  - "tests/extended/pin-library-remote.test.ts"
 invariants:
-  - "scripts/ is checkout-only: it never ships in the npm package, enforced by the packaging check in `scripts/check-hygiene.ts` and by the FORBIDDEN list in `scripts/check-release.mjs`."
-  - "The lint gate (`scripts/check-hygiene.ts`) makes no model requests and never touches a real user installation; its subprocesses are dry runs and fixture projects."
-  - "`library/registry.yaml`, `library/skills/registry.yaml`, `library/skills/skill-marketplace.json`, and `.claude-plugin/marketplace.json` are generated artifacts; pin mode rewrites them and check mode (`--check`) only reads them and exits 1 on drift."
+  - "publicationPlan rejects any branch not matching v followed by three digits, and any version whose channel tag fails publishTagErrors."
+  - "verifyQualificationRecord accepts a qualification run only when it is a successful workflow_dispatch run of .github/workflows/ci.yml on the exact commit, with prepare, ci (22) and ci (24) all successful."
+  - "compareVersions orders strict SemVer ignoring build metadata; forwardedTags only forwards a registry dist-tag that is strictly older than the version being published."
+  - "generateLibraryMarketplace in check mode reports drift and exits non-zero when .claude-plugin/marketplace.json differs from the rendered content; in default mode it rewrites that file."
+  - "check-release.mjs enforces per-class package size budgets and a 3,000-entry ceiling, and forbids shipping source maps, benchmarks, stray scripts, environment files and node_modules."
 validate:
-  - "node --import tsx scripts/check-hygiene.ts"
+  - "pnpm run lint"
+  - "pnpm run skills:check"
+  - "pnpm run library:check"
+  - "pnpm run test:file tests/contracts/installed-package-ci.test.ts"
+  - "pnpm run test:file tests/contracts/native-install-hardening.test.ts"
 ---
 
-# Scripts
+# Command-line maintenance scripts
 
-`scripts/` holds build, validation, catalog, installation and release tooling.
-Most files operate on a source checkout. The four runtime installer files in
-`scripts/release-manifest.json` also ship in the npm package; the packaging
-checks reject other repository scripts on the publish path.
+The `scripts/` directory holds the maintainer-facing tooling that sits outside the shipped runtime. Reach for this page when you need to know which script gates a release, regenerates the skill or marketplace catalogs, runs the lint hygiene pass, or benchmarks the terminal UI. None of these scripts is loaded by the CLI at runtime. The package allowlist in `package.json` ships only a subset (`scripts/native-install.cjs` and the release-manifest scripts), and `scripts/check-release.mjs` treats any other `scripts/` file in the tarball as a defect.
 
-## How each entry point is registered
+## What the area contains
 
-The `package.json` `scripts` field wires the entry points (inspected in this
-run):
+Each script is a standalone Node or tsx entry point. They are wired through `package.json` scripts:
 
-- `lint` runs `biome check . && node --import tsx scripts/check-hygiene.ts`.
-- `skills:pin` / `skills:check` run `scripts/pin-skills.ts`, with `--check`
-  forwarded to check mode.
-- `library:pin` / `library:check` run `scripts/pin-library.ts`, with `--check`.
-- `pi:surface-diff` runs `scripts/pi-surface-diff.ts`; `pi:surface-snapshot`
-  runs the same file with `--write`.
-- `ci:release` runs `node scripts/release-candidate.mjs qualify`;
-  `release:preflight` (also the `prepublishOnly` hook) runs
-  `scripts/release-candidate.mjs preflight`.
-- `test:file` and the `test` / `test:full` scripts preload
-  `tests/harness/tmp-root.ts` for environment isolation.
+- `lint` runs `biome check .` and then `node --import tsx scripts/check-hygiene.ts`.
+- `skills:pin` and `skills:check` run `scripts/pin-skills.ts`, with and without `--check`.
+- `library:pin` and `library:check` run `scripts/pin-library.ts`. That file was not inspected for this page.
 
-`scripts/check-release.mjs` has no `package.json` entry of its own; it is
-called by the qualification flow in `scripts/release-candidate.mjs` and is the
-gate `prepublishOnly` ultimately protects.
+The other anchor scripts (`scripts/release-publish.mjs`, `scripts/check-release.mjs`, `scripts/native-install.cjs`, `scripts/bench-tui.ts`, `scripts/bench-tui-feedback.ts`, `scripts/generate-library-marketplace.ts`) are not exposed as named `package.json` scripts in the lines inspected. Their owning responsibilities are described below from source.
 
-## The hygiene gate: `check-hygiene.ts`
+## Release gating and publication
 
-`scripts/check-hygiene.ts` runs source and package checks in one process and
-exits 1 if any collected an error. The `checks` array near the bottom names
-the active checks:
+`scripts/release-publish.mjs` owns the publication plan and the dev snapshot path.
 
-```
-documentation-links, product-namespace, case-portable-paths, export-hygiene,
-boundaries, ci-scripts, library-pin, defaults-yaml, settings-inventory,
-environment-variable-inventory, theme-discipline, readme-install-block,
-packaging, gitignored-reference, tracked-ignored, prompts, docs-source
-```
+- `publicationPlan(receipt, branch, mode)` requires the branch to match `^v\d{3}$`, derives a channel (`dev`, `beta` when the version contains `-`, otherwise `latest`), and throws if `publishTagErrors` reports problems. The returned object carries the commit, package specifier, tarball name and checksums, with `tag` set to `null` in dev mode.
+- `snapshotPayload(receipt, directory)` builds a dev snapshot from an already qualified tarball. It refuses archives with entries outside `package/`, `..` segments, backslashes, or non-file and non-directory tar types. It then rewrites only `package.json`'s `version` field and checks that every other file's mode and digest is unchanged. The repacked archive is produced with fixed owner, group and mtime, then re-extracted and compared against the expected inventory.
+- `releaseMode` reads `CLIO_CODER_RELEASE_MODE` and only accepts `release` or `dev`. `payload` calls `snapshotPayload` only in dev mode.
+- `compareVersions` implements strict SemVer ordering with build metadata ignored. `forwardedTags` uses it to decide which npm dist-tags (`beta`, `dev` for a `latest` publish; `dev` for a `beta` publish) must be moved forward, returning only tags that are strictly older than the new version.
+- `verifyQualificationRecord(record, jobs, commit, inProgress)` is the gate that accepts a qualification run. It requires `head_sha` to equal the commit, `path` to be `.github/workflows/ci.yml`, `event` to be `workflow_dispatch`, and (unless `inProgress`) a completed successful run. It then requires the newest jobs named `prepare`, `ci (22)` and `ci (24)` to have succeeded. `qualification` fetches the run and jobs through `api`, which shells out to `gh api`.
 
-`CHECK_HYGIENE_PROFILE=1` prints per-check timing. Boundaries are checked
-against the actual source tree; routine lint does not create synthetic
-boundary projects or enforce test filenames and README editorial structure.
+The focused test `tests/contracts/installed-package-ci.test.ts` imports this module. Its cases include "qualification rejects another commit, automatic events, and failed required gates" and "candidate checksums bind its archive version, site provenance, and installer bytes". Those tests were located by search, and their assertion bodies beyond the case names were not read for this page.
 
-`checkLibraryPin` runs `scripts/pin-library.ts --check`. It checks local content
-and generated projections while preserving committed remote pins without a
-network refresh. Explicit `library:pin` performs remote refreshes.
+`scripts/check-release.mjs` is the release gate for the built `dist/` tree and the npm package contents. It runs in the release path (its header names `ci:release` and `prepublishOnly`). Its key rules, as read in the first 160 lines:
 
-The `packaging` check compares `scripts/release-manifest.json` with the
-`package.json` allowlist and paths resolved by production code. The
-`readme-install-block` check verifies the documented installation commands,
-release pin and source-installer shadowing advice. Pi declaration comparison
-is a separate dependency-maintenance command, described below.
+- Dist integrity: `dist/cli/index.js` and `dist/worker/entry.js` must carry the `#!/usr/bin/env node` shebang, and no shared chunk may carry one.
+- Pack-report mode: when `--tarball` and `--report` are both supplied, the script checks the tarball's sha512 integrity and size against the report, rejects unsafe tar paths, and compares the tarball's file inventory to the report. It then extracts the tarball and audits the extracted `package/` root.
+- `FORBIDDEN` rules reject `patches/`, retired `docs/html/`, Python bytecode, `.map` files, `benchmarks/`, unshipped `scripts/` files, `.tsbuildinfo`, `.env` files and `node_modules/`.
+- `SIZE_BUDGETS` assigns each payload class (grammars, codemap, dist bundles, gui client, src, docs, and the library/examples/models/root group) a byte ceiling. The total unpacked ceiling is their sum. `MAX_TARBALL_BYTES` is 16,000,000 and `MAX_ENTRY_COUNT` is 3,000. The inline comments record that budgets are re-pinned only with explicit maintainer approval.
 
-## Library pinning pipeline
+The required file and prefix lists are read from `scripts/release-manifest.json`, which the same file's comment says is shared with a packaging contract test.
 
-The library pinning is a three-script pipeline with a fixed ordering,
-driven by `scripts/pin-library.ts` (run via `pnpm run library:pin`):
+## Catalog generators
 
-1. **Validate** curated packages. `pin-library.ts` walks
-   `library/{skills,agents,prompts,fleets,plugins}` looking for `plugin.json`,
-   collects authoring templates under `library/_authoring/templates`, and
-   runs `validateLibraryPackage` on each. Any validation error exits 1 before
-   anything is written.
-2. **Pin skills.** It calls `pinSkillsCatalog({ check })` from
-   `scripts/pin-skills.ts`, which regenerates
-   `library/skills/registry.yaml` (provenance-stripped sha256 pins) and
-   `library/skills/skill-marketplace.json` from the skill catalog.
-3. **Write full-tree pins.** `pin-library.ts` builds registry rows with
-   `buildRegistryRow` from `scripts/pin-library-remote.ts`, merges the
-   "blessed" remote rows read back from the previous `library/registry.yaml`
-   via `readBlessedRemoteRows` / `refreshBlessedRemoteRow`, sorts by name,
-   and writes `library/registry.yaml`.
-4. **Project to Claude Code.** It calls `generateLibraryMarketplace({ root,
-   check })` from `scripts/generate-library-marketplace.ts`, which reads the
-   just-written `library/registry.yaml` and renders
-   `.claude-plugin/marketplace.json`.
+`scripts/pin-skills.ts` regenerates `library/skills/registry.yaml` (the pinned content hashes) and publishes `library/skills/skill-marketplace.json`. Its header states that runtime discovery uses the shared `library/registry.yaml` and that this script is not a second installation authority.
 
-`pin-skills.ts` is the deepest validator in the chain. `collectEntries` walks
-the skill catalog (`collectPackageDirs` treats a directory carrying its own
-`SKILL.md` as a package and descends into directories without one), and
-enforces the catalog contract: required frontmatter keys
-(`REQUIRED_CORE_KEYS`, `REQUIRED_CLIO_KEYS`), a provenance value from
-`PROVENANCE_VALUES` (`designed` | `adapted` | `imported`), a `clio-coder.origin`
-for `adapted`/`imported`, `audit: pass`, a `source-url` that ends with the
-catalog path, and an `allowed-tools` / `disallowed-tools` list whose entries
-must be Clio tool names in canonical lowercase. The lowercase rule is load
-bearing: Claude Code reads the same key as a pre-approval grant, so a
-capitalized name like `Bash` would auto-approve Bash in Claude Code. Malformed
-YAML frontmatter is a hard failure in both modes.
+- `pinSkillsCatalog(options)` (exported, line 396) takes `catalogDir` and `check` options and returns a `PinSkillsResult` with drift flags, drift lines and the rendered manifest and index text.
+- `collectPackageDirs` treats a directory with its own `SKILL.md` as a package and otherwise descends into it as a category folder.
+- Required frontmatter is enforced: `REQUIRED_CORE_KEYS` (`name`, `description`, `version`, `license`) and `REQUIRED_CLIO_KEYS` (`registry-id`, `source-url`) inside the `clio-coder:` block. Malformed frontmatter is a hard failure in both modes.
+- `allowed-tools` and `disallowed-tools` values are checked against `ALL_TOOL_NAMES` in canonical lowercase spelling. The in-source comment explains that Claude Code reads the same key as a pre-approval grant, so a mis-cased name could silently auto-approve a host tool.
+- Normalized content hashes come from `normalizedSkillHash` in `src/domains/resources/skills/content-hash.ts`, and the body line budget comes from `SKILL_BODY_LINE_BUDGET` in `src/domains/resources/skills/authoring-check.ts`. Both were imported and not read.
 
-`generate-library-marketplace.ts` is a pure projection: it never invents
-entries. `portabilityVerdict` returns a reason (not an error) when a pinned
-package is not portable, because a native-only package is a normal library
-contribution, not a pinning failure. It excludes a package when a root
-directory in `HOST_SCANNED_ROOTS` (`agents`, `commands`, `hooks`,
-`output-styles`, `.mcp.json`, `.claude-plugin`) exists, when `skills/` holds no
-`<name>/SKILL.md`, when there is neither a root `SKILL.md` nor a `skills/`
-directory, or when a top-level `skills` manifest field would suppress the root
-fallback. Remote entries (source URLs matching
-`^(?:[a-z][a-z0-9+.-]*:\/\/|git@)`) are reported as excluded, not published.
-The entry set is verified by `pnpm run library:check`, which `lint` runs, so a
-stale marketplace fails the gate.
+`scripts/generate-library-marketplace.ts` regenerates `.claude-plugin/marketplace.json` from the pinned library registry.
 
-## The release qualification gate
+- `renderLibraryMarketplace` (exported, line 186) produces the marketplace content and the included entries and excluded packages.
+- `portabilityVerdict(directory, manifest)` decides inclusion. A package is excluded, with a reason rather than an error, when a root `agents`, `commands`, `hooks`, `output-styles`, `.mcp.json` or `.claude-plugin` exists, since Claude Code would default-scan those. The header records this as measured against Claude Code 2.1.267.
+- `generateLibraryMarketplace(options)` (exported, line 297) runs in two modes. With `check` it compares the rendered content to the file on disk and returns drift lines. Without `check` it writes the file. Render errors return early with `ok: false` and no write.
+- The CLI entry at the bottom of the file prints excluded packages, reports drift on stderr, and exits 1 on drift, directing the operator to `pnpm run library:pin`.
 
-`scripts/release-candidate.mjs` orchestrates release qualification. In
-`qualify` mode it requires a clean committed tree, runs `pnpm run ci`
-(`qualify-after-ci` mode runs only `pnpm run build`, trusting the tag workflow
-to have run the reusable CI), then runs `scripts/check-release.mjs`, packs the
-tarball, runs `pnpm run test:package` against it, re-packs to prove
-determinism, and writes a receipt to the user cache with mode 0o600. In
-`preflight` mode it validates that receipt is fresh (same commit, same Node,
-less than 24 hours old), that the version is coherent, and that the artifact
-digest still matches a fresh pack.
+The focused test `tests/extended/library-portability.test.ts` imports `renderLibraryMarketplace`. The search did not reveal further assertions from this file.
 
-`scripts/check-release.mjs` is the tarball audit. It checks the two
-executable entries (`dist/cli/index.js`, `dist/worker/entry.js`) exist with
-the shebang `#!/usr/bin/env node`, and that no shared chunk carries a shebang.
-It runs `npm pack --dry-run --json` and applies:
+## Lint hygiene
 
-- `FORBIDDEN` rules: `patches/`, `docs/html/`, Python bytecode, `.map`,
-  `benchmarks/`, `scripts/`, `.tsbuildinfo`, `.env` files, and `node_modules/`.
-- `REQUIRED_FILES` / `REQUIRED_PREFIXES` from `scripts/release-manifest.json`.
-- Size budgets: `MAX_TARBALL_BYTES = 12_000_000` and
-  `MAX_UNPACKED_BYTES = 55_000_000`.
-- Builtin recipe frontmatter: every `.md` under `src/domains/agents/builtins`
-  must be in the pack and carry the strict v1 schema (`requiredRecipeKeys` /
-  `allowedRecipeKeys`).
-- Dependency advisories via `shippedAdvisoryFindings` in
-  `scripts/release-audit.mjs`, which audits only the root importer.
+`scripts/check-hygiene.ts` runs as the second half of `pnpm run lint`. It accumulates failures through `fail(rule, message)` into a module-level `errors` array. Rules visible in the inspected region:
 
-Version coherence runs through `releaseVersionErrors` in
-`scripts/release-version-policy.mjs`: a development tree may open
-`CHANGELOG.md` with `## Unreleased`, but an explicit publish context
-(`CLIO_CODER_RELEASE_CONTEXT=publish`), a hosted tag, or an exact local
-version tag requires the heading `## <version> - YYYY-MM-DD` and the
-`package.json` version to match it. `readmeInstallVersion` returns the latest
-dated stable release when the tree is still under `## Unreleased`, and the
-package version otherwise.
+- `checkDocumentationLinks` scans `docs/**/*.md`, `README.md` and `CONTRIBUTING.md`. It checks Markdown and HTML link targets for existence and, for `.md` targets with a fragment, checks the heading anchor using `slugify` from `src/tools/context/docs-engine.ts`. It also checks backticked `src/`, `tests/`, `scripts/` and `apps/` paths. Fenced code blocks are skipped.
+- `collectFiles(dirs, extensions)` walks directories and returns files by extension for the export-hygiene pass. The header comment records that the pass was rewritten to avoid spawning one `grep` per exported symbol.
 
-## The Pi API surface diff
+The remainder of the file (the export-hygiene and product-namespace checks, from roughly line 139 onward) was not read in detail for this page.
 
-`scripts/pi-surface-diff.ts` guards the Pi SDK boundary. It collects every
-`@earendil-works/pi-*` import in `src/` (both `import` and `export` clauses),
-resolves each imported specifier to a `.d.ts` declaration via the package's
-`exports` map, and builds a TypeScript program over those declarations.
-`buildPiSurfaceSnapshot` emits a snapshot of each export's normalized
-declaration hash (`signatureHash`), and `comparePiSurfaceSnapshots` compares
-the baseline `docs/pi-surface.json` to the installed surface, failing only
-when an imported export was removed or changed signature and reporting new
-exports as info. `--write` regenerates the snapshot; comparison without
-`--write` is run explicitly with `pnpm pi:surface-diff` during dependency maintenance. The three packages are pinned exactly and move
-together (`@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`,
-`@earendil-works/pi-tui`), per the Pi SDK dependency section of the repository
-handbook.
+## Native installer helper
 
-## Focused tests
+`scripts/native-install.cjs` is a CommonJS helper that runs before any package is importable. Its inspected parts:
 
-`tests/contracts/release-boundary.test.ts` (manual) covers two script helpers:
-`shippedAdvisoryFindings` from `scripts/release-audit.mjs` and
-`releaseVersionErrors` / `readmeInstallVersion` from
-`scripts/release-version-policy.mjs`. It asserts a clean `pnpm audit` report
-yields no notes or errors; that an unknown report shape (`null`, `{}`, an
-error code, or a report missing `metadata`) throws "unknown"; and that a
-missing advisory detail for a non-zero vulnerability count throws
-"without advisory details". For advisories it blocks `high` and `critical`
-while keeping `moderate` visible as a note. For versions it asserts
-`readmeInstallVersion` pins to the latest dated stable release
-(`0.4.4`) under `## Unreleased`, requires a dated stable release to exist, and
-that `releaseVersionErrors` allows `Unreleased` in development but refuses it
-for a tag or publish and requires the exact version and a `YYYY-MM-DD` date.
+- `atomic(file, text, mode)` writes to a temporary file, fsyncs it, and renames it into place.
+- `clioRoot(role)` resolves the config and state roots using the same order as `src/core/xdg.ts`: `CLIO_CODER_<ROLE>_DIR`, then `CLIO_CODER_HOME`, then platform defaults for Windows, macOS, and XDG on other systems. The comment states the order is repeated because the helper runs first.
+- `record(root)` reads `install.json` under the state root, requires `node`, `current` and `launcher` to be absolute, requires schema 1 or 2, and checks that `current` lies inside `versions/` and `node` inside `runtime/`. Errors are thrown with the file path.
 
-`tests/extended/library-portability.test.ts` (extended, not routine CI)
-exercises `renderLibraryMarketplace` against throwaway fixture roots built
-from `library/_authoring/templates`. It asserts the composite template
-(a root `agents/`) is excluded with a reason naming the host-scanned
-directory; agent-, prompt-, and fleet-only packages are excluded with
-"no portable skill surface"; and a standalone skill package publishes
-alongside them. It also asserts the canonical skill inventory in
-`library/skills` and the Materio bundle matches `library/registry.yaml`, and
-that optional host links are symlinks that never copy bodies.
+The focused test `tests/contracts/native-install-hardening.test.ts` covers these areas. Its cases include "truncated and malformed install records give actionable errors without partial launch state", "retention preserves current, rollback and live receipts while collecting old and refused versions", and "rollback keeps the capable desktop manager and cleanup while launching the activated server". Only the test names were read for this page; the bodies were not inspected.
 
-`tests/extended/pin-library-remote.test.ts` (extended) exercises
-`refreshBlessedRemoteRow` with an injected `fetchPluginSource`, asserting a
-successful fetch regenerates the row and recomputes the digest, an
-identity-mismatch or invalid tree preserves the pinned row with a warning, a
-network failure preserves the row unchanged with a warning, and cleanup runs
-on both success and failure.
+## TUI benchmarks
 
-The compact selection in `scripts/ci-tests.mjs` determines routine behavior
-checks. The broader contract and extended suites remain explicit investigation
-commands; directory membership alone does not make a test a default gate.
+`scripts/bench-tui.ts` and `scripts/bench-tui-feedback.ts` are developer benchmarks. They are not part of the lint or release path.
 
-## Extension seams
-
-- **Add a hygiene check**: append a `[name, fn]` pair to the `checks` array at
-  the bottom of `scripts/check-hygiene.ts` and implement the function in the
-  same file using `fail(rule, message)`. Keep the check focused on a concrete source or distribution defect.
-- **Add a library kind**: extend `KIND_DIRS` in `scripts/pin-library.ts` to add
-  another `library/<dir>` scanned for `plugin.json`, matching the expected
-  `clio.kind` on the manifest.
-- **Add a Pi package**: extend `PI_PACKAGES` in `scripts/pi-surface-diff.ts`;
-  the snapshot and comparison then cover it automatically.
-- **Add a portability rule**: change `portabilityVerdict` or
-  `HOST_SCANNED_ROOTS` in `scripts/generate-library-marketplace.ts`. The rule
-  must return a reason string, not throw, so a native-only package is reported
-  rather than failing the pin.
-- **Add a required package file**: add it to `scripts/release-manifest.json`
-  `requiredFiles`, and the `packaging` hygiene check will enforce it against
-  the `package.json` `files` allowlist while `check-release.mjs` enforces it
-  against the actual tarball.
+`scripts/bench-tui.ts` parses `--turns`, `--frames`, `--repeats`, `--columns`, `--rows`, `--mode`, `--workload` and `--style`, validating against a fixed workload list (for example `composer`, `diagram`, `workers`, `reply-500k`) and modes `regular` and `fullscreen`. Its `CountingTerminal` implements the `Terminal` interface from `src/engine/tui.ts` and counts written bytes, so timings exclude emulator painting. Workloads drive `createChatPanel` from `src/interactive/chat-panel.ts` and `buildLayout` from `src/interactive/layout.ts`. The renderer observer is a no-op `TuiRenderObserver`. `scripts/bench-tui-feedback.ts` was indexed but not read for this page.
 
 ## Things to watch when editing
 
-- **Only runtime installers ship from scripts/.** The four installer files
-  named in `scripts/release-manifest.json` are allowed; other repository tools
-  remain checkout-only.
-- **No model calls in the lint gate.** `check-hygiene.ts` must stay free of
-  model requests and real user installations.
-- **Generated catalogs are committed.** `library/registry.yaml`,
-  `library/skills/registry.yaml`, `library/skills/skill-marketplace.json`, and
-  `.claude-plugin/marketplace.json` are checked into the tree and must be
-  regenerated with `pnpm run library:pin` after a library change; a stale
-  catalog fails `library:check` and therefore `lint`.
-- **The marketplace is a projection, not an authority.** Do not hand-edit
-  `.claude-plugin/marketplace.json`; `generate-library-marketplace.ts` derives
-  it from `library/registry.yaml` and `library:check` verifies it.
-- **The `check-release.mjs` size budgets are tripwires, not diets.**
-  `MAX_TARBALL_BYTES` and `MAX_UNPACKED_BYTES` exist to catch packaging
-  defects (leaked `node_modules`, doubled `dist`). Raising them requires a
-  deliberate decision; lowering them will fail on the current artifact.
-- **Remote pin rows are re-fetched on every pin.** `pin-library.ts` reads the
-  previous `library/registry.yaml` via `readBlessedRemoteRows` and re-fetches
-  each blessed remote row to verify its digest; a network failure keeps the
-  row unchanged with a warning, it does not fail the pin.
-- **Version coherence is enforced at publish.** `prepublishOnly` runs
-  `scripts/release-candidate.mjs preflight`, which requires a fresh receipt
-  from `ci:release`. A version bumped in `package.json` without a dated
-  `CHANGELOG.md` heading will fail at publish time and cannot be replaced
-  afterwards because published tags are immutable.
+- `scripts/check-release.mjs` size budgets and the `MAX_TARBALL_BYTES` value carry inline comments that they are maintainer-approved pins. Raising a budget without that approval is what the file's own comments warn against.
+- `scripts/check-release.mjs` and `scripts/release-publish.mjs` both read the release manifest and version policy. The `scripts/release-version-policy.mjs` module that supplies `publishTagErrors` and `snapshotVersion` was not read for this page.
+- `scripts/pin-skills.ts` and `scripts/generate-library-marketplace.ts` both describe `library/` as the canonical tree. Edits to skill frontmatter feed the pinned hashes; the marketplace is a projection and is not meant to be hand-edited. The generator's check mode is what `lint` relies on through `pnpm run library:check`.
+- `scripts/native-install.cjs` duplicates the XDG resolution from `src/core/xdg.ts` by design. A change to the resolution order must be made in both places.
 
-<!-- clio-coder:wiki unresolved sources: docs/html/, tests/contracts/*, tests/extended/* -->
+## Related pages
+
+- [Tests contracts](tests/contracts.md) covers the contract tests that exercise these scripts.
+- [Tests extended](tests/extended.md) covers the library portability test.
+- [Core](core.md) covers `src/core/xdg.ts` and the package-root resolution the installer mirrors.
+- [Interactive](interactive.md) covers the chat panel and layout that the TUI benchmarks drive.

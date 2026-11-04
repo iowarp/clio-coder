@@ -1,423 +1,193 @@
 ---
-title: "Domains evidence"
-summary: "How Clio builds and reads forensic evidence bundles: the fixed eight-file layout, the canonical five-axis trust model, provenance admission, export-boundary redaction, and the CLI, tool, and observability entry points."
+title: "Run evidence, trust status, and redaction"
+summary: "How a finished run's evidence is read, judged, projected for operator surfaces, and redacted. Use this page when changing trust axes, verdict tiers, run assessment, gate-review composition, provenance display, or secret redaction in src/domains/evidence."
 sources:
   - "src/domains/evidence/index.ts"
-  - "src/domains/evidence/assessment.ts"
-  - "src/domains/evidence/run-evidence.ts"
   - "src/domains/evidence/trust-status.ts"
   - "src/domains/evidence/trust-projection.ts"
+  - "src/domains/evidence/run-trust.ts"
+  - "src/domains/evidence/assessment.ts"
+  - "src/domains/evidence/redact.ts"
+  - "src/domains/evidence/run-evidence.ts"
   - "src/domains/evidence/provenance.ts"
-  - "src/domains/evidence/inventory.ts"
-  - "src/domains/evidence/detail.ts"
-  - "src/domains/evidence/types.ts"
 symbols:
-  - "buildEvidence"
-  - "EVIDENCE_FILES"
-  - "inspectEvidence"
-  - "loadEvidenceTrustStatus"
-  - "evidenceInventorySnapshot"
-  - "evidenceDetailSnapshot"
-  - "CanonicalTrustStatus"
-  - "TRUST_STATUS_AXES"
+  - "composeTrustStatus"
+  - "adaptRunTrustStatus"
+  - "inspectRunTrustStatus"
+  - "adaptGateDecisionReviewStatus"
   - "trustVerdict"
-  - "formatTrustSummary"
   - "summarizeTrustStatus"
-  - "extractRunProvenance"
+  - "formatTrustSummaryLine"
+  - "readRunTrust"
+  - "assessRun"
+  - "runEvidence"
   - "admitRunProvenance"
-  - "EvidenceTag"
-  - "FAILURE_CAUSE_TAG_ORDER"
+  - "redactSecretsText"
+  - "redactSecretsDeep"
+  - "redactKnownSecrets"
 tests:
+  - "tests/extended/evidence-integrity.test.ts"
   - "tests/contracts/evidence-tool.test.ts"
-  - "tests/contracts/evidence-bundle-files.test.ts"
 invariants:
-  - "Every bundle holds exactly the files EVIDENCE_FILES lists, and the four retired files from older bundles are never required for reads."
-  - "A receipt sealed under a retired integrity version is set aside unread and reported as retired, never as failed or corrupt."
-  - "Self-reported artifact kinds can never ground the validationGrounding axis of the run they describe."
-  - "The evidence tool never returns a bundle's contents to a session that does not own that bundle's session or project cwd."
+  - "A canonical trust status has exactly five axes (artifactIntegrity, validationGrounding, independentReview, contextProvenance, completionEvidence); normalization rejects unknown or missing fields and any state not in the axis vocabulary."
+  - "A compatibility source may only establish unknown or not_applicable; normalization rejects any other state from that source."
+  - "Run validation and context axes are read only when the run seal verifies; an unsealed or failed run reads them as absent with reason not_observed."
+  - "trustVerdict returns compromised whenever integrity failed, validation failed or ungrounded, review failed or not_independent, or context invalid, regardless of other axes."
+  - "Provenance (pipeline, persona override, escalation counts) is shown only when the artifactIntegrity axis is verified, or when no status is supplied to admitRunProvenance."
+  - "redactSecretsDeep replaces credential-shaped substrings with [redacted:<kind>] and tallies each replacement; plain prose such as 'a bearer credential is required' is left unchanged."
+  - "Gate review verdicts compose over a sealed assessment only when the gate's subject digest equals the sealed run.settled digest; a mismatched digest is not admitted as that run's review."
 validate:
-  - "pnpm run test:file -- tests/contracts/evidence-tool.test.ts"
+  - "pnpm run test:file -- tests/extended/evidence-integrity.test.ts"
+  - "pnpm run typecheck"
 ---
 
-# Domains evidence
+# Run evidence, trust status, and redaction
 
-The evidence domain builds **forensic evidence bundles** from a run or a session and
-serves fixed, machine-readable reads of those bundles. A bundle aggregates the
-dispatch run ledger, sealed run receipts, linked session ledger entries, audit
-rows, gate decisions, and per-run canonical trust status into one directory under
-`<dataDir>/evidence/<evidenceId>/`. The bundle is the export boundary for run data:
-secret-shaped values are redacted at build time, and only the bundle's own
-`overview.json` records how much was filtered.
+This area turns a finished run into an inspectable record. It decides which claims about a run are established, how those claims are named for operators, which runs are shown as trustworthy, what provenance a run may display, and how secret-shaped text is removed before it leaves the process. Read this page before changing any trust axis, verdict tier, assessment finding, gate review composition, or redaction pattern.
 
-The domain has three consumers:
+## What the area does
 
-- the `clio-coder evidence` CLI (`src/cli/evidence.ts`), for operators;
-- the `evidence` tool (`src/tools/evidence.ts`), which exposes ownership-scoped
-  bundle reads to the model;
-- the observability domain (`src/domains/telemetry/extension.ts`), which
-  auto-builds a bundle whenever a dispatch run terminates and folds a compact
-  sidecar row into `<stateDir>/evidence-index.json`.
+The area has four cooperating layers:
 
-## Ownership
+1. **Canonical trust model** (`src/domains/evidence/trust-status.ts`). A run's trust is a `CanonicalTrustStatus` with five axes: `artifactIntegrity`, `validationGrounding`, `independentReview`, `contextProvenance`, and `completionEvidence`. Each axis is either `absent` with a reason, or an attributed state carrying a `source`, an `authority`, and up to 16 typed artifact references. The model deliberately has no score and no overall verdict.
+2. **Projection** (`src/domains/evidence/trust-projection.ts`). Operator and machine surfaces read the canonical model only through this module. It fixes the words for each state, the clause order of the human summary, a four-level verdict tier, and a bounded machine record.
+3. **Run assessment and reads** (`src/domains/evidence/assessment.ts`, `src/domains/evidence/run-trust.ts`, `src/domains/evidence/run-evidence.ts`). `assessRun` judges a run once after it settles and produces journaled data. `readRunTrust` and `runEvidence` read that sealed assessment back, composing later gate reviews over it when they cite the run's settlement digest.
+4. **Provenance and redaction** (`src/domains/evidence/provenance.ts`, `src/domains/evidence/redact.ts`). Provenance is the pipeline, persona-override, and escalation facts of a receipt, shown only under a verified seal. Redaction removes secret-shaped values by pattern and, for known values, by exact match.
 
-| File | Owns |
-| --- | --- |
-| `src/domains/evidence/index.ts` | Barrel: re-exports the builder, store accessors, trust-status model, trust projection, provenance helpers, and all public types. |
-| `src/domains/evidence/assessment.ts` | `buildEvidence` (the aggregator), `BuildEvidenceOptions`, `authenticatedRunWorktree`, `hasSessionRunEvidence`. |
-| `src/domains/evidence/run-evidence.ts` | `EVIDENCE_FILES` (the fixed bundle layout), `evidenceDirectory`, `inspectEvidence`, `loadEvidenceTrustStatus`, `loadEvidenceRunProvenance`, `loadEvidenceGateDecisions`, `listEvidenceOverviews`, `EvidenceNotFoundError`, `findingsFile`. |
-| `src/domains/evidence/trust-status.ts` | The canonical five-axis model: `TRUST_STATUS_AXES`, `TRUST_STATUS_STATES`, `normalizeTrustStatus`, `composeTrustStatus`, `adaptReceiptIntegrityStatus`, `adaptRunReceiptValidationStatus`, `adaptRunReceiptContextStatus`, `adaptGateDecisionReviewStatus`, `adaptGroundedEvidenceValidationStatus`, `inspectRunReceiptTrustStatus`, `verifyReceiptIntegrityOutcome`, retired-seal diagnostics. |
-| `src/domains/evidence/trust-projection.ts` | The operator projection: `trustVerdict`, `formatTrustSummary`, `formatTrustAxes`, `summarizeTrustStatus`, `TRUST_STATE_WORDS`. |
-| `src/domains/evidence/provenance.ts` | `extractRunProvenance`, `admitRunProvenance`, `hasRunProvenance`, `runProvenanceFromUnknown`, `provenanceTranscriptLines`, `provenanceCompactSuffix`, `PERSONA_HASH_PREFIX_CHARS`. |
-| `src/domains/evidence/inventory.ts` | `evidenceInventorySnapshot` (the fixed read a GUI host can invoke blind), `EvidenceInventoryArtifact`, bounds constants. |
-| `src/domains/evidence/detail.ts` | `evidenceDetailSnapshot` (one bundle's runs with verdict and per-axis states). |
-| `src/domains/evidence/types.ts` | `EVIDENCE_VERSION`, `EVIDENCE_TAGS` (the 29-tag taxonomy), `FAILURE_CAUSE_TAG_ORDER`, `EvidenceOverview`, `EvidenceFinding`, `EvidenceBuildResult`, and all bundle file shapes. |
-| `src/domains/evidence/assessment.ts` | `buildEvidenceTrustStatusFile`, the single pure boundary that composes every evidence-linked trust axis for the bundle. |
-| `src/domains/evidence/redact.ts` | `createRedactionTally`, `redactSecretsText`, `redactSecretsDeep`, `SECRET_PATTERNS`. |
-| `src/domains/evidence/failure-attribution.ts` | `attributeEvidenceFailure`, which maps termination facts onto the failure-cause tag subset. |
-| `src/domains/evidence/assessment.ts` | `renderEvidenceFindingsMarkdown`, the human rendering inside `findings.md`. |
-| `src/domains/evidence/finish-contract-map.ts` | `FINISH_CONTRACT_EVIDENCE_TAGS`, the pure mapping from the live finish-contract kinds onto forensic tags. |
-| `src/domains/evidence/ordering.ts` | `compareCodepoints`, the codepoint ordering used for deterministic bundle contents. |
+`src/domains/evidence/index.ts` re-exports the public surface of these modules. Consumers import from `src/domains/evidence/index.ts` or from the specific module.
 
-## Building a bundle: `buildEvidence`
+## Trust axes and their composition
 
-`buildEvidence(options)` in `src/domains/evidence/assessment.ts` accepts
-`BuildEvidenceOptions` with `dataDir`, `stateDir`, and exactly one of `runId` or
-`sessionId` (both or neither is an error). It returns `EvidenceBuildResult` with
-the `evidenceId`, the bundle directory, the `EvidenceOverview`, the findings, the
-`EvidenceTrustStatusFile`, and `ungroundedClaims` (the total, across
-integrity-verified receipts only, of validation claims without matching
-executions).
+`TRUST_STATUS_AXES` and `TRUST_STATUS_STATES` come from `src/core/telemetry/trust-vocabulary.ts`. `src/domains/evidence/trust-status.ts` builds on them with per-axis allowed states and per-axis allowed source kinds (`AXIS_SOURCES`), plus allowed authority kinds per source kind (`SOURCE_AUTHORITIES`).
 
-The build pipeline:
+`composeTrustStatus(...projections)` starts every axis at `absent` with reason `not_recorded`, then copies each defined axis from each projection in order. A later projection replaces an earlier one on the same axis only. The result is passed through `normalizeTrustStatus`, so the composed output is validated again.
 
-1. **Ledger selection.** `readRunLedger` reads `<stateDir>/runs.json` and
-   `selectRunEnvelopes` parses only the selected rows, strictly validating each
-   with `parseRunEnvelope` (status must be one of
-   `queued|running|completed|failed|interrupted|stale|dead`; `runtimeKind` one of
-   `http|sdk|subprocess|acp-delegation`). Envelopes are sorted by start time, then id.
-2. **Receipt authentication.** `readReceipt` reads each
-   `envelope.receiptPath ?? <stateDir>/receipts/<id>.json`, then verifies
-   integrity through `inspectRunReceiptTrustStatus(receipt, envelope).integrity`.
-   Three outcomes: missing file, invalid receipt, and integrity failure. A seal
-   sealed under a retired integrity version is set aside unread (the error text
-   names both versions) and is *not* an integrity failure; see
-   `verifyReceiptIntegrityOutcome` and `retiredReceiptIntegrityReason` in
-   `src/domains/evidence/trust-status.ts`.
-3. **Session linking.** `linkSessionEntries` reads the session ledgers for every
-   session the selected runs named, folds the decision board on the active path
-   (`foldDecisionBoard(filterEntriesToActivePath(...))`), and attributes every
-   entry to a run via `linkSessionEntry`:
-   - `entry-run-id` (exact): only `protectedArtifact` entries carry a
-     write-time run id (`writeTimeRunId`);
-   - `timestamp-window` (best-effort): the entry timestamp falls in exactly one
-     run window;
-   - `ambiguous-timestamp-window` (best-effort, `runId` null): the timestamp falls
-     in more than one window, so the entry lists candidates instead of picking an
-     owner;
-   - `no-run-window`: no window covers it.
+`normalizeTrustStatus` and `validateTrustStatus` are the boundary for persisted or extension input. The former throws on any structural violation; the latter returns `{ ok: false, reason }` instead. Normalization enforces these conditions in `normalizeAttributedStatus`:
 
-   Windows come from `attributionWindows`, which includes **sibling runs from the
-   same sessions** read leniently off the raw ledger, so a run-scoped bundle
-   cannot claim an entry a concurrent sibling produced. `linkCoversRun` includes
-   an ambiguous entry in every candidate run's bundle.
-4. **Audit linking.** `linkAuditRows` links audit rows by direct `runId` (exact),
-   direct `sessionId` (exact), or best-effort `timestamp-tool` when a `tool_call`
-   row's timestamp and tool name match exactly one run window's receipt tool
-   stats.
-5. **Tool events.** `toolEvents` prefers session-derived events, then audit rows,
-   then receipt aggregates; only the first non-empty source is exported.
-6. **Validation evidence.** `validationEvidenceByRun` collects the executed
-   validation artifacts per run: successful validation bash executions
-   (`detectValidationCommand(...).kind === "validation"`), successful
-   protected-artifact entries carrying a validation command, and
-   `tool_call`/`tool_result` pairs where the call recognized a validation command
-   (`bash` with a command, or `verify` with a check name) and the result was not
-   an error. A multi-run bundle credits an ambiguous entry to nobody
-   (`validationRunIdFor` returns null unless the bundle covers exactly one run).
-7. **Trust composition.** `buildEvidenceTrustStatusFile` (`src/domains/evidence/assessment.ts`)
-   composes, per run, the receipt-derived status from
-   `inspectRunReceiptTrustStatus`, optionally upgrades `validationGrounding` when
-   grounded evidence exists (`adaptGroundedEvidenceValidationStatus`), and applies
-   the latest integrity-verified gate decision for the run as
-   `independentReview` (`adaptGateDecisionReviewStatus`).
-8. **Findings.** `buildFindings` derives per-run and bundle-level
-   `EvidenceFinding` rows from the trust axes, receipts, and links; see the
-   finding rules below. `resolveReceiptDecisions` adds decision-provenance
-   findings for each `receipt.decisionRefs` entry against the session decision
-   board.
-9. **Redaction.** `createRedactionTally` starts a cold-path tally; findings,
-   envelopes, receipts, tool-event previews, trust status, and decisions are
-   redacted with `redactSecretsDeep`, and the transcript with
-   `redactSecretsText` (`src/domains/evidence/redact.ts` matches PEM blocks,
-   AWS/GitHub/Slack/Google keys, `sk-` keys, JWTs, and secret-named assignments).
-   `overview.redactionCount` records the total. Raw session files are never
-   touched; only the bundle is scrubbed.
-10. **Writing.** `writeEvidenceFiles` writes exactly the eight files in
-    `EVIDENCE_FILES` (`src/domains/evidence/run-evidence.ts`): `overview.json`,
-    `transcript.md`, `tool-events.jsonl`, `receipt.json`, `gate-decisions.json`,
-    `trust-status.json`, `findings.json`, `findings.md`.
+- `source` must have exactly the keys `kind` and `id`, and the source kind must be allowed for that axis.
+- `authority.kind` must be allowed for the source kind.
+- A `compatibility` source may only establish `unknown` or `not_applicable`; any other state throws.
+- Artifact references are bounded to `TRUST_STATUS_MAX_ARTIFACT_REFERENCES` (16), are sorted, and duplicates throw.
+- Identifiers are bounded to `TRUST_STATUS_MAX_IDENTIFIER_LENGTH` (512) and may not contain control characters.
 
-```mermaid
-sequenceDiagram
-  participant Ext as observability extension
-  participant Build as buildEvidence (build.ts)
-  participant Ledger as runs.json + receipts/
-  participant Sessions as session ledgers
-  participant Files as dataDir/evidence/<id>/
-  participant Index as evidence-index.json
-  participant Bus as dispatch bus
-  Ext->>Build: buildEvidence({ runId })
-  Build->>Ledger: readRunLedger, readReceipt per envelope
-  Build->>Sessions: readSessionEntriesForId, foldDecisionBoard
-  Build->>Files: writeEvidenceFiles (8 files)
-  Build-->>Ext: EvidenceBuildResult
-  Ext->>Index: writeEvidenceIndexRowQueued(row)
-  Ext->>Bus: AccountabilityEvidenceReady
-```
+Digests are restricted to SHA-256 hex strings, and `normalizeAttributedStatus` normalizes `gate_decision` authority ids through `normalizeYoloGateAuthority`.
 
-### Finding rules
+## Building a run's trust
 
-`buildFindings` in `src/domains/evidence/assessment.ts` emits, per run: a
-`receipt-retired` info row for a retired seal, `receipt-integrity` warn for a
-failed seal, `no-validation` warn for a successful run whose
-`validationGrounding` is absent/unknown, `proxy-validation` warn for an
-`ungrounded` grounding, `cwd-missing`, `blocked-tool`, `escalation` (unresolved
-permission escalations from the receipt's `safety.decisions`), `external-bypass`
-for `delegation.toolGovernance === "agent-managed"`, `timeout` for stale/dead
-runs, and a failure-cause tag from `attributeEvidenceFailure`
-(`src/domains/evidence/failure-attribution.ts`) for non-zero exits
-(`context-overflow`, `tool-loop`, `timeout`, `auth-failure`, `provider-transient`,
-`missing-dependency`, `wrong-runtime`, `test-failure`, `build-failure`,
-`unknown`). Bundle-level rows include `session-linked`/`session-missing`,
-`audit-linked`/`audit-missing`, `best-effort-link`, `protected-artifact`, and the
-`context-provenance`/`independent-review`/`completion-evidence` rows read off the
-canonical axes by `axisFindings`.
+`adaptRunTrustStatus(facts, integrity)` builds a run's status from its settled facts (`RunTrustFacts`: the `run.settled` fields plus `runId` and `digest`). If `facts` is null, every axis is `absent` with `artifact_missing`. When `integrity.state` is `verified`, the validation and context axes are read from the facts. Otherwise they are `absent` with `not_observed`. Independent review and completion evidence are `absent` with `not_recorded` at this level; later steps fill them in.
 
-## Canonical trust model
+Validation is decided in `runValidationStatus` in a fixed priority order. The first matching branch wins:
 
-`src/domains/evidence/trust-status.ts` defines the five-axis canonical status.
-`TRUST_STATUS_AXES` is `artifactIntegrity`, `validationGrounding`,
-`independentReview`, `contextProvenance`, `completionEvidence`. Each axis is
-either:
+1. A host verification with status `rejected`. If every failing check also failed on the task base, the result is `unknown` under authority `host-verification-baseline-failed`; otherwise it is `failed`.
+2. Host verification `verified` gives `validated`. `not_implicated` gives `unknown`.
+3. Observed command results (typed validations whose source id carries `OBSERVED_COMMAND_PREFIX`) decide `failed` or `validated` under authority `host-observed-command`, unless the settled quality fails for a reason other than those commands.
+4. Settled quality failures give `failed` under `result-quality`.
+5. A grounding record with basis `no-command-executed` and ungrounded claims gives `ungrounded`.
+6. Settled quality validating gives `validated`.
+7. The descriptive `verification` marker: `verified` gives `validated`, `unverified` gives `absent`, `not_applicable` gives `not_applicable`, and anything else gives `unknown`.
 
-- an **absent** state with a reason (`not_recorded`, `not_observed`,
-  `artifact_missing`, `historical_format`), or
-- an **attributed** state carrying a closed `TRUST_STATUS_STATES` vocabulary plus
-  `source` (where the fact came from), `authority` (who is entitled to make the
-  observation), and `artifacts` (bounded to 16 references per axis, deduplicated
-  and deterministically ordered by `normalizeTrustStatus`).
+Context provenance is read in `runContextStatus` from the settled `contextProvenance` verdict and from hash records whose subjects map to `briefing`, `worker_context`, or `project_context` artifacts.
 
-Two constraints are enforced at normalization:
+`inspectRunTrustStatus(record)` is the read-model entry. It takes a `RunTelemetryV1`-shaped `{ row, settled, seal }` and returns `{ integrity, status }`. A scope whose seal failed keeps a `failed` integrity even when `settled` is missing; its validation and context axes are `absent`.
 
-- `AXIS_SOURCES` restricts which source kind may establish each axis, and
-  `SOURCE_AUTHORITIES` restricts which authority kind each source kind may carry.
-- A `compatibility` source (a historical-format placeholder) cannot establish
-  anything but `unknown` or `not_applicable`.
+`runIntegrityOfSeal` maps the seal verdict to `RunIntegrity`: `verified` (by `seal`), `unsealed` (with a reason), or `failed` (with a mismatch description from `describeSealMismatch`).
 
-`composeTrustStatus` merges projections axis by axis: a later projection replaces
-the same axis, and one axis's state never fills or promotes another.
-`CanonicalTrustStatus` has no confidence score or overall verdict; the
-presentation tier comes from `trustVerdict` in
-`src/domains/evidence/trust-projection.ts`.
+## Gate reviews
 
-### Verdict tiers
+`adaptGateDecisionReviewStatus(gate, subjectRunId, verification)` maps one `gate.decided` fact to an `independentReview` state for one subject run.
 
-`trustVerdict(status)` reads the axes in fixed priority order:
+- No gate: `absent` with `artifact_missing`.
+- The gate has no subject for this run: `absent` with `not_recorded`.
+- Verification is missing or not ok: `unknown`, with `unauthenticated-gate-artifact` authority if verification was supplied and failed, or the historical compatibility authority if it was not supplied.
+- No `decider` or no `independent` field: `not_applicable` for operator-confirmed or YOLO-applied outcomes, otherwise `inconclusive`.
+- `independent === false`: `not_independent`.
+- Outcome `pass` gives `passed`, `fail` gives `failed`, and `winner` gives `passed` only when the winner is this run.
 
-1. `compromised` when the seal failed, validation failed or was inferred
-   (`ungrounded`), review failed or was not independent, or context provenance is
-   invalid;
-2. `unknown` when the seal is not verified;
-3. `reviewed` when independent review passed;
-4. `grounded` when validation was validated;
-5. `unverified` otherwise.
+`readRunTrust` in `src/domains/evidence/run-trust.ts` composes gate reviews over the sealed assessment. Only gates whose subject digest equals the sealed `run.settled` digest are admitted, and each decision is applied once. The seal's integrity replaces the producer's integrity in the composed status. When a later review changes the independent-review state, the sealed independent-review finding is replaced by one produced from `reviewFinding`.
 
-`formatTrustSummary` renders the compact human line in the fixed clause order
-integrity, validation (with its claimant), independent review, context,
-completion; `formatTrustSummaryLine` prefixes it with the verdict;
-`formatTrustAxes` emits the machine form `trust_status=v1 artifactIntegrity:...`;
-`summarizeTrustStatus` builds the bounded machine projection (verdict, axes,
-claimant, unanswered axes, and up to 8 artifact references). A retired seal never
-reads as broken: `integrityClause` prints `seal v<N> retired (this build verifies
-v<M>)`, and `retiredIntegrityVersionOf` recovers `<N>` from the compatibility
-source id of the `artifactIntegrity` axis.
+`readGateReviews` and `readRunGateIndex` gather gate facts from sealed scopes. `gateReviewsOf` follows the run's `parentRunId` chain up to `MAX_LINEAGE` (32) and reads the sessions the run and its ancestors belong to. A run whose own scope does not verify has no admitted lineage. The code comment states that gate artifact files are not a source here.
 
-## Provenance admission
+## Assessment
 
-`src/domains/evidence/provenance.ts` reads the sealed receipt's
-`pipeline`, `personaOverride`, and `safety.decisions` escalation counters into a
-`RunProvenanceView`. `admitRunProvenance(view, status)` admits the view only
-when no canonical status is supplied *or* the status's `artifactIntegrity` is
-`verified`; a rejected or retired seal admits nothing. `provenanceTranscriptLines`
-and `provenanceCompactSuffix` render each admitted field, so a broken seal's
-receipt prints no autonomy values. `runProvenanceFromUnknown` is the defensive
-reader used when the bundle's `receipt.json` is read back (it validates each
-field instead of throwing).
+`assessRun(runId, input)` in `src/domains/evidence/assessment.ts` takes the run's journal records, an optional `RunAssessmentContext`, the gate reviews naming the run, and an optional decision map. It returns `null` when the journal has no `run.settled` record. Otherwise it:
 
-## Store layout and reads
+- Chooses the latest `run.settled` by timestamp and computes its digest with `runSettledDigest`.
+- Builds the initial trust with integrity `{ state: "verified", by: "producer" }`. The comment states the seal later supplies the authoritative integrity.
+- Composes completion evidence from the latest `completion.evaluated` record at or before settlement.
+- For each gate whose subject names this run, checks the subject digest against the run digest. A mismatch produces an unverified gate that yields `unknown` review under the mismatch reason. Each gate's review is composed in.
+- Produces findings through `runFindings`, then adds one `context-provenance` finding per decision ref, `info` when it resolves and `warn` when it does not.
+- Sets `firstPassSuccess` only when the outcome succeeded, the attempt is 0, and no `no-validation` finding exists.
+- Attributes failure cause through `attributeEvidenceFailure` when the exit code is non-zero.
 
-The bundle directory layout is fixed by `EVIDENCE_FILES` in
-`src/domains/evidence/run-evidence.ts`. `evidenceDirectory(dataDir, evidenceId)` asserts
-the id is safe (`assertSafeId`) and joins `<dataDir>/evidence/<id>`. Reads:
+`runFindings` raises these finding tags, among others: `no-validation`, `proxy-validation`, `blocked-tool`, `escalation`, `external-bypass`, `context-provenance`, `completion-evidence`, and a failure-cause tag. Each has a fixed severity. The `external-bypass` finding is raised when the settled `toolGovernance` is `agent-managed`.
 
-- `inspectEvidence(dataDir, evidenceId)` loads `overview.json`, `findings.json`,
-  and the trust status; a missing bundle throws `EvidenceNotFoundError`, while a
-  bundle that exists but lacks `findings.json` throws a different error.
-- `loadEvidenceTrustStatus` returns a canonical projection, or the explicit
-  `historical_format` shape when the file is missing (bundles built before the
-  projection existed still read).
-- `loadEvidenceRunProvenance` reads `receipt.json` and returns only runs whose
-  receipt carries at least one provenance field; a missing file yields an empty
-  list.
-- `loadEvidenceGateDecisions` returns only gate decisions that pass
-  `verifyGateDecisionArtifact`.
-- `listEvidenceOverviews` lists bundle overviews and silently skips unreadable
-  directories so listing stays scriptable.
+`gatherRunAssessment` is the async wrapper that reads gate decisions via `readGateReviews` and the session's active decision path via `activeDecisions` before calling `assessRun`. Read failures are caught, and the affected part is left unresolved.
 
-The four files `trace.raw.jsonl`, `trace.cleaned.jsonl`, `audit-linked.jsonl`,
-and `protected-artifacts.json` were written by builds before 0.5.6 and no reader
-opened; current builds write exactly `EVIDENCE_FILES`, and old bundles still read
-because every reader opens files by name.
+## Verdict tiers and projection
 
-## Upstream callers and downstream dependencies
+`trustVerdict(status)` in `src/domains/evidence/trust-projection.ts` returns one of `reviewed`, `grounded`, `unverified`, `compromised`, or `unknown`. The checks run in this order (read from source; no focused test asserts the full ordering directly):
 
-**Observability auto-build.** `src/domains/telemetry/extension.ts`
-subscribes to `DispatchCompleted` and `DispatchFailed` on the dispatch bus. A
-terminal payload with a run id starts `buildAndIndexEvidence` without blocking the
-bus, and the extension's `stop()` flushes the in-flight promises so a headless
-one-shot run still lands its bundle. `DispatchFailed` builds only when
-`dispatchHasEvidenceLedger(payload)` (the payload carries a lineage), because
-pre-admission failures never create a run ledger. After the build, a sidecar row
-goes to `<stateDir>/evidence-index.json` through
-`writeEvidenceIndexRowQueued` (`src/domains/telemetry/accountability.ts`),
-and the extension emits `BusChannels.AccountabilityEvidenceReady`. The row's
-`firstPassSuccess` is true only when the run succeeded, had lineage attempt 0,
-and the bundle carries no `no-validation` tag.
+1. `compromised` if integrity is `failed`, validation is `failed` or `ungrounded`, review is `failed` or `not_independent`, or context is `invalid`.
+2. `unknown` if integrity is not `verified`.
+3. `reviewed` if review is `passed`.
+4. `grounded` if validation is `validated`.
+5. Otherwise `unverified`.
 
-**CLI.** `src/cli/evidence.ts` implements `build --run <id> | --session <id>`,
-`inspect <evidenceId> [--json]`, `list`, and `inventory --json`. The `build`
-command exits 1 when findings contain `receipt-integrity` rows and prints retired
-seals as notes. `inventory` requires `--json`; a bare invocation is a usage error
-because the GUI host relies on the JSON shape.
+`worstTrustVerdict` orders tiers by `TRUST_VERDICT_SEVERITY` (`compromised`, `unverified`, `unknown`, `grounded`, `reviewed`) and returns the worst one present, or `unknown` for an empty list.
 
-**Evidence tool.** `src/tools/evidence.ts` exposes modes `list`, `inspect`,
-`run`, and `session` to the model. Ownership is enforced with
-`dispatchOwnership(dispatchOwnerOf({}, options?.sessionId)).seesBundle(overview)`,
-so a bundle is visible only to its session or to a session in the project its
-runs executed in. `list` delegates to `evidenceInventorySnapshot` with a
-shrinking page size until the 16 KiB cap (`EVIDENCE_TOOL_MAX_BYTES`) fits;
-`run` tries `inspectEvidence` first and falls back to `buildEvidence` on
-`EvidenceNotFoundError`; `session` refuses foreign session ids with an
-`evidence_foreign` error and never leaks task text or cwds in its summary.
+`formatTrustSummary` joins five clauses with `"; "` in a fixed order: integrity, validation, independent review, context, completion. Word choices come from `TRUST_STATE_WORDS`. `trustStateWord` falls back to the `unknown` word for an unrecognized state. `validationClause` names the claimant for validated and failed states. `formatTrustSummaryLine` prefixes the verdict word and `trust v1:`.
 
-**Downstream reads inside dispatch.** `src/domains/dispatch/run-findings.ts`
-is deliberately *not* `buildEvidence`: it is a cheap pure classifier over
-in-memory receipt draft fields, imported at record time to keep the v3 integrity
-digest JSON-clean. It consumes `EvidenceTag` and `FAILURE_CAUSE_TAG_ORDER` from
-this domain to emit the receipt's conservative findings summary and
-`firstPassSuccess`.
+`summarizeTrustStatus` returns a `TrustSummaryProjection` containing version, verdict, text, axis states, a `claimant` string, the list of unanswered axes (absent or unknown), and up to `TRUST_SUMMARY_MAX_REFS` (8) sorted `<kind>:<id>` references.
 
-## Inventory and detail projections
+The compromised tier is exercised indirectly by `tests/contracts/evidence-tool.test.ts`, which imports `evidenceDetailSnapshot` from `src/domains/evidence/detail.ts`; its case `withholds a tampered run's facts and ungrounded counts` runs a tampered fixture and asserts `evidenceDetailSnapshot("fixture").verdict` equals `compromised` and that a `run-seal` finding is present. That case does not isolate the other tiers or the clause order of `formatTrustSummary`.
 
-`evidenceInventorySnapshot(now, dataDir, include?, page?)` in
-`src/domains/evidence/inventory.ts` is the fixed read a GUI host can invoke
-blind: it accepts no identifier or path, sorts by newest `generatedAt`, applies
-the caller's `include` filter before the newest-first window is taken, and caps
-the window at `EVIDENCE_INVENTORY_MAX_ARTIFACTS` (12) with cursors. Identity
-strings (run ids, agent ids, statuses) are sanitized with
-`sanitizeCallTargetText`, truncated to `IDENTITY_WIDTH` (128), and bounded at
-`EVIDENCE_INVENTORY_MAX_IDS` (8). A bundle covering several runs takes the
-**worst** verdict (`VERDICT_SEVERITY` order: compromised, unverified, unknown,
-grounded, reviewed), and an unreadable trust file costs only that artifact its
-verdict. `evidenceDetailSnapshot` in `src/domains/evidence/detail.ts` projects one
-bundle's runs to verdict plus all five axis states, capped at
-`EVIDENCE_DETAIL_MAX_RUNS` (16).
+Callers in the repository include `src/cli/fleet-view.ts` (`formatTrustSummaryLine`), `src/tools/monitor.ts` and `src/tools/dispatch-runner.ts` (`summarizeTrustStatus`), `src/interactive/exit-summary-collector.ts` (`summarizeTrustStatus(...).verdict`), and `src/domains/session/view-artifacts.ts` (`formatTrustSummaryLine`, `trustStateWord`).
 
-## Focused tests
+## Provenance
 
-`tests/contracts/evidence-tool.test.ts` drives the tool end to end against a
-scratch environment and demonstrates:
+`extractRunProvenance(receipt)` reads optional `pipeline`, `personaOverride`, and escalation counts from a receipt-shaped object. `escalationCountsFrom` returns `null` unless `safety.decisions.escalationRequested` is defined; missing counters default to zero.
 
-- inventory paging with cursors and the `EVIDENCE_INVENTORY_MAX_ARTIFACTS` window
-  (`lists an empty inventory and bounds the newest fixture bundles`);
-- ownership scoping: a foreign project's bundle is absent from `list` and `inspect`
-  returns `evidence_foreign` (`keeps another session's bundle from another project out of list and inspect`);
-- `inspect` output equal to the build result, including all axis keys and verdicts
-  (`inspects the fixture using the CLI trust projection and canonical findings`);
-- tampered receipt facts withheld: `totals.receipts` 0, `ungroundedClaims` 0,
-  verdict `compromised`, `receipt-integrity` finding present
-  (`withholds tampered receipt facts and ungrounded counts`);
-- retired seals counted as neither claims nor receipts (`does not count claims from retired receipts`);
-- worktree fields exposed only while the receipt still verifies, and withheld as
-  `{status:"withheld", reason:"receipt-integrity"}` after a forged field
-  (`exposes worktree fields only while the run receipt still verifies`);
-- gate decisions filtered to integrity-verified artifacts only
-  (`returns only integrity-verified gate decisions`);
-- session-mode redaction: the summary contains no secret string, `redactionCount > 0`,
-  and omits `tasks`/`cwds`, while foreign sessions get `evidence_foreign` and absent
-  sessions get `artifact_absent` (`returns a bounded redacted summary only to the owning session`);
-- UTF-8-safe truncation that keeps the envelope valid JSON at 16 KiB
-  (`bounds UTF-8 output while keeping the truncation envelope valid JSON`).
+`admitRunProvenance(view, status?)` returns the view unchanged only when `status` is undefined or its `artifactIntegrity.state` is `verified`. Otherwise it returns `{}`. The focused test in `tests/extended/evidence-integrity.test.ts` asserts this: an unsealed status from `inspectRunTrustStatus(null)` admits an empty object for a view containing a pipeline and a persona override.
 
-`tests/extended/evidence-decision-refs.test.ts` proves the layout contract:
+`provenanceTranscriptLines` and `provenanceCompactSuffix` render admitted fields. The persona prompt hash is clipped to `PERSONA_HASH_PREFIX_CHARS` (12) characters followed by `...`.
 
-- a fresh build writes exactly the `EVIDENCE_FILES` names and none of the four
-  retired files (`writes exactly the files the overview lists and none of the retired ones`);
-- a bundle an earlier build wrote with the retired files still reads through
-  `inspectEvidence`, `loadEvidenceTrustStatus`, `loadEvidenceRunProvenance`, and
-  `listEvidenceOverviews` (`still reads a bundle an earlier build wrote with the retired files`).
+## Redaction
 
-Both run under the `pnpm test` contracts gate; the narrowest non-destructive
-check is `pnpm run test:file -- tests/contracts/evidence-tool.test.ts`.
+`src/domains/evidence/redact.ts` defines a `RedactionTally` counter and a fixed list of value-shaped patterns in `SECRET_PATTERNS`: URL userinfo (shared with display redaction through `URL_USERINFO_RE` from `src/domains/safety/redaction.ts`), PEM private key blocks, AWS access keys, GitHub tokens, `sk-` keys, Slack tokens, Google API keys, JWTs, `authorization` headers or scheme values, and a generic key/token/secret/password assignment.
 
-## Extension seams
+`redactSecretsText(text, tally, options?)` applies each pattern in order. URL userinfo is replaced only when `urlUserinfoHoldsSecret` confirms the value. For the `assignment`, `authorization`, and `jwt` kinds, the key, separator, or leading run is kept and only the value is replaced. An optional `keepAssignmentValue` callback can keep an assignment value.
 
-- **New evidence tag**: add it to `EVIDENCE_TAGS` in `src/domains/evidence/types.ts`; add it to `FAILURE_CAUSE_TAG_ORDER` only when it is a canonical failure cause; add the emitting rule to `buildFindings` in `src/domains/evidence/assessment.ts` (or `classifyTags` in `src/domains/dispatch/run-findings.ts` for the cheap receipt-time classifier).
-- **New trust axis state**: extend `TRUST_STATUS_STATES` in `src/domains/evidence/trust-status.ts` and, when a new source kind participates, its rows in `AXIS_SOURCES` and `SOURCE_AUTHORITIES`.
-- **New redaction shape**: add a `SECRET_PATTERNS` entry in `src/domains/evidence/redact.ts`; `overview.redactionCount` self-describes the bundle afterward.
-- **New provenance field**: widen `ProvenanceReceipt` (`Pick<RunReceipt, ...>`) and `RunProvenanceView` in `src/domains/evidence/provenance.ts`, plus the validators in `runProvenanceFromUnknown`; `admitRunProvenance` gates it on verified integrity automatically.
-- **New inventory field**: extend `EvidenceInventoryArtifact` in `src/domains/evidence/inventory.ts`; the GUI contract tests (`apps/clio-coder-gui/tests/evidence-http.test.ts`) will then see it.
-- **New bundle file**: change `EVIDENCE_FILES` and update both contract tests above; a new file without a reader violates the bundle's own doc contract.
+`redactSecretsDeep` walks strings, arrays, and plain objects. `secretRedactingReplacer` is a `JSON.stringify` replacer that also redacts the whole value of a property whose name matches a credential word.
 
-See [Domains dispatch](../domains/dispatch.md) for the receipt and gate-decision
-shapes this domain verifies, [Domains session](../domains/session.md) for the
-session ledger entries it links, [Domains safety](../domains/safety.md) for
-protected-artifact entries, [Domains observability](../domains/observability.md)
-for the sidecar index consumer, [Cli](../cli.md) for the `evidence` command, and
-[Contract tests](../tests/contracts.md) for the gate these contract tests run
-under.
+`redactKnownSecrets(text, values)` replaces exact occurrences of known values, longest first, and only values at least `KNOWN_SECRET_MIN_LENGTH` (8) characters long. The regex is cached on the joined value set.
+
+`redactSecretSegments(segments, tally)` applies the same patterns across display-frame boundaries by matching the joined string and mapping ranges back to segments.
+
+The focused tests in `tests/extended/evidence-integrity.test.ts` exercise `redactSecretsDeep` with these inputs:
+
+- An `Authorization: Bearer` header holding an opaque canary token, a prose sentence `sent bearer abcdef123456 upstream`, and a reference `Authorization: Bearer $TOKEN`. The header and scheme are redacted, the variable reference and the prose sentence `a bearer credential is required` are unchanged, and the tally is 2.
+- A GitHub token `ghp_...` inside prose and `API_KEY=hunter2hunter2hunter2`. Both are removed, the clean string is unchanged, and the tally is 2.
+
+Callers that redact include `src/tools/result-disposition.ts`, `src/tools/consult.ts`, `src/tools/dispatch-run-events.ts`, `src/domains/memory/secret-text.ts`, and `src/tools/bash.ts` (through `redactKnownSecrets`).
+
+## Run evidence reads
+
+`runEvidence(runId, record, gates)` in `src/domains/evidence/run-evidence.ts` builds a `RunEvidence` from `readRunTrust`. When integrity is not verified, it adds a `run-seal` finding (`warn` for failed, `info` otherwise). It copies the sealed assessment's findings, decisions, and provenance only when the assessment exists. It fills `totals` and `settled` only when the seal verifies and settlement exists.
+
+`inspectRunEvidence(stateDir, runId)` reads the run record and its gate index. `listRunEvidence(stateDir, skip?)` lists runs under the telemetry runs directory with `listStateDirectory`, sorts them by settlement time newest first, and skips unreadable scopes.
+
+## Coverage notes
+
+The gate-review digest check in `assessRun` (`src/domains/evidence/assessment.ts`) and in `readRunTrust` (`src/domains/evidence/run-trust.ts`) was read from source. The search of `tests/` for the mismatch reason string `gate subject run digest mismatched` and for `digest mismatched` found no focused case, so the mismatch branch is described from source only.
 
 ## Things to watch when editing
 
-- **Do not remove the raw-row spread in `parseRunEnvelope` and `parseRunReceipt`**
-  (`src/domains/evidence/assessment.ts`). Integrity verification recomputes digests
-  over ledger fields the parsers do not model (outcome, lineage, identity, token
-  splits); a lossy re-parse makes every clean receipt recompute to a different
-  digest and fail.
-- **Retired seals are not failures.** `readReceipt`, `adaptReceiptIntegrityStatus`,
-  and `verifyReceiptIntegrityOutcome` each treat a retired integrity version as
-  "set aside unread". New code that verifies a receipt must go through
-  `verifyReceiptIntegrityOutcome`, and its text must never call the receipt
-  invalid, broken, or corrupt.
-- **Self-reports cannot ground validation.** `SELF_REPORTED_ARTIFACT_KINDS`
-  (`finish_contract_evidence`, `run_receipt`) are filtered by
-  `adaptGroundedEvidenceValidationStatus`; a bundle can only upgrade
-  `validationGrounding` from independently observed session artifacts.
-- **The tool-event source preference is silent.** `toolEvents` returns session
-  events if any exist; audit rows and receipt aggregates are dropped entirely,
-  not merged.
-- **The `evidence inventory` CLI shape is load-bearing.** It requires `--json`,
-  and `evidenceInventorySnapshot` accepts no identifier, path, or limit from the
-  caller beyond `include` and pagination; keep it blind-safe.
-- **Redaction is cold-path only.** `redactSecretsText`/`redactSecretsDeep` run at
-  bundle build time, never during live turns; raw session files must stay
-  untouched.
-- **Worst verdict wins.** The inventory's `VERDICT_SEVERITY` fold takes the worst
-  verdict across a bundle's runs; averaging or preferring the newest run is the
-  one summary the code deliberately avoids.
-- **Compatibility sources are placeholders.** `normalizeAttributedStatus` rejects
-  any `compatibility`-sourced state other than `unknown` or `not_applicable`; a
-  historical-format bundle cannot establish positive axes.
-- **`exactOptionalPropertyTypes` is on.** Bundle export code spreads optional
-  fields with conditional objects (see `evidenceRunLink`, `transcriptRunLink`,
-  and the overview `redactionCount` write); `field: undefined` fails typecheck.
+- Trust axis states, source kinds, and authority kinds are defined in `src/core/telemetry/trust-vocabulary.ts`. Adding a state requires a matching entry in the word table in `src/domains/evidence/trust-projection.ts`, which is typed against `TRUST_STATUS_STATES`.
+- `trustVerdict` and `trustVerdictWord` decide what an operator sees first. Changing their branch order changes which axis the compromised word names.
+- `assessRun` uses the producer's integrity, and `readRunTrust` replaces it with the seal's integrity. A change that reads integrity from the producer alone would lose the seal's authority.
+- Redaction patterns must stay linear in their input, as the file header states, because redaction runs synchronously during live turns.
+- The gate-review digest check is what prevents a decision about one settlement from composing over another. Removing it would change which reviews a run shows.
+
+## Decisions
+
+No recorded decision refs were supplied to this page, so none are cited.

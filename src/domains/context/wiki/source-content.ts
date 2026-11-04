@@ -96,7 +96,9 @@ export function wikiSourcesMatch(
 	sources?: readonly string[],
 ): boolean {
 	if (!previous || Object.keys(previous).length === 0 || Object.keys(current).length === 0) return false;
-	const claimed = sources?.map(normalizeClaim);
+	// Clio's gitignored project state is never captured, so a citation of it, such as the run's own
+	// lock file, can never match and would hold its page pending with no failure to report.
+	const claimed = sources?.map(normalizeClaim).filter((claim) => !covers(".clio-coder", claim));
 	const paths = [...new Set([...Object.keys(previous), ...Object.keys(current)])].filter(
 		(path) => !claimed || claimed.some((source) => covers(source, path)),
 	);

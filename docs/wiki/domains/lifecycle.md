@@ -1,379 +1,328 @@
 ---
-title: "Domains lifecycle"
-summary: "Diagnose an install with `clio-coder doctor`, migrate versioned state through `runPending`, and detect the install method so an upgrade never offers npm-global reinstall to a source checkout."
+title: "Lifecycle: migrations, install detection, and update checks"
+summary: "How Clio Coder's lifecycle domain applies versioned state migrations once per home, detects how the install was made, checks for and defers updates, and reports doctor findings. Read this before adding a migration or changing upgrade behavior."
 sources:
-  - "src/domains/lifecycle/index.ts"
-  - "src/domains/lifecycle/doctor.ts"
   - "src/domains/lifecycle/migrations/index.ts"
+  - "src/domains/lifecycle/migrations/registry-ids.ts"
+  - "src/domains/lifecycle/boot-migrations.ts"
   - "src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts"
-  - "src/domains/lifecycle/migrations/2026-09-01-retire-panes-knobs.ts"
   - "src/domains/lifecycle/install-method.ts"
-  - "src/domains/lifecycle/upgrade-notice.ts"
   - "src/domains/lifecycle/update-check.ts"
-  - "src/domains/lifecycle/release-version.ts"
-  - "src/domains/lifecycle/state.ts"
-  - "src/cli/doctor.ts"
-  - "src/cli/upgrade.ts"
+  - "src/domains/lifecycle/doctor.ts"
+  - "src/domains/lifecycle/index.ts"
 symbols:
-  - "runDoctor"
-  - "runDoctorFleetChecks"
-  - "runDoctorInteropChecks"
-  - "runDoctorRuntimeChecks"
-  - "runDoctorModelChecks"
-  - "formatDoctorReport"
-  - "isUninitializedHome"
-  - "inspectInstallation"
-  - "npmInstallArgs"
-  - "installationCommand"
   - "runPending"
   - "listMigrations"
-  - "readMigrationManifest"
+  - "readMigrationManifestResult"
+  - "applyPendingMigrationsAtBoot"
+  - "Migration"
+  - "MigrationReport"
+  - "SettingsV2CollisionError"
+  - "migrateSettingsV1Document"
+  - "readInstallerRecord"
+  - "inspectInstallation"
   - "createUpdateCheck"
-  - "parseReleaseVersion"
-  - "compareReleaseVersions"
-  - "fetchReleaseVersion"
-  - "describeUpgradeNotice"
-  - "takeUpgradeNotice"
-  - "readStateInfo"
-  - "ensureClioState"
+  - "UPDATE_CHECK_INTERVAL_MS"
 tests:
-  - "tests/contracts/upgrade-command.test.ts"
-  - "tests/contracts/update-check.test.ts"
   - "tests/extended/settings-migration.test.ts"
-  - "tests/extended/upgrade-lifecycle.test.ts"
-  - "tests/extended/package-manager-upgrade.test.ts"
+  - "tests/contracts/lifecycle-safety.test.ts"
 invariants:
-  - "The migration manifest is rewritten after each `up()`, so a migration that already succeeded is never re-run."
-  - "A source-checkout install is never reported as `npm` kind, and `npmInstallArgs` throws for any non-npm kind."
-  - "An upgrade notice is claimed and shown once per version, via the `noticedVersion` stamp in `install.json`."
-  - "The settings v2 migration runs before any migration that reaches the strict v2 settings reader."
-  - "On a home Clio has never written to, `runDoctor` reports one row and returns without running the per-root checks."
+  - "A migration id recorded in the applied manifest is not run again by runPending for that state tree. Each id is written to the manifest after its up() returns, so an earlier success survives a later failure."
+  - "A manifest that is over 1 MiB, not a JSON object, has a key other than applied, has a non-array or empty-id applied list, or has duplicate ids is refused: runPending throws before any up() runs and the file is not replaced."
+  - "A settings v1 document whose v1 keys collide with their v2 destinations is refused with SettingsV2CollisionError, and the settings.yaml file and its .v1.bak backup are not written."
+  - "The settings v2 migration returns without rewriting when settings.yaml already parses to version 2, and a second run on a migrated file leaves the bytes unchanged."
 validate:
-  - "pnpm run test:file -- tests/contracts/upgrade-command.test.ts"
-  - "pnpm run test:file -- tests/contracts/update-check.test.ts"
   - "pnpm run test:file -- tests/extended/settings-migration.test.ts"
-  - "pnpm run test:file -- tests/extended/upgrade-lifecycle.test.ts"
+  - "pnpm run test:file -- tests/contracts/lifecycle-safety.test.ts"
 ---
 
-# Domains lifecycle
+# Lifecycle: migrations, install detection, and update checks
 
-The lifecycle domain owns the verbs that act on the install itself rather than on a session or a dispatch:
-diagnose the install, upgrade it and migrate its versioned state, detect how it was installed, and tell
-the operator when the running version is out of date. The public surface is re-exported from
-`src/domains/lifecycle/index.ts`, which exposes the doctor core and formatters, the migration runner,
-the state-metadata readers, the upgrade-notice text generator, and the version info.
+The lifecycle domain under `src/domains/lifecycle/` handles what happens to a
+Clio Coder home between versions. A reader needs this page when a change
+alters on-disk state shape, when `clio-coder upgrade` or post-install behavior
+is involved, or when the install method and update check affect a command.
+Its main parts are the migration runner, the boot-time caller of that runner,
+the settings v1 to v2 migration, the install-method detector, the update check,
+and the doctor finding that reports migration state.
 
-## Doctor: diagnosing an install
+This page covers the parts inspected for this revision. The deferred update
+wrapper (`src/domains/lifecycle/deferred-update.ts`), `src/domains/lifecycle/canonical-names.ts`,
+and the other migrations under `src/domains/lifecycle/migrations/` are described
+only at the level of their exported names or not at all. Their behavior is not
+explained here.
 
-`runDoctor` in `src/domains/lifecycle/doctor.ts` is the synchronous core. It returns an array of
-`DoctorFinding` rows, one per named check, where each row carries an `ok` flag, a stable `name`, a
-human-readable `detail`, and an optional `level` (`"ok" | "info" | "warn" | "error"`). The command-line
-entry point is `runDoctorCommand` in `src/cli/doctor.ts`, registered under the name `"doctor"` in the
-`COMMAND_HANDLERS` map of `src/cli/index.ts`.
+## Migration runner
 
-The synchronous core checks, in order:
+`src/domains/lifecycle/migrations/index.ts` owns the migration contract. A
+`Migration` has an `id` and an `up(stateDir)` that returns nothing or a
+`MigrationReport` with `changed` and `attention` lists. The registry is a
+static, frozen array (`REGISTRY`) in that file, not discovered from the
+filesystem. At module load the file throws if `REGISTRY` does not match
+`REGISTERED_MIGRATION_IDS` from `src/domains/lifecycle/migrations/registry-ids.ts`
+in order and length. The header comment states that registry order is
+deliberately not id order: a settings repair must run before any migration
+that reads settings through the strict reader. The current registry places
+`settingsV2` first.
 
-- The Clio version, Node version, and platform, from `getVersionInfo()`.
-- The engine runtime, by asserting `piAgentCore`, `piAi`, and `piTui` are all present.
-- The four XDG roots (config, data, state, cache) via `directoryFinding`, which distinguishes a missing
-  path (`ENOENT`), a path that is a file/symlink/FIFO/socket/device node, and a directory that is not
-  readable/writable/traversable. The remedy differs by failure: `--fix` creates a missing root but
-  cannot move a file aside or widen a mode, so each row names the command that fits the failure.
-- `settings.yaml`, validated directly through the loader's own `validateSettingsFile`, so a parse error
-  here matches the exact key paths and remedy the loader will refuse to start on.
-- `credentials.yaml`, in one stable row covering missing, wrong mode, correct mode (`0o600`), and read
-  error. `--fix` chmods this file to `0o600`.
-- State metadata, read through `readStateInfoResult` and compared against the running version. A record
-  whose version differs from the running one is reported stale with a pointer to `doctor --fix`.
+`runPending(stateDir, migrations = REGISTRY)` is the entry point. Its flow,
+as read in `migrations/index.ts`:
 
-Before the per-root checks, `runDoctor` short-circuits on an untouched home. `isUninitializedHome`
-returns true only when none of the four roots exist and no `install.json` exists. On that home, with no
-`--fix`, `runDoctor` returns a single `"installation"` row (level `"warn"`) saying to run `clio-coder`
-or `clio-coder configure`, and stops. This is the documented behavior that `doctor` as a first command
-after `npm install` does not read as damage and exits 0.
+1. It takes `withStateFileLock` on the manifest path from `migrationManifestPath()`.
+2. It reads the manifest with `readManifest`, from the config-location path if
+   that file exists, otherwise from the legacy state-root path. If the
+   manifest is in the legacy location and the config-location file does not
+   yet exist, it is written to the config location, and the legacy file is
+   removed.
+3. If `readManifest` returns a `problem`, `runPending` throws that problem
+   and runs no migration.
+4. For each migration not already in the applied set, it awaits `up()`, adds
+   the id, and writes the manifest immediately. The code comment records that
+   writing after each `up()` prevents a later failure from re-running earlier
+   migrations.
+5. A non-empty report is appended through `appendMigrationNotice`, so the
+   report survives a process that drops child stdout.
+6. The function writes the final manifest and returns `applied` (new ids this
+   call), `allApplied`, `available` (every id in the list it was given), and
+   `reports` keyed by id.
 
-`runDoctor` with `--fix` calls `initializeClioHome()` (from `src/core/init.ts`) to create the directory
-tree and write `settings.yaml` and `credentials.yaml` if absent. A repair that throws is recorded in a
-`"repair"` row and the run continues, so the command that explains the damage never prints nothing.
+`readMigrationManifestResult(stateDir)` is the read-only variant used by
+`doctor`. It reads the config-location manifest when present, otherwise the
+legacy one, and it does not write or move anything. `readManifest` rejects a
+file over `MIGRATION_MANIFEST_MAX_BYTES` (1 MiB), a non-object root, any key
+other than `applied`, a non-array `applied`, empty ids, and duplicate ids.
+Each rejection returns a `problem` string rather than throwing; only
+`runPending` converts a problem into a thrown error.
 
-The network-bound and fleet sweeps are separate async functions that the CLI invokes on top of the core.
-They are not part of `runDoctor` itself:
+Focused tests in `tests/extended/settings-migration.test.ts`:
 
-- `runDoctorRuntimeChecks` walks `settings.targets` for `openai-compat` and `anthropic-compat` URLs and
-  fingerprints any that respond as a known native server (LM Studio, Ollama), emitting a WARN row that
-  advises converting the target to the native runtime.
-- `runDoctorModelChecks` checks every model pointer `settings.yaml` aims at a target with no static
-  catalog against what the target advertises; it uses the live list when the target answers and falls
-  back to the `wireModels` list `configure` recorded. It reports server settings that defeat
-  prefix-cache reuse as their own WARN rows.
-- `runDoctorInteropChecks` reports one row per detected external coding agent and an aggregate row for
-  foreign skill roots; it reports and never proposes, and never writes.
-- `runDoctorFleetChecks` probes every configured fleet node over SSH and persists the verdicts to the
-  durable preflight store that dispatch placement consults. A failing node is a WARN, never fatal.
-  Plain doctor observes; `--fix` is the run that may record, because recording is what admits a node.
+- `moves a state-root manifest to the config root without replaying what it records`
+  writes `{"applied":["recorded"]}` under the state root, calls `runPending`
+  with a migration whose id is `recorded`, and asserts that `applied` is
+  empty, that the migration's `up` was never called, that the legacy file is
+  gone, and that the config-root manifest holds `["recorded"]`.
+- `refuses a corrupt migration manifest instead of replaying user-data changes`
+  writes `{"applied":["once","once"]}` and asserts that
+  `readMigrationManifestResult(stateDir).problem` mentions "duplicate", that
+  `runPending` rejects with a message matching `cannot be trusted.*duplicate`,
+  that `up` is never called, and that the manifest file is unchanged.
+- `serializes concurrent migration runners and records a migration once` runs
+  two `runPending` calls concurrently against one migration whose `up` waits
+  20 ms. It asserts `up` ran once, that the combined `applied` lists contain
+  the id once, and that the manifest mode is `0o600` on non-Windows platforms.
+- `orders migrations before strict readers and records each migration once`
+  asserts the exact registry order (settings v2 first, then the retired-panes
+  knob migration, then the others), and that a second `runPending` call
+  returns an empty `applied` list.
 
-`collectDoctorFindings` in `src/cli/doctor.ts` composes the core with all the sweeps plus the CLI-local
-findings (`stateStorageFinding`, `toolchainFindings`, `hpcToolchainFindings`, `slurmMcpFindings`,
-`panesFindings`, `namingHistoryFindings`, `validationContractFinding`, `taskWorktreeFindings`, and the
-`--deep` checks). `formatDoctorReport` renders each finding as a four-character badge (`OK`, `INFO`,
-`WARN`, or `!! `) padded, then the name padded to 22, then the detail folded onto one line by
-`foldDetail`.
+## Boot-time application
 
-## Upgrade: the path that migrates state
+`src/domains/lifecycle/boot-migrations.ts` exports `applyPendingMigrationsAtBoot`.
+Its source comment says it exists because a background update installs with
+`--no-post-install`, so the first launch of the new version must run pending
+migrations itself. The function returns early when the config-location
+manifest exists and already lists every id in `REGISTERED_MIGRATION_IDS`. If
+no config-location manifest exists and no legacy manifest exists, it also
+returns. Otherwise it dynamically imports `src/domains/lifecycle/migrations/index.ts` and calls
+`runPending(stateDir)`. A thrown error is pushed to the module's notice list
+as a message telling the operator to run `clio-coder upgrade --post-install`.
+Reports from applied migrations are pushed as notices unless `interactive` is
+true. `takeBootMigrationNotices` returns and clears that list.
+`takePendingMigrationNotices` reads the file-based notices written by
+`appendMigrationNotice`, under a state-file lock with a 50 ms timeout, and
+removes the file once read.
 
-`runUpgradeCommand` in `src/cli/upgrade.ts` is the upgrade verb, registered as `"upgrade"` in
-`src/cli/index.ts`. It detects the install method, consults the registry (for non-source installs),
-replaces the package (for npm installs), and applies pending state migrations.
+Callers, found by search and inspected at the call line: `src/cli/clio.ts`
+invokes `applyPendingMigrationsAtBoot()` with no argument, and
+`src/entry/orchestrator.ts` imports it with `takeBootMigrationNotices` and
+`takePendingMigrationNotices` and calls it with an `interactive` argument. The
+`upgrade` command in `src/cli/upgrade.ts` calls `deps.runPending(stateDir)`
+directly at line 829 of that file.
 
-The sequence for an npm global install:
+## Settings v1 to v2 migration
 
-1. `inspectInstallation()` classifies the install (see below).
-2. `lookUpAvailableVersion` fetches the channel version from the registry. A source checkout never
-   queries the registry; a `--post-install` run reports the lookup as "not checked".
-3. `runNpmInstall` spawns `npm install -g --prefix <prefix> @iowarp/clio-coder@<channel>` via
-   `npmInstallArgs`, which pins the prefix so the upgrade lands in the install's own prefix, not npm's
-   current default. The child's stdout is drained, because `npm install -g` writes well past a 64 KB
-   pipe buffer and a child whose stdout nobody reads blocks.
-4. `runPostInstallUpgrade` re-launches the installed entry with `upgrade --post-install --channel=<c>`,
-   so the new binary runs the post-install checks, not the old process.
-5. In the `--post-install` run, `runPending` applies migrations and `runDoctorFixAfterInstall` runs
-   `doctor --fix` with the installed entry.
+`src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts` is the first
+registered migration. Its id is `SETTINGS_V2_MIGRATION_ID`, `2026-09-01-settings-v2`.
+The exported `migrateSettingsV1Document(raw)` is a pure transform. It rejects a
+non-map root and any `version` other than 1 or absent, then clones the
+document and moves keys with a table of `[from, to, valueTransform]` entries
+using the dot-path helpers `getPath`, `setPath`, and `deletePath`. It also
+drops a fixed set of keys (`identity`, `background.thinkingLevel`, `theme`,
+`compaction.excludeLastTurns`, and the remaining `panes` tree), and calls
+`migrateFleetNodeAliases` and `dropRetiredExternalAgentKeys`.
 
-For a source checkout, the upgrade never touches the registry or runs `npm install`. It prints
-`SOURCE_UPGRADE_LEAD` advice (fetch tags, check out a release, `pnpm run install:local`), applies
-migrations with `runPending`, then calls `initializeClioHome()` directly to refresh `install.json`, and
-finishes with `finish()` which may relaunch via `runRestart`.
+If any move's destination already exists, `move` records a collision and
+leaves the source in place. After all moves, a non-empty `collisions` list
+causes `SettingsV2CollisionError` to be thrown, with a message stating the
+original `settings.yaml` was left untouched. Otherwise the function sets
+`version` to 2 and runs `validateSettings` from `src/core/config.ts`; any
+validation issue throws `SettingsValidationError`.
 
-The `--dry-run` path reports the detected facts (method, current version, available version, state dir),
-previews each pending migration by id, and returns 0 without changing anything. It distinguishes three
-registry states: "not checked" (source checkout or post-install checks), "unknown (the registry could
-not be reached)" (a lookup that was made and came back empty), and a concrete version. An "already
-current" verdict is only claimed when a lookup was made and compared a version, or when no lookup was
-owed.
+The migration's `up` method runs inside `withSettingsLock`. It returns when the
+file is absent, and returns without writing when the parsed document already
+has `version: 2`. Otherwise it writes the transformed YAML through
+`safeResourceWrite` with a `.v1.bak` backup at `${path}.v1.bak`, then writes a
+JSON report named `<migration id>.json` under `migration-reports/` in the state
+directory. A parse failure throws before any write.
 
-## Migration runner: versioned state-shape changes
+Focused tests in `tests/extended/settings-migration.test.ts`:
 
-`runPending` in `src/domains/lifecycle/migrations/index.ts` applies every registered migration the state
-tree has not recorded yet. A migration is an object with a stable `id` of the form
-`YYYY-MM-DD-<slug>` and an async `up(stateDir)`. The registry is a static, ordered list compiled into
-the bundle, so the runtime never scans the filesystem for migration files.
+- `migrates v1 atomically, keeps the original backup, and is idempotent` writes
+  a v1 file with `orchestrator`, `workers.default`, and `targets`, runs
+  `settingsV2.up`, and asserts the `.v1.bak` equals the original text,
+  `version` is 2, `chat` equals `{ target: "local", model: "qwen" }`, and
+  `fleet.default` carries the moved `thinkingLevel`. A second `up` call leaves
+  the file bytes unchanged.
+- `carries only explicit v1 pane choices into v2` asserts that a v1
+  `panes.enabled: auto` and `panes.yazi.enabled: true` migrate to
+  `interface.panes` with `enabled` `auto` and `files.enabled` true, while an
+  absent layout defaults to `off`.
+- `refuses a v1/v2 collision without replacing or backing up the file` writes
+  `orchestrator: { target: old }` alongside `chat: { target: new }`, expects
+  `settingsV2.up` to reject with `SettingsV2CollisionError`, and asserts the
+  file is unchanged and no `.v1.bak` exists.
 
-Applied migration ids are persisted to `<stateDir>/migrations.json`. `runPending` reads the manifest,
-skips every id already present, and for each remaining migration invokes `up()`, adds the id, and
-rewrites the manifest after each `up()` rather than once at the end. That rewrite-after-each is the
-at-most-once guarantee: a throw from a later migration cannot discard the record of the earlier ones
-that already succeeded, so they are not re-run against a tree they have already changed. Even when
-nothing is pending, `runPending` rewrites the manifest, so a home whose file was missing or unparseable
-gains a well-formed one. `listMigrations` returns the registry and `readMigrationManifest` returns the
-`{ applied: string[] }` for a state directory.
-
-The two registered migrations, in order, are:
-
-- `2026-09-01-settings-v2` (`src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts`). This is the
-  complete settings v1 → v2 rewrite. It moves 62 v1 keys to their v2 locations
-  (`orchestrator.target` → `chat.target`, `workers.default` → `fleet.default`, etc.), drops retired keys,
-  sets `version: 2`, and validates the result against the strict schema. It holds the settings
-  single-writer lock (`withSettingsLock`) around its read-rewrite-write and lands the write through
-  `safeResourceWrite` with a `.v1.bak` backup. It throws `SettingsV2CollisionError` when a v1 source and
-  its v2 destination both exist, leaving the original untouched. It is idempotent: a re-run over a
-  `version: 2` file returns without rewriting.
-- `2026-09-01-retire-panes-knobs` (`src/domains/lifecycle/migrations/2026-09-01-retire-panes-knobs.ts`).
-  It strips the retired `panes.agents` and `panes.keepFailed` keys, which the v2 schema refuses by name.
-  It is a no-op on a file that never named those keys and never rewrites a file it cannot parse.
-
-The registry order is deliberately not the id order. `settings-v2` owns the complete v1 rewrite,
-including the already-retired pane keys, and must run before any later migration reaches the strict v2
-reader. `retire-panes-knobs` remains registered for homes that recorded the v2 migration independently and
-for manifest continuity. The manifest replays by id membership rather than by position, so a home that
-already applied one is unaffected by where the other sits.
-
-The module header documents three requirements for future migrations: a migration that writes
-`settings.yaml` must hold the settings single-writer lock around its read-rewrite-write and land the
-write through the atomic rename writer; migrations are authored against the shapes the code has on the
-day they are needed, never against stale pre-release shapes; and a repair migration runs before any
-migration that reads through `readSettings`, because that reader throws on the very document the repair
-exists to fix.
+Two other focused tests call `migrateSettingsV1Document` directly rather than
+`up`: `tests/contracts/retired-settings-keys.test.ts` and
+`tests/contracts/autonomy-settings.test.ts`. Their assertions were not read
+for this page.
 
 ## Install-method detection
 
-`inspectInstallation` in `src/domains/lifecycle/install-method.ts` classifies an install without running
-a package manager or consulting the network. It returns an `Installation` with `kind`, `root`, `entry`,
-and `prefix`. The kinds are `"source" | "npm" | "pnpm" | "bun" | "local" | "unknown"`.
+`src/domains/lifecycle/install-method.ts` decides how Clio Coder was installed,
+so lifecycle verbs do not offer the wrong upgrade path. Its header comment
+says a source checkout must never be offered the npm-global reinstall path.
 
-The detection order is:
+`sourceCheckoutRoot(entryPath)` resolves `process.argv[1]` with `realpathSync`
+and returns the checkout root only when the resolved entry is the built CLI
+entry point under the package's `dist/cli` output directory (the source joins
+the `dist`, `cli`, and `index.js` segments), the path does not include a `node_modules` segment, the `package.json` at the
+root is named `@iowarp/clio-coder`, and the root has a `.git` directory or
+`src/cli/index.ts`. Any failed check returns null.
 
-1. Resolve the entry path (default `process.argv[1]`) to a real path. A missing launcher still leaves
-   the package root available for recovery advice.
-2. If the root's `package.json` name is not `@iowarp/clio-coder`, return `unknown`.
-3. `sourceCheckoutRoot` checks whether the entry ends in `dist/cli/index.js`, is not inside a
-   `node_modules` directory, and the root has either a `.git` directory or `src/cli/index.ts`. If so,
-   return `source`.
-4. A path ending in `lib/node_modules/@iowarp/clio-coder` is `npm`, with the prefix being everything
-   before that suffix.
-5. A path containing `pnpm/global/<number>` is `pnpm`.
-6. A path containing `install/global/node_modules` is `bun`.
-7. A path containing `node_modules` is `local`.
-8. Otherwise `unknown`.
+`inspectInstallation(entryPath, fallbackRoot)` returns an `Installation` with
+a `kind` from the union `source`, `npm`, `pnpm`, `bun`, `installer`,
+`homebrew`, `winget`, `local`, or `unknown`. The order of checks is: package
+name, source checkout, Homebrew `Cellar` segments, npm layout
+(`lib/node_modules/@iowarp/clio-coder` under a prefix), pnpm global layout,
+bun global layout, and finally a `node_modules` segment for `local`. When an
+npm-layout prefix sits under `<install root>/versions/<version>` and
+`readInstallerRecord` finds a manifest, the kind is `installer`, or `winget`
+when the record's manager is `winget` and `CLIO_CODER_MANAGER_UNINSTALL` is not
+`1`.
 
-This is the prevention the domain exists to provide: a source-checkout install is never classified as
-`npm`, so `clio-coder upgrade` never offers the npm-global reinstall path to a source checkout. The
-published package may not exist, and `npm install -g` would escape the install's roots and touch the
-global npm prefix.
+`readInstallerRecord(installRoot)` parses `install.json`. It accepts `schema`
+1 or 2 only, requires `kind` to equal `INSTALLER_MANIFEST_KIND`
+(`clio-coder-installer`), and requires that `current` lies under `versions/`
+and `node` lies under `runtime/`. A `previous` value is checked the same way
+when present. Any failed check returns null. `defaultInstallRoot` honors
+`CLIO_CODER_INSTALL_DIR`, then `CLIO_CODER_HOME/install`, then a platform
+default.
 
-`npmInstallArgs` returns `["install", "-g", "--prefix", prefix, "@iowarp/clio-coder@<channel>"]` and
-throws for any non-npm kind, because automatic upgrade requires an identified npm global installation.
-`installationCommand` produces the update or uninstall command as a string for the install method:
-`npm` with its prefix for npm, `pnpm add/remove -g` for pnpm, `bun add/remove -g` for bun, and for a
-source checkout it prints the git fetch and checkout advice.
+Consumers of this module include `npmInstallArgs` and `npmUpgradeInvocation`,
+which refuse anything other than an identified npm installation, and
+`installationCommand`, which renders the upgrade or uninstall command for a
+given kind. The focused test `self-upgrade plans automatic replacement only
+for a newer npm release` in `tests/contracts/lifecycle-safety.test.ts` builds
+an `npm` installation and checks that the self-upgrade planner reports
+`available` for a newer version and `manual` for a `pnpm` kind without a
+registry call. This test was located by search and its exact assertions were
+not read for this revision; the description above is from the test name and
+should be treated as unverified detail.
 
-## Update checking and upgrade notice
+## Update check
 
-`createUpdateCheck` in `src/domains/lifecycle/update-check.ts` returns an object with `probe` and
-`claim`. Construction does no I/O; the interactive owner starts probes after its first committed frame.
-The cache path is `<cacheDir>/update-<fingerprint>.json`, where the fingerprint is the first 16 hex
-characters of the SHA-256 of the install root. The intervals are `UPDATE_CHECK_INTERVAL_MS` (24 h) and
-`UPDATE_NOTICE_INTERVAL_MS` (7 days).
+`src/domains/lifecycle/update-check.ts` defines the cache and notice model.
+`UPDATE_CHECK_INTERVAL_MS` is 24 hours, and `UPDATE_NOTICE_INTERVAL_MS` is
+seven of those intervals. The cache file is named with an `update-` prefix and the fingerprint, with a
+`.json` suffix, in
+`cacheDir`, where `updateFingerprint` is the first 16 hex characters of a
+SHA-256 over the installer root (or install root when there is no installer
+record). The cache holds `checkedAt`, `available`, `availableTag`, `track`,
+the install lease fields (`updateAttemptedAt`, `updatePid`, `updateHost`,
+`updateBirth`, `updateLeaseMs`), `lastUpdate`, and `deferredWait`.
+`UpdateNotice.kind` is one of `available`, `replaced`, `failed`, or `updated`,
+with optional `install` (start a native background install) and `defer` (hand
+a package-manager install to a wrapper) flags.
 
-`probe` reads the installed files afresh from disk. It compares the on-disk version to the running
-version captured before hydration and flags a "replaced" notice when they differ or the entry's mtime is
-newer than process start. Development trees, local/npx copies, and unknown layouts never generate
-registry traffic. A "available" notice is only produced when the cached registry version is newer than
-the running version and the install kind is npm, pnpm, or bun. Registry lookups are cached for 24 h and
-share one request across simultaneous sessions through `withStateFileLock`.
+`createUpdateCheck(options)` does no work at construction; its probes are
+started by the interactive owner. Its cache reads and writes use atomic
+rename through a temporary file, and `readCache` ignores a cache file over
+16 KiB. The install lease blocks concurrent background installs. `leaseLive`
+treats a lease as held only while it is younger than `updateLeaseMs` (or
+`INSTALL_LEASE_MS`, the native installer timeout plus one minute) and its
+holder pid is alive on this host, with birth-token comparison through
+`leaseHolderAlive`. A lease held by another host is treated as live until it
+expires. `settledToday` applies the day-long back-off only after a run for
+the exact version has settled, so an interrupted run is retried.
 
-`claim` stamps `notifiedKey` and `notifiedAt` in the cache under the same file lock, and refuses to
-claim when the session is not idle, when an available-notice was already claimed within the check
-interval, or when the same notice key was claimed within the notice interval. The interactive consumer
-is `startUpdateMonitor` in `src/interactive/update-monitor.ts`, which ticks every second, probes on a
-60 s cadence, and displays the notice text for 30 s while idle.
+`readDeferredWait` returns a deferred wait only when it names a version newer
+than the running one and is less than a day old. `readLastBackgroundUpdate`
+returns the newest `lastUpdate` record when it has numeric `at` and boolean
+`ok`. Both are consumed by `doctor`.
 
-The version-semantics helpers are in `src/domains/lifecycle/release-version.ts`:
+The focused update tests are in `tests/contracts/update-check.test.ts`. That
+file was located by search and was not read for this page, so its cases are
+not described here.
 
-- `parseReleaseVersion` accepts strict SemVer and rejects leading zeros, `v` prefixes, and metadata that
-  could become a shell argument.
-- `compareReleaseVersions` orders core versions numerically and prereleases by the SemVer rules,
-  returning `null` when either side fails to parse.
-- `fetchReleaseVersion` fetches a channel from the npm registry with a 2.5 s timeout and returns the
-  version string or `null`.
+## Doctor and the exported surface
 
-`describeUpgradeNotice` in `src/domains/lifecycle/upgrade-notice.ts` renders the one line the first
-interactive launch after an upgrade says. It reads `KEYBOARD_FACING_CHANGES`, a frozen map from version
-to a keyboard-facing change summary. When the target version has an entry, the line names the change
-and points to the CHANGELOG; otherwise it gives the generic "What changed is in CHANGELOG.md" line.
-`takeUpgradeNotice` in `src/domains/lifecycle/state.ts` returns the version transition the operator has
-not been told about yet, or `null`. `initializeClioHome` refreshes `install.json` silently on every
-boot, so by the time anything can speak the record already says the current version; `upgradedFrom`
-remembers where it came from. Claiming the notice stamps `noticedVersion`, so it is shown once per
-version and never again. A record without `upgradedFrom`, or one already noticed, yields `null` and
-writes nothing. The consumer is `entry/orchestrator.ts`, which calls `takeUpgradeNotice()` only when
-interactive and pushes `describeUpgradeNotice(upgrade)` into `initialNotices`.
+`src/domains/lifecycle/doctor.ts` builds the `lifecycle migrations` finding at
+about line 666. It calls `readMigrationManifestResult(dirs.state)`, lists the
+registered ids with `listMigrations()`, and treats ids as satisfied without a
+manifest record when the current settings are valid and the id is one of
+`2026-09-01-settings-v2` or `2026-09-01-retire-panes-knobs`. The finding is
+`ok` with a warning level only when there is a problem-free manifest and at
+least one pending id. Its detail shows the problem text on a refused manifest,
+the count of unrecorded-but-satisfied ids, or the pending ids with the
+`clio-coder upgrade --post-install` hint.
 
-## State metadata
+The focused test `doctor distinguishes satisfied settings migrations from
+pending work without writing receipts` in `tests/extended/settings-migration.test.ts`
+writes a manifest that records every registered id except the two settings
+ids, then sets `settings.yaml` to `version: 2`. It asserts the finding is `ok`,
+with no level, and that the detail includes `already satisfy 2 unrecorded`.
+It then checks that `version: 1`, `version: 2` with `panes: { agents: off }`,
+and an unparseable YAML document each produce a `warn` finding whose detail
+includes "pending". The test asserts that neither the manifest nor the
+settings file is rewritten.
 
-`src/domains/lifecycle/state.ts` reads and writes `<stateDir>/install.json`. `readStateInfoResult`
-distinguishes a genuinely absent file (`ENOENT`, returns `info: null, problem: null`) from a present but
-unreadable one (returns `problem` with the read error), because the two have different remedies.
-`readStateInfo` returns only the `info`. `ensureClioState` calls `initializeClioHome()` and then reads,
-throwing if the record was not written. `takeUpgradeNotice` is described above.
-
-`StateInfo` carries `version`, `installedAt` (absent when the record was rebuilt over a state root whose
-install time was gone), `upgradedAt`, `repairedAt` (when the record itself was rebuilt, never the same
-claim as an install), `upgradedFrom`, `noticedVersion`, `platform`, and `nodeVersion`.
-
-## Lifecycle flow
-
-```mermaid
-flowchart TD
-  A["clio-coder upgrade"] --> B["inspectInstallation()"]
-  B -->|kind=source| C["Print source-update advice"]
-  B -->|kind=npm| D["lookUpAvailableVersion()"]
-  B -->|kind=pnpm/bun/local/unknown| H["Print package-manager instructions"]
-  D --> E["runNpmInstall()"]
-  E --> F["runPostInstallUpgrade()"]
-  F -->|"new process"| G["runPending(stateDir)"]
-  G --> I["runDoctorFixAfterInstall()"]
-  C --> J["runPending(stateDir)"]
-  J --> K["initializeClioHome()"]
-  I --> L["finish()"]
-  J --> L
-  K --> L
-```
+`src/domains/lifecycle/index.ts` re-exports `runDoctor`, `formatDoctorReport`,
+the migration API (`listMigrations`, `runPending`, `readMigrationManifestResult`
+and the `Migration`, `MigrationManifest`, `MigrationRunResult` types),
+`planSelfUpgrade`, `runApprovedSelfUpgrade`, the state helpers, the upgrade
+notice helper, and version info. The `src/domains/lifecycle/self-upgrade.ts`
+file is re-exported but was not read for this page.
 
 ## Extension seams
 
-- **Adding a migration.** Author `YYYY-MM-DD-<slug>.ts` with a default export matching the `Migration`
-  contract, then register it in `REGISTRY` in `src/domains/lifecycle/migrations/index.ts`. The order
-  matters: a settings-repair migration must precede any migration that reads through `readSettings`.
-  The migration header in `2026-09-01-settings-v2.ts` documents the lock and atomic-write requirements.
-- **Adding a doctor row.** Add the finding to the relevant `runDoctor*` function. Synchronous rows go
-  in `runDoctor` in `src/domains/lifecycle/doctor.ts`; network-bound rows go in the async sweeps
-  (`runDoctorRuntimeChecks`, `runDoctorModelChecks`, `runDoctorInteropChecks`,
-  `runDoctorFleetChecks`), which are composed in `collectDoctorFindings` in `src/cli/doctor.ts`.
-  CLI-local findings are composed there too.
-- **Adding an install kind.** Extend the `kind` union in `Installation` and add a branch in
-  `inspectInstallation`, `npmInstallArgs` (if it needs automatic upgrade), and `installationCommand`.
-- **Adding a keyboard-facing change note.** Add an entry to `KEYBOARD_FACING_CHANGES` in
-  `src/domains/lifecycle/upgrade-notice.ts`. The footer classifies a plain string by its text, and
-  `"changed"` is what makes it a sticky, dismissable notice rather than one that fades in twelve
-  seconds.
-
-## Focused tests
-
-- `tests/contracts/upgrade-command.test.ts` demonstrates the install-method detection and the upgrade
-  flow. It builds an npm-layout fixture with a custom prefix, asserts `inspectInstallation` returns
-  `kind: "npm"` and the correct prefix, asserts `npmInstallArgs` returns the exact prefix-pinned args,
-  asserts `installationCommand` quotes the prefix, and asserts `npmInstallArgs` throws for a pnpm kind.
-  It verifies the upgrade runs `npm install -g --prefix <prefix>` then `upgrade --post-install`, and
-  that `--restart` relaunches with argv the real startup parser accepts. It also checks pnpm global vs
-  project-local layout classification and that an older dist-tag never downgrades the installed package.
-- `tests/contracts/update-check.test.ts` demonstrates the update check. It asserts construction does no
-  I/O, that `probe` returns an available notice, that a busy session does not consume a reminder, that
-  simultaneous sessions share one registry request and one reminder, that a replaced install is
-  detected without consulting the registry, and that development/local/unknown installs never check the
-  registry. It also verifies the monitor waits for idle, hides during work, expires, and can be
-  dismissed.
-- `tests/extended/settings-migration.test.ts` demonstrates the migration ordering and the settings v2
-  migration. It asserts the registry order is `[settings-v2, retire-panes-knobs]`, that a v1 document
-  migrates atomically with a `.v1.bak` backup and is idempotent, that a v1/v2 collision is refused
-  without replacing the file, and that a v2 file is untouched on re-run.
-- `tests/extended/upgrade-lifecycle.test.ts` demonstrates the upgrade lifecycle. It asserts the upgrade
-  reports detected facts before doing anything, exits 0 when current with no pending migrations, does
-  not claim to be current when the registry was asked and could not answer, previews every pending
-  migration by id in dry run, applies pending migrations and reports the count, and reports a failed
-  migration with the recovery command.
-- `tests/extended/package-manager-upgrade.test.ts` demonstrates the post-install path. It asserts a
-  `--post-install --dry-run` previews local migrations without a registry lookup or package
-  replacement.
+To add a migration, follow the header in `migrations/index.ts`: author a file
+under `src/domains/lifecycle/migrations/` named `YYYY-MM-DD-<slug>.ts` with a
+default export matching the `Migration` contract, import it, insert it into
+`REGISTRY` at the position its ordering requires, and add its id to
+`REGISTERED_MIGRATION_IDS` in `src/domains/lifecycle/migrations/registry-ids.ts` at the same position. The
+module throws at load if those two lists disagree in order or length. A
+migration that writes `settings.yaml` should hold `withSettingsLock` and
+land its write through `safeResourceWrite`, as the settings v2 migration does.
 
 ## Things to watch when editing
 
-- **Manifest rewrite after each `up()`.** Do not move the `writeManifest` call in `runPending` to after
-  the loop. The per-migration rewrite is what preserves the at-most-once guarantee when a later
-  migration throws.
-- **Registry order is not id order.** The `REGISTRY` array order encodes the settings-repair-before-read
-  constraint. Do not sort the registry by id; the manifest replays by id membership and a home that
-  already applied one is unaffected by where the other sits, but the order matters for a home that has
-  applied neither.
-- **Settings migrations must hold the lock and write atomically.** A migration that writes
-  `settings.yaml` must hold `withSettingsLock` around its read-rewrite-write and land the write through
-  `safeResourceWrite`, so it never races `updateSettings` and readers never see a partial file.
-- **Install-method classification must stay network-free.** `inspectInstallation` inspects layout only.
-  Adding a registry lookup here would break the offline upgrade path and the update-check test that
-  asserts no registry traffic for non-npm kinds.
-- **The upgrade notice is claimed exactly once per version.** `takeUpgradeNotice` stamps
-  `noticedVersion` and only returns a transition when `upgradedFrom` is present and differs from the
-  current version. If you change the stamp or the return condition, the notice will either never show
-  or repeat on every boot.
-- **Doctor must stay read-only without `--fix`.** The per-root checks in `runDoctor` create nothing;
-  `initializeClioHome` is called only when `options.fix` is true. Adding a side effect to the
-  synchronous core breaks the "diagnose without creating files" contract and the exit-0 behavior on an
-  untouched home.
-- **Drain the npm child's stdout.** `runChild` in `src/cli/upgrade.ts` drains stdout and stderr because
-  `npm install -g` writes well past a 64 KB pipe buffer and a child whose stdout nobody reads blocks
-  forever. Removing the drain reintroduces the silent hang.
-- **The upgrade notice word "changed" is load-bearing.** The footer classifies a plain string by its
-  text, and `"changed"` is what makes the upgrade notice sticky and dismissable rather than a transient
-  message. Renaming the phrase in `describeUpgradeNotice` or in `KEYBOARD_FACING_CHANGES` values can
-  change how the footer renders the notice.
-
-<!-- clio-coder:wiki unresolved sources: lib/node_modules/@iowarp/clio-coder -->
+- Registry order is not id order. A migration that repairs settings must sit
+  before any migration that reads settings through the strict reader. The
+  header comment in `migrations/index.ts` says so, and settings v2 is first in
+  `REGISTRY`.
+- The manifest is written after each successful `up()`. The comment in
+  `runPending` explains that this is what keeps earlier successes from
+  re-running after a later failure; moving the write to the end of the loop
+  changes that behavior.
+- A corrupt manifest is refused, not replaced. `readManifest` returns a
+  `problem`, and `runPending` throws before any `up()` runs.
+- Retired migration ids (the naming migration and the runtime-id migrations)
+  are not in `REGISTRY`. The header says that an id with no registered
+  migration is inert in the manifest.
+- `applyPendingMigrationsAtBoot` short-circuits only when every registered id is
+  present in the config-location manifest. A new registered id therefore
+  causes a `runPending` call on the next boot.
+- The doctor's satisfied-id list is hardcoded in `src/domains/lifecycle/doctor.ts`. A new migration
+  whose effect is already visible in settings must be added there by hand if
+  the operator should not see it as pending.

@@ -69,7 +69,9 @@ where one exists.
 Search for tests by the relevant symbol or behavior across the repository, including consumers;
 absence from this package's tests is not repository-wide absence. If no relevant test is found,
 state the search scope and source-only evidence in the body without inventing a test or declaring
-test absence itself a coverage gap. An adjacent subsystem may be linked to its owning page only
+test absence itself a coverage gap. A `coverage_gaps` entry that only reports a search finding no
+test is wrong wherever it came from, a seeded draft included: move the statement into the body and
+delete the entry, which corrects the draft rather than hiding a gap. An adjacent subsystem may be linked to its owning page only
 when this page's claims stay within an inspected interface. A still-unread assigned implementation,
 configuration, or existing focused test remains a coverage gap; do not move it into "unverified"
 body prose to finish. Imports, entry points, and helper inventories alone do not finish an assigned
@@ -82,7 +84,9 @@ when no central assignment remains uncovered; never remove a gap merely to pass 
 This page is published to readers outside the project and describes the tree as it is now. Never
 write absolute local paths, host names, private network addresses, user names, or credentials. Do
 not narrate sessions, tickets, reviews, or how the code used to work, and do not describe removed
-behavior. A source comment that mentions history is not a reason to repeat it.
+behavior. A source comment that mentions history is not a reason to repeat it. Do not write in the
+first person or describe your own reading ("this pass", "read in this run"): state what the code
+does, and leave out or link what you did not trace.
 
 A broad assigned scope is an overview, not a file-by-file audit. When its files cannot all be read
 within your budget, choose the workflows a reader of this area most needs, trace those, describe

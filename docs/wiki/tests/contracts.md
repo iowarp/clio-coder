@@ -1,236 +1,222 @@
 ---
-title: "Contract tests"
-summary: "The contract test suite that guards Clio's behavioral invariants, covering state isolation, dispatch routing, engine lifecycle, smoke tests of the built binary, ACP boundary behavior, and import-boundary enforcement."
+title: "Contract tests: run_script, dispatch admission, worker boundary, gateway, ACP, telemetry, continuity and safety"
+summary: "Describes the tests/contracts suite: behavior-level tests that pin externally observable rules for the run_script tool, dispatch admission, the worker boundary, the MCP gateway, ACP sessions, telemetry journals, continuity handoffs and safety gates. Read this page to find which contract a test pins down and which source to rerun it against."
 sources:
-  - "tests/harness/tmp-root.ts"
-  - "tests/harness/scratch-env.ts"
-  - "tests/harness/dispatch.ts"
-  - "tests/harness/receipt.ts"
-  - "tests/harness/run-journal.ts"
-  - "tests/harness/headless-run.ts"
-  - "tests/boundaries/check-boundaries.ts"
-  - "tests/contracts/engine-lifecycle.test.ts"
-  - "tests/contracts/fleet-dock.test.ts"
-  - "tests/contracts/quota-claude-code-provider.test.ts"
-  - "tests/smoke/acp-boundary.test.ts"
-  - "tests/smoke/real-binary-boot.test.ts"
-symbols:
-  - "registerFauxFromEnv"
-  - "isolateClioEnv"
-  - "makeScratchHome"
-  - "runBoundaryCheck"
-  - "sealedReceipt"
-  - "readRunJournal"
-  - "installTmpGitGuard"
+  - "src/tools/run-script.ts"
+  - "src/domains/dispatch/admission.ts"
+  - "src/domains/dispatch/validation.ts"
+  - "src/domains/dispatch/worker-protocol.ts"
+  - "src/domains/session/continuity/fold.ts"
+  - "src/domains/safety/policy-engine.ts"
+  - "src/worker/entry.ts"
 tests:
-  - "tests/contracts/engine-lifecycle.test.ts"
-  - "tests/contracts/fleet-dock.test.ts"
-  - "tests/contracts/quota-claude-code-provider.test.ts"
-  - "tests/smoke/acp-boundary.test.ts"
-  - "tests/smoke/real-binary-boot.test.ts"
+  - "tests/contracts/run-script.test.ts"
+  - "tests/contracts/dispatch-admission.test.ts"
+  - "tests/contracts/worker-boundary.test.ts"
+  - "tests/contracts/gateway-mcp.test.ts"
+  - "tests/contracts/acp-v1-sessions.test.ts"
+  - "tests/contracts/telemetry-journal.test.ts"
+  - "tests/contracts/continuity-fold.test.ts"
+  - "tests/contracts/safety-gates.test.ts"
 invariants:
-  - "Tests never write to the operator's real home directory; the tmp-root preload redirects all Clio state into a per-run scratch root."
-  - "A `.git` marker at the system temp root or the run's scratch root is refused by the tmp-git guard, preventing ignore-policy contract failures."
-  - "The engine lifecycle ordering after pi 0.84.4 is locked: prepareNextTurn runs only before another assistant turn, never after a final or terminating turn."
-  - "Only src/engine/** imports @earendil-works/pi-*; the boundary checker enforces this and five other import rules."
+  - "run_script refuses an interpreter outside RUN_SCRIPT_INTERPRETERS before a run record is created, as asserted by the focused test's refusal cases."
+  - "run_script refuses a script or cwd that resolves outside the workspace root when outsideAllowed is false; the focused test exercises direct, symlinked and parent-relative escapes."
+  - "validateJobSpec refuses a harness-origin request that is not readOnly with the error 'requestOrigin harness requires readOnly true'."
+  - "For a harness-origin coder request with a workspace-edit recipe, the worker spawn is not reached; a read-only scout request reaches the spawn stub in the focused test."
+  - "admit refuses a request whose requested scope is not a subset of the orchestrator scope, with a reason beginning 'scope <agentId> is not a subset of the orchestrator scope'; the focused test asserts this for a write root outside the orchestrator's roots."
+  - "A worker starts no model run until the orchestrator sends an admit frame carrying the announced specDigest; a wrong digest or closed channel exits with code 2 in the focused test."
+  - "The safety policy hard-blocks zero-access paths such as .env before any confirmation, including the shell-quoting forms the focused test enumerates."
+  - "A continuity commit is accepted only as a validated successor of the reducing head; a high sequence number alone does not validate a chain."
+  - "An ACP close cancels and waits for an active prompt, which then stops with stopReason cancelled."
+  - "A gateway MCP server that is untrusted is never launched by an unscoped find or a call; a trusted server launches only on a scoped refresh, as the focused test asserts."
 validate:
-  - "pnpm test"
+  - "pnpm run test:file -- tests/contracts/run-script.test.ts"
+  - "pnpm run test:file -- tests/contracts/dispatch-admission.test.ts"
+  - "pnpm run test:file -- tests/contracts/worker-boundary.test.ts"
+  - "pnpm run test:file -- tests/contracts/gateway-mcp.test.ts"
+  - "pnpm run test:file -- tests/contracts/continuity-fold.test.ts"
+  - "pnpm run test:file -- tests/contracts/acp-v1-sessions.test.ts"
+  - "pnpm run test:file -- tests/contracts/telemetry-journal.test.ts"
+  - "pnpm run test:file -- tests/contracts/safety-gates.test.ts"
 ---
 
-# Contract tests
+# Contract tests: run_script, dispatch admission, worker boundary, gateway, ACP, telemetry, continuity and safety
 
-The contract test suite guards Clio's behavioral invariants across four lanes: contract tests (regression tests under `tests/contracts/`), smoke tests (end-to-end exercises of the built binary under `tests/smoke/`), extended tests (longer integration tests under `tests/extended/` and `tests/extended-smoke/`, run only under `test:full`), and boundary tests (static import-rule enforcement under `tests/boundaries/`). Every lane shares the same state-isolation harness so that no test can leak into the operator's real home or interfere with another test's state.
+The `tests/contracts` directory holds behavior-level tests for the rules a caller of a Clio tool, the dispatch path, the ACP surface or the gateway can rely on. A reader needs this page when they want to know which contract a test pins down, or when they change an enforcing source and need the nearest tests to rerun. The tests import real source modules and assert on their results. This page describes the assertions that were read in the current pass; it does not claim that any test was executed.
 
-## State isolation: the tmp-root preload
+## Anchor files
 
-The single most important invariant of the test suite is that **tests and dev runs never touch the operator's real home**. The mechanism is a preload script loaded via `--import ./tests/harness/tmp-root.ts` in every test invocation.
+- `tests/contracts/run-script.test.ts`: the `run_script` tool.
+- `tests/contracts/dispatch-admission.test.ts`: dispatch validation, the admission gate and capacity queueing.
+- `tests/contracts/worker-boundary.test.ts`: the orchestrator-to-worker protocol, event projection, steering, admission, attestation and permission reuse.
+- `tests/contracts/gateway-mcp.test.ts`: MCP servers reached through the gateway, including trust, lazy launch and teardown.
+- `tests/contracts/acp-v1-sessions.test.ts`: the ACP v1 session surface.
+- `tests/contracts/telemetry-journal.test.ts`: telemetry producer boundaries, write-location rules and journal overflow handling.
+- `tests/contracts/continuity-fold.test.ts`: the continuity handoff fold, which validates chain extension.
+- `tests/contracts/safety-gates.test.ts`: the safety policy engine's block, allow and ask decisions.
 
-`tests/harness/tmp-root.ts` performs these steps at load time:
+## run_script
 
-1. **Reads the real temp dir** before redirecting anything, resolving symlinks via `realpathSync` (macOS hands out `/var/folders/...` which resolves under `/private/var`; the canonical form is needed for later path comparisons).
-2. **Sweeps stale roots**: removes any previous `clio-coder-tests-*` directories whose recorded owner PID has exited and whose `mtime` is older than 4 hours (`STALE_ROOT_MS`).
-3. **Creates a per-run scratch root** via `mkdtemp(join(systemTmp, "clio-coder-tests-"))` and writes `.owner.json` containing the current PID.
-4. **Redirects `TMPDIR`** to the scratch root, so every subsequent `mkdtemp()` call from any test module lands inside it.
-5. **Sets Clio's state variables**: if no test has already chosen its own `CLIO_CODER_*_DIR` values, the preload sets `CLIO_CODER_HOME`, `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, and `CLIO_CODER_CACHE_DIR` under the scratch root, plus `CLIO_CODER_REQUIRE_HOME_PREFIX=1`.
-6. **Clears color-control env vars** (`FORCE_COLOR`, `NO_COLOR`, `COLORFGBG`, `CLIO_CODER_THEME`) so every test sees the same default theme.
-7. **Installs the tmp-git guard** via `installTmpGitGuard` from `tests/harness/tmp-git-guard.ts`, which refuses a `.git` at either the system temp root or the run's scratch root.
-8. **Removes the scratch root at exit** via `process.on("exit")`, but only if `isRemovableRoot()` confirms it is safe to delete (checks the path starts with the system tmp, the basename starts with the expected prefix, and `lstatSync` reports a real directory rather than a symlink).
+### Ownership
 
-The tmp-root preload runs in the runner process and again in each test child; a child inherits the root through the environment (`CLIO_CODER_TEST_TMP_ROOT`) and reuses it rather than creating a new one. Only the process that created the root removes it.
+`src/tools/run-script.ts` owns the tool. `RUN_SCRIPT_INTERPRETERS` is the interpreter allowlist; the tool's parameter schema uses it as the `StringEnum` of the `interpreter` property. `validateRequest` performs the argument checks against a workspace root and an `outsideAllowed` flag. Run records go through `src/core/run-records.ts`, and command execution is in `src/core/safe-exec.ts`; those two modules were not read.
 
-### The tmp-git guard
+### Flow
 
-`tests/harness/tmp-git-guard.ts` enforces issue #205: a `.git` at the system temp root or at the run's scratch root silently flips `isInsideGitRepo()` for every `mkdtemp` scratch directory, breaking tests that rely on accurate repository detection. The guard:
+A caller invokes the tool with an argument object. `validateRequest` runs before any run record is created:
 
-- Wraps every `node:fs` creator function (`appendFile`, `mkdirSync`, `writeFile`, `symlink`, etc.) to throw before the `.git` entry is created.
-- Wraps every `node:child_process` entry point (`exec`, `spawn`, `fork`, etc.) to check before and after for a `.git` that appeared.
-- Uses `syncBuiltinESMExports()` to republish the wrappers through the builtin ES module facades so that `import { mkdirSync } from "node:fs"` sees the wrapper.
-- Reports offenders at exit and sets the exit code to 1.
+1. The interpreter argument is trimmed and checked with `isInterpreter` against `RUN_SCRIPT_INTERPRETERS`. A value outside the list returns the error `interpreter must be one of <list>; got '<value>'. Paths and other executables are not accepted.`
+2. The script path is resolved to a real path. When `outsideAllowed` is false and the real script path is not inside the real workspace root, the call returns `script resolves outside the workspace root: <script> -> <real path>`.
+3. The working directory is resolved. When `outsideAllowed` is true and a `cwd` is given, it is resolved against the root with `path.resolve`; otherwise `resolveSafeCwd` is used. A resolved cwd that is not a directory returns `cwd is not a directory`. When `outsideAllowed` is false and the cwd's real path is outside the root, the call returns `cwd escapes the workspace root through a symbolic link`.
 
-The guard never deletes anything; a `.git` at either level that pre-exists the run is reported to stderr but left alone.
+The source comment above the outside-root check records that the flag exists so that an operator at a permissive autonomy setting can run a script outside the workspace after the network scan. this page did not trace how the caller derives `outsideAllowed` from operator mode or sandbox state.
 
-### Per-test isolation via scratch-env
+### Focused test cases
 
-For tests that need a separate home within the run, `tests/harness/scratch-env.ts` provides three flavors:
+`tests/contracts/run-script.test.ts` contains these cases:
 
-- **`makeScratchHome()`**: creates a fresh `mkdtemp` directory and returns its dir, an env object with `CLIO_CODER_*` vars set (including `CLIO_CODER_REQUIRE_HOME_PREFIX=1`), and a cleanup function. Does not touch `process.env` — the child reads env fresh.
-- **`isolateClioEnv()`**: in-process isolation with a full `process.env` backup/restore. It queues behind a process-wide async lock (`acquireEnvLock`) so that two test files running concurrently under `--experimental-test-isolation=none` cannot overlap their `process.env` mutation windows. This lock was added after issue #84: `interop-consent.test.ts` and `interop-state.test.ts` both had fully synchronous test bodies yet clobbered each other's `CLIO_CODER_HOME` because the Node test runner's scheduling inserted a gap between hook invocations that was enough for interleaving.
-- **`newScratchClioHome()` / `clearScratchClioHome()`**: minimal in-process isolation that keeps the scratch dir as a plain string, for use with `beforeEach`/`afterEach`.
+- The refusal case for scripts outside the workspace calls the tool with `{ interpreter: "node", script: <path> }` for six inputs: an absolute path to an outside file, a symbolic link at the root pointing outside, a path through a symbolic link directory, the parent-relative argument `"../evil.js"`, a missing `missing.js`, and a directory `sub`. Each must return `kind: "error"`, and `runDirs` must find no run directory. The `"../evil.js"` argument is accepted with either a not-found or an outside-root message.
+- The escaping-cwd case covers `cwd: ".."` and a symbolic link that escapes the root.
+- The interpreter refusal case passes values outside the allowlist, such as `/usr/bin/env`, `python3.12` and `perl5`, and asserts that no run record is created.
+- A workspace root reached through a symbolic link runs and records under the canonical root.
 
-All in-process flavors call `resetXdgCache()` so that `src/` code re-resolves the scratch directories.
+The refusal tests use real temporary workspaces and real files, and they refuse before execution, so they do not need a stubbed command runner.
 
-## Test scripts and lane structure
+### Things to watch when editing
 
-The `package.json` scripts define four test lanes:
+- The interpreter allowlist and workspace confinement are separate checks. Passing `outsideAllowed` true skips the confinement checks for both the script and the cwd, so a change to how that flag is derived changes which scripts can run.
+- Refusals from `validateRequest` return before a run record is created, and the focused test asserts the absence of run directories for these cases.
 
-| Script | What it runs |
-|--------|-------------|
-| `pnpm test` | `tests/contracts/*.test.ts`, `tests/smoke/acp-boundary.test.ts`, `tests/smoke/real-binary-boot.test.ts`, `tests/smoke/process-lifecycle.test.ts`, `tests/smoke/boot-handoff.test.ts` with `--test-concurrency=2` |
-| `pnpm test:full` | `tests/contracts/*.test.ts`, `tests/extended/*.test.ts`, `tests/smoke/*.test.ts`, `tests/extended-smoke/*.test.ts` |
-| `pnpm test:file -- <file>` | A single test file (never builds) |
-| `pnpm test:maintenance` | Two keyboard test files under `tests/extended/` |
+## Dispatch admission
 
-Both `test` and `test:full` preload `tests/harness/tmp-root.ts` via `--import`. The `pretest` and `pretest:full` scripts build `dist/` only when it is missing (`test -f dist/cli/index.js && test -f dist/metafile-esm.json || pnpm run build`).
+### Ownership
 
-The `ci` script runs the full handoff gate: `pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:maintenance && pnpm run check:gui && pnpm run test:gui`.
+- `validateJobSpec` in `src/domains/dispatch/validation.ts` validates a job spec. `DISPATCH_BRIEFING_MAX_BYTES` and `INTERNAL_DISPATCH_BRIEFING_MAX_BYTES` are exported from the same file; the focused test imports the internal limit.
+- `admit` in `src/domains/dispatch/admission.ts` takes an `AdmissionRequest` and an injected subset predicate `subsetFn`. It runs two checks in order. First, when `subsetFn(requestedScope, orchestratorScope)` returns false, it refuses with the reason `scope <agentId> is not a subset of the orchestrator scope: <describeScopeExcess>`. Second, for each entry in `requestedActions`, it refuses with `action <action> not in requestedScope.allowedActions` when the requested scope's `allowedActions` set does not contain that action. Otherwise it returns `admitted: true` with reason `ok`.
+- `createCapacityAdmissionController` in the same file builds the capacity gate. The queue is in `src/domains/dispatch/admission-queue.ts` and leases are in `src/domains/dispatch/capacity-lease.ts`.
+- `admissionWriteBoundaries` in `src/domains/dispatch/extension.ts` maps a task worktree's write paths back onto the checkout before the subset check; the harness-origin recipe check is in the same extension module.
 
-## Engine lifecycle contracts
+### Flow
 
-`tests/contracts/engine-lifecycle.test.ts` locks the ordering Clio's turn runtime relies on after the pi 0.84.4 `prepareNextTurn` change. The test file covers:
+A dispatch request is validated by `validateJobSpec`. When `requestOrigin` is `harness` and `readOnly` is not true, validation returns `requestOrigin harness requires readOnly true`. For a harness-origin request whose agent is not read-only, the dispatch extension produces the message `dispatch: harness-origin runs require a read-only recipe; ...` before a worker is spawned. Scope admission goes through `admit`, and the capacity controller decides when a worker may start.
 
-- **prepareNextTurn runs only before another assistant turn**: a scripted provider returns a tool-call turn followed by a final turn; the test asserts the timeline is `["llm:1", "tool:one", "prepare", "llm:2"]` and that `prepareNextTurn` never runs after the final turn.
-- **Steering during preparation**: a steer queued while `prepareNextTurn` is running is delivered before the next assistant call, landing after the tool result and before the continuation.
-- **Terminating tool batches**: preparation is skipped entirely after a terminating tool batch, but the run still closes through `agent_end`.
-- **Preparation failure**: when `prepareNextTurn` throws, the run closes through `agent_end` with an assistant message carrying `stopReason: "error"`.
-- **Transcript resets**: `Agent.reset()` is refused while a run is active (throws `/already processing/`); Clio's reset callers cancel and await settlement first, after which the same reset is accepted.
-- **Tool argument normalization**: `validateEngineToolArguments` treats `null` for an optional non-nullable argument as omitted (pi-ai 0.84.2 behavior) while still rejecting `null` where the schema requires a value.
-- **TUI keybinding table**: pi-tui 0.84.4 alt-screen actions are routable through Clio's table without colliding with Clio app defaults; a deliberately scoped overlap (`ctrl+g` for `searchNext` while the search overlay is focused) is recorded.
-- **Alternate-screen render seams**: the three protected seams Clio measures (`overlay`, `cursor`, `normalization`) still run inside one fullscreen frame after pi 0.84.2 paints full-width rows as direct line references.
+### Focused test cases
 
-## Fleet dock layout
+`tests/contracts/dispatch-admission.test.ts` contains these cases:
 
-`tests/contracts/fleet-dock.test.ts` tests the Fleet dock's layout behavior:
+- "validates harness origin only with an explicit read-only request and the internal briefing ceiling" sends `{ agentId: "scout", task: "Inspect the source", requestOrigin: "harness" }` with `readOnly` absent and with `readOnly: false`. Both return `{ ok: false, errors: ["requestOrigin harness requires readOnly true"] }`. With `readOnly: true` the spec is accepted and `requestOrigin` and `readOnly` are preserved. A briefing of `INTERNAL_DISPATCH_BRIEFING_MAX_BYTES + 1` bytes returns `briefing must be <limit> UTF-8 bytes or fewer`, and a `requestOrigin` of `unknown` returns `requestOrigin must be one of: user|agent|internal|harness`.
+- "refuses a harness-origin coder and admits shadow Scout to worker creation" uses `makeDispatchBundle` from `tests/harness/dispatch.ts` with a spawn stub that counts starts. A harness-origin `coder` request with a workspace-edit recipe is refused with the read-only recipe message and the spawn stub is not reached. The same request for `scout` reaches the spawn stub, which throws a fixture error to mark the reach.
+- "names the root or action that exceeds the orchestrator scope in a subset denial" calls `admit` with the real `isSubset` predicate from `src/domains/safety/scope.ts`. A `git-master` request whose `allowedWriteRoots` holds an outside-the-workspace test input (an absolute path under a directory named `elsewhere`), against `WORKSPACE_SCOPE`, is refused with a reason matching `^scope git-master is not a subset of the orchestrator scope: write root <that input> lies outside`, and the reason ends with the advice `leave write_roots empty`. The input is a synthetic string in the test, not a repository file. A `coder` request with `WORKSPACE_SCOPE` against an orchestrator of `READONLY_SCOPE` is refused with a reason matching `needs action class dispatch, execute, write`. That text is produced by the subset predicate's excess description, so this case exercises the first check; the test does not exercise the `requestedActions` loop.
+- The task-worktree case calls `admissionWriteBoundaries` with a worktree at `/dev/shm/clio-test-worktrees/run1` and asserts that "src/a.js" and `test/` map to paths under the checkout root, while a second synthetic outside-the-workspace input, named in the test as an unrelated place, is unchanged. Admitting the first two mapped roots against `WORKSPACE_SCOPE` returns `admitted: true`.
+- Capacity cases cover a same-endpoint foreground deadlock being refused rather than queued, ordinary saturation being queued, and deterministic ordering with a fail-closed queue bound. The capacity tests hold a peer lock by writing a lock file through `holdCapacityLockAsPeer`, which records a live pid that is not the test process; the lock file format was not read in full.
 
-- **Live Fleet runs reserve normal-flow rows**: the test builds a layout with a transcript, Fleet dock, editor, and footer, renders it in both `regular` and `fullscreen` modes across widths 40–200, and asserts that the transcript sentence is preserved intact, the Fleet dock appears between the transcript and the editor, and every row fits within the terminal width.
-- **A live run is never drawn by a transcript-covering ticker overlay**: the test creates an interactive tickers component and asserts that when a dispatch row is active, the overlay does not render any line containing "Fleet runs".
+### Things to watch when editing
 
-## Quota provider contracts
+- The harness-origin read-only rule is in `validateJobSpec`, and the recipe check is in the dispatch extension. The `coder` case depends on both, so changing either can change which error a caller sees.
+- `admit` takes its subset predicate as an argument, so scope containment is enforced by the injected function, not by the gate itself. The `describeScopeExcess` reason text is part of what callers see.
+- The `requestedActions` loop in `admit` runs only after the subset check passes, so an action rejection and a scope rejection produce different reason prefixes.
 
-`tests/contracts/quota-claude-code-provider.test.ts` tests the Claude Code quota provider end-to-end with a stubbed `fetch`:
+## Worker boundary
 
-- Parses the `limits[]` usage shape into ordered windows (session, weekly, scoped weekly).
-- Falls back to the flat `five_hour` and `seven_day` buckets when `limits` is empty.
-- Maps HTTP 401 and 403 to an expired session.
-- Captures `Retry-After` when the usage endpoint rate limits the read.
-- Reports other failing statuses and malformed JSON as errors.
-- Reports missing credentials without spending a network call.
-- Detects Claude Code's own credential file and ignores unusable ones.
-- Refuses a token the credential record already declares expired, without a request.
-- Asks for a fresh sign-in when the refresh token is gone or also expired.
-- Still calls the endpoint when the record carries no expiry at all.
-- Parses `Retry-After` and plan strings defensively.
-- Serves a cached snapshot inside the TTL and refetches after it expires.
-- Falls back to the last good snapshot when a refresh fails.
-- Reports a failure directly when nothing good was ever cached.
-- Registers explicitly connected adapters in display order.
+`tests/contracts/worker-boundary.test.ts` pins the protocol between the orchestrator and a dispatched worker process. The protocol types and hashing live in `src/domains/dispatch/worker-protocol.ts` and `src/worker/protocol.ts`; the worker entry is `src/worker/entry.ts`, where `announceWorker` emits an `announce` control frame carrying `specDigest` and the function returns the digest. The worker then calls `demux.awaitAdmission(attestedDigest, WORKER_ADMISSION_WAIT_MS)` from `src/worker/stdin-demux.ts` before any model call. A rejected wait writes `[worker] not admitted: <message>` to stderr and returns exit code 2. Process spawning is in `src/domains/dispatch/worker-spawn.ts`.
 
-## Smoke tests: the built binary
+Focused cases read:
 
-The smoke tests exercise the built `dist/cli/index.js` binary end-to-end. They use the same `isolateClioEnv` pattern and the `CLIO_CODER_*` env vars to redirect all state into a scratch directory.
+- "reuses permission answers only for the exact call and unchanged permission conditions" builds a cache key with `workerPermissionCacheKey` from `src/engine/worker-runtime.ts`. A remembered `approve` or `deny` is returned only for the same tool, arguments (independent of key order) and permission context. A different `cwd`, a different command, a changed permission context (`net:project-verifier-confirm` or `autonomy:yolo`) or a changed action class each miss the cache.
+- "binds transport admission to the entire approved worker identity" builds an attestation with `approvedIdentityForSpec` and checks `verifyWorkerAttestation`. An identical attestation returns `{ ok: true }`; changing `toolSignature` returns `ok: false`.
+- "emits canonical hash domains and normalizes released event ids at the wire read boundary" pins the hash domains: the settings fingerprint is the SHA-256 of `clio-coder.settings:` plus canonical JSON, the spec digest uses the `clio-coder.workerSpec:` domain, the tool signature is the SHA-256 of the sorted tool names, and the endpoint hash of an undefined endpoint is the SHA-256 of `clio-coder.endpoint:none`.
+- "projects incremental events and preserves terminal evidence under backpressure" passes a `message_update` through `projectWorkerEventForStdout`, which keeps only `assistantMessageEvent` (here `{ type: "text_delta", delta: "tail" }`) and drops the cumulative `message` field. It then pushes three events into `createBoundedEventQueue(2)`: a display update, a `message_end` terminal event, and a second display update. The queue shifts the `message_end` first and reports `droppedDisplayFrames` of 1, so the terminal frame survives while a display frame is dropped under pressure.
+- "serializes live steering and acknowledges exact accepted sequences" passes three steers with sequences 1, 2 and 3 to `createOrderedSteerHandler` concurrently. The delivery callback returns false for text `"refuse"`. The test asserts that delivery runs in order `["first", "refuse", "third"]`, that the accept callback receives sequences `[1, 3]`, and that the reject callback receives one reason containing `does not accept`.
+- "starts no model run until the orchestrator admits the attested digest" starts a real worker entry. After the announce arrives, the test waits 500 ms and asserts that stdout is empty and no model request was made. Only after it writes an `admit` frame carrying the announced `specDigest` does the run start.
+- "exits unadmitted with code 2 on a wrong digest or a closed channel" runs two workers concurrently, one answering with a wrong digest and one closing stdin. Both must exit with code 2, print `[worker] not admitted: ` on stderr, write nothing to stdout, and make zero model requests.
 
-### ACP boundary
+The remaining cases in this file (stdout write failures, backpressure on the stdout lane, output bounding, hook queries and hook verdicts) were not read; they are not described here.
 
-`tests/smoke/acp-boundary.test.ts` drives the ACP (Agent Client Protocol) stdio boundary:
-
-- **Terminal authentication**: `acp auth login` without a terminal exits with code 2 and an error message about `--quick` needing a terminal.
-- **Missing service credentials**: a target with `auth.apiKeyEnvVar` set but the env var unset is rejected before admission with `prompt_not_admitted` / `authentication-required`; after logging in via `auth login`, the same session is reopened and the turn completes.
-- **Text turn and unadmitted prompt**: a configured home serves a text turn; an unconfigured home rejects the prompt with `prompt_not_admitted`.
-- **Same-child session close/new**: a direct ACP `session/close` followed by `session/new` resets history, ancestry, and tasks on the same child process; the original session can be resumed via `session/load`.
-- **Cancelled permission response**: responding `cancelled` to a `session/request_permission` aborts the turn before the tool can resume the model.
-- **Permission allow and reject**: mediating one unrecognized shell write `allow-once` and one `reject-once` produces the expected file creation or non-creation and tool status.
-
-### Real binary boot
-
-`tests/smoke/real-binary-boot.test.ts` tests the built binary's boot path:
-
-- **v1 settings upgrade**: writes a v1 `settings.yaml`, runs `clio-coder upgrade`, asserts two migrations applied, a backup file is kept, and the migrated settings match the expected v2 shape. Re-running `upgrade` reports no pending migrations and leaves the file unchanged.
-- **`--autonomy` flag**: rejects unsupported values, refuses to drop the flag on subcommands that would silently ignore it, and accepts it for the interactive session without rewriting `settings.yaml`.
-- **First-run setup**: takes a genuinely empty home through the interactive setup wizard, seeding a target via `lmstudio` and reaching the editor.
-
-## Extended tests (test:full only)
-
-The `tests/extended/` and `tests/extended-smoke/` directories contain longer integration tests that run only under `pnpm run test:full`. The repository handbook is explicit: "A regression test belongs in `tests/contracts/`. `tests/extended/**` runs only under `pnpm run test:full`, never in CI (except the two keyboard files `test:maintenance` runs), so a test placed there guards nothing."
-
-`tests/extended-smoke/headless-artifact.test.ts` is representative: it drives the built `clio-coder run` binary with a seeded OpenAI-compatible fixture, asserts the terminal artifact was written, and verifies the sealed receipt against its ledger row. The `sealedReceipt()` helper from `tests/harness/headless-run.ts` reads the run journal via `readRunJournal()`, finds the single receipt, locates its envelope in `runs.json`, and calls `verifyReceiptIntegrity()` to confirm the integrity seal binds them.
-
-## Fake model injection (CLIO_CODER_WORKER_FAUX)
-
-The worker entry can run end-to-end without provider credentials through `CLIO_CODER_WORKER_FAUX`. When this env var equals `"1"`, `registerFauxFromEnv()` in `src/engine/ai.ts` registers a pi-ai faux provider and queues a single deterministic assistant response. The faux model is wired into the worker runtime at `src/engine/worker-runtime.ts:432`:
-
-```ts
-const fauxModel = registerFauxFromEnv();
-// ...
-const model = applyModelCapabilityPatch(
-  input.target.runtime === "faux" && fauxModel ? fauxModel : synthesized,
-  input.modelCapabilities,
-);
+```mermaid
+sequenceDiagram
+  participant W as Worker entry
+  participant O as Orchestrator
+  W->>O: announce (specDigest)
+  Note over W: awaitAdmission(specDigest) - no model call yet
+  O-->>W: admit (same specDigest)
+  Note over W: model run starts
+  O--xW: wrong digest or closed channel
+  Note over W: "[worker] not admitted", exit 2
 ```
 
-The faux provider responds to every prompt with the configured text (default `"ok"`) and stop reason (default `"stop"`). Additional env vars control the response:
+### Things to watch when editing
 
-| Env var | Purpose | Default |
-|---------|---------|---------|
-| `CLIO_CODER_WORKER_FAUX` | Must equal `"1"` to arm registration | — |
-| `CLIO_CODER_WORKER_FAUX_MODEL` | Model id registered under the faux provider | `"faux-model"` |
-| `CLIO_CODER_WORKER_FAUX_TEXT` | Assistant response text | `"ok"` |
-| `CLIO_CODER_WORKER_FAUX_STOP_REASON` | Assistant stop reason | `"stop"` |
-| `CLIO_CODER_WORKER_FAUX_ERROR_MESSAGE` | Optional assistant error message | — |
+- The announce-then-admit ordering is asserted by a timing-based wait, so the 500 ms pause is a test aid for the "no run before admit" claim, not a guarantee of the protocol's timing.
+- The event-queue case shows that a terminal `message_end` is retained while display frames are dropped; changing the queue's drop policy changes that outcome.
 
-This mechanism is documented in `docs/guide/environment-variables.md` and is recognized by the hygiene checker (`scripts/check-hygiene.ts:615`) as a valid env var pattern.
+## Gateway MCP
 
-## Receipt and evidence capture
+`tests/contracts/gateway-mcp.test.ts` exercises MCP servers reached through the `gateway` tool. Its surface is described on [Tools gateway](../tools/gateway.md).
 
-The receipt system provides a durable, tamper-evident account of every dispatch run. The test harness for receipts is split across three files:
+Focused case read: "never launches an untrusted server, lists it with the trust remedy, and launches a trusted one on a scoped refresh". The test trusts one server with `trustMcpServer` at action class `read`, then asserts:
 
-- **`tests/harness/receipt.ts`**: provides `fixtureEnvelope(runId)` and `fixtureReceiptDraft(envelope)` that construct complete, valid receipt envelopes and drafts. The integrity digest covers every receipt field, so a new required field breaks every suite at once.
-- **`tests/harness/run-journal.ts`**: provides `readRunJournal(stateDir)` which reads the run ledger (`runs.json`) and the receipts directory under `stateDir`, returning a `RunJournal` with envelopes keyed by run id and all parsed receipts.
-- **`tests/harness/headless-run.ts`**: provides `headlessScratch(prefix)` which creates a scratch home initialized by `doctor --fix`, `runCli(args, options)` which spawns the built CLI with a timeout, and `sealedReceipt(stateDir)` which reads the run journal, finds the single receipt, verifies its integrity against the ledger row, and returns both.
+- Registration launches no client, and dashboard connection sampling does not start one.
+- An unscoped `find` with `query: "mcp"` launches nothing and names the trusted server in `missingCatalogs`, with a note that tells the caller to use `gateway(op="find", server="<id>", refresh=true)`.
+- A scoped `find` with `server: "fake"` and `refresh: true` launches exactly that server, once, and leaves the other declared server unspawned.
+- An untrusted server is listed with status `untrusted`, the remedy `clio-coder mcp trust marker`, the interactive remedy `/mcp trust marker`, and no catalog.
+- A `call` routed to the untrusted server is refused with a message that says it is never launched until trusted, and no client is started.
+- A second `call` to the trusted server reuses the session's client; closing the source waits until the trusted server's process is gone and records one teardown report that is complete.
 
-The receipt integrity check is performed by `verifyReceiptIntegrity(receipt, envelope)` from `src/domains/telemetry/seal.ts`. The test `tests/contracts/acp-receipt-tool-truth.test.ts` demonstrates the receipt capture flow: it dispatches a run against an ACP peer that emits tool call and tool result frames, and asserts that the sealed receipt records the tool kinds (`edit`, `execute`), completed spans, mutations, and safety decisions.
+Other gateway cases cover caching, cancellation, process-group termination, result bounding, and stale declarations (for example "treats a trusted server whose declaration changed as stale and never launches it"). Their assertions were not read, so they are listed by name only.
 
-## Boundary enforcement
+## ACP v1 sessions
 
-`tests/boundaries/check-boundaries.ts` implements six static import rules that enforce architectural isolation between domains. The `runBoundaryCheck(projectRoot)` function walks every TypeScript file under `src/`, extracts all import specifiers (including dynamic imports and `/// <reference>` directives), and evaluates each against the rules:
+`tests/contracts/acp-v1-sessions.test.ts` drives the ACP surface through a `fixture` helper that talks JSON-RPC to the session server. The engine-side surface is described on [Engine ACP](../engine/acp.md).
 
-| Rule | Constraint |
-|------|-----------|
-| **Rule 1** | Only `src/engine/**` may import `@earendil-works/pi-*` at all, including type-only imports. Since the 0.83.0 engine-boundary rework there is no type-only exception. |
-| **Rule 2** | `src/worker/**` never value-imports `src/domains/**` except the three provider modules allow-listed in `isAllowedWorkerProviderValueImport` (`plugins.ts`, `registry.ts`, `runtimes/builtins.ts`). Type-only imports are allowed. |
-| **Rule 3** | `src/domains/<x>` never imports `src/domains/<y>/extension.ts` for `y != x`. Use the contract exported from `src/domains/<y>/index.ts` instead. |
-| **Rule 4** | `src/tools/**` never imports `src/interactive/**`. The tool substrate is surface-agnostic. |
-| **Rule 5** | The chat loop's turn modules (`chat-loop.ts`, `turn-*.ts`) never import `src/entry/**`. Composition flows one way: the entry point composes the loop, never the reverse. |
-| **Rule 6** | Any value importer outside the computed Stage 0 closure and its `src/interactive/**` and `src/engine/**` trees reaches those protected trees only through a declared seam in `STAGE0_SEAMS`. A seam may not lead back into Stage 0 unless that existing composition-root overlap is explicitly declared. |
+Focused cases read:
 
-Rule 6 has a second half: even when a seam is declared, the seam's own import closure must not reach into the Stage 0 owner's closure. The Stage 0 owner is `src/interactive/terminal-lease.ts`, and its closure is pinned to 32 chunks, 1,400,000 total bytes, and 350,000 Clio source bytes by `tests/contracts/instant-shell-import-graph.test.ts`.
+- "ACP close cancels and waits for an active prompt": after `initialize` and `session/new`, a `session/prompt` is started, a `session/set_mode` during it is rejected with a message matching `/active prompt/`, then `session/close` returns `{}`, the fixture records that the prompt was cancelled, and the pending prompt resolves with `stopReason: "cancelled"`.
+- "a refused injecting command does not produce a successful ACP turn": a slash command `/skill missing` whose `invoke` returns an error level and that injects a user turn is sent as a prompt. The prompt request rejects with JSON-RPC code `-32603` and the message `the prompt turn failed`.
 
-The `STAGE0_SEAMS` array contains 30+ declared edges, each with a written reason explaining why the edge exists. For example: `src/engine/types.ts` is a seam because "the erased engine shapes (AgentMessage, ImageContent) domains and the CLI both take. Type-only at every call site."
+The other ACP cases cover resume without replay, paged session listing, history streaming, replay of crashed sessions, and pricing facts. Their assertions were not read.
 
-## Things to watch when editing
+## Telemetry journal
 
-- **The tmp-root preload is load-order dependent.** It runs before every test module, so any test that reads `TMPDIR` or `CLIO_CODER_*` env vars sees the redirected values. A test that needs the real temp dir must save and restore the original value explicitly.
+`tests/contracts/telemetry-journal.test.ts` pins boundaries and journal behavior read.
 
-- **The `isolateClioEnv` lock is process-wide.** A test that calls `await isolateClioEnv()` in `beforeEach` and `restore()` in `afterEach` holds the lock for the duration of the test. If two test files run concurrently (under `--experimental-test-isolation=none`), they serialize on this lock. A test that fails to call `restore()` deadlocks every subsequent test.
+- "producer boundaries reject filesystem helpers and serialization without blocking enqueue" and "rule11 keeps writes under the telemetry root inside the telemetry domain" call checker functions from `tests/boundaries/check-boundaries.ts`, which take a file name and a source string and return violation strings. `checkTelemetryProducer` flags a producer that imports `open` from `node:fs/promises` or calls `JSON.stringify` or `new DatabaseSync`, and accepts a plain `sink.enqueue(event)`. `checkTelemetryWrites` flags write-style source text that targets telemetry paths when the checked file is outside `src/domains/telemetry/`; the same text under that directory is not flagged.
+- "journal overflow and invalid records produce gaps, rotation preserves records, and secrets are redacted" opens a call journal with `queueCapacity: 2` and `segmentBytes: 1`, emits four `session.opened` events and flushes. The test asserts `journal.health().dropped` is 2. It then emits one event with an unexpected field, which yields `invalid` of 1. A settled call whose stop detail contains an `api_key=` assignment is written as `api_key=[redacted:assignment]`. The read-back rows contain two `journal.gap` records, one with reason `writer-drop` and count 2 and one with reason `invalid-record` and count 1, exactly two `session.opened` rows, and at least one `journal.segment_closed` row.
+- "a flush returns only after the batch a sibling flush started behind the one in flight is written (#434)" and the overlapping-ownership case are listed by name; their assertions were not read.
 
-- **The tmp-git guard wraps `node:fs` and `node:child_process` globally.** It uses `syncBuiltinESMExports()` to republish the wrappers through the builtin ES module facades. A test that monkey-patches `node:fs` or `node:child_process` may break the guard or vice versa.
+The worker forwarding case and the remaining journal cases in the file were not read.
 
-- **Smoke tests require a built `dist/`.** The `pretest` script builds `dist/` only when it is missing. A stale `dist/` is not rebuilt, and smoke tests run the built binary. After source changes, run `pnpm run build` before `pnpm test`.
+## Continuity fold
 
-- **Extended tests run only under `test:full`.** A regression test placed in `tests/extended/` does not run in CI (except the two keyboard files `test:maintenance` runs). Regression tests belong in `tests/contracts/`.
+`tests/contracts/continuity-fold.test.ts` exercises `foldContinuity` from `src/domains/session/continuity/fold.ts`, with the contract types in `src/domains/session/continuity/contract.ts`.
 
-- **The boundary checker reads any inline `{ type X }` clause as a value import.** Write type-only imports as `import type { X }` to avoid rule 2/rule 6 failures.
+Focused cases read:
 
-- **The faux model is worker-only.** `registerFauxFromEnv()` is called from `src/engine/worker-runtime.ts`, which is the worker subprocess entry point. It is not available in the orchestrator process.
+- "folds prepared through acknowledged with matching terminal evidence": a prepared-through-acknowledged transaction with matching terminal evidence folds to phase `acknowledged`, one attempt spent, commit outcome `summarized`, no anomalies, and authority `recall_only`.
+- "treats an identical duplicate as idempotent and a contradictory one as a conflict": a repeated identical reducing record is not an extra attempt, while a contradictory record for the same sequence raises the `duplicate_conflict` anomaly, sets `validated` to false and yields the action `recall_only` with reason `conflicting_evidence`.
+- "refuses a commit that is not a validated successor of reducing": a continuity-only commit at sequence 50 with no spent attempt raises `malformed_continuity_record` and leaves the phase at `prepared`. The same commit with attempt 1 validates structurally but is still refused with `illegal_transition`, because sequence 50 does not follow the head. In the fold source, `illegal_transition` is raised when a phase transition is not in `LEGAL_PREDECESSORS`.
 
-- **The receipt integrity digest covers every field.** When adding a new field to `RunEnvelope` or `RunReceiptDraft`, the fixture in `tests/harness/receipt.ts` must be updated in the same change, or every receipt test breaks at once.
+Other cases cover predecessor and attempt checks, refusal of a third reduction attempt, carry verification, resume and pause handling, and clock ambiguity. Their assertions were not read.
 
-<!-- clio-coder:wiki unresolved sources: tests/contracts/*.test.ts, tests/extended/*.test.ts, tests/smoke/*.test.ts, tests/extended-smoke/*.test.ts, tests/extended/**, src/engine/**, src/worker/**, src/domains/**, src/domains/<x>, src/domains/<y>/extension.ts, src/domains/<y>/index.ts, src/tools/**, src/interactive/**, src/entry/** -->
+### Things to watch when editing
+
+- The fold checks chain extension against the observed head, not against the sequence number. Changing the transition check changes which of these cases is refused.
+
+## Safety gates
+
+`tests/contracts/safety-gates.test.ts` exercises `createSafetyPolicyEngine` from `src/domains/safety/policy-engine.ts` and `mapAutonomy` from `src/domains/safety/autonomy.ts`. In the policy engine, `block` is the final verdict, `ask` is a net rail, and `allow` is the remaining case; a zero-access match and a bash read of a zero-access path produce the reason code `secret_path_bash`.
+
+Focused cases read:
+
+- "hard-blocks zero-access paths before confirmation or ordinary ask rails": reads and writes of `.env` and `credentials.yaml`, and shell commands that reach `.env` through `$'\x2eenv'`, `$'.env'`, `$".env"`, nested `bash -c`, and option-bearing shells such as `bash -o pipefail -c` or `zsh -x -ec`, return `kind: "block"` both with and without a `confirmed` argument. A read of `~/.ssh/id_rsa` returns `reasonCode: "secret_path_bash"`.
+- "admits only standalone git diff whitespace checks in default mode": `git diff --check` and `git diff --cached --check` return `allow` with rule `builtin:git-diff-check` and execRecognition `recognized`, and map to `allow` under both default and yolo autonomy. Adding `--ext-diff`, `--output=`, a pipe, a `&&` chain or command substitution makes the command unrecognized and maps to `ask` in default mode, while a redirect to `.env` or a `cat` of `~/.ssh/id_rsa` is blocked.
+- "recognizes only exact toolchain version probes": `node --version`, `go version` and `python3 -V` return `allow` with rule `builtin:version-probe`.
+
+The first describe block in this file also asserts that an `rg` command is treated as pending, not recognized, until the login environment capture settles, after which the policy follows what the environment holds.
+
+### Things to watch when editing
+
+- The tests show that recognition is per exact command shape. Broadening a recognized pattern changes which commands map to `allow` under default autonomy, and these tests pin the current narrow set.
+
+## Running the tests
+
+The declared commands in `package.json` include `pnpm run test:file` and `pnpm run test`. The narrowest checks for this page are the `pnpm run test:file -- <file>` forms listed in the front matter. this page did not run any of them.
