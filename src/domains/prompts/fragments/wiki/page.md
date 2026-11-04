@@ -84,7 +84,9 @@ when no central assignment remains uncovered; never remove a gap merely to pass 
 This page is published to readers outside the project and describes the tree as it is now. Never
 write absolute local paths, host names, private network addresses, user names, or credentials. Do
 not narrate sessions, tickets, reviews, or how the code used to work, and do not describe removed
-behavior. A source comment that mentions history is not a reason to repeat it.
+behavior. A source comment that mentions history is not a reason to repeat it. Do not write in the
+first person or describe your own reading ("this pass", "read in this run"): state what the code
+does, and leave out or link what you did not trace.
 
 A broad assigned scope is an overview, not a file-by-file audit. When its files cannot all be read
 within your budget, choose the workflows a reader of this area most needs, trace those, describe
