@@ -35,11 +35,11 @@ servers:
 Keep the id `slurm`. The skill expects it, and it is what switches on the confirmation for allocations.
 
 ```sh
-clio-coder doctor
+clio-coder doctor --verbose
 clio-coder mcp list
 ```
 
-`doctor` shows `slurm clio-kit`, `slurm mcp server`, and `slurm scheduler` rows. Those rows are informational or warnings, and they never fail the check.
+`doctor --verbose` shows `slurm clio-kit`, `slurm mcp server`, and `slurm scheduler` rows. Those rows are informational or warnings, and they never fail the check.
 
 ## Install the skill
 
