@@ -208,6 +208,7 @@ test("--json dispatch tool-call fragments reassemble with the password gone, per
 		...scrub.scrub(toolDelta(2, 'XJ@host/y"}')),
 		...scrub.scrub(updateFrame({ type: "toolcall_end", contentIndex: 1, toolCall: { name: "bash" } })),
 		...scrub.scrub(updateFrame({ type: "toolcall_end", contentIndex: 2, toolCall: { name: "bash" } })),
+		...scrub.finish(true),
 	];
 	const deltas = (index: number): string =>
 		innerOf(frames)
@@ -240,23 +241,20 @@ test("completed --json streams keep ports in tool results, user messages and fin
 		deepStrictEqual(projector.project({ type, message: toolResult } as never), [{ type, message: toolResult }]);
 		deepStrictEqual(projector.project({ type, message: user } as never), [{ type, message: user }]);
 	}
-	const scrub = createJsonCredentialScrub();
+	const finished = (inner: object): Record<string, unknown> | undefined => {
+		const scrub = createJsonCredentialScrub();
+		const stop = { role: "assistant", stopReason: "stop", content: [] };
+		const frames = [...scrub.scrub(updateFrame(inner)), ...scrub.scrub({ type: "message_end", message: stop })];
+		return innerOf(frames.filter((frame) => (frame as { type?: string }).type === "message_update"))[0];
+	};
 	const toolCall = { type: "toolCall", id: "c", name: "bash", arguments: { url: "postgres://db:5432" } };
-	strictEqual(
-		JSON.stringify(innerOf(scrub.scrub(updateFrame({ type: "toolcall_end", contentIndex: 1, toolCall })))[0]?.toolCall),
-		JSON.stringify(toolCall),
-	);
+	deepStrictEqual(finished({ type: "toolcall_end", contentIndex: 1, toolCall })?.toolCall, toolCall);
 	const text = "see http://localhost:8080";
-	strictEqual(innerOf(scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: text })))[0]?.content, text);
-	strictEqual(
-		innerOf(scrub.scrub(updateFrame({ type: "thinking_end", contentIndex: 0, content: text })))[0]?.content,
-		text,
-	);
+	strictEqual(finished({ type: "text_end", contentIndex: 0, content: text })?.content, text);
+	strictEqual(finished({ type: "thinking_end", contentIndex: 0, content: text })?.content, text);
 	// A finished block still loses a password, and a cut-off assistant message still holds.
-	const secret = innerOf(
-		scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: "https://u:ZQXJ@h/x" })),
-	)[0];
-	strictEqual(secret?.content, "https://u:[redacted]@h/x");
+	strictEqual(finished({ type: "text_end", contentIndex: 0, content: "https://u:ZQXJ@h/x" })?.content, "https://u:[redacted]@h/x");
+	const scrub = createJsonCredentialScrub();
 	const cut = {
 		role: "assistant",
 		stopReason: "aborted",
@@ -265,14 +263,25 @@ test("completed --json streams keep ports in tool results, user messages and fin
 	ok(!SECRET_LETTERS.test(JSON.stringify(scrub.scrub({ type: "message_end", message: cut }))));
 });
 
-test("a finished text block releases what waited in its filter as complete", () => {
-	const scrub = createJsonCredentialScrub();
-	const frames = [
-		...scrub.scrub(updateFrame({ type: "text_delta", contentIndex: 0, delta: "open http://localhost:8080" })),
-		...scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: "open http://localhost:8080" })),
-	];
-	const deltas = innerOf(frames).filter((inner) => inner.type === "text_delta");
-	strictEqual(deltas.map((inner) => inner.delta).join(""), "open http://localhost:8080");
+test("a finished block with nothing open goes out at once, and an open one waits for its message's stop reason", () => {
+	const closed = createJsonCredentialScrub();
+	strictEqual(closed.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: "done here" })).length, 1);
+	const end = updateFrame({ type: "text_end", contentIndex: 0, content: "open https://u:hun" });
+	const delta = updateFrame({ type: "text_delta", contentIndex: 0, delta: "open https://u:hun" });
+	// Providers end the open block before a message the token limit stopped, so a block end alone says nothing.
+	const stopped = (stopReason: string): string => {
+		const scrub = createJsonCredentialScrub();
+		const message = { role: "assistant", stopReason, content: [] };
+		const before = [...scrub.scrub(delta), ...scrub.scrub(end)];
+		ok(!JSON.stringify(before).includes("hun"), JSON.stringify(before));
+		return JSON.stringify([...before, ...scrub.scrub({ type: "message_end", message })]);
+	};
+	ok(stopped("stop").includes('"content":"open https://u:hun"'));
+	ok(!stopped("length").includes("hun"), stopped("length"));
+	ok(stopped("length").includes('"content":"open https://u:"'), stopped("length"));
+	const dead = createJsonCredentialScrub();
+	const frames = [...dead.scrub(delta), ...dead.scrub(end), ...dead.finish(false)];
+	ok(!JSON.stringify(frames).includes("hun"), JSON.stringify(frames));
 	strictEqual(innerOf(frames).at(-1)?.type, "text_end");
 });
 

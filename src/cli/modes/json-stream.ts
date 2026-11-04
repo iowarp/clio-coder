@@ -1,5 +1,6 @@
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
+	holdUnresolvedUserinfo,
 	messageStopCompleted,
 	redactStreamingUrlCredentials,
 	redactUrlCredentials,
@@ -117,14 +118,18 @@ function mapStrings(value: unknown, map: (text: string) => string, depth = 0): u
 
 const isDeltaType = (type: unknown): boolean => type === "text_delta" || type === "thinking_delta";
 const isUpdateDeltaType = (type: unknown): boolean => isDeltaType(type) || type === "toolcall_delta";
-/** The increments each finished block's end event settles. */
-const BLOCK_END_DELTA: ReadonlyMap<string, string> = new Map([
-	["text_end", "text_delta"],
-	["thinking_end", "thinking_delta"],
-	["toolcall_end", "toolcall_delta"],
-]);
+const BLOCK_END_TYPES: ReadonlySet<string> = new Set(["text_end", "thinking_end", "toolcall_end"]);
 
 const heldText = (text: string): string => redactStreamingUrlCredentials(text);
+
+function holdsOpenUrl(value: unknown): boolean {
+	let open = false;
+	mapStrings(value, (text) => {
+		open ||= holdUnresolvedUserinfo(text) !== text;
+		return text;
+	});
+	return open;
+}
 
 /**
  * URL credentials off a JSON stream, whose reader appends deltas and cannot take one back, so a delta waits in a filter
@@ -135,14 +140,17 @@ export function createJsonCredentialScrub(): {
 	finish<T>(completed: boolean): T[];
 } {
 	const open = new Map<string, { filter: UrlCredentialStreamFilter; frame: (delta: string) => unknown }>();
-	const close = (key: string, completed: boolean): unknown[] => {
-		const entry = open.get(key);
-		if (entry === undefined) return [];
-		open.delete(key);
-		const rest = entry.filter.end(completed);
-		return rest.length > 0 ? [entry.frame(rest)] : [];
+	const waitingBlockEnds: ((completed: boolean) => unknown)[] = [];
+	const finish = (completed: boolean): unknown[] => {
+		const frames: unknown[] = [];
+		for (const { filter, frame } of open.values()) {
+			const rest = filter.end(completed);
+			if (rest.length > 0) frames.push(frame(rest));
+		}
+		open.clear();
+		for (const frame of waitingBlockEnds.splice(0)) frames.push(frame(completed));
+		return frames;
 	};
-	const finish = (completed: boolean): unknown[] => [...open.keys()].flatMap((key) => close(key, completed));
 	const through = (key: string, delta: string, frame: (delta: string) => unknown): unknown[] => {
 		const entry = open.get(key) ?? { filter: new UrlCredentialStreamFilter(), frame };
 		open.set(key, { ...entry, frame });
@@ -175,14 +183,19 @@ export function createJsonCredentialScrub(): {
 			if (isUpdateDeltaType(inner.type) && typeof inner.delta === "string") {
 				return through(`update:${String(inner.type)}:${index}`, inner.delta, shape);
 			}
-			const deltaType = BLOCK_END_DELTA.get(String(inner.type));
-			if (deltaType !== undefined) {
-				// The model finished this block, so its own text is complete and what waited for it can go.
-				const finished = mapStrings(rest, redactUrlCredentials) as object;
-				return [
-					...close(`update:${deltaType}:${index}`, true),
-					{ ...heldOuter, assistantMessageEvent: { ...finished, ...heldPartial } },
-				];
+			if (BLOCK_END_TYPES.has(String(inner.type))) {
+				// Providers end the open block ahead of a message the token limit stopped, so a block's end cannot release what
+				// it holds. A block with no open URL has nothing to decide, and any other waits for its message's stop reason.
+				const settled = (completed: boolean): unknown => ({
+					...heldOuter,
+					assistantMessageEvent: {
+						...(mapStrings(rest, (text) => redactStreamingUrlCredentials(text, completed)) as object),
+						...heldPartial,
+					},
+				});
+				if (!holdsOpenUrl(rest)) return [settled(true)];
+				waitingBlockEnds.push(settled);
+				return [];
 			}
 			return [mapStrings(frame, heldText)];
 		}
