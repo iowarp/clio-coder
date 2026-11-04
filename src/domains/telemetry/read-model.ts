@@ -2558,17 +2558,20 @@ export function timeline(
 				entries.push({
 					kind: "system-one",
 					at,
-					site: data.site,
-					moment: data.moment ?? null,
+					point: data.point,
+					set: data.set,
 					outcome: data.outcome,
+					build: data.build ?? null,
 					latency: { fact: latency, display: renderFact(latency, "duration") },
 					deadline: { fact: deadline, display: renderFact(deadline, "duration") },
-					fitted: data.fitted ?? null,
+					asked: data.asked,
+					abstained: data.abstained,
 					routes: data.routes.map((route) => {
 						const roundTrip = route.roundTripMs === undefined ? null : localClock(route.roundTripMs);
 						return {
 							engine: route.engine,
 							kind: route.kind,
+							profile: route.profile,
 							outcome: route.outcome,
 							roundTrip: roundTrip ? { fact: roundTrip, display: renderFact(roundTrip, "duration") } : null,
 							breaker: route.breaker ?? null,

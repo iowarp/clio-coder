@@ -3,7 +3,7 @@ import type { JournalEventName } from "./events.js";
 import { journalDefinition } from "./events.js";
 
 export type TelemetryMode = SegmentHeader["mode"];
-export type CaptureFlags = SegmentHeader["capture"];
+export type CaptureFlags = Omit<SegmentHeader["capture"], "systemOneDataset">;
 export type CaptureFlag = keyof CaptureFlags;
 
 /** The `telemetry` settings block. Research flags are requests; `effectiveTelemetryCapture` decides (#434). */
@@ -24,7 +24,6 @@ export const STANDARD_CAPTURE: TelemetryCapture = Object.freeze({
 		content: false,
 		deltas: false,
 		providerHeaders: false,
-		systemOneDataset: false,
 		busTrace: false,
 	}),
 });
@@ -59,12 +58,4 @@ export function captureAdmits(capture: TelemetryCapture, kind: JournalEventName)
 	if (definition.tier !== "research") return true;
 	if (capture.mode !== "research") return false;
 	return definition.capture === undefined || capture.capture[definition.capture];
-}
-
-/**
- * The System One dataset keeps redacted decision state and rendered prompts, so it is content: only research mode
- * with its flag and content capture keeps it, and nothing else admits it (#434).
- */
-export function systemOneDatasetRecording(capture: TelemetryCapture): boolean {
-	return captureAdmits(capture, "system_one.sample_captured");
 }

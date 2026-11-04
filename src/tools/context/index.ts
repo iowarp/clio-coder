@@ -1,7 +1,7 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
 import type { ClioSettings } from "../../core/config.js";
-import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
+import type { CatalogRanker, PrecomputedRanking } from "../../core/precomputed-rank.js";
 import type { RouteProvenance } from "../../core/route-provenance.js";
 import { settingsAwareness } from "../../core/settings-awareness.js";
 import { SKILL_SUGGESTION_ANCHOR, type SkillLoadRefusal, type SkillRefusalKind } from "../../core/skill-activation.js";
@@ -36,7 +36,6 @@ import {
 import type { SessionEntryInput } from "../../domains/session/contract.js";
 import type { SessionEntry } from "../../domains/session/entries.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
-import type { RelevanceRanker } from "../../domains/system-one/rank.js";
 import {
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
@@ -116,13 +115,9 @@ export interface ContextToolDeps {
 	 * invite a load the pending-skill policy rejects. Undefined means true.
 	 */
 	skillMarketplace?: boolean;
-	/**
-	 * Ranks the skills listing by meaning through the `relevance` site. Asked
-	 * lazily, only when the model lists skills and the site is bound, and cached
-	 * per turn by the ranker. It orders the listing and never shortens it.
-	 */
-	rankRelevance?: RelevanceRanker;
-	/** A skill the model loaded, so one the ranking listed can be joined to it as a follow-up. */
+	/** Orders the skills listing and never shortens it. */
+	rankSkills?: CatalogRanker;
+	/** A skill the model loaded, which feeds the capability gate's usage prior. */
 	onSkillLoaded?: (name: string) => void;
 }
 
@@ -500,17 +495,16 @@ async function runRankedSkillsScope(
 ): Promise<ToolResult> {
 	const listing = (typeof args.name === "string" ? args.name.trim() : "").length === 0;
 	let relevance: PrecomputedRanking | undefined;
-	if (listing && deps.rankRelevance?.asks() === true) {
+	if (listing && deps.rankSkills !== undefined) {
 		try {
 			const skills = withPluginDiscoveryPass(() =>
 				modelVisibleSkills(loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) }).items),
 			);
-			const ranked = deps.rankRelevance({
-				use: "skills",
+			const ranked = deps.rankSkills({
 				need: typeof args.query === "string" ? args.query.trim() : "",
 				candidates: skills.map((skill) => ({ id: skill.name, summary: skill.description })),
 			});
-			if (ranked !== null) relevance = { scores: ranked.scores, source: ranked.source };
+			if (ranked !== null) relevance = ranked;
 		} catch {
 			// A ranking that cannot be read is simply no ranking; the listing is the
 			// model's map of its own capabilities and must render either way.

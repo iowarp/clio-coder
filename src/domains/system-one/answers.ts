@@ -1,5 +1,5 @@
 /**
- * Certainty and the readers a site's policy uses.
+ * Certainty and the readers a point's `read` uses.
  *
  * Engines disagree on what their own `confidence` means, so certainty is
  * always recomputed here from the mass. A reader returns null for a wrong type
@@ -33,8 +33,7 @@ export function certaintyFromMass(type: QuestionType, answer: Pick<Answer, "noul
 
 /**
  * A noul as a boolean at `cut` (default 0.5), or null when the answer is not a
- * noul. Whether the cut was fitted for the answering build is the site's
- * question to ask through `SiteCuts`, not this reader's.
+ * noul.
  */
 export function isTrue(answer: Answer | undefined, cut = 0.5): boolean | null {
 	if (answer === undefined || answer.type !== "noul" || answer.noul === undefined) return null;

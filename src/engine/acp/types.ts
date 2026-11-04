@@ -1178,21 +1178,11 @@ export type AcpAsideAnswer =
 	| { status: "refused"; reason: string }
 	| { status: "failed"; reason: string };
 
-export interface AcpDraftVerdict {
-	picked: string | null;
-	probabilities: Partial<Record<string, number>>;
-	sound: Partial<Record<string, boolean | null>>;
-	source: string;
-	elapsedMs: number;
-}
-
 export type AcpDraftOutcome =
 	| {
 			status: "drafted";
 			aborted: boolean;
 			candidates: ReadonlyArray<{ status: "drafted"; text: string } | { status: "failed"; reason: string }>;
-			/** Absent when the rounds were aborted before a judgment was asked for. */
-			judgment?: { verdict: AcpDraftVerdict } | { reason: string };
 	  }
 	| { status: "refused"; reason: string };
 

@@ -1,18 +1,13 @@
 import { createHash } from "node:crypto";
 import type { MemoryPromptSelection } from "./contract.js";
-import { canonicalMemoryRepositoryIdentity, eligibleMemoryRecords } from "./operations.js";
+import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import {
 	inspectMemoryPromptSelection,
 	MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
 	type MemoryPromptOptions,
 	renderMemoryPromptSection,
-	selectMemoryForPrompt,
 } from "./prompt-section.js";
-import {
-	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
-	MEMORY_RELEVANCE_VERSION,
-	type PrecomputedMemoryRelevance,
-} from "./relevance.js";
+import { MEMORY_RELEVANCE_VERSION } from "./relevance.js";
 import { readMemoryStoreSnapshot } from "./store.js";
 import type { MemoryScope } from "./types.js";
 
@@ -20,10 +15,6 @@ import type { MemoryScope } from "./types.js";
  * Key-sorted entries, so two passes that scored the same records the same way
  * hit the cache regardless of the order the answers came back in.
  */
-function sortedScores(scores: Readonly<Record<string, number>>): Array<[string, number]> {
-	return Object.entries(scores).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
 /** Host-owned attempt identity, distinct from the ledger ID allocated after preflight. */
 export interface MemoryPromptRequest {
 	readonly turnId: string | null;
@@ -35,13 +26,6 @@ export interface MemoryPromptRequest {
 	readonly taskText: string;
 	readonly activePaths: readonly string[];
 	readonly activeSymbols?: readonly string[];
-	/**
-	 * Scores this turn's pre-turn pass resolved, or absent when the memory
-	 * decision site is unbound or the pass produced nothing. It is part of the
-	 * cache key: a new pass that reused the previous turn's cached section would
-	 * be serving a selection the scores no longer justify.
-	 */
-	readonly precomputedRelevance?: PrecomputedMemoryRelevance;
 }
 
 export interface MemoryPromptReaderOptions {
@@ -52,13 +36,6 @@ export interface MemoryPromptReaderOptions {
 	selection?: Pick<MemoryPromptOptions, "scopes" | "tokenBudget" | "maxItems">;
 	/** Source seam for deterministic read-count tests; production reads the real bounded store. */
 	readStore?: typeof readMemoryStoreSnapshot;
-	/**
-	 * Called with the ids of the records a freshly built section admitted, only
-	 * when a model ranking applied to it. It lets a follow-up tracker join a
-	 * selection to the ranking that ordered it. Never called for a cached
-	 * section, and a throw never reaches the prompt.
-	 */
-	onRankedSelection?: (ids: ReadonlyArray<string>) => void;
 }
 
 /**
@@ -69,23 +46,7 @@ export interface MemoryPromptReaderOptions {
  * Calls without a prepared turn (boot/reset prewarm) read each time. Later
  * prewarm can reuse the preceding snapshot; a fresh attempt always rereads.
  */
-/** A memory record offered to a ranker: the lesson is what is being asked about. */
-export interface MemoryRankingCandidate {
-	readonly id: string;
-	readonly summary: string;
-}
-
-export interface MemoryPromptReader {
-	(request: MemoryPromptRequest): string;
-	/**
-	 * The eligible records to rank for this turn, or null when ranking could not
-	 * change the section: it was already built for this turn, a ranking pinned
-	 * earlier in the session still applies, or every eligible record fits the
-	 * section anyway. Asked before the section is built so a ranker is paid for
-	 * only when the order decides what the prompt carries.
-	 */
-	rankingCandidates(request: MemoryPromptRequest): ReadonlyArray<MemoryRankingCandidate> | null;
-}
+export type MemoryPromptReader = (request: MemoryPromptRequest) => string;
 
 /** Scopes the main agent's prompt draws from; other eligible scopes reach it only through memory_recall. */
 export const MEMORY_MAIN_PROMPT_SCOPES: ReadonlyArray<MemoryScope> = ["global", "repo", "runtime"];
@@ -97,7 +58,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 	const readStore = options.readStore ?? readMemoryStoreSnapshot;
 	let frame: { key: string; section: string } | null = null;
 	let selected: { key: string; section: string; items: MemoryPromptSelection["items"] } | null = null;
-	let pinned: PinnedRanking | null = null;
 	const authorityOf = (request: MemoryPromptRequest) => {
 		const dataDir = options.getDataDir();
 		const activeRepository = canonicalMemoryRepositoryIdentity(request.cwd);
@@ -123,22 +83,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 				activePaths: [...request.activePaths],
 				activeSymbols: [...(request.activeSymbols ?? [])],
 			};
-			// The section sits in the system prompt, so a ranking that moved with
-			// every turn's task would recompile the prompt and send the whole
-			// conversation through a cold prefill on each follow-up (26.6s at 64k
-			// tokens on a local 27B). The first ranking a session applies is kept
-			// until the approved records or the session's authority change.
-			const precomputed = pinRanking(
-				pinned,
-				request.precomputedRelevance,
-				{ authority: pinAuthority(authority, request.sessionAuthority), session: request.sessionAuthority },
-				snapshot.revision,
-			);
-			pinned = precomputed === undefined ? pinned : precomputed.pin;
-			// The score map is keyed, not just its presence: the same records under
-			// a new ranking's scores select differently, and reusing the cached text
-			// would serve a section those scores no longer justify.
-			const ranking = precomputed?.ranking;
 			const key = createHash("sha256")
 				.update(
 					JSON.stringify([
@@ -148,8 +92,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 						relevance,
 						experimentalRelevance,
 						MEMORY_RELEVANCE_VERSION,
-						MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
-						ranking === undefined ? null : [ranking.source, sortedScores(ranking.scores)],
 					]),
 				)
 				.digest("hex");
@@ -160,7 +102,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
 					...(experimentalRelevance ? { relevance } : {}),
-					...(ranking === undefined ? {} : { precomputedRelevance: ranking }),
 				});
 				section = renderMemoryPromptSection(built.records);
 				const records = new Map(snapshot.records.map((record) => [record.id, record]));
@@ -171,13 +112,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 						: [];
 				});
 				selected = Object.freeze({ key, section, items });
-				if (ranking !== undefined) {
-					try {
-						options.onRankedSelection?.(built.records.map((record) => record.id));
-					} catch {
-						// Observation must not cost the section it describes.
-					}
-				}
 			}
 			try {
 				options.onSelection?.({
@@ -201,84 +135,5 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 		frame = request.turnId === null ? null : Object.freeze({ key: frameKey, section });
 		return section;
 	};
-	const rankingCandidates = (request: MemoryPromptRequest): ReadonlyArray<MemoryRankingCandidate> | null => {
-		try {
-			const { dataDir, activeRepository, authority, frameKey } = authorityOf(request);
-			if (request.turnId !== null && frame?.key === frameKey) return null;
-			const snapshot = readStore(dataDir);
-			const pin = pinRanking(
-				pinned,
-				undefined,
-				{ authority: pinAuthority(authority, request.sessionAuthority), session: request.sessionAuthority },
-				snapshot.revision,
-			);
-			if (pin !== undefined) return null;
-			const eligibility = {
-				scopes: selection.scopes,
-				activeRepository,
-				activeRuntime: { kind: "runtime" as const, key: request.runtimeId },
-				activeAgent: null,
-			};
-			const eligible = eligibleMemoryRecords(snapshot.records, eligibility);
-			const admitted = selectMemoryForPrompt(snapshot.records, { ...selection, ...eligibility }).length;
-			return eligible.length > admitted ? eligible.map((record) => ({ id: record.id, summary: record.lesson })) : null;
-		} catch {
-			// A store that cannot be read has nothing to rank, and the reader itself reports that failure.
-			return null;
-		}
-	};
-	return Object.assign(read, { rankingCandidates });
-}
-
-interface PinnedRanking {
-	/** Reader authority without the session component, so a pending id can be matched. */
-	readonly authority: string;
-	/** Session authority the ranking was pinned under. */
-	readonly session: string;
-	readonly revision: string;
-	readonly ranking: PrecomputedMemoryRelevance;
-}
-
-function pinAuthority(authority: string, sessionAuthority: string): string {
-	return authority.replace(JSON.stringify(sessionAuthority), "");
-}
-
-/**
- * A session's first turn can run before its id exists, under `pending:<n>`.
- * The session that id becomes is the same session, so the pin carries over.
- */
-function sameSession(pinned: string, current: string): boolean {
-	if (pinned === current) return true;
-	try {
-		const [pinnedEpoch, pinnedId] = JSON.parse(pinned) as [unknown, unknown];
-		const [currentEpoch] = JSON.parse(current) as [unknown, unknown];
-		return pinnedEpoch === currentEpoch && typeof pinnedId === "string" && pinnedId.startsWith("pending:");
-	} catch {
-		return false;
-	}
-}
-
-/**
- * The ranking this turn's section uses: the session's pinned one while it
- * still applies, even on a turn whose pass produced no scores, otherwise this
- * turn's, which becomes the new pin. With no pin and no scores the section
- * keeps its base order, which is every turn when the site is unbound.
- */
-function pinRanking(
-	pinned: PinnedRanking | null,
-	fresh: PrecomputedMemoryRelevance | undefined,
-	identity: { authority: string; session: string },
-	revision: string,
-): { ranking: PrecomputedMemoryRelevance; pin: PinnedRanking } | undefined {
-	if (
-		pinned !== null &&
-		pinned.authority === identity.authority &&
-		pinned.revision === revision &&
-		sameSession(pinned.session, identity.session)
-	) {
-		return { ranking: pinned.ranking, pin: { ...pinned, session: identity.session } };
-	}
-	// An empty score map ranks nothing, so it must not claim the session's pin.
-	if (fresh === undefined || Object.keys(fresh.scores).length === 0) return undefined;
-	return { ranking: fresh, pin: { ...identity, revision, ranking: fresh } };
+	return read;
 }

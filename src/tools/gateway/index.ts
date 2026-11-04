@@ -1,10 +1,10 @@
 import { Type } from "typebox";
 import { discoveryScore } from "../../core/harness-discovery.js";
+import type { CatalogRanker, PrecomputedRanking } from "../../core/precomputed-rank.js";
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { toolSurfaceSources } from "../../core/turn-constraints.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
-import type { RelevanceRanker } from "../../domains/system-one/rank.js";
 import { StringEnum, validateEngineToolArguments } from "../../engine/ai.js";
 import { wireParameterSchema } from "../agent-tools.js";
 import type { ToolSurface } from "../lazy-tool.js";
@@ -81,81 +81,14 @@ export interface GatewayCapabilityEntry {
 	unavailable?: string;
 }
 
-/** What each action class is for, as a capability category's stated purpose. */
-const ACTION_CLASS_PURPOSE: Readonly<Partial<Record<ActionClass, string>>> = {
-	read: "Inspect files, workspace state, services or external sources without changing them.",
-	write: "Create or change files inside the workspace.",
-	execute: "Run commands, programs or external actions whose effects depend on what they run.",
-	dispatch: "Start, steer or collect worker agents.",
-	system_modify: "Change machine, harness or settings state outside the workspace.",
-	destructive: "Delete or irreversibly change external state.",
-	git_destructive: "Rewrite or discard version control history or uncommitted work.",
-};
-
 /** Entries an unfiltered listing must exceed before a ranker is asked to order it. */
 export const GATEWAY_RANK_MIN_LISTING = 40;
-/** Related entries a find adds beside a query's own hits. */
-export const GATEWAY_RELATED_MAX = 5;
-
-/** Scores for capability names, and who produced them. */
-export interface GatewayCapabilityRanking {
-	scores: Readonly<Record<string, number>>;
-	/** The measured score at which an entry the query missed may be offered as related. */
-	relatedAt?: number;
-	source: string;
-}
-
-/**
- * Ranks capabilities against what find was asked for, or returns null when it
- * has no finished opinion. It never waits. Bound only on the session registry,
- * from the `relevance` decision site; a worker's gateway and an unbound
- * session never rank.
- */
-export interface GatewayCapabilityRanker {
-	(request: {
-		query: string;
-		entries: ReadonlyArray<{
-			name: string;
-			description: string;
-			categories?: ReadonlyArray<{ id: string; label: string; purpose: string }>;
-		}>;
-	}): GatewayCapabilityRanking | null;
-	/** Whether a ranking would be asked for now, so find skips projecting its catalog for nothing. */
-	asks(): boolean;
-}
-
-/**
- * The gateway's ranker over the shared relevance ranker. Only the session has
- * one; a worker's gateway and an unbound session never rank.
- */
-export function capabilityRankerFrom(ranker: RelevanceRanker): GatewayCapabilityRanker {
-	const rank = (request: Parameters<GatewayCapabilityRanker>[0]): GatewayCapabilityRanking | null => {
-		if (!ranker.asks()) return null;
-		const ranked = ranker({
-			use: "capabilities",
-			need: request.query,
-			candidates: request.entries.map((entry) => ({
-				id: entry.name,
-				summary: entry.description,
-				...(entry.categories !== undefined ? { categories: entry.categories } : {}),
-			})),
-		});
-		if (ranked === null) return null;
-		return {
-			scores: ranked.scores,
-			...(ranked.relatedAt !== undefined ? { relatedAt: ranked.relatedAt } : {}),
-			source: ranked.source,
-		};
-	};
-	return Object.assign(rank, { asks: () => ranker.asks() });
-}
-
 export interface GatewayToolDeps {
 	registry: ToolRegistry;
 	/** Local MCP servers, present on the session registry only. */
 	mcp?: McpCapabilitySource;
-	rankCapabilities?: GatewayCapabilityRanker;
-	/** A capability the model called through the gateway, so a ranked one can be joined to its ranking as a follow-up. */
+	rankCapabilities?: CatalogRanker;
+	/** A capability the model called through the gateway, which feeds the capability gate's usage prior. */
 	onCapabilityCalled?: (name: string) => void;
 }
 
@@ -265,15 +198,35 @@ function autonomyNote(actionClass: ActionClass): string {
 	}
 }
 
+/** The capability names this run may reach, or null when nothing restricts it. */
+function allowedSet(options: ToolInvokeOptions | undefined): ReadonlySet<string> | null {
+	const run = options?.allowedTools;
+	const turn = options?.turnConstraints?.allowedTools;
+	if (run === undefined && turn === undefined) return null;
+	return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
+}
+
+/** What `find` would list for this run with each capability's full description, for a caller that filters them. */
+export function gatewayCapabilityItems(
+	registry: ToolRegistry,
+	mcp: McpCapabilitySource | undefined,
+	options: ToolInvokeOptions | undefined,
+): Array<{ name: string; description: string }> {
+	const allowed = allowedSet(options);
+	const admitted = (name: string): boolean => allowed === null || allowed.has(name);
+	const entries = new Map<string, string>();
+	for (const spec of registry.listAll()) {
+		if (surfaceSpecPlacement(spec, allowed) === "gateway" && admitted(spec.name))
+			entries.set(spec.name, spec.description);
+	}
+	for (const entry of mcp?.catalog().entries ?? []) {
+		if (admitted(entry.name)) entries.set(entry.name, entry.description);
+	}
+	return [...entries].map(([name, description]) => ({ name, description }));
+}
+
 export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	const { registry } = deps;
-
-	const allowedSet = (options: ToolInvokeOptions | undefined): ReadonlySet<string> | null => {
-		const run = options?.allowedTools;
-		const turn = options?.turnConstraints?.allowedTools;
-		if (run === undefined && turn === undefined) return null;
-		return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
-	};
 
 	/** Whether this run's tool surface names any capability of MCP server `id`. */
 	const admitsServer = (id: string, allowed: ReadonlySet<string> | null): boolean =>
@@ -355,32 +308,13 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		message: `gateway: capability "${name}" is not on this run's admitted tool surface; admitted capabilities: ${[...allowed].sort().join(", ") || "(none)"}. Use one of these exact names.\n${surfaceRefusal(options, (tools) => tools.includes(name))}`,
 	});
 
-	/**
-	 * Take a finished ranking, never letting it cost the find. Every miss or
-	 * failure is the listing the substring filter already produced.
-	 */
-	const rank = (query: string, entries: ReadonlyArray<GatewayCapabilityEntry>): GatewayCapabilityRanking | null => {
+	/** Never lets a ranking cost the find: every miss or failure is the listing it already had. */
+	const rank = (entries: ReadonlyArray<GatewayCapabilityEntry>): PrecomputedRanking | null => {
 		if (deps.rankCapabilities === undefined || entries.length === 0) return null;
 		try {
-			// Checked before the catalog is projected, so a site that would not be
-			// asked costs the find nothing.
-			if (!deps.rankCapabilities.asks()) return null;
-			// The one category every capability carries with a stated purpose is its
-			// action class. MCP servers declare no purpose, so they are not offered as
-			// finer categories; an `unknown` class has none, and a catalog holding one
-			// is not grouped at all.
 			return deps.rankCapabilities({
-				query,
-				entries: entries.map((entry) => {
-					const purpose = ACTION_CLASS_PURPOSE[entry.actionClass];
-					return {
-						name: entry.name,
-						description: entry.description,
-						...(purpose !== undefined
-							? { categories: [{ id: entry.actionClass, label: `${entry.actionClass} capabilities`, purpose }] }
-							: {}),
-					};
-				}),
+				need: "",
+				candidates: entries.map((entry) => ({ id: entry.name, summary: entry.description })),
 			});
 		} catch {
 			return null;
@@ -540,33 +474,14 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 							.filter(({ score }) => score > 0)
 							.sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name))
 							.map(({ entry }) => entry);
-			// A ranking only ever reorders an unfiltered listing or adds related
-			// entries beside a query's own hits. The hits keep their order, nothing
-			// is removed, and a scoped find is the one server the caller named.
+			// A ranking only ever reorders an unfiltered listing. Nothing is removed, and a
+			// scoped find is the one server the caller named.
 			let rankedBy: string | undefined;
-			let related: GatewayCapabilityEntry[] = [];
-			let relatedBy: string | undefined;
 			if (!scoped && query.length === 0 && entries.length > GATEWAY_RANK_MIN_LISTING) {
-				const ranking = rank("", entries);
+				const ranking = rank(entries);
 				if (ranking !== null) {
 					entries = rankByPrecomputedScore(entries, (entry) => entry.name, ranking.scores).map((ranked) => ranked.item);
 					rankedBy = ranking.source;
-				}
-			} else if (!scoped && query.length > 0) {
-				// Every queried find asks, not only a thin one: a lexical hit on one
-				// shared word ("status") counted as success, so "slurm batch job
-				// status" returned four unrelated tools and never reached the ranker.
-				// An unbound capabilities site answers null at no cost.
-				const hits = new Set(entries.map((entry) => entry.name));
-				const others = catalogEntries.filter((entry) => !hits.has(entry.name));
-				const ranking = rank(rawQuery, others);
-				const relatedAt = ranking?.relatedAt;
-				if (ranking !== null && relatedAt !== undefined) {
-					related = others
-						.filter((entry) => (ranking.scores[entry.name] ?? 0) >= relatedAt)
-						.sort((left, right) => (ranking.scores[right.name] ?? 0) - (ranking.scores[left.name] ?? 0))
-						.slice(0, GATEWAY_RELATED_MAX);
-					if (related.length > 0) relatedBy = ranking.source;
 				}
 			}
 			const total = entries.length;
@@ -611,12 +526,6 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				...(truncated ? { note: "more matches; follow nextOffset or narrow query" } : {}),
 				...(rankedBy !== undefined
 					? { order: `ranked by ${rankedBy} against this turn's task; all capabilities remain available across pages` }
-					: {}),
-				...(relatedBy !== undefined
-					? {
-							related,
-							relatedNote: `not matched by the query text; judged related to it by ${relatedBy}`,
-						}
 					: {}),
 			};
 			return finalizeObservation({

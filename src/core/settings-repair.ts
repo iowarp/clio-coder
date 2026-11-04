@@ -122,6 +122,31 @@ export function repairSettingsCoercions(additional: SettingsScalarRepair[] = [])
 			}
 			removals.push({ start, end, path: retired.path });
 		}
+		// A block map left with no keys reads as null, and a null section fails validation, so its line goes
+		// with its last key. Deepest first, because emptying a section can empty the section holding it.
+		const emptied: Array<{ start: number; end: number }> = [];
+		const gone = new Set(removals.map((entry) => entry.path));
+		const sections = new Set(
+			removals.flatMap((entry) =>
+				entry.path.split(".").flatMap((_, i, all) => (i > 0 ? [all.slice(0, i).join(".")] : [])),
+			),
+		);
+		for (const section of [...sections].sort((a, b) => b.split(".").length - a.split(".").length)) {
+			const node = findNode(document.contents, section);
+			if (!isMap(node) || node.flow || !Array.isArray(node.range)) continue;
+			if (!node.items.every((entry) => isScalar(entry.key) && gone.has(`${section}.${String(entry.key.value)}`))) continue;
+			const parts = section.split(".");
+			const key = parts.pop();
+			const holder = parts.length === 0 ? document.contents : findNode(document.contents, parts.join("."));
+			const pair = isMap(holder)
+				? holder.items.find((entry) => isScalar(entry.key) && entry.key.value === key)
+				: undefined;
+			if (!pair || !isScalar(pair.key) || !pair.key.range) continue;
+			const start = text.lastIndexOf("\n", pair.key.range[0] - 1) + 1;
+			if (text.slice(start, pair.key.range[0]).trim()) continue;
+			emptied.push({ start, end: node.range[2] });
+			gone.add(section);
+		}
 		for (const repair of repairs) {
 			const node = findNode(document.contents, repair.path);
 			if (!editableScalar(node, repair.from)) {
@@ -133,7 +158,7 @@ export function repairSettingsCoercions(additional: SettingsScalarRepair[] = [])
 		// Splice from the end so earlier offsets stay valid.
 		let next = text;
 		const removedRanges: Array<{ start: number; end: number; text: string }> = [];
-		for (const removal of [...removals].sort((a, b) => a.start - b.start)) {
+		for (const removal of [...removals, ...emptied].sort((a, b) => a.start - b.start)) {
 			const previous = removedRanges.at(-1);
 			if (previous && removal.start <= previous.end) previous.end = Math.max(previous.end, removal.end);
 			else removedRanges.push({ start: removal.start, end: removal.end, text: "" });
@@ -152,6 +177,14 @@ export function repairSettingsCoercions(additional: SettingsScalarRepair[] = [])
 		]);
 		if (edits.some((edit) => remaining.has(edit.repair.path))) {
 			return { rewritten: [], skipped: [...skipped, ...edits.map((edit) => edit.repair.path)] };
+		}
+		// A repair that makes a loading file fail to load strands the home, so it writes nothing.
+		const known = new Set(validation.issues.map((issue) => issue.path));
+		if (checked.issues.some((issue) => !known.has(issue.path))) {
+			return {
+				rewritten: [],
+				skipped: [...skipped, ...removals.map((entry) => entry.path), ...edits.map((edit) => edit.repair.path)],
+			};
 		}
 		safeResourceWrite(path, next, { encoding: "utf8", mode: SETTINGS_FILE_MODE });
 		return {

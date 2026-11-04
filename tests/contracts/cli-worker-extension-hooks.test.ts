@@ -192,7 +192,7 @@ describe("context generation worker extension hooks", () => {
 		await installGate(scratch, project);
 		for (const argv of [
 			["context", "wiki"],
-			["context", "init", "--yes"],
+			["context", "init"],
 		]) {
 			const before = fixture.requests.length;
 			const run = await runCli(argv, { env: scratch.env, cwd: project, timeoutMs: 90_000 });
@@ -215,7 +215,7 @@ describe("context generation worker extension hooks", () => {
 		const wiki = await runCli(["context", "wiki"], { env: scratch.env, cwd: project, timeoutMs: 90_000 });
 		ok(wiki.code !== 0, `the wiki ran past the failed host: ${wiki.stdout}`);
 		ok(refused.test(wiki.stderr), wiki.stderr);
-		const init = await runCli(["context", "init", "--yes"], { env: scratch.env, cwd: project, timeoutMs: 90_000 });
+		const init = await runCli(["context", "init"], { env: scratch.env, cwd: project, timeoutMs: 90_000 });
 		ok(refused.test(init.stderr), init.stderr);
 		ok(
 			fixture.requests.every((request) => request.stream === false),

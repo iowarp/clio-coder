@@ -24,7 +24,6 @@ type StoredSubject =
 	| "config"
 	| "memory-trace"
 	| "observation-trace"
-	| "system-one-sample"
 	| "run-result"
 	| "evidence-findings";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
@@ -111,7 +110,6 @@ export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
 	"request",
 	"memory-trace",
 	"observation-trace",
-	"system-one-sample",
 	"run-result",
 	"evidence-findings",
 ]);
@@ -240,7 +238,6 @@ const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"config",
 	"memory-trace",
 	"observation-trace",
-	"system-one-sample",
 	"run-result",
 	"evidence-findings",
 ]);

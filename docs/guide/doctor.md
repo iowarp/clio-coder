@@ -205,17 +205,12 @@ gets a single informational `slurm mcp` row. These rows never fail doctor. See
 
 ## System One rows
 
-Doctor reports how System One is configured and never asks a decision, so a failing row is a broken binding or an unverified target. See the [System One guide](system-one.md).
+Doctor reports how System One is configured and never asks a decision. See the [System One guide](system-one.md).
 
 | Row | Level and meaning |
 | --- | --- |
-| `system one (experimental)` | `INFO` `off; no site is bound` when no site is bound. It is then the only System One row, unless recording is on. |
-| `system one (experimental) off` | `INFO` when some sites are bound, listing the sites that are not. |
-| `system one (experimental) <site>` | One row for each bound site. `WARN` names why a binding cannot answer (an engine `systemOne.engines` does not define, a target `targets` lacks, an unregistered runtime, or a `systemone` engine over a runtime that does not answer typed decisions) and says the site stays silent. `WARN` also appears when the binding resolves but `connection <target>` is not verified, because the site may stay silent. Otherwise the row is `OK` and shows the engine, its kind, the target, the model, any `timeoutMs` deadline, the builds whose cuts at this site are measured or operator-configured, and that any other answering build is unvalidated and only records. |
-| `system one (experimental) engine <name>` | One row for each `systemone` engine a site or task route uses. It shows the engine's profile, the window one request may fill and where that window comes from (the target's `capabilities.contextWindow`, the profile ceiling or the runtime default), and whether the server answered the passive check, with the round trip and the build it serves. The check reads `/models` or `/health` and never asks a decision, so it puts no work on the processor the engine runs on. `WARN` when the server does not answer, because every site it serves then behaves as if unbound. |
-| `system one dataset` | `INFO` `record on (research capture)` or `record off`. The samples are research content in session telemetry journals, which `clio-coder systemone status` counts. Shown when a site is bound or recording is on. |
-
-A site row that is `OK` says the binding is well formed. Doctor cannot know which build will answer, so it names the builds a site's cuts cover; the build that actually answered each call is recorded with each dataset sample, which `clio-coder systemone export` writes out.
+| `system one (experimental)` | `INFO` `off` when no route is named, and it is then the only System One row. Otherwise one row per named route. `OK` shows the route, its engine kind, target and model. `WARN` names why a route cannot answer, or that `connection <target>` is not verified, so `consult` may give no answer. |
+| `system one (experimental) engine <name>` | One row for each `systemone` engine a route uses. It shows the engine's profile, the window one request may fill and where that window comes from (the target's `capabilities.contextWindow`, the profile ceiling or the runtime default), and whether the server answered the passive check. The check never asks a decision, so it puts no work on the processor the engine runs on. `WARN` when the server does not answer. `clio-coder systemone check <engine> --live` asks one decision. |
 
 ## Deep checks
 

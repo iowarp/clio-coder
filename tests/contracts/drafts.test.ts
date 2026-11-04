@@ -4,24 +4,15 @@ import type { Model } from "@earendil-works/pi-ai";
 
 import inceptionRuntime from "../../src/domains/providers/runtimes/cloud/inception.js";
 import litellmRuntime from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { draftTakenOutcome } from "../../src/domains/system-one/outcomes.js";
 import { setDiffusionFramesEnabled } from "../../src/engine/apis/diffusion-frames.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
-import type { OverlayGeneralOpenersDeps } from "../../src/interactive/overlay-general-openers.js";
-import { createOverlayGeneralOpeners } from "../../src/interactive/overlay-general-openers.js";
-import {
-	type DraftOverlayState,
-	formatDraftOverlayBody,
-	type OpenDraftOverlayOptions,
-	takenDraft,
-} from "../../src/interactive/overlays/draft.js";
+import { type DraftOverlayState, formatDraftOverlayBody, takenDraft } from "../../src/interactive/overlays/draft.js";
 import {
 	DRAFT_DEFAULT,
 	DRAFT_SYSTEM_PROMPT,
 	DRAFT_TOOL_CALL_REASON,
 	draftCandidateFromText,
 	draftSystemPrompt,
-	draftsToJudge,
 	draftTemperature,
 	isTemperatureRejection,
 	parseDraftArgs,
@@ -112,35 +103,14 @@ describe("/draft overlay", () => {
 			{ kind: "drafted", text: "def fib(n): return n * 2" },
 			{ kind: "drafted", text: "memoized fib" },
 		],
-		judge: {
-			kind: "judged",
-			verdict: {
-				picked: "A",
-				probabilities: { A: 0.99, B: 0, C: 0.01 },
-				sound: { A: true, B: false, C: null },
-				source: "jev/jev-latest",
-				elapsedMs: 263,
-			},
-		},
 		selected: 0,
 		scroll: 0,
 	});
 
-	it("shows each candidate's mass, the pick, and a candidate judged unsound", () => {
+	it("shows each candidate's state and the selected draft's text", () => {
 		const text = plain(formatDraftOverlayBody(base(), 90, 10).join("\n"));
-		ok(/A\s+█+░*\s0\.99\s+✓ picked/u.test(text), text);
-		ok(/B\s+░+\s0\.00\s+judged unsound/u.test(text), text);
-		ok(!/C.*judged unsound/u.test(text), "an undecided soundness says nothing");
-		ok(text.includes("judged by jev/jev-latest in 263ms"));
 		ok(text.includes("def fib(n): ..."), "the selected draft's text is shown");
-	});
-
-	it("says why a draft was not judged instead of drawing empty bars", () => {
-		const state = base();
-		state.judge = { kind: "unjudged", reason: "not judged: bind systemOne.sites.drafts to an engine" };
-		const text = plain(formatDraftOverlayBody(state, 90, 10).join("\n"));
-		ok(text.includes("bind systemOne.sites.drafts"));
-		ok(!text.includes("█"));
+		ok(!text.includes("judge"), "/draft reads unjudged");
 	});
 
 	it("windows a long draft and counts what is below", () => {
@@ -161,27 +131,15 @@ describe("/draft use key", () => {
 			{ kind: "drafted", text: "  memoized fib\n" },
 			{ kind: "streaming", text: "half a dra" },
 		],
-		judge: {
-			kind: "judged",
-			verdict: {
-				picked: "A",
-				probabilities: { A: 0.9, B: 0.1 },
-				sound: {},
-				source: "jev/jev-latest",
-				elapsedMs: 263,
-				ref: "draft_1",
-			},
-		},
 		selected: 1,
 		scroll: 0,
 	});
 
-	it("takes only a settled draft, trimmed, with the verdict that judged it", () => {
+	it("takes only a settled draft, trimmed", () => {
 		const state = settled();
 		const taken = takenDraft(state);
 		ok(taken !== null);
 		deepStrictEqual([taken.index, taken.label, taken.text], [1, "B", "memoized fib"]);
-		strictEqual(taken.verdict?.ref, "draft_1");
 		state.selected = 2;
 		strictEqual(takenDraft(state), null, "a draft still denoising cannot be taken");
 	});
@@ -191,79 +149,12 @@ describe("/draft use key", () => {
 		const candidate = draftCandidateFromText(markup);
 		deepStrictEqual(candidate, { status: "failed", reason: DRAFT_TOOL_CALL_REASON });
 		deepStrictEqual(draftCandidateFromText(`Some prose\n${markup}\nMore prose`), candidate);
-		deepStrictEqual(draftsToJudge([candidate, { status: "drafted", text: "a reply" }]), {
-			reason: "not judged: a draft failed or came back empty",
-		});
 		const state = settled();
 		state.candidates[1] = { kind: "failed", reason: DRAFT_TOOL_CALL_REASON };
 		ok(plain(formatDraftOverlayBody(state, 90, 10).join("\n")).includes(DRAFT_TOOL_CALL_REASON));
 		strictEqual(takenDraft(state), null);
 		state.candidates[1] = { kind: "drafted", text: markup };
 		strictEqual(takenDraft(state), null, "the use key must reject unclassified markup");
-	});
-
-	it("keeps a clean draft takeable when the judge marks it unsound", () => {
-		const state = settled();
-		if (state.judge.kind !== "judged") throw new Error("expected a judged draft");
-		state.judge.verdict.sound.B = false;
-		strictEqual(takenDraft(state)?.text, "memoized fib");
-	});
-
-	it("records the taken label, the judge's pick and whether they agree, keyed by the judging call", () => {
-		deepStrictEqual(draftTakenOutcome({ ref: "draft_1", taken: "B", judgedPick: "A" }), {
-			ref: "draft_1",
-			source: "draft",
-			facts: { taken: "B", judgedPick: "A", agreed: false },
-		});
-		deepStrictEqual(draftTakenOutcome({ ref: "draft_1", taken: "A", judgedPick: "A" }).facts, {
-			taken: "A",
-			judgedPick: "A",
-			agreed: true,
-		});
-		strictEqual(draftTakenOutcome({ ref: "draft_1", taken: "A", judgedPick: null }).facts.agreed, false);
-	});
-
-	it("records a draft taken while the judge still runs under the judging call's ref, with no pick", async () => {
-		let overlay: OpenDraftOverlayOptions | undefined;
-		let judgeRef: string | undefined;
-		let judgeSignal: AbortSignal | undefined;
-		const recorded: Array<{ ref: string; source: string; facts: Readonly<Record<string, unknown>> }> = [];
-		const composed: string[] = [];
-		const deps = {
-			transitions: { state: "closed" },
-			tui: {},
-			terminal: { columns: 100 },
-			requestRender() {},
-			closeOverlay: () => overlay?.onClose(),
-			composer: { getText: () => "", setText: (text: string) => composed.push(text) },
-			recordOutcome: (outcome: (typeof recorded)[number]) => recorded.push(outcome),
-			openDraftOverlay: (_tui: unknown, options: OpenDraftOverlayOptions) => {
-				overlay = options;
-				return { setCandidate() {}, setJudge() {}, refuse() {} };
-			},
-			draftCandidates: async () => ({
-				status: "drafted",
-				aborted: false,
-				candidates: [
-					{ status: "drafted", text: "first" },
-					{ status: "drafted", text: "second" },
-				],
-			}),
-			judgeDrafts: (_request: string, _texts: ReadonlyArray<string>, signal: AbortSignal, ref: string) => {
-				judgeRef = ref;
-				judgeSignal = signal;
-				return new Promise(() => {});
-			},
-		} as unknown as OverlayGeneralOpenersDeps;
-		createOverlayGeneralOpeners(deps).openDraft("write it", 2);
-		while (judgeRef === undefined) await new Promise((resolve) => setImmediate(resolve));
-		ok(overlay?.onUse);
-		overlay.onUse({ index: 1, label: "B", text: "second", verdict: null });
-		deepStrictEqual(composed, ["second"]);
-		strictEqual(judgeSignal?.aborted, true, "taking a draft aborts the judge");
-		deepStrictEqual(recorded, [
-			{ ref: judgeRef, source: "draft", facts: { taken: "B", judgedPick: null, agreed: false } },
-		]);
 	});
 });
 

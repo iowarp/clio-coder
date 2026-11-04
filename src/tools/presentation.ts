@@ -691,10 +691,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		class: "delegate",
 		verbs: CLASS_VERBS.knowledge,
 		object: (args) => {
+			const filter = args.filter as { source?: unknown } | undefined;
+			if (typeof filter?.source === "string") return plain(`an advisor · filter ${filter.source}`);
 			const count = Array.isArray(args.questions) ? args.questions.length : 0;
 			return plain(count === 0 ? "an advisor" : `an advisor · ${count} question${count === 1 ? "" : "s"}`);
 		},
-		consumes: ["questions"],
+		consumes: ["questions", "filter"],
 	},
 	[ToolNames.Vision]: {
 		class: "knowledge",

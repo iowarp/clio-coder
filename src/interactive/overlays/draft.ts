@@ -1,11 +1,9 @@
 import { skinEpoch } from "../theme/tokens.js";
 /**
- * `/draft` overlay: the candidates as they denoise, then the judge's pick.
+ * `/draft` overlay: the candidates as they denoise.
  *
- * One row per candidate carries its state and, once the judge answers, a bar
- * for the probability mass it gave that candidate, so the operator sees how
- * decisive the pick was and not only which candidate won. Below the rows is
- * the selected candidate's text; the arrows and the number keys move the
+ * One row per candidate carries its state. Below the rows is the selected
+ * candidate's text; the arrows and the number keys move the
  * selection. Enter takes the selected draft into the composer, unsent. Like
  * `/btw`, nothing here reaches the session.
  */
@@ -20,12 +18,7 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import {
-	DRAFT_LABELS,
-	type DraftLabel,
-	type DraftVerdict,
-	hasDeadDraftToolCallMarkup,
-} from "../../session-control/drafts.js";
+import { DRAFT_LABELS, type DraftLabel, hasDeadDraftToolCallMarkup } from "../../session-control/drafts.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { codeInk } from "../renderers/code-ink.js";
 import { clioTheme, GLYPH, markdownTheme, rule } from "../theme/index.js";
@@ -37,17 +30,9 @@ export type DraftCandidatePhase =
 	| { kind: "drafted"; text: string }
 	| { kind: "failed"; reason: string };
 
-export type DraftJudgePhase =
-	| { kind: "waiting" }
-	| { kind: "judging" }
-	| { kind: "judged"; verdict: DraftVerdict }
-	/** No judgment, with the sentence that says why. */
-	| { kind: "unjudged"; reason: string };
-
 export interface DraftOverlayState {
 	request: string;
 	candidates: DraftCandidatePhase[];
-	judge: DraftJudgePhase;
 	selected: number;
 	scroll: number;
 	/** The whole round was cancelled or refused before any candidate ran. */
@@ -56,16 +41,14 @@ export interface DraftOverlayState {
 
 export interface DraftOverlaySession extends OverlayHandle {
 	setCandidate(index: number, phase: DraftCandidatePhase): void;
-	setJudge(phase: DraftJudgePhase): void;
 	refuse(reason: string): void;
 }
 
-/** The settled draft Enter would take, with the verdict that judged it when there is one. */
+/** The settled draft Enter would take. */
 export interface TakenDraft {
 	index: number;
 	label: DraftLabel;
 	text: string;
-	verdict: DraftVerdict | null;
 }
 
 export interface OpenDraftOverlayOptions {
@@ -85,17 +68,11 @@ export interface OpenDraftOverlayOptions {
 	onClose: () => void;
 }
 
-const BAR_CELLS = 16;
 const MIN_WIDTH = 50;
 const MAX_WIDTH = 110;
 
 function overlayWidth(columns: number): number {
 	return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, columns - 4));
-}
-
-function bar(mass: number): string {
-	const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(mass * BAR_CELLS)));
-	return `${GLYPH.barFull.repeat(filled)}${GLYPH.barEmpty.repeat(BAR_CELLS - filled)}`;
 }
 
 function candidateStatus(phase: DraftCandidatePhase): string {
@@ -108,34 +85,18 @@ function candidateStatus(phase: DraftCandidatePhase): string {
 /** One row per candidate: label, bar or status, and the pick marker. */
 function candidateRows(state: DraftOverlayState, width: number): string[] {
 	const theme = clioTheme();
-	const verdict = state.judge.kind === "judged" ? state.judge.verdict : null;
 	return state.candidates.map((phase, index) => {
 		const label = DRAFT_LABELS[index] ?? String(index + 1);
 		const cursor = index === state.selected ? theme.fg("selectedOption", GLYPH.cursor) : " ";
 		const head = `${cursor} ${index === state.selected ? theme.fg("selectedOption", label) : label}  `;
 		let body: string;
-		if (verdict && phase.kind === "drafted") {
-			const mass = verdict.probabilities[label as keyof DraftVerdict["probabilities"]] ?? 0;
-			const picked = verdict.picked === label;
-			const sound = verdict.sound[label as keyof DraftVerdict["sound"]];
-			const soundNote = sound === false ? theme.fg("warning", "  judged unsound") : "";
-			body = `${theme.fg(picked ? "success" : "annotation", bar(mass))} ${mass.toFixed(2)}${picked ? theme.fg("success", `  ${GLYPH.ok} picked`) : ""}${soundNote}  ${theme.fg("annotation", candidateStatus(phase))}`;
-		} else if (phase.kind === "failed") {
+		if (phase.kind === "failed") {
 			body = theme.fg("error", `${GLYPH.error} ${phase.reason}`);
 		} else {
 			body = theme.fg(phase.kind === "streaming" ? "annotation" : "menuDescription", candidateStatus(phase));
 		}
 		return truncateToWidth(`${head}${body}`, width);
 	});
-}
-
-function judgeLine(state: DraftOverlayState): string {
-	const theme = clioTheme();
-	const judge = state.judge;
-	if (judge.kind === "waiting") return theme.fg("annotation", "judge waits for every draft");
-	if (judge.kind === "judging") return theme.fg("annotation", "judging…");
-	if (judge.kind === "unjudged") return theme.fg("warning", judge.reason);
-	return theme.fg("annotation", `judged by ${judge.verdict.source} in ${judge.verdict.elapsedMs}ms`);
 }
 
 function dimLines(text: string, width: number): string[] {
@@ -200,7 +161,6 @@ export function formatDraftOverlayBody(state: DraftOverlayState, width: number, 
 		return lines;
 	}
 	lines.push(...candidateRows(state, contentWidth));
-	lines.push(truncateToWidth(judgeLine(state), contentWidth));
 	lines.push(rule(theme, contentWidth));
 	lines.push(...selectedText(state, contentWidth, maxTextLines));
 	return lines;
@@ -229,7 +189,7 @@ export function takenDraft(state: DraftOverlayState): TakenDraft | null {
 	const text = phase.text.trim();
 	const label = DRAFT_LABELS[state.selected];
 	if (text.length === 0 || label === undefined || hasDeadDraftToolCallMarkup(text)) return null;
-	return { index: state.selected, label, text, verdict: state.judge.kind === "judged" ? state.judge.verdict : null };
+	return { index: state.selected, label, text };
 }
 
 /** Every candidate has settled one way or the other. */
@@ -241,11 +201,10 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 	const state: DraftOverlayState = {
 		request: options.request,
 		candidates: Array.from({ length: options.count }, () => ({ kind: "streaming", text: "" }) as DraftCandidatePhase),
-		judge: { kind: "waiting" },
 		selected: 0,
 		scroll: 0,
 	};
-	// The frame, the request, the rows, the judge line and two rules take about
+	// The frame, the request, the rows and two rules take about
 	// a dozen rows; the selected draft gets what is left of the screen.
 	const maxTextLines = Math.max(6, options.rows - options.count - 14);
 	const body = new DraftOverlayBody(state, maxTextLines);
@@ -306,7 +265,7 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 					{ key: "↑↓", verb: "scroll" },
 					...(options.onUse && takenDraft(state) ? [{ key: "Enter", verb: "use" }] : []),
 				],
-				{ key: "Esc", verb: allSettled(state) && state.judge.kind !== "judging" ? "close" : "cancel" },
+				{ key: "Esc", verb: allSettled(state) ? "close" : "cancel" },
 			)(innerWidth),
 	});
 
@@ -315,20 +274,6 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 		setCandidate(index, phase) {
 			if (closed || index < 0 || index >= state.candidates.length) return;
 			state.candidates[index] = phase;
-			tui.requestRender();
-		},
-		setJudge(phase) {
-			if (closed) return;
-			state.judge = phase;
-			// Land on the pick, so the text below the bars is the one the judge
-			// would have the operator read first.
-			if (phase.kind === "judged" && phase.verdict.picked !== null) {
-				const picked = DRAFT_LABELS.indexOf(phase.verdict.picked);
-				if (picked >= 0) {
-					state.selected = picked;
-					state.scroll = 0;
-				}
-			}
 			tui.requestRender();
 		},
 		refuse(reason) {

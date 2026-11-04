@@ -9,9 +9,7 @@
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
-import type { DecisionTask } from "../domains/system-one/contract.js";
 import type { ProfileId } from "../domains/system-one/profiles.js";
-import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 import type { SandboxMode, UnixSocketMode } from "./sandbox/types.js";
@@ -70,12 +68,12 @@ export type FleetAgentProfiles = Record<string, string>;
 
 /**
  * What answers a System One question. `systemone` is any `POST /v1/systemone`
- * server (TypeSafe Jev, Laya, OpenJev, Kev). `llm` reads an ordinary chat
- * target through its logprobs, or asks it for a vote when the runtime has none.
- * `mode` only matters for `llm`: `auto` probes the target once and picks.
+ * server (TypeSafe Jev, Laya, OpenJev, Kev). `llm` asks an ordinary chat target
+ * every question of an ask in one schema-bound request.
  */
 export type SystemOneEngineKind = "systemone" | "llm";
-export type SystemOneMode = "auto" | "logprobs" | "answer" | "batch";
+/** One route name, an ordered list, `off` or null. A later settings layer's list replaces the earlier one. */
+export type SystemOneUse = string | string[] | null;
 
 export interface SystemOneEngineSettings {
 	kind: SystemOneEngineKind;
@@ -83,7 +81,6 @@ export interface SystemOneEngineSettings {
 	target: string;
 	/** Wire model id; absent means the target's default model. */
 	model?: string;
-	mode?: SystemOneMode;
 	/**
 	 * The capability profile of the served model (`contract.ts`), which picks its
 	 * renderer, the questions it may be asked and how its numbers are read.
@@ -92,24 +89,13 @@ export interface SystemOneEngineSettings {
 	profile?: ProfileId;
 }
 
-/**
- * An engine name, or the engine with a deadline that replaces the site's own.
- * `tasks` routes one task of the site to another engine; every task it does not
- * name stays with `engine`, and every route shares the site's one deadline.
- */
-export type SystemOneSiteBinding =
-	| string
-	| { engine: string; timeoutMs?: number; tasks?: Partial<Record<DecisionTask, string>> };
-
 export interface SystemOneSettings {
 	/**
-	 * The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site. Unset
-	 * leaves only sites bound one by one, and `off` masks those too.
+	 * The opt-in: an ordered list of routes, each `jev`, `memory`, `main`, a declared engine or a target.
+	 * Unset and `off` send nothing, and a route nobody named is never used. Applies on the next start.
 	 */
-	use: string | null;
+	use: SystemOneUse;
 	engines: Record<string, SystemOneEngineSettings>;
-	/** Optional per-site overrides of `use`. A site with no entry follows `use`, and null turns that site off. */
-	sites: Partial<Record<SiteId, SystemOneSiteBinding | null>>;
 }
 
 /**
@@ -529,7 +515,6 @@ export interface FleetSettings extends FleetRouteSettings {
 	/** Standing worker node preference; null leaves unpinned work local and permits a session question. */
 	defaultNode: string | null;
 	/** Experimental worker prewarm. After a turn reading predicts a dispatch, the `workerPrepare` site is asked which recipe it would name first, and only a measured build's answer starts a worker; off by default. */
-	speculativeDispatch: boolean;
 	nodes: FleetNodeSettings[];
 	adaptiveRouting: AdaptiveRoutingSettings;
 	permissions: FleetPermissionsSettings;
@@ -741,8 +726,7 @@ export interface IntegrationsSettings {
 export const DEFAULT_SETTINGS = {
 	version: 2 as const,
 	turnControl: {
-		workflows: ["orientation", "direction", "ledger-facts", "detached-collection"],
-		orientation: { maxSplit: 4, maxCostUsdPerTurn: null },
+		workflows: ["detached-collection"],
 	} as TurnControlSettings,
 	targets: [] as TargetDescriptor[],
 	chat: {
@@ -792,7 +776,6 @@ export const DEFAULT_SETTINGS = {
 		 * ahead of the call and holds it until a matching dispatch adopts it or the
 		 * turn settles. Off, no recipe question is asked and nothing is held.
 		 */
-		speculativeDispatch: false,
 		nodes: [] as FleetNodeSettings[],
 		adaptiveRouting: {
 			roles: [] as ActiveRoutingRole[],
@@ -846,7 +829,6 @@ export const DEFAULT_SETTINGS = {
 	systemOne: {
 		use: null,
 		engines: {},
-		sites: {},
 	} as SystemOneSettings,
 	safety: {
 		autonomy: "default" as AutonomyLevel,
@@ -923,7 +905,7 @@ export const DEFAULT_SETTINGS = {
 	} as IntegrationsSettings,
 	telemetry: {
 		mode: "standard",
-		research: { content: false, deltas: true, providerHeaders: true, systemOneDataset: true, busTrace: false },
+		research: { content: false, deltas: true, providerHeaders: true, busTrace: false },
 	} as TelemetrySettings,
 };
 
@@ -942,10 +924,7 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 version: 2
 
 turnControl:
-  workflows: [orientation, direction, ledger-facts, detached-collection]
-  orientation:
-    maxSplit: 4
-    maxCostUsdPerTurn: null
+  workflows: [detached-collection]
 
 # Configured inference endpoints. Target descriptor leaves are unchanged in v2.
 targets: []
@@ -991,7 +970,6 @@ fleet:
   rosters: {}
   agentProfiles: {}
   # Experimental: start the worker a fitted System One turn reading predicts.
-  speculativeDispatch: false
   adaptiveRouting:
     roles: []
     postures: []
@@ -1053,14 +1031,11 @@ context:
     background: false
     inboxes: []
 
-# Experimental. System One stays off until you choose an engine with use: jev,
-# memory, main, a declared engine or a target. sites overrides one site; off masks
-# everything. An engine with no measurement for its exact build sends nothing.
-# Sites, keys and cuts may change between releases.
+# Experimental. System One stays off until use names a route or an ordered list of
+# them: jev, memory, main, a declared engine or a target. Keys may change between releases.
 systemOne:
   use: null
   engines: {}
-  sites: {}
 
 safety:
   autonomy: default
@@ -1171,7 +1146,6 @@ telemetry:
     content: false
     deltas: true
     providerHeaders: true
-    systemOneDataset: true
     busTrace: false
 `;
 

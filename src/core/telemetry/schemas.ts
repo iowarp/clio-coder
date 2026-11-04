@@ -47,7 +47,6 @@ export const ObjectRefSchema = Type.Object(
 			"prompt-text",
 			"memory-trace",
 			"observation-trace",
-			"system-one-sample",
 			"run-result",
 			"evidence-findings",
 		]),
@@ -405,6 +404,7 @@ export const SYSTEM_ONE_OUTCOME = vocabulary([
 	"breaker-open",
 	"unsupported",
 	"flow-denied",
+	"busy",
 ]);
 const lagPercentiles = Type.Array(Type.Object({ p: Type.Number({ minimum: 0, maximum: 100 }), ms: duration }, closed), {
 	maxItems: 64,
@@ -1144,21 +1144,6 @@ export const ProcessBootedSchema = Type.Object(
 	},
 	closed,
 );
-/**
- * One System One dataset sample: a decision with its redacted state and question specs, or an outcome that followed
- * one, joined by `ref`. The sample itself is research content in `objects/` (#434).
- */
-export const SystemOneSampleCapturedSchema = Type.Object(
-	{
-		sample: vocabulary(["decision", "outcome"]),
-		decisionId: Type.Optional(ExistingId),
-		site: Type.Optional(ExistingId),
-		ref: Type.Optional(ExistingId),
-		content: ObjectRefSchema,
-		bytes: count,
-	},
-	closed,
-);
 /** A live event the hub delivered, journaled only under research mode's bus-trace flag: its name, never its payload (#434). */
 export const BusTracedSchema = Type.Object({ event: Type.String({ minLength: 1, maxLength: 128 }) }, closed);
 const prewarmLabel = Type.String({ minLength: 1, maxLength: 128 });
@@ -1549,6 +1534,7 @@ export const SafetyJudgedSchema = Type.Object(
 		model: Type.Optional(ExistingId),
 		noVerdict: Type.Optional(ExistingId),
 		operatorMessages: Type.Optional(count),
+		screened: Type.Optional(vocabulary(["parked"])),
 	},
 	closed,
 );
@@ -1695,24 +1681,32 @@ export const MiddlewareFiredSchema = Type.Object(
 /** One System One decision: what each engine answered, against which deadline, and its breaker (#429). */
 export const SystemOneDecidedSchema = Type.Object(
 	{
-		site: ExistingId,
-		moment: Type.Optional(ExistingId),
+		/** The decision point and its question-set version, which is what a later outcome groups by. */
+		point: ExistingId,
+		set: ExistingId,
+		/** Join key for a later outcome, such as a tool call id. */
+		ref: Type.Optional(ExistingId),
+		askId: ExistingId,
 		outcome: SYSTEM_ONE_OUTCOME,
+		engineKind: Type.Optional(ExistingId),
+		profile: Type.Optional(ExistingId),
+		build: Type.Optional(ExistingId),
+		readout: Type.Optional(ExistingId),
 		latencyMs: duration,
 		deadlineMs: duration,
-		fitted: Type.Optional(Type.Boolean()),
+		tokens: Type.Optional(Type.Object({ input: count, output: count }, closed)),
+		asked: count,
+		abstained: count,
 		routes: Type.Array(
 			Type.Object(
 				{
 					engine: ExistingId,
 					kind: ExistingId,
+					profile: ExistingId,
 					outcome: SYSTEM_ONE_OUTCOME,
 					roundTripMs: Type.Optional(duration),
-					/**
-					 * opened: this timeout opened the cooldown. probe: the half-open probe went out. closed: an answer
-					 * reset a counting breaker. disabled: a derived engine was disabled for the session.
-					 */
-					breaker: Type.Optional(vocabulary(["opened", "probe", "closed", "disabled"])),
+					/** opened: this timeout opened the cooldown. probe: the half-open probe went out. closed: an answer reset a counting breaker. */
+					breaker: Type.Optional(vocabulary(["opened", "probe", "closed"])),
 				},
 				closed,
 			),

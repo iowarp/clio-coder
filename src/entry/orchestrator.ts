@@ -23,6 +23,7 @@ import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.j
 import { installInternalGitPolicy } from "../core/internal-git.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import type { CatalogRanker } from "../core/precomputed-rank.js";
 import { ensureProjectIgnore } from "../core/project-root.js";
 import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
 import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
@@ -63,7 +64,7 @@ import {
 import { type SettingsOrigin, settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
-import { captureAdmits, effectiveTelemetryCapture, systemOneDatasetRecording } from "../core/telemetry/capture.js";
+import { captureAdmits } from "../core/telemetry/capture.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { EventPayload } from "../core/telemetry/events.js";
 import type { Fact } from "../core/telemetry/fact.js";
@@ -80,7 +81,7 @@ import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
-import { AGENT_CATEGORY_PURPOSE, AgentsDomainModule } from "../domains/agents/index.js";
+import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule, diffSettings } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
@@ -95,7 +96,6 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
-import { scheduleSpeculativeHold } from "../domains/dispatch/held-workers.js";
 import {
 	compileFleetRunPreview,
 	createDispatchDomainModule,
@@ -138,7 +138,6 @@ import {
 	taskMemoryHandoffSeedOffer,
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
-import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
 import {
 	deleteTaskBankSnapshot,
@@ -153,7 +152,6 @@ import {
 } from "../domains/memory/task-memory-policy.js";
 import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domains/memory/task-memory-status.js";
 import { type CapabilityMatch, createCapabilityGate } from "../domains/middleware/capability-gate.js";
-import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
@@ -194,6 +192,7 @@ import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
 	backgroundMemoryAdmissionLimit,
+	backgroundSlotKey,
 	canonicalEndpointKey,
 	createProvidersDomainModule,
 	endpointThroughput,
@@ -215,6 +214,7 @@ import {
 } from "../domains/providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
+import type { LlmRequestAdmission, OneShotPort } from "../domains/providers/one-shot.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -307,21 +307,13 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
-import type { LlmRequestAdmission, OneShotPort, SystemOneInstance } from "../domains/system-one/index.js";
-import { createSystemOne } from "../domains/system-one/index.js";
-import { createMeasurementReader } from "../domains/system-one/measurement.js";
-import { createFollowUpTracker, observePermissionOutcomes } from "../domains/system-one/outcomes.js";
-import { createRelevanceRanker } from "../domains/system-one/rank.js";
-import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
-import { createSystemOneScopes } from "../domains/system-one/scopes.js";
-import { effectiveSystemOne } from "../domains/system-one/selection.js";
-import { TURN_SITE } from "../domains/system-one/sites/turn.js";
+import type { SystemOneInstance } from "../domains/system-one/index.js";
+import { createSystemOne, parseRouteList } from "../domains/system-one/index.js";
 import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
-import { READ_MODEL_FOLD, TelemetryDomainModule, workspaceTelemetryCapture } from "../domains/telemetry/index.js";
-import type { TurnControlRecord } from "../domains/turn-control/index.js";
+import { READ_MODEL_FOLD, TelemetryDomainModule } from "../domains/telemetry/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -335,9 +327,7 @@ import {
 	bindBoardActions,
 	createAcpInterviewChannel,
 	createHostToolEvents,
-	draftsToJudge,
 	followWorkerRuns,
-	judgeDraftsAtSite,
 	oracleBriefingFromEntries,
 	runHostDispatch,
 } from "../engine/acp/host-members.js";
@@ -382,16 +372,10 @@ import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
-import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibility.js";
 import { createReloadClasses } from "./reload-classes.js";
-import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
-import { createSystemOneControl, SYSTEM_ONE_SCOPE_ENTRY } from "./system-one-control.js";
-import {
-	createDecisionUsageTally,
-	createSystemOneHost,
-	createSystemOneRequestAdmission,
-	type TurnPrewarmPrediction,
-} from "./system-one-host.js";
+import { createJudgeScreen, createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
+import { createSideRequestAdmission } from "./side-request-admission.js";
+import { createSystemOneControl } from "./system-one-control.js";
 import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -799,7 +783,7 @@ function memoryObservationCapacity(providers: ProvidersContract, settings: Reado
  * without ever becoming a turn. The answer is text, so an engine behind this
  * port can vote but cannot read logprobs.
  */
-export function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
+function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
 	return async (request) => {
 		const target = providers.getTarget(request.targetId);
 		const wireModelId = request.model ?? target?.defaultModel ?? null;
@@ -2017,8 +2001,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			void termination.shutdown(143);
 		},
 	});
-	let capabilityGate = createCapabilityGate();
-	let prepareRelevance: ((task: string) => void) | null = null;
+	const capabilityGate = createCapabilityGate();
 	const bootStdout = (text: string): void => {
 		if (options.terminalLease) options.terminalLease.writeDiagnostic("stdout", text);
 		else process.stdout.write(text);
@@ -2219,7 +2202,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// load; a worker dispatched before that carries no extension hooks.
 	let workerHookSource: import("./extension-reload.js").ExtensionReloadCoordinator["workerHooks"] | null = null;
 	const memoryOwner = new MemoryRuntime();
-	let getMemoryLessonJudge: (() => null) | null = null;
 	const result = await loadDomains(
 		[
 			options.startupSettings
@@ -2930,7 +2912,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		notice: memoryNotice,
 		diagnostic: memoryDiagnostic,
-		getLessonJudge: () => getMemoryLessonJudge?.() ?? null,
 		observerHistoryTokens: () =>
 			memoryObservationCapacity(providers, effectiveSettingsForDispatch?.() ?? getCurrentSettings()),
 		lessonSource: () => {
@@ -3166,12 +3147,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				})),
 			});
 		};
-		// The reminder is built before a first-turn ranking could land if it only starts here, so the
-		// same requests start at submit and the reminder takes whatever has finished by then.
-		prepareRelevance = (task) => {
-			rankReminderSkills(task);
-			rankReminderCapabilities(task);
-		};
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
@@ -3245,6 +3220,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 		session: () => session,
 		safety,
+		// `systemOne` and `chat` are built further down; nothing calls the judge before the first tool call.
+		screen: createJudgeScreen({
+			systemOne: () => systemOne,
+			providers,
+			liveWindow: () => chat.screenWindow(),
+			flow: flowLedger,
+		}),
 	});
 	// The git hook drift guard takes its baseline now, at session start: a hook
 	// file added or changed later, however it got there, makes the next git
@@ -3322,15 +3304,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
 		sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
-		// System One reads what the deterministic checks cannot: content other people
-		// wrote, and an unrecognized command that yolo would run unread. Both are read
-		// through the host so the registry never learns which engine answered, and
-		// both are experimental and only record: neither holds, parks or changes a
-		// call. The result screen reads on every surface. The gate is wired on the
-		// interactive registry alone because headless and ACP have nobody to label
-		// what it recorded.
-		screenToolResult: (source, content, ref, restrictions) =>
-			systemOneHost.screenToolResult(source, content, ref, restrictions),
 		flow: {
 			carried: () => flowLedger.current(),
 			refusal: () => flowLedger.refusal(),
@@ -3338,7 +3311,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// The gateway is registered after this registry; the lookup runs at call time.
 			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
 		},
-		...(interactive ? { observeToolCallGate: (subject, ref) => systemOneHost.observeToolCallGate(subject, ref) } : {}),
 		sessionCodeConsent,
 		safetyJudge,
 		hookDrift,
@@ -3506,7 +3478,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: null;
 
 	// The effective view has to exist before anything below composes against it.
-	// `systemOne.bound("consult")` reads it while the tool registry is assembled,
+	// `systemOne.bound()` reads it while the tool registry is assembled,
 	// and a `const` declared after that call is still in its temporal dead zone:
 	// bound() swallows the ReferenceError, so every start read as an unbound site
 	// and the consult tool never registered.
@@ -3753,64 +3725,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	termination.onDrain(() => {
 		for (const unsubscribe of unsubscribeSettingsProjectionSync) unsubscribe();
 	});
-	// System One: one recorder and one instance for the process. Every call
-	// leaves a compact row that reaches the ledger at the next turn boundary or
-	// settle, and, when the operator opted in, a redacted record for the dataset.
-	const systemOneOrigins = new Map<string, { id: string; cwdHash: string; cwd: string }>();
-	const currentSystemOneOrigin = () => {
-		const origin = session?.current();
-		if (origin) {
-			systemOneOrigins.set(origin.id, { id: origin.id, cwdHash: origin.cwdHash, cwd: origin.cwd });
-			if (systemOneOrigins.size > 256) {
-				const oldest = systemOneOrigins.keys().next().value;
-				if (oldest !== undefined) systemOneOrigins.delete(oldest);
-			}
-		}
-		return origin;
-	};
-	const currentSessionId = (): string | null => currentSystemOneOrigin()?.id ?? null;
-	// Resolve the workspace's consent even before the first turn creates a session. Adoption and late outcomes ask
-	// again for their destination's workspace; the journal also checks capture before storing any content (#434).
-	const systemOneRecording = (sessionId: string | null = currentSessionId()): boolean => {
-		const current = currentSystemOneOrigin();
-		const settings = getCurrentSettings();
-		const origin = sessionId === null ? null : systemOneOrigins.get(sessionId);
-		if (sessionId !== null && !origin) return false;
-		const requested =
-			sessionId === null || sessionId === current?.id
-				? settings.telemetry
-				: applyOverrides(
-						config?.get() ?? readSettings(),
-						new Map([...startupOverrides, ...(conversationOverrides.get(sessionId) ?? [])]),
-					).telemetry;
-		if (!systemOneDatasetRecording(effectiveTelemetryCapture(requested, true))) return false;
-		const { capture } = workspaceTelemetryCapture(requested, clioStateDir(), origin?.cwd ?? process.cwd());
-		return systemOneDatasetRecording(capture);
-	};
-	const systemOneRecorder = createRecorder({
-		currentSession: currentSessionId,
-		recording: systemOneRecording,
-		// A delayed outcome keeps its original session; research traces acquire that session's own writer (#434).
-		// A sample acts for the engine that answered its decision; an outcome whose decision this process never saw
-		// falls back to the session's System One (#434).
-		sample: (sessionId, engine, data, content) => {
-			currentSystemOneOrigin();
-			const origin = systemOneOrigins.get(sessionId);
-			if (origin)
-				telemetry?.recordResearchTrace?.(
-					origin,
-					{ role: "system-one", id: engine ?? origin.id },
-					"system_one.sample_captured",
-					data,
-					content,
-				);
-		},
-		// The park flush writes a session's rows before it closes, so a call that
-		// started in a session that is no longer current is a late answer for a ledger
-		// this process has closed.
-		appendSessionRow: () => {},
-	});
-	const decisionUsage = createDecisionUsageTally(systemOneRecorder);
+	// System One: one instance for the process, fixed at startup in what it binds.
+	const currentSessionId = (): string | null => session?.current()?.id ?? null;
 	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
 	const systemOneAdmissionDeps = {
 		providers,
@@ -3823,37 +3739,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null;
 		},
 	};
-	const admitSystemOneRequest = createSystemOneRequestAdmission(systemOneAdmissionDeps);
+	const admitSystemOneRequest = createSideRequestAdmission(systemOneAdmissionDeps);
 	const safetyJudgeOneShot = createSystemOneOneShot(
 		providers,
-		createSystemOneRequestAdmission({ ...systemOneAdmissionDeps, role: "safety-judge" }),
+		createSideRequestAdmission({ ...systemOneAdmissionDeps, role: "safety-judge" }),
 	);
-	const systemOneEndpointCapacity = (targetId: string): number => {
-		const target = providers.getTarget(targetId);
-		const key = target === null ? null : canonicalEndpointKey(target);
-		if (key === null) return Number.POSITIVE_INFINITY;
-		const capacity = resolveEndpointCapacities({
-			statuses: providers.list(),
-			targets: getCurrentSettings().targets,
-			runtimeFor: (runtimeId) => providers.getRuntime(runtimeId),
-		})[key];
-		// An endpoint with no fixed slot count (a cloud API, vllm, sglang) reports no
-		// limit, and the engine applies its own default.
-		return capacity?.limit ?? Number.POSITIVE_INFINITY;
-	};
-	const systemOneScopes = createSystemOneScopes();
-	// `run --systemone` holds for this process, and a headless run has no later override.
-	if (options.headless?.systemOne !== undefined) systemOneScopes.set("session", options.headless.systemOne);
-	// A session is created lazily with its first turn, so a choice made before it waits to be written.
-	let unsavedSystemOneScope: { use: string | null } | null = null;
-	// A task or session override replaces `systemOne.use` for every System One read.
+	// `run --systemone` holds for this process and writes nothing.
 	const systemOneSettings = (): Readonly<ClioSettings> => {
 		const settings = getCurrentSettings();
-		return effectiveSystemOne(settings, systemOneScopes.current()?.use ?? settings.systemOne.use);
+		const use = options.headless?.systemOne;
+		return use === undefined ? settings : { ...settings, systemOne: { ...settings.systemOne, use: parseRouteList(use) } };
 	};
 	const systemOneCore = createSystemOne({
 		settings: () => systemOneSettings(),
-		measurements: createMeasurementReader(),
 		// Every engine request is judged against the restrictions it inherited
 		// before a byte leaves, typed and LLM engines alike. The runner treats a
 		// throw as abstention, so this only ever returns.
@@ -3866,9 +3764,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				mergeFlowRestrictions(inherited, flowLedger.current()),
 				resolveModelDestination({
 					targetId: request.destination.targetId,
-					runtimeId: request.destination.runtime,
-					url: request.destination.url,
-					model: request.destination.model,
+					runtimeId: request.destination.runtimeId,
+					url: request.destination.url ?? null,
+					model: request.destination.wireModelId,
 				}),
 			);
 			return reason === null ? { allowed: true } : { allowed: false, reason };
@@ -3877,236 +3775,47 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		credentialsPresent,
 		oneShot: createSystemOneOneShot(providers, admitSystemOneRequest),
 		admitLlmRequest: admitSystemOneRequest,
-		// Each call is bound to the session it starts in. A slow turn-end answer can
-		// settle after /new, /resume or a branch switch, and reading the session when
-		// it settles would file it under the wrong one.
+		// Each call is bound to the session it starts in, so a slow answer that settles
+		// after /new, /resume or a branch switch files under the session that asked.
 		currentSession: currentSessionId,
-		endpointCapacity: systemOneEndpointCapacity,
-		recorder: () => decisionUsage.recorder,
 	});
 	// Every caller that reaches System One through this instance inherits the
 	// session's restrictions on its request unless it already names a narrower
 	// set, so the flow check above sees them whoever asked.
 	const systemOne: SystemOneInstance = {
-		bound: (site) => systemOneCore.bound(site),
-		shadowed: (site, moment) => systemOneCore.shadowed(site, moment),
-		describe: () => systemOneCore.describe(),
-		identity: (site) => systemOneCore.identity?.(site) ?? null,
-		settled: (maxWaitMs) => systemOneCore.settled(maxWaitMs),
-		measuredDeadlineMs: (site) => systemOneCore.measuredDeadlineMs(site),
-		breakers: () => systemOneCore.breakers?.() ?? [],
-		refusedEngines: () => systemOneCore.refusedEngines?.() ?? new Map(),
-		...(systemOneCore.limits !== undefined ? { limits: (site, task) => systemOneCore.limits?.(site, task) ?? null } : {}),
-		run: (site, object, options) => {
-			const carried = flowLedger.current();
-			const given = options as { flow?: unknown } | undefined;
-			const flow = given?.flow !== undefined ? given.flow : carried;
+		...systemOneCore,
+		ask: (point, object, options) => {
+			const flow = options?.flow !== undefined ? options.flow : flowLedger.current();
 			const merged = { ...(options ?? {}), ...(flow !== null && flow !== undefined ? { flow } : {}) };
-			return systemOneCore.run(site, object, merged);
+			return systemOneCore.ask(point, object, merged);
 		},
-	};
-	// A session override lives in that session's ledger, so a resume restores it.
-	const restoreSystemOneScope = (): void => {
-		const rows = readCurrentSessionEntries().filter(
-			(entry) => entry.kind === "custom" && entry.customType === SYSTEM_ONE_SCOPE_ENTRY,
-		);
-		const last = rows.at(-1);
-		const use = last?.kind === "custom" ? (last.data as { use?: unknown } | null)?.use : undefined;
-		systemOneScopes.resetSession(typeof use === "string" ? use : null);
-	};
-	const saveSystemOneScope = (): void => {
-		const meta = session?.current();
-		if (unsavedSystemOneScope === null || !meta) return;
-		session?.appendEntry({
-			kind: "custom",
-			customType: SYSTEM_ONE_SCOPE_ENTRY,
-			parentTurnId: session?.tree(meta.id).leafId ?? null,
-			display: false,
-			data: unsavedSystemOneScope,
-		});
-		unsavedSystemOneScope = null;
 	};
 	const systemOneControl = createSystemOneControl({
-		cwd: () => process.cwd(),
-		settings: () => getCurrentSettings(),
-		scopes: systemOneScopes,
+		settings: () => systemOneSettings(),
 		runtimes: { get: (id) => providers.getRuntime(id) },
-		recording: systemOneRecording,
-		latencyMs: (site) => decisionUsage.latency(site),
 		refusedEngines: () => systemOne.refusedEngines?.() ?? new Map(),
-		persistSession: (use) => {
-			unsavedSystemOneScope = { use };
-			saveSystemOneScope();
-		},
-	});
-	// The judge's 0.8 and 0.6 were never measured, so binding `consult` no longer turns it on.
-	getMemoryLessonJudge = () => null;
-	// How each approval the main agent parked was answered, joined to the card's
-	// advisory and the yolo gate by the request id both carried.
-	termination.onDrain(
-		observePermissionOutcomes({
-			bus,
-			registry: toolRegistry,
-			record: (outcome) => systemOneRecorder.outcome(outcome),
-		}),
-	);
-	const followUps = createFollowUpTracker((outcome) => systemOneRecorder.outcome(outcome));
-	let holdPredictedWorker: ((prediction: TurnPrewarmPrediction) => void) | null = null;
-	const systemOneHost = createSystemOneHost({
-		systemOne,
-		usage: decisionUsage,
-		readSessionEntries: () => readCurrentSessionEntries(),
-		listRecipes: () =>
-			agents !== undefined && getCurrentSettings().fleet.speculativeDispatch
-				? agents
-						.listSpecs()
-						.filter((spec) => spec.audience !== "internal")
-						.map((spec) => ({
-							id: spec.id,
-							description: spec.description,
-							...(spec.category !== "internal"
-								? { categories: [{ id: spec.category, label: spec.category, purpose: AGENT_CATEGORY_PURPOSE[spec.category] }] }
-								: {}),
-						}))
-				: null,
-		currentSession: currentSessionId,
-		recording: systemOneRecording,
-		onPrediction: (prediction) => holdPredictedWorker?.(prediction),
 	});
 	let lastMemoryPromptRuntimeId: string | undefined;
 	const memoryReader = createMemoryPromptReader({
 		getDataDir: clioDataDir,
 		onSelection: (selection) => memoryOwner.recordPromptSelection(selection),
-		// A section built under a ranking joins each record it admitted to that
-		// ranking's call, so the dataset can tell a useful ordering from a neutral one.
-		onRankedSelection: (ids) => {
-			for (const id of ids) followUps.used("memory", id);
-		},
 	});
-	// Optional ranking never starts on the chat's own model, through any route of
-	// the binding or any target alias for it, nor on an endpoint whose declared
-	// slots are already in use. Memory, skills and the gateway all reach this one
-	// ranker, so the policy covers every caller; a cached answer is still served.
-	const relevanceMayStart = (): boolean => {
-		const settings = getCurrentSettings();
-		return (
-			relevanceStartRefusal({
-				settings: systemOneSettings(),
-				getTarget: (targetId) => providers.getTarget(targetId),
-				capacities: resolveEndpointCapacities({
-					statuses: providers.list(),
-					targets: settings.targets,
-					runtimeFor: (runtimeId) => providers.getRuntime(runtimeId),
-				}),
-				usage: endpointCapacityUsage(),
-			}) === null
-		);
-	};
-	const relevanceIsHosted = (): boolean => {
-		const settings = systemOneSettings();
-		const binding = settings.systemOne.sites.relevance;
-		const name = typeof binding === "string" ? binding : binding?.engine;
-		const engine = name === undefined ? undefined : settings.systemOne.engines[name];
-		const target = settings.targets.find((entry) => entry.id === engine?.target);
-		return engine?.kind === "systemone" && target?.runtime === "typesafe-jev";
-	};
-	const relevanceRanker = createRelevanceRanker({
-		// A local accelerator serves one optional ranking at a time; a hosted engine takes the turn's
-		// few catalogs at once, so a second one is not dropped behind the first.
-		maxPending: () => (systemOneSettings().systemOne.sites.relevance !== undefined && relevanceIsHosted() ? 3 : 1),
-		systemOne,
-		flow: () => flowLedger.current(),
-		task: () => systemOneHost.task(),
-		tracker: followUps,
-		recording: systemOneRecording,
-		mayStart: relevanceMayStart,
-	});
-	// A ranking asked under a session, branch or binding that is gone cannot help
-	// the next listing, so it stops holding the ranker's slot and its endpoint, and
-	// the old owner's finished rankings go with it so their refs join nothing new.
-	// A new operator task supersedes at `readTurn` below. Shutdown aborts every
-	// fill and starts none before System One's settle wait.
-	const unsubscribeRelevanceLifecycle = [
-		bus.subscribe("session.started", () => relevanceRanker.release("session started")),
-		bus.subscribe("session.reattached", () => relevanceRanker.release("session resumed")),
-		bus.subscribe("session.parked", () => relevanceRanker.release("session parked")),
-		bus.subscribe("session.turn_switched", () => relevanceRanker.release("branch switched")),
-		bus.subscribe("config.hot_reloaded", () => relevanceRanker.abortStale()),
-		bus.subscribe("config.next_turn_scheduled", () => relevanceRanker.abortStale()),
-		bus.subscribe("shutdown.requested", () => relevanceRanker.dispose()),
-	];
-	termination.onDrain(() => {
-		for (const unsubscribe of unsubscribeRelevanceLifecycle) unsubscribe();
-		relevanceRanker.dispose();
-	});
-	capabilityGate = createCapabilityGate({
-		relevance: relevanceRanker,
-		relevanceCandidateLimit: () =>
-			systemOne.describe().find((binding) => binding.site === "relevance")?.kind === "llm" ? 12 : 64,
-	});
-	const catalogRanker = Object.assign(
-		(request: Parameters<typeof relevanceRanker>[0]) => {
-			if (request.use === "memory") return relevanceRanker(request);
+	// The turn's own words, for a listing asked for without a query and for triage.
+	let operatorTask = "";
+	// The session's lexical capability gate orders a listing the model asked for. It never shortens one.
+	const catalogRanker =
+		(kind: "skills" | "capabilities"): CatalogRanker =>
+		(request) => {
 			const ranked = capabilityGate.rank({
-				kind: request.use,
-				task: request.need || systemOneHost.task(),
+				kind,
+				task: request.need || operatorTask,
 				candidates: request.candidates.map((candidate) => ({ id: candidate.id, description: candidate.summary })),
 				limit: 10,
 			});
-			return ranked.length
-				? { scores: Object.fromEntries(ranked.map((hit) => [hit.id, hit.score])), source: "capability gate", ref: "" }
+			return ranked.length > 0
+				? { scores: Object.fromEntries(ranked.map((hit) => [hit.id, hit.score])), source: "capability gate" }
 				: null;
-		},
-		{ asks: () => true },
-	);
-
-	/**
-	 * Write what System One recorded since the last flush as ledger entries. A row goes under the
-	 * turn its ref names when the tree holds that turn and under the current leaf otherwise, so a
-	 * slow answer stays with its own turn after a later turn or a `/tree` switch moved the leaf.
-	 * The drain empties the buffer, so a second call finds nothing and writes nothing. The settle,
-	 * park and shutdown callers can therefore overlap.
-	 */
-	const flushSystemOne = (): void => {
-		const meta = session?.current();
-		if (!meta) return;
-		const calls = systemOneRecorder.drain(meta.id);
-		if (calls.length === 0) return;
-		try {
-			const tree = session?.tree(meta.id);
-			if (!tree) return;
-			for (const group of anchorSessionRows(calls, tree)) {
-				session?.appendEntry({
-					kind: "custom",
-					customType: SESSION_ROW_CUSTOM_TYPE,
-					parentTurnId: group.parentTurnId,
-					display: false,
-					data: { calls: group.calls },
-				});
-			}
-		} catch {
-			// Recording System One is best effort and cannot change the turn.
-		}
-	};
-	// A session's pending rows have to reach its own ledger before it parks. After
-	// an ACP session/close nothing drains again, and after /new, /resume, /fork or a
-	// branch switch the next drain belongs to another session, so the rows would be
-	// dropped. The emit is synchronous and fires while the session is still current
-	// with its writer open. A fork emits from inside forkFromState, before it closes
-	// the parent's writer, so /fork and ACP session/fork need no flush of their own.
-	bus.subscribe("session.parked", ({ sessionId }) => {
-		if (session?.current()?.id === sessionId) flushSystemOne();
-		systemOneHost.forgetOperatorTexts();
-		systemOneScopes.resetSession(null);
-		unsavedSystemOneScope = null;
-	});
-	// A resume or a `/tree` switch can keep the session id and still change which
-	// requests precede the next turn, so the kept texts go and the ledger is read once.
-	bus.subscribe("session.reattached", () => {
-		systemOneHost.forgetOperatorTexts();
-		restoreSystemOneScope();
-	});
-	bus.subscribe("session.turn_switched", () => systemOneHost.forgetOperatorTexts());
+		};
 	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
 	const jobHost = createJobHost({
 		registry: toolRegistry,
@@ -4152,20 +3861,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: {}),
 		// Discovery shares the pre-turn gate; optional calibrated rankings arrive from its nonblocking cache.
-		rankRelevance: catalogRanker,
-		onSkillLoaded: (name) => {
-			followUps.used("skills", name);
-			capabilityGate.used("skills", name);
-		},
-		onCapabilityCalled: (name) => {
-			followUps.used("capabilities", name);
-			capabilityGate.used("capabilities", name);
-		},
-		// consult exists only when its site is bound at startup, so an operator who
-		// never bound it keeps the registry, tool signature and prompt they had. A
-		// binding removed mid-session answers "no usable answer". bound() reads the
+		rankSkills: catalogRanker("skills"),
+		rankCapabilities: catalogRanker("capabilities"),
+		onSkillLoaded: (name) => capabilityGate.used("skills", name),
+		onCapabilityCalled: (name) => capabilityGate.used("capabilities", name),
+		// consult exists only when a route is named at startup, so an operator who
+		// never named one keeps the registry, tool signature and prompt they had. A
+		// route removed mid-session answers "no usable answer". bound() reads the
 		// effective settings view built above, which is why that block precedes this call.
-		...(systemOne.bound("consult")
+		...(systemOne.bound()
 			? {
 					consult: {
 						systemOne,
@@ -4699,8 +4403,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	const explorationNudge = createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot });
-	middleware.registerHook(explorationNudge.registration);
+	middleware.registerHook(
+		createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot }).registration,
+	);
 	middleware.registerHook(createUnbackedWorkerClaimRegistration());
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
@@ -4714,75 +4419,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const turnControl = createTurnControlRunner({
 		getSettings: getCurrentSettings,
-		getAutonomy: resolveEffectiveAutonomy,
 		dispatch,
-		agents,
-		toolRegistry,
 		getInvokeOptions: () => {
 			const sessionId = session?.current()?.id;
 			return sessionId === undefined ? {} : { sessionId };
 		},
 		getTurnConstraints: () => chat.currentTurnConstraints?.(),
-		isContinuation: () => false,
-		// The turn site answered with acts and a breadth under cuts fitted to the
-		// build that produced them, so an unmeasured model never starts harness work.
-		// A wait is bounded by the deadline the turn call itself runs under.
-		readInterpretation: async (wait) => {
-			if (wait === undefined) return systemOneHost.interpretation();
-			const binding = systemOneSettings().systemOne.sites.turn;
-			const bindingTimeoutMs = typeof binding === "object" && binding !== null ? binding.timeoutMs : undefined;
-			return systemOneHost.awaitInterpretation(
-				bindingTimeoutMs ?? systemOne.measuredDeadlineMs("turn") ?? TURN_SITE.deadlineMs,
-				wait.signal,
-			);
-		},
-		facts: {
-			turnIndex: () =>
-				readCurrentSessionEntries().filter(
-					(entry) =>
-						entry.kind === "message" &&
-						entry.role === "user" &&
-						(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
-				).length,
-			taskEstablished,
-			clarificationStreak: () => turnOutcomeCollector.clarificationStreak(),
-			finishedDetachedBatchIds: () => finishedDetachedBatchIds(dispatch),
-		},
-		cwd: process.cwd(),
-		bus,
+		finishedDetachedBatchIds: () => finishedDetachedBatchIds(dispatch),
 		emitNotice: (text) => {
 			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(text);
 			else bootStderr(`${text}\n`);
 		},
-		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
-		rememberOrientation(turnId, runId, succeeded) {
-			dispatchDedup.rememberHarnessOrientation(turnId, runId);
-			if (succeeded) explorationNudge.rememberHarnessScout(turnId);
-		},
 	});
-	const seedOrientationFromSession = (): void => {
-		let snapshot: TurnControlRecord["orientation"];
-		try {
-			const meta = session?.current();
-			const latest = meta
-				? [...readRecentSessionEntriesForContract(meta.id)]
-						.reverse()
-						.find(
-							(entry) =>
-								entry.kind === "custom" &&
-								entry.customType === "turnControl" &&
-								(entry.data as TurnControlRecord | null)?.orientation !== undefined,
-						)
-				: undefined;
-			if (latest?.kind === "custom") snapshot = (latest.data as TurnControlRecord).orientation;
-		} catch {
-			/* S6: an unreadable tail cannot seed reuse. */
-		}
-		turnControl.seedOrientation(snapshot ?? null);
-	};
-	seedOrientationFromSession();
-	const unsubscribeOrientationResume = bus.subscribe("session.reattached", seedOrientationFromSession);
-	termination.onDrain(() => unsubscribeOrientationResume());
 	// The opt-in turn-end watchdog. Headless and ACP runs pass `false` for the
 	// surface: neither has an operator reading a transcript, so a notice they
 	// cannot see would be a worker run spent on nothing whatever the setting says.
@@ -4863,38 +4511,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	}
-	// The turn site's hints for the main agent. Registered on every surface that
-	// runs a chat turn; with the site unbound or unfitted the verdict carries no
-	// line and the registration contributes nothing.
-	middleware.registerHook(
-		createDecisionHintsRegistration({
-			getHints: () => systemOneHost.hints(),
-			controllerActed: () => turnControl.controllerActed(),
-			getTurnConstraints: () => chat.currentTurnConstraints?.(),
-		}),
-	);
 	// No boundary from here to `lease.adopt`. The chat loop starts a target probe
 	// and a prewarm timer whose notices, like the lease diagnostics taken below,
 	// reach only subscribers the interactive application registers; a loop turn
 	// in between would deliver them to nobody.
-	let cancelQueuedSpeculativeHold: (() => void) | null = null;
-	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
-	// The host hands over a prediction when its reading lands, usually while the
-	// main model is still generating, so a reading later than the prompt can still
-	// hold the worker before the dispatch it predicts. Settlement cancels a queued hold.
-	holdPredictedWorker = (prediction) => {
-		cancelQueuedSpeculativeHold?.();
-		cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
-			cancelQueuedSpeculativeHold = null;
-			dispatch?.speculate?.(prediction);
-		});
-	};
 	const chat = createChatLoop({
 		...(acpInterviews ? { eggAsk: askUserBridge } : {}),
 		turnControl,
 		turnOutcomeCollector,
 		...(dispatch ? { outcomeDispatch: dispatch } : {}),
-		getDecisionUsage: (userTurnId) => decisionUsage.read(userTurnId),
 		getTaskEstablished: taskEstablished,
 		visionSidecar,
 		getReadySkillCount,
@@ -4964,69 +4589,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				return new Map();
 			}
 		},
-		// Memory is ranked while the prompt composes, and only when the order decides
-		// what the section carries: more eligible records than it admits and no
-		// ranking pinned earlier in the session.
-		getMemoryRelevance: createMemoryRelevance({ reader: memoryReader, rank: relevanceRanker }),
-		readTurn: (input) => {
-			if ((session?.current()?.id ?? null) !== outcomeSessionId) {
-				seedOutcomeFromSession();
-				seedOrientationFromSession();
-			}
-			// A new operator task makes every ranking still in flight answer the old
-			// one; cancelling it here keeps it off the endpoint this turn needs. Turn
-			// settle and cancel keep the task, so a continuation may still use them.
-			relevanceRanker.supersede("new operator task");
-			systemOneScopes.noteOperatorTurn();
-			saveSystemOneScope();
-			systemOneHost.readTurn(input);
-			try {
-				prepareRelevance?.(input.task);
-			} catch {
-				// Preparation is optional; the reminder ranks for itself as it is built.
-			}
+		onOperatorTurn: ({ task }) => {
+			operatorTask = task;
+			if ((session?.current()?.id ?? null) !== outcomeSessionId) seedOutcomeFromSession();
 		},
-		readSteer: (input) => systemOneHost.readSteer(input),
-		currentOperatorTask: () => systemOneHost.task(),
-		// Held processes a turn did not use die with the turn, cancelled or not.
-		onTurnSettled: () => {
-			// Calls made mid-turn (gateway ranking, consult, an approval card) belong
-			// to the turn that made them, not to the next one.
-			flushSystemOne();
-			saveSystemOneScope();
-			// The verdict is about the request that just finished; a continuation or
-			// the next turn must not read it.
-			systemOneHost.clearVerdict();
-			cancelQueuedSpeculativeHold?.();
-			cancelQueuedSpeculativeHold = null;
-			dispatch?.releaseSpeculative?.("turn settled");
-			const current = dispatch?.speculativeStats?.();
-			if (current === undefined) return;
-			const counts = {
-				held: Math.max(0, current.held - previousSpeculativeStats.held),
-				adopted: Math.max(0, current.adopted - previousSpeculativeStats.adopted),
-				discarded: Math.max(0, current.discarded - previousSpeculativeStats.discarded),
-			};
-			previousSpeculativeStats = current;
-			if (counts.held === 0 && counts.adopted === 0 && counts.discarded === 0) return;
-			try {
-				const meta = session?.current();
-				if (!meta) return;
-				session?.appendEntry({
-					kind: "custom",
-					customType: "speculativeDispatch",
-					parentTurnId: session?.tree(meta.id).leafId ?? null,
-					display: false,
-					data: counts,
-				});
-				return counts;
-			} catch {
-				// Accounting is best effort and cannot change turn settlement.
-			}
-		},
-		flushSystemOne,
-		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
-		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
+		currentOperatorTask: () => operatorTask,
+		systemOne,
 		// The skill writes a plain file that a later session reads with no label; /handoff carries the labels.
 		refuseHandoffSkill: (inlinedPaths) => {
 			// Read through current(): labels absorbed before a session exists have no session id to ask about.
@@ -5136,30 +4704,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		{ timeoutMs: chatShutdownAllowanceMs },
 	);
 
-	// System One rows reach the ledger at turn boundaries, so whatever was recorded
-	// since the last settle (a /draft judgment, an answer that arrived after its
-	// deadline) is still pending here and would die with the process. Registered
-	// after the chat hook so the aborted turn's calls are in, and the persist phase
-	// that closes the session runs after it. The ledger rows go before the dataset
-	// queue.
-	// A turn waits about a second for the turn-end reading and then moves on, while
-	// the call itself runs to its deadline and records whenever it settles. Quitting
-	// inside that gap would end the process before the row exists, so the hook waits
-	// for calls still in flight first. The bound is the longest default site deadline,
-	// and with nothing in flight the wait is a resolved promise, so a quit that has
-	// nothing to record is no slower. The hook budget covers the wait plus the flush.
-	const SYSTEM_ONE_SHUTDOWN_WAIT_MS = 5_000;
-	termination.onDrain(
-		async () => {
-			try {
-				await systemOne.settled(SYSTEM_ONE_SHUTDOWN_WAIT_MS);
-				flushSystemOne();
-			} finally {
-				systemOneRecorder.flush();
-			}
-		},
-		{ timeoutMs: SYSTEM_ONE_SHUTDOWN_WAIT_MS + resolveShutdownHookBudgetMs() },
-	);
 	// Every Ollama chat pins its model with keep_alive -1, and the ownership
 	// record dies with this process, so release the models this process loaded
 	// once the drain above has stopped the turn that could pin them again
@@ -5893,18 +5437,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							refreshQuota: refreshAcpQuota,
 						}
 					: {}),
-				// /btw and /draft run the chat loop's own out-of-turn rounds, and a
-				// draft is judged by the same `drafts` System One site the overlay uses.
+				// /btw and /draft run the chat loop's own out-of-turn rounds.
 				aside: {
 					ask: (question, signal) => chat.askSideQuestion(question, { signal }),
-					draft: async (request, count, signal) => {
-						const outcome = await chat.draftCandidates(request, count, { signal });
-						if (outcome.status === "refused" || outcome.aborted) return outcome;
-						const drafted = draftsToJudge(outcome.candidates);
-						const judgment =
-							"reason" in drafted ? drafted : await judgeDraftsAtSite({ systemOne }, request, drafted.texts, signal);
-						return { ...outcome, judgment };
-					},
+					draft: (request, count, signal) => chat.draftCandidates(request, count, { signal }),
 				},
 				// The same reload /library reload runs, with the generation change the
 				// PluginsReloaded event reports. A throw is a failed reload.
@@ -6237,7 +5773,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		})(),
 		systemOne,
 		systemOneControl,
-		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		telemetry,
 		chat,
 		...(options.terminalLease
