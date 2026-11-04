@@ -103,7 +103,9 @@ const LEGACY = {
 export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 	// Nothing declares what an unnamed server's numbers are, so they do not count as real probabilities.
 	generic: { id: "generic", ...LEGACY, probabilities: false },
-	jev: { id: "jev", ...LEGACY },
+	// The server refuses a request as a whole with HTTP 400 max_tokens_exceeded: on jev-1.14.0, 57,013
+	// input tokens at 220,391 characters answered and 262,048 characters did not, each row far under the window.
+	jev: { id: "jev", ...LEGACY, windowCounts: "whole-request" },
 	laya: { id: "laya", ...LEGACY, windowCeiling: 512 },
 	"laya-multilingual": { id: "laya-multilingual", ...LEGACY, windowCeiling: 1024 },
 	"julia-1": {

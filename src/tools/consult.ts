@@ -69,8 +69,10 @@ export const CONSULT_LIMITS = {
 	filterItems: 256,
 	/** Code points of one `items` or `capabilities` entry. */
 	filterItemChars: 240,
-	/** Code points of one output chunk, or of one file's path and head together, under a filter. */
-	filterHeadChars: 512,
+	/** Code points of one output chunk, or of one file's path and digest or head together, under a filter. */
+	filterEvidenceChars: 512,
+	/** Bytes of one file a digest is read from. */
+	filterDigestReadBytes: 64 * 1024,
 	/** Item text across one filter. */
 	filterTotalChars: CONSULT_FILTER_MAX_CHARS,
 	filterMatchesMax: 32,
@@ -135,7 +137,7 @@ export const consultParameters = Type.Object({
 			),
 			paths: Type.Optional(
 				Type.Array(Type.String(), {
-					description: `source files: workspace paths or globs; each file's path and the start of its text are read, ${CONSULT_LIMITS.filterHeadChars} characters together.`,
+					description: `source files: workspace paths or globs; each file is scored on its path and a digest of its leading comment, exported names and imported modules (TypeScript, JavaScript, Python), or the start of its text for anything else, ${CONSULT_LIMITS.filterEvidenceChars} characters together.`,
 				}),
 			),
 			path: Type.Optional(Type.String({ description: "source output: the offload path a truncated result named." })),
@@ -143,7 +145,7 @@ export const consultParameters = Type.Object({
 				Type.Integer({
 					minimum: 1,
 					maximum: CONSULT_LIMITS.outputChunkLinesMax,
-					description: `source output: lines per chunk, default ${CONSULT_LIMITS.outputChunkLines}; the first ${CONSULT_LIMITS.filterHeadChars} characters of each chunk are read.`,
+					description: `source output: lines per chunk, default ${CONSULT_LIMITS.outputChunkLines}; the first ${CONSULT_LIMITS.filterEvidenceChars} characters of each chunk are read.`,
 				}),
 			),
 			limit: Type.Optional(
@@ -194,7 +196,7 @@ export const consultParameters = Type.Object({
 });
 
 const DESCRIPTION =
-	"Get advice from a fast decision model; a design choice you then make goes to `decide`. The strong use is `filter`: score up to 256 things you do not hold (workspace file heads, chunks of an offloaded result, MCP and gateway capabilities, your own items) against one criterion, and read only what matched, because only ids and scores come back. `questions` asks up to four typed questions (yesNo, pick, rate) over `state` and `paths` you supply; a smart if on something you already read is the weak case, since the model knows less than you do. It is advice and never makes the choice. Each route has its own bound (5 s typed, 30 s LLM) and failover totals 45 s at worst; at most 3 calls per turn.";
+	"Get advice from a fast decision model; a design choice you then make goes to `decide`. The strong use is `filter`: score up to 256 things you do not hold (workspace files by what they are for, chunks of an offloaded result, MCP and gateway capabilities, your own items) against one criterion, and read only what matched, because only ids and scores come back. A file carries its path and a digest, so behavior inside a body is a question for `grep`. `questions` asks up to four typed questions (yesNo, pick, rate) over `state` and `paths` you supply; a smart if on something you already read is the weak case, since the model knows less than you do. It is advice and never makes the choice. Each route has its own bound (5 s typed, 30 s LLM) and failover totals 45 s at worst; at most 3 calls per turn.";
 
 function codePoints(value: string): number {
 	return [...value].length;
@@ -281,19 +283,27 @@ function isInside(root: string, real: string): boolean {
 }
 
 type FileRead =
-	| { readonly key: string; readonly real: string; readonly text: string; readonly whole: boolean }
+	| {
+			readonly key: string;
+			readonly real: string;
+			/** The redacted head at the asked length. */
+			readonly text: string;
+			/** Everything read, redacted, for a digest to read past the head. */
+			readonly read: string;
+			readonly whole: boolean;
+	  }
 	| { readonly reason: string };
 
 /** The read tool's rules for one named file, so both forms refuse the same things in the same words. */
 async function workspaceReader(
 	cwd: string,
 	options: ToolInvokeOptions | undefined,
-): Promise<(raw: unknown, chars: number) => Promise<FileRead>> {
+): Promise<(raw: unknown, chars: number, readBytes?: number) => Promise<FileRead>> {
 	const filter = createObservationPathFilter(cwd, options?.allowsObservationPath);
 	const tally = createRedactionTally();
 	const root = await realpath(cwd);
 	const seen = new Set<string>();
-	return async (raw, chars) => {
+	return async (raw, chars, readBytes) => {
 		if (typeof raw !== "string" || raw.trim().length === 0) return { reason: "not a path" };
 		if (options?.signal?.aborted === true) return { reason: "cancelled" };
 		let real: string;
@@ -314,8 +324,8 @@ async function workspaceReader(
 			const handle = await open(real, "r");
 			let head: Buffer;
 			try {
-				// Room for `chars` code points of any width.
-				const buffer = Buffer.alloc(Math.min(entry.size, chars * 4));
+				// Room for `chars` code points of any width, unless the caller bounds the read itself.
+				const buffer = Buffer.alloc(Math.min(entry.size, readBytes ?? chars * 4));
 				const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 				head = buffer.subarray(0, bytesRead);
 			} finally {
@@ -326,11 +336,137 @@ async function workspaceReader(
 			// Redacted before the cut, so the cut cannot shorten a secret past what its pattern recognizes.
 			const redacted = redactSecretsText(decoded, tally);
 			const text = headOf(redacted, chars);
-			return { key, real, text, whole: entry.size <= head.length && text === redacted };
+			return { key, real, text, read: redacted, whole: entry.size <= head.length && text === redacted };
 		} catch (err) {
 			return { reason: err instanceof Error ? err.message : String(err) };
 		}
 	};
+}
+
+const DIGEST_COMMENT_CHARS = 200;
+const DIGEST_IMPORT_RESERVE_CHARS = 120;
+
+/** The comment first, then the exports, leaving the imports their reserve. Null when the file showed none of the three. */
+function assembleDigest(
+	comment: string,
+	exported: ReadonlySet<string>,
+	imported: ReadonlySet<string>,
+	room: number,
+): string | null {
+	const lead = headOf(comment.replace(/\s+/gu, " ").trim(), DIGEST_COMMENT_CHARS);
+	if (lead.length === 0 && exported.size === 0 && imported.size === 0) return null;
+	const imports = `imports: ${[...imported].join(", ") || "none"}`;
+	const exportsLine = `exports: ${[...exported].join(", ") || "none"}`;
+	const left = room - (lead.length > 0 ? codePoints(lead) + 1 : 0);
+	const shownExports = headOf(
+		exportsLine,
+		Math.max(0, left - 1 - Math.min(codePoints(imports), DIGEST_IMPORT_RESERVE_CHARS)),
+	);
+	const shownImports = headOf(imports, Math.max(0, left - 1 - codePoints(shownExports)));
+	return `${lead.length > 0 ? `${lead}\n` : ""}${shownExports}\n${shownImports}`;
+}
+
+/** The first comment ahead of any statement but an import. */
+function scriptLeadingComment(source: string): string {
+	let rest = source.replace(/^#![^\n]*\n/u, "");
+	for (;;) {
+		rest = rest.trimStart();
+		if (rest.startsWith("/*")) {
+			const end = rest.indexOf("*/");
+			return end < 0 ? "" : rest.slice(2, end).replace(/^\s*\*+ ?/gmu, "");
+		}
+		if (rest.startsWith("//")) {
+			const lines: string[] = [];
+			while (rest.startsWith("//")) {
+				const newline = rest.indexOf("\n");
+				const line = newline < 0 ? rest : rest.slice(0, newline);
+				if (!line.startsWith("// biome-ignore")) lines.push(line.replace(/^\/\/+ ?/u, ""));
+				rest = newline < 0 ? "" : rest.slice(newline + 1).trimStart();
+			}
+			if (lines.length > 0) return lines.join(" ");
+			continue;
+		}
+		const statement = /^import\b[^;]*;/u.exec(rest);
+		if (statement === null) return "";
+		rest = rest.slice(statement[0].length);
+	}
+}
+
+function scriptDigest(source: string, room: number): string | null {
+	const exported = new Set<string>();
+	const imported = new Set<string>();
+	for (const match of source.matchAll(
+		/^export\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|type|interface|enum)\s+([A-Za-z_$][\w$]*)/gmu,
+	)) {
+		exported.add(match[1] ?? "");
+	}
+	for (const match of source.matchAll(/^export\s*(?:type\s*)?\{([^}]*)\}/gmu)) {
+		for (const part of (match[1] ?? "").split(",")) {
+			const name = part
+				.trim()
+				.replace(/^type\s+/u, "")
+				.split(/\s+as\s+/u)
+				.pop()
+				?.trim();
+			if (name) exported.add(name);
+		}
+	}
+	for (const match of source.matchAll(/^(?:import|export)\b[^;]*?\bfrom\s+["']([^"']+)["']/gmu))
+		imported.add(match[1] ?? "");
+	for (const match of source.matchAll(/^import\s+["']([^"']+)["']/gmu)) imported.add(match[1] ?? "");
+	return assembleDigest(scriptLeadingComment(source), exported, imported, room);
+}
+
+/** The module docstring, or else the comment lines ahead of the first statement. */
+function pythonLeadingComment(source: string): string {
+	let rest = source;
+	const lines: string[] = [];
+	for (;;) {
+		rest = rest.trimStart();
+		if (!rest.startsWith("#")) break;
+		const newline = rest.indexOf("\n");
+		const line = newline < 0 ? rest : rest.slice(0, newline);
+		if (!/^#!|^#.*coding[:=]/u.test(line)) lines.push(line.replace(/^#+ ?/u, ""));
+		rest = newline < 0 ? "" : rest.slice(newline + 1);
+	}
+	const docstring = /^[rRuU]?("""|''')([\s\S]*?)\1/u.exec(rest);
+	return docstring?.[2] ?? lines.join(" ");
+}
+
+function pythonDigest(source: string, room: number): string | null {
+	const exported = new Set<string>();
+	const imported = new Set<string>();
+	const declared = /^__all__\s*(?::[^=\n]+)?=\s*[[(]([^\])]*)[\])]/mu.exec(source);
+	if (declared !== null) {
+		for (const match of (declared[1] ?? "").matchAll(/["']([^"']+)["']/gu)) exported.add(match[1] ?? "");
+	} else {
+		for (const match of source.matchAll(
+			/^(?:(?:async\s+)?def|class)\s+([A-Za-z]\w*)|^([A-Z][A-Z0-9_]*)\s*(?::[^=\n]+)?=/gmu,
+		)) {
+			exported.add(match[1] ?? match[2] ?? "");
+		}
+	}
+	for (const match of source.matchAll(/^import\s+([^\n#]+)|^from\s+(\.*[\w.]*)\s+import\b/gmu)) {
+		if (match[2] !== undefined) imported.add(match[2]);
+		for (const part of (match[1] ?? "").split(",")) {
+			const name = part.trim().split(/\s+as\s+/u)[0];
+			if (name) imported.add(name);
+		}
+	}
+	return assembleDigest(pythonLeadingComment(source), exported, imported, room);
+}
+
+/**
+ * What a file is for, inside `room`: its leading comment, exported names and imported
+ * modules. A live trial on Jev read these better than a head of any size, and no better on
+ * behavior inside a body (recall .58 at best, 0 for a global with no import), so that stays
+ * grep's. Null for a language not read here, or a file showing none of the three: its head goes.
+ * Regular expressions on purpose: code_nav's index is a built artifact a filter must not wait on.
+ */
+function fileDigest(path: string, source: string, room: number): string | null {
+	if (/\.(?:[cm]?[jt]s|[jt]sx)$/iu.test(path)) return scriptDigest(source, room);
+	if (/\.py[iw]?$/iu.test(path)) return pythonDigest(source, room);
+	return null;
 }
 
 /** The first `chars` code points, without spreading a text of any length. */
@@ -487,13 +623,18 @@ function parseFilter(raw: unknown): ParsedFilter | string {
 	};
 }
 
+/** What one item put in front of the engine: a file's digest, a file's head, or the text as given. */
+type FilterCarried = "digest" | "head" | "text";
+
 /**
  * What one filter offers. Every item ends up scored or counted under a reason, so
  * `offered` is always `scored + unscored` and the sum of `skipped` is `unscored`.
  */
 class FilterGathering {
 	readonly items: Record<string, string> = {};
-	readonly charsRead: Record<string, number> = {};
+	/** Code points each item carried, the path included. */
+	readonly chars: Record<string, number> = {};
+	readonly carried: Record<string, FilterCarried> = {};
 	/** Items the engine saw only part of. */
 	readonly partial = new Set<string>();
 	readonly skipped: Record<string, number> = {};
@@ -520,11 +661,10 @@ class FilterGathering {
 
 	/**
 	 * The id comes back to the agent and the text goes to the engine, so both are checked here.
-	 * `named` puts the id on the item's first line inside the same `chars`, because a file's head
-	 * is often all imports and its path says what it is. `charsRead` counts the text alone, so a
-	 * match never overstates how much of the file the engine saw, and an empty text stays empty.
+	 * A file's id opens its item, inside the same `chars`, because a path says what a file is.
+	 * An empty text stays empty, so a file is never scored on its path alone.
 	 */
-	add(id: string, text: unknown, chars: number, whole = true, named = false): boolean {
+	add(id: string, text: unknown, chars: number, carried: FilterCarried = "text", whole = true): boolean {
 		if (this.full) {
 			this.skip(this.overLimit);
 			return false;
@@ -538,11 +678,12 @@ class FilterGathering {
 			return false;
 		}
 		const redacted = redactSecretsText(text, createRedactionTally());
-		const label = named ? `${id}\n` : "";
+		const label = carried === "text" ? "" : `${id}\n`;
 		const shown = headOf(redacted, chars - codePoints(label));
 		this.offered += 1;
 		this.items[id] = `${label}${shown}`;
-		this.charsRead[id] = codePoints(shown);
+		this.chars[id] = codePoints(label) + codePoints(shown);
+		this.carried[id] = carried;
 		if (!whole || shown !== redacted) this.partial.add(id);
 		return true;
 	}
@@ -604,7 +745,7 @@ async function gatherFiles(
 	}
 	if (candidates.size === 0) return null;
 	const heads = Math.min(candidates.size, CONSULT_LIMITS.filterItems);
-	const reservation = reserveObservation(heads * CONSULT_LIMITS.filterHeadChars, options);
+	const reservation = reserveObservation(heads * CONSULT_LIMITS.filterEvidenceChars, options);
 	if (reservation.exhausted) return evidenceExhausted(reservation, "Continue in a follow-up turn.");
 	// Bounds and gates the reads and is refunded, not charged: only ids and scores reach the model.
 	commitObservationReservation(reservation);
@@ -620,14 +761,20 @@ async function gatherFiles(
 				gathering.skip("turn observation budget");
 				continue;
 			}
-			const file = await read(raw, CONSULT_LIMITS.filterHeadChars);
+			const file = await read(raw, CONSULT_LIMITS.filterEvidenceChars, CONSULT_LIMITS.filterDigestReadBytes);
 			if ("reason" in file) {
 				gathering.skip(file.reason);
 				continue;
 			}
-			if (gathering.add(file.key, file.text, CONSULT_LIMITS.filterHeadChars, file.whole, true)) {
+			const room = CONSULT_LIMITS.filterEvidenceChars - codePoints(file.key) - 1;
+			const digest = fileDigest(file.key, file.read, room);
+			const added =
+				digest === null
+					? gathering.add(file.key, file.text, CONSULT_LIMITS.filterEvidenceChars, "head", file.whole)
+					: gathering.add(file.key, digest, CONSULT_LIMITS.filterEvidenceChars, "digest", false);
+			if (added) {
 				gathering.realPaths.push(file.real);
-				spent += Buffer.byteLength(file.text, "utf8");
+				spent += Buffer.byteLength(gathering.items[file.key] ?? "", "utf8");
 			}
 		}
 		return null;
@@ -662,7 +809,7 @@ async function gatherOutput(
 	for (let start = 0; start < lines.length; start += filter.chunkLines) {
 		const end = Math.min(start + filter.chunkLines, lines.length);
 		const chunk = lines.slice(start, end).join("\n");
-		gathering.add(`L${start + 1}-${end}`, chunk, CONSULT_LIMITS.filterHeadChars);
+		gathering.add(`L${start + 1}-${end}`, chunk, CONSULT_LIMITS.filterEvidenceChars);
 	}
 	gathering.realPaths.push(path);
 	return null;
@@ -682,7 +829,7 @@ function publicReadout(readout: string | undefined): string | undefined {
 }
 
 const FILTER_NOTE =
-	"Advice from a decision model, not a decision. Each match's charsRead and the read counts say how much it saw: a miss on a partly read item does not prove the item is irrelevant.";
+	"Advice from a decision model, not a decision. Each match says what it carried and how many characters: a digest is a file's path, leading comment, exported names and imported modules, a head is its path and first characters, and text is the item as given. carried.partial counts items the engine saw only part of, every digest among them, so a miss there does not prove the item is irrelevant. A digest shows no body: behavior inside a file is a question for grep.";
 
 function requestWindow(deps: ConsultDeps): number | null {
 	try {
@@ -785,8 +932,10 @@ async function runFilter(
 	const partial = scored.filter((id) => gathering.partial.has(id)).length;
 	const capChars =
 		filter.source === "files" || filter.source === "output"
-			? CONSULT_LIMITS.filterHeadChars
+			? CONSULT_LIMITS.filterEvidenceChars
 			: CONSULT_LIMITS.filterItemChars;
+	const carriedCounts: Record<FilterCarried, number> = { digest: 0, head: 0, text: 0 };
+	for (const id of scored) carriedCounts[gathering.carried[id] ?? "text"] += 1;
 	const unscoredCount = Object.values(gathering.skipped).reduce((sum, count) => sum + count, 0);
 	const output = {
 		answered: true,
@@ -794,10 +943,14 @@ async function runFilter(
 		offered: gathering.offered,
 		scored: scored.length,
 		matchCount: matches.length,
-		matches: matches.slice(0, filter.limit).map((entry) => ({ ...entry, charsRead: gathering.charsRead[entry.id] ?? 0 })),
+		matches: matches.slice(0, filter.limit).map((entry) => ({
+			...entry,
+			carried: gathering.carried[entry.id] ?? "text",
+			chars: gathering.chars[entry.id] ?? 0,
+		})),
 		unscored: unscoredCount,
 		skipped: gathering.skipped,
-		read: { capChars, whole: scored.length - partial, partial },
+		carried: { capChars, ...carriedCounts, partial },
 		...(verdict.usage !== undefined ? { tokens: verdict.usage } : {}),
 		readout: publicReadout(readout),
 		model: verdict.build,

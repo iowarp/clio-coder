@@ -60,10 +60,10 @@ interface FilterResult {
 	offered: number;
 	scored: number;
 	matchCount: number;
-	matches: Array<{ id: string; score?: number; charsRead: number }>;
+	matches: Array<{ id: string; score?: number; carried: string; chars: number }>;
 	unscored: number;
 	skipped: Record<string, number>;
-	read: { capChars: number; whole: number; partial: number };
+	carried: { capChars: number; digest: number; head: number; text: number; partial: number };
 	tokens?: { input: number; output: number };
 	readout?: string;
 	model?: string;
@@ -172,7 +172,7 @@ describe("contracts/consult tool", () => {
 	});
 	afterEach(() => env.restore());
 
-	const typed = () => fakeEngine("typed", "jev", 8192, typedReply);
+	const typed = () => fakeEngine("typed", "jev", 32000, typedReply);
 	const bound = (engines: ReadonlyArray<DecisionEngine>, extra: Partial<ConsultDeps> = {}) =>
 		sessionRegistry(workspace, { systemOne: systemOneOver(engines), cwd: () => workspace, ...extra });
 	const filter = async (
@@ -254,7 +254,7 @@ describe("contracts/consult tool", () => {
 			/previous reply/,
 			/quoted code/,
 			/one claim/,
-			/read\.partial/,
+			/carried\.partial/,
 		]) {
 			match(withRoute.prompt, line);
 		}
@@ -326,7 +326,7 @@ describe("contracts/consult tool", () => {
 		strictEqual(payload.matches.length, 1);
 		strictEqual(payload.unscored, 1);
 		deepStrictEqual(payload.skipped, { "empty or not text": 1 });
-		deepStrictEqual(payload.read, { capChars: 240, whole: 4, partial: 0 });
+		deepStrictEqual(payload.carried, { capChars: 240, digest: 0, head: 0, text: 4, partial: 0 });
 		ok(!result.text.includes('"two"'), "a non-match's id does not cross either");
 		deepStrictEqual(payload.tokens, { input: 40, output: 2 });
 		strictEqual(payload.readout, "server");
@@ -343,7 +343,7 @@ describe("contracts/consult tool", () => {
 		match(spent.text, /limit of 3 calls per turn/);
 	});
 
-	it("reads file heads through globs, under the protected-path policy, and says how much it read", async () => {
+	it("reads file digests through globs, under the protected-path policy, and says what each carried", async () => {
 		writeFileSync(join(workspace, "src", "cache.ts"), `export const key = "${TOKEN}"; // cache\n${"x".repeat(2000)}\n`);
 		writeFileSync(join(workspace, "src", "view.ts"), "export const view = 1;\n");
 		writeFileSync(join(workspace, "src", "bin.ts"), Buffer.from([0, 1, 2, 3]));
@@ -358,8 +358,9 @@ describe("contracts/consult tool", () => {
 			source: "files",
 			paths: ["src/*.ts", "**/cache.ts", ".env", "../outside/secret.txt", "src/missing.ts"],
 		});
-		deepStrictEqual(payload.matches, [{ id: "src/cache.ts", score: 0.9, charsRead: 512 - "src/cache.ts\n".length }]);
-		deepStrictEqual(payload.read, { capChars: 512, whole: 1, partial: 1 });
+		const cacheItem = "src/cache.ts\nexports: key\nimports: none";
+		deepStrictEqual(payload.matches, [{ id: "src/cache.ts", score: 0.9, carried: "digest", chars: cacheItem.length }]);
+		deepStrictEqual(payload.carried, { capChars: 512, digest: 2, head: 0, text: 0, partial: 2 });
 		strictEqual(payload.offered, payload.scored + payload.unscored);
 		strictEqual(payload.scored, 2);
 		deepStrictEqual(payload.skipped, {
@@ -383,25 +384,65 @@ describe("contracts/consult tool", () => {
 		ok(!sent.includes("node_modules"));
 	});
 
-	it("carries a file's path inside the head's cap, and never scores an empty file on its path alone", async () => {
-		const fits = `export const fits = 1;${"y".repeat(512 - 22 - "src/fits.ts\n".length)}`;
+	it("falls back to path and head inside the cap, and never scores an empty file on its path alone", async () => {
+		const fits = `the fits file${"y".repeat(512 - 13 - "src/fits.md\n".length)}`;
 		const over = `${fits}z`;
-		writeFileSync(join(workspace, "src", "fits.ts"), fits);
-		writeFileSync(join(workspace, "src", "over.ts"), over);
+		writeFileSync(join(workspace, "src", "fits.md"), fits);
+		writeFileSync(join(workspace, "src", "over.md"), over);
 		writeFileSync(join(workspace, "src", "empty.ts"), " \n");
 		const engine = typed();
 		const payload = await filter(bound([engine]), {
 			criterion: "names a component",
 			source: "files",
-			paths: ["src/fits.ts", "src/over.ts", "src/empty.ts"],
+			paths: ["src/fits.md", "src/over.md", "src/empty.ts"],
 		});
 		const sent = Object.values(engine.asked[0]?.questions ?? {}).map((question) => JSON.stringify(question));
 		strictEqual(sent.length, 2);
-		ok(sent[0]?.includes(JSON.stringify(`src/fits.ts\n${fits}`).slice(1, -1)));
-		ok(sent[1]?.includes(JSON.stringify(`src/over.ts\n${fits}`).slice(1, -1)));
+		ok(sent[0]?.includes(JSON.stringify(`src/fits.md\n${fits}`).slice(1, -1)));
+		ok(sent[1]?.includes(JSON.stringify(`src/over.md\n${fits}`).slice(1, -1)));
 		ok(!sent[1]?.includes(`${fits}z`));
-		deepStrictEqual(payload.read, { capChars: 512, whole: 1, partial: 1 });
+		deepStrictEqual(payload.carried, { capChars: 512, digest: 0, head: 2, text: 0, partial: 1 });
 		deepStrictEqual(payload.skipped, { "empty or not text": 1 });
+	});
+
+	it("leaves out what Jev's server would refuse, because its window counts the whole request", async () => {
+		strictEqual(PROFILES.jev.windowCounts, "whole-request");
+		const items = Object.fromEntries(
+			Array.from({ length: 256 }, (_, index) => [`item-${index}-${"x".repeat(120)}`, `the cache ${"y".repeat(230)}`]),
+		);
+		const engine = typed();
+		const payload = await filter(bound([engine]), { criterion: "c".repeat(200), source: "items", items });
+		ok((payload.skipped["over the smallest route's window"] ?? 0) > 0);
+		strictEqual(payload.offered, payload.scored + payload.unscored);
+		strictEqual(engine.asked.length, 1);
+	});
+
+	it("digests TypeScript and Python to comment, exports and imports, redacted, within the read bound", async () => {
+		const padding = `\n${"// padding\n".repeat(7000)}`;
+		writeFileSync(
+			join(workspace, "src", "secret.ts"),
+			`/** Rotates the key ${TOKEN} nightly. */\nimport { a } from "./a.js";\nexport function rotate() { return "bodytext"; }${padding}export const beyond = 1;\n`,
+		);
+		writeFileSync(
+			join(workspace, "src", "tool.py"),
+			`#!/usr/bin/env python\n"""Loads the job queue."""\nimport os, sys as system\nfrom .jobs import run\nLIMIT = 3\ndef load():\n    return "bodytext"\ndef _hidden():\n    pass\n`,
+		);
+		writeFileSync(join(workspace, "src", "plain.ts"), "const onlyCode = 1;\n");
+		const engine = typed();
+		const payload = await filter(bound([engine]), {
+			criterion: "names a component",
+			source: "files",
+			paths: ["src/secret.ts", "src/tool.py", "src/plain.ts"],
+		});
+		const sent = JSON.stringify(engine.asked[0]?.questions);
+		ok(!sent.includes(TOKEN), "a secret in a leading comment never reaches the engine");
+		ok(sent.includes("Rotates the key"));
+		ok(sent.includes("exports: rotate\\nimports: ./a.js"));
+		ok(!sent.includes("beyond"), "nothing past the read bound is seen");
+		ok(sent.includes("Loads the job queue.\\nexports: LIMIT, load\\nimports: os, sys, .jobs"));
+		ok(!sent.includes("bodytext") && !sent.includes("_hidden"));
+		ok(sent.includes("src/plain.ts\\nconst onlyCode = 1;"), "a file showing none of the three goes as its head");
+		deepStrictEqual(payload.carried, { capChars: 512, digest: 2, head: 1, text: 0, partial: 2 });
 	});
 
 	it("splits one offloaded result into line ranges, and refuses any other path", async () => {
@@ -418,7 +459,7 @@ describe("contracts/consult tool", () => {
 		ok(!JSON.stringify(engine.asked[0]?.questions).includes("Item: L1-16"), "a chunk's line range says nothing about it");
 		strictEqual(payload.matches[0]?.id, "L17-32");
 		strictEqual(payload.scored, 3);
-		deepStrictEqual(payload.read, { capChars: 512, whole: 3, partial: 0 });
+		deepStrictEqual(payload.carried, { capChars: 512, digest: 0, head: 0, text: 3, partial: 0 });
 
 		for (const other of [join(workspace, "src", "x.ts"), path]) {
 			const refused = await invoke(
@@ -440,8 +481,8 @@ describe("contracts/consult tool", () => {
 		ok(!sent.includes(ToolNames.Consult));
 		ok(!sent.includes(ToolNames.Read));
 		strictEqual(payload.offered, sent.length);
-		strictEqual(payload.read.capChars, 240);
-		ok(payload.matches.every((entry) => entry.charsRead <= 240));
+		strictEqual(payload.carried.capChars, 240);
+		ok(payload.matches.every((entry) => entry.chars <= 240));
 	});
 
 	it("counts everything past the caps as unscored and never drops it", async () => {
@@ -451,7 +492,7 @@ describe("contracts/consult tool", () => {
 		strictEqual(capped.scored, 256);
 		strictEqual(capped.unscored, 44);
 		deepStrictEqual(capped.skipped, { "over the 256-item limit": 44 });
-		deepStrictEqual(capped.read, { capChars: 240, whole: 0, partial: 256 });
+		deepStrictEqual(capped.carried, { capChars: 240, digest: 0, head: 0, text: 256, partial: 256 });
 
 		const lines = Array.from({ length: 200 }, () => "z".repeat(600)).join("\n");
 		const path = writeToolOffload(lines, { sessionId: "s1" } as Parameters<typeof writeToolOffload>[1]);
@@ -462,7 +503,7 @@ describe("contracts/consult tool", () => {
 		);
 		strictEqual(total.offered, 200);
 		strictEqual(total.scored, 125);
-		strictEqual(total.read.partial, 125);
+		strictEqual(total.carried.partial, 125);
 		deepStrictEqual(total.skipped, { "over the 64000-character total": 75 });
 	});
 
@@ -518,7 +559,7 @@ describe("contracts/consult tool", () => {
 			items: { one: "the cache", two: "a view" },
 		});
 		strictEqual(payload.readout, "label");
-		deepStrictEqual(payload.matches, [{ id: "one", charsRead: 9 }]);
+		deepStrictEqual(payload.matches, [{ id: "one", carried: "text", chars: 9 }]);
 		strictEqual(payload.scored, 2);
 	});
 

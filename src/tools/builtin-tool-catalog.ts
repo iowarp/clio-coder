@@ -466,7 +466,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		objective: "Filter evidence you do not hold through the bound decision model, or ask it typed questions, as advice.",
 		// A session's usage notes read this, not promptHint, and only a registered tool has one.
 		discoveryHint:
-			"Filter with consult before opening many files or a long offload. A miss on a partly read item does not prove it irrelevant, and read.partial counts those, so read before ruling one out. When you write consult questions, state each outcome as something observable in the evidence, describe what a call does rather than severity words (a plain curl GET read as irreversible until the rung was reworded around changing remote state), include the previous reply when a short follow-up is the subject, keep quoted code out of the evidence, and ask one claim per question.",
+			"Filter with consult before opening many files or a long offload. A filter answers what a file is for, from its path and a digest of its comment, exports and imports; behavior inside a file body belongs to grep. A miss on a partly read item does not prove it irrelevant, and carried.partial counts those, so read before ruling one out. When you write consult questions, state each outcome as something observable in the evidence, describe what a call does rather than severity words (a plain curl GET read as irreversible until the rung was reworded around changing remote state), include the previous reply when a short follow-up is the subject, keep quoted code out of the evidence, and ask one claim per question.",
 		uiLabel: "Consult",
 		// Each call counts against the per-turn limit, so a retry is not free.
 		retrySafety: "not_retry_safe",
