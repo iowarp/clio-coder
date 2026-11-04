@@ -7,7 +7,12 @@
  * every pattern here has to stay linear in its input.
  */
 
-import { URL_USERINFO_RE, URL_USERNAME_TOKEN_RE, urlUserinfoHoldsSecret } from "../safety/redaction.js";
+import {
+	secretUrlParamValues,
+	URL_USERINFO_RE,
+	URL_USERNAME_TOKEN_RE,
+	urlUserinfoHoldsSecret,
+} from "../safety/redaction.js";
 
 export interface RedactionTally {
 	count: number;
@@ -159,7 +164,24 @@ export function redactSecretsText(
 			return `[redacted:${pattern.kind}]`;
 		});
 	}
-	return out;
+	return redactUrlParams(out, tally);
+}
+
+/**
+ * The display rule's query values, which the assignment pattern above misses when they are short or hold a `;`. It runs last,
+ * so a value that pattern already hid keeps its marker, and a journal never shows what a screen hides (#446).
+ */
+function redactUrlParams(text: string, tally: RedactionTally): string {
+	const out: string[] = [];
+	let copied = 0;
+	for (const { start, end } of secretUrlParamValues(text)) {
+		if (!urlUserinfoHoldsSecret(text.slice(start, end))) continue;
+		tally.count += 1;
+		out.push(text.slice(copied, start), "[redacted:url-param]");
+		copied = end;
+	}
+	out.push(text.slice(copied));
+	return out.join("");
 }
 
 /**
@@ -212,6 +234,11 @@ export function redactSecretSegments(segments: string[], tally: RedactionTally):
 			ranges.push({ start, end: match.index + match[0].length - (userinfo ? 1 : 0), kind: pattern.kind });
 			tally.count += 1;
 		}
+	}
+	for (const { start, end } of secretUrlParamValues(joined)) {
+		if (!urlUserinfoHoldsSecret(joined.slice(start, end))) continue;
+		ranges.push({ start, end, kind: "url-param" });
+		tally.count += 1;
 	}
 	ranges.sort((a, b) => a.start - b.start || b.end - a.end);
 	let offset = 0;

@@ -129,12 +129,11 @@ function redactSecretFlags(value: string): string {
  * `?token=value`, where a parameter name runs on to the next `=`. A scan rather than one pattern: every name in a run shares
  * that `=` or its absence, and a pattern walks to it again from each one, so `&token` repeated took 8 s at 320 KB.
  */
-function redactSecretUrlParams(value: string): string {
+export function secretUrlParamValues(value: string): Array<{ start: number; end: number }> {
 	const names = new RegExp(SECRET_URL_PARAM_NAME_RE);
 	const stops = new RegExp(SECRET_URL_PARAM_STOP_RE);
 	const secrets = new RegExp(SECRET_URL_PARAM_VALUE_RE);
-	const out: string[] = [];
-	let copied = 0;
+	const found: Array<{ start: number; end: number }> = [];
 	let stop = -1;
 	for (let name = names.exec(value); name !== null; name = names.exec(value)) {
 		if (stop < names.lastIndex) {
@@ -146,8 +145,17 @@ function redactSecretUrlParams(value: string): string {
 		if (!secrets.exec(value)?.[0]) continue;
 		names.lastIndex = secrets.lastIndex;
 		if (ENV_REFERENCE_RE.test(value.slice(stop + 1, secrets.lastIndex))) continue;
-		out.push(value.slice(copied, stop + 1), "[redacted]");
-		copied = secrets.lastIndex;
+		found.push({ start: stop + 1, end: secrets.lastIndex });
+	}
+	return found;
+}
+
+function redactSecretUrlParams(value: string): string {
+	const out: string[] = [];
+	let copied = 0;
+	for (const { start, end } of secretUrlParamValues(value)) {
+		out.push(value.slice(copied, start), "[redacted]");
+		copied = end;
 	}
 	out.push(value.slice(copied));
 	return out.join("");
