@@ -554,7 +554,9 @@ export function prefixHeadlessFailure(
 	const snapshot = chat.lastRunSnapshot?.();
 	if (!snapshot) return message;
 	const route = [snapshot.runtimeId, snapshot.targetUrl].filter(Boolean).join(" ");
-	return `target '${snapshot.targetId}' (${route}): ${headlessRouteFailureText(message) ?? message}`;
+	return redactUrlCredentials(
+		`target '${snapshot.targetId}' (${route}): ${headlessRouteFailureText(message) ?? message}`,
+	);
 }
 
 /**

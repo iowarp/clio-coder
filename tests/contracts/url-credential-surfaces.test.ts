@@ -6,7 +6,7 @@ import {
 	createJsonCredentialScrub,
 	projectDispatchJsonEvent,
 } from "../../src/cli/modes/json-stream.js";
-import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { withRunFailureReporting, writeRunDiagnostic } from "../../src/cli/run-failure.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -972,6 +972,18 @@ test("a reply cut off inside an opaque token shows none of it at any headless or
 	} finally {
 		env.restore();
 	}
+});
+
+test("a headless failure hides the password in the target URL it names", () => {
+	const url = "https://alice:hunter2XY@127.0.0.1:9/v1";
+	const chat = {
+		lastRunSnapshot: () => ({ targetId: "mock-chat", runtimeId: "openai-compat", targetUrl: url }),
+	} as never;
+	strictEqual(
+		prefixHeadlessFailure(chat, "Connection error"),
+		"target 'mock-chat' (openai-compat https://alice:[redacted]@127.0.0.1:9/v1): Connection error",
+	);
+	ok(!prefixHeadlessFailure(chat, `fetch failed for ${url}`).includes("hunter2"));
 });
 
 test("a feed bound keeps a scheme's last character with the :// that follows it", async () => {
