@@ -23,6 +23,8 @@ A live model list, a cached list, and a provider catalog are distinct evidence. 
 
 `clio-coder doctor --fix` creates missing directories and template files, makes `settings.yaml` and `credentials.yaml` owner-only, rewrites retired setting values such as `safety.autonomy: auto-edit` and YAML `on` and `off` booleans while keeping your comments, and records fleet preflight results. Plain `doctor` previews the settings rewrite. Version migrations still run through `clio-coder upgrade`.
 
+The `shell sandbox` row says whether this host contains your commands and where they may write.
+
 For a live tool-use probe and validation-contract dry run:
 
 ```sh

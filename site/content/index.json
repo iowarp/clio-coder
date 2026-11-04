@@ -83,6 +83,7 @@
     "summary": "continuity.md",
     "headings": [
       "Pick up a conversation",
+      "Find sessions from the shell",
       "Keep long work focused",
       "Recover an interrupted handoff"
     ]
@@ -125,7 +126,8 @@
       "Delegate a focused task",
       "Follow the work",
       "Permissions, sandbox, and merges",
-      "Compose a fleet when you need one"
+      "Run a playbook when you need one",
+      "Give workers MCP tools"
     ]
   },
   {

@@ -96,7 +96,7 @@ The browser has its own **Guided setup**; configuring in the terminal first is o
 
 ## Update, roll back and remove
 
-Interactive sessions show a quiet footer hint when a newer release exists, and `/upgrade` reviews and applies it from inside the terminal. From the shell, update with the tool that installed it:
+Installer installs update themselves in the background, at most once a day. On Linux and macOS, npm, pnpm, bun, and volta installs whose prefix you own update after an interactive session quits and no other process of that install remains. Set `interface.autoUpdate: false` or `CLIO_CODER_AUTO_UPDATE=0` to keep only the notice. `/upgrade` reviews an update from inside the terminal. From the shell, update with the tool that installed it:
 
 | Installed with | Update | Remove the program |
 | --- | --- | --- |
@@ -106,7 +106,7 @@ Interactive sessions show a quiet footer hint when a newer release exists, and `
 
 The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`.
 
-If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.
+If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run.
 
 `clio-coder uninstall` removes your settings, credentials, sessions and caches, and the desktop app's background service, so it previews what it will delete and asks first. Add `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 

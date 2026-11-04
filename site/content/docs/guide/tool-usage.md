@@ -12,9 +12,11 @@ A useful sequence is **inspect → change → verify → review**. Inspect the a
 
 ## Understand permission requests
 
-**default** is the supervised mode. Reads, workspace edits, and commands Clio Coder recognizes, such as read-only inspection and the project's test runners, run without a prompt. Unrecognized shell commands and outward actions such as a push wait for your approval. **yolo** allows work without ordinary confirmation prompts; hard blocks and damage-control questions still apply. Set autonomy in **Permissions & Limits**.
+**default** follows one rule: containment first, judgment second, asking last. Workspace edits run. Shell commands run inside an OS sandbox when the host has one. In a Git work tree, Clio Coder snapshots your files before the first change of a turn, and `/rewind` restores them. A safety judge reviews what would otherwise ask against your own messages, and you are asked when it has no verdict or the decision is yours.
 
-Read each requested command and its working directory before approving it. In the terminal, a shell approval card also shows an **Effect** line that says in plain words what the command would do. It is a reading aid; admission does not depend on it.
+**yolo** is a skip-permissions mode for long jobs in a container. Nothing asks and commands run unsandboxed as you; only a short floor, your project rules, and the run's ceilings block. It needs a one-time acceptance. Set the level in **Permissions & Limits**, with `--autonomy`, or with the leader key. See [the containment tutorial](/tutorials/let-it-work-with-containment-and-rewind.html).
+
+When a card reaches you, read the command and its working directory before approving it. A card nobody answers within `safety.unattendedAfterSeconds` (300 by default) is denied and the turn continues. In the terminal, a shell approval card also shows an **Effect** line that says in plain words what the command would do. It is a reading aid; admission does not depend on it.
 
 Asking for a plan or saying “do not edit” guides the task; it does not establish a technical read-only boundary. Use the explicit tool restrictions or read-only dispatch options when you need that boundary.
 
@@ -24,6 +26,6 @@ Ask Clio Coder to discover available checks, then run the relevant one with `ver
 
 > Discover this project's verification checks. Run the test check through verify and report the exit status, failures, and anything you could not check.
 
-On the desktop, the Session column's **Artifacts** card lists tool output, receipts, and session records, and **Changes** lists the files a turn changed. In the terminal, use `/view` to browse artifacts and receipts.
+On the desktop, the Session column's **Artifacts** card lists tool output and session records, and **Changes** lists the files a turn changed. In the terminal, use `/view` to browse artifacts and run records.
 
 For checks that must accompany specific changes, add a [project quality policy](/docs/guide/quality-policy.html). For a worked example, follow [the temperature-calibration tutorial](/tutorials/temperature-calibration.html).

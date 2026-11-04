@@ -1,6 +1,6 @@
 ## Find a useful skill
 
-The Library contains **skills, agents, prompts, fleets, and plugins**. Open `/library` or press **Alt+L**. Switch categories with left/right, search with `/`, and open a package with Enter.
+The Library contains **skills, agents, prompts, playbooks, and plugins**. Open `/library` or press **Alt+L**. Switch categories with left/right, search with `/`, and open a package with Enter.
 
 Use **Browse** to find available content and **Installed** to manage your copies. Choose **User** for tools shared across projects or **Project** for resources specific to this workspace.
 
