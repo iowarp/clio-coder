@@ -43,6 +43,8 @@ import {
 	headGuardAfter,
 	holdUnresolvedUserinfo,
 	messageStopCompleted,
+	namesSecret,
+	openNameStart,
 } from "../safety/redaction.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 
@@ -54,8 +56,8 @@ export const RUN_FEED_CAP_BYTES = 2 * 1024 * 1024;
 export const RUN_FEED_READ_TAIL_BYTES = 256 * 1024;
 /** Prose a text row may hold back while it waits for a word boundary. */
 const TEXT_CARRY_MAX_CHARS = 4096;
-/** The most of a query parameter a bound keeps back whole, so a value's name stays on the row with its value (#446). */
-const QUERY_PARAM_KEEP_CHARS = 1024;
+/** The most of a query parameter or an open URL a bound keeps back whole, so a value's name stays on the row with its value (#446). */
+const OPEN_TAIL_KEEP_CHARS = 1024;
 /** Rows that follow a finished text block in every runtime, so no URL spans them and the carry goes out whole. */
 const TEXT_BLOCK_END_EVENTS: ReadonlySet<string> = new Set([
 	"thinking",
@@ -135,6 +137,8 @@ interface WriterState {
 	carryAt: string;
 	/** The carry was cut at its bound mid-URL, and what follows it stays off the feed until the guard runs out. */
 	headGuard: CutHeadGuard | null;
+	/** The carry is a name a bound kept back that names a secret, and the next text decides whether its value is attached. */
+	boundSecretName: boolean;
 }
 
 const writers = new Map<string, WriterState>();
@@ -160,6 +164,7 @@ function loadWriterState(path: string): WriterState {
 		carry: "",
 		carryAt: "",
 		headGuard: null,
+		boundSecretName: false,
 	};
 	const tail = readTail(path, 64 * 1024);
 	if (tail === null) return state;
@@ -235,11 +240,20 @@ function holdBack(text: string): { head: string; tail: string } {
 	return { head: text.slice(0, cut), tail: text.slice(cut) };
 }
 
-/** Where a bound cuts an outgrown carry: ahead of a short final query parameter, whose name a later row could not recognize. */
+/**
+ * Where a bound cuts an outgrown carry: ahead of whatever text still to come could complete. That is a short final query
+ * parameter, a URL with no colon yet, or a name ending in a colon or `=`, which every word of compact JSON can be. Keeping it back
+ * loses nothing, where a row ending in it would leave a piece on each side that no later row could recognize (#446).
+ */
 function carryBoundCut(carry: string): number {
 	const param = Math.max(carry.lastIndexOf("&"), carry.lastIndexOf("?"));
-	if (param <= 0 || carry.length - param > QUERY_PARAM_KEEP_CHARS || /\s/u.test(carry.slice(param))) return carry.length;
-	return param;
+	if (param > 0 && carry.length - param <= OPEN_TAIL_KEEP_CHARS && !/\s/u.test(carry.slice(param))) return param;
+	const url = carry.lastIndexOf("://");
+	if (url > 0 && carry.length - url <= OPEN_TAIL_KEEP_CHARS && endsInOpenCredential(carry.slice(url))) {
+		// A URL with a password on the way is the discard below's to settle, as any tail of its authority could be password.
+		return holdUnresolvedUserinfo(carry) === carry ? url - 1 : carry.length;
+	}
+	return openNameStart(carry) ?? carry.length;
 }
 
 /**
@@ -270,6 +284,15 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 		if (state.seq === 0 && state.bytes === 0) ensureRunDirectory(stateDir, runId);
 		if (body.kind === "event" && body.type === "text" && body.detail !== undefined) {
 			let detail = body.detail;
+			if (state.boundSecretName && detail.length > 0) {
+				state.boundSecretName = false;
+				if (/^\s/u.test(detail)) {
+					// A value set apart from its name can be too short for a row's own rule, and a bound already split this run.
+					writeBounded(path, state, { kind: "event", type: "text", detail: state.carry }, state.carryAt);
+					state.headGuard = headGuardAfter(state.carry);
+					state.carry = "";
+				}
+			}
 			if (state.headGuard !== null) {
 				detail = dropCutHead(detail, state.headGuard);
 				if (state.headGuard.tokens === 0) state.headGuard = null;
@@ -288,6 +311,8 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 				if (open) state.headGuard = cutHeadGuard();
 				writeBounded(path, state, { kind: "event", type: "text", detail: shown }, state.carryAt);
 				state.carry = open ? "" : state.carry.slice(split);
+				state.carryAt = at;
+				state.boundSecretName = openNameStart(state.carry) === 0 && namesSecret(state.carry);
 			}
 			return;
 		}
@@ -298,6 +323,7 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 			state.carry = "";
 			// The next text starts a new block, so nothing of it continues what the guard covers.
 			state.headGuard = null;
+			state.boundSecretName = false;
 		}
 		writeBounded(path, state, body, at);
 	} catch {

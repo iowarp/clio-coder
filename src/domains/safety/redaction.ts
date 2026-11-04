@@ -320,15 +320,28 @@ export interface CutHeadGuard {
 	token: string;
 }
 
-// `https:`, `https:/`, `https://u` or `?token=abc`, each of which goes on to name a secret or hold one.
+// `https://u` or `?token=abc`, each of which goes on to hold a secret.
 const OPEN_CREDENTIAL_END_RE = new RegExp(
-	String.raw`:\/?$|:\/\/${stringRun(String.raw`[^\s/"]`)}"?$|${SECRET_URL_PARAM_NAME_RE.source}[^=\s&#]*=[^&#\s]*$`,
+	String.raw`:\/\/${stringRun(String.raw`[^\s/"]`)}"?$|${SECRET_URL_PARAM_NAME_RE.source}[^=\s&#]*=[^&#\s]*$`,
 	"iu",
 );
 
 /** Whether a cut at the end of this text would leave a piece of a credential on each side, neither of which matches (#446). */
 export function endsInOpenCredential(text: string): boolean {
 	return OPEN_CREDENTIAL_END_RE.test(text);
+}
+
+const OPEN_NAME_CHARS = 64;
+const OPEN_NAME_END_RE = new RegExp(String.raw`[a-z0-9_+.-]{0,${OPEN_NAME_CHARS}}["']?(?:=|:\/?)$`, "iu");
+
+/**
+ * Where a name ending this text starts: `"key":`, `password=`, `https:` or `https:/`. Every word of compact JSON and minified
+ * code can end this way, and what follows may be that name's value, so the two have to reach one row together (#446).
+ */
+export function openNameStart(text: string): number | null {
+	const from = Math.max(0, text.length - OPEN_NAME_CHARS - 3);
+	const match = OPEN_NAME_END_RE.exec(text.slice(from));
+	return match === null ? null : from + match.index;
 }
 
 const CUT_TOKENS = 2;
@@ -341,7 +354,7 @@ export function cutHeadGuard(): CutHeadGuard {
 }
 
 /** Whether a whole token leads into a secret. Prose such as `well-known` does not, so it cannot extend a discard. */
-function namesSecret(token: string): boolean {
+export function namesSecret(token: string): boolean {
 	let start = token.length;
 	while (start > 0 && /[a-z0-9_-]/iu.test(token.charAt(start - 1))) start -= 1;
 	return secretFlagStart(token.slice(start)) !== null || SECRET_KEY_RE.test(token) || SECRET_LEAD_IN_RE.test(token);
