@@ -618,6 +618,20 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 			.map((update) => JSON.stringify(update.content));
 		ok(frames.length > 0, "no live frame reached the client");
 		ok(!frames.some((frame) => frame.includes("hun")), JSON.stringify(frames));
+		// Stderr's newline closes no URL on stdout, which is still growing behind it.
+		await live.call("_clio-coder/session/shell", {
+			sessionId: meta.id,
+			command: "printf 'https://alice:hunter2'; printf 'warn\\n' >&2; sleep 1; printf '@h/ done\\n'",
+		});
+		const merged = live
+			.updates()
+			.filter((update) => update.status === "in_progress" && update.content !== undefined)
+			.map((update) => JSON.stringify(update.content));
+		ok(
+			merged.some((frame) => frame.includes("warn")),
+			JSON.stringify(merged),
+		);
+		ok(!merged.some((frame) => frame.includes("hunter2")), JSON.stringify(merged));
 	} finally {
 		live.transport.close();
 		await served;
