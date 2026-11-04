@@ -1150,9 +1150,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// chatter the model never offered as a reply. Printing that chatter instead
 			// hands the operator a dangling "let me try..." for a turn that succeeded.
 			const answer =
-				result.sawTerminatingToolResult && result.terminatingToolText.length > 0
-					? result.terminatingToolText
-					: result.text;
+				result.sawTerminatingToolResult && result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
 			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		}
 	}

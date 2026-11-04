@@ -1,7 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { createHeadlessJsonProjector, createJsonCredentialScrub, projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
+import {
+	createHeadlessJsonProjector,
+	createJsonCredentialScrub,
+	projectDispatchJsonEvent,
+} from "../../src/cli/modes/json-stream.js";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -114,11 +118,21 @@ test("a run feed bound never leaves a secret query value without its name", asyn
 	const env = await isolateClioEnv("url-surfaces-feed-");
 	try {
 		const long = "a".repeat(4090);
-		const rows = feedText("query", `https://h/?x=${long}&token=ZQXJZQXJ`, "ZQXJZQXJ&y=1 and the rest follows here ", MESSAGE_STOP);
+		const rows = feedText(
+			"query",
+			`https://h/?x=${long}&token=ZQXJZQXJ`,
+			"ZQXJZQXJ&y=1 and the rest follows here ",
+			MESSAGE_STOP,
+		);
 		ok(!rows.join("\n").match(SECRET_LETTERS), JSON.stringify(rows.map((row) => row.slice(-40))));
 		ok(rows.join("").endsWith("&y=1 and the rest follows here "), rows.join("").slice(-60));
 		ok(rows.join("").includes(long));
-		const value = feedText("long-value", `https://h/?token=ZQ${"X".repeat(5000)}`, "ZQXJZQXJ more words to follow ", MESSAGE_STOP);
+		const value = feedText(
+			"long-value",
+			`https://h/?token=ZQ${"X".repeat(5000)}`,
+			"ZQXJZQXJ more words to follow ",
+			MESSAGE_STOP,
+		);
 		ok(!value.join("\n").match(SECRET_LETTERS), JSON.stringify(value.map((row) => row.slice(0, 60))));
 	} finally {
 		env.restore();
@@ -243,7 +257,11 @@ test("completed --json streams keep ports in tool results, user messages and fin
 		scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: "https://u:ZQXJ@h/x" })),
 	)[0];
 	strictEqual(secret?.content, "https://u:[redacted]@h/x");
-	const cut = { role: "assistant", stopReason: "aborted", content: [{ type: "toolCall", arguments: { u: "https://u:ZQXJ" } }] };
+	const cut = {
+		role: "assistant",
+		stopReason: "aborted",
+		content: [{ type: "toolCall", arguments: { u: "https://u:ZQXJ" } }],
+	};
 	ok(!SECRET_LETTERS.test(JSON.stringify(scrub.scrub({ type: "message_end", message: cut }))));
 });
 
@@ -487,7 +505,7 @@ test("an ACP raw record redacts ahead of its bound, so a cut cannot strip a pass
 		cwd: process.cwd(),
 		chat: {
 			submit: async () => {
-				const long = `${"x".repeat(ACP_MAX_STRING_BYTES - 20)} https://u:hunter2@h/ ${"y".repeat(64)}`;
+				const long = `${"x".repeat(ACP_MAX_STRING_BYTES - 64)} https://u:hunter2@h/ ${"y".repeat(64)}`;
 				emit({ type: "tool_execution_start", toolCallId: "c", toolName: "bash", args: { command: long } });
 				emit({ type: "message_end", message: assistantAnswer("done") });
 			},

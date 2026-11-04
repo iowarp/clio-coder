@@ -266,7 +266,11 @@ function shownUserinfoEnd(value: string, start: number, lastAt: number): number 
 
 /** The last `"` in the token that closed a string. No URL ahead of it can still grow, whatever follows (#446). */
 function lastClosingQuote(value: string, tokenStart: number): number {
-	for (let quote = value.lastIndexOf('"'); quote >= tokenStart && quote >= 0; quote = value.lastIndexOf('"', quote - 1)) {
+	for (
+		let quote = value.lastIndexOf('"');
+		quote >= tokenStart && quote >= 0;
+		quote = value.lastIndexOf('"', quote - 1)
+	) {
 		if (quote + 1 < value.length && /[,:;}\])>\\]/u.test(value.charAt(quote + 1))) return quote;
 		if (quote === 0) break;
 	}
