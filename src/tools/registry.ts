@@ -25,7 +25,7 @@ import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { toolSurfaceSources, turnAllowsTool } from "../core/turn-constraints.js";
-import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
+import { containsInstructionMarkers, INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type {
 	MiddlewareEffect,
@@ -3248,7 +3248,7 @@ function applyToolResultEffects(
 	const inherited = inheritedHostNotes(result, nested);
 	const annotations = annotationMessages(effects);
 	if (annotations.length === 0) return withHostNotes(result, inherited);
-	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
+	const warning = INSTRUCTION_SHAPED_NOTE;
 	const prefix = !bannered && annotations.includes(warning) ? `${warning}\n\n` : "";
 	const remaining = annotations.filter((annotation) => annotation !== warning);
 	const suffix = remaining.length > 0 ? `${TOOL_RESULT_NOTES_SEPARATOR}${remaining.join("\n")}` : "";

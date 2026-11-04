@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
+import { INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
 import { clioStateDir } from "../core/xdg.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -539,7 +539,7 @@ function shapeTextToolResult(
 	requestedDisposition?: ToolResultDisposition,
 ): ToolResult {
 	const shaped = shapeTextToolResultBody(spec, result, context, requestedDisposition);
-	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
+	const warning = INSTRUCTION_SHAPED_NOTE;
 	if (!resultText(result).includes(warning)) return shaped;
 	const hardMaxBytes = maxBytesFor(spec, context);
 	const disposition = normalizeToolResultDisposition(spec, hardMaxBytes, requestedDisposition);

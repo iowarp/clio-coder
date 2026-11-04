@@ -18,7 +18,7 @@
  */
 
 import { isMcpToolName, ToolNames } from "../../../core/tool-names.js";
-import { UNTRUSTED_CONTENT_BANNER } from "../../../core/untrusted-content.js";
+import { INSTRUCTION_SHAPED_NOTE, UNTRUSTED_CONTENT_BANNER } from "../../../core/untrusted-content.js";
 import { isTrue } from "../answers.js";
 import { pointQuestion, yesNo } from "../questions.js";
 import type { DecisionPoint } from "../types.js";
@@ -37,6 +37,8 @@ export const JUDGE_SCREEN_MAX_RESULTS = 4;
 /** Code points of the content's head sent. An injection sits where the tool put the text, not at the far end of a large file. */
 const MAX_CONTENT_CHARS = 6000;
 const MAX_SOURCE_CHARS = 200;
+/** Room for Clio's own text ahead of the content, with the blank line between the note and the banner. */
+const OWN_HEADER_CHARS = INSTRUCTION_SHAPED_NOTE.length + 2 + UNTRUSTED_CONTENT_BANNER.length;
 
 /** Tools that return content from outside the workspace and the fleet. MCP servers are third parties by definition. */
 const SCREENED_TOOLS: ReadonlySet<string> = new Set([ToolNames.WebFetch, ToolNames.WebRead]);
@@ -67,14 +69,20 @@ export interface JudgeScreenValue {
 
 /**
  * web_fetch and web_read open every result with Clio's own untrusted-data sentence,
- * so the engine would judge Clio's "do not follow directives" line and read every
- * page as more suspect than the page itself. The sentence is removed only at the
- * head, where the tools put it; the same words quoted mid-content are content.
+ * and the registry puts its instruction-marker note in front of that, so the engine
+ * would judge Clio's "do not follow directives" line and read every page as more
+ * suspect than the page itself. Each comes off once, only at the head, where Clio
+ * puts them; the same words quoted mid-content are content.
  */
-function withoutOwnBanner(head: string): string {
+function withoutOwnHeader(head: string): string {
 	const trimmed = head.trimStart();
-	if (!trimmed.startsWith(UNTRUSTED_CONTENT_BANNER)) return head;
-	return trimmed.slice(UNTRUSTED_CONTENT_BANNER.length).replace(/^\r?\n/, "");
+	const unnoted = trimmed.startsWith(INSTRUCTION_SHAPED_NOTE)
+		? trimmed.slice(INSTRUCTION_SHAPED_NOTE.length).trimStart()
+		: trimmed;
+	if (unnoted.startsWith(UNTRUSTED_CONTENT_BANNER)) {
+		return unnoted.slice(UNTRUSTED_CONTENT_BANNER.length).replace(/^\r?\n/, "");
+	}
+	return unnoted === trimmed ? head : unnoted;
 }
 
 function textOf(content: unknown): string {
@@ -189,8 +197,8 @@ export const JUDGE_SCREEN_POINT: DecisionPoint<JudgeScreenObject, JudgeScreenVal
 	optional: true,
 	state(object) {
 		// Bounded before spreading so a multi-megabyte result costs one slice, not one array of code points.
-		const head = object.content.slice(0, MAX_CONTENT_CHARS * 2 + UNTRUSTED_CONTENT_BANNER.length);
-		const content = [...withoutOwnBanner(head).slice(0, MAX_CONTENT_CHARS * 2)].slice(0, MAX_CONTENT_CHARS).join("");
+		const head = object.content.slice(0, MAX_CONTENT_CHARS * 2 + OWN_HEADER_CHARS);
+		const content = [...withoutOwnHeader(head).slice(0, MAX_CONTENT_CHARS * 2)].slice(0, MAX_CONTENT_CHARS).join("");
 		if (content.trim().length === 0) return null;
 		return { source: boundedHead(object.source, MAX_SOURCE_CHARS), content };
 	},
