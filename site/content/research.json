@@ -13,5 +13,20 @@
     "interfaces": [
       "Terminal"
     ]
+  },
+  {
+    "slug": "sealed-run-records",
+    "title": "Can an agent run be a scientific record?",
+    "description": "What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder.",
+    "category": "Reproducible agent science",
+    "time": "10 min",
+    "basis": "Read from source; first experiment not yet run",
+    "status": "Open question. The records have shipped; no study exists yet.",
+    "author": "The Clio Coder team",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ],
+    "source": "sealed-run-records.md"
   }
 ]

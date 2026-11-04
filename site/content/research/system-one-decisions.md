@@ -158,6 +158,6 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 
 ::: next
 - [The full System One guide](https://github.com/iowarp/clio-coder/blob/main/docs/guide/system-one.md)
-- [All open questions](/research.html)
+- [Can an agent run be a scientific record?](/research/sealed-run-records.html)
 - [Let Clio Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
 :::
