@@ -59,10 +59,10 @@ export interface TriageVerdict {
 	readonly urgency: SteerUrgency;
 	/**
 	 * 0 to 1. From a side model this is its own word and never a calibrated probability. From
-	 * a typed route it is the mass on the relation, or 0 when the engine declares no real
-	 * probabilities, so a label can only mark.
+	 * a typed route it is the mass on the relation. Absent when the engine declares no real
+	 * probabilities: that verdict is a label, which has no confidence and can only mark.
 	 */
-	readonly confidence: number;
+	readonly confidence?: number;
 }
 
 const RELATION_KEYS = Object.keys(STEER_RELATIONS) as ReadonlyArray<SteerRelation>;
@@ -180,7 +180,7 @@ export function triageLabelsFor(verdict: TriageVerdict): Readonly<Record<string,
 		producer: "triage",
 		relation: verdict.relation,
 		urgency: verdict.urgency === "now" ? "now" : verdict.urgency === "endOfTurn" ? "end-of-turn" : "next-slot",
-		confidence: verdict.confidence.toFixed(2),
+		...(verdict.confidence === undefined ? { readout: "label" } : { confidence: verdict.confidence.toFixed(2) }),
 	};
 }
 
@@ -195,19 +195,20 @@ export function triageMayInterrupt(
 ): boolean {
 	return (
 		verdict.relation === "stop" &&
+		verdict.confidence !== undefined &&
 		verdict.confidence >= TRIAGE_STOP_MIN_CONFIDENCE &&
 		entry.pinned !== true &&
 		now - entry.enqueuedAt <= TRIAGE_STOP_MAX_AGE_MS
 	);
 }
 
-/** Typed picks as verdicts. Without real probabilities the mass is one-hot and would always clear the stop bar, so it counts as none. */
+/** Typed picks as verdicts. Without real probabilities the mass is one-hot and would always clear the stop bar, so a verdict carries none. */
 export function typedTriageVerdicts(picks: ReadonlyArray<TriagePick>, probabilities: boolean): TriageVerdict[] {
 	return picks.map(({ id, relation, urgency, mass }) => ({
 		id,
 		relation,
 		urgency,
-		confidence: probabilities ? mass : 0,
+		...(probabilities ? { confidence: mass } : {}),
 	}));
 }
 

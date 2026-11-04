@@ -317,7 +317,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		relabel(id, labels, kind) {
 			const entry = queue[find(id)];
 			if (!entry) return false;
-			entry.labels = { ...entry.labels, ...labels };
+			// Replaced, not merged: a later label verdict must not inherit the confidence an earlier round recorded.
+			entry.labels = { ...labels };
 			if (kind !== undefined && entry.pinned !== true) entry.kind = kind;
 			emitQueueUpdate();
 			report({ type: "relabeled", entry: { ...entry }, by: "producer" });

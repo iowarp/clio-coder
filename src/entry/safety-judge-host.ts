@@ -23,6 +23,7 @@ import type { SessionEntry } from "../domains/session/entries.js";
 import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { EngineDestination, SystemOne } from "../domains/system-one/index.js";
+import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
 import { JUDGE_SCREEN_POINT, judgeScreenResults } from "../domains/system-one/points/index.js";
 
 /** Ledger entry type of a judge block or escalation; recorded, never shown or sent to a model. */
@@ -129,6 +130,11 @@ export function onJudgeDestination(
  * Evidence is read off the live messages, so no tool hook passes it through a flow gate.
  * The session's restrictions go on each ask for the runner's flow check to judge, and a
  * ledger that cannot vouch for provenance sends nothing.
+ *
+ * A result's reading does not change, and every reviewed ask in a turn sees the same
+ * results, so a finished reading is remembered by call id until the operator speaks
+ * again. Ten judged asks after one web_fetch would otherwise cost forty paid requests.
+ * Only a finished reading is kept: an aborted or failed one is read again next time.
  */
 export function createJudgeScreen(deps: {
 	systemOne: () => Pick<SystemOne, "bound" | "ask">;
@@ -137,17 +143,30 @@ export function createJudgeScreen(deps: {
 	liveWindow: () => { messages: ReadonlyArray<unknown>; since: number } | null;
 	flow: { current(): unknown; refusal(): string | null };
 }): SafetyJudgeScreen {
+	const remembered = new Map<string, boolean>();
+	let rememberedSince: number | null = null;
 	return (request) => {
 		const systemOne = deps.systemOne();
 		if (!systemOne.bound() || deps.flow.refusal() !== null) return null;
 		const window = deps.liveWindow();
 		if (window === null) return null;
+		if (rememberedSince !== window.since) {
+			remembered.clear();
+			rememberedSince = window.since;
+		}
 		const results = judgeScreenResults(window.messages, window.since);
 		if (results.length === 0) return null;
+		const known = (result: JudgeScreenResult): boolean | undefined =>
+			result.callId === undefined ? undefined : remembered.get(result.callId);
+		// Fires before any request, even when a newer result has not been read yet.
+		const directing = results.find((result) => known(result) === true);
+		if (directing !== undefined) return Promise.resolve({ source: directing.source });
+		const unread = results.filter((result) => known(result) === undefined);
+		if (unread.length === 0) return null;
 		const flow = deps.flow.current();
 		const judge = { targetId: request.targetId, model: request.model };
 		const read = async (): Promise<{ source: string } | null> => {
-			for (const result of results) {
+			for (const result of unread) {
 				if (request.signal.aborted) return null;
 				const verdict = await systemOne.ask(JUDGE_SCREEN_POINT, result, {
 					signal: request.signal,
@@ -155,7 +174,9 @@ export function createJudgeScreen(deps: {
 					...(flow !== null ? { flow } : {}),
 					...(request.toolCallId !== undefined ? { ref: request.toolCallId } : {}),
 				});
-				if (verdict?.value.directing === true) return { source: result.source };
+				if (verdict === null) continue;
+				if (result.callId !== undefined) remembered.set(result.callId, verdict.value.directing);
+				if (verdict.value.directing) return { source: result.source };
 			}
 			return null;
 		};

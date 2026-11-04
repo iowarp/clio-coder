@@ -54,6 +54,11 @@ export interface JudgeScreenObject {
 	readonly content: string;
 }
 
+/** One result as the live messages hold it. Its call id is what a finished reading is remembered under. */
+export interface JudgeScreenResult extends JudgeScreenObject {
+	readonly callId?: string;
+}
+
 export interface JudgeScreenValue {
 	/** Probability that the content directs an AI agent. */
 	readonly p: number;
@@ -108,9 +113,9 @@ function targetsByCall(messages: ReadonlyArray<unknown>): Map<string, string> {
  * whole here: the runner redacts before anything bounds it, and a cut made first could
  * leave a partial secret no pattern recognizes.
  */
-export function judgeScreenResults(messages: ReadonlyArray<unknown>, since: number): JudgeScreenObject[] {
+export function judgeScreenResults(messages: ReadonlyArray<unknown>, since: number): JudgeScreenResult[] {
 	const targets = targetsByCall(messages);
-	const results: JudgeScreenObject[] = [];
+	const results: JudgeScreenResult[] = [];
 	for (let index = messages.length - 1; index >= 0 && results.length < JUDGE_SCREEN_MAX_RESULTS; index -= 1) {
 		const message = messages[index] as {
 			role?: unknown;
@@ -125,8 +130,13 @@ export function judgeScreenResults(messages: ReadonlyArray<unknown>, since: numb
 		if (typeof message.timestamp === "number" && message.timestamp < since) continue;
 		const content = textOf(message.content);
 		if (content.trim().length === 0) continue;
-		const target = typeof message.toolCallId === "string" ? targets.get(message.toolCallId) : undefined;
-		results.push({ source: target === undefined ? message.toolName : `${message.toolName} ${target}`, content });
+		const callId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
+		const target = callId === undefined ? undefined : targets.get(callId);
+		results.push({
+			source: target === undefined ? message.toolName : `${message.toolName} ${target}`,
+			content,
+			...(callId !== undefined ? { callId } : {}),
+		});
 	}
 	return results;
 }

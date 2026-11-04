@@ -342,6 +342,56 @@ test("evidence is the newest four third-party results since the operator spoke, 
 	strictEqual(JUDGE_SCREEN_POINT.state({ source: "s", content: quoted })?.content, quoted);
 });
 
+test("a finished reading is remembered by call id until the operator speaks, and an unfinished one is not", async () => {
+	const directing = engine("typed", AWAY, 0.9);
+	let since = NOW;
+	const first = screenOver(systemOneOver([route(directing)]), { liveWindow: () => ({ ...WINDOW, since }) });
+	const { review, records } = judged({ reply: () => settledReply(judgeReply("allow", "task-local")), screen: first });
+	strictEqual((await review()).kind, "park");
+	const second = await review();
+	strictEqual(second.kind, "park");
+	if (second.kind === "park") match(second.gateReason, /web_fetch https:\/\/x\.test\/a/u);
+	strictEqual(records[1]?.screened, "parked");
+	strictEqual(directing.asked.length, 1);
+	// The same message without a settled judge: a remembered reading lands before a fast verdict.
+	const fast = judged({ reply: () => judgeReply("allow", "task-local"), screen: first });
+	strictEqual((await fast.review()).kind, "park");
+	strictEqual(directing.asked.length, 1);
+	since = NOW - 1;
+	await first({ targetId: "judge", model: "m", signal: new AbortController().signal });
+	strictEqual(directing.asked.length, 2);
+
+	// A clean reading is remembered too, so a second review sends nothing.
+	const clean = engine("typed", AWAY, 0.1);
+	const cleanScreen = screenOver(systemOneOver([route(clean)]));
+	const signal = new AbortController().signal;
+	strictEqual(await cleanScreen({ targetId: "judge", model: "m", signal }), null);
+	strictEqual(await cleanScreen({ targetId: "judge", model: "m", signal }), null);
+	strictEqual(clean.asked.length, 1);
+
+	// An aborted reading is read again.
+	const retried = engine("typed", AWAY, 0.1);
+	const retry = screenOver(systemOneOver([route(retried)]));
+	const aborted = new AbortController();
+	aborted.abort(new Error("the verdict landed"));
+	strictEqual(await retry({ targetId: "judge", model: "m", signal: aborted.signal }), null);
+	strictEqual(retried.asked.length, 0);
+	strictEqual(await retry({ targetId: "judge", model: "m", signal }), null);
+	strictEqual(retried.asked.length, 1);
+
+	// A result with no call id goes unmemoized.
+	const anonymous = engine("typed", AWAY, 0.1);
+	const noId = screenOver(systemOneOver([route(anonymous)]), {
+		liveWindow: () => ({
+			since: NOW,
+			messages: [{ role: "toolResult", toolName: "web_read", content: "a page", timestamp: NOW }],
+		}),
+	});
+	await noId({ targetId: "judge", model: "m", signal });
+	await noId({ targetId: "judge", model: "m", signal });
+	strictEqual(anonymous.asked.length, 2);
+});
+
 test("the reading stops at the first directing result, newest first", async () => {
 	const directing = engine("typed", AWAY, 0.9);
 	const screen = screenOver(systemOneOver([route(directing)]), {

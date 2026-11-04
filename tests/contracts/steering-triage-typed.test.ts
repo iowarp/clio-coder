@@ -15,6 +15,7 @@ import {
 	TRIAGE_STOP_MIN_CONFIDENCE,
 	triageFloor,
 	triageKindFor,
+	triageLabelsFor,
 	triageMayInterrupt,
 } from "../../src/session-control/steering-triage.js";
 
@@ -172,13 +173,18 @@ test("a label readout only marks, however one-hot its answer", async () => {
 	const ran = await round({ systemOne: over(engine(LABELS, "stop", 1)) });
 	const verdict = ran.applied?.[0];
 	strictEqual(verdict?.relation, "stop");
-	strictEqual(verdict?.confidence, 0);
+	strictEqual(verdict?.confidence, undefined);
+	const labels = triageLabelsFor(verdict as TriageVerdict);
+	strictEqual(labels.readout, "label");
+	ok(!("confidence" in labels));
 	strictEqual(triageMayInterrupt(verdict as TriageVerdict, FRESH, 1_000), false);
 });
 
 test("real mass interrupts at the bar and not under it", async () => {
 	const at = (await round({ systemOne: over(engine(MASS, "stop", TRIAGE_STOP_MIN_CONFIDENCE)) })).applied?.[0];
 	strictEqual(triageMayInterrupt(at as TriageVerdict, FRESH, 1_000), true);
+	strictEqual(triageLabelsFor(at as TriageVerdict).confidence, "0.80");
+	ok(!("readout" in triageLabelsFor(at as TriageVerdict)));
 	const under = (await round({ systemOne: over(engine(MASS, "stop", 0.79)) })).applied?.[0];
 	strictEqual(under?.relation, "stop");
 	strictEqual(triageMayInterrupt(under as TriageVerdict, FRESH, 1_000), false);
