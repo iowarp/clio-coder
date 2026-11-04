@@ -214,7 +214,9 @@ describe("a typed triage ask on anthropic-max", () => {
 describe("the output_config dialect", () => {
 	it("stays out of the response_format table a worker refuses from", () => {
 		strictEqual(speaksOutputConfigFormat("anthropic-max"), true);
-		strictEqual(speaksOutputConfigFormat("anthropic"), false);
+		strictEqual(speaksOutputConfigFormat("anthropic"), true);
+		strictEqual(speaksOutputConfigFormat("anthropic-compat"), false);
+		strictEqual(responseSchemaDialectFor("anthropic"), null);
 		strictEqual(responseSchemaDialectFor("anthropic-max"), null);
 		strictEqual(runtimeSpeaksResponseSchemaDialect(anthropicMaxRuntime), false);
 	});

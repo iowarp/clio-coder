@@ -89,21 +89,22 @@ export function responseFormatFor(
 }
 
 /**
- * The runtime whose System One asks hold their reply through the Messages API's
+ * The runtimes whose System One asks hold their reply through the Messages API's
  * `output_config.format`, the one schema spelling this wire has. It sits apart from
  * {@link responseSchemaDialectFor} because it is no `response_format` field, a worker
  * reading that table must keep refusing a contract it cannot carry, and a round that did
  * not ask for this (`/handoff`, the safety judge, triage's side model) keeps its request.
  *
- * Measured on Claude Haiku 5.5 through the subscription. A model that predates the field
- * answers HTTP 400, which {@link isResponseSchemaRejection} reads as the same refusal
- * every other dialect earns, so the round falls back to its prompt.
+ * Measured on Claude Haiku 5.5 through the subscription. `anthropic` is the same wire on an
+ * API key and is untested. A model that predates the field answers HTTP 400, which
+ * {@link isResponseSchemaRejection} reads as the same refusal every other dialect earns, so
+ * the round falls back to its prompt.
  */
-export const OUTPUT_CONFIG_SCHEMA_RUNTIME_ID = "anthropic-max";
+const OUTPUT_CONFIG_SCHEMA_RUNTIME_IDS: ReadonlySet<string> = new Set(["anthropic-max", "anthropic"]);
 
 /** Whether a System One ask on this runtime binds its schema through `output_config.format`. */
 export function speaksOutputConfigFormat(runtimeId: string): boolean {
-	return runtimeId === OUTPUT_CONFIG_SCHEMA_RUNTIME_ID;
+	return OUTPUT_CONFIG_SCHEMA_RUNTIME_IDS.has(runtimeId);
 }
 
 /** The `output_config.format` value that binds a Messages API reply to `schema`. */
