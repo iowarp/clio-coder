@@ -20,6 +20,7 @@ import { openCallScope } from "../domains/telemetry/call-scope.js";
  */
 
 import type { ThinkingLevel } from "../core/defaults.js";
+import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import {
 	isResponseSchemaRejection,
 	type ResponseSchemaDialect,
@@ -139,6 +140,8 @@ export interface SideQuestionResult {
 	usage: SideQuestionUsage | null;
 	/** True when the operator cancelled the round with Esc or Ctrl+C. */
 	aborted: boolean;
+	/** The model the provider said answered, absent where the wire reports none. */
+	reportedModel?: string;
 }
 
 function positive(value: unknown): number {
@@ -389,7 +392,13 @@ async function runRound(
 					callOutcome: "success",
 					...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
 				});
-				return { text: answer, usage, aborted: false };
+				const reported = responseModelIdObservationFromRecord(event.message as never, "not-observed");
+				return {
+					text: answer,
+					usage,
+					aborted: false,
+					...(reported.state === "reported" ? { reportedModel: reported.reportedModelId } : {}),
+				};
 			}
 			if (event.type === "error") {
 				const failed = event.error as { stopReason?: unknown; usage?: unknown; errorMessage?: unknown };

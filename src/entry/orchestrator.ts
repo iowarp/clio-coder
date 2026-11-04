@@ -799,7 +799,7 @@ function memoryObservationCapacity(providers: ProvidersContract, settings: Reado
  * without ever becoming a turn. The answer is text, so an engine behind this
  * port can vote but cannot read logprobs.
  */
-function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
+export function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
 	return async (request) => {
 		const target = providers.getTarget(request.targetId);
 		const wireModelId = request.model ?? target?.defaultModel ?? null;
@@ -845,6 +845,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 		return {
 			text: result.text,
 			...(result.usage !== null ? { usage: { input: result.usage.input, output: result.usage.output } } : {}),
+			...(result.reportedModel !== undefined ? { model: result.reportedModel } : {}),
 		};
 	};
 }
