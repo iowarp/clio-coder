@@ -35,7 +35,7 @@ The three commands answer different needs. Pick by whether you want a recorded r
 | `/peer <peer> <brief>` | A Herdr pane opens for you to work in (start Clio Coder inside Herdr with `--with-panes`) | No run record |
 :::
 
-Panes are [experimental](/experimental/panes-and-docks.html). Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
+Panes are [experimental](/research/panes-and-docks.html). Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
 
 ## Give one bounded assignment
 

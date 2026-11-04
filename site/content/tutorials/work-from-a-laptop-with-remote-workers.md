@@ -138,7 +138,7 @@ Transfer, verification and application failures preserve the node branch for rec
 
 ## Follow the result
 
-Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/experimental/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
+Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/research/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
 
 SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio Coder has verified.
 

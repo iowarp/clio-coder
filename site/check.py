@@ -18,7 +18,7 @@ link_ref = product.get('linkRef') or docs_source['ref']
 source_tree = f"{repository}/tree/{link_ref}"
 doc_sources = {item["path"]: item["source"] for item in manifest["files"]}
 errors = []
-for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/experimental', 'content/drafts', 'review', 'vendor', 'cards'):
+for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/research', 'content/drafts', 'review', 'vendor', 'cards'):
     if (root / private).exists():
         errors.append(f'Private source directory entered the public output: {private}')
 for private in ('assets/brand/provenance.json', 'assets/logo.webp', 'assets/banner.webp'):
@@ -126,12 +126,12 @@ urls = [e.text for e in ET.parse(root / 'sitemap.xml').findall('.//{*}loc')]
 if len(urls) != len(set(urls)):
     errors.append('Sitemap contains duplicate URLs')
 pages = {}
-for collection in ('tutorials', 'experimental'):
+for collection in ('tutorials', 'research'):
     for item in json.loads((site / f'content/{collection}.json').read_text()):
         if f"{origin}/{collection}/{item['slug']}.html" not in urls:
             errors.append(f"{collection}/{item['slug']}: registered article is missing from sitemap")
-if origin + '/experimental.html' not in urls:
-    errors.append('Experimental listing is missing from sitemap')
+if origin + '/research.html' not in urls:
+    errors.append('Research listing is missing from sitemap')
 if origin + '/404.html' in urls:
     errors.append('404 must not be listed in sitemap')
 for url in [*urls, origin + '/404.html']:
@@ -178,7 +178,7 @@ for url in [*urls, origin + '/404.html']:
             crumbs = next(node for node in graph if node.get('@type') == 'BreadcrumbList')['itemListElement']
             if [item['position'] for item in crumbs] != list(range(1, len(crumbs) + 1)) or crumbs[-1]['item'] != url:
                 errors.append(f'{path}: structured breadcrumbs are not a valid path to this page')
-        if path.startswith(('/tutorials/', '/experimental/')) and (entity.get('@type') != 'Article' or not entity.get('headline') or not entity.get('author')):
+        if path.startswith(('/tutorials/', '/research/')) and (entity.get('@type') != 'Article' or not entity.get('headline') or not entity.get('author')):
             errors.append(f'{path}: tutorial article metadata is incomplete')
         if path == '/':
             software = next(node for node in graph if node.get('@type') == 'SoftwareSourceCode')

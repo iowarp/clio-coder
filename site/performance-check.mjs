@@ -29,7 +29,7 @@ try {
 		"/",
 		"/docs.html",
 		"/learn.html",
-		"/experimental.html",
+		"/research.html",
 		...values.paths.split(",").filter(Boolean),
 	]) {
 		const context = await browser.newContext({

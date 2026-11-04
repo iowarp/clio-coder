@@ -47,5 +47,5 @@ Try it on a task you can check before trusting it with a long one. This page mak
 ::: next
 - [Choose a model for your project](/tutorials/choose-model-for-your-project.html)
 - [Connection guide](/docs/guide/configuration-and-targets.html)
-- [Bring a fast decision model with System One](/experimental/system-one-decisions.html)
+- [Bring a fast decision model with System One](/research/system-one-decisions.html)
 :::

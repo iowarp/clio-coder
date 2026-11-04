@@ -92,6 +92,6 @@ Capture needs no extra program. For playback, `clio-coder tools install asciinem
 
 ::: next
 - [Semantic context beta guide](https://github.com/iowarp/clio-coder/blob/v0.6.2/docs/guide/semantic-context.md)
-- [Remote workers and clusters](/experimental/remote-workers-and-clusters.html)
+- [Remote workers and clusters](/research/remote-workers-and-clusters.html)
 - [Connect a model](/docs/guide/configuration-and-targets.html)
 :::

@@ -4,9 +4,9 @@ The product site helps a developer or curious newcomer understand fit, install
 Clio Coder, connect a suitable model, and complete a useful first task. Lead with
 what the user can do. A research institution is not a product benefit.
 
-Anthony's personal site, akougkas.io, explains the insight, judgment, and research
-direction behind the work. Its companion essays are distilled first-person
-writing rather than another copy of the product guide. Link related articles in
+Anthony's personal site, akougkas.io, holds personal essays: the insight and
+judgment behind the work, in the first person. They are not another copy of the
+product guide, and they do not belong on this site. Link related articles in
 context; give distinct pages distinct titles, descriptions, and canonical URLs.
 
 ## Article shape
@@ -19,21 +19,37 @@ from an independently executed demonstration. State the version scope when
 commands or formats may change. Do not invent screenshots, benchmarks, costs,
 adoption numbers, or testimonials.
 
-Use existing Overview, Docs, Tutorials, and Experimental navigation. The install
+Use existing Overview, Docs, Tutorials, and Research navigation. The install
 section and first-session tutorial are useful next actions. More articles are
 justified by more answered user questions, not keyword permutations.
 
-## Experimental articles
+## Shipped work and research
 
-Experimental is for capabilities a reader has to opt into: features that are
-off by default, need extra software, or may change between releases. Articles
-live in `content/experimental/` and are registered in
-`content/experimental.json`, which has the same shape as
-`content/tutorials.json`. They may be shorter than tutorials. Each one opens
-with a note that marks the feature experimental and states the version scope,
-says what turns it on, and names its limits. A capability moves to Tutorials or
-the overview only when it stops needing that note. An entry has a cover only
-when a real capture of that feature exists.
+Docs and Tutorials hold what shipped, opt-in and beta features included. If a
+reader can turn it on at the stated version and it does what the page says, it
+belongs there, and the page states what turns it on and its limits.
+
+Research holds open questions. Pages live in `content/research/` and are
+registered in `content/research.json`, which has the same shape as
+`content/tutorials.json`. Each one is an invitation to the team and students,
+with outside researchers welcome, and has these parts:
+
+- The question, stated so that an answer could be wrong.
+- What is known and measured so far, with sample sizes and the build measured.
+  Say when a sample is small, when a result came from a design that no longer
+  exists, and when nothing has been measured.
+- Why the answer matters.
+- How to use Clio Coder on it today, with commands that exist at the stated
+  version.
+- A first experiment, labelled "proposed, not yet run" until someone has run it
+  and recorded the result.
+- How to join: GitHub issues and `CONTRIBUTING.md`.
+
+Name no lab, advisor, or funding. Publish numbers on the page and no data files.
+No private paths, hostnames, or agent logs. A research page may run longer than a
+tutorial. When a question is settled and the result ships, the how-to moves to
+Docs or Tutorials and the Research page says what was found. Personal essays stay
+on akougkas.io.
 
 ## First guide batch
 
