@@ -738,6 +738,11 @@ const STAGE0_SEAMS: ReadonlyArray<Stage0Seam> = [
 			"sumRunUsage, the one usage fold both the CLI modes and the TUI report from. Its value closure stays on domains and engine/ai, off the render graph.",
 	},
 	{
+		module: "src/session-control/side-question.ts",
+		reason:
+			"runOutOfTurnRound, the one round a subscription route can answer through, since such a target has no chat wire. `systemone check --live` must ask the way a session's engine asks, or it would verify a path no session uses. Reached only by dynamic import behind that subcommand, so the CLI skips the chat loop that re-exports it, and its closure stays on domains, core and the provider half of the engine, off the Stage 0 closure.",
+	},
+	{
 		module: "src/engine/tui-primitives.ts",
 		reason:
 			"a pure re-export of the three pi-tui symbols src/cli/fleet-view.ts needs. It has no relative imports at all, and boundaries rule1 forbids the CLI importing pi-tui directly, so this module is why fleet-view does not touch the engine tui barrel.",
