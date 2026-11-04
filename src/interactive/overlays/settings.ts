@@ -1942,7 +1942,7 @@ function systemOneRows(settings: Readonly<ClioSettings>, live: () => Readonly<Cl
 		settingItem("systemOne.use", Array.isArray(use) ? use.join(", ") : (use ?? SITE_OFF_CHOICE), {
 			label: "Decision engine",
 			description:
-				"Experimental opt-in. Off until chosen. It registers the consult tool on the next start, which sends the evidence the agent supplies, including the heads of files it names. main and memory add separate completions to that route; jev sends redacted state to TypeSafe.",
+				"Experimental opt-in. Off until chosen. It registers the consult tool on the next start, which sends the evidence the agent supplies, including the heads of files it names. A route also drives the judge screen, which sends web and MCP result text at judge time, and steering triage when that is on. main and memory add separate completions to that route; jev sends redacted state to TypeSafe.",
 			submenu: selectListSubmenu("Decision engine", [
 				{ value: SITE_OFF_CHOICE, label: "Off" },
 				...useChoices.map((name) => ({ value: name, label: name })),
