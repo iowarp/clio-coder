@@ -1929,14 +1929,6 @@ A dispatched run's `apiCalls` in `run.settled` counts provider calls as a fact, 
 
 The route observer records what the joint route resolver decided against what happened for every dispatch. It never selects a route, because selection belongs to the resolver. It journals each decision as `route.decided` in the journal of the session or run that asked, with the selected and executed routes, the scored candidates, the reasons and whether the policy would have run another route. The outcome's durable record is the run's own `run.settled`, which route history folds ([Route history and settled labels](#route-history-and-settled-labels)). There is no separate observation file. The records measure route regret, constraint validity, prediction calibration, and outcome. They do not measure whether Clio Coder dispatched the agent the caller asked for, because that is true by construction.
 
-## Speculative worker prewarm
-
-`fleet.speculativeDispatch` (default `false`, experimental) lets Clio Coder start a worker process before the model asks for it. The System One `turn` site predicts which recipe the main agent is about to dispatch. When its fitted prewarm cut fires, Clio spawns that worker and holds it at "waiting for spec" while the main model generates. See [System One](system-one.md) for the `turn` site.
-
-A dispatch adopts a held process only when its agent, target, wire model, runtime, and working directory all match the prediction. Anything else runs on an ordinary cold spawn, and the held process is killed when the turn settles. At most two held processes exist at once. They take no capacity lease, so they never take a slot from a real dispatch.
-
-Nothing is held for a remote node, a non-native runtime, a draining fleet, or an endpoint or fleet already at its limit. The call, admission, spec, and run record of the adopting dispatch are identical to a cold spawn.
-
 ## Residency
 
 Remote workers default to residency observe. The SSH transport projects that

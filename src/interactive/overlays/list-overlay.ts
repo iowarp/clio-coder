@@ -579,7 +579,8 @@ export class ListOverlayView implements Component {
 		// standing. Scrolling a pane is reachable only once the pane is on screen, and
 		// it is the widest entry, so it goes with the arrows: at 120 columns it used
 		// to outlive every global key and leave n, b and s off the rail.
-		const hasDetail = this.items.some((item) => !!item.detail);
+		// The selected row decides: a list mixing rows advertised Tab on a row where the press does nothing.
+		const hasDetail = !!this.filteredItems()[this.selectedIndex]?.detail;
 		if (hasDetail && this.detailPaneDrawn) hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
 		if (this.options.filterable) {
 			hintEntries.push(this.options.explicitSearch ? { key: "/", verb: "search", critical: true } : FILTER_HINT);

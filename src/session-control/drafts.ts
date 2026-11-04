@@ -1,15 +1,12 @@
 /**
- * `/draft [N] <request>`: several candidate answers side by side, one judgment.
+ * `/draft [N] <request>`: several candidate answers side by side.
  *
  * A diffusion model answers a request in about a second, which makes asking it
- * several times cheaper than asking a frontier model once. That only helps if
- * something can say which answer to read first. A System One model does exactly
- * that: one `choice` over the candidates returns a calibrated distribution, so
- * the overlay can show how decisive the pick was rather than only which one won.
+ * several times cheaper than asking a frontier model once. The operator reads
+ * the candidates and takes one.
  *
  * Nothing here enters the session. The rounds read the compiled history the
- * next turn would send, like `/btw`, and the judge reads only the request and
- * the candidate texts. Closing the overlay ends the exchange.
+ * next turn would send, like `/btw`. Closing the overlay ends the exchange.
  */
 
 import { stripDeadToolCallMarkup } from "../engine/loop-guard.js";
@@ -23,8 +20,8 @@ export const DRAFT_DEFAULT = 3;
 
 /**
  * One temperature per candidate. The same request at the same temperature
- * gives a diffusion model little reason to answer differently, and a judge
- * picking between near-copies is a judgment about nothing. The first draft
+ * gives a diffusion model little reason to answer differently, and near-copies
+ * give the operator nothing to choose between. The first draft
  * stays close to the model's default answer; the rest move away from it.
  */
 export const DRAFT_TEMPERATURES = [0.3, 0.7, 1.0, 1.2] as const;
@@ -82,10 +79,9 @@ export function draftTemperature(model: DraftModelShape | string, temperature: n
 
 /**
  * How a candidate that cannot be spread by temperature is told to differ. The
- * first draft stays the plain answer, so the judge always has a baseline; the
- * rest are asked for a distinct route to the same answer. Prompt variation
- * moves a model less than temperature does, but a judge choosing between
- * identical drafts is judging nothing.
+ * first draft stays the plain answer, as a baseline; the rest are asked for a
+ * distinct route to the same answer. Prompt variation moves a model less than
+ * temperature does, but identical drafts offer no choice.
  */
 const DRAFT_ANGLES = [
 	"",

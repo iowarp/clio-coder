@@ -1,5 +1,5 @@
 /**
- * What may reach the dataset file. A decision's state is the operator's own
+ * What may leave in a decision request. A decision's state is the operator's own
  * request, tool arguments and tool output, so nothing leaves this module
  * without passing the two secret filters the rest of the harness already
  * trusts, plus a key-name pass for values that carry no secret-shaped text of
@@ -42,7 +42,7 @@ function homeRegExp(): RegExp | null {
 	return re;
 }
 
-/** Replace the operator's home directory prefix with `~`, so a dataset row does not name the account. */
+/** Replace the operator's home directory prefix with `~`, so a request does not name the account. */
 function tildeHome(text: string): string {
 	const re = homeRegExp();
 	return re === null ? text : text.replace(re, "~");

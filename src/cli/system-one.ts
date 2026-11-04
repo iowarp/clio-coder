@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
+import type { OneShotPort } from "../domains/providers/one-shot.js";
 import { printError } from "./shared.js";
 
 export const SYSTEM_ONE_HELP = `clio-coder systemone status
@@ -107,22 +108,49 @@ async function offlineSystemOneDeps(live: Readonly<ClioSettings>) {
 	const { BUILTIN_RUNTIMES } = await import("../domains/providers/runtimes/builtins.js");
 	const { openAuthStorage, resolveAuthTarget } = await import("../domains/providers/auth/index.js");
 	const { credentialAvailable } = await import("../domains/providers/credentials.js");
+	const { resolveSideCallAuth } = await import("../domains/providers/side-call-auth.js");
+	const { oneShotTokens } = await import("../domains/providers/one-shot.js");
+	const { runOutOfTurnRound } = await import("../session-control/side-question.js");
 	const auth = openAuthStorage();
 	const getTarget = (id: string) => live.targets.find((entry) => entry.id === id) ?? null;
 	const getRuntime = (id: string) => BUILTIN_RUNTIMES.find((runtime) => runtime.id === id) ?? null;
+	const authPort = {
+		resolveForTarget: (
+			target: Parameters<typeof resolveAuthTarget>[0],
+			runtime: Parameters<typeof resolveAuthTarget>[1],
+			options?: { signal?: AbortSignal },
+		) => auth.resolveForTarget(resolveAuthTarget(target, runtime), options ?? {}),
+	};
+	// A subscription target has no chat wire, so a check reaches it the way a session's engine does.
+	const oneShot: OneShotPort = async (request) => {
+		const target = getTarget(request.targetId);
+		const runtime = target === null ? null : getRuntime(target.runtime);
+		const wireModelId = request.model ?? target?.defaultModel ?? null;
+		if (target === null || runtime === null || wireModelId === null) {
+			throw new Error(`target '${request.targetId}' names no model to ask`);
+		}
+		const result = await runOutOfTurnRound({
+			model: runtime.synthesizeModel(target, wireModelId, null),
+			messages: [],
+			systemPrompt: request.system,
+			userText: request.user,
+			maxTokens: request.maxTokens,
+			thinkingLevel: "off",
+			signal: request.signal,
+			runtimeId: runtime.id,
+			...(await resolveSideCallAuth(authPort as never, target, runtime, "clio-coder-local-target", request.signal)),
+		});
+		if (result.aborted) throw new Error("the one-shot round was aborted");
+		return {
+			text: result.text,
+			...(result.usage !== null ? { usage: oneShotTokens(result.usage) } : {}),
+			...(result.reportedModel !== undefined ? { model: result.reportedModel } : {}),
+		};
+	};
 	return {
 		settings: () => live,
-		providers: {
-			getTarget,
-			getRuntime,
-			auth: {
-				resolveForTarget: (
-					target: Parameters<typeof resolveAuthTarget>[0],
-					runtime: Parameters<typeof resolveAuthTarget>[1],
-					options?: { signal?: AbortSignal },
-				) => auth.resolveForTarget(resolveAuthTarget(target, runtime), options ?? {}),
-			},
-		} as never,
+		providers: { getTarget, getRuntime, auth: authPort } as never,
+		oneShot,
 		// This process registers no runtime, so the set holds exactly the keys this runtime declares.
 		credentialsPresent: () =>
 			new Set(
@@ -150,8 +178,9 @@ async function runCheck(name: string): Promise<number> {
 	const systemOne = createSystemOne(await offlineSystemOneDeps(live));
 	let failure = "the engine gave no answer";
 	const verdict = await systemOne.ask(
-		consultPoint({ check: pointQuestion(yesNo("Is 2 greater than 1?", "It is greater", "It is not greater")) }),
-		{ state: { check: "build identity" }, files: {} },
+		// The state settles the question, because an engine told to read only the state abstains otherwise.
+		consultPoint({ check: pointQuestion(yesNo("Is left greater than right?", "It is greater", "It is not greater")) }),
+		{ state: { left: 2, right: 1 }, files: {} },
 		{ onFailure: (reason) => (failure = reason) },
 	);
 	const requested = resolved.engine.model ?? "target default";

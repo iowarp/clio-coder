@@ -65,7 +65,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder panes install [--force] [--json]` | Alias for `clio-coder tools install herdr`. |
 | `clio-coder panes theme` | Print Clio Coder's theme tokens as a herdr `[theme.custom]` block to paste into herdr's `config.toml`; Clio never edits that file. See [Panes and the Files Pane](panes-and-files.md). |
 | `clio-coder panes workspace on\|off\|ask\|status` | Set or inspect the remembered choice for embedded workspaces. See [Turn panes on](panes-and-files.md#turn-panes-on). |
-| `clio-coder systemone status\|use <engine>\|off\|check <engine> --live\|export --out <file> [--since <YYYY-MM-DD>] [--site <site>]` | Show what each System One site will do and why, choose its engine at user or project scope, verify which build answers, or export the local research dataset as JSON lines. The dataset is research telemetry (`system_one.sample_captured` records in session journals), recorded only with `telemetry.mode: research`, `telemetry.research.systemOneDataset` and content consent for the workspace. `--out` may not point into the telemetry directory. Experimental. See [System One](system-one.md). |
+| `clio-coder systemone status\|use <route>[,<route>...]\|off\|check <engine> --live` | Show whether System One is on and why not, name its routes at user or project scope, turn it off, or verify which build answers. A named route answers the `consult` tool, the judge screen and steering triage, so on a hosted route web and MCP result text leaves the machine at judge time. Experimental. See [System One](system-one.md). |
 | `clio-coder tasks [list\|add\|hand\|done\|drop]` | List, add, hand, finish, or drop project operator tasks. `add` takes `--expect <path>` and `--verify <checkId>[:timeoutMs]`; `hand`, `done` and `drop` take a `uN` id. |
 | `clio-coder verifiers discover\|inspect\|author\|validate\|add\|edit\|rename\|remove\|baseline\|dry-run` | Discover, inspect, author, validate, add, edit, rename, remove, baseline, or dry-run project checks. |
 | `clio-coder reset --state\|--data\|--cache\|--auth\|--settings\|--all [--dry-run] [--force] [--json]` | Reset the named Clio Coder state; with no level it exits 2. Under `--state` or `--all`, an owned background app is stopped first and reported as `Removed Background service`. |
@@ -412,12 +412,12 @@ The registry table below lists every interactive slash command. On a bare `/`, c
 | `/delegate` | `/delegate [--read-only] [--share] <agent-id> <task>` | Run a configured ACP peer as a managed run with a sealed run record; `--read-only` denies write permission requests. |
 | `/peer` | `/peer [--cwd <workspace>] <claude-code\|codex\|opencode\|antigravity\|pi> [brief]` | Open an installed coding agent in an owned Herdr pane; no managed run. Needs the pane layer, see [Panes and the Files Pane](panes-and-files.md). |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
-| `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3). With the System One `drafts` site bound, a decision engine says which to read first. `Enter` on a finished draft puts it in the composer, unsent |
+| `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3). `Enter` on a finished draft puts it in the composer, unsent |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis; `--rounds` takes an integer from 1 to 3 |
 | `/agents` | `/agents` | Open the Library on Agents. |
 | `/usage` | `/usage` | Show workspace activity, subscription quota, credits, and session token and cost totals |
-| `/systemone` | `/systemone [status\|use <engine>\|off] [--scope task\|session\|project\|user]` | Show what each System One site will do and why, or choose its engine for this task, session or project. Experimental. |
+| `/systemone` | `/systemone` | Show whether System One is on and what answers it. It changes nothing: `clio-coder systemone use` names a route and applies on the next start. Experimental. |
 | `/health` | `/health` | Show telemetry journal losses, event-loop lag, transport, quota, route and System One breakers |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/upgrade` | `/upgrade` | Recheck the release, review an eligible npm-global or installer replacement, and ask before changing the package. An installer install follows the channel it recorded, and a pinned install is left alone with the command that unpins it. User data is preserved; after success Clio asks you to exit and restart. A source checkout is told to update through git; other installation kinds receive manager-specific instructions. |
@@ -534,7 +534,7 @@ show equal percentages are never merged.
 | Workflow | Behavior |
 | --- | --- |
 | `/model` and `/thinking` | Choose a route for this session or save it as a default. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md). |
-| `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Candidates differ by sampling temperature, or by prompt angle for models that refuse a sampler, with one retry without `temperature` on an `Unsupported parameter: temperature` rejection. Bind `systemOne.sites.drafts` for a judged pick. In `/draft`, `Enter` on a finished draft closes the overlay and appends its text to the composer below anything already typed, never sending it, and `Esc` closes without taking anything. |
+| `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Candidates differ by sampling temperature, or by prompt angle for models that refuse a sampler, with one retry without `temperature` on an `Unsupported parameter: temperature` rejection. In `/draft`, `Enter` on a finished draft closes the overlay and appends its text to the composer below anything already typed, never sending it, and `Esc` closes without taking anything. |
 | `/council` | Runs a roster declared under `fleet.rosters` of two to five read-only members: the roster named `default`, or the one `--roster` names. With no `--roster` and no `default` roster, the notice points at `fleet.rosters` in `settings.yaml`. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/share <runId>`. |
 | `/run` and `/delegate` | Start a worker or ACP peer as a managed run with a sealed run record. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
@@ -761,9 +761,9 @@ selected entry now and keeps the rest queued, and the restore key (`Alt+Q`)
 puts everything back in the editor. The panel shows each entry's slot word,
 how long it has waited, and advisory marks: `!` when a reading found it urgent,
 `·t` when steering triage relabeled it. Steering triage is experimental and
-off by default (`chat.steering.triage`): when on, a side model reads the queue
-once it has settled, moves an unrelated task to the end of the turn unless you
-set its slot yourself, and may interrupt the run on a confident stop.
+off by default (`chat.steering.triage`): when on, a bound System One route or
+else a side model reads the queue once it has settled, moves an unrelated task to the end of the turn unless you
+set its slot yourself, and may interrupt the run on a confident stop. A label route never interrupts.
 
 ### The same three modes against a background worker
 

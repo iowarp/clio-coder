@@ -9,7 +9,6 @@ sources:
   - "scripts/check-release.mjs"
   - "scripts/release-candidate.mjs"
   - "scripts/pi-surface-diff.ts"
-  - "scripts/decision-probe.ts"
   - "scripts/release-version-policy.mjs"
   - "scripts/release-manifest.json"
 symbols:
@@ -191,16 +190,6 @@ together (`@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`,
 `@earendil-works/pi-tui`), per the Pi SDK dependency section of the repository
 handbook.
 
-## Operator-run System One calibration
-
-`scripts/decision-probe.ts` scores a System One site's wording against its labeled
-fixture under `tests/fixtures/decision-cases/`, live. It **calls the named engine**
-(from `systemOne.engines`, or built from `--kind`, `--target` and `--model`), runs
-each case through `createSystemOne` as production does, and reports per labeled key
-how many answers agreed, abstained or were wrong, the probability ranges of the two
-classes, and a suggested cut with its margins. It prints the answering build because
-a cut belongs to one build. The usage comment marks it "never part of CI."
-
 ## Focused tests
 
 `tests/contracts/release-boundary.test.ts` (manual) covers two script helpers:
@@ -263,8 +252,7 @@ commands; directory membership alone does not make a test a default gate.
   named in `scripts/release-manifest.json` are allowed; other repository tools
   remain checkout-only.
 - **No model calls in the lint gate.** `check-hygiene.ts` must stay free of
-  model requests and real user installations. `decision-probe.ts` exercises
-  real runtimes only in an explicitly requested operator run.
+  model requests and real user installations.
 - **Generated catalogs are committed.** `library/registry.yaml`,
   `library/skills/registry.yaml`, `library/skills/skill-marketplace.json`, and
   `.claude-plugin/marketplace.json` are checked into the tree and must be

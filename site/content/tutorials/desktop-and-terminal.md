@@ -17,7 +17,9 @@ The terminal combines the conversation, tool calls, permissions, and worker acti
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
 
-During a turn, **Enter** queues a message that Clio reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run. Review a permission card before allowing an action. **Deny** skips that call; **Stop** ends the turn.
+During a turn, **Enter** queues a message that Clio reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
+
+On a permission card, **Enter** allows the call. **Esc** denies it, which skips that call and leaves the run going. **Alt+X** stops the turn.
 
 ## Clio Coder on the desktop
 
@@ -29,7 +31,7 @@ clio-coder gui --open
 
 The command opens the local application with its access link. Open a workspace folder, describe a task, and choose a model and thinking level from the composer.
 
-The rail on the left groups tasks by workspace. The Session column on the right shows the workspace's Git state, the model, context, usage, the plan, artifacts, changes, and receipts as the task runs.
+The rail on the left groups tasks by workspace. The Session column on the right shows the workspace's Git state, the model, context, usage, the plan, artifacts, changes, and run records as the task runs.
 
 You can keep any number of tasks open. Launching again brings the existing window forward instead of opening another. Up to four turns run at once and later ones wait for a slot. A task nobody has looked at for five minutes is paused with its conversation kept; choose **Resume session** to continue it.
 

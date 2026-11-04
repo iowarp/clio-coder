@@ -99,7 +99,7 @@ export interface WikiGenerationPlan {
 export const WIKI_DEPTH_STRATEGY: Record<ResolvedWikiDepth, DepthStrategy> = {
 	simple: { areaDepth: 1, areaShare: 0.08, minAreaLines: 400 },
 	medium: { areaDepth: 2, areaShare: 0.03, minAreaLines: 250 },
-	detailed: { areaDepth: 3, areaShare: 0.008, minAreaLines: 150 },
+	detailed: { areaDepth: 3, areaShare: 0.002, minAreaLines: 150 },
 };
 
 export interface DepthStrategy {
@@ -118,6 +118,7 @@ export const MAX_MEDIUM_OWNERSHIP_PAGES = 24;
 export const MAX_DETAILED_OWNERSHIP_PAGES = 64;
 const MEDIUM_SPLIT_LINES = 8_000;
 const DETAILED_SPLIT_LINES = 4_000;
+const MIN_FLAT_FAMILY_FILES = 3;
 
 interface Area {
 	key: string;
@@ -263,132 +264,36 @@ function sumLines(files: ReadonlyArray<CodewikiFile>): number {
 	return files.reduce((total, file) => total + Math.max(0, file.loc), 0);
 }
 
-/** Split sorted files into contiguous groups of at most `limit` lines; a file above it stays alone. */
-function rawGroups(files: CodewikiFile[], limit: number): CodewikiFile[][] {
-	const groups: CodewikiFile[][] = [];
-	let current: CodewikiFile[] = [];
-	let lines = 0;
-	for (const file of files) {
-		const size = Math.max(0, file.loc);
-		if (current.length > 0 && lines + size > limit) {
-			groups.push(current);
-			current = [];
-			lines = 0;
-		}
-		current.push(file);
-		lines += size;
-	}
-	if (current.length > 0) groups.push(current);
-	return groups;
-}
-
 /**
- * Contiguous groups of sorted files, cut on filename-prefix boundaries. Consecutive prefix groups pack
- * greedily while they stay within `limit`; a prefix group above it splits by the next stem token, and
- * only when tokens run out by raw sorted order.
+ * A flat directory splits only along filename families that name a subject,
+ * such as `dispatch-*.ts`. A file outside a family stays with its directory's
+ * page, and a test file never splits off: an alphabetical slice has no subject
+ * a reader would look for.
  */
-function prefixGroups(files: CodewikiFile[], level: number, limit: number): CodewikiFile[][] {
-	const runs: CodewikiFile[][] = [];
-	let previousToken: string | undefined;
-	for (const file of files) {
-		const token = stemTokens(file.path)[level] ?? "";
-		if (previousToken === token) runs[runs.length - 1]?.push(file);
-		else runs.push([file]);
-		previousToken = token;
-	}
-	const out: CodewikiFile[][] = [];
-	let pending: CodewikiFile[] = [];
-	let pendingLines = 0;
-	const flush = (): void => {
-		if (pending.length > 0) out.push(pending);
-		pending = [];
-		pendingLines = 0;
-	};
-	for (const run of runs) {
-		const lines = sumLines(run);
-		if (lines <= limit) {
-			if (pendingLines + lines > limit) flush();
-			pending.push(...run);
-			pendingLines += lines;
-			continue;
-		}
-		flush();
-		const tokenDepth = Math.max(...run.map((file) => stemTokens(file.path).length));
-		if (run.length === 1) out.push(run);
-		else if (level + 1 < tokenDepth) out.push(...prefixGroups(run, level + 1, limit));
-		else out.push(...rawGroups(run, limit));
-	}
-	flush();
-	return out;
-}
-
-/** A stem for naming only: role markers such as `.test` or a leading `test_` are dropped. */
-function nameStem(path: string): string {
-	const stem = fileStem(path);
-	const cleaned = stem.replace(/^test_/, "").replace(/[._-](?:test|spec)$/, "");
-	return cleaned.length > 0 ? cleaned : stem;
-}
-
-function firstToLastName(files: ReadonlyArray<CodewikiFile>, raw = false): string {
-	const first = files[0];
-	const last = files[files.length - 1];
-	if (!first || !last) return "files";
-	const stem = raw ? fileStem : nameStem;
-	return `${slugSegment(stem(first.path))}-to-${slugSegment(stem(last.path))}`;
-}
-
-/** The page name of one flat group: its shared stem prefix, else its first and last stems. */
-function flatGroupName(files: ReadonlyArray<CodewikiFile>): string {
-	const first = files[0];
-	const last = files[files.length - 1];
-	if (!first || !last) return "files";
-	if (files.length === 1) return slugSegment(nameStem(first.path));
-	const firstTokens = stemTokens(first.path);
-	let prefix = 0;
-	while (prefix < firstTokens.length && files.every((file) => stemTokens(file.path)[prefix] === firstTokens[prefix]))
-		prefix += 1;
-	if (prefix > 0) return slugSegment(firstTokens.slice(0, prefix).join("-"));
-	return firstToLastName(files);
-}
-
-/** Owners for the direct files of one directory, and the files of that scope they leave behind. */
-function flatOwners(
-	dir: string,
-	files: ReadonlyArray<CodewikiFile>,
-	limit: number,
-): { groups: Area[]; rest: CodewikiFile[] } {
+function flatOwners(dir: string, files: ReadonlyArray<CodewikiFile>): { groups: Area[]; rest: CodewikiFile[] } {
 	const isDirect = (file: CodewikiFile): boolean => areaForPath(file.path, Number.MAX_SAFE_INTEGER) === dir;
-	const direct = files.filter(isDirect).sort(byPath);
-	const rest = files.filter((file) => !isDirect(file));
-	const grouped = prefixGroups(direct, 0, limit);
-	let names = grouped.map(flatGroupName);
-	// Groups of one directory must not share a name: retry colliding ones with fuller names.
-	const fallbacks: Array<(group: CodewikiFile[]) => string> = [
-		(group) => (group.length === 1 ? slugSegment(fileStem(group[0]?.path ?? "")) : firstToLastName(group)),
-		(group) => (group.length === 1 ? slugSegment(fileStem(group[0]?.path ?? "")) : firstToLastName(group, true)),
-	];
-	for (const fallback of fallbacks) {
-		const current = names;
-		names = current.map((name, position) =>
-			current.filter((other) => other === name).length > 1 ? fallback(grouped[position] ?? []) : name,
-		);
+	const families = new Map<string, CodewikiFile[]>();
+	for (const file of files) {
+		if (!isDirect(file) || file.role === "test") continue;
+		const family = stemTokens(file.path)[0] ?? "";
+		families.set(family, [...(families.get(family) ?? []), file]);
 	}
-	const groups = grouped.map((group, position): Area => {
-		const first = group[0] as CodewikiFile;
-		const last = group[group.length - 1] as CodewikiFile;
+	const owned = new Map(
+		[...families].filter(([, members]) => members.length >= MIN_FLAT_FAMILY_FILES).map(([name, group]) => [name, group]),
+	);
+	const claimed = new Set([...owned.values()].flat().map((file) => file.path));
+	const groups = [...owned].map(([name, group]): Area => {
+		const members = [...group].sort(byPath);
+		const first = members[0] as CodewikiFile;
+		const last = members[members.length - 1] as CodewikiFile;
 		return {
 			key: `${dir}#${first.path}`,
-			files: group,
-			lines: sumLines(group),
-			group: {
-				dir,
-				name: names[position] ?? "",
-				first: baseName(first.path),
-				last: baseName(last.path),
-			},
+			files: members,
+			lines: sumLines(members),
+			group: { dir, name: slugSegment(name), first: baseName(first.path), last: baseName(last.path) },
 		};
 	});
-	return { groups, rest };
+	return { groups, rest: files.filter((file) => !claimed.has(file.path)) };
 }
 
 function boundedOwnership(areas: Area[], threshold: number, bounds: OwnershipBounds): Area[] {
@@ -397,7 +302,10 @@ function boundedOwnership(areas: Area[], threshold: number, bounds: OwnershipBou
 		bounds.minSplitLines,
 		Math.ceil(areas.reduce((sum, area) => sum + area.lines, 0) / bounds.divisor),
 	);
-	const included = areas.filter((area) => area.lines >= threshold);
+	// A small test directory is not a subject of its own; its lines fold into the parent's page.
+	const included = areas.filter(
+		(area) => area.lines >= threshold && (area.lines >= splitLines || area.files.some((file) => file.role !== "test")),
+	);
 	const selected = included.length > 0 ? included : areas.slice(0, 1);
 	const owned = new Map(selected.slice(0, maxOwners - 1).map((area) => [area.key, { ...area, files: [...area.files] }]));
 	const selectedKeys = new Set(owned.keys());
@@ -441,14 +349,14 @@ function boundedOwnership(areas: Area[], threshold: number, bounds: OwnershipBou
 		// One child and no remainder is no directory boundary: split that child's direct files instead.
 		const [onlyChild] = substantial;
 		if (bounds.flat && onlyChild && substantial.length === 1 && remainder.length === 0) {
-			const flat = flatOwners(onlyChild.key, onlyChild.files, splitLines);
+			const flat = flatOwners(onlyChild.key, onlyChild.files);
 			candidates.push(withRemainder(flat.groups, flat.rest, onlyChild.key));
 		}
 		if (bounds.flat && remainderLines > splitLines) {
-			const flat = flatOwners(area.key, remainderFiles, splitLines);
+			const flat = flatOwners(area.key, remainderFiles);
 			candidates.push(withRemainder([...substantial, ...flat.groups], flat.rest));
 			if (substantial.length > 0) {
-				const only = flatOwners(area.key, area.files, splitLines);
+				const only = flatOwners(area.key, area.files);
 				candidates.push(withRemainder(only.groups, only.rest));
 			}
 		}
@@ -557,7 +465,8 @@ function candidateWithScopes(
 	depth: ResolvedWikiDepth,
 ): { plan: WikiPlan; scopes: ReadonlyArray<ReadonlyArray<CodewikiFile>> } {
 	const source = codewiki.files.filter((file) => file.lang !== "config");
-	const totalLines = source.reduce((total, file) => total + Math.max(0, file.loc), 0);
+	// A test tree is often as large as the product; it must not raise the bar a product area clears.
+	const totalLines = source.reduce((total, file) => total + (file.role === "test" ? 0 : Math.max(0, file.loc)), 0);
 	const { areaDepth, areaShare, minAreaLines } = WIKI_DEPTH_STRATEGY[depth];
 	const threshold = Math.max(minAreaLines, Math.floor(totalLines * areaShare));
 	const areas = collectAreas(source, areaDepth);

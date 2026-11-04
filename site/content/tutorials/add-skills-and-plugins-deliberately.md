@@ -1,7 +1,7 @@
-Clio Coder's Library contains skills, agents, prompts, fleets, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
+Clio Coder's Library contains skills, agents, prompts, playbooks, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
 
 ::: note Version scope
-This guide describes v0.6.0. Library recipes and executable harness extensions have different roles, and installing either is not a grant of authority.
+This guide describes v0.6.8. Library recipes and extensions have different roles, and installing either is not a grant of authority.
 :::
 
 ::: diagram library-flow
@@ -67,7 +67,7 @@ Scope helps reproducibility: another person can see which procedures belong to t
 
 ## Use plugins for related resources
 
-A Library plugin groups related skills, prompts, agents, fleets, and supporting files. The catalog ships with Clio Coder, but its content is not installed automatically.
+A Library plugin groups related skills, prompts, agents, playbooks, and supporting files. The catalog ships with Clio Coder, but its content is not installed automatically.
 
 ```sh
 clio-coder library list --kind plugin
@@ -91,7 +91,9 @@ After changes made by another process, `/library reload` refreshes recipes and `
 
 ## Know when you need an extension
 
-Library plugins provide portable recipes. Executable harness extensions add runtime tools, hooks, or interface behavior through `clio-coder extensions`, and adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and Clio Coder names any it ignored when a session starts.
+Library plugins provide portable recipes. [Extensions](/tutorials/write-an-extension-with-declared-capabilities.html) are code that adds runtime tools, hooks, or interface behavior through `clio-coder extensions`, and load only after you approve the capabilities they declare.
+
+Adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and Clio Coder names any it ignored when a session starts.
 
 ::: limits
 - Choose the least extensive mechanism that supplies the task.

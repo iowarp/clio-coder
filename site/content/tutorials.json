@@ -22,6 +22,50 @@
     "basis": "Product tour with 0.6.0 development captures"
   },
   {
+    "slug": "let-it-work-with-containment-and-rewind",
+    "title": "Let Clio Coder work without watching every call",
+    "description": "Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.",
+    "category": "Safety and autonomy",
+    "time": "7 min",
+    "author": "The Clio Coder team",
+    "source": "let-it-work-with-containment-and-rewind.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8"
+  },
+  {
+    "slug": "run-a-playbook-and-land-it",
+    "title": "Run a playbook and land the result",
+    "description": "Run the builtin sdlc playbook on one task, watch it work, and land the branch it keeps after you preview the change.",
+    "category": "Workers and fleets",
+    "time": "8 min",
+    "author": "The Clio Coder team",
+    "source": "run-a-playbook-and-land-it.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8"
+  },
+  {
+    "slug": "run-it-unattended-within-limits",
+    "title": "Run it unattended within limits",
+    "description": "Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one.",
+    "category": "Safety and autonomy",
+    "time": "7 min",
+    "author": "The Clio Coder team",
+    "source": "run-it-unattended-within-limits.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8"
+  },
+  {
+    "slug": "see-what-a-session-cost-and-what-a-run-did",
+    "title": "See what a session cost and what a run did",
+    "description": "Read session cost and stop reasons from local journals, verify a sealed record, and prepare an archive that uploads nothing.",
+    "category": "Accountability",
+    "time": "6 min",
+    "author": "The Clio Coder team",
+    "source": "see-what-a-session-cost-and-what-a-run-did.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8"
+  },
+  {
     "slug": "temperature-calibration",
     "title": "A numerical change, checked with Clio Coder",
     "description": "Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification.",
@@ -42,7 +86,7 @@
     "source": "choose-model-for-your-project.md",
     "cover": "tui-configure-review",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "coordinate-your-coding-agents",
@@ -54,7 +98,7 @@
     "source": "coordinate-your-coding-agents.md",
     "cover": "tui-interop",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "keep-long-coding-tasks-on-track",
@@ -66,7 +110,7 @@
     "source": "keep-long-coding-tasks-on-track.md",
     "cover": "tui-context",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "check-a-change-against-your-repository",
@@ -78,7 +122,7 @@
     "source": "check-a-change-against-your-repository.md",
     "cover": "tui-verify-result",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "add-skills-and-plugins-deliberately",
@@ -90,7 +134,7 @@
     "source": "add-skills-and-plugins-deliberately.md",
     "cover": "tui-library-installed",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "work-from-a-laptop-with-remote-workers",
@@ -102,6 +146,17 @@
     "source": "work-from-a-laptop-with-remote-workers.md",
     "cover": "tui-settings-fleet",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.8"
+  },
+  {
+    "slug": "write-an-extension-with-declared-capabilities",
+    "title": "Write an extension with declared capabilities",
+    "description": "Scaffold, test, and install a small extension, and see exactly what approving its capabilities covers.",
+    "category": "Extend Clio Coder",
+    "time": "8 min",
+    "author": "The Clio Coder team",
+    "source": "write-an-extension-with-declared-capabilities.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8"
   }
 ]

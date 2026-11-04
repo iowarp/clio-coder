@@ -96,19 +96,19 @@ The browser has its own **Guided setup**; configuring in the terminal first is o
 
 ## Update, roll back and remove
 
-Interactive sessions show a quiet footer hint when a newer release exists, and `/upgrade` reviews and applies it from inside the terminal. From the shell, update with the tool that installed it:
+Installer installs update themselves in the background, at most once a day. On Linux and macOS, npm, pnpm, bun, and volta installs whose prefix you own update after an interactive session quits and no other process of that install remains. Set `interface.autoUpdate: false` or `CLIO_CODER_AUTO_UPDATE=0` to keep only the notice. `/upgrade` reviews an update from inside the terminal. From the shell, update with the tool that installed it:
 
 | Installed with | Update | Remove the program |
 | --- | --- | --- |
-| Installer | `clio-coder upgrade`. The new version installs beside the current one and must start before the launcher switches to it. | `clio-coder uninstall --remove-binary` |
+| Installer | `clio-coder upgrade`. The new version installs beside the current one and must start before the launcher switches to it. | `clio-coder uninstall` |
 | npm | `clio-coder upgrade` | `npm uninstall -g @iowarp/clio-coder` |
 | bun | `bun add -g @iowarp/clio-coder@latest`, then `clio-coder upgrade --post-install` | `bun remove -g @iowarp/clio-coder` |
 
 The installer keeps the previous version. `clio-coder upgrade --rollback` makes it current again. An install made with an exact `--version` stays pinned to that version until you run the installer with `--version latest`.
 
-If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run. The 0.6.1 upgrade, rollback and uninstall were checked on WSL and native Windows, and were not checked by hand on macOS.
+If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run.
 
-`clio-coder uninstall` removes your settings, credentials, sessions and caches, and the desktop app's background service, so it previews what it will delete and asks first. Add `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
+`clio-coder uninstall` removes your settings, credentials, sessions and caches, the launcher, the desktop app's background service, and for an installer install the managed Node and every package version. It previews what it will delete and asks first, and it stops with exit 1 while a session is open on this state directory. Add `--keep-binary` to keep the program, `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 
 If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 

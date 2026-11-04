@@ -214,7 +214,7 @@ import {
 } from "../domains/providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
-import type { LlmRequestAdmission, OneShotPort } from "../domains/providers/one-shot.js";
+import { type LlmRequestAdmission, type OneShotPort, oneShotTokens } from "../domains/providers/one-shot.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -828,7 +828,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 		if (result.aborted) throw new Error("the one-shot round was aborted");
 		return {
 			text: result.text,
-			...(result.usage !== null ? { usage: { input: result.usage.input, output: result.usage.output } } : {}),
+			...(result.usage !== null ? { usage: oneShotTokens(result.usage) } : {}),
 			...(result.reportedModel !== undefined ? { model: result.reportedModel } : {}),
 		};
 	};
@@ -4704,12 +4704,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		{ timeoutMs: chatShutdownAllowanceMs },
 	);
 
-	// System One rows reach the ledger at turn boundaries, so whatever was recorded
-	// since the last settle (a /draft judgment, an answer that arrived after its
-	// deadline) is still pending here and would die with the process. Registered
-	// after the chat hook so the aborted turn's calls are in, and the persist phase
-	// that closes the session runs after it. The ledger rows go before the dataset
-	// queue.
 	// Every Ollama chat pins its model with keep_alive -1, and the ownership
 	// record dies with this process, so release the models this process loaded
 	// once the drain above has stopped the turn that could pin them again

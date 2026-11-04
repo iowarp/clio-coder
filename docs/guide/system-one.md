@@ -38,7 +38,7 @@ systemOne:
 
 Routes are tried in order, each under its own timeout, and one engine answers one ask. `off` anywhere in the list turns System One off. A route you did not name is never used, and a route that cannot run says why at `clio-coder systemone status` and sends nothing.
 
-Choosing a route needs a restart because the choice decides whether the tool registers at all. Editing what a declared engine means applies to the next question, and that engine is rebuilt only when its own configuration changes.
+A named route does more than answer the tool. It also drives the judge screen and, when triage is on, typed steering triage, so with a hosted engine web and MCP result text leaves the machine at judge time. Choosing a route needs a restart because the choice decides whether the tool registers at all. Editing what a declared engine means applies to the next question, and that engine is rebuilt only when its own configuration changes.
 
 ## Off
 
@@ -47,8 +47,9 @@ Off is the default, and off is byte-identical to a build that has no System One.
 ## What it is honest about
 
 - **A filter answers what a file is for.** A file reaches the model as its path and a digest, so a filter misses behavior inside a body. Use `grep` for that.
-- **About 1 match in 3 is wrong.** A filter narrows what to read. Read each match before you rely on it, and do not treat a miss as proof, especially when `carried.partial` is above zero.
-- **LLM routes return labels, not probabilities.** `memory`, `main` and any chat target answer one label per question, so a filter match from them has no score and a `yesNo` is 0 or 1.
+- **Matches are often wrong.** On the query sets tried so far, between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. Do not treat a miss as proof either, especially when `carried.partial` is above zero.
+- **`consult` is unproven.** `consult` ships as experimental. Nothing yet measures whether agents reach for it or whether it speeds anything up.
+- **LLM routes return labels, not probabilities.** `memory`, `main` and any chat target answer one label per question, so a filter match from them has no score and a question comes back as `label` (`yes` or `no`, an option, or a rung) with no `pTrue`, mass or `certainty`.
 - **Generic routes never screen.** A route without declared real probabilities (any `kind: llm` engine, and a `kind: systemone` engine on the `generic` profile) is skipped by the judge screen before any byte leaves.
 - **It is not a safety net.** The deterministic safety rules and the safety judge decide. The screen can only park a call the judge would have allowed.
 - **Nothing measures your engine for you.** There are no fitted thresholds. A profile declares what a model family reads and how its numbers are read, and it makes no accuracy claim.
@@ -59,7 +60,7 @@ Off is the default, and off is byte-identical to a build that has no System One.
 
 ### The filter form
 
-A filter scores things the agent does not hold against one criterion, and only ids and scores come back, so the agent's context pays for what matched. This is the strong use: the model's value is reading what the agent has not paid for.
+A filter scores things the agent does not hold against one criterion, and only ids and scores come back.
 
 | `source` | Items | Each item carries |
 | --- | --- | --- |
@@ -82,7 +83,7 @@ The result gives `offered`, `scored`, `matchCount`, up to `limit` `matches` (def
 | `pick` | `options`, 2 to 8 names with descriptions | Mass per option and `certainty`, with no winner named |
 | `rate` | `ladder`, 2 to 8 rungs, lowest first | `position`, mass per rung and `certainty` |
 
-A question is at most 400 characters, and an option, rung or criterion at most 200. This is the weak case on something the agent already read, because the model knows less than the agent does.
+A question is at most 400 characters, and an option, rung or criterion at most 200. On something the agent already read, the model knows less than the agent does.
 
 Files in either form answer to the same containment and protected-path rules as `read`, count against the turn's observation budget and are redacted for secrets before anything leaves the process. A file that fails a check is skipped and named with its reason. The result's `readout` says what the numbers are as the answering engine declares them.
 
@@ -149,13 +150,13 @@ clio-coder systemone off
 clio-coder systemone check <engine> --live
 ```
 
-`status` says whether System One is on, what each route reaches and why a route cannot run. `/systemone` in a session shows the same lines and changes nothing. `use` and `off` write to user settings by default, and a project write goes to `.clio-coder/settings.local.yaml` under the usual trust rules. `run --systemone <route>[,<route>...]` sets one run, and `run --systemone off` turns it off for that run. `check --live` sends one content-free decision and reports the build that answered. `clio-coder systemone --help` prints the usage and exits 0.
+`status` says whether System One is on, what each route reaches, what a bound route sends and why a route cannot run. `/systemone` in a session shows the same lines and changes nothing. `use` and `off` write to user settings by default, and a project write goes to `.clio-coder/settings.local.yaml` under the usual trust rules. `run --systemone <route>[,<route>...]` sets one run, and `run --systemone off` turns it off for that run. `check --live` sends one content-free decision and reports the build that answered. `clio-coder systemone --help` prints the usage and exits 0.
 
 `clio-coder doctor` never asks a decision. Its rows are listed in [Doctor](doctor.md). `/health` shows engine breakers.
 
 ## Privacy
 
-State is redacted in the process before a request exists, so a hosted engine or LLM API receives redacted text. Redaction is best effort. A hosted engine still receives what you send it: file digests, chunks of a result, queued operator messages and web content, so name a hosted route only if you would send that text there. A local server keeps everything on the machine.
+State is redacted in the process before a request exists, so a hosted engine or LLM API receives redacted text. Redaction is best effort. A hosted engine still receives what these uses send it: file digests and heads, chunks of a result, queued operator messages when triage is on, and web and MCP result text at judge time. Name a hosted route only if you would send that text there. A local server keeps everything on the machine.
 
 Every request is also checked against the information-flow restrictions its evidence carries, and files `consult` reads add theirs. A rule whose recipients do not include the engine's target ends that route as `flow-denied`, and nothing is sent. See [Information flow](information-flow.md).
 
