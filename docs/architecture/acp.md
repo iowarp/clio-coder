@@ -374,7 +374,7 @@ The remaining `_clio-coder/*` methods project terminal views as bounded read mod
 | `_clio-coder/context/status` | `{sessionId}` | `{version: 1, active, latest}`: the running context operation's latest activity payload, or null, and the newest finished operation from the live event or the session ledger, or null. Bound session only. A context operation itself runs through `commands/invoke` with `command: "context"`. |
 | `_clio-coder/context/ledger` | `{sessionId}` | The `/context` view: window, used, reserve, free, groups (at most 32), compaction state, and prompt-cache facts. Unknown stays unknown, so a window of 0 and a null percentage travel as they are. |
 | `_clio-coder/aside/ask` | `{sessionId, question}` | `{status: "answered" or "aborted" or "refused" or "failed", text or reason}`. Question at most 8000 characters. Answers at most 64 KiB. |
-| `_clio-coder/aside/draft` | `{sessionId, request, count?}` | `{status: "drafted", candidates, judgment?}` or `{status: "refused"}`. `count` is 1 to 4, default 3. Candidates are labeled `A` to `D`. |
+| `_clio-coder/aside/draft` | `{sessionId, request, count?}` | `{status: "drafted", candidates}` or `{status: "refused"}`. `count` is 1 to 4, default 3. Candidates are labeled `A` to `D`. |
 | `_clio-coder/aside/cancel` | `{sessionId}` | `{cancelled}` |
 | `_clio-coder/extensions/list` | `{sessionId}` | `{version: 1, extensions, truncated}`, at most 64, each with a `state` of `eligible`, `shadowed`, `disabled`, `incompatible`, or `invalid`. |
 | `_clio-coder/extensions/reload` | `{sessionId}` | `{status: "committed", generation, ...}` or `{status: "rejected", reason, generation}`. Idle only. |

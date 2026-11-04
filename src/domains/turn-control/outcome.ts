@@ -22,7 +22,6 @@ export interface TurnOutcomeRecord {
 	/** True for the automatic follow-up a middleware nudge requested, which is not an operator turn. */
 	readonly continuation: boolean;
 	readonly control: {
-		producer: "system-one" | null;
 		decision: WorkflowDecision["kind"];
 		decisionHash: string | null;
 		executed: boolean;
@@ -42,11 +41,9 @@ export interface TurnOutcomeRecord {
 	};
 	readonly harness: { readonly runIds: ReadonlyArray<string>; readonly reads: number };
 	readonly conversation: {
-		/** Regex facts about the closing text, kept so the dataset can compare them with the site's reading. */
+		/** Regex facts about the closing text. */
 		readonly endedWithQuestion: boolean;
 		readonly offeredOptions: boolean;
-		/** The turn-end site's reading of whether the message waits on the operator, or null when it did not answer. */
-		readonly asksOperator: boolean | null;
 		readonly taskEstablished: boolean;
 		readonly clarificationStreak: number;
 	};
@@ -62,7 +59,6 @@ export interface TurnOutcomeRecord {
 	};
 	readonly tokens: {
 		readonly coordinator: TurnTokens;
-		readonly decisionModel: TurnTokens;
 		readonly workers: TurnTokens;
 	};
 	readonly failure?: TurnFailureRecord;
@@ -81,8 +77,6 @@ export interface TurnOutcomeInput {
 	readonly duplicateDispatch: boolean;
 	readonly harness: TurnOutcomeRecord["harness"];
 	readonly finalAssistantText: string;
-	/** The turn-end site's verdict on whether the message waits on the operator; null falls back to the regex reading. */
-	readonly asksOperator?: boolean | null;
 	readonly taskEstablished: boolean;
 	readonly previousClarificationStreak: number;
 	readonly completion: TurnOutcomeRecord["completion"];
@@ -140,8 +134,7 @@ export function conversationShape(finalAssistantText: string): { endedWithQuesti
 /**
  * How many consecutive turns ended waiting on the operator. Two endings count.
  * One is a closing question or option list with no tool call, where `asks` is
- * the caller's reading of the text: the turn-end site's verdict when one
- * answered, otherwise the regex shape. The other is an ask_user interview the
+ * the regex shape of the text. The other is an ask_user interview the
  * operator dismissed. A clarification that goes through ask_user always has a
  * tool call, so the first test can never see it; an interview the operator
  * answered is progress and resets the streak like any other tool turn.
@@ -158,7 +151,6 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 	const byTool: Record<string, number> = Object.create(null);
 	for (const tool of input.toolNames) byTool[tool] = (byTool[tool] ?? 0) + 1;
 	const shape = conversationShape(input.finalAssistantText);
-	const asksOperator = input.asksOperator ?? null;
 	const interviewDismissed = input.interviewDismissed === true;
 	return {
 		version: 1,
@@ -180,11 +172,10 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 		harness: { runIds: [...input.harness.runIds], reads: input.harness.reads },
 		conversation: {
 			...shape,
-			asksOperator,
 			taskEstablished: input.taskEstablished,
 			clarificationStreak: nextClarificationStreak(input.previousClarificationStreak, {
 				toolCalls: input.toolNames.length,
-				asks: asksOperator ?? (shape.endedWithQuestion || shape.offeredOptions),
+				asks: shape.endedWithQuestion || shape.offeredOptions,
 				interviewDismissed,
 			}),
 		},
@@ -192,7 +183,6 @@ export function reduceTurnOutcome(input: TurnOutcomeInput): TurnOutcomeRecord {
 		operator: { canceled: input.canceled || interviewDismissed, ...(interviewDismissed ? { interviewDismissed } : {}) },
 		tokens: {
 			coordinator: { ...input.tokens.coordinator },
-			decisionModel: { ...input.tokens.decisionModel },
 			workers: { ...input.tokens.workers },
 		},
 		...(input.failure ? { failure: { ...input.failure } } : {}),

@@ -34,7 +34,6 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import type { AcpBoardActions, AcpInterviewBinding, AcpInterviewChannel } from "./server.js";
 import { ACP_INTERVIEW_CANCEL_METHOD, ACP_INTERVIEW_REQUEST_METHOD } from "./types.js";
 
-export { draftsToJudge, judgeDraftsAtSite } from "../../session-control/drafts.js";
 export { oracleBriefingFromEntries } from "../../session-control/oracle.js";
 export { followWorkerRuns } from "../../session-control/worker-run-ledger.js";
 

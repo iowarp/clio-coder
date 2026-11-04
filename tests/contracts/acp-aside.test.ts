@@ -137,7 +137,7 @@ test("one round at a time, and cancel aborts the one in flight", async () => {
 	}
 });
 
-test("drafts come back labelled with the judge's verdict, or the reason there is none", async () => {
+test("drafts come back labelled", async () => {
 	const seen: Array<[string, number]> = [];
 	const agent = await peer({
 		ask: async () => ({ status: "refused", reason: "unused" }),
@@ -151,15 +151,6 @@ test("drafts come back labelled with the judge's verdict, or the reason there is
 					{ status: "failed", reason: "endpoint reset" },
 					{ status: "drafted", text: "Use a list." },
 				],
-				judgment: {
-					verdict: {
-						picked: "A",
-						probabilities: { A: 0.8, B: 0, C: 0.2 },
-						sound: { A: true, B: null, C: false },
-						source: "jev/sys1",
-						elapsedMs: 264,
-					},
-				},
 			};
 		},
 	});
@@ -182,14 +173,6 @@ test("drafts come back labelled with the judge's verdict, or the reason there is
 				},
 				{ label: "C", status: "drafted", text: "Use a list.", truncated: false },
 			],
-			judgment: {
-				status: "judged",
-				picked: "A",
-				probabilities: { A: 0.8, B: 0, C: 0.2 },
-				sound: { A: true, B: null, C: false },
-				source: "jev/sys1",
-				elapsedMs: 264,
-			},
 		});
 		await assert.rejects(
 			agent.call("_clio-coder/aside/draft", { sessionId: agent.sessionId, request: "x", count: 5 }),
@@ -225,7 +208,7 @@ test("a refusal from the chat loop is reported, not thrown", async () => {
 	}
 });
 
-test("failed side rounds and judgments keep provider bodies off ACP while preserving diagnostics", async () => {
+test("failed side rounds keep provider bodies off ACP while preserving diagnostics", async () => {
 	const providerBody = "provider rejected credential secret-example at https://private.example/infer";
 	const agent = await peer({
 		ask: async () => ({ status: "failed", reason: providerBody }),
@@ -233,7 +216,6 @@ test("failed side rounds and judgments keep provider bodies off ACP while preser
 			status: "drafted",
 			aborted: false,
 			candidates: [{ status: "failed", reason: providerBody }],
-			judgment: { reason: `not judged: provider failed: ${providerBody}` },
 		}),
 	});
 	try {
@@ -253,22 +235,11 @@ test("failed side rounds and judgments keep provider bodies off ACP while preser
 				status: "drafted",
 				aborted: false,
 				candidates: [{ status: "failed", reason: providerBody }],
-				judgment: { reason: providerBody },
 			},
 			(line) => diagnostics.push(line),
 		);
-		assert.equal(diagnostics.length, 3);
+		assert.equal(diagnostics.length, 2);
 		assert.ok(diagnostics.every((line) => line.includes(providerBody)));
-		const unbound = "not judged: bind systemOne.sites.drafts to an engine declared in systemOne.engines";
-		const known = projectDraftOutcome({
-			status: "drafted",
-			aborted: false,
-			candidates: [],
-			judgment: { reason: unbound },
-		});
-		assert.equal(known.status, "drafted");
-		if (known.status !== "drafted") return;
-		assert.deepEqual(known.judgment, { status: "unjudged", reason: unbound });
 	} finally {
 		await agent.stop();
 	}

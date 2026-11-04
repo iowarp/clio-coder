@@ -416,11 +416,15 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 		makeTelemetryRecord(
 			"system_one.decided",
 			{
-				site: "intent",
+				point: "consult",
+				set: "consult-v1",
+				askId: "dc_1",
 				outcome: "timeout",
 				latencyMs: 900,
 				deadlineMs: 800,
-				routes: [{ engine: "local", kind: "model", outcome: "timeout", breaker: "opened" }],
+				asked: 2,
+				abstained: 2,
+				routes: [{ engine: "local", kind: "systemone", profile: "generic", outcome: "timeout", breaker: "opened" }],
 				callIds: [],
 			},
 			ctx,

@@ -25,8 +25,7 @@ import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../providers/
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { loadSessionTelemetrySource } from "../session/telemetry-source.js";
-import type { SiteBindingInfo } from "../system-one/types.js";
-import { systemOneRecordingLabel, workspaceTelemetryCapture } from "../telemetry/consent.js";
+import { workspaceTelemetryCapture } from "../telemetry/consent.js";
 import { telemetryJournalFiles, telemetrySessionsDirectory } from "../telemetry/paths.js";
 import { cacheReport } from "../telemetry/read-model.js";
 import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
@@ -1335,25 +1334,6 @@ export async function runDoctorModelChecks(
 	return [...findings, ...(await systemOneFindings(registry, findings, observations))];
 }
 
-/** The builds whose cuts cover a site, from a cut table keyed by build identity. */
-function buildsWithCuts(site: string, table: Readonly<Record<string, Readonly<Record<string, number>>>>): string[] {
-	return Object.entries(table)
-		.filter(([, cuts]) => Object.keys(cuts).some((key) => key.startsWith(`${site}.`)))
-		.map(([build]) => build);
-}
-
-/**
- * Doctor never asks a decision, so it cannot know which build will answer. It
- * states which builds a bound site's readings would be validated for: measured
- * cuts that ship, cuts the operator wrote, and everything else unvalidated.
- */
-function cutStanding(site: string, measured: Readonly<Record<string, Readonly<Record<string, number>>>>): string {
-	const fitted = buildsWithCuts(site, measured);
-	return fitted.length === 0
-		? "no build has cuts at this site, so it sends nothing unless the dataset is recorded"
-		: `cuts measured for ${fitted.join(", ")}; any other build sends nothing unless the dataset is recorded`;
-}
-
 /**
  * Where each System One site is bound, which bindings cannot resolve, and what
  * the decision dataset holds. System One is experimental and off by default, so
@@ -1366,56 +1346,37 @@ async function systemOneFindings(
 	connections: ReadonlyArray<DoctorFinding>,
 	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
 ): Promise<DoctorFinding[]> {
-	// A session binds sites from the layered settings, so a site a trusted
-	// project file binds is live there and must not read as unbound here. An
-	// untrusted project layer contributes nothing, exactly as in a session.
+	// A session binds from the layered settings, so a choice a trusted project file makes is live there and must not
+	// read as off here. An untrusted project layer contributes nothing, exactly as in a session.
 	const layered = readLayeredSettings(process.cwd()).settings;
-	const { effectiveSystemOne } = await import("../system-one/selection.js");
+	const { effectiveSystemOne, resolveChoice, routeNames } = await import("../system-one/selection.js");
 	const settings = effectiveSystemOne(layered);
-	const { describeBindings } = await import("../system-one/recorder/index.js");
-	const { FITTED_CUTS } = await import("../system-one/calibration.js");
 	const profiles = await import("../system-one/profiles.js");
-	const juliaCounted = existsSync((await import("../system-one/julia-tokenizer.js")).juliaTokenizerPath());
-	const bindings = describeBindings(layered, runtimes);
-	const off = bindings.filter((binding) => binding.engine === null).map((binding) => binding.site);
-	const rows: DoctorFinding[] = [];
-	if (off.length === bindings.length) {
-		rows.push({ ok: true, level: "info", name: "system one (experimental)", detail: "off; no site is bound" });
-	} else if (off.length > 0) {
-		rows.push({ ok: true, level: "info", name: "system one (experimental) off", detail: off.join(", ") });
-	}
-	for (const binding of bindings) {
-		if (binding.engine === null) continue;
-		const name = `system one (experimental) ${binding.site}`;
-		if (binding.problem !== undefined) {
-			rows.push({ ok: true, level: "warn", name, detail: `${binding.problem}; the site stays silent` });
+	const name = "system one (experimental)";
+	const routes = routeNames(layered.systemOne.use);
+	if (routes.length === 0) return [{ ok: true, level: "info", name, detail: "off" }];
+	const findings: DoctorFinding[] = [];
+	for (const route of routes) {
+		const resolved = resolveChoice(layered, route);
+		if (resolved.kind !== "engine") {
+			const problem = resolved.kind === "unavailable" ? resolved.problem : `'${route}' is not a route`;
+			findings.push({ ok: true, level: "warn", name, detail: `${problem}; consult cannot use ${route}` });
 			continue;
 		}
-		const connection = connections.find((finding) => finding.name === `connection ${binding.target}`);
+		const { engine } = resolved;
+		const connection = connections.find((finding) => finding.name === `connection ${engine.target}`);
 		const unverified = connection === undefined || !connection.ok || connection.level === "warn";
-		rows.push({
+		findings.push({
 			ok: true,
 			...(unverified ? { level: "warn" as const } : {}),
 			name,
 			detail:
-				`${binding.engine} (${binding.kind}) → ${binding.target}/${binding.model ?? "target default"}` +
-				(binding.deadlineMs === undefined ? "" : `; deadline ${binding.deadlineMs} ms`) +
-				`; ${cutStanding(binding.site, FITTED_CUTS)}` +
-				(unverified ? `; connection ${binding.target} is not verified, so this site may stay silent` : ""),
+				`${resolved.name} (${engine.kind}) → ${engine.target}/${engine.model ?? "target default"}` +
+				(unverified ? `; connection ${engine.target} is not verified, so consult may give no answer` : ""),
 		});
+		findings.push(...(await systemOneEngineFindings(settings, [resolved.name], runtimes, observations, profiles)));
 	}
-	rows.push(...systemOneEngineFindings(settings, bindings, runtimes, observations, profiles, juliaCounted));
-	// With nothing bound and recording off, the dataset row would only repeat the off row. The samples live in the
-	// session journals, which `clio-coder systemone status` counts (#434).
-	const recording = systemOneRecordingLabel(settings, process.cwd());
-	if (off.length !== bindings.length || recording !== "record off")
-		rows.push({
-			ok: true,
-			level: "info",
-			name: "system one dataset",
-			detail: `${recording}; samples are research content in session journals (clio-coder systemone status)`,
-		});
-	return rows;
+	return findings;
 }
 
 /**
@@ -1423,23 +1384,16 @@ async function systemOneFindings(
  * fill, and whether its server answered the passive check, with the round trip.
  * The round trip is the metadata request (`/models` or `/health`), never a
  * decision, so doctor puts no work on the accelerator the engine runs on. An
- * engine that does not answer leaves its sites behaving as if unbound.
+ * engine that does not answer leaves consult with no answer.
  */
-function systemOneEngineFindings(
+async function systemOneEngineFindings(
 	settings: Readonly<ReturnType<typeof readSettings>>,
-	bindings: ReadonlyArray<SiteBindingInfo>,
+	names: ReadonlyArray<string>,
 	runtimes: { get(id: string): RuntimeDescriptor | null },
 	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
 	profiles: typeof import("../system-one/profiles.js"),
-	juliaCounted: boolean,
-): DoctorFinding[] {
+): Promise<DoctorFinding[]> {
 	const { engineWindow, profileFor } = profiles;
-	const names = new Set<string>();
-	for (const binding of bindings) {
-		if (binding.engine === null || binding.problem !== undefined) continue;
-		names.add(binding.engine);
-		for (const routed of Object.values(binding.routes ?? {})) if (routed !== undefined) names.add(routed);
-	}
 	const rows: DoctorFinding[] = [];
 	for (const name of names) {
 		const engine = Object.hasOwn(settings.systemOne.engines, name) ? settings.systemOne.engines[name] : undefined;
@@ -1457,11 +1411,11 @@ function systemOneEngineFindings(
 					? `target ${target.id} declares ${declared}, profile ceiling ${profile.windowCeiling}`
 					: `declared on target ${target.id}`;
 		const counting =
-			profile.id !== "julia-1"
+			profile.tokenizer === undefined
 				? ""
-				: juliaCounted
-					? "; options counted with Julia-1's tokenizer"
-					: "; options byte-bounded until Julia-1's tokenizer is cached on first use";
+				: (await profile.tokenizer.cached())
+					? `; options counted with ${profile.tokenizer.label}`
+					: `; options byte-bounded until ${profile.tokenizer.label} is cached on first use`;
 		const head = `profile ${profile.id}; window ${window === null ? "unbounded" : `${window} tokens`} (${source})${counting}`;
 		const where = target.url ?? `${runtime.displayName} endpoint`;
 		const observation = observations.get(target.id);
@@ -1472,7 +1426,7 @@ function systemOneEngineFindings(
 				ok: true,
 				level: "info",
 				name: rowName,
-				detail: `${head}; ${where} has no passive check, so reachability is not known until a site asks`,
+				detail: `${head}; ${where} has no passive check, so reachability is not known until consult asks`,
 			});
 			continue;
 		}
@@ -1481,7 +1435,7 @@ function systemOneEngineFindings(
 				ok: true,
 				level: "warn",
 				name: rowName,
-				detail: `${head}; ${where} did not answer: ${observation.probe.error ?? "no reply"}; every site it serves behaves as if unbound; ${confirm}`,
+				detail: `${head}; ${where} did not answer: ${observation.probe.error ?? "no reply"}; consult gets no answer from it; ${confirm}`,
 			});
 			continue;
 		}

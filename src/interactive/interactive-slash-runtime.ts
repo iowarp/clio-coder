@@ -25,7 +25,6 @@ import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { verifyRunRecordReport } from "../domains/session/view-artifacts.js";
 import { archiveCommandHost, type ShareContract } from "../domains/share/index.js";
-import type { SystemOneCommand } from "../domains/system-one/scopes.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -191,7 +190,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openSkillsHub: (request?: LibraryBrowseRequest) => void;
 	openUsage: () => void;
 	openHealth: () => void;
-	systemOneControl?: { run(command: SystemOneCommand): string[] };
+	systemOneControl?: { run(): string[] };
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;
 	/** Run one `/draft` in its own overlay. */

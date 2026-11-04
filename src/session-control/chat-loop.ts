@@ -18,7 +18,7 @@ import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { readSettledRun } from "../domains/telemetry/run-record.js";
 import type { TelemetrySessionLease } from "../domains/telemetry/session-journals.js";
-import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
+import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import type {
@@ -33,9 +33,7 @@ export { runOutOfTurnRound } from "./side-question.js";
 export { createTurnControlRunner } from "./turn-control-runner.js";
 
 import { isPlanOnlyRequest, stripPlanCloseOptions } from "../core/plan-request.js";
-import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
-import { ToolNames } from "../core/tool-names.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
@@ -126,7 +124,6 @@ import {
 	type SessionEntry,
 	SKILL_CONTEXT_STATE,
 } from "../domains/session/entries.js";
-import { operatorTextOfUserPayload } from "../domains/session/history.js";
 import { readPromptCompileRecords } from "../domains/session/prompt-manifest.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import type { RetrySettings } from "../domains/session/retry.js";
@@ -177,11 +174,15 @@ import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./s
 import type { AgentStatusEvent } from "./status-types.js";
 import {
 	parseTriageAnswer,
+	runTriageRound,
 	TRIAGE_MAX_TOKENS,
 	TRIAGE_RESPONSE_SCHEMA,
 	TRIAGE_SCHEMA_NAME,
 	TRIAGE_SYSTEM_PROMPT,
 	type TriageEntry,
+	type TriageSystemOne,
+	type TriageVerdict,
+	triageFloor,
 	triageKindFor,
 	triageLabelsFor,
 	triageMayInterrupt,
@@ -330,51 +331,6 @@ export type ToolApprovalStateEvent =
 			state: "resumed";
 	  };
 
-export interface SpeculativeDispatchCounts {
-	held: number;
-	adopted: number;
-	discarded: number;
-}
-
-/** The first `limit` code points of `value`, so a slice never lands inside a surrogate pair. */
-function boundedCodePoints(value: string, limit: number): string {
-	// A pasted log can be megabytes; 2 × limit code units always hold `limit` code points.
-	const points = [...value.slice(0, limit * 2 + 1)];
-	return points.length <= limit ? value : points.slice(0, limit).join("");
-}
-
-/** The dataset facts of one turn outcome; the settled turn and the turn cancelled before admission write the same shape. */
-function turnOutcomeFacts(
-	record: TurnOutcomeRecord,
-	extra: { continuation: boolean; interviewDismissed: boolean; skillsLoaded: ReadonlyArray<string> },
-): Record<string, unknown> {
-	return {
-		turnId: record.turnId,
-		continuation: extra.continuation,
-		toolCalls: record.coordinator.toolCalls,
-		tools: record.coordinator.byTool,
-		dispatches: record.coordinator.dispatches,
-		askUserCalls: record.coordinator.byTool[ToolNames.AskUser] ?? 0,
-		skillsLoaded: [...extra.skillsLoaded],
-		harnessAction:
-			record.control === null ? null : { decision: record.control.decision, executed: record.control.executed },
-		endedWithQuestion: record.conversation.endedWithQuestion,
-		asksOperator: record.conversation.asksOperator,
-		clarificationStreak: record.conversation.clarificationStreak,
-		canceled: record.operator.canceled,
-		// Both an Esc that aborts a stream and a dismissed interview set
-		// `canceled`; this tells a label reader which one it was.
-		interviewDismissed: extra.interviewDismissed,
-		completion: record.completion.decision,
-		mutatedPaths: record.completion.mutatedPaths,
-		stopReason: record.stopReason,
-		durationMs: Math.round(record.durationMs),
-		// A cancelled turn settles before its workers seal their receipts, so an unsealed run counts as unknown
-		// here. A `turn-tokens` row carries the count that arrived late.
-		workerTokens: { ...record.tokens.workers },
-	};
-}
-
 function noOutcomeUsage(): TurnTokens {
 	return { input: sumFacts([]), output: sumFacts([]), cacheRead: sumFacts([]), total: sumFacts([]) };
 }
@@ -480,7 +436,6 @@ export type ChatLoopEvent = (
 	| ChatNoticeEvent
 	| AgentStatusEvent
 	| ToolApprovalStateEvent
-	| { type: "speculative_dispatch"; counts: SpeculativeDispatchCounts }
 ) & { modelTimeMs?: number };
 
 export interface PromptSubmitInput {
@@ -716,6 +671,12 @@ export interface ChatLoop {
 	 */
 	contextLedger(): ContextLedger;
 	/**
+	 * The live agent messages and when the operator last spoke, epoch milliseconds, for a
+	 * reading of what entered the run since then. Role cannot say: reminders and continuations
+	 * are user messages too. Null with no runtime.
+	 */
+	screenWindow(): { messages: ReadonlyArray<AgentMessage>; since: number } | null;
+	/**
 	 * The published live budget for the next request: one immutable view with
 	 * the effective window, the structural accounting, the real output
 	 * reservation, headroom, pressure, and an opaque revision every consumer
@@ -805,8 +766,6 @@ export interface CreateChatLoopDeps {
 	eggAsk?: AskUserHandler;
 	turnControl?: TurnControlRunner;
 	turnOutcomeCollector?: TurnOutcomeCollector;
-	/** Tokens System One spent on calls joined to this user turn, for the outcome record's `decisionModel` split. */
-	getDecisionUsage?: (userTurnId: string) => TurnTokens;
 	getTaskEstablished?: () => boolean;
 	outcomeDispatch?: Pick<DispatchContract, "getRun">;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
@@ -973,74 +932,14 @@ export interface CreateChatLoopDeps {
 	/** Runs before any turn is written, so a ledger fact can precede the text it describes. */
 	beforeTurnRecorded?: (session: SessionContract) => void;
 	getMemoryRecordStatuses?: TurnContextDeps["getMemoryRecordStatuses"];
-	/**
-	 * Start reading this turn's request through the `turn` site, once, before the
-	 * prompt is built, and return without waiting for it. The interactive host
-	 * always wires it and asks nothing when the site is unbound. The host keeps a
-	 * reading that lands in time: the hint registration, the turn controller and
-	 * the prewarm read it from there. `userTurnId` is the id the ledger will file
-	 * the user turn under, so the decision record and the outcome that follows it
-	 * share a join key. `previousTask` reads the ledger and may throw, so it is
-	 * called only when a call will be made, inside a catch.
-	 */
-	readTurn?: (input: {
-		userTurnId: string;
-		task: string;
-		/** What the operator typed, as the ledger will show it. */
-		request: string;
-		previous: string;
-		previousTask: () => string;
-	}) => void;
-	/**
-	 * Ask the record-only `steer` site about a message the operator queued during
-	 * a run, and return without waiting. `ref` is the queue entry id, which the
-	 * outcome rows written when the entry leaves the queue join on.
-	 */
-	readSteer?: (input: {
-		ref: string;
-		text: string;
-		chosen: "next-slot" | "end-of-turn";
-		position: number;
-		queued: number;
-		previous: string;
-	}) => void;
+	/** Told when an operator submits a task, before anything else about the turn runs. Never told about a continuation. */
+	onOperatorTurn?: (input: { task: string }) => void;
 	/** The operator request the run is working on, for the steering triage round. Absent, triage sends no task. */
 	currentOperatorTask?: () => string;
+	/** Typed steering triage when a route is bound. Absent or unbound, triage is the side-model round. */
+	systemOne?: TriageSystemOne;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
-	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
-	/**
-	 * Memory scores for the section this request builds, or undefined when the
-	 * `relevance` site is unbound or ranking could not change the section. It runs
-	 * while the prompt composes, so it is asked only when the order decides what
-	 * the prompt carries.
-	 */
-	getMemoryRelevance?: (
-		request: MemoryPromptRequest,
-	) => Promise<PrecomputedRanking | undefined> | PrecomputedRanking | undefined;
-	/**
-	 * Write every System One decision and outcome recorded since the last flush
-	 * as one ledger entry. Called after the user turn is appended so the rows sit
-	 * under the turn they describe; the host also flushes at settle.
-	 */
-	flushSystemOne?: () => void;
-	/**
-	 * Hand the settled turn's final message to the experimental `turnEnd` site,
-	 * which reads it detached and only records. The loop never waits for it, and
-	 * the clarification streak keeps the regex reading of the closing text.
-	 */
-	recordTurnEnd?: (input: {
-		userTurnId: string;
-		request: string;
-		message: string;
-		toolNames: ReadonlyArray<string>;
-	}) => void;
-	/** What followed a decision, joined to it by `ref` when the dataset is exported. */
-	recordOutcome?: (outcome: {
-		session?: string | null;
-		ref: string;
-		source: "turn" | "turn-tokens" | "next-operator" | "steer";
-		facts: Readonly<Record<string, unknown>>;
-	}) => void;
+	onTurnSettled?: () => void;
 	getReadySkillCount?: () => number;
 	/** Live source of each active route for the attended prompt (DF-7). */
 	getRouteSources?: () => Readonly<Record<RouteName, RouteSource>>;
@@ -1392,6 +1291,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	// --- module composition -------------------------------------------------
 
+	let operatorSpokeAt = 0;
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
@@ -1404,27 +1304,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				...(entry.origin !== undefined ? { origin: entry.origin } : {}),
 			}),
 		emitNotice,
-		// What became of each queued entry, joined by id to the steer site's reading
-		// of it. The dataset learns delivery from these rows; nothing reads them live.
-		onEvent: (event) => {
-			const facts: Record<string, unknown> = { event: event.type, kind: event.entry.kind };
-			if (event.entry.pinned === true) facts.pinned = true;
-			if (event.entry.labels !== undefined) facts.labels = event.entry.labels;
-			if (event.type === "delivered") {
-				facts.point = event.point;
-				facts.waitedMs = event.waitedMs;
-			} else if (event.type === "removed") {
-				facts.reason = event.reason;
-				facts.waitedMs = event.waitedMs;
-			} else {
-				facts.by = event.by;
-			}
-			deps.recordOutcome?.({ ref: event.entry.id, source: "steer", facts });
-		},
 		// The loop's own resubmits (stranded steers, continuation requests) run
 		// from submit's finally and bypass the admission gate: an interrupt that
 		// holds the gate while awaiting that same run would otherwise deadlock.
 		submit: (text, options) => submitTracked(text, options),
+		onEvent: (event) => {
+			if (event.type === "delivered") operatorSpokeAt = Date.now();
+		},
 	});
 
 	const middleware = createTurnMiddleware({
@@ -1473,7 +1359,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		getMemorySection: deps.getMemorySection,
 		...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
 		getMemoryRecordStatuses: deps.getMemoryRecordStatuses,
-		...(deps.getMemoryRelevance ? { getMemoryRelevance: deps.getMemoryRelevance } : {}),
 		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,
 		...(deps.getRouteSources ? { getRouteSources: deps.getRouteSources } : {}),
@@ -1722,12 +1607,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			signal?.addEventListener("abort", forward, { once: true });
 			if (signal?.aborted || ownerSignal?.aborted) controllerAbort.abort();
 			try {
-				const result = await deps.turnControl.run({
-					operatorText: "",
-					continuation: true,
-					userTurnId,
-					signal: controllerAbort.signal,
-				});
+				const result = await deps.turnControl.run({ userTurnId, signal: controllerAbort.signal });
 				if (controllerAbort.signal.aborted || ownerSignal?.aborted || identity !== submitGeneration) return null;
 				outcomeCollector.recordControl(result.record);
 				if (deps.session?.current()) {
@@ -1993,7 +1873,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * The last operator turn that settled and has not yet been followed by another
 	 * operator message. The next submit reports how it was followed, once.
 	 */
-	let previousOperatorTurn: { id: string; settledAt: number } | null = null;
 
 	// Operator turns the session already holds, for the outcome row's `turnIndex`.
 	// Reparsing the whole ledger every turn made the row cost grow with the session,
@@ -2017,7 +1896,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 */
 	const amendLateWorkerTokens = (input: {
 		turnId: string;
-		ref: string;
 		parentTurnId: string | null;
 		runIds: ReadonlyArray<string>;
 		missing: ReadonlyArray<string>;
@@ -2038,18 +1916,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							customType: TURN_OUTCOME_TOKENS_CUSTOM_TYPE,
 							parentTurnId: input.parentTurnId,
 							display: false,
-							data: { turnId: input.turnId, ref: input.ref, workers, sealedAfterMs: afterMs },
+							data: { turnId: input.turnId, workers, sealedAfterMs: afterMs },
 						});
 					} catch {
-						// The ledger closed under the watcher; the dataset row below still records the count.
+						// The ledger closed under the watcher, so the late count is lost with it.
 					}
 				}
-				deps.recordOutcome?.({
-					ref: input.ref,
-					session: sessionId,
-					source: "turn-tokens",
-					facts: { turnId: input.turnId, workerTokens: { ...workers }, sealedAfterMs: afterMs },
-				});
 			},
 		});
 		lateReceiptWatchers.add(stop);
@@ -2106,12 +1978,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnIndex: operatorTurnIndex(),
 				continuation: input.continuation,
 				finalAssistantText: "",
-				asksOperator: null,
 				taskEstablished: deps.getTaskEstablished?.() ?? false,
 				canceled: true,
 				tokens: {
 					coordinator: noOutcomeUsage(),
-					decisionModel: deps.getDecisionUsage?.(input.userTurnId) ?? noOutcomeUsage(),
 					workers: workerOutcomeUsage(collected.harness.runIds, deps.outcomeDispatch),
 				},
 				failure: classifyCallFailure("Canceled before admission", { invoked: false, aborted: true, retryAttempts: 0 }),
@@ -2128,24 +1998,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			});
 			outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
 			await recordTurnSettled(input.userTurnId, "aborted", 0, "operator_cancel");
-			const outcomeRef = input.continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : input.userTurnId;
-			deps.recordOutcome?.({
-				ref: outcomeRef,
-				source: "turn",
-				facts: turnOutcomeFacts(record, { continuation: input.continuation, interviewDismissed: false, skillsLoaded: [] }),
-			});
 			amendLateWorkerTokens({
 				turnId: input.userTurnId,
-				ref: outcomeRef,
 				parentTurnId: outcomeParent,
 				runIds: collected.harness.runIds,
 				missing: missingReceipts,
 			});
-			if (!input.continuation) previousOperatorTurn = { id: input.userTurnId, settledAt: performance.now() };
-			else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
-			// The turn decision waits in the buffer for the next admission otherwise, and a
-			// session that ends here would file the decision and its outcome apart.
-			deps.flushSystemOne?.();
 		} catch {
 			// Measurement must not change how a cancelled turn settles.
 		}
@@ -2232,8 +2090,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// --- steering triage ----------------------------------------------------
 	//
 	// Off by default (chat.steering.triage). Once the queue has settled for a
-	// moment with enough entries, one detached side-model round reads it and
-	// relabels entries: an unrelated task moves to the end of the turn, a
+	// moment with enough entries, one detached round reads it, typed picks from a
+	// bound route or else the side model, and relabels entries: an unrelated task moves to the end of the turn, a
 	// confident stop may interrupt the run when the operator allowed it. The
 	// round never holds the engine; a verdict that lands after the queue changed
 	// is dropped, and the operator's own toggles pin an entry against it.
@@ -2248,7 +2106,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const scheduleTriage = (): void => {
 		const triage = deps.getSettings().chat.steering.triage;
-		if (!triage.enabled || queues.entries().length < triage.minQueued) return;
+		if (!triage.enabled || queues.entries().length < triageFloor(triage, deps.systemOne)) return;
 		cancelTriage();
 		triageTimer = setTimeout(() => {
 			triageTimer = null;
@@ -2326,8 +2184,30 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (triageInFlight || !state.streaming || !state.runtime) return;
 		const triage = deps.getSettings().chat.steering.triage;
 		const asked: TriageEntry[] = queues.entries().map((entry) => ({ id: entry.id, text: entry.text, kind: entry.kind }));
-		if (asked.length < triage.minQueued) return;
+		if (asked.length < triageFloor(triage, deps.systemOne)) return;
 		triageInFlight = true;
+		try {
+			await runTriageRound({
+				triage,
+				systemOne: deps.systemOne,
+				asked,
+				task: () => deps.currentOperatorTask?.() ?? "",
+				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
+				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
+				apply: (verdicts) => applyTriage(verdicts, triage.autoInterrupt),
+				side: () => runSideTriage(asked),
+			});
+		} catch {
+			// A failed round leaves the queue exactly as the operator left it.
+		} finally {
+			triageInFlight = false;
+		}
+	};
+
+	/** The side-model round. It has its own deadline, so an ask that spent its bound before falling back does not end it. */
+	const runSideTriage = async (asked: ReadonlyArray<TriageEntry>): Promise<void> => {
+		if (!state.runtime) return;
+		const triage = deps.getSettings().chat.steering.triage;
 		const controller = new AbortController();
 		const deadline = setTimeout(() => controller.abort(), triage.timeoutMs);
 		deadline.unref?.();
@@ -2355,7 +2235,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					systemPrompt: TRIAGE_SYSTEM_PROMPT,
 					userText: triageUserText({
 						task: deps.currentOperatorTask?.() ?? "",
-						previous: lastAssistantText(state.runtime.agent.state.messages),
+						previous: state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : "",
 						entries: asked,
 					}),
 					maxTokens: TRIAGE_MAX_TOKENS,
@@ -2376,38 +2256,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				asked.map((entry) => entry.id),
 			);
 			if (!triageSnapshotMatches(asked, queues.entries())) {
-				for (const verdict of verdicts) {
-					deps.recordOutcome?.({ ref: verdict.id, source: "steer", facts: { event: "triage", stale: true } });
-				}
 				return;
 			}
 			applyTriage(verdicts, triage.autoInterrupt);
-		} catch {
-			// A failed round leaves the queue exactly as the operator left it.
 		} finally {
 			clearTimeout(deadline);
-			triageInFlight = false;
 		}
 	};
 
-	const applyTriage = (
-		verdicts: ReadonlyArray<ReturnType<typeof parseTriageAnswer>[number]>,
-		autoInterrupt: boolean,
-	): void => {
+	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): void => {
 		for (const verdict of verdicts) {
 			const entry = queues.entries().find((candidate) => candidate.id === verdict.id);
 			if (entry === undefined) continue;
-			deps.recordOutcome?.({
-				ref: entry.id,
-				source: "steer",
-				facts: {
-					event: "triage",
-					relation: verdict.relation,
-					urgency: verdict.urgency,
-					confidence: verdict.confidence,
-					pinned: entry.pinned === true,
-				},
-			});
 			if (
 				autoInterrupt &&
 				state.streaming &&
@@ -2544,17 +2404,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 										...(options.origin !== undefined ? { origin: options.origin } : {}),
 									})
 								: queues.steer(text, options.display, { front, referencedPaths });
-						if (entry !== null && deps.readSteer) {
-							const entries = queues.entries();
-							deps.readSteer({
-								ref: entry.id,
-								text,
-								chosen: mode === "end-of-turn" ? "end-of-turn" : "next-slot",
-								position: entries.findIndex((candidate) => candidate.id === entry.id) + 1,
-								queued: entries.length,
-								previous: lastAssistantText(state.runtime.agent.state.messages),
-							});
-						}
 						if (entry !== null) scheduleTriage();
 						return;
 					}
@@ -2760,74 +2609,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					continuation: options.requestContinuation === true,
 					images,
 				});
-				// The user turn id is fixed before anything is asked about the turn, so the
-				// pre-turn decision record, the ledger row and every outcome that follows
-				// carry the id the user turn will be filed under. A run that returns
+				// The user turn id is fixed before turn control runs, so its record and the
+				// ledger row carry the id the user turn will be filed under. A run that returns
 				// before admission leaves the id unused, which costs nothing.
 				const reservedUserTurnId = randomUUID();
-				let previous = "";
-				const messages = agentRuntime.agent.state.messages;
-				for (let index = messages.length - 1; index >= 0; index -= 1) {
-					if (messages[index]?.role === "assistant") {
-						previous = extractText(messages[index]);
-						break;
-					}
-				}
-				const operatorTurn = options.requestContinuation !== true;
-				if (operatorTurn && previousOperatorTurn !== null) {
-					// The operator's reply is the strongest signal of how the last turn
-					// landed: a correction, a thanks, a retry or silence all read differently.
-					const followed = previousOperatorTurn;
-					previousOperatorTurn = null;
+				if (options.requestContinuation !== true) {
+					operatorSpokeAt = Date.now();
 					try {
-						deps.recordOutcome?.({
-							ref: followed.id,
-							source: "next-operator",
-							facts: { text: boundedCodePoints(operatorText, 300), gapMs: Math.round(submittedAt - followed.settledAt) },
-						});
+						deps.onOperatorTurn?.({ task: text });
 					} catch {
-						// Recording an outcome never costs the turn it describes.
-					}
-				}
-				// System One's reading of the request starts here without holding up the
-				// submit: the hint registration and the prewarm use it only if it has
-				// landed by the time they read, and the turn controller below may wait
-				// for it, never past the turn site's deadline. A continuation turn
-				// carries a nudge rather than the operator's request, so a judgment about
-				// it would be a judgment about the nudge.
-				if (operatorTurn && deps.readTurn) {
-					// What the operator asked last turn, as typed. Without it a correction
-					// such as "actually drop X from that list" has nothing to correct, and
-					// it scored unknown at 0.22 on the assistant's reply alone. Read only
-					// when a call will be made, because it reparses the whole ledger from
-					// disk and an operator without System One must not pay for it.
-					const lastTurnId = state.lastTurnId ?? undefined;
-					const previousTask = (): string => {
-						const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], lastTurnId);
-						for (let index = entries.length - 1; index >= 0; index -= 1) {
-							const entry = entries[index];
-							if (entry?.kind !== "message" || entry.role !== "user") continue;
-							if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
-							return operatorTextOfUserPayload(entry.payload) ?? "";
-						}
-						return "";
-					};
-					try {
-						// The last assistant message is evidence for a short follow-up: "ok go
-						// ahead" is an action after a proposal and a pleasantry without one.
-						deps.readTurn({
-							userTurnId: reservedUserTurnId,
-							task: text,
-							request: options.display?.text ?? operatorText,
-							previous,
-							previousTask,
-						});
-					} catch {
-						// Every consumer degrades to what it did before the call existed.
+						// The host's own bookkeeping never costs the submit.
 					}
 				}
 
-				let orientationBlock: string | null = null;
+				let turnControlBlock: string | null = null;
 				let turnControlRecord: TurnControlRecord | null = null;
 				if (deps.turnControl) {
 					const controllerAbort = owner;
@@ -2835,13 +2630,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					setTurnPreparation("preparing");
 					try {
 						const result = await deps.turnControl.run({
-							operatorText: text,
-							continuation: options.requestContinuation === true,
 							userTurnId: reservedUserTurnId,
 							signal: controllerAbort.signal,
 						});
 						if (generation !== submitGeneration || disposed) return;
-						orientationBlock = result.block;
+						turnControlBlock = result.block;
 						turnControlRecord = result.record;
 					} finally {
 						if (pendingPreTurnRead === controllerAbort) pendingPreTurnRead = null;
@@ -2922,7 +2715,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 				const composeSubmittedText = () =>
-					[reminderProjection(), orientationBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
+					[reminderProjection(), turnControlBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
 						.filter((part) => part.length > 0)
 						.join("\n\n");
 				let submittedText = composeSubmittedText();
@@ -3089,16 +2882,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 				context.logPromptCompileIfPending();
-				if (deps.flushSystemOne && deps.session?.current()) {
-					try {
-						// The pre-turn decision and anything asked since the last turn settled
-						// (an approval card, a /draft judgment) land under the user turn just
-						// appended, so a record and its outcome share a ledger neighborhood.
-						deps.flushSystemOne();
-					} catch {
-						// Recording System One is best effort and never costs the turn.
-					}
-				}
 				if (turnControlRecord) {
 					outcomeCollector.recordControl(turnControlRecord);
 					if (deps.session?.current()) {
@@ -3377,21 +3160,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 									: undefined;
 							const finalAssistantText =
 								typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
-							// The turn-end site reads the message for the record only. A continuation
-							// is not the operator's request, so it is not asked, and a dismissed
-							// interview already says how the turn ended.
-							if (!canceled && !interviewDismissed && !continuation && deps.recordTurnEnd) {
-								try {
-									deps.recordTurnEnd({
-										userTurnId,
-										request: operatorText,
-										message: finalAssistantText,
-										toolNames: collected.toolNames,
-									});
-								} catch {
-									// Recording a reading never costs the turn it describes.
-								}
-							}
 							const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
 							const missingReceipts = canceled ? await awaitWorkerRunResults(workerRunIds, deps.outcomeDispatch) : [];
 							// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
@@ -3409,7 +3177,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								...(failure ? { failure: { ...failure, retryAttempts: turnRetryAttempts + providerRetryAttempts } } : {}),
 								tokens: {
 									coordinator: persistence.turnUsage(userTurnId) ?? noOutcomeUsage(),
-									decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),
 									workers: workerOutcomeUsage(workerRunIds, deps.outcomeDispatch),
 								},
 								stopReason:
@@ -3437,36 +3204,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								turnRetryAttempts + providerRetryAttempts,
 								canceled ? "operator_cancel" : undefined,
 							);
-							// The turn-end reading asked for a continuation, and every decision about
-							// the request carries the operator turn's id. A row filed under the
-							// continuation's own id would join no decision when the dataset exports.
-							const outcomeRef = continuation && previousOperatorTurn !== null ? previousOperatorTurn.id : userTurnId;
-							try {
-								deps.recordOutcome?.({
-									ref: outcomeRef,
-									source: "turn",
-									facts: turnOutcomeFacts(record, {
-										continuation,
-										interviewDismissed,
-										skillsLoaded: [...(pendingSkillPolicy?.loadedSkillNames ?? [])].filter(
-											(name) => !skillsLoadedBeforeTurn.has(name),
-										),
-									}),
-								});
-							} catch {
-								// Recording an outcome never costs the turn it describes.
-							}
 							amendLateWorkerTokens({
 								turnId: userTurnId,
-								ref: outcomeRef,
 								parentTurnId: outcomeParent,
 								runIds: workerRunIds,
 								missing: missingReceipts,
 							});
 							// A continuation extends the operator turn it followed, so the gap the
 							// next operator message reports runs from the end of the whole chain.
-							if (!continuation) previousOperatorTurn = { id: userTurnId, settledAt: performance.now() };
-							else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
 						} catch {
 							// Measurement must not change turn settlement when a ledger or receipt is unavailable.
 						}
@@ -3674,6 +3419,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			});
 		},
 		contextLedger: () => context.contextLedger(),
+		screenWindow: () => (state.runtime ? { messages: state.runtime.agent.state.messages, since: operatorSpokeAt } : null),
 		liveBudget: () => context.liveBudget(),
 		inspectLiveBudget: () => context.inspectLiveBudget(),
 		refreshLiveBudget: () => context.refreshLiveBudget(),
@@ -3704,7 +3450,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Local shell completion and tree navigation also refresh the same transcript.
 			eggs.syncConversation();
 			operatorTurnsBefore = null;
-			previousOperatorTurn = null;
 			lastHistoricalImageNoticeKey = null;
 			pendingVisionSidecar?.abort();
 			pendingCompactionPaint?.abort();
@@ -4042,8 +3787,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			turnActive = false;
 			keepalive.cancel();
 			try {
-				const counts = deps.onTurnSettled?.();
-				if (counts !== undefined) emit({ type: "speculative_dispatch", counts });
+				deps.onTurnSettled?.();
 			} catch {
 				// Settle hooks are housekeeping and never cost the turn.
 			}

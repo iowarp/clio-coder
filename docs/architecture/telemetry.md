@@ -65,7 +65,7 @@ Every event the harness emits is declared once in `EVENTS` ([events.ts](../../sr
 
 Where a live signal and a journal record mark the same moment with different facts, they are two events: the live `session.created`, `session.reattached` and `compaction.ended` repaint and open writers, and the journal `session.opened`, `session.resumed` and `compaction.settled` are what the scope keeps.
 
-The registry is also the in-process bus. The hub ([hub.ts](../../src/core/telemetry/hub.ts), `telemetryHub()`) is the one emit path: `emit(name, payload, ctx?)` delivers the payload to subscribers synchronously and, for a journal event, enqueues a record to the sink of the scope its context names, the given `ctx` or else the async context. It returns true only when a journal record was enqueued. `emitContent` enqueues a content-bearing research record whose preimage the writer stores, reserves against the research cap and cites before it writes the record. `subscribe` registers a listener; a listener runs on the emitter's stack, and one that returns a promise is not awaited. The `PREIMAGE_SUBJECTS` table names the events whose content goes to `objects/` this way: `memory.traced`, `memory.observed`, `request.captured` and `system_one.sample_captured`.
+The registry is also the in-process bus. The hub ([hub.ts](../../src/core/telemetry/hub.ts), `telemetryHub()`) is the one emit path: `emit(name, payload, ctx?)` delivers the payload to subscribers synchronously and, for a journal event, enqueues a record to the sink of the scope its context names, the given `ctx` or else the async context. It returns true only when a journal record was enqueued. `emitContent` enqueues a content-bearing research record whose preimage the writer stores, reserves against the research cap and cites before it writes the record. `subscribe` registers a listener; a listener runs on the emitter's stack, and one that returns a promise is not awaited. The `PREIMAGE_SUBJECTS` table names the events whose content goes to `objects/` this way: `memory.traced`, `memory.observed` and `request.captured`.
 
 ## Tiers and capture modes
 
@@ -75,14 +75,14 @@ Every journal event has one tier and one content class. The tier says why the re
 | --- | --- | --- |
 | `accountability` | Safety, spend, outcomes and approvals: calls, turns, runs, seals, gaps, budget, tool and approval decisions, gate verdicts, library lifecycle. | Always. There is no off. |
 | `operational` | How the harness ran: routing, prompt compiles, config, health, auth refreshes, middleware, System One decisions, worker channel failures, boot and shutdown. | Always. |
-| `research` | Content and high-volume detail: prompt text, request bodies, memory traces, delta histograms, prefix blocks, provider headers, the System One dataset, the bus trace. | Only in research mode, each behind its flag. |
+| `research` | Content and high-volume detail: prompt text, request bodies, memory traces, delta histograms, prefix blocks, provider headers, the bus trace. | Only in research mode, each behind its flag. |
 
 Content classes are `content-free` (ids, counts, closed vocabularies), `structural` (shapes and object references without operator text) and `content-bearing` (text a person or model wrote, always through an object).
 
 `telemetry.mode` is `standard` (the default) or `research` ([settings inventory](../guide/configuration-and-targets.md#telemetry)).
 
 - **Standard** admits accountability and operational records.
-- **Research** also admits `health.samples_captured` and `prompt.prefix_captured`, and the research events the `telemetry.research` flags turn on: `content` admits `prompt.text_captured`, `request.captured`, `memory.traced` and `memory.observed`; `systemOneDataset` admits `system_one.sample_captured`; `busTrace` admits `bus.traced`, one record naming each live event the hub delivers; `deltas` admits `call.timing_captured`; `providerHeaders` admits `provider.headers_captured`. `content` and `systemOneDataset` also need the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. The process scope has no workspace, so it never captures content.
+- **Research** also admits `health.samples_captured` and `prompt.prefix_captured`, and the research events the `telemetry.research` flags turn on: `content` admits `prompt.text_captured`, `request.captured`, `memory.traced` and `memory.observed`; `busTrace` admits `bus.traced`, one record naming each live event the hub delivers; `deltas` admits `call.timing_captured`; `providerHeaders` admits `provider.headers_captured`. `content` also needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. The process scope has no workspace, so it never captures content.
 - A project or local settings layer can lower capture but never raise it.
 - Research capture is capped at 256 MiB per session, counting its research records and the objects they store. A refusal is a `journal.gap` with reason `research-cap`, and accountability records continue.
 
@@ -149,7 +149,7 @@ The session ledger (`<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl`) i
 
 ## Objects
 
-`objects/` in a scope directory holds `obj_<sha256>.json` files: canonical sorted JSON, redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/telemetry/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas`, `config`, `briefing`, `steering` and `run-result`; a `config` object keeps the names of every `headers` and `env` map but withholds their values. The content subjects are `prompt-text`, `request`, `memory-trace`, `observation-trace` and `system-one-sample`. Objects are stored through the scope's writer, behind any seal in progress. A reader that finds a missing object reports it as missing, and an object whose bytes do not match its id is an error.
+`objects/` in a scope directory holds `obj_<sha256>.json` files: canonical sorted JSON, redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/telemetry/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas`, `config`, `briefing`, `steering` and `run-result`; a `config` object keeps the names of every `headers` and `env` map but withholds their values. The content subjects are `prompt-text`, `request`, `memory-trace` and `observation-trace`. Objects are stored through the scope's writer, behind any seal in progress. A reader that finds a missing object reports it as missing, and an object whose bytes do not match its id is an error.
 
 ## Seals and bundles
 
@@ -296,7 +296,7 @@ The journal events, grouped by subject. The registry in [events.ts](../../src/co
 | `context.snapshotted`, `context.pruned`, `context.recalled`, `context.warning_raised` | operational | content-free or structural | Context snapshots with their token split and window, working-set pruning and recall, and context warnings. |
 | `quota.read`, `health.sampled` | operational | content-free | Quota readings and one 10 s health window (event-loop lag, RSS, writer queue depth and drops), in the process journal. |
 | `auth.refreshed`, `middleware.fired`, `middleware.hook_failed`, `hook.ran`, `system_one.decided`, `worker.channel_failed` | operational | content-free or structural | OAuth refreshes, middleware rule firings and hook failures, operator hook runs, System One decisions, and worker channel failures. |
-| `prompt.text_captured`, `request.captured`, `memory.traced`, `memory.observed`, `system_one.sample_captured` | research | content-bearing | Prompt text, request bodies, memory traces and observations, and the System One dataset, each as an object. Need `content` (`systemOneDataset` for the dataset) and consent. |
+| `prompt.text_captured`, `request.captured`, `memory.traced`, `memory.observed` | research | content-bearing | Prompt text, request bodies, memory traces and observations, each as an object. Need `content` and consent. |
 | `prompt.prefix_captured`, `call.timing_captured`, `provider.headers_captured`, `health.samples_captured`, `bus.traced` | research | structural or content-free | Prefix block hashes, inter-delta gap histograms, allowlisted provider headers, full health curves, and the live-event trace. |
 
 ## Design decisions

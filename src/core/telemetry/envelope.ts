@@ -32,7 +32,8 @@ export const SegmentHeaderSchema = Type.Object(
 				content: Type.Boolean(),
 				deltas: Type.Boolean(),
 				providerHeaders: Type.Boolean(),
-				systemOneDataset: Type.Boolean(),
+				/** Retired. Every older header names it and the capture object is closed, so a reader must still accept it. */
+				systemOneDataset: Type.Optional(Type.Boolean()),
 				busTrace: Type.Boolean(),
 			},
 			closed,
@@ -94,9 +95,27 @@ export function makeTelemetryRecord<K extends JournalEventName>(
 export type RecordRead =
 	| { kind: "record"; record: TelemetryRecord }
 	| { kind: "header"; header: SegmentHeader }
+	/** A kind this version retired on purpose. It stays in the hash chain and counts as nothing: not unreadable, not skipped. */
+	| { kind: "retired"; k: string }
 	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record"; segment?: true };
 
 /** Readers never retire future records; even a newer envelope is counted, not rewritten (#434). */
+/**
+ * Kinds an older journal may hold that nothing reads any more, with the record version retired (absent means all).
+ * Without this they would read as `unknown-kind`, and retention would hold every such session as unreadable.
+ */
+const RETIRED_RECORD_KINDS: Readonly<Record<string, number | undefined>> = {
+	"system_one.sample_captured": undefined,
+	// Version 1 described decision sites, which are gone. Keyed on the version, so a later reader still reads version 2.
+	"system_one.decided": 1,
+};
+
+function isRetiredRecord(raw: Record<string, unknown>): raw is Record<string, unknown> & { k: string } {
+	if (typeof raw.k !== "string" || !Object.hasOwn(RETIRED_RECORD_KINDS, raw.k)) return false;
+	const version = RETIRED_RECORD_KINDS[raw.k];
+	return version === undefined || raw.kv === version;
+}
+
 export function readTelemetryRecord(value: unknown): RecordRead {
 	if (!value || typeof value !== "object") return { kind: "skipped", reason: "invalid-record" };
 	const raw = value as Record<string, unknown>;
@@ -112,6 +131,7 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 			? { kind: "header", header: raw }
 			: { kind: "skipped", reason: "invalid-record", segment: true };
 	}
+	if (isRetiredRecord(raw)) return { kind: "retired", k: raw.k };
 	if (!Value.Check(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };
 	if (!isJournalEvent(value.k)) return { kind: "skipped", reason: "unknown-kind" };
 	const definition = journalDefinition(value.k);

@@ -1,10 +1,10 @@
 # System One Architecture
 
-System One is an experimental decision layer. A site names one object, a typed question set about that object is answered by a pluggable engine, and the site's policy reads the answers under cuts fitted for the build that answered. The domain is `src/domains/system-one/`. This page describes the contract and its invariants. For configuration, operation and what each site does with an answer, see the [System One guide](../guide/system-one.md).
+System One is an experimental, opt-in seam to a fast decision model. A decision point names one object, a typed question set about it is answered by a pluggable engine, and the point's pure reader turns the answers into a typed value. Nothing runs unless `systemOne.use` names a route. The domain is `src/domains/system-one/`. This page describes the contract and its invariants. For configuration and operation, see the [System One guide](../guide/system-one.md).
 
 ## Contract in one paragraph
 
-The `SystemOne.run` facade catches engine and routing failures and returns `null` when no usable verdict is available ([factory.ts](../../src/domains/system-one/factory.ts)). Automatic sites run detached and fall back when a reading is absent, late or unusable. Fitted cuts govern policy hints and acts; the explicit `consult` site can return distributions from an unfitted engine because its reader applies no policy cut ([consult.ts](../../src/domains/system-one/sites/consult.ts)). Engine implementations may reject internally; the facade isolates those errors from the caller's turn. The types are in [types.ts](../../src/domains/system-one/types.ts): `SiteDefinition`, `Answer`, `DecisionEngine`, `SystemOne`, `DecisionRecord`, `RouteRecord`, `OutcomeRecord` and `DecisionRecorder`.
+`SystemOne.ask(point, object, options)` is the one seam ([factory.ts](../../src/domains/system-one/factory.ts)). It walks the named routes in order and returns a `Verdict` or `null`, and `null` always means the caller behaves as if System One did not exist, so nothing in it throws ([runner.ts](../../src/domains/system-one/runner.ts)). An engine declares what it can read and where its requests go, and formation reads only that declaration, so no point or runner branch names a vendor. The types are in [types.ts](../../src/domains/system-one/types.ts): `DecisionPoint`, `Answer`, `DecisionEngine`, `EngineCapabilities`, `EngineDestination`, `Verdict` and `RouteAttempt`.
 
 ## Questions and answers
 
@@ -13,192 +13,117 @@ A question is one of three types ([questions.ts](../../src/domains/system-one/qu
 | Type | Criteria | Answer |
 | --- | --- | --- |
 | `noul` | What true and false each look like | Probability of true |
-| `choice` | Option key to when it applies, 1 to 255 options | Most probable key and mass per option |
-| `score` | 2 to 10 levels from lowest to highest | Expected level and mass per level |
+| `choice` | Option key to when it applies | Most probable key and mass per option |
+| `score` | Levels from lowest to highest | Expected level and mass per level |
 
-Criteria describe situations, not degrees. Every answer carries `certainty`, an engine-neutral peakedness in [0, 1] recomputed from the mass so engines that report confidence differently compare ([answers.ts](../../src/domains/system-one/answers.ts)). It also carries a `calibrated` flag, false for vote counts, tournament readouts and a single option order, and optional `flags` (`flip` when the two option orders disagree, `approximate` for a tournament, `partial` when an option order was unreadable). `readout` names what the number is as the engine's profile declares it (`server`, `softmax-binary`, `softmax-exclusive`, `sigmoid-independent`, `ordinal-expectation`, `logprob` or `vote`). It is not a calibration claim. A missing answer is an abstention on that question alone. Sites treat an answer below a certainty floor as undecided, which is `null` and not `false`, and read a `noul` only through a calibrated probability, so a vote fraction never crosses a cut.
+A question also carries answer semantics ([contract.ts](../../src/domains/system-one/contract.ts)): `boolean` for one claim about one state, `exclusive` for a choice, `ordinal` for a level, and `independent` for one item of a filter, whose number does not compete with any other item's. Every answer carries `certainty`, an engine-neutral peakedness recomputed from the mass ([answers.ts](../../src/domains/system-one/answers.ts)), and `readout`, which names what the number is: `server` (a typed wire's own value), `softmax-binary`, `softmax-exclusive`, `sigmoid-independent`, `ordinal-expectation` or `categorical` (a label with no probability scale). A readout is not a calibration claim. A missing answer is an abstention on that question alone.
 
-## Sites are keyed by the object they judge
+## Decision points
 
-A site declares `id`, a `version`, a hard `deadlineMs`, an optional `moment`, an optional `requiredCut`, optional `compact` wordings, and pure functions: `state(object)` builds the bounded state or returns `null` to ask nothing, `questions(object)` fans out every question about that state, `read(answers, object, cuts)` applies policy under the build's cuts and returns a typed verdict or `null`, and `summarize(value)` gives the ledger its outcome fields. `taskOf` and `cutTask` say which decision task a question serves and which task's answers a cut is compared with. The decision tasks are `intent`, `recipe`, `toolRisk`, `injection`, `turnEnd`, `relevance`, `clusterSelect`, `consult`, `drafts` and `steer`. `SITE_TASKS` in [contract.ts](../../src/domains/system-one/contract.ts) is the source matrix of which tasks each site asks, and settings validation refuses a task route outside it.
+A point declares `id`, a `version`, a hard `deadlineMs`, optional `requires` and `optional` flags, and pure functions: `state(object)` builds the bounded state or returns `null` to ask nothing, `questions(object)` gives every question about that state and `read(answers, object)` returns the typed value or `null`. There is no table of thresholds. A point that reads a yes/no uses `p >= 0.5`, the question's own boundary. Definitions live under `src/domains/system-one/points/`, with shared caps in [bounds.ts](../../src/domains/system-one/points/bounds.ts).
 
-| Site | Definitions (moment, version) | Tasks asked | Cut keys read |
-| --- | --- | --- | --- |
-| `turn` | `turn-v4` | `intent` | `direct`, `dispatch`, `prewarm`, `architecture`, `direction`, `shape` |
-| `workerPrepare` | `worker-prepare-v1` | `recipe` | `recipe`, required |
-| `toolCall` | moment `card` and moment `gate`, `tool-call-v3` and `tool-call-v2` | `toolRisk` | `cardFloor`, required, `cardOutside` and `cardDestroys` at `card`; `gateRadius` and `gateDestroys` at `gate` |
-| `toolResult` | `tool-result-v2` | `injection` | `instructions` |
-| `turnEnd` | `turn-end-v3` | `turnEnd` | `asksOperator`, `blocksOnDecision`, `blocksOnDecisionFloor` |
-| `relevance` | `relevance-v2`; moment `clusters`, `relevance-cluster-v2` | `relevance`, `clusterSelect` | `ranked` (a validation marker), `related`; `clusters` at the `clusters` moment, required |
-| `consult` | `consult-v1` | `consult` | none |
-| `drafts` | `drafts-v1` | `drafts` | `pick`, required; `sound` |
-| `steer` | `steer-v1` | `steer` | `relationFloor`, `urgencyFloor` |
+| Point | Asked by | Object | Deadline | Flags |
+| --- | --- | --- | --- | --- |
+| `consult` | The [consult tool](../../src/tools/consult.ts), questions form ([consult.ts](../../src/domains/system-one/points/consult.ts)) | The agent's state and file heads | 45 s | |
+| `consult` (filter) | The consult tool, filter form | One independent yes/no per item | 45 s | |
+| `judgeScreen` | The safety judge ([judge-screen.ts](../../src/domains/system-one/points/judge-screen.ts)) | One tool result as `{source, content}` | 10 s | `requires.probabilities`, `optional` |
+| `triage` | The chat loop ([triage.ts](../../src/domains/system-one/points/triage.ts)) | The task, the latest reply and the queued entries | `chat.steering.triage.timeoutMs` | `optional` |
 
-Each definition lives in one file under `src/domains/system-one/sites/`. `consult` is a factory because the agent supplies the questions. `consult` has no cut and no policy.
+`requires.probabilities` skips a route whose engine does not declare real probabilities, before any byte leaves. `optional` means the point is not worth waiting for: a route on a destination the ask avoids or with no free endpoint slot is skipped as `busy`. Deadlines are bounds derived from the kind timeouts, not fits to recorded latency.
 
-One call carries one state and every question about it. The `systemone` engine sends those questions in one request. The `llm` engine sends requests per question and option order or vote, with concurrency bounded by the endpoint's capacity. Every state is capped by code points in [bounds.ts](../../src/domains/system-one/sites/bounds.ts) so a fitted cut was measured on evidence of a known size and a small-window engine never truncates the part that matters. A site's `compact` wordings are short variants for renderers with a declared per-option bound. They carry their own version, which joins the threshold identity of any build read through them.
-
-Two definitions can share an id and differ in `moment`. `toolCall` has `card` (the advisory on an open approval card) and `gate` (the detached yolo reading). `relevance` has `clusters` for selecting catalog groups. Each moment trips its own breaker and keeps its own answered build, so a slow card never opens the gate's. A site that sets `requiredCut` is skipped on any route whose identity lacks that cut, before any request, and a call skipped for that reason on every route leaves no decision row.
+A filter's items live in the question head, so a point's state stays small and only ids and scores cross back to the agent. A file item is a digest read with regular expressions, because `code_nav`'s index is a built artifact a filter must not wait on. The judge screen sends one result per ask rather than one filter over four, because a bounded renderer refuses text in the question head and the approval card has to name which result fired.
 
 ## Engines
 
-Clio Coder's defaults bind no engines or sites: `systemOne.use` is null and `systemOne.engines` and `systemOne.sites` are empty ([defaults.ts](../../src/core/defaults.ts)). Configuring an engine alone starts no site calls. [selection.ts](../../src/domains/system-one/selection.ts) expands `use` into the active profile with a site's own entry winning, and the factory resolves bindings from that result.
+The defaults bind nothing: `systemOne.use` is null and `systemOne.engines` is empty ([defaults.ts](../../src/core/defaults.ts)). [selection.ts](../../src/domains/system-one/selection.ts) resolves each named route to an engine. The alias `jev` comes from a runtime's `decisionAlias` descriptor, mirrored in the boot manifest so a process with no hydrated providers resolves it too. A route that cannot run reports a problem and nothing borrows another route.
 
-An engine implements `decide(request)` and rejects on transport failure, an unusable reply or abort. It does not own deadlines or fallback ([systemone.ts](../../src/domains/system-one/engines/systemone.ts) and [llm.ts](../../src/domains/system-one/engines/llm.ts)). `unsupported(task, question)` says, without any I/O, why the engine must not be asked a question.
+[engine-kinds.ts](../../src/domains/system-one/engine-kinds.ts) is the table resolution, status and the runner read. A new kind is one row there and one module under `engines/`.
 
-- `systemone` asks through a runtime's `decide` verb. Three built-in runtimes implement it: `typesafe-jev` and `systemone` post to `POST /v1/systemone`, and `inception` posts the same `{model, state, questions}` body to `POST /v1/decisions`, answered only by `mercury-decide`. Converting the wire reply drops an answer whose type does not match its question or whose choice is not a declared key. A choice with one option has no uncertainty and is answered locally without a request. The build is the model the server reports. A server that reports none, or `unknown`, gets the build `<target id>/<requested model or default>`, so a fitted cut never applies to an unidentified server. Every question passes the profile's renderer again here, so no caller reaches the wire with a question the profile refuses.
-- `llm` runs an ordinary chat target as a one-letter decider. With logprobs it reads the first-token letter alternatives in both option orders and averages them through a softmax whose temperature is fitted per build and question bucket (`FITTED_TEMPERATURES` is empty, so every build reads at 1.0). An unreadable order is dropped and the answer is flagged `partial` and uncalibrated. Without logprobs it casts five votes with alternating option order, needs at least three valid votes, and marks the answers uncalibrated. Questions of more than 26 options run as a tournament of groups of 25 that keeps each group's two strongest, flagged `approximate`. Questions are never packed into one request. Requests share one state prefix so a server's prefix cache prefills it once, and a scheduler bounds concurrency by the endpoint's capacity (4 when the host cannot say).
-- `llm` mode `batch` sends every question of a call in one schema-bound request at temperature 0 ([llm-batch.ts](../../src/domains/system-one/engines/llm-batch.ts)). Answers are one-hot, `calibrated` false, readout `categorical`, and an abstention leaves a question unanswered. Its build comes from the model and fingerprint each response reports. A measurement ([measurement.ts](../../src/domains/system-one/measurement.ts)) gives a passing action a cut of 1, read by the sites as usual, so a label acts only where [calibrate.ts](../../src/domains/system-one/calibrate.ts) validated it. Those cuts reach the runner as local cuts, filtered to the site versions they were measured on.
-- `llm` mode `auto` starts with logprobs. A warm request that returns no usable logprobs downgrades that target, model and URL to votes, re-checked after ten minutes. Three consecutive calls with half or more of their option orders unreadable flip it the same way. A logprobs verdict is trusted for 30 minutes. The reply `note` (`downgraded: no-logprobs`, `downgraded: partial-logprobs` or `partial: N of M logprob orders unreadable`) says why a readout is not the configured one, and a call never mixes the two readouts.
-- The build key of an `llm` engine is `llm:<runtime>@<host>/<model>#<mode>:<prompt version>` (`oneshot` replaces the host for a runtime without an HTTP chat wire). Its window is the target's context window less a 256-token reserve when that window exceeds 1,024 tokens, and the window itself otherwise.
-- Every request an `llm` engine sends, schema retries included, passes the composition root's paid-request admission ([system-one-host.ts](../../src/entry/system-one-host.ts)). A request to a priced target is refused once the session cost ceiling is reached and never waits for a raise, a refused request fails the whole decision, and usage is recorded under the `system-one` label that `/usage` and `clio-coder usage report` count as System One calls and not as turns. `safety.limits.sessionCostUsd: 0` means no ceiling, so `sessionCeilingReached` in [budget.ts](../../src/domains/scheduling/budget.ts) never refuses a request for cost.
+| Kind | Per-route timeout | Module | How it asks |
+| --- | --- | --- | --- |
+| `systemone` | 5 s | [systemone.ts](../../src/domains/system-one/engines/systemone.ts) | A runtime's `decide` verb. `typesafe-jev` and `systemone` post to `POST /v1/systemone`, and `inception` posts the same `{model, state, questions}` body to `POST /v1/decisions`, answered only by `mercury-decide`. |
+| `llm` | 30 s | [llm.ts](../../src/domains/system-one/engines/llm.ts), [llm-batch.ts](../../src/domains/system-one/engines/llm-batch.ts) | Every question of an ask in one schema-bound request at temperature 0. Answers are one-hot with readout `categorical`, and an abstention leaves a question unanswered. |
 
-A `systemone` engine's window is `engineWindow(profile, declared)` in [profiles.ts](../../src/domains/system-one/profiles.ts): the target's `capabilities.contextWindow` (or the runtime default, 480 on the `systemone` runtime) bounded by the profile's ceiling. An engine has no placement. The processor a decision model runs on (an integrated GPU, an NPU, the CPU or a hosted service) belongs to the server behind the target, and the server's reported build, which already keys every cut, is what distinguishes two placements of one checkpoint. Doctor reports each bound engine's profile, window and passive round trip without asking a decision.
+An engine declares `capabilities` (semantics, readout, whether its numbers are real probabilities, renderer, option bounds, window and whether that window counts per question or over the whole request) and a `destination`. A null destination sends no byte, which is what a bundled in-process model would declare. Nothing is bundled today.
 
-`createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts) resolves a site's binding from live settings on every call, memoizes one engine per configured name, and rebuilds it when a digest of its own configuration, target and runtime changes. A binding's `tasks` map adds one route per other engine, each carrying the tasks sent to it. A routed engine that is unusable abstains its tasks and never falls back to the site's engine. `limits(site, task)` reports the window and option bound of the engine answering a task, so a caller can choose a bounded hierarchy over a flat ask.
+The build is what the server reported on that response. A `systemone` server that reports none, or `unknown`, gets the build `<target id>/<requested model or default>`. An `llm` build names the runtime, host, reported model, fingerprint and prompt version, and a response that names no model fails the call.
+
+Every request an `llm` engine sends passes the composition root's paid-request admission ([side-request-admission.ts](../../src/entry/side-request-admission.ts)). A request to a priced target is refused once the session cost ceiling is reached and never waits for a raise, and usage is recorded under the `system-one` label. `safety.limits.sessionCostUsd: 0` means no ceiling, so `sessionCeilingReached` in [budget.ts](../../src/domains/scheduling/budget.ts) never refuses a request for cost.
+
+A `systemone` engine's window is `engineWindow(profile, declared)` in [profiles.ts](../../src/domains/system-one/profiles.ts): the target's `capabilities.contextWindow` (or the runtime default, 480 on `systemone` and 32,000 on `typesafe-jev`) bounded by the profile's ceiling. An engine has no placement. The processor a model runs on belongs to the server behind the target.
+
+`createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts) fixes which routes exist at startup, because `use` also decides whether the tool registers. What each name means is resolved from live settings on every ask, one engine is memoized per name and rebuilt when a digest of its configuration, target and runtime changes, and a route the settings stop naming is dropped at once.
 
 ## Capability profiles
 
-A profile is a declared contract for a served model, not a measurement ([profiles.ts](../../src/domains/system-one/profiles.ts)). It says which tasks and answer semantics the model may be asked (`boolean`, `exclusive`, `ordinal`, `independent`), the limits its publisher declares, and how its numbers are read. `render` runs before any byte leaves. A question outside the profile's tasks, semantics or option count is abstained on with a reason. A bounded renderer prefers the site's compact wording, keeps option keys and order, and abstains when neither wording provably fits. It never cuts text to make a question fit.
+A profile is a declared contract for a served model, not a measurement ([profiles.ts](../../src/domains/system-one/profiles.ts)). It says which answer semantics the model may be asked, the limits its publisher declares and how its numbers are read. A question outside them is abstained on with a reason before any byte leaves. A bounded renderer keeps option keys and order and abstains when a wording does not provably fit. It never cuts text to make a question fit.
 
-| Profile | Renderer | Tasks | Semantics | Options | Window ceiling |
-| --- | --- | --- | --- | --- | --- |
-| `generic`, `jev` | `systemone-v1` | all | all | 1 to 255 | none |
-| `laya` | `systemone-v1` | all | all | 1 to 255 | 512 |
-| `laya-multilingual` | `systemone-v1` | all | all | 1 to 255 | 1024 |
-| `julia-1` | `julia-compact-v1` | all | all | 2 to 20, 48 tokens each, 512-token question head | 8192 |
-| `gliner2.5-small` | `gliner-label-v1` | `intent`, `recipe`, `relevance`, `clusterSelect` | `exclusive`, `independent` | 2 to 255 | none |
-| `gliner2.5-decide` | `gliner-label-v1` | those four and `turnEnd` | all | 2 to 255 | none |
-| `strands-decider` | `systemone-v1` | all | all | 1 to 255 | 4096 |
+| Profile | Renderer | Real probabilities | Semantics | Options | Window ceiling | Window counts |
+| --- | --- | --- | --- | --- | --- | --- |
+| `generic` | `systemone-v1` | no | all | 1 to 255 | none | per question |
+| `jev` | `systemone-v1` | yes | all | 1 to 255 | none | whole request |
+| `laya` | `systemone-v1` | yes | all | 1 to 255 | 512 | per question |
+| `laya-multilingual` | `systemone-v1` | yes | all | 1 to 255 | 1024 | per question |
+| `julia-1` | `julia-compact-v1` | yes | all | 2 to 20, 48 tokens each, 512-token question head | 8192 | per question |
+| `gliner2.5-small` | `gliner-label-v1` | yes | `exclusive`, `independent` | 2 to 255 | none | per question |
+| `gliner2.5-decide` | `gliner-label-v1` | yes | all | 2 to 255 | none | per question |
+| `strands-decider` | `systemone-v1` | yes | all | 1 to 255 | 4096 | per question |
+| `llm-structured` | `llm-prompt` | no | all | 1 to 255 | none | whole request |
 
-The legacy renderer is the identity, so `generic`, `jev`, `laya` and `strands-decider` send each question exactly as the site wrote it. The semantic question id, task and renderer revision stay in Clio Coder's record and are not sent. Julia-1 options are proven to fit by UTF-8 bytes, which is an upper bound and abstains more often than a count. Once `julia-1` is bound, [julia-tokenizer.ts](../../src/domains/system-one/julia-tokenizer.ts) fetches the model's tokenizer once from its published repository, pinned by revision and SHA-256, into the Clio Coder cache and replaces the byte proof with the real count. Offline, or before that file is cached, the byte proof stays. The `strands-decider` ceiling is its checkpoint's `max_length`. Its own fitting rule gives the question the window first and the state the rest, and the runner applies that rule without the cuts: state plus the longest question must fit the window or nothing is sent.
+`llm-structured` is what any chat target declares and is not chosen by hand. `generic` declares no real probabilities because nothing says what an unnamed server's numbers are. The `systemone-v1` renderer sends each question as the point wrote it, and the semantic kind and renderer revision stay in Clio Coder and are not sent. Julia-1 options are proven to fit by UTF-8 bytes until [julia-tokenizer.ts](../../src/domains/system-one/julia-tokenizer.ts) has fetched the model's tokenizer, pinned by revision and SHA-256, into the Clio Coder cache.
+
+## Formation
+
+[formation.ts](../../src/domains/system-one/formation.ts) is the one place a question becomes a request. It reads only what an engine declares and never truncates. A yes/no or filter item goes as a yes/no when the engine declares `independent` or `boolean`. An engine with only an exclusive choice reads it as a two-label choice per item (`match` or `other`), and the mass of `match` comes back as the yes/no, because one choice across all items would make them compete. Windows use the same estimate as the rest of the harness, one token per four characters. Under a per-question window a row too large abstains alone, and under a whole-request window a request too large is refused as `overflow`. The consult tool fits a filter to the smallest whole-request window among usable routes, so failover still has somewhere to go.
 
 ## The runner
 
 [runner.ts](../../src/domains/system-one/runner.ts) owns everything that must hold for every engine.
 
-1. **State.** The site builds it, and the runner redacts it once before any request exists, so every engine kind and every record sees the same scrubbed state. Question text is redacted by value too, while ids and option keys stay exact.
-2. **Validation and routing.** Every question is validated, and a site that asks nothing fails the call. Each question goes to the route that answers its task. An engine that refuses a question through `unsupported` abstains on it, and a call where no route accepts any question ends as `unsupported`.
-3. **Required cut.** A route whose identity lacks the site's `requiredCut` is skipped before any request.
-4. **Window.** A route whose engine declares a window and cannot fit the state plus its longest question (estimated at one token per four characters) gets `overflow`, because a server silently truncating evidence is the failure a gate cannot detect.
-5. **Breaker.** Three consecutive timeouts at one (engine configuration, site, moment) open a breaker for five minutes, then exactly one call probes. Only timeouts trip it. An answer or a refusal proves the engine responds and resets it.
-6. **Information flow.** The composition root supplies a content-blind check that judges the restrictions the evidence inherited against the engine's model destination (target, runtime, URL, model). A refusal ends that route as `flow-denied` and nothing is sent. A configured check that cannot answer is not a permit. With no check installed the request is allowed. Callers pass the restrictions their evidence carries, and the root adds the session's own. See the [information flow guide](../guide/information-flow.md).
-7. **Deadline.** The binding's `timeoutMs` or the site's `deadlineMs` is one budget counted from the call's start and shared by every route. It aborts the engines through a signal, and a caller's own signal cancels the call.
-8. **Read.** The answering build selects the cuts. `read` and `summarize` are wrapped, and an exception in a site's policy becomes an error on the call's record, not on the turn. A cut is read from the route that answered the task the cut is compared with, so a cut fitted on one engine never applies to another engine's number.
-9. **Record.** One `DecisionRecord` is emitted per evaluated call whatever its outcome (`answered`, `failed`, `timeout`, `canceled`, `overflow`, `breaker-open`, `unsupported` or `flow-denied`), carrying the session that was current when the call started so a late answer is filed under the session that asked. Each engine that took part leaves a `RouteRecord` with its profile, renderer, tasks, build, threshold identity, the validation of its cuts (`measured`, `operator` or `none`), its own outcome and round trip, and the questions as a bounded renderer sent them. The call's `build` is set only when one engine answered all of it. If every route is skipped because a required cut is missing, no decision row is emitted.
+1. **State.** The point builds it, and the runner redacts it once before any request exists, so every engine kind sees the same scrubbed state ([scrub.ts](../../src/domains/system-one/scrub.ts)). Question text is redacted by value too, while ids and option keys stay exact.
+2. **Routes.** Routes are tried in order until one answers. One engine answers one ask, and verdicts are never merged across engines.
+3. **Formation.** A route that cannot carry the ask ends as `unsupported` or `overflow`.
+4. **Avoidance.** An `optional` point skips a route the caller's `avoid` names or whose endpoint has no free slot, as `busy`. The judge screen avoids the judge's own destination.
+5. **Breaker.** Three consecutive timeouts on one engine configuration open a breaker for five minutes, then exactly one call probes. Only timeouts trip it. An answer or a refusal proves the engine responds and resets it. A server that answers 400 unknown model is recorded as refused, because no retry can change that, and is shown by status.
+6. **Information flow.** The composition root supplies a content-blind check that judges the restrictions the evidence inherited against the engine's destination (target, runtime, URL, model). A refusal ends that route as `flow-denied` and nothing is sent. A configured check that cannot answer is not a permit. See the [information flow guide](../guide/information-flow.md).
+7. **Deadline.** Each route runs under its kind's timeout inside the point's total, counted from the ask's start. A caller's own signal cancels the ask.
+8. **Read.** `read` is wrapped, so an exception in a point becomes a failed ask, not a failed turn.
+9. **Record.** One content-free `system_one.decided` record per ask, at kind version 2, carrying the point, question-set version, `ref`, outcome (`answered`, `failed`, `timeout`, `canceled`, `overflow`, `breaker-open`, `unsupported`, `flow-denied` or `busy`), latency, deadline, token counts, counts of questions asked and abstained, and one row per route. A kind 1 line from an older journal reads as retired. No state, question text or answer is kept, and there is no decision dataset or recorder.
 
-In-flight calls are tracked so shutdown can wait a bounded time for a row that a turn stopped waiting on. The runner remembers the identity each engine last answered under for ten minutes, per site and moment, so callers can ask `shadowed(site, moment)` cheaply.
+## Where points are read
 
-## Calibration: cuts belong to a threshold identity
-
-[calibration.ts](../../src/domains/system-one/calibration.ts) is the one reviewable table of what a build's numbers mean. A cut is keyed by `thresholdIdentity(build, renderer, siteVersion, compactVersion)` ([contract.ts](../../src/domains/system-one/contract.ts)). For the legacy wire and the `llm` prompt the identity is the bare build string. For a bounded renderer it is `<build>+<renderer>@<siteVersion>`, with `/<compactVersion>` appended when a compact wording was read. `FITTED_CUTS` holds `<site>.<key>` entries per identity, each fitted from a labeled run on that exact build with the run cited beside the numbers. `FITTED_CONTRACTS` lists the renderer and site versions a measured table was fitted under, and a measured cut applies only when the call matches exactly, so a reworded site or another rendering goes silent until it is measured again. `cutsFor(identity, site, overrides, contract)` overlays local cuts the factory is handed, never settings, and reports `fitted`, true when any cut exists for the site under the identity. Each action reads its own key, so `fitted` says only that a site has some measurement.
-
-The table ships cuts for one build, `jev-1.14.0` over the `systemone-v1` renderer, under the site versions `turn-v4`, `worker-prepare-v1`, `turn-end-v3`, `tool-call-v2` (gate), `tool-call-v3` (card), `tool-result-v2`, `relevance-v2` and `relevance-cluster-v2`. Its note in `calibration.ts` states the rule: a margin derived from the measured run-to-run noise and what a false fire costs, chosen on a fit split and scored once on a held-out split.
-
-| Cut key | Role |
-| --- | --- |
-| `turn.direct` | `[Scope]` hint |
-| `turn.dispatch` | `[Plan]` hint and the expected-dispatch act |
-| `turn.architecture` | `[Explore]` hint |
-| `turn.direction` | Direction act |
-| `turn.prewarm` | Asking `workerPrepare` |
-| `turn.shape` | The mass a shape needs, which the plan hint phrases and a second held worker reads |
-| `workerPrepare.recipe` | The mass a recipe pick needs to hold a worker |
-| `toolCall.gateRadius`, `toolCall.gateDestroys` | Yolo gate escalation, read by the site policy and only recorded by the host |
-| `toolResult.instructions` | Instruction flag, read by the site policy and only recorded by the host |
-| `turnEnd.asksOperator` | Reading that the reply asks the operator, only recorded |
-| `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor` | The two sides of one policy: blocking needs the first, not blocking needs the second or less, and the middle is no decision. Only recorded |
-| `relevance.ranked` | Validation marker, not a threshold. A build without it never reorders a listing |
-| `relevance.related` | The score at which an entry nothing else matched may join a list. Without it, scores only reorder |
-| `toolCall.cardFloor` | Certainty under which the card shows nothing. Required, so a build without it sends no request |
-| `toolCall.cardOutside`, `toolCall.cardDestroys` | Past these the card may say a call reaches outside the workspace, and the ledger that it destroys data |
-| `drafts.pick`, `drafts.sound` | The mass a `/draft` recommendation needs and the score a soundness claim needs. `pick` is required |
-| `steer.relationFloor`, `steer.urgencyFloor` | Certainty under which a steer reading names no choice. Only recorded |
-
-`jev-1.14.0` has no `turnEnd.blocksOnDecision`, `turnEnd.blocksOnDecisionFloor`, `drafts.pick` or `drafts.sound` cut, because each failed that rule, so those readings only record or stay silent.
-
-A site that hints, gates or acts must stay silent when `fitted` is false. That state is **shadow mode**: the engine is still asked and the call is fully recorded, but the policy returns no hint, no gate and no act. A keyed threshold is chosen above the highest observed negative with the measured margin, and it accepts missed positives where the classes overlap. Safety sites can only add friction. `FITTED_TEMPERATURES` follows the same rule for LLM builds and is empty until a build is fitted.
-
-In [system-one-host.ts](../../src/entry/system-one-host.ts), `turn`, `turnEnd`, the `toolCall` gate, the `toolResult` screen and `steer` always detach. `turnEnd`, the gate, the screen and `steer` have no reader and are asked only while the dataset is recorded, even with fitted cuts. The `turn` reading is kept for its readers only from a fitted build. Callers query `shadowed(site, moment)` under the same moment that recorded the answering identity. It is true when no engine taking part can act: each last answered from an unfitted identity within ten minutes, or, not yet heard from, would answer as a build with no cut at the site, so an unmeasured engine is never called to learn its build. `relevance` reads a finished cached ranking synchronously and starts missing work detached. Shadow requests are skipped unless the dataset is recording. A catalog too large for one request is asked by its own categories (at most 32 groups of at most 64 entries, two levels deep), which needs the `relevance.clusters` cut.
-
-## Records
-
-Two readers get two artifacts from the same `DecisionRecord`. The recorder is installed by the composition root only. Workers install none and record nothing.
-
-**Session ledger rows.** Always on. A compact row per call, custom entry type `systemOne`, drained at the next turn boundary into the session that asked ([rows.ts](../../src/domains/system-one/recorder/rows.ts)). It carries site, site version, engine, kind, build, outcome, error (cut to 160 characters), latency, deadline, the estimated state tokens, a SHA-256 of the state, the number of questions, the answers, usage, `fitted`, the policy summary and the per-engine routes without their rendered text. It never carries the state, so a ledger stays small and safe to share.
-
-**Dataset samples.** Only under research telemetry capture with `telemetry.research.systemOneDataset` and content consent ([dataset.ts](../../src/domains/system-one/recorder/dataset.ts), `systemOneDatasetRecording` in [capture.ts](../../src/core/telemetry/capture.ts)). Each sample is a research, content-bearing `system_one.sample_captured` record in the session's telemetry journal. The record carries the sample kind, the decision id, site and `ref` it concerns, and a reference to an object in the session's `objects/` directory that holds the sample itself. There is no separate System One store, and telemetry [retention](telemetry.md#retention) expires the samples like any other research content.
-
-| Sample | Object holds |
-| --- | --- |
-| `decision` | One call: the redacted state capped at 16 KiB with a `stateTruncated` flag, a digest of the serialized runner-redacted state before the dataset's additional scrub and bound, a redaction count, question hashes, the answers, the policy outcome and the routes, rendered questions included, together with the spec of every question it asked, keyed by hash. The row's `engineKind` names the engine kind because `kind` classifies the row |
-| `outcome` | What followed a decision, joined to it by `ref` at export |
-
-Capture is read when a sample is about to be recorded, so turning it off applies to held decisions too. A decision finished before any session exists is held (at most 512) until a session adopts it, so it is not filed as `session: null`, and an outcome naming a held decision waits and is recorded right after it. A process that ends first drops what it holds, because the process scope keeps no content.
-
-The `ref` on a call is the join key for outcomes: the user turn id, a permission request id, a tool call id, a ranking call id or a queue entry id. Outcome sources are `turn` (what the turn did), `turn-tokens` (amends a canceled turn with worker tokens that sealed after it), `next-operator`, `permission` (how a parked approval was answered and how long it took), `follow-up` (whether a ranked skill, capability or memory entry was later used), `draft` (the draft taken, the judge's pick and whether they agreed) and `steer` (what became of a queued message).
-
-`clio-coder systemone status|export` read the journaled samples through [export.ts](../../src/domains/system-one/recorder/export.ts). Export runs the scrub over every row again on the way out, so a sample recorded before a scrub fix does not leak through it. The operator workflow for these commands is in the guide's [training dataset](../guide/system-one.md#the-training-dataset) section.
-
-## Where sites are read
-
-The composition root builds one `SystemOne`, one recorder and one host ([system-one-host.ts](../../src/entry/system-one-host.ts)). The host is what readers that cannot await take from.
-
-| Site | Reader | Degrades to |
+| Point | Reader | Degrades to |
 | --- | --- | --- |
-| `turn` | Started once before the prompt is built. The turn controller waits for it, up to the call's own deadline, when direction could act on it, and no other reader waits; a measured reading ready in time can inform hints and turn control, and a late reading cannot enter the next continuation | No hints, previous turn-control behavior |
-| `workerPrepare` | Chained after a turn reading that predicts a dispatch. A held process is started when it lands, and a reading after settlement holds nothing | The dispatch spawns its own worker |
-| `toolCall` gate | Detached recording as an unrecognized `execute` starts at `yolo`, interactive only; never parks | `yolo` unchanged |
-| `toolCall` card | Approval overlay, polled per frame, never waited on | No advisory line |
-| `toolResult` | Detached recording for `web_fetch`, `web_read` and MCP tool results; never adds a banner. The result's information-flow restrictions travel with the request | No banner beyond the deterministic scan |
-| `turnEnd` | Detached record of the settled turn; no nudge or settlement waits for it | The regular expressions |
-| `relevance` | Skills and capability reminders are ranked at submit. Listings, gateway `find` and memory recall take a finished cached ranking synchronously (32 kept, keyed by catalog, question, binding and flow restrictions); a cache miss starts work without waiting, up to three at once on a hosted engine and one on any other | Local vocabulary order |
-| `consult` | The `consult` tool ([consult.ts](../../src/tools/consult.ts)), registered at startup when bound; waits for the answer up to the deadline because the agent chose to ask | Tool absent |
-| `drafts` | `/draft` overlay, which waits for the judgment up to the deadline. `Enter` on a finished draft appends it to the composer and records a `draft` outcome joined to the judging call by `ref` | Candidates shown unjudged |
-| `steer` | Chat loop, when a message is queued mid-run. Detached record; nothing reads the answer | Nothing changes |
+| `consult` | The `consult` tool, registered in the session registry at startup when a route is named. It waits, because the agent chose to ask. | Tool absent, or `answered: false` with a note to proceed |
+| `judgeScreen` | `createJudgeScreen` in [safety-judge-host.ts](../../src/entry/safety-judge-host.ts), run beside a main-session judge round. Up to 4 newest results since the operator last spoke, read one per ask, including web and MCP capabilities called through the gateway. Finished readings are kept by call id until the operator speaks. The judge's verdict aborts a reading still running. | The judge's verdict stands |
+| `triage` | `runTriageRound` in [steering-triage.ts](../../src/session-control/steering-triage.ts), detached, on a settled queue. A verdict that lands after the queue changed is dropped. | The side-model round, then the queue as the operator left it |
 
-Every reader wraps its call so a throw degrades to the same fallback. The `toolResult` reading runs detached and preserves result delivery; the `after_tool` deterministic marker scan still judges the original result.
-
-## Validating a Laya build
-
-A new engine or a new build of an existing engine (Laya, Julia-1, the Strands Decider, a hosted build) ships in shadow. It cannot hint or act until cuts are fitted for its exact threshold identity, and the gate, result screen, turn-end and steer sites remain record-only. The procedure is:
-
-1. Bind the engine to a site and run `node --import tsx scripts/decision-probe.ts <fixture.json> --engine <name>` against a labeled fixture in `tests/fixtures/decision-cases/` (`turn.json`, `worker-prepare.json`, `drafts.json`, `turn-end.json`, `tool-calls.json`, `tool-results.json` or `capabilities.json`). The engine comes from `systemOne.engines` in the operator's settings, or from `--kind`, `--target` and `--model`. Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers. The probe calls the engine live and is never part of CI.
-2. For each labeled key, read agreement, abstention, wrong and confidently wrong counts, the probability ranges of the positive and negative classes per run, and the suggested cut with its margin to each side. The suggestion is null when the classes overlap.
-3. Choose cuts with `--case-split fit` by the rule in `calibration.ts`, score them once with `--case-split holdout`, add to `FITTED_CUTS` under the printed build only the keys that hold, citing the run beside them, and list the renderer and site versions in `FITTED_CONTRACTS`.
-4. Record real traffic with research capture and export it to compare builds on the operator's own turns.
-
-A cut from one build says nothing about another build, another vendor, a different renderer or site version, or a chat model reporting logprobs, which is why the key is the identity and an identity absent from the table never acts. The probe and the fixtures live in the source repository and are not in the npm package.
+The screen and triage are the only harness uses. Nothing else in the turn path reads System One: no point holds up tool admission, tool-result delivery, turn settlement or prompt composition, and none adds prompt text.
 
 ## Invariants
 
-- System One facade and host calls isolate engine failures from the turn. The `run` facade returns `null`; explicit callers can report that no answer was available.
-- The main model never falls back to interpreting the turn when the `turn` site is silent.
-- A verdict is advice. Only `consult` returns a distribution to the agent, and it never returns a chosen option.
-- Safety sites only tighten. A site cannot remove a confirmation, clear a deterministic flag or unblock a call. The gate and the result screen only record.
-- Redaction happens once before the request is built, so what a hosted engine receives and what is recorded start from the same text. The dataset then applies its own second pass to its copy.
+- Unbound, Clio Coder sends no System One request and the tool registry, gateway listing and prompt are what they would be without System One.
+- An ask returns a verdict or `null` and never throws into the caller.
+- A verdict is advice. `consult` returns a distribution or ids with scores, and never a chosen option.
+- The screen only tightens. It can turn a judge allow into a park, except under the operator-named rule, and it can never admit anything.
+- A label cannot interrupt. A route without real probabilities gives a triage verdict no confidence, so a stop stays a mark, and it never reaches the screen.
+- Redaction happens before the request is built.
 - A request leaves only when the information-flow check allows its destination for the restrictions the evidence carries.
-- Workers record nothing and never receive `consult`.
+- Workers never receive `consult`, and the screen does not run on a worker's review.
 
 ## Source map
 
 | Component | Source | Key contracts |
 | :--- | :--- | :--- |
-| Contract | [types.ts](../../src/domains/system-one/types.ts), [contract.ts](../../src/domains/system-one/contract.ts) | `SiteDefinition`, `DecisionEngine`, `SystemOne`, `DecisionRecord`, `SITE_TASKS`, `thresholdIdentity` |
-| Questions and answers | [questions.ts](../../src/domains/system-one/questions.ts), [answers.ts](../../src/domains/system-one/answers.ts) | `noul`, `choice`, `score`, `certaintyFromMass` |
-| Calibration | [calibration.ts](../../src/domains/system-one/calibration.ts) | `FITTED_CUTS`, `FITTED_CONTRACTS`, `cutsFor`, `temperatureFor` |
+| Contract | [types.ts](../../src/domains/system-one/types.ts), [contract.ts](../../src/domains/system-one/contract.ts) | `DecisionPoint`, `DecisionEngine`, `SystemOne`, `Verdict`, `SemanticKind`, `ReadoutKind` |
+| Questions and answers | [questions.ts](../../src/domains/system-one/questions.ts), [answers.ts](../../src/domains/system-one/answers.ts) | `yesNo`, `pick`, `rate`, `filterQuestions`, `certaintyFromMass` |
+| Formation | [formation.ts](../../src/domains/system-one/formation.ts) | `formRequest`, `estimateTokens` |
 | Runner and factory | [runner.ts](../../src/domains/system-one/runner.ts), [factory.ts](../../src/domains/system-one/factory.ts) | `createRunner`, `createSystemOne` |
-| Engines | [systemone.ts](../../src/domains/system-one/engines/systemone.ts) and [llm.ts](../../src/domains/system-one/engines/llm.ts) | `createSystemOneEngine`, `createLlmEngine` |
+| Engines | [engine-kinds.ts](../../src/domains/system-one/engine-kinds.ts), [systemone.ts](../../src/domains/system-one/engines/systemone.ts), [llm.ts](../../src/domains/system-one/engines/llm.ts) | `ENGINE_KINDS`, `createSystemOneEngine`, `createLlmEngine` |
 | Profiles and renderers | [profiles.ts](../../src/domains/system-one/profiles.ts), [julia-tokenizer.ts](../../src/domains/system-one/julia-tokenizer.ts) | `PROFILES`, `render`, `engineWindow` |
-| Catalog hierarchy and ranking | [hierarchy.ts](../../src/domains/system-one/hierarchy.ts), [rank.ts](../../src/domains/system-one/rank.ts) | `groupByCategory`, `createRelevanceRanker` |
+| Points | [consult.ts](../../src/domains/system-one/points/consult.ts), [judge-screen.ts](../../src/domains/system-one/points/judge-screen.ts), [triage.ts](../../src/domains/system-one/points/triage.ts) | `consultPoint`, `consultFilterPoint`, `JUDGE_SCREEN_POINT`, `triagePoint` |
 | Wire | [systemone-wire.ts](../../src/domains/providers/runtimes/common/systemone-wire.ts), [systemone.ts](../../src/domains/providers/runtimes/protocol/systemone.ts), [inception.ts](../../src/domains/providers/runtimes/cloud/inception.ts) | `postSystemOne`, `postTypedDecisions`, the `systemone` runtime, `mercury-decide` |
 | Doctor rows | [doctor.ts](../../src/domains/lifecycle/doctor.ts) | `systemOneFindings`, `systemOneEngineFindings` |
-| Sites | [turn.ts](../../src/domains/system-one/sites/turn.ts), [tool-call.ts](../../src/domains/system-one/sites/tool-call.ts), [tool-result.ts](../../src/domains/system-one/sites/tool-result.ts), [turn-end.ts](../../src/domains/system-one/sites/turn-end.ts), [relevance.ts](../../src/domains/system-one/sites/relevance.ts), [consult.ts](../../src/domains/system-one/sites/consult.ts), [drafts.ts](../../src/domains/system-one/sites/drafts.ts), [steer.ts](../../src/domains/system-one/sites/steer.ts) | `TURN_SITE`, `WORKER_PREPARE_SITE`, `TOOL_CALL_CARD_SITE`, `TOOL_CALL_GATE_SITE`, `TOOL_RESULT_SITE`, `TURN_END_SITE`, `RELEVANCE_SITE`, `consultSite`, `DRAFTS_SITE`, `STEER_SITE` |
-| Outcomes | [outcomes.ts](../../src/domains/system-one/outcomes.ts) | `observePermissionOutcomes`, `createFollowUpTracker`, `draftTakenOutcome` |
-| Recorder | [index.ts](../../src/domains/system-one/recorder/index.ts), [dataset.ts](../../src/domains/system-one/recorder/dataset.ts) | ledger rows, dataset sample writer, export, `describeBindings` |
-| Opt-in | [selection.ts](../../src/domains/system-one/selection.ts) | `effectiveSystemOne`, `resolveChoice`, `ACTIVE_PROFILE` |
-| Host | [system-one-host.ts](../../src/entry/system-one-host.ts) | `createSystemOneHost` |
+| Opt-in | [selection.ts](../../src/domains/system-one/selection.ts) | `routeNames`, `resolveChoice`, `effectiveSystemOne` |
 | Consult tool | [consult.ts](../../src/tools/consult.ts) | `createConsultTool`, `CONSULT_LIMITS` |
-| Local measurement | [calibrate.ts](../../src/domains/system-one/calibrate.ts), [measurement.ts](../../src/domains/system-one/measurement.ts) | `CALIBRATION_SITES`, `calibrateSite`, `indexMeasurements` |
-| CLI | [system-one.ts](../../src/cli/system-one.ts) | `systemone status`, `use`, `off`, `check`, `calibrate`, `export` |
-| Scopes and status | [scopes.ts](../../src/domains/system-one/scopes.ts), [status.ts](../../src/domains/system-one/status.ts), [system-one-control.ts](../../src/entry/system-one-control.ts) | `createSystemOneScopes`, `describeStatus`, `/systemone` |
+| CLI and status | [system-one.ts](../../src/cli/system-one.ts), [status.ts](../../src/domains/system-one/status.ts), [system-one-control.ts](../../src/entry/system-one-control.ts) | `systemone status`, `use`, `off`, `check`, `describeStatus`, `/systemone` |

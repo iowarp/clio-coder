@@ -55,7 +55,7 @@ import * as S from "./schemas.js";
  */
 export interface JournalDefinition<S extends TSchema = TSchema> {
 	readonly durability: "journal";
-	readonly version: 1;
+	readonly version: number;
 	readonly schema: S;
 	readonly tier: Tier;
 	readonly cc: ContentClass;
@@ -89,8 +89,10 @@ function journal<
 		scope?: "process" | "session";
 		// biome-ignore lint/suspicious/noExplicitAny: the projection's own annotation names the live payload type.
 		project?: (payload: any) => Static<S>;
+		/** Bumped only with the old version retired in `envelope.ts`, so a reader counts it rather than skipping it. */
+		version?: number;
 	},
->(schema: S, options: O): { durability: "journal"; version: 1; schema: S } & O {
+>(schema: S, options: O): { durability: "journal"; version: number; schema: S } & O {
 	return { durability: "journal", version: 1, schema, ...options };
 }
 
@@ -273,11 +275,6 @@ export const EVENTS = {
 	"code_step.settled": journal(S.CodeStepSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"process.started": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
 	"process.exited": journal(S.ProcessExitedSchema, { tier: "accountability", cc: "content-free" }),
-	"system_one.sample_captured": journal(S.SystemOneSampleCapturedSchema, {
-		tier: "research",
-		cc: "content-bearing",
-		capture: "systemOneDataset",
-	}),
 	"bus.traced": journal(S.BusTracedSchema, { tier: "research", cc: "structural", capture: "busTrace" }),
 	"old_telemetry.removed": journal(S.OldTelemetryRemovedSchema, {
 		tier: "operational",
@@ -386,7 +383,7 @@ export const EVENTS = {
 	"prompt.prefix_captured": journal(S.PromptPrefixCapturedSchema, { tier: "research", cc: "structural" }),
 	"auth.refreshed": journal(S.AuthRefreshedSchema, { tier: "operational", cc: "content-free" }),
 	"middleware.fired": journal(S.MiddlewareFiredSchema, { tier: "operational", cc: "content-free" }),
-	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free" }),
+	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free", version: 2 }),
 	"worker.channel_failed": journal(S.WorkerChannelFailedSchema, { tier: "operational", cc: "content-free" }),
 	"request.captured": journal(S.RequestCapturedSchema, { tier: "research", cc: "content-bearing", capture: "content" }),
 	"provider.headers_captured": journal(S.ProviderHeadersCapturedSchema, {
@@ -535,7 +532,6 @@ export const PREIMAGE_SUBJECTS = {
 	"memory.traced": "memory-trace",
 	"memory.observed": "observation-trace",
 	"request.captured": "request",
-	"system_one.sample_captured": "system-one-sample",
 } as const satisfies Partial<Record<JournalEventName, ObjectRef["subject"]>>;
 export type PreimageEventName = keyof typeof PREIMAGE_SUBJECTS;
 export type PreimageData<N extends PreimageEventName> = Omit<JournalPayload<N>, "content" | "bytes">;

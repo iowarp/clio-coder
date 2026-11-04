@@ -1,161 +1,84 @@
 /**
  * What System One will do under these settings, in the words every surface
- * shows: off, configured but unmeasured, active for these measured actions,
- * recording, or unavailable. Pure, and it sends nothing.
+ * shows. Pure, and it sends nothing.
  */
 
 import type { ClioSettings } from "../../core/config.js";
 import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
-import { TYPESAFE_DEFAULT_MODEL } from "../providers/runtimes/typesafe-model.js";
-import type { LocalCuts } from "./calibration.js";
-import { measuredActions } from "./calibration.js";
-import { batchRequestKey } from "./engines/llm.js";
-import type { MeasurementIndex } from "./measurement.js";
-import { describeBindings, type RuntimeLookup } from "./recorder/bindings.js";
 import type { ChoiceResolution } from "./selection.js";
-import { ACTIVE_PROFILE, effectiveSystemOne, RECORD_ONLY_SITES, resolveChoice } from "./selection.js";
-import type { SiteId } from "./types.js";
+import { effectiveSystemOne, resolveChoice, routeNames } from "./selection.js";
 
-export type SiteState = "off" | "unmeasured" | "active" | "recording" | "idle" | "unavailable";
-
-export interface SiteStatus {
-	readonly site: SiteId;
-	readonly state: SiteState;
-	readonly engine: string | null;
-	readonly destination: string | null;
-	/** The measured actions a site can take, or why it does not act. */
-	readonly detail: string;
-}
-
-export interface SystemOneStatus {
-	readonly use: string | null;
-	readonly scope: string;
-	readonly headline: string;
-	readonly sites: ReadonlyArray<SiteStatus>;
+export interface RuntimeLookup {
+	get(id: string): { readonly id: string; readonly decide?: unknown } | null;
 }
 
 export interface StatusInput {
 	readonly settings: Readonly<ClioSettings>;
-	/** The override in force and the scope it came from; absent reads `systemOne.use` from the settings layers. */
-	readonly override?: { readonly use: string; readonly scope: "task" | "session" };
 	readonly settingsOrigin?: string;
 	readonly runtimes?: RuntimeLookup;
 	/** Whether a runtime's key is available. Absent reads every key as present. */
 	readonly hasCredential?: (runtimeId: string, envVar: string) => boolean;
-	readonly recording?: boolean;
-	readonly localCuts?: LocalCuts;
-	readonly measurements?: MeasurementIndex;
-	readonly latencyMs?: (site: SiteId) => number | null;
 	/** What this process's engines have refused to serve; a separate process cannot know. */
 	readonly refusedEngines?: ReadonlyMap<string, string>;
 }
 
-export const IDENTITY_LIMIT =
-	"A measurement belongs to the model name the server reports, plus its fingerprint where it gives one. It cannot detect a checkpoint swapped behind the same name and fingerprint.";
-
-function calibrateHint(name: string): string {
-	return `configured but unmeasured, so nothing is sent; run clio-coder systemone calibrate ${name}`;
+export interface SystemOneStatus {
+	/** The named routes as the operator wrote them, or null when none is chosen. */
+	readonly use: string | null;
+	readonly scope: string;
+	readonly headline: string;
 }
+
+/** A bound route reaches past the tool, so every surface that says it is on says this too. */
+export const SYSTEM_ONE_REACH =
+	"A route that declares real probabilities also reads web and MCP results when the safety judge reviews a call, and a route answers steering triage when chat.steering.triage is on. On a hosted route, that text and consult's evidence leave the machine";
 
 function costNote(resolution: ChoiceResolution): string | null {
 	if (resolution.kind !== "engine" || resolution.engine.kind !== "llm") return null;
 	const where = `${resolution.engine.target}/${resolution.engine.model ?? "target default"}`;
-	return `${resolution.name} adds separate completions on ${where}: tokens and money or subscription usage, and latency it must measure. Requests pass paid-request admission and count against the session's cost ceiling.`;
+	return `${resolution.name} adds separate completions on ${where}. Requests pass paid-request admission and count against the session's cost ceiling.`;
+}
+
+/** The destination one route reaches, or why it cannot be used. */
+function routeReading(input: StatusInput, resolved: ChoiceResolution): { active: string } | { problem: string } {
+	if (resolved.kind === "unavailable") return { problem: resolved.problem };
+	if (resolved.kind !== "engine") return { problem: "it is not a route" };
+	const refusal = input.refusedEngines?.get(resolved.name);
+	if (refusal !== undefined) return { problem: refusal };
+	const effective = effectiveSystemOne(input.settings, [resolved.name]);
+	const target = effective.targets.find((entry) => entry.id === resolved.engine.target);
+	const runtimeId = target?.runtime ?? "";
+	const required = findBuiltinRuntimeBootMetadata(runtimeId)?.credentialsEnvVar;
+	if (required !== undefined && input.hasCredential?.(runtimeId, required) === false) {
+		return { problem: `${required} is not set` };
+	}
+	const destination = `${resolved.engine.target}/${resolved.engine.model ?? target?.defaultModel ?? "target default"}`;
+	return { active: `${resolved.name} → ${destination}` };
 }
 
 export function describeStatus(input: StatusInput): SystemOneStatus {
-	const use = input.override?.use ?? input.settings.systemOne.use;
-	const scope = input.override?.scope ?? input.settingsOrigin ?? "settings";
-	const resolved = resolveChoice(input.settings, use);
-	const applied = { ...input.settings, systemOne: { ...input.settings.systemOne, use } };
-	const effective = effectiveSystemOne(applied);
-	const recording = input.recording === true;
-	const local = { ...input.measurements?.cuts, ...input.localCuts };
-	const sites = describeBindings(applied, input.runtimes).map((binding): SiteStatus => {
-		const { site, engine } = binding;
-		if (engine === null) return { site, state: "off", engine: null, destination: null, detail: "asks nothing" };
-		if (binding.problem !== undefined) {
-			return { site, state: "unavailable", engine, destination: null, detail: `${binding.problem}; nothing is sent` };
-		}
-		const cfg = effective.systemOne.engines[engine];
-		const target = effective.targets.find((entry) => entry.id === binding.target);
-		const destination = `${binding.target}/${binding.model ?? target?.defaultModel ?? "target default"}`;
-		const refusal = input.refusedEngines?.get(engine);
-		if (refusal !== undefined) {
-			return { site, state: "unavailable", engine, destination, detail: `${refusal}; nothing more is sent` };
-		}
-		// A key named on the target or by a gateway is the runtime's own affair; only a declared runtime key is checked.
-		const runtimeId = target?.runtime ?? "";
-		const required = findBuiltinRuntimeBootMetadata(runtimeId)?.credentialsEnvVar;
-		if (required !== undefined && input.hasCredential?.(runtimeId, required) === false) {
-			return { site, state: "unavailable", engine, destination, detail: `${required} is not set; nothing is sent` };
-		}
-		if (RECORD_ONLY_SITES.includes(site)) {
-			return recording
-				? { site, state: "recording", engine, destination, detail: "asked for the dataset; no reader acts on it" }
-				: { site, state: "idle", engine, destination, detail: "record-only; asks nothing while the dataset is off" };
-		}
-		if (site === "consult") {
-			return {
-				site,
-				state: "active",
-				engine,
-				destination,
-				detail: "the agent may ask; readings are uncalibrated and no policy reads them; registered at startup",
-			};
-		}
-		// A batch route's build is what its measurement says answered; any other LLM readout has no measurement.
-		const requestKey =
-			cfg?.kind === "llm" && cfg.mode === "batch" && target !== undefined
-				? batchRequestKey(target, target.runtime, binding.model ?? null)
-				: null;
-		const build =
-			cfg?.kind === "llm"
-				? ((requestKey === null ? undefined : input.measurements?.buildsFor(requestKey)[0]) ?? null)
-				: (binding.model ?? target?.defaultModel ?? (target?.runtime === "typesafe-jev" ? TYPESAFE_DEFAULT_MODEL : null));
-		const actions = measuredActions(site, build, local);
-		if (actions.length === 0) {
-			return recording
-				? { site, state: "recording", engine, destination, detail: "unmeasured; asked for the dataset only" }
-				: { site, state: "unmeasured", engine, destination, detail: calibrateHint(engine) };
-		}
-		const latency = input.latencyMs?.(site) ?? null;
-		return {
-			site,
-			state: "active",
-			engine,
-			destination,
-			detail: `measured: ${actions.join(", ")}${latency === null ? "" : `; observed ${latency} ms`}`,
-		};
-	});
-	const active = sites.filter((site) => site.state === "active" && site.site !== "consult");
-	const headline = (() => {
-		if (resolved.kind === "off") return "off: every site is masked";
-		if (resolved.kind === "unavailable") return `unavailable: ${resolved.problem}; nothing is sent`;
-		const bound = sites.filter((site) => site.engine !== null);
-		if (bound.length === 0) return "off: no engine is chosen";
-		const blocked = bound.find((site) => site.state === "unavailable" && ACTIVE_PROFILE.includes(site.site));
-		if (blocked !== undefined) return `unavailable: ${blocked.detail}`;
-		if (active.length === 0) {
-			const name = resolved.kind === "engine" ? resolved.name : (bound[0]?.engine ?? "");
-			return calibrateHint(name);
-		}
-		return `active for measured actions at ${active.map((site) => site.site).join(", ")}`;
-	})();
-	const cost = costNote(resolved);
-	return { use, scope, headline: cost === null ? headline : `${headline}. ${cost}`, sites };
+	const { use } = input.settings.systemOne;
+	const scope = input.settingsOrigin ?? "settings";
+	const shown = use === null || use === undefined ? null : typeof use === "string" ? use : use.join(", ");
+	const names = routeNames(use);
+	if (names.length === 0) return { use: shown, scope, headline: shown === null ? "off: no engine is chosen" : "off" };
+	const resolutions = names.map((name) => resolveChoice(input.settings, name));
+	const readings = resolutions.map((resolved) => routeReading(input, resolved));
+	const active = readings.flatMap((reading) => ("active" in reading ? [reading.active] : []));
+	const problems = readings.flatMap((reading, index) =>
+		"problem" in reading ? [names.length > 1 ? `${names[index]}: ${reading.problem}` : reading.problem] : [],
+	);
+	const unusable = problems.join("; ");
+	const headline =
+		active.length === 0
+			? `unavailable: ${unusable}; nothing is sent`
+			: `active: the consult tool is bound to ${active.join(", then ")}${unusable.length > 0 ? `; unavailable: ${unusable}` : ""}`;
+	const costs = resolutions.flatMap((resolved) => costNote(resolved) ?? []);
+	const reach = active.length === 0 ? [] : [SYSTEM_ONE_REACH];
+	return { use: shown, scope, headline: [headline, ...reach, ...costs].join(". ") };
 }
 
-/** The lines `/systemone status` and `clio-coder systemone status` print. */
+/** The lines `/systemone` and `clio-coder systemone status` print. */
 export function formatStatus(status: SystemOneStatus): string[] {
-	const lines = [
-		`system one (experimental): ${status.headline}`,
-		`choice: ${status.use ?? "unset"} (${status.scope})`,
-		...status.sites.map(
-			(row) =>
-				`  ${row.site}: ${row.state}${row.destination === null ? "" : ` via ${row.engine} → ${row.destination}`}; ${row.detail}`,
-		),
-		IDENTITY_LIMIT,
-	];
-	return lines;
+	return [`system one (experimental): ${status.headline}`, `choice: ${status.use ?? "unset"} (${status.scope})`];
 }

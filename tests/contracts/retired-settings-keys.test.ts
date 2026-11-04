@@ -40,6 +40,24 @@ test("user settings load with retired per-agent keys and list them as retired", 
 });
 
 // `init` wrote `systemOne: { engines: {}, sites: {}, cuts: {} }`, so every existing home names a key since retired.
+test("an old engine mode is a tombstone: the engine still loads and every value reads as batch", async (t) => {
+	const home = await isolateClioEnv("clio-retired-engine-mode-");
+	t.after(() => home.restore());
+	const file = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	for (const mode of ["auto", "logprobs", "answer", "batch"]) {
+		writeFileSync(
+			file,
+			`version: 2\ntargets:\n  - { id: local, runtime: llamacpp, url: "http://127.0.0.1:1" }\nsystemOne:\n  use: [fast, local]\n  engines:\n    fast: { kind: llm, target: local, mode: ${mode} }\n`,
+		);
+		const validation = validateSettingsFile();
+		ok(validation.retired.some((entry) => entry.path === "systemOne.engines.fast.mode"));
+		const { systemOne } = readSettings();
+		ok(!("mode" in (systemOne.engines.fast ?? {})));
+		strictEqual(String(systemOne.use), "fast,local");
+	}
+});
+
 test("a retired systemOne key never blocks loading: an empty cuts is silent and the rest are listed", async (t) => {
 	const home = await isolateClioEnv("clio-retired-system-one-");
 	t.after(() => home.restore());
@@ -91,4 +109,22 @@ test("doctor removes retired keys in flow and block settings without losing adja
 		strictEqual(readSettings().integrations.externalAgents.entries[0]?.command, "peer");
 		ok(readFileSync(file, "utf8").startsWith("# Keep this comment\n"));
 	}
+});
+
+test("doctor removes a section its last retired key emptied, so the repaired home still loads", async (t) => {
+	const home = await isolateClioEnv("clio-retired-emptied-");
+	t.after(() => home.restore());
+	const file = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(
+		file,
+		"# Keep this comment\nversion: 2\nturnControl:\n  orientation:\n    maxSplit: 2\nfleet:\n  speculativeDispatch: true\ntelemetry:\n  research:\n    systemOneDataset: true\nchat:\n  model: kept\n",
+	);
+	const result = repairSettingsCoercions();
+	strictEqual(result.removed?.length, 3);
+	strictEqual(readFileSync(file, "utf8"), "# Keep this comment\nversion: 2\nchat:\n  model: kept\n");
+	const after = validateSettingsFile();
+	strictEqual(after.issues.length, 0);
+	strictEqual(after.retired.length, 0);
+	ok(readSettings());
 });

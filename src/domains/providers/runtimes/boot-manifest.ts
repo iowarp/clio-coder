@@ -8,7 +8,8 @@
  * silently drift.
  */
 
-import type { RuntimeAuth, RuntimeKind, RuntimeTier } from "../types/runtime-descriptor.js";
+import type { DecisionAlias, RuntimeAuth, RuntimeKind, RuntimeTier } from "../types/runtime-descriptor.js";
+import { TYPESAFE_DEFAULT_MODEL } from "./typesafe-model.js";
 
 export interface RuntimeBootMetadata {
 	id: string;
@@ -18,6 +19,9 @@ export interface RuntimeBootMetadata {
 	auth: RuntimeAuth;
 	credentialsEnvVar?: string;
 	oauthProviderId?: string;
+	/** The descriptor implements `decide()`. */
+	decides?: true;
+	decisionAlias?: DecisionAlias;
 }
 
 export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> = [
@@ -28,12 +32,27 @@ export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> =
 	{ id: "deepseek", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "DEEPSEEK_API_KEY" },
 	{ id: "google", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "GOOGLE_API_KEY" },
 	{ id: "groq", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "GROQ_API_KEY" },
-	{ id: "inception", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "INCEPTION_API_KEY" },
+	{
+		id: "inception",
+		kind: "http",
+		tier: "cloud",
+		auth: "api-key",
+		credentialsEnvVar: "INCEPTION_API_KEY",
+		decides: true,
+	},
 	{ id: "mistral", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "MISTRAL_API_KEY" },
 	{ id: "openai", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "OPENAI_API_KEY" },
 	{ id: "openai-codex", kind: "http", tier: "cloud", auth: "oauth" },
 	{ id: "openrouter", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "OPENROUTER_API_KEY" },
-	{ id: "typesafe-jev", kind: "http", tier: "cloud", auth: "api-key", credentialsEnvVar: "TYPESAFE_API_KEY" },
+	{
+		id: "typesafe-jev",
+		kind: "http",
+		tier: "cloud",
+		auth: "api-key",
+		credentialsEnvVar: "TYPESAFE_API_KEY",
+		decides: true,
+		decisionAlias: { name: "jev", defaultModel: TYPESAFE_DEFAULT_MODEL, profile: "jev" },
+	},
 	{ id: "lemonade-anthropic", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "lemonade", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "llamacpp", kind: "http", tier: "local-native", auth: "api-key" },
@@ -46,7 +65,7 @@ export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> =
 	{ id: "anthropic-compat", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "litellm", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "openai-compat", kind: "http", tier: "protocol", auth: "api-key" },
-	{ id: "systemone", kind: "http", tier: "protocol", auth: "api-key" },
+	{ id: "systemone", kind: "http", tier: "protocol", auth: "api-key", decides: true },
 	{ id: "sglang", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "vllm", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "claude-code", kind: "subprocess", tier: "subscription", auth: "claude-cli" },

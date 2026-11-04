@@ -459,6 +459,7 @@ function filterScope(
 	for (const segment of source.files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
 			if (row.kind === "header") headers.push(row.header);
+			if (row.kind === "retired") continue;
 			if (row.kind === "skipped") dropped.unreadable += 1;
 			else if (row.kind === "header") rows.push(row);
 			else if (SOURCE_SEALS.has(row.record.k)) {
@@ -724,6 +725,7 @@ function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, ins
 	const refs = new Map<string, string>();
 	for (const segment of files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
+			if (row.kind === "retired") continue;
 			if (row.kind === "skipped") return "holds a line this version cannot read";
 			if (row.kind === "header") {
 				if (row.header.clockOrigin.host !== installId) return "holds a segment header naming another host";

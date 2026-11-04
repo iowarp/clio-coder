@@ -37,8 +37,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
-import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
-import type { SystemOneCommand } from "../domains/system-one/scopes.js";
+import type { SystemOne } from "../domains/system-one/index.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
@@ -143,15 +142,9 @@ export interface InteractiveDeps {
 	/** Session budget state `/fleet run` shows as the ceiling a plan is admitted under. */
 	scheduling?: SchedulingContract;
 	/** `/systemone`: the terminal control over the one setting. */
-	systemOneControl?: { run(command: SystemOneCommand): string[] };
-	/** The session's System One instance: the approval card's advisory and the `/draft` judge read their sites through it. */
+	systemOneControl?: { run(): string[] };
+	/** The session's System One instance, for the breakers `/health` shows. */
 	systemOne?: SystemOne;
-	/** Records what followed a System One decision, joined to it by ref. `/draft` reports the draft the operator took. */
-	recordOutcome?: (outcome: {
-		ref: string;
-		source: OutcomeRecord["source"];
-		facts: Readonly<Record<string, unknown>>;
-	}) => void;
 	telemetry: TelemetryContract;
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */

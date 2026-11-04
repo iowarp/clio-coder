@@ -174,7 +174,7 @@ function healthLines(data: HealthData, width: number): string[] {
 	else if (data.systemOne.length === 0) lines.push(...missing("no engine breaker is open or counting timeouts"));
 	for (const breaker of data.systemOne ?? [])
 		lines.push(
-			`${statusChip(theme, breaker.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", breaker.engine)} ${theme.fg("annotation", `${breaker.site}${breaker.moment ? `/${breaker.moment}` : ""}`)} ${theme.fg(
+			`${statusChip(theme, breaker.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", breaker.engine)} ${theme.fg(
 				breaker.state === "closed" ? "counter" : "warning",
 				systemOneBreakerPhrase(breaker),
 			)}`,

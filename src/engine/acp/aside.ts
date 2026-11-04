@@ -1,6 +1,6 @@
 import type { AcpAsideAnswer, AcpDraftOutcome } from "./types.js";
 
-export type { AcpAsideAnswer, AcpDraftOutcome, AcpDraftVerdict } from "./types.js";
+export type { AcpAsideAnswer, AcpDraftOutcome } from "./types.js";
 export { ACP_ASIDE_ASK_METHOD, ACP_ASIDE_CANCEL_METHOD, ACP_ASIDE_DRAFT_METHOD, ACP_ASIDE_META_KEY } from "./types.js";
 /**
  * `_clio-coder/aside/*`: the terminal's `/btw` and `/draft` for an ACP client.
@@ -10,7 +10,7 @@ export { ACP_ASIDE_ASK_METHOD, ACP_ASIDE_CANCEL_METHOD, ACP_ASIDE_DRAFT_METHOD, 
  * a `session/update`. The host's chat loop runs them, beside a turn in flight
  * over a snapshot of its history (#415); this module only bounds what comes
  * back and labels drafts the way the overlay does, so a client shows the same
- * candidates and verdict.
+ * candidates.
  */
 
 export const ACP_ASIDE_DRAFT_COUNTS = { min: 1, max: 4, default: 3 } as const;
@@ -39,18 +39,7 @@ function clean(text: string, maxBytes: number): { text: string; truncated: boole
 }
 
 const reasonText = (reason: string) => clean(reason, MAX_REASON_BYTES).text;
-const finite = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 const ROUND_FAILED = "the model round failed; the agent's diagnostics carry the provider's answer";
-const JUDGMENT_UNAVAILABLE = "not judged: the model round did not produce a judgment; inspect the agent's diagnostics";
-/** Exact process-authored outcomes; any other judgment reason can contain provider prose. */
-const SAFE_JUDGMENT_REASONS = new Set([
-	"not judged: bind systemOne.sites.drafts to an engine declared in systemOne.engines",
-	"not judged: the drafts engine gave no usable pick in time",
-	"not judged: cancelled",
-	"not judged: a draft failed or came back empty",
-	"not judged: fewer than 2 drafts to compare",
-]);
-
 export function projectAsideAnswer(answer: AcpAsideAnswer, diagnostics?: (line: string) => void) {
 	if (answer.status === "refused") return { status: answer.status, reason: reasonText(answer.reason) };
 	if (answer.status === "failed") {
@@ -63,18 +52,6 @@ export function projectAsideAnswer(answer: AcpAsideAnswer, diagnostics?: (line: 
 
 export function projectDraftOutcome(outcome: AcpDraftOutcome, diagnostics?: (line: string) => void) {
 	if (outcome.status === "refused") return { status: "refused" as const, reason: reasonText(outcome.reason) };
-	const labels = LABELS.slice(0, outcome.candidates.length);
-	const pick = <T>(record: Partial<Record<string, T>>, read: (value: T | undefined) => T) =>
-		Object.fromEntries(labels.map((label) => [label, read(record[label])]));
-	const judgment = outcome.judgment;
-	let judgmentReason: string | undefined;
-	if (judgment !== undefined && "reason" in judgment) {
-		if (SAFE_JUDGMENT_REASONS.has(judgment.reason)) judgmentReason = judgment.reason;
-		else {
-			diagnostics?.(`draft judgment unavailable: ${reasonText(judgment.reason)}`);
-			judgmentReason = JUDGMENT_UNAVAILABLE;
-		}
-	}
 	return {
 		status: "drafted" as const,
 		aborted: outcome.aborted,
@@ -87,20 +64,5 @@ export function projectDraftOutcome(outcome: AcpDraftOutcome, diagnostics?: (lin
 			const bounded = clean(candidate.text, MAX_ANSWER_BYTES);
 			return { label, status: "drafted" as const, text: bounded.text, truncated: bounded.truncated };
 		}),
-		...(judgment === undefined
-			? {}
-			: {
-					judgment:
-						"verdict" in judgment
-							? {
-									status: "judged" as const,
-									picked: labels.find((label) => label === judgment.verdict.picked) ?? null,
-									probabilities: pick(judgment.verdict.probabilities, (value) => Math.max(0, finite(value))),
-									sound: pick(judgment.verdict.sound, (value) => (typeof value === "boolean" ? value : null)),
-									source: reasonText(judgment.verdict.source),
-									elapsedMs: Math.max(0, Math.round(finite(judgment.verdict.elapsedMs))),
-								}
-							: { status: "unjudged" as const, reason: judgmentReason ?? JUDGMENT_UNAVAILABLE },
-				}),
 	};
 }

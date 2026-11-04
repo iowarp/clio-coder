@@ -808,9 +808,9 @@ export function renderToolAwaitingApproval(
  * distinct, and "safety-net rail" would send someone scrolling back to look
  * for a standing rule that does not exist.
  */
-export function approvalAxisText(view: Pick<ApprovalRequestView, "axis" | "gateBuild">): string {
+export function approvalAxisText(view: Pick<ApprovalRequestView, "axis">): string {
 	if (view.axis.kind === "autonomy") return `autonomy level ${view.axis.level}`;
-	return safetyNetRailText(view.axis.ruleId, view.gateBuild);
+	return safetyNetRailText(view.axis.ruleId);
 }
 
 /**

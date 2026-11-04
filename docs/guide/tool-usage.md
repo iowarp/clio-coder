@@ -14,7 +14,7 @@ Operational reference for agents and operators. Sections summarize each tool's a
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-component-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
 | Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder) |
-| Configure and manage the session | [`configure_clio`](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-system-one-a-bounded-question), [`music`](#music-control-the-focus-radio-pane) |
+| Configure and manage the session | [`configure_clio`](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-a-fast-decision-model), [`music`](#music-control-the-focus-radio-pane) |
 
 Cross-cutting behavior that applies to every tool is in
 [Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget),
@@ -50,7 +50,7 @@ One gateway provides `find`, `describe`, `call`, and `chain`. Source: [index.ts]
 | `refresh` | Find only; explicitly connect and refresh the named server. |
 | `steps` | Chain: 1–16 operations with unique `id`, `capability`, `args`, and optional `after:[ids]`. |
 
-`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. When the System One `relevance` site has a ranking ready, an unfiltered listing of more than 40 entries is ordered by it and a queried find adds up to five related capabilities beside its own hits; hits keep their order and nothing is removed (see [System One](system-one.md)). Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
+`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
 authority notes; `call` validates against the live schema and runs under the
 capability's own authority. Direct tools are called directly, or included as
 steps in a chain. Describing `gateway` returns composition syntax; describing
@@ -72,7 +72,7 @@ Capabilities that the gateway directory implements itself, and the other gateway
 | `clio_docs` | `query` (omit to list the corpus), `limit` | [clio_docs](#cliodocs-retrieve-bundled-documentation-through-the-gateway) |
 | `clio_library` | `query`, `kind`, `ref`, `limit`, `offset` | [clio_library](#cliolibrary-inspect-the-component-catalog-through-the-gateway) |
 | `data` | `op` is `inspect`, `select` or `validate`, plus the format and window arguments | [data](#data-inspect-structured-files-through-the-gateway) |
-| `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `consult`, `vision`, `configure_clio` | Each tool's own schema | The tool's own section |
+| `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `vision`, `configure_clio` | Each tool's own schema | The tool's own section |
 | `extension_<id>__<name>` | The tool's schema, from an extension command tool or an api 2 runtime tool | [Extensions](harness-extensions.md) |
 | `mcp_<id>__<tool>` | The MCP server tool's schema | The MCP paragraphs below |
 
@@ -178,7 +178,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `music` | direct | gateway | orchestrate | read | sequential |
 | `limitation` | direct | gateway | orchestrate | read | parallel |
 | `decide` | direct | gateway | orchestrate | read | sequential |
-| `consult` | gateway | gateway | orchestrate | read | parallel |
+| `consult` | direct | gateway | orchestrate | read | parallel |
 | `vision` | gateway | gateway | observe | read | parallel |
 | `web_read` | gateway | gateway | retrieve | read | parallel |
 | `web_fetch` | gateway | gateway | retrieve | read; outward for a non-GET method or a body | parallel |
@@ -1172,17 +1172,29 @@ The tool registers only when `integrations.music.agentControl` is on, cliamp res
 
 `question` is required. Omit `path` to inspect the most recent image attached in the session. Images over 20,000,000 bytes are refused. The result carries structured observations, an answer and the model's provenance, and the image contents are not sent to the main model. The tool errors with `fleet.profiles.vision is not configured` until that profile exists.
 
-## consult: ask System One a bounded question
+## consult: ask a fast decision model
 
-`consult` puts up to four independent questions about the same evidence to the System One `consult` site. Source: [consult.ts](../../src/tools/consult.ts). Read class; parallel. See the [System One guide](system-one.md) for binding an engine.
+`consult` asks the routes `systemOne.use` names. It is a direct tool in the main session, present only when a route is named at startup. `consult` ships as experimental. Nothing yet measures whether agents reach for it or whether it speeds anything up. Source: [consult.ts](../../src/tools/consult.ts). Read class; parallel. See the [System One guide](system-one.md) for the opt-in and the limits.
+
+A call takes one form. `filter` scores things you do not hold against one criterion and returns only ids and scores:
+
+| Field | Contract |
+| --- | --- |
+| `criterion` | One claim judged on each item alone, up to 200 characters. |
+| `source` | `files` (with `paths`, workspace paths or globs), `output` (with `path`, an offload a truncated result named, and optional `chunkLines`), `capabilities` (MCP and gateway tools) or `items` (with `items`, your own id-to-text map). |
+| `limit` | Matches returned, default 16, at most 32. `matchCount` still counts them all. |
+
+A filter answers what a file is for, from its path and a digest of its leading comment, exports and imports. It misses behavior inside a body, which is a question for `grep`, and between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. An LLM route returns a label, so its matches carry no score.
+
+`questions` asks typed questions over evidence you supply:
 
 | Argument | Contract |
 | --- | --- |
-| `questions` | Required, 1 to 4 items. Each has an `id`, a `kind` (`yesNo`, `pick` or `rate`), a `question`, and per kind `whenTrue`/`whenFalse`, `options` (2 to 8 name-to-description entries) or `ladder` (2 to 8 rungs, lowest first). |
+| `questions` | 1 to 4 items. Each has an `id`, a `kind` (`yesNo`, `pick` or `rate`), a `question`, and per kind `whenTrue` and `whenFalse` (both required), `options` (2 to 8 name-to-description entries) or `ladder` (2 to 8 rungs, lowest first). |
 | `state` | Optional evidence object, at most 2048 bytes as JSON. The model sees nothing else. |
 | `paths` | Optional, up to 8 workspace files whose head is sent as evidence with secrets redacted. |
 
-A turn may make 3 consult calls. The tool changes nothing. It returns `answered: true` with the answers and the answering build, or `answered: false` with a note to proceed on your own judgment when the decision model gives no usable answer. The answer is advice, not a decision.
+A turn may make 3 consult calls. The tool changes nothing. It returns `answered: true` with what the engine said and the answering build, or `answered: false` with a note to proceed on your own judgment when no route gives a usable answer. The answer is advice, not a decision.
 
 ## Headless declared verifier commands
 

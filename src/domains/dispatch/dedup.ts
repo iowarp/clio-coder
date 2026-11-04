@@ -8,7 +8,6 @@
  * Orchestrator-only: workers never register the dispatch tool.
  */
 
-import { dispatchTargetsOnlyScouts } from "../../core/read-only-calls.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 
@@ -18,11 +17,7 @@ export const DISPATCH_DEDUP_REGISTRATION_ID = "guard.dispatch-dedup";
 const DISPATCH_GUARD_TURN_LIMIT = 32;
 const DISPATCH_DEFAULT_AGENT_ID = "coder";
 
-export function createDispatchDedupRegistration(): {
-	registration: MiddlewareHookRegistration;
-	rememberHarnessOrientation(turnId: string, runId: string): void;
-} {
-	const harnessByTurn = new Map<string, string>();
+export function createDispatchDedupRegistration(): { registration: MiddlewareHookRegistration } {
 	const successfulDispatchesByTurn = new Map<string, Set<string>>();
 	const permissionFailuresByTurn = new Map<string, Set<string>>();
 
@@ -41,11 +36,6 @@ export function createDispatchDedupRegistration(): {
 	};
 
 	return {
-		rememberHarnessOrientation(turnId, runId) {
-			harnessByTurn.set(turnId, runId);
-			while (harnessByTurn.size > DISPATCH_GUARD_TURN_LIMIT)
-				harnessByTurn.delete(harnessByTurn.keys().next().value as string);
-		},
 		registration: {
 			id: DISPATCH_DEDUP_REGISTRATION_ID,
 			description: "blocks re-running a dispatch that already completed successfully in this user turn",
@@ -54,16 +44,6 @@ export function createDispatchDedupRegistration(): {
 			toolNames: [ToolNames.Dispatch],
 			evaluate(input): ReadonlyArray<MiddlewareEffect> {
 				if (input.turnId === undefined || input.metadata?.origin === "harness") return [];
-				const runId = harnessByTurn.get(input.turnId);
-				// A mixed call (scout plus other agents) is the model's own fan-out and runs; only a call made purely of scouts repeats the orientation.
-				if (input.hook === "before_tool" && runId && dispatchTargetsOnlyScouts(input.toolArgs))
-					return [
-						{
-							kind: "block_tool",
-							severity: "hard-block",
-							reason: `dispatch duplicate blocked: Clio already ran Scout for orientation this turn (run ${runId}); answer from the [Orientation] findings or ask a focused question.`,
-						},
-					];
 				// CLB-5: remember only attested terminal permission failures. Exact arguments
 				// leave a changed task, scope or route available to recover deliberately.
 				const permissionKey = stableJson(input.toolArgs ?? {});

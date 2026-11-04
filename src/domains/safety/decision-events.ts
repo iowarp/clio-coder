@@ -122,6 +122,8 @@ export interface SafetyJudgementInput {
 	noVerdict?: string;
 	/** Operator messages the judge's prompt carried; absent when no prompt was built (escalated, no route). */
 	operatorMessages?: number;
+	/** Set when a tool result reading turned this `allow` into a park, so the record does not read as a call that ran. */
+	screened?: "parked";
 }
 
 export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"safety.judged"> {
@@ -138,6 +140,7 @@ export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"
 		...(input.model !== undefined ? { model: input.model } : {}),
 		...(input.noVerdict !== undefined ? { noVerdict: input.noVerdict } : {}),
 		...(input.operatorMessages !== undefined ? { operatorMessages: input.operatorMessages } : {}),
+		...(input.screened !== undefined ? { screened: input.screened } : {}),
 	};
 }
 

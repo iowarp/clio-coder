@@ -709,9 +709,8 @@ installing executable components.
 
 | Experimental feature | Availability and limits |
 | --- | --- |
-| **System One** | Fast decision engines at typed sites; decisions require fitted cuts. Do not assume an unvalidated engine provides calibrated judgments. |
-| **Steering triage** | `chat.steering.triage` is off by default; a side model can classify queued messages, defer unrelated work, or interrupt for a confident stop request. |
-| **Speculative dispatch** | `fleet.speculativeDispatch` is off by default. |
+| **System One** | Off until `systemOne.use` names a decision model. A route answers the `consult` tool, the judge screen and steering triage, so a hosted route receives web and MCP result text at judge time. A filter misses behavior inside a file body, and between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. Nothing yet measures whether agents reach for `consult` or whether it speeds anything up. |
+| **Steering triage** | `chat.steering.triage` is off by default; a bound System One route or a side model can classify queued messages, defer unrelated work, or interrupt for a confident stop request. |
 | **SSH worker nodes** | Explicitly configured nodes need a passing recorded project readiness test before dispatch. |
 | **Docks and music** | Off by default and require Herdr; music additionally requires cliamp and explicit integration settings. |
 

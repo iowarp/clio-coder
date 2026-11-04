@@ -106,18 +106,6 @@ export interface OverlayPermissionLifecycleDeps {
 	 */
 	onOperatorParked?(): void;
 	/**
-	 * An advisory sentence about one parked call's blast radius, or the empty
-	 * string when there is nothing to say. Absent when no System One engine is
-	 * bound to the `toolCall` site, which is the default.
-	 *
-	 * It is asked after the dialog is already on screen and its result is never
-	 * waited on, so it cannot delay or block an approval. It is also advisory in
-	 * the strict sense: nothing on the admission path reads it. A card the
-	 * System One gate raised never asks it: the gate's reason is that card's
-	 * advisory (`PermissionRequiredMeta.gateReason`).
-	 */
-	describeToolRisk?(subject: ToolRiskSubject): Promise<string>;
-	/**
 	 * How long a main-agent card waits for the operator before Clio denies the
 	 * call and the turn continues (`safety.unattendedAfterSeconds`, #421). Read
 	 * once per request when it parks; 0 or absent waits forever. Worker
@@ -271,7 +259,6 @@ function mainApprovalRequestView(
 		...(target.length > 0 ? { target } : {}),
 		...(mutation !== null ? { mutation } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
-		...(meta?.gateBuild !== undefined ? { gateBuild: meta.gateBuild } : {}),
 	};
 }
 
@@ -332,49 +319,11 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry, queueDepth: num
 }
 
 /**
- * Start the advisory for one card and hand back the reader the body polls.
- *
- * The request is deliberately not awaited. The dialog is already on screen by
- * the time this returns, the reader answers with the empty string until an
- * answer lands, and a rejected promise leaves it answering that way forever.
- * A render is requested when something arrives so the line appears without the
- * operator having to press a key.
- */
-function advisorySlot(deps: OverlayPermissionLifecycleDeps, subject: ToolRiskSubject): PermissionAdvisoryReader {
-	let line = "";
-	// This runs before the dialog is opened, so a synchronous throw here would
-	// stop the card from ever reaching the operator. An injected dependency that
-	// throws instead of rejecting, or hands back something that is not a
-	// promise, must cost the card its one sentence and nothing more.
-	try {
-		const pending = deps.describeToolRisk?.(subject);
-		void Promise.resolve(pending)
-			.then((text) => {
-				if (typeof text !== "string" || text.length === 0) return;
-				line = text;
-				deps.requestRender();
-			})
-			.catch(() => {
-				// An outage costs the card one sentence and nothing else.
-			});
-	} catch {
-		// Same outcome as a rejection: the card renders without the line.
-	}
-	return () => line;
-}
-
-/**
- * The advisory of a card the System One gate raised: the gate's own reason,
- * present from the first frame. The gate has already answered and its decision
- * is on the ledger under this request id, so the card site is not asked. A
- * second, cheaper reading of the same command adds latency and can contradict
- * the reason the card exists: a destroys reading of 0.46 sat above a line that
- * said the command "stays inside the workspace". The reason came from an engine
- * build, so it passes the same sanitizer as a call target before it is drawn.
- *
- * The site ends its reason with the answering build in parentheses and the
- * Requested-by row already names that build. Only that exact suffix is dropped,
- * so a reason in any other shape keeps every word it has.
+ * The advisory of a card the safety judge handed over: the judge's own reason,
+ * present from the first frame. It passes the same sanitizer as a call target
+ * before it is drawn. A reason may end with the answering build in parentheses
+ * and the Requested-by row already names that build. Only that exact suffix is
+ * dropped, so a reason in any other shape keeps every word it has.
  */
 function gateAdvisory(reason: string, build: string | undefined): PermissionAdvisoryReader {
 	const line = sanitizeCallTargetText(reason);
@@ -480,15 +429,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			countdowns.get(requestId)?.countdown.remainingMs() ?? null;
 
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
-		const advisory = advisorySlot(deps, {
-			tool: entry.tool,
-			actionClass: entry.actionClass,
-			target: entry.target ?? "",
-			requestId: entry.requestId,
-		});
 		// The entry is still at the head of the queue here, so the queue's length counts it.
 		const view = workerApprovalRequestView(entry, workerQueue.length);
-		if (!deps.openPermissionOverlay(view, undefined, undefined, advisory)) return false;
+		if (!deps.openPermissionOverlay(view, undefined, undefined)) return false;
 		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;
@@ -561,7 +504,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			const announceParked = (): void => {
 				if (!markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) return;
 				deps.onOperatorParked?.();
-				const notice = approvalParkedNotice(call.tool, decision, autonomy, meta.gateBuild);
+				const notice = approvalParkedNotice(call.tool, decision, autonomy);
 				deps.appendNotice(notice.level, notice.text, notice.source);
 			};
 			if (meta.toolCallId !== undefined) {
@@ -575,19 +518,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			// The window runs from the park whether or not a card can show yet: an
 			// operator who left a picker open is as absent as one who left the card.
 			armCountdown(meta.requestId, call.tool, decision.classification.actionClass);
-			// Facts only, and only the ones already on the card. The parked args
-			// hold mutation text and command strings that have not been through the
-			// call-target allowlist, so the advisory reads the sanitized target the
-			// operator is looking at rather than the raw call.
-			const advisory =
-				meta.gateReason !== undefined
-					? gateAdvisory(meta.gateReason, meta.gateBuild)
-					: advisorySlot(deps, {
-							tool: call.tool,
-							actionClass: decision.classification.actionClass,
-							target: view.target ?? "",
-							requestId: view.requestId,
-						});
+			const advisory = meta.gateReason !== undefined ? gateAdvisory(meta.gateReason, meta.gateBuild) : undefined;
 			if (
 				!deps.openPermissionOverlay(
 					view,

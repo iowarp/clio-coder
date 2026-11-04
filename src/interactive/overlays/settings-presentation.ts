@@ -136,8 +136,7 @@ export function formatSettingsValue(path: string, value: string): string {
 		return `${number.toLocaleString()} sec`;
 	}
 	if (path.endsWith("Bytes")) return `${(number / 1024).toLocaleString()} KB`;
-	if (path === "safety.limits.sessionCostUsd" || path === "turnControl.orientation.maxCostUsdPerTurn")
-		return renderUsdLimit(number);
+	if (path === "safety.limits.sessionCostUsd") return renderUsdLimit(number);
 	if (
 		path === "context.compaction.threshold" ||
 		path === "context.workingSet.target" ||

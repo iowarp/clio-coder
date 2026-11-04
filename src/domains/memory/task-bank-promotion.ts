@@ -35,7 +35,6 @@ export interface ProposeInjectedTaskMemoryInput {
 	writeOptions?: MemoryMutationOptions;
 	/** Only a caller that checked concrete source evidence may report a held lesson. */
 	observation?: "held";
-	heldEntryIds?: ReadonlySet<string>;
 }
 
 export interface ProposeInjectedTaskMemoryResult {
@@ -97,7 +96,6 @@ export async function proposeInjectedTaskMemory(
 				// counts, and stacking it would push older contradictions out of the window.
 				const held =
 					input.observation === "held" &&
-					(input.heldEntryIds === undefined || input.heldEntryIds.has(item.entry.id)) &&
 					!(existing?.observations ?? []).some((seen) => seen.sessionId === sessionId && seen.kind === "held");
 				if (held) {
 					record.observations = [...(record.observations ?? []), { at, sessionId, kind: "held" as const }].slice(
