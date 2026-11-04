@@ -136,8 +136,72 @@ function redactSecretUrlParams(value: string): string {
 	return out.join("");
 }
 
+// Groups 1 and 2 are a string sequence's introducer and payload (OSC, DCS, SOS, PM, APC), which can carry any text. An
+// escape a row cut short still ends the string it opened.
+const ESCAPE_SEQUENCE_RE =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: this pattern exists to match terminal escapes
+	/\u001b(?:\[[0-?]*[ -/]*(?:[@-~]|$)|([\]P^_X])([^\u0007\u001b]*)(?:\u0007|\u001b\\|$)|[ -/]*[0-~]?)/gu;
+
+/**
+ * Patterns read escapes as secret text: `--token ESC[0mESC[38;2;1;2;3m` loses the sequence's head and shows `;2;1;2;3m`,
+ * which crashed the TUI's width check, while a value styled `ESC[38;2;1;2;3mSECRET` ended at the `;` and leaked. So the
+ * patterns read the visible text, and every sequence survives whole. Those inside a replaced span follow its marker, in
+ * order, so the style after it is unchanged.
+ */
+function redactStyledString(value: string): string {
+	const escapes: Array<{ at: number; sequence: string }> = [];
+	let plain = "";
+	let copied = 0;
+	for (const match of value.matchAll(ESCAPE_SEQUENCE_RE)) {
+		plain += value.slice(copied, match.index);
+		copied = match.index + match[0].length;
+		const introducer = match[1];
+		const payload = match[2];
+		let sequence = match[0];
+		if (introducer !== undefined && payload !== undefined) {
+			// A visible name can lead into a value held here, and the patterns reading the visible text never see it.
+			const shown = headGuardAfter(plain) === null ? redactPlainSecretString(payload) : "[redacted]";
+			sequence = `\u001b${introducer}${shown}${match[0].slice(payload.length + 2)}`;
+		}
+		escapes.push({ at: plain.length, sequence });
+	}
+	plain += value.slice(copied);
+	const redacted = redactPlainSecretString(plain);
+	const shorter = Math.min(plain.length, redacted.length);
+	let head = 0;
+	while (head < shorter && plain[head] === redacted[head]) head += 1;
+	let tail = 0;
+	while (tail < shorter - head && plain[plain.length - 1 - tail] === redacted[redacted.length - 1 - tail]) tail += 1;
+	const marker = redacted.slice(head, redacted.length - tail);
+	const out: string[] = [];
+	let cursor = 0;
+	let placed = false;
+	for (const { at, sequence } of escapes) {
+		if (!placed && at >= head) {
+			out.push(plain.slice(cursor, head), marker);
+			cursor = plain.length - tail;
+			placed = true;
+		}
+		if (at > cursor) {
+			out.push(plain.slice(cursor, at));
+			cursor = at;
+		}
+		out.push(sequence);
+	}
+	if (!placed) {
+		out.push(plain.slice(cursor, head), marker);
+		cursor = plain.length - tail;
+	}
+	out.push(plain.slice(cursor));
+	return out.join("");
+}
+
 /** Scrub credentials embedded in one string: URL userinfo, query params, `KEY=value`, and `--flag value`. */
 export function redactSecretString(value: string): string {
+	return value.includes("\u001b") ? redactStyledString(value) : redactPlainSecretString(value);
+}
+
+function redactPlainSecretString(value: string): string {
 	return redactSecretFlags(
 		redactSecretUrlParams(
 			value.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>

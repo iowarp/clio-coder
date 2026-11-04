@@ -220,3 +220,27 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });
+
+test("a one-shot round names the model the provider reported and invents none", async () => {
+	const provider = registerEngineFauxProvider({ api: "side-reported-model", models: [{ id: "requested" }] });
+	try {
+		provider.setResponses([
+			{
+				...fauxAssistantMessage("first"),
+				responseModelIdObservation: { state: "reported", reportedModelId: "served-build" },
+			} as never,
+			fauxAssistantMessage("second"),
+		]);
+		const input = {
+			model: provider.getModel(),
+			messages: [],
+			systemPrompt: "side",
+			userText: "ask",
+			thinkingLevel: "off" as const,
+		};
+		assert.equal((await runOutOfTurnRound(input)).reportedModel, "served-build");
+		assert.equal("reportedModel" in (await runOutOfTurnRound(input)), false);
+	} finally {
+		provider.unregister();
+	}
+});

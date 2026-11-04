@@ -91,6 +91,16 @@ test("pre-admission harness reads survive turn_start and direction records execu
 	assert.deepEqual(facts.toolNames, []);
 });
 
+test("input queued mid-turn keeps the turn's tool calls on the turn it joined", async () => {
+	const { createTurnOutcomeCollector } = await import("../../src/session-control/turn-outcome-collector.js");
+	const collector = createTurnOutcomeCollector();
+	collector.evaluate({ hook: "turn_start", sessionId: "s1", turnId: "u1" });
+	collector.evaluate({ hook: "before_tool", sessionId: "s1", turnId: "u1", toolName: "read" });
+	collector.evaluate({ hook: "before_tool", sessionId: "s1", turnId: "queued", toolName: "edit" });
+	collector.evaluate({ hook: "turn_end", sessionId: "s1", turnId: "a1", metadata: { userTurnId: "queued" } });
+	assert.deepEqual(collector.take("u1", "queued").toolNames, ["read", "edit"]);
+});
+
 // A dispatch whose worker failed or was aborted still launched a run that spent
 // worker tokens. Recording only successful dispatches left dispatches and the
 // worker token total empty for an operator-aborted refactor.

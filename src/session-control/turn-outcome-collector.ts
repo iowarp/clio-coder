@@ -17,7 +17,8 @@ export interface CollectedTurn {
 }
 
 export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
-	take(userTurnId: string): CollectedTurn;
+	/** `current` is the id the turn runs under now: input queued mid-turn files its own user entry and moves it there. */
+	take(userTurnId: string, current?: string | null): CollectedTurn;
 	recordCompletion(
 		turnId: string | null,
 		decision: "ok" | "engage",
@@ -107,8 +108,11 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		seedClarificationStreak(value) {
 			previousClarificationStreak = value;
 		},
-		take(id) {
-			const result = userTurnId === null || userTurnId === id ? active : emptyTurn(previousClarificationStreak);
+		take(id, current) {
+			const result =
+				userTurnId === null || userTurnId === id || userTurnId === current
+					? active
+					: emptyTurn(previousClarificationStreak);
 			active = emptyTurn(previousClarificationStreak);
 			userTurnId = null;
 			assistantTurnId = null;

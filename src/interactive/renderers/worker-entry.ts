@@ -51,6 +51,12 @@ type WorkerEntryState = StreamWorkerEntryState & {
 const workerTextCache = new WeakMap<StreamWorkerEntryState, Map<string, { source: string; text: string }>>();
 const workerAnswers = new WeakMap<StreamWorkerEntryState, WorkerAnswerProjection>();
 
+/** A clipped row's redaction marker can outgrow what it replaced, and the TUI throws on a row past the terminal's width. */
+function redactedRow(row: string, width: number): string {
+	const redacted = redactSecretString(row);
+	return redacted === row ? row : truncateToWidth(redacted, width, GLYPH.ellipsis, false);
+}
+
 function displayText(entry: WorkerEntryState, key: string, source: string): string {
 	const owner = entry.cacheOwner ?? entry;
 	const fields = workerTextCache.get(owner) ?? new Map();
@@ -658,7 +664,7 @@ function helperRow(
 		),
 		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", width) : []),
 		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", width) : []),
-	].map(redactSecretString);
+	].map((row) => redactedRow(row, width));
 }
 
 export function renderWorkerEntryLines(
@@ -690,7 +696,7 @@ export function renderWorkerEntryLines(
 			...group,
 			alignedHeader(entry, safeWidth, nowMs, options.siblings),
 			liveCardDetail(entry, safeWidth),
-		].map(redactSecretString);
+		].map((row) => redactedRow(row, safeWidth));
 	}
 	if (!inspect && isPending(entry)) {
 		return [
@@ -698,7 +704,7 @@ export function renderWorkerEntryLines(
 			...group,
 			alignedHeader(entry, safeWidth, nowMs, options.siblings),
 			...(detail.style === "compact" ? [] : [progressLine(entry, safeWidth, nowMs, false)]),
-		].map(redactSecretString);
+		].map((row) => redactedRow(row, safeWidth));
 	}
 	const integrity = entry.result?.trust;
 	const provenance =
@@ -799,5 +805,5 @@ export function renderWorkerEntryLines(
 			: []),
 		...provenance,
 		...quality,
-	].map(redactSecretString);
+	].map((row) => redactedRow(row, safeWidth));
 }

@@ -16,7 +16,7 @@ import {
 	WORKER_PROGRESS_WINDOW_BYTES,
 	WORKER_PROGRESS_WINDOW_MS,
 } from "../../src/domains/telemetry/worker-progress.js";
-import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
@@ -996,4 +996,94 @@ test("userinfo redaction counts once, survives a second pass and spans display f
 	]);
 	const summary = deterministicDiagnosticSummary("fatal: https://u:ZQXJ@h/r\n", 1024);
 	deepStrictEqual(summary, { text: "fatal: https://u:[redacted:url-userinfo]@h/r", redactions: 1, complete: false });
+});
+
+test("redacting a styled worker row keeps its escapes whole and its width on budget", () => {
+	const reset = "\u001b[0m";
+	const muted = "\u001b[38;2;137;128;113m";
+	const styled = `does not govern auth-token ${reset}${muted} · ≥5,770,768 · 119 calls${reset}`;
+	const row = redactSecretString(styled);
+	strictEqual(row.includes(`${muted}`), true);
+	strictEqual(stripTerminalSequences(row).includes(";2;137"), false);
+	const hidden = redactSecretString(`--token ${muted}ZQXJSECRET${reset} next`);
+	strictEqual(stripTerminalSequences(hidden), "--token [redacted] next");
+	strictEqual(hidden.endsWith(`${muted}${reset} next`), true);
+	const split = stripTerminalSequences(redactSecretString(`API_TO${muted}KEN=ZQXJSECRET${reset}`));
+	strictEqual(split, "API_TOKEN=[redacted]");
+	const link = redactSecretString("\u001b]8;;https://h/a?token=ZQXJSECRET\u0007site\u001b]8;;\u0007");
+	strictEqual(link.includes("ZQXJSECRET"), false);
+	strictEqual(stripTerminalSequences(link), "site");
+
+	const text =
+		"The new per-target timeout is only for model requests and it does not govern auth-token x refresh or login";
+	const telemetry = {
+		row: { tokens: { display: "≥5,770,768 (1 call unknown)" } },
+		activity: { toolCalls: { display: "119" }, elapsed: { display: "30m" } },
+	};
+	const entry = {
+		runId: "r",
+		agentId: "architect",
+		task: "t",
+		text,
+		pending: true,
+		runtime: {},
+		progress: { phase: "writing" },
+	};
+	for (let width = 40; width <= 180; width += 1) {
+		for (const line of renderWorkerEntryLines(entry as never, width, { telemetry: telemetry as never })) {
+			strictEqual(stripTerminalSequences(line).includes(";2;"), false, `width ${width}: ${JSON.stringify(line)}`);
+			strictEqual(visibleWidth(line) <= width, true, `width ${width}: ${visibleWidth(line)} ${JSON.stringify(line)}`);
+		}
+	}
+});
+
+test("no secret survives redaction wherever a styled line holds it, and every SGR sequence stays whole", () => {
+	const secret = "ZQXJSECRET";
+	const sgr = "\u001b[38;2;137;128;113m";
+	const reset = "\u001b[0m";
+	const end = "\u001b\\";
+	const cases = {
+		plain: `--token ${secret} next`,
+		"styled on both sides": `${sgr}--token ${reset}${sgr}${secret}${reset} next`,
+		"split by SGR": `--token ZQXJ${sgr}SECRET${reset} next`,
+		"OSC payload": `\u001b]8;;https://h/a?token=${secret}\u0007site\u001b]8;;\u0007 ${sgr}x${reset}`,
+		"DCS payload": `\u001bPq;token=${secret}${end} ${sgr}x${reset}`,
+		"SOS payload": `\u001bXtoken=${secret}${end} ${sgr}x${reset}`,
+		"PM payload": `\u001b^token=${secret}${end} ${sgr}x${reset}`,
+		"APC payload": `\u001b_token=${secret}${end} ${sgr}x${reset}`,
+		"named outside an APC payload": `--token \u001b_${secret}${end} ${sgr}x${reset}`,
+		"twice in one line": `--token ${secret} ${sgr}mid${reset} API_KEY=${secret}`,
+	};
+	const sgrOf = (text: string) => text.match(new RegExp("\\u001b\\[[0-9;]*m", "gu")) ?? [];
+	for (const [name, line] of Object.entries(cases)) {
+		const out = redactSecretString(line);
+		strictEqual(/ZQXJ|SECRET/u.test(out), false, `${name}: ${JSON.stringify(out)}`);
+		strictEqual(/ZQXJ|SECRET/u.test(stripTerminalSequences(out)), false, `${name}: stripped`);
+		deepStrictEqual(sgrOf(out), sgrOf(line), name);
+	}
+});
+
+test("a /view row whose redaction outgrows it is fitted to its width again", async () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	const text = "it does not govern auth-token x refresh or login in any code path that exists and auth-token y";
+	panel.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "c",
+		toolName: "bash",
+		args: { command: "run" },
+	} as never);
+	panel.applyEvent({
+		type: "tool_execution_end",
+		toolCallId: "c",
+		toolName: "bash",
+		isError: false,
+		result: { content: [{ type: "text", text }] },
+	} as never);
+	for (const artifact of panel.inspectionArtifacts()) {
+		const { render } = await artifact.load();
+		for (let width = 20; width <= 120 && render !== undefined; width += 1) {
+			for (const row of render(width)) strictEqual(visibleWidth(row) <= width, true, `${width}: ${JSON.stringify(row)}`);
+		}
+	}
 });

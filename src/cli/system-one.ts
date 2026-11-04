@@ -3,6 +3,8 @@ import type { ClioSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { clioStateDir } from "../core/xdg.js";
+import type { ProvidersContract } from "../domains/providers/contract.js";
+import type { LlmRequestAdmission, OneShotPort } from "../domains/system-one/index.js";
 import { exportToFile, isDay, summarizeDataset } from "../domains/system-one/recorder/index.js";
 import type { DecisionRecord, SiteId } from "../domains/system-one/types.js";
 import { SITE_IDS } from "../domains/system-one/types.js";
@@ -244,8 +246,25 @@ function formatTally(tally: { hits: number; positives: number; falseFires: numbe
 	return `${tally.hits}/${tally.positives} right, ${tally.falseFires}/${tally.negatives} false`;
 }
 
+/** A runtime with no chat wire answers through the port the orchestrator uses, and this process boots no orchestrator. */
+async function domainOneShot(admit: LlmRequestAdmission, cleanups: Array<() => Promise<void>>): Promise<OneShotPort> {
+	const { loadDomains } = await import("../core/domain-loader.js");
+	const { ConfigDomainModule } = await import("../domains/config/index.js");
+	const { ProvidersDomainModule } = await import("../domains/providers/index.js");
+	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
+	cleanups.push(() => loaded.stop());
+	const providers = loaded.getContract<ProvidersContract>("providers");
+	if (!providers) throw new Error("provider domain not loaded");
+	const { createSystemOneOneShot } = await import("../entry/orchestrator.js");
+	return createSystemOneOneShot(providers, admit);
+}
+
 /** Measure a batch route on the packaged cases and store what passed. */
-async function runCalibrate(name: string, only: ReadonlyArray<string> | undefined): Promise<number> {
+async function runCalibrate(
+	name: string,
+	only: ReadonlyArray<string> | undefined,
+	cleanups: Array<() => Promise<void>>,
+): Promise<number> {
 	const settings = readLayeredSettings(process.cwd()).settings;
 	const { effectiveSystemOne, resolveChoice } = await import("../domains/system-one/selection.js");
 	const resolved = resolveChoice(settings, name);
@@ -329,29 +348,32 @@ A site's holdout is skipped when no key passes its fit.
 	let last: DecisionRecord | null = null;
 	const placeholders: Record<string, Record<string, number>> = {};
 	let learned: string | null = null;
+	const admitLlmRequest: LlmRequestAdmission = async (request) => {
+		const account = await admit(request);
+		const pricing = resolveEffectivePricing(
+			target,
+			runtime.getRuntime(target.runtime) ?? { id: target.runtime },
+			request.model,
+		);
+		return Object.assign(
+			(usage: Parameters<typeof account>[0], observation?: Parameters<typeof account>[1]) => {
+				account(usage, observation);
+				if (usage !== null) addCalibrationSpend(spend, pricing, usage);
+			},
+			account.withContext ? { withContext: account.withContext } : {},
+		);
+	};
+	const { hasChatWire } = await import("../domains/system-one/engines/llm-wire.js");
 	const system = createSystemOne({
 		...deps,
+		...(hasChatWire(target.runtime) ? {} : { oneShot: await domainOneShot(admitLlmRequest, cleanups) }),
 		// A site that requires a cut sends nothing without one, so the build under measurement holds a placeholder.
 		localCuts: () => placeholders,
 		measurements: () => ({
 			...indexMeasurements([]),
 			buildsFor: () => (learned === null ? [] : [learned]),
 		}),
-		admitLlmRequest: async (request) => {
-			const account = await admit(request);
-			const pricing = resolveEffectivePricing(
-				target,
-				runtime.getRuntime(target.runtime) ?? { id: target.runtime },
-				request.model,
-			);
-			return Object.assign(
-				(usage: Parameters<typeof account>[0], observation?: Parameters<typeof account>[1]) => {
-					account(usage, observation);
-					if (usage !== null) addCalibrationSpend(spend, pricing, usage);
-				},
-				account.withContext ? { withContext: account.withContext } : {},
-			);
-		},
+		admitLlmRequest,
 		recorder: () => ({
 			decision: (row) => {
 				last = row;
@@ -507,14 +529,17 @@ export async function runSystemOneCommand(argv: ReadonlyArray<string>): Promise<
 		printError("check sends a request, so it requires --live");
 		return 2;
 	}
+	const cleanups: Array<() => Promise<void>> = [];
 	try {
 		if (parsed.command === "use") return await runUse(parsed.name as string, parsed.scope ?? "user");
 		if (parsed.command === "off") return await runUse("off", parsed.scope ?? "user");
 		if (parsed.command === "check") return await runCheck(parsed.name as string);
-		if (parsed.command === "calibrate") return await runCalibrate(parsed.name as string, parsed.sites);
+		if (parsed.command === "calibrate") return await runCalibrate(parsed.name as string, parsed.sites, cleanups);
 		return parsed.command === "status" ? await runStatus() : await runExport(parsed);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
+	} finally {
+		await Promise.all(cleanups.map((cleanup) => cleanup()));
 	}
 }

@@ -3366,7 +3366,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					if (userTurnId !== null && deps.session?.current()) {
 						try {
 							const continuation = options.requestContinuation === true;
-							const collected = outcomeCollector.take(userTurnId);
+							const collected = outcomeCollector.take(userTurnId, state.activeUserTurnId);
 							const finalMessage = [...agentRuntime.agent.state.messages]
 								.reverse()
 								.find((message) => message.role === "assistant");

@@ -118,6 +118,8 @@ export interface Runner {
 	answeredIdentity(digest: string, site: SiteId, moment?: string): { identity: string; contract: CallContract } | null;
 	/** Every breaker that counts a timeout or is tripped. */
 	breakers(): SystemOneBreakerView[];
+	/** Engine configurations whose server refused the model by name, which no retry can change. */
+	refused(): ReadonlyArray<{ digest: string; engine: string; reason: string }>;
 }
 
 interface BreakerState {
@@ -153,6 +155,9 @@ function breakerKey(route: RunnerRoute, site: { readonly id: SiteId; readonly mo
 	return momentKey(route.digest, site.id, site.moment);
 }
 
+/** A server that does not know the model answers every later decision the same way, so one request settles it. */
+const UNKNOWN_MODEL_RE = /\b400\b.*\bunknown model\b/isu;
+
 function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
@@ -162,6 +167,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 	// Only timeouts trip the breaker: a refused connection or an unusable answer
 	// comes back in milliseconds and costs the turn nothing.
 	const breakers = new Map<string, BreakerState>();
+	const refused = new Map<string, { digest: string; engine: string; reason: string }>();
 	// Calls that have not left their record yet. A turn waits only briefly for a
 	// slow answer, and the call goes on to record it whenever it settles, so a
 	// process that exits in between would lose the row without something to wait on.
@@ -503,6 +509,12 @@ export function createRunner(deps: RunnerDeps): Runner {
 					continue;
 				}
 			}
+			const refusal = refused.get(route.digest);
+			if (refusal !== undefined) {
+				plan.outcome = "breaker-open";
+				plan.error = refusal.reason;
+				continue;
+			}
 			const breaker = breakers.get(breakerKey(route, site));
 			if (breaker !== undefined && breaker.failures >= BREAKER_THRESHOLD && performance.now() < breaker.openUntil) {
 				plan.outcome = "breaker-open";
@@ -621,6 +633,10 @@ export function createRunner(deps: RunnerDeps): Runner {
 								// An answer or a refusal both prove the engine responds.
 								if (breakers.delete(key)) breakerMoves.set(plan, "closed");
 								plan.outcome = "failed";
+								if (UNKNOWN_MODEL_RE.test(plan.error)) {
+									const { digest, name } = plan.route;
+									refused.set(digest, { digest, engine: name, reason: plan.error });
+								}
 							}
 						}
 					}),
@@ -766,5 +782,5 @@ export function createRunner(deps: RunnerDeps): Runner {
 		return views;
 	}
 
-	return { run, settled, answeredIdentity, breakers: breakerViews };
+	return { run, settled, answeredIdentity, breakers: breakerViews, refused: () => [...refused.values()] };
 }

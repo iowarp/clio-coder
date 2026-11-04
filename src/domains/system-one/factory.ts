@@ -451,5 +451,13 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 			}
 		},
 		breakers: () => runner.breakers(),
+		// A changed pin is a new configuration, so a refusal of the old one no longer describes the engine.
+		refusedEngines: () =>
+			new Map(
+				runner
+					.refused()
+					.filter((entry) => engines.get(entry.engine)?.digest === entry.digest)
+					.map((entry) => [entry.engine, entry.reason]),
+			),
 	};
 }
