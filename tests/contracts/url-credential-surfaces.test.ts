@@ -253,7 +253,10 @@ test("completed --json streams keep ports in tool results, user messages and fin
 	strictEqual(finished({ type: "text_end", contentIndex: 0, content: text })?.content, text);
 	strictEqual(finished({ type: "thinking_end", contentIndex: 0, content: text })?.content, text);
 	// A finished block still loses a password, and a cut-off assistant message still holds.
-	strictEqual(finished({ type: "text_end", contentIndex: 0, content: "https://u:ZQXJ@h/x" })?.content, "https://u:[redacted]@h/x");
+	strictEqual(
+		finished({ type: "text_end", contentIndex: 0, content: "https://u:ZQXJ@h/x" })?.content,
+		"https://u:[redacted]@h/x",
+	);
 	const scrub = createJsonCredentialScrub();
 	const cut = {
 		role: "assistant",
