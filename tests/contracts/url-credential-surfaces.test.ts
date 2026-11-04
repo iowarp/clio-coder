@@ -14,7 +14,9 @@ import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-j
 import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
+	endsInOpenCredential,
 	holdUnresolvedUserinfo,
+	redactFinalUrlCredentials,
 	redactSecretString,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
@@ -969,5 +971,78 @@ test("a reply cut off inside an opaque token shows none of it at any headless or
 		strictEqual(holdUnresolvedUserinfo(OPAQUE), OPAQUE);
 	} finally {
 		env.restore();
+	}
+});
+
+const PARAM_SECRET = "hunter2XY";
+
+test("the URL rule hides a value by what its whole parameter name means", () => {
+	for (const name of [
+		"password",
+		"db_password",
+		"dbPassword",
+		"pwd",
+		"pass",
+		"passwd",
+		"secret",
+		"client_secret",
+		"clientSecret",
+		"token",
+		"access_token",
+		"accessToken",
+		"refresh_token",
+		"oauth_token",
+		"X-Amz-Security-Token",
+		"auth",
+		"authorization",
+		"api_key",
+		"apiKey",
+		"apikey",
+		"credential",
+	]) {
+		for (const lead of ["?", "?a=1&"]) {
+			const text = `https://h.example/p${lead}${name}=${PARAM_SECRET}&next=1 words`;
+			strictEqual(redactUrlCredentials(text), `https://h.example/p${lead}${name}=[redacted]&next=1 words`);
+			ok(!redactSecretsText(text, createRedactionTally()).includes(PARAM_SECRET), name);
+		}
+	}
+	strictEqual(
+		redactUrlCredentials(`jdbc:sqlserver://db:1433;user=sa;password=${PARAM_SECRET};encrypt=true`),
+		"jdbc:sqlserver://db:1433;user=sa;password=[redacted];encrypt=true",
+	);
+	strictEqual(redactUrlCredentials("https://h?token=$TOKEN"), "https://h?token=$TOKEN");
+});
+
+test("a name that only starts with a secret word keeps its value, so a completed stream loses nothing", () => {
+	for (const text of [
+		"see https://github.com/o/r/commits?author=alice for it",
+		"https://h/usage?tokens=100&max_tokens=200",
+		"https://h/?authenticated=true",
+		"fetch('https://h/', ?credentials=include)",
+		"https://h/?authority=x&secrets=y&passwords=z&bypass=w&token_type=bearer",
+		"https://h/?token&x=1",
+		// Semicolons divide parameters only inside a URL, so code keeps its statements.
+		"let a=1;token=next();password=b",
+		'{"u":"https://h/a","v":"x;token=1"}',
+	]) {
+		strictEqual(redactUrlCredentials(text), text);
+		strictEqual(redactFinalUrlCredentials(text, true), text);
+		const filter = new UrlCredentialStreamFilter();
+		let joined = "";
+		for (let at = 0; at < text.length; at += 3) joined += filter.push(text.slice(at, at + 3));
+		strictEqual(joined + filter.end(true), text);
+	}
+	ok(!endsInOpenCredential("https://h/?author=ali"));
+	ok(endsInOpenCredential("https://h/?a=1&pwd=hun"));
+	ok(endsInOpenCredential("https://h/?pwd="));
+	ok(endsInOpenCredential("jdbc:sqlserver://db;password=hun"));
+	strictEqual(redactUrlCredentials("BASE_TOKENS=100 and --token to pass"), "BASE_TOKENS=100 and --token to pass");
+});
+
+test("a long run of parameter delimiters stays linear", () => {
+	for (const unit of ["&token", "?a", ";b=", "&", "://;"]) {
+		const started = performance.now();
+		redactUrlCredentials(unit.repeat(Math.ceil(320_000 / unit.length)));
+		ok(performance.now() - started < 1_000, unit);
 	}
 });
