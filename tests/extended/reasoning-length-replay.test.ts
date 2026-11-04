@@ -25,10 +25,10 @@ const usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-function fixtureModel(): Model<"openai-completions"> {
+function fixtureModel(id = modelId): Model<"openai-completions"> {
 	const model = litellm.synthesizeModel(
 		{ id: "fixture", runtime: "litellm", url: "http://fixture.invalid" },
-		modelId,
+		id,
 		null,
 	) as Model<"openai-completions">;
 	model.reasoning = true;
@@ -292,5 +292,57 @@ test("LiteLLM completion replay retains completed reasoning and tool calls", asy
 	ok(sentResult);
 	strictEqual(sentResult.tool_call_id, id);
 	strictEqual(sentResult.content, "No events; same cursor.");
+	deepStrictEqual(context, before);
+});
+
+// Replaying the reasoning made Qwopus repeat the call it led to (12 of 18 as
+// sent, 0 of 18 without); the saved transcript keeps it.
+test("Qwopus tool turns replay without reasoning, and its interrupted thought survives", async () => {
+	const model = fixtureModel("dynamo/qwopus3.8-27b-flash-v2");
+	const id = "0123456789abcdef0123456789abcdef";
+	const context: Context = {
+		messages: [
+			{ role: "user", content: "Check HEAD.", timestamp: 0 },
+			{
+				...interrupted(model),
+				stopReason: "toolUse",
+				content: [
+					{ type: "thinking", thinking: reasoning, thinkingSignature: "reasoning_content" },
+					{ type: "toolCall", id, name: "bash", arguments: { command: "git rev-parse HEAD" } },
+				],
+			},
+			{
+				role: "toolResult",
+				toolCallId: id,
+				toolName: "bash",
+				content: [{ type: "text", text: "HEAD" }],
+				isError: false,
+				timestamp: 2,
+			},
+			{
+				...interrupted(model),
+				content: [{ type: "thinking", thinking: "Still working.", thinkingSignature: "reasoning_content" }],
+			},
+			{ role: "user", content: "Continue.", timestamp: 4 },
+		],
+	};
+	const before = structuredClone(context);
+	let request: { messages: Array<WireMessage & { tool_calls?: unknown[] }> } | undefined;
+	await openAICompletionsApiProvider
+		.streamSimple(model, context, {
+			apiKey: "fixture",
+			reasoning: "xhigh",
+			maxTokens: 128,
+			fetch: async (_url, init) => {
+				request = JSON.parse(String(init?.body));
+				return new Response(response({ content: "Done." }), { headers: { "content-type": "text/event-stream" } });
+			},
+		})
+		.result();
+	ok(request);
+	const [toolTurn, length] = request.messages.filter((message) => message.role === "assistant");
+	strictEqual(toolTurn?.tool_calls?.length, 1);
+	strictEqual(toolTurn.reasoning_content, undefined);
+	strictEqual(length?.reasoning_content, "Still working.");
 	deepStrictEqual(context, before);
 });
