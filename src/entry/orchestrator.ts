@@ -214,7 +214,12 @@ import {
 } from "../domains/providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
-import { type LlmRequestAdmission, type OneShotPort, oneShotTokens } from "../domains/providers/one-shot.js";
+import {
+	type LlmRequestAdmission,
+	type OneShotPort,
+	oneShotRoundOptions,
+	oneShotTokens,
+} from "../domains/providers/one-shot.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -821,9 +826,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			},
 			onUsage: (usage, observation) => recordUsage?.(usage, observation),
 			...sideAuth,
-			...(request.schema !== undefined
-				? { responseSchema: { name: "system_one_vote", schema: request.schema as Record<string, unknown> } }
-				: {}),
+			...oneShotRoundOptions(request),
 		});
 		if (result.aborted) throw new Error("the one-shot round was aborted");
 		return {

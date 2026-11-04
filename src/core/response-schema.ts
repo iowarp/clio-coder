@@ -89,6 +89,29 @@ export function responseFormatFor(
 }
 
 /**
+ * The runtime whose System One asks hold their reply through the Messages API's
+ * `output_config.format`, the one schema spelling this wire has. It sits apart from
+ * {@link responseSchemaDialectFor} because it is no `response_format` field, a worker
+ * reading that table must keep refusing a contract it cannot carry, and a round that did
+ * not ask for this (`/handoff`, the safety judge, triage's side model) keeps its request.
+ *
+ * Measured on Claude Haiku 5.5 through the subscription. A model that predates the field
+ * answers HTTP 400, which {@link isResponseSchemaRejection} reads as the same refusal
+ * every other dialect earns, so the round falls back to its prompt.
+ */
+export const OUTPUT_CONFIG_SCHEMA_RUNTIME_ID = "anthropic-max";
+
+/** Whether a System One ask on this runtime binds its schema through `output_config.format`. */
+export function speaksOutputConfigFormat(runtimeId: string): boolean {
+	return runtimeId === OUTPUT_CONFIG_SCHEMA_RUNTIME_ID;
+}
+
+/** The `output_config.format` value that binds a Messages API reply to `schema`. */
+export function outputConfigFormatFor(schema: Record<string, unknown>): Record<string, unknown> {
+	return { type: "json_schema", schema };
+}
+
+/**
  * Whether this runtime speaks the dialect above. Transport shape, not capability.
  *
  * LiteLLM joins llama.cpp here because a gateway in front of llama.cpp is the
@@ -173,7 +196,7 @@ export function isResponseSchemaRejection(diagnostic: string | null | undefined)
 	if (!diagnostic) return false;
 	const text = diagnostic.toLowerCase();
 	if (!/\b(?:400|422)\b|invalid_request_error|bad request/.test(text)) return false;
-	return /grammar|json[ _-]?schema|response[ _-]?format/.test(text);
+	return /grammar|json[ _-]?schema|response[ _-]?format|output[ _-]?config|output[ _-]?format/.test(text);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

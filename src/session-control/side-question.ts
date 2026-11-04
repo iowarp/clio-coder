@@ -23,9 +23,11 @@ import type { ThinkingLevel } from "../core/defaults.js";
 import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import {
 	isResponseSchemaRejection,
+	outputConfigFormatFor,
 	type ResponseSchemaDialect,
 	responseFormatFor,
 	responseSchemaDialectFor,
+	speaksOutputConfigFormat,
 } from "../core/response-schema.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { streamSimple } from "../engine/ai.js";
@@ -120,6 +122,8 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	responseSchema?: { name: string; schema: Record<string, unknown> };
 	/** Resolved runtime id, which is what decides the wire dialect. */
 	runtimeId?: string;
+	/** A System One ask, whose schema also binds on a runtime that takes `output_config.format`. */
+	holdReply?: boolean;
 	/** Sampling temperature; absent leaves the provider's default. `/draft` spreads it across candidates. */
 	temperature?: number;
 	/**
@@ -276,7 +280,7 @@ export function closePendingToolCalls(messages: ReadonlyArray<AgentMessage>, mid
 }
 
 interface SchemaBinding {
-	dialect: ResponseSchemaDialect;
+	dialect: ResponseSchemaDialect | "output-config";
 	name: string;
 	schema: Record<string, unknown>;
 }
@@ -284,7 +288,10 @@ interface SchemaBinding {
 /** The schema binding for this round, or null when nothing can be bound on the wire. */
 function schemaBindingFor(input: OutOfTurnRoundInput): SchemaBinding | null {
 	if (input.responseSchema === undefined || input.runtimeId === undefined) return null;
-	const dialect = responseSchemaDialectFor(input.runtimeId);
+	const dialect =
+		input.holdReply === true && speaksOutputConfigFormat(input.runtimeId)
+			? "output-config"
+			: responseSchemaDialectFor(input.runtimeId);
 	return dialect === null ? null : { dialect, ...input.responseSchema };
 }
 
@@ -343,7 +350,14 @@ async function runRound(
 		// The agent loop's convention: "off" sends no reasoning option, which the
 		// simple-stream seam resolves to thinking off for every provider.
 		if (input.thinkingLevel !== "off") options.reasoning = input.thinkingLevel;
-		if (binding !== null) {
+		if (binding?.dialect === "output-config") {
+			const format = outputConfigFormatFor(binding.schema);
+			// Pi has no option for this field and its Anthropic adapter does not read samplingParams.
+			options.onPayload = (payload: Record<string, unknown>) => ({
+				...payload,
+				output_config: { ...(payload.output_config as Record<string, unknown> | undefined), format },
+			});
+		} else if (binding !== null) {
 			options.samplingParams = { response_format: responseFormatFor(binding.dialect, binding.schema, binding.name) };
 		}
 
