@@ -16,18 +16,7 @@
 import type { QuestionType, SiteId } from "./types.js";
 
 /** What a question is for. Routing, capability narrowing and cut binding all key on it. */
-export const DECISION_TASKS = [
-	"intent",
-	"recipe",
-	"toolRisk",
-	"injection",
-	"turnEnd",
-	"relevance",
-	"clusterSelect",
-	"consult",
-	"drafts",
-	"steer",
-] as const;
+export const DECISION_TASKS = ["consult", "relevance"] as const;
 export type DecisionTask = (typeof DECISION_TASKS)[number];
 
 /**
@@ -36,15 +25,7 @@ export type DecisionTask = (typeof DECISION_TASKS)[number];
  * cannot quietly send a different task to the named engine.
  */
 export const SITE_TASKS: Readonly<Record<SiteId, ReadonlyArray<DecisionTask>>> = {
-	turn: ["intent"],
-	workerPrepare: ["recipe"],
-	toolCall: ["toolRisk"],
-	toolResult: ["injection"],
-	turnEnd: ["turnEnd"],
-	relevance: ["relevance", "clusterSelect"],
 	consult: ["consult"],
-	drafts: ["drafts"],
-	steer: ["steer"],
 };
 
 /** The task a site asks when its definition names none. */
@@ -62,7 +43,7 @@ export type SemanticKind = "boolean" | "exclusive" | "ordinal" | "independent";
 export function semanticKind(task: DecisionTask, type: QuestionType): SemanticKind {
 	if (type === "choice") return "exclusive";
 	if (type === "score") return "ordinal";
-	return task === "relevance" || task === "clusterSelect" ? "independent" : "boolean";
+	return task === "relevance" ? "independent" : "boolean";
 }
 
 /**

@@ -42,7 +42,6 @@ import { isLibraryKind } from "../domains/resources/library-types.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
-import type { SystemOneCommand as SystemOneCommandInput, SystemOneScopeName } from "../domains/system-one/scopes.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
@@ -199,7 +198,7 @@ type SlashCommandVariant =
 	| { kind: "loop"; command: LoopCommand }
 	| { kind: "agents"; connect?: boolean }
 	| { kind: "usage" }
-	| { kind: "systemone"; action: "status" | "use" | "off"; name?: string; scope?: SystemOneScopeName }
+	| { kind: "systemone" }
 	| { kind: "systemone-usage"; reason?: string }
 	| { kind: "health" }
 	| { kind: "workspace"; action: "off" | "status" }
@@ -816,7 +815,7 @@ export interface SessionCommandContext {
 	/** `/health`: telemetry journal losses, event-loop lag, the session's transport, quota, route and System One breakers. */
 	openHealth?: () => void;
 	/** `/systemone`: its lines come from the composition root, which owns the scopes. */
-	systemOne?: { run(command: SystemOneCommandInput): string[] };
+	systemOne?: { run(): string[] };
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
 	 * `deep` adds the live tool probe on the session's targets and the
@@ -2137,35 +2136,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "systemone",
 		acp: false,
-		description: "Show System One's state, or choose its engine for this task, session or project",
+		description: "Show whether System One is on and what answers it",
 		group: "Inspect",
 		kinds: ["systemone", "systemone-usage"],
-		args: {
-			subcommands: {
-				status: {},
-				use: { positionals: [{ name: "engine", required: true }], flags: [{ name: "--scope", takesValue: true }] },
-				off: { flags: [{ name: "--scope", takesValue: true }] },
-			},
-		},
-		subcommandDescriptions: {
-			status: "Show what each site will do and why",
-			use: "Choose jev, memory, main, an engine or a target; --scope task|session|project|user",
-			off: "Turn System One off; --scope task|session|project|user",
-		},
+		args: {},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "systemone-usage", reason: parsed.error };
-			if (parsed.subcommand === undefined || parsed.subcommand === "status")
-				return { kind: "systemone", action: "status" };
-			const scope = parsed.flags.get("--scope") ?? parsed.flags.get("scope");
-			if (scope !== undefined && !["task", "session", "project", "user"].includes(String(scope))) {
-				return { kind: "systemone-usage", reason: "--scope must be task, session, project or user" };
-			}
-			const scoped = scope !== undefined ? { scope: String(scope) as SystemOneScopeName } : {};
-			if (parsed.subcommand === "off") return { kind: "systemone", action: "off", ...scoped };
-			const name = parsed.positionals[0];
-			return name === undefined
-				? { kind: "systemone-usage", reason: "use needs an engine" }
-				: { kind: "systemone", action: "use", name, ...scoped };
+			return parsed.error ? { kind: "systemone-usage", reason: parsed.error } : { kind: "systemone" };
 		},
 		handle(command, ctx) {
 			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "systemone");
@@ -2174,12 +2150,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "systemone") return;
-			const lines = ctx.systemOne?.run({
-				action: command.action,
-				...(command.name !== undefined ? { name: command.name } : {}),
-				...(command.scope !== undefined ? { scope: command.scope } : {}),
-			});
-			// Transcript output, because notices collapse newlines and a site table is unreadable on one line.
+			const lines = ctx.systemOne?.run();
 			ctx.io.stdout(`${(lines ?? ["System One is not available on this surface."]).join("\n")}\n`);
 		},
 	},

@@ -18,11 +18,7 @@ import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
 import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
-import type { DecisionTask } from "../domains/system-one/contract.js";
-import { SITE_TASKS } from "../domains/system-one/contract.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
-import type { SiteId } from "../domains/system-one/types.js";
-import { SITE_IDS } from "../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
@@ -1021,14 +1017,13 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"integrations.externalAgents.entries[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
 	"integrations.externalAgents.entries[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
 	// Written as an empty map by `init` from 0.5.3 through 0.5.7, so most upgraded files carry it.
-	"fleet.decisionProfiles":
-		"System One replaced decision profiles; bind an engine under systemOne.engines and systemOne.sites",
-	"systemOne.cuts":
-		"a number acts only when it was measured on the exact build; run clio-coder systemone calibrate instead of writing cuts by hand",
-	"systemOne.record": "research capture keeps the System One dataset: telemetry.research.systemOneDataset with content",
-	"systemOne.retentionDays":
-		"System One samples are research content in session journals, which telemetry retention expires",
-	"systemOne.maxMiB": "System One samples are research content in session journals, which telemetry retention bounds",
+	"fleet.decisionProfiles": "System One replaced decision profiles; name an engine with systemOne.use",
+	"systemOne.sites": "there are no decision sites any more; set systemOne.use to bind the consult tool",
+	"systemOne.cuts": "no build-keyed cut acts any more",
+	"systemOne.record": "the decision dataset is gone",
+	"systemOne.retentionDays": "the decision dataset is gone",
+	"systemOne.maxMiB": "the decision dataset is gone",
+	"telemetry.research.systemOneDataset": "the decision dataset is gone",
 	"fleet.speculativeDispatch": "workers are no longer held ahead of a predicted dispatch",
 	"turnControl.interpretation": "no harness workflow reads the request before a turn any more",
 	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
@@ -1121,8 +1116,9 @@ function reportV1Tombstones(issues: Issues, raw: Record<string, unknown>): void 
 			// `init` wrote `fleet.decisionProfiles: {}` from 0.5.3 through 0.5.7, so an empty map is
 			// the default shape of every upgraded file and carries no configuration to lose.
 			if (path === "fleet.decisionProfiles" && isEmptyPlainObject(raw.fleet, "decisionProfiles")) continue;
-			// The same default shape: `init` wrote `systemOne.cuts: {}` until it was retired.
+			// The same default shape: `init` wrote `systemOne.cuts: {}` and `sites: {}` until they were retired.
 			if (path === "systemOne.cuts" && isEmptyPlainObject(raw.systemOne, "cuts")) continue;
+			if (path === "systemOne.sites" && isEmptyPlainObject(raw.systemOne, "sites")) continue;
 			// A key with no replacement does nothing, so it must never block loading or an
 			// upgrade: a 0.5.x interop setup wrote entries[].permissionTimeoutMs by default and
 			// the 0.6.0 installer refused every such home. It is ignored and doctor names it.
@@ -1408,7 +1404,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	// The last four are retired; listed so a tombstone is all they report and an old file still loads.
+	// All but the first two are retired; listed so a tombstone is all they report and an old file still loads.
 	issues.unknownKeys("systemOne", raw, ["use", "engines", "sites", "cuts", "record", "retentionDays", "maxMiB"]);
 	const next = settings.systemOne;
 	if ("use" in raw) {
@@ -1466,80 +1462,10 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 			next.engines = engines;
 		}
 	}
-	if ("sites" in raw) {
-		if (!isPlainObject(raw.sites)) issues.add("systemOne.sites", `expected a map, got ${describe(raw.sites)}`);
-		else {
-			const sites: ClioSettings["systemOne"]["sites"] = {};
-			// Bindings are checked against the engines the file itself declares, so a
-			// partial parse failure above does not cascade into one issue per site.
-			const declared = isPlainObject(raw.engines) ? raw.engines : {};
-			for (const [site, value] of Object.entries(raw.sites)) {
-				const path = `systemOne.sites.${site}`;
-				if (!(SITE_IDS as ReadonlyArray<string>).includes(site)) {
-					issues.add(path, `unknown site, expected one of ${SITE_IDS.join(", ")}`);
-					continue;
-				}
-				// A later layer writes null to unbind a site an earlier layer or systemOne.use bound.
-				if (value === null) {
-					sites[site as SiteId] = null;
-					continue;
-				}
-				let engine: string | undefined;
-				let timeoutMs: number | undefined;
-				let tasks: Partial<Record<DecisionTask, string>> | undefined;
-				if (typeof value === "string") engine = expectString(issues, path, value);
-				else if (isPlainObject(value)) {
-					issues.unknownKeys(path, value, ["engine", "timeoutMs", "tasks"]);
-					engine = expectString(issues, `${path}.engine`, value.engine);
-					if ("timeoutMs" in value) timeoutMs = expectInteger(issues, `${path}.timeoutMs`, value.timeoutMs, { min: 1 });
-					if ("tasks" in value) {
-						if (!isPlainObject(value.tasks)) {
-							issues.add(`${path}.tasks`, `expected a map, got ${describe(value.tasks)}`);
-						} else {
-							// A task the site does not ask, or an engine nobody declared, is refused:
-							// either would leave the task running somewhere the operator did not name.
-							const asked = SITE_TASKS[site as SiteId];
-							const routed: Partial<Record<DecisionTask, string>> = {};
-							for (const [task, target] of Object.entries(value.tasks)) {
-								if (!asked.includes(task as DecisionTask)) {
-									issues.add(`${path}.tasks.${task}`, `unknown task, expected one of ${asked.join(", ")}`);
-									continue;
-								}
-								const routedTo = expectString(issues, `${path}.tasks.${task}`, target);
-								if (routedTo === undefined) continue;
-								if (!Object.hasOwn(declared, routedTo)) {
-									issues.add(`${path}.tasks.${task}`, `engine '${routedTo}' is not defined in systemOne.engines`);
-									continue;
-								}
-								routed[task as DecisionTask] = routedTo;
-							}
-							tasks = routed;
-						}
-					}
-				} else {
-					issues.add(path, `expected an engine name or a map, got ${describe(value)}`);
-					continue;
-				}
-				if (engine === undefined) continue;
-				if (!Object.hasOwn(declared, engine)) {
-					issues.add(path, `engine '${engine}' is not defined in systemOne.engines`);
-					continue;
-				}
-				sites[site as SiteId] =
-					timeoutMs === undefined && tasks === undefined
-						? engine
-						: {
-								engine,
-								...(timeoutMs !== undefined ? { timeoutMs } : {}),
-								...(tasks !== undefined ? { tasks } : {}),
-							};
-			}
-			next.sites = sites;
-		}
-	}
 }
 
-const TELEMETRY_CAPTURE_FLAGS = ["content", "deltas", "providerHeaders", "systemOneDataset", "busTrace"] as const;
+const TELEMETRY_CAPTURE_FLAGS = ["content", "deltas", "providerHeaders", "busTrace"] as const;
+const RETIRED_TELEMETRY_CAPTURE_FLAGS = ["systemOneDataset"] as const;
 
 function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings): void {
 	if (!isPlainObject(raw)) {
@@ -1557,7 +1483,10 @@ function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("telemetry.research", `expected a map, got ${describe(raw.research)}`);
 		return;
 	}
-	issues.unknownKeys("telemetry.research", raw.research, TELEMETRY_CAPTURE_FLAGS);
+	issues.unknownKeys("telemetry.research", raw.research, [
+		...TELEMETRY_CAPTURE_FLAGS,
+		...RETIRED_TELEMETRY_CAPTURE_FLAGS,
+	]);
 	for (const flag of TELEMETRY_CAPTURE_FLAGS) {
 		if (!(flag in raw.research)) continue;
 		const parsed = expectBoolean(issues, `telemetry.research.${flag}`, raw.research[flag]);

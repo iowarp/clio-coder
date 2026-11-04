@@ -64,9 +64,6 @@ import {
 } from "../../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
-import { describeBindings } from "../../domains/system-one/recorder/bindings.js";
-import type { SiteId } from "../../domains/system-one/types.js";
-import { SITE_IDS } from "../../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../../domains/turn-control/index.js";
 import type { Component, OverlayHandle, SettingItem, TUI } from "../../engine/tui.js";
 import { getKeybindings, Input, isKeyRelease, matchesKey, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -165,8 +162,8 @@ const RESTART_REQUIRED_IDS = new Set<string>([
 	// key held then. Changing the rung mid-session would leave the contract on
 	// the rung it resolved to, so the row says restart rather than lying.
 	"panes.enabled",
-	// The consult tool is registered once, at startup, with the engine bound then.
-	"systemOne.sites.consult",
+	// The consult tool is registered once, at startup, with the engine chosen then.
+	"systemOne.use",
 ]);
 
 export { SETTINGS_SECTIONS, type SettingsSectionId };
@@ -183,7 +180,6 @@ type EntrySettingId =
 	| `setting.${string}`
 	| `workers.profiles.${string}`
 	| `workers.agentBindings.${string}`
-	| `systemOne.sites.${string}`
 	| "systemOne.use"
 	| `targets.${string}`
 	| `fleet.nodes.${string}`
@@ -1414,7 +1410,7 @@ export function buildSettingItems(
 			valueSegments: [],
 		}),
 		...agentBindingRows(settings, live),
-		...systemOneSiteRows(settings, live),
+		...systemOneRows(settings, live),
 		settingItem("workers.agentBindings", "", {
 			label: "Add agent route",
 			...(profileCount > 0 ? { submenu: addBindingSubmenu } : { readOnly: true }),
@@ -1936,112 +1932,21 @@ function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly
 }
 
 const SITE_OFF_CHOICE = "(off)";
-const SITE_LABELS: Readonly<Record<SiteId, string>> = {
-	workerPrepare: "Worker preparation",
-	turn: "Before each answer",
-	toolCall: "Before using a tool",
-	toolResult: "After a tool responds",
-	turnEnd: "Before finishing a turn",
-	relevance: "When sorting context",
-	consult: "When an agent asks for advice",
-	drafts: "When comparing drafts",
-	steer: "When a message is queued mid-run",
-};
-
-/**
- * What each System One site does with an answer and what it sends to get one.
- * Binding a site to a hosted target is the operator's consent to that evidence
- * leaving the machine, so the row states it next to the binding.
- */
-const SITE_NOTES: Readonly<Record<SiteId, { readonly does: string; readonly sends: string }>> = {
-	workerPrepare: {
-		does: "picks the worker recipe to hold ready when a turn reading predicts a dispatch",
-		sends: "the request, the last reply and the recipe descriptions",
-	},
-	turn: {
-		does:
-			"reads what your message asks for without delaying it; a fitted build's hints and acts are used only when the reading lands before the prompt is built, and every other reading is only recorded",
-		sends: "your request, the tail of the last reply and your previous request",
-	},
-	toolCall: {
-		does:
-			"adds an advisory blast-radius line to approval cards and, in yolo, reads unrecognized commands for the record only; it never holds, parks or allows a call",
-		sends: "the call's redacted one-line target, never raw arguments",
-	},
-	toolResult: {
-		does:
-			"reads web and MCP output for text that tries to instruct the agent, for the record only; the result reaches the agent unchanged and at once",
-		sends: "the head of the tool output and its source",
-	},
-	turnEnd: {
-		does:
-			"reads the final message for questions to you, stalls and unproven claims, and only records what it read; the clarification streak keeps its own reading",
-		sends: "the tail of the final message, your request, earlier requests and tool names",
-	},
-	relevance: {
-		does:
-			"reorders long skill, capability and memory listings by meaning once a ranking has finished; a listing never waits for one and never loses an entry",
-		sends: "the need, the turn's task and entry descriptions",
-	},
-	consult: {
-		does: "answers typed questions the main agent asks (bound at startup)",
-		sends: "the evidence the agent supplies, including the head of files it names",
-	},
-	drafts: {
-		does: "rates /draft candidates in the overlay",
-		sends: "the /draft request and the candidate answers",
-	},
-	steer: {
-		does:
-			"reads how a message typed during a run relates to the work and how soon it should land, for the record only; delivery follows your keys and the queue navigator",
-		sends: "the queued message, the request that started the run and the tail of the latest reply",
-	},
-};
-
-/**
- * One row per System One site, choosing the engine it asks. The record toggle
- * and the retention limits are ordinary catalog rows under `systemOne.*`.
- */
-function systemOneSiteRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
+/** The one System One row. Choosing a hosted target is the operator's consent to that evidence leaving the machine. */
+function systemOneRows(settings: Readonly<ClioSettings>, live: () => Readonly<ClioSettings>): SettingsCenterItem[] {
 	const engineNames = Object.keys(live().systemOne.engines);
-	const bindings = new Map(describeBindings(settings).map((binding) => [binding.site, binding]));
 	const targetNames = settings.targets.map((target) => target.id);
 	const useChoices = [...new Set(["jev", "memory", "main", ...engineNames, ...targetNames])];
 	const use = settings.systemOne.use;
-	const useRow = settingItem("systemOne.use", use ?? SITE_OFF_CHOICE, {
-		label: "Decision engine",
-		description:
-			"Experimental opt-in for every active site. Off until chosen. main and memory add separate completions to that route; jev sends redacted state to TypeSafe. An engine with no measurement for its exact build sends nothing, and clio-coder systemone status says why.",
-		submenu: selectListSubmenu("Decision engine", [
-			{ value: SITE_OFF_CHOICE, label: "Off" },
-			...useChoices.map((name) => ({ value: name, label: name })),
-		]),
-	});
 	return [
-		useRow,
-		...SITE_IDS.map((site) => {
-			const binding = bindings.get(site);
-			const engine = binding?.engine ?? null;
-			const note = SITE_NOTES[site];
-			const state =
-				binding === undefined || engine === null
-					? "Off: asks nothing."
-					: binding.problem !== undefined
-						? `Bound to engine ${engine}, which cannot answer: ${binding.problem}. The site asks nothing until it can.`
-						: `Asks ${binding.target}/${binding.model ?? "default"} through engine ${engine}.`;
-			const selectable = engineNames.length > 0;
-			return settingItem(`systemOne.sites.${site}`, engine ?? SITE_OFF_CHOICE, {
-				label: SITE_LABELS[site],
-				description: `Experimental. ${state} It ${note.does}. Sends ${note.sends}.${selectable ? "" : " Add a decision engine in the settings file first."}`,
-				...(selectable
-					? {
-							submenu: selectListSubmenu(`Decision engine: ${SITE_LABELS[site]}`, [
-								{ value: SITE_OFF_CHOICE, label: "Off" },
-								...engineNames.map((name) => ({ value: name, label: name })),
-							]),
-						}
-					: { readOnly: true, affordance: "Add a decision engine in the settings file" }),
-			});
+		settingItem("systemOne.use", use ?? SITE_OFF_CHOICE, {
+			label: "Decision engine",
+			description:
+				"Experimental opt-in. Off until chosen. It registers the consult tool on the next start, which sends the evidence the agent supplies, including the heads of files it names. main and memory add separate completions to that route; jev sends redacted state to TypeSafe.",
+			submenu: selectListSubmenu("Decision engine", [
+				{ value: SITE_OFF_CHOICE, label: "Off" },
+				...useChoices.map((name) => ({ value: name, label: name })),
+			]),
 		}),
 	];
 }
@@ -2807,28 +2712,6 @@ function applyEntrySettingChange(settings: ClioSettings, id: string, value: stri
 	}
 	if (id === "systemOne.use") {
 		settings.systemOne.use = value === SITE_OFF_CHOICE || value === "" ? null : value;
-		return true;
-	}
-	if (id.startsWith("systemOne.sites.")) {
-		const site = id.slice("systemOne.sites.".length);
-		if (!(SITE_IDS as ReadonlyArray<string>).includes(site)) return true;
-		const key = site as SiteId;
-		if (value === SITE_OFF_CHOICE || value === "") delete settings.systemOne.sites[key];
-		else if (Object.hasOwn(settings.systemOne.engines, value)) {
-			// A deadline and the task routes the operator set on the binding outlive a
-			// change of engine; only the site's own engine is what this row chooses.
-			const current = settings.systemOne.sites[key];
-			const timeoutMs = typeof current === "object" && current !== null ? current.timeoutMs : undefined;
-			const tasks = typeof current === "object" && current !== null ? current.tasks : undefined;
-			settings.systemOne.sites[key] =
-				timeoutMs === undefined && tasks === undefined
-					? value
-					: {
-							engine: value,
-							...(timeoutMs !== undefined ? { timeoutMs } : {}),
-							...(tasks !== undefined ? { tasks } : {}),
-						};
-		}
 		return true;
 	}
 	if (id.startsWith("workers.agentBindings.")) {

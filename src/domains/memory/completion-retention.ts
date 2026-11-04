@@ -8,7 +8,6 @@ import { MEMORY_HISTORY_REVIEW_SYSTEM_PROMPT } from "../prompts/memory-intervent
 import type { MemoryCommitScope } from "./commit-state.js";
 import type { CompletedLessonSource } from "./history-review.js";
 import { lessonEvidence } from "./lesson-evidence.js";
-import type { MemoryLessonJudge } from "./lesson-judge.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationEvent, observationTracing, traceObservation } from "./observation-events.js";
 import { observationDigest } from "./observations.js";
@@ -101,7 +100,6 @@ export async function retainCompletedTask(input: {
 	timeoutMs: number;
 	signal: AbortSignal;
 	isCurrent(): boolean;
-	judge?: MemoryLessonJudge;
 	onProgress?: (status: RetentionStatus) => void;
 	/**
 	 * Approved repository claims. The pass is shown them so it does not restate
@@ -357,36 +355,23 @@ async function retainWithinDeadline(
 		await save(prepared);
 		input.signal.throwIfAborted();
 		if (!input.isCurrent()) throw new Error("memory judgment lost content authority");
-		const judged = input.judge && lessons.length ? await input.judge(lessons, input.source, input.signal) : undefined;
-		if (input.judge && lessons.length)
-			event("lesson-judgment", { candidates: lessons.length, accepted: judged?.size ?? 0, unavailable: judged === null });
 		const proposed = await proposeInjectedTaskMemory(input.dataDir, {
 			sessionId: input.scope.sessionId,
 			cwd: input.cwd,
 			entries: lessons,
 			observation: "held",
-			...(judged !== undefined ? { heldEntryIds: judged ?? new Set<string>() } : {}),
 			writeOptions: { signal: input.signal, timeoutMs: 100, isCurrent: input.isCurrent },
 		});
-		const selectedRecords =
-			judged === undefined
-				? proposed.records
-				: lessons
-						.filter((entry) => judged?.has(entry.id))
-						.flatMap((entry) => {
-							const record = proposed.recordByEntry.get(entry.id);
-							return record ? [record] : [];
-						});
 		const retained = [
-			...new Map(selectedRecords.filter((record) => record.approved).map((record) => [record.id, record])).values(),
+			...new Map(proposed.records.filter((record) => record.approved).map((record) => [record.id, record])).values(),
 		].map((record) => ({
 			id: record.id,
 			text: record.lesson,
 		}));
 		// Stored proposals the gate held are settled: another pass over the same
 		// candidates restores them free of an attempt and would only append the same
-		// session's `held` again, which once evicted an older contradiction. Only an
-		// unavailable judge or a failed store write leaves saved candidates pending.
+		// session's `held` again, which once evicted an older contradiction. Only a
+		// failed store write leaves saved candidates pending.
 		// Lessons the host could bind to no receipt or source are a deterministic
 		// verdict over this source: the same ledger yields the same evidence, so a
 		// second extraction could only reword them. In the live session they stay
@@ -397,7 +382,7 @@ async function retainWithinDeadline(
 			...prepared,
 			phase: retained.length
 				? "retained"
-				: proposed.errors.length > 0 || (lessons.length > 0 && judged === null)
+				: proposed.errors.length > 0
 					? "pending"
 					: lessons.length > 0
 						? "gated"
@@ -407,11 +392,7 @@ async function retainWithinDeadline(
 			reason: proposed.errors.length
 				? "store-error"
 				: lessons.length && !retained.length
-					? judged === null
-						? "judge-unavailable"
-						: judged !== undefined
-							? "judge-gated"
-							: "evidence-gate-held"
+					? "evidence-gate-held"
 					: result.droppedOperations
 						? "invalid-operations"
 						: extracted && !lessons.length

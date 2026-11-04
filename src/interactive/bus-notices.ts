@@ -197,16 +197,11 @@ export { WATCHDOG_NOTICE_CHECK_LIMIT, watchdogBlockersNotice } from "../session-
  * autonomy ask exists only because of the current level and can be widened in
  * .clio-coder/safety.yaml when it is an execute action.
  */
-export function approvalParkedNotice(
-	tool: string,
-	decision: SafetyDecision,
-	autonomy: string,
-	gateBuild?: string,
-): BusNotice {
+export function approvalParkedNotice(tool: string, decision: SafetyDecision, autonomy: string): BusNotice {
 	const actionClass = decision.classification.actionClass;
 	const axis = askAxis(decision);
 	if (axis.kind === "net") {
-		const asker = safetyNetRailText(axis.ruleId, gateBuild);
+		const asker = safetyNetRailText(axis.ruleId);
 		return {
 			level: "warn",
 			text: `[approval] Parked ${tool} (${actionClass}): ${asker} asks for confirmation. Approve once, or Esc to deny this call.`,

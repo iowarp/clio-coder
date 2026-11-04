@@ -5,9 +5,8 @@ import { telemetryCallInContext } from "../../../core/telemetry/producer.js";
  * OpenAI-compatible runtimes, or an injected one-shot port for the runtimes
  * that have no such wire (subscription and CLI-backed ones).
  *
- * It is direct HTTP on purpose. pi-ai drops logprobs from the stream it
- * parses, and a domain reaching the engine seam would add a second Stage 0
- * reacher, so the request is built and read here through `probeJson`.
+ * It is direct HTTP on purpose: a domain reaching the engine seam would add a
+ * second Stage 0 reacher, so the request is built and read here through `probeJson`.
  */
 
 import {
@@ -20,18 +19,12 @@ import { LlmAdmissionRefused } from "../../providers/one-shot.js";
 import { probeJson } from "../../providers/probe/http.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
-import type { Prompt } from "./llm-prompt.js";
-import { voteSchema } from "./llm-prompt.js";
+import type { Prompt } from "./llm-batch.js";
 import type { EngineHost } from "./shared.js";
 import { errorText, resolveToken } from "./shared.js";
 
 /** Ceiling for one HTTP request; the runner's deadline arrives as the abort signal and wins. */
 const HTTP_CEILING_MS = 120_000;
-/** A vote is one letter, but a target that reasons anyway needs room to reach it. */
-export const VOTE_MAX_TOKENS = 128;
-/** Sampling temperature for votes; the spread between votes is the whole signal. */
-export const VOTE_TEMPERATURE = 0.7;
-const TOP_LOGPROBS = 20;
 
 /**
  * Runtimes read through `POST {base}/chat/completions`, with how each spells
@@ -99,11 +92,6 @@ export function chatBaseUrl(runtimeId: string, target: TargetDescriptor): string
 	return `${root.endsWith("/v1") ? root.slice(0, -"/v1".length) : root}/v1`;
 }
 
-export interface TokenLogprob {
-	readonly token: string;
-	readonly logprob: number;
-}
-
 export interface ChannelUsage {
 	readonly input: number;
 	readonly output: number;
@@ -111,10 +99,6 @@ export interface ChannelUsage {
 
 export interface Channel {
 	readonly wire: "http" | "oneshot";
-	/** The first output token's alternatives, or null when the server sent no logprobs. */
-	firstToken(prompt: Prompt): Promise<{ tokens: TokenLogprob[] | null; usage?: ChannelUsage }>;
-	/** One sampled reply to the prompt, schema-bound where the runtime has a dialect. */
-	vote(prompt: Prompt, labelCount: number): Promise<{ text: string; usage?: ChannelUsage }>;
 	/** One deterministic reply held to `schema`, with the identity the server reported for it. */
 	batch(prompt: Prompt, schema: Record<string, unknown>, maxTokens: number): Promise<BatchReply>;
 }
@@ -149,9 +133,6 @@ interface ChatCompletion {
 	system_fingerprint?: unknown;
 	choices?: Array<{
 		message?: { content?: unknown };
-		logprobs?: {
-			content?: Array<{ token?: unknown; logprob?: unknown; top_logprobs?: unknown }> | null;
-		} | null;
 	}>;
 	usage?: {
 		prompt_tokens?: unknown;
@@ -184,31 +165,6 @@ function usageOf(data: ChatCompletion): LlmRequestUsage | undefined {
 function channelUsageOf(data: ChatCompletion): ChannelUsage | undefined {
 	const usage = usageOf(data);
 	return usage === undefined ? undefined : { input: usage.input + (usage.cacheRead ?? 0), output: usage.output };
-}
-
-function tokenEntry(raw: unknown): TokenLogprob | null {
-	if (typeof raw !== "object" || raw === null) return null;
-	const row = raw as { token?: unknown; logprob?: unknown };
-	return typeof row.token === "string" && typeof row.logprob === "number" && Number.isFinite(row.logprob)
-		? { token: row.token, logprob: row.logprob }
-		: null;
-}
-
-function firstTokenOf(data: ChatCompletion): TokenLogprob[] | null {
-	const first = data.choices?.[0]?.logprobs?.content?.[0];
-	if (first === undefined || first === null) return null;
-	const out: TokenLogprob[] = [];
-	if (Array.isArray(first.top_logprobs)) {
-		for (const raw of first.top_logprobs) {
-			const entry = tokenEntry(raw);
-			if (entry !== null) out.push(entry);
-		}
-	}
-	// The sampled token is normally repeated in the alternatives, and counting it
-	// twice would inflate its mass. Servers asked for zero alternatives send it alone.
-	const chosen = tokenEntry(first);
-	if (chosen !== null && !out.some((entry) => entry.token === chosen.token)) out.push(chosen);
-	return out.length > 0 ? out : null;
 }
 
 function identityOf(data: ChatCompletion): AnsweredIdentity | null {
@@ -357,26 +313,6 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 
 	return {
 		wire: "http",
-		async firstToken(prompt) {
-			const data = await postThinkingOff({
-				model,
-				messages: messages(prompt),
-				max_tokens: 1,
-				temperature: 0,
-				logprobs: true,
-				top_logprobs: TOP_LOGPROBS,
-			});
-			const usage = channelUsageOf(data);
-			return { tokens: firstTokenOf(data), ...(usage ? { usage } : {}) };
-		},
-		async vote(prompt, labelCount) {
-			const data = await postBound(
-				{ model, messages: messages(prompt), max_tokens: VOTE_MAX_TOKENS, temperature: VOTE_TEMPERATURE },
-				voteSchema(labelCount),
-			);
-			const usage = channelUsageOf(data);
-			return { text: contentOf(data), ...(usage ? { usage } : {}) };
-		},
 		async batch(prompt, schema, maxTokens) {
 			const data = await postBound({ model, messages: messages(prompt), max_tokens: maxTokens, temperature: 0 }, schema);
 			const usage = channelUsageOf(data);
@@ -399,31 +335,6 @@ export function createOneShotChannel(input: OneShotChannelInput): Channel {
 	const { targetId, model, port, signal } = input;
 	return {
 		wire: "oneshot",
-		async firstToken() {
-			// A port returns text, never token alternatives.
-			return { tokens: null };
-		},
-		async vote(prompt, labelCount) {
-			try {
-				const reply = await port({
-					engine: input.engine,
-					targetId,
-					model,
-					system: prompt.system,
-					user: prompt.user,
-					schema: voteSchema(labelCount),
-					maxTokens: VOTE_MAX_TOKENS,
-					signal,
-				});
-				return { text: reply.text, ...(reply.usage ? { usage: reply.usage } : {}) };
-			} catch (error) {
-				if (error instanceof LlmAdmissionRefused) {
-					input.onAdmissionRefused?.(error);
-					throw error;
-				}
-				throw new Error(`one-shot call failed: ${errorText(error)}`);
-			}
-		},
 		async batch(prompt, schema, maxTokens) {
 			try {
 				const reply = await port({

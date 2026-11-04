@@ -58,7 +58,7 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 		previousClarificationStreak: 2,
 		completion: { decision: "not-assessed", mutatedPaths: 0, evidenceKinds: [] },
 		canceled: false,
-		tokens: { coordinator: unused, decisionModel: unused, workers: unused },
+		tokens: { coordinator: unused, workers: unused },
 		stopReason: "stop",
 		durationMs: 10,
 	};
@@ -74,7 +74,6 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 	deepStrictEqual(question.conversation, {
 		endedWithQuestion: true,
 		offeredOptions: false,
-		asksOperator: null,
 		taskEstablished: false,
 		clarificationStreak: 3,
 	});

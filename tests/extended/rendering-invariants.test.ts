@@ -1118,7 +1118,7 @@ describe("Pi TUI compatibility", () => {
 		} as unknown as TUI;
 		const handle = openHealthOverlay(tui, undefined, {
 			getSystemOneBreakers: () => [
-				{ engine: "local-small", site: "turn", moment: null, state: "open", failures: 3, remainingMs: 120_000 },
+				{ engine: "local-small", site: "consult", moment: null, state: "open", failures: 3, remainingMs: 120_000 },
 			],
 		});
 		try {

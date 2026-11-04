@@ -44,6 +44,22 @@ export function canonicalEndpointKey(value: TargetDescriptor | string): string |
 const MODEL_KEY_SEPARATOR = "#model=";
 
 /**
+ * The slot key optional work admits against. Behind a model-routed gateway that
+ * nothing bounds, the request's own model is the scheduler it competes with;
+ * once the gateway carries a bound, every model behind it counts.
+ */
+export function backgroundSlotKey(
+	target: TargetDescriptor,
+	wireModelId: string,
+	bounded: (gatewayKey: string) => boolean,
+): string | null {
+	const gateway = canonicalEndpointKey(target);
+	const model = modelEndpointKey(target, wireModelId);
+	if (gateway === null || model === gateway) return gateway;
+	return bounded(gateway) ? gateway : model;
+}
+
+/**
  * Slot identity of one model's requests on a target: the endpoint key, with
  * the model appended behind a model-routed gateway. Every stream counted
  * under a model key also counts under its gateway key (`countStream`), so a

@@ -3,12 +3,7 @@
  * schema-bound request, answered with labels.
  *
  * A label has no probability scale, so an answer is not a confidence. Its mass
- * is one-hot and `calibrated` stays false; the readout says what it is, and a
- * site's policy reads it only under a cut that a measurement placed for this
- * exact build, which validated the label-to-action rule directly. Questions in
- * one request can interfere, which is why the whole batch is the measured
- * contract: its wording, order and state projection change only with
- * `BATCH_PROMPT_VERSION` or the site's version, and either voids a measurement.
+ * is one-hot and its readout says so, so nothing may read it as a probability.
  */
 
 import { certaintyFromMass } from "../answers.js";
@@ -18,6 +13,16 @@ import type { Answer, Question } from "../types.js";
 export const BATCH_PROMPT_VERSION = "b1";
 
 const ABSTAIN = "unsure";
+
+export interface Prompt {
+	readonly system: string;
+	readonly user: string;
+}
+
+/** The serialized state, shared by every question of one call. */
+export function renderState(state: Readonly<Record<string, unknown>>): string {
+	return JSON.stringify(state, null, 1) ?? "";
+}
 
 const SYSTEM_PROMPT = `You are a strict decision function. You receive a STATE and QUESTIONS. Each question lists the only labels it accepts and what each label means. Reply with ONLY a JSON object mapping every question id to one of its labels, or to "${ABSTAIN}" when the STATE does not decide that question. No explanation.`;
 
@@ -42,10 +47,7 @@ export function isDecided(question: Question): boolean {
 	return question.type === "choice" && Object.keys(question.criteria).length === 1;
 }
 
-export function batchPrompt(
-	stateText: string,
-	questions: Readonly<Record<string, Question>>,
-): { system: string; user: string } {
+export function batchPrompt(stateText: string, questions: Readonly<Record<string, Question>>): Prompt {
 	const lines = Object.entries(questions).map(([id, question]) => {
 		const labels = labelsOf(question)
 			.map(([label, meaning]) => `  ${label}: ${meaning}`)

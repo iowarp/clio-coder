@@ -1,6 +1,7 @@
 import { bashShellPath } from "../core/bash-shell.js";
 import type { ClioSettings } from "../core/config.js";
 import { semanticUsable } from "../core/config.js";
+import type { CatalogRanker } from "../core/precomputed-rank.js";
 import type { RouteProvenance } from "../core/route-provenance.js";
 import type { ContextRecalledPayload } from "../core/telemetry/live-events.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -14,7 +15,6 @@ import type { SessionContract } from "../domains/session/contract.js";
 import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
-import type { RelevanceRanker } from "../domains/system-one/rank.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
@@ -34,7 +34,7 @@ import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
 import { clioDocsToolSurface, clioLibraryToolSurface } from "./gateway/clio-context-surface.js";
 import { dataToolSurface, prepareDataAdmissionArguments } from "./gateway/data-surface.js";
-import { capabilityRankerFrom, createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
+import { createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
@@ -93,11 +93,11 @@ export interface CoreToolBootstrapDeps {
 	>;
 	skillMarketplace?: boolean;
 	/**
-	 * Ranks the skills listing by meaning through the `relevance` site. It orders
-	 * the listing and never shortens it, so a worker registry that carries none
-	 * simply lists in catalog order.
+	 * Order the skills listing and an unfiltered gateway find. Neither ever shortens a
+	 * list, so a worker registry that carries none lists in catalog order.
 	 */
-	rankRelevance?: RelevanceRanker;
+	rankSkills?: CatalogRanker;
+	rankCapabilities?: CatalogRanker;
 	/** A skill the model loaded, so a ranked one can be joined to its ranking as a follow-up. */
 	onSkillLoaded?: (name: string) => void;
 	/**
@@ -237,7 +237,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
-		...(deps.rankRelevance ? { rankRelevance: deps.rankRelevance } : {}),
+		...(deps.rankSkills ? { rankSkills: deps.rankSkills } : {}),
 		...(deps.onSkillLoaded ? { onSkillLoaded: deps.onSkillLoaded } : {}),
 	};
 	if (deps.askUser) {
@@ -359,7 +359,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		createGatewayTool({
 			registry,
 			...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
-			...(deps.rankRelevance ? { rankCapabilities: capabilityRankerFrom(deps.rankRelevance) } : {}),
+			...(deps.rankCapabilities ? { rankCapabilities: deps.rankCapabilities } : {}),
 			...(deps.onCapabilityCalled ? { onCapabilityCalled: deps.onCapabilityCalled } : {}),
 		}),
 		{

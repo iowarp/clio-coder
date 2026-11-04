@@ -9,9 +9,7 @@
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
-import type { DecisionTask } from "../domains/system-one/contract.js";
 import type { ProfileId } from "../domains/system-one/profiles.js";
-import type { SiteId } from "../domains/system-one/types.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
 import type { SandboxMode, UnixSocketMode } from "./sandbox/types.js";
@@ -92,24 +90,12 @@ export interface SystemOneEngineSettings {
 	profile?: ProfileId;
 }
 
-/**
- * An engine name, or the engine with a deadline that replaces the site's own.
- * `tasks` routes one task of the site to another engine; every task it does not
- * name stays with `engine`, and every route shares the site's one deadline.
- */
-export type SystemOneSiteBinding =
-	| string
-	| { engine: string; timeoutMs?: number; tasks?: Partial<Record<DecisionTask, string>> };
-
 export interface SystemOneSettings {
 	/**
-	 * The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site. Unset
-	 * leaves only sites bound one by one, and `off` masks those too.
+	 * The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers. Unset and `off` send nothing.
 	 */
 	use: string | null;
 	engines: Record<string, SystemOneEngineSettings>;
-	/** Optional per-site overrides of `use`. A site with no entry follows `use`, and null turns that site off. */
-	sites: Partial<Record<SiteId, SystemOneSiteBinding | null>>;
 }
 
 /**
@@ -843,7 +829,6 @@ export const DEFAULT_SETTINGS = {
 	systemOne: {
 		use: null,
 		engines: {},
-		sites: {},
 	} as SystemOneSettings,
 	safety: {
 		autonomy: "default" as AutonomyLevel,
@@ -920,7 +905,7 @@ export const DEFAULT_SETTINGS = {
 	} as IntegrationsSettings,
 	telemetry: {
 		mode: "standard",
-		research: { content: false, deltas: true, providerHeaders: true, systemOneDataset: true, busTrace: false },
+		research: { content: false, deltas: true, providerHeaders: true, busTrace: false },
 	} as TelemetrySettings,
 };
 
@@ -1047,13 +1032,10 @@ context:
     inboxes: []
 
 # Experimental. System One stays off until you choose an engine with use: jev,
-# memory, main, a declared engine or a target. sites overrides one site; off masks
-# everything. An engine with no measurement for its exact build sends nothing.
-# Sites, keys and cuts may change between releases.
+# memory, main, a declared engine or a target. Keys may change between releases.
 systemOne:
   use: null
   engines: {}
-  sites: {}
 
 safety:
   autonomy: default
@@ -1164,7 +1146,6 @@ telemetry:
     content: false
     deltas: true
     providerHeaders: true
-    systemOneDataset: true
     busTrace: false
 `;
 

@@ -840,6 +840,7 @@ function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: 
 		} else if (row.kind === "record" && origin)
 			result.records.push({ record: row.record, origin: row.record.origin ?? origin });
 		else {
+			if (row.kind === "retired") continue;
 			if (row.kind === "skipped" && row.segment) origin = undefined;
 			result.skipped += 1;
 		}

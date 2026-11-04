@@ -683,10 +683,6 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Research: provider headers",
 		"In research mode, record each provider call's response status and its allow-listed response headers: rate-limit and quota windows, request ids and server timing, each value cut to 256 characters. Cookies, auth echoes and every other header are never kept.",
 	],
-	"telemetry.research.systemOneDataset": [
-		"Research: decision dataset",
-		"In research mode, keep the System One decision dataset. It holds redacted prompts and decision state, so it also needs Research: capture content and consent for the workspace.",
-	],
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
 		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
@@ -714,6 +710,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"chat.cacheKeepalive": [
 		"Keep prompt cache warm",
 		"While a turn waits on its own tools, such as an attached dispatch, refresh a hosted provider's prompt cache shortly before it expires when that is expected to save more than it costs. Applies to Anthropic, OpenAI and Codex routes.",
+	],
+	"systemOne.use": [
+		"Decision engine",
+		"Experimental opt-in. Off until chosen. Names what answers the consult tool: jev, memory, main, a declared engine or a target. Registers on the next start.",
 	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",

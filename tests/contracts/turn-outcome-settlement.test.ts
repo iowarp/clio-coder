@@ -203,7 +203,6 @@ for (const continuation of [false, true])
 
 interface CancelledRun {
 	entries: SessionEntry[];
-	recorded: Array<{ ref: string; source: string; facts: Record<string, unknown> }>;
 	reservedId: string;
 }
 
@@ -218,7 +217,6 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 	settings.chat.target = target.id;
 	settings.chat.model = target.defaultModel ?? "gpt-4o";
 	const entries: SessionEntry[] = [];
-	const recorded: CancelledRun["recorded"] = [];
 	const session = {
 		current: () => ({ id: "outcome-session", cwd: scratch.dir, cwdHash: "outcome-repo" }),
 		tree: () => ({ leafId: null }),
@@ -240,7 +238,6 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 		knownTargets: () => new Set([target.id]),
 		session,
 		readSessionEntries: () => entries,
-		recordOutcome: (outcome) => recorded.push({ ...outcome, facts: outcome.facts as Record<string, unknown> }),
 		turnControl: {
 			async run(input: { userTurnId: string; signal: AbortSignal }) {
 				reservedId = input.userTurnId;
@@ -293,7 +290,7 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 				pricing: { usd: measured(0), pricedBy: "none" },
 			}),
 		);
-		await Promise.all([settlement, submitted.then(() => check({ entries, recorded, reservedId }))]);
+		await Promise.all([settlement, submitted.then(() => check({ entries, reservedId }))]);
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();
@@ -312,7 +309,7 @@ const measured = (value: number) => ({
 const SCOUT_TOKENS = { input: measured(40), output: measured(2), cacheRead: measured(0), total: measured(42) };
 
 it("a cancel during turn control before admission still yields one cancelled outcome row", async () => {
-	await cancelBeforeAdmission(60, async ({ entries, recorded, reservedId }) => {
+	await cancelBeforeAdmission(60, async ({ entries, reservedId }) => {
 		const rows = entries.filter((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		strictEqual(rows.length, 1);
 		const row = rows[0];
@@ -322,23 +319,16 @@ it("a cancel during turn control before admission still yields one cancelled out
 		strictEqual(outcome.operator.canceled, true);
 		strictEqual(outcome.stopReason, "aborted");
 		deepStrictEqual(outcome.tokens.workers, SCOUT_TOKENS);
-		strictEqual(recorded.length, 1);
-		strictEqual(recorded[0]?.ref, reservedId);
-		strictEqual(recorded[0]?.source, "turn");
-		strictEqual(recorded[0]?.facts.canceled, true);
-		deepStrictEqual(recorded[0]?.facts.workerTokens, SCOUT_TOKENS);
 	});
 });
 
 // The settle wait gives up after 2 s; the Scout seals at 2.5 s, so the count arrives as an amend.
-it("worker tokens that seal after the settle wait amend the cancelled outcome, in the ledger and the dataset", async () => {
-	await cancelBeforeAdmission(2500, async ({ entries, recorded, reservedId }) => {
+it("worker tokens that seal after the settle wait amend the cancelled outcome, in the ledger", async () => {
+	await cancelBeforeAdmission(2500, async ({ entries, reservedId }) => {
 		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		ok(outcome?.kind === "custom");
 		// The Scout had not sealed when the outcome was written, so its tokens are an unknown contribution.
 		strictEqual((outcome.data as TurnOutcomeRecord).tokens.workers.total.unknownCount, 1);
-		strictEqual(recorded[0]?.source, "turn");
-		strictEqual((recorded[0]?.facts.workerTokens as TurnOutcomeRecord["tokens"]["workers"]).total.unknownCount, 1);
 		const amended = () => entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcomeTokens");
 		for (let waited = 0; amended() === undefined && waited < 5000; waited += 50) {
 			await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -347,13 +337,8 @@ it("worker tokens that seal after the settle wait amend the cancelled outcome, i
 		ok(amend?.kind === "custom");
 		strictEqual(amend.parentTurnId, outcome.parentTurnId);
 		strictEqual(amend.display, false);
-		const data = amend.data as { turnId: string; ref: string; workers: unknown };
+		const data = amend.data as { turnId: string; workers: unknown };
 		strictEqual(data.turnId, reservedId);
-		strictEqual(data.ref, reservedId);
 		deepStrictEqual(data.workers, SCOUT_TOKENS);
-		strictEqual(recorded.length, 2);
-		strictEqual(recorded[1]?.source, "turn-tokens");
-		strictEqual(recorded[1]?.ref, reservedId);
-		deepStrictEqual(recorded[1]?.facts.workerTokens, SCOUT_TOKENS);
 	});
 });

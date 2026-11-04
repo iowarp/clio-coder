@@ -12,23 +12,17 @@ import { randomUUID } from "node:crypto";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import { createRedactionTally } from "../evidence/redact.js";
-import type { CallContract } from "./calibration.js";
-import { cutsFor, validationOf } from "./calibration.js";
 import type { DecisionTask } from "./contract.js";
-import { primaryTask, SITE_TASKS, thresholdIdentity } from "./contract.js";
+import { primaryTask, SITE_TASKS } from "./contract.js";
 import { validateQuestion } from "./questions.js";
 import { clearedSiteObject, scrub } from "./scrub.js";
 import type {
 	Answer,
 	CallOutcome,
 	DecisionEngine,
-	DecisionRecord,
-	DecisionRecorder,
 	EngineReply,
 	Question,
-	RouteRecord,
 	RunOptions,
-	SiteCuts,
 	SiteDefinition,
 	SiteId,
 	SystemOneBreakerView,
@@ -39,13 +33,6 @@ import type {
 export const BREAKER_THRESHOLD = 3;
 /** How long a tripped engine is left alone before one call probes it again. */
 export const BREAKER_COOLDOWN_MS = 5 * 60_000;
-/**
- * How long the build an engine last answered with is trusted. A server can be
- * upgraded under the same binding, and a caller that skips or detaches calls
- * while the build is unfitted would otherwise never learn of the new build.
- */
-export const ANSWERED_BUILD_TTL_MS = 10 * 60_000;
-
 /** One engine and the tasks of a site it answers. */
 export interface RunnerRoute {
 	readonly name: string;
@@ -84,15 +71,12 @@ export type DecisionFlowCheck = (request: {
 }) => { readonly allowed: true } | { readonly allowed: false; readonly reason: string };
 
 export interface RunnerDeps {
-	recorder?: () => DecisionRecorder | null;
 	/**
 	 * The session current now, read once when a call starts. A slow answer can
 	 * land after the operator switched sessions, and the record it leaves has to
 	 * name the session that asked, not the one that happens to be current by then.
 	 */
 	currentSession?: () => string | null;
-	/** Cuts beyond the shipped table, read per call. */
-	cutOverrides: () => Readonly<Record<string, Readonly<Record<string, number>>>>;
 	flowCheck?: DecisionFlowCheck;
 }
 
@@ -109,13 +93,6 @@ export interface Runner {
 	 * the longest one still running. Resolves at once when nothing is in flight.
 	 */
 	settled(maxWaitMs: number): Promise<void>;
-	/**
-	 * The threshold identity and call contract the engine behind this digest last
-	 * answered `site` under, or null when it has not answered within the TTL. Only
-	 * a call knows the renderer and site version, so the caller recomputes cuts
-	 * from this against live settings rather than trusting a cached verdict.
-	 */
-	answeredIdentity(digest: string, site: SiteId, moment?: string): { identity: string; contract: CallContract } | null;
 	/** Every breaker that counts a timeout or is tripped. */
 	breakers(): SystemOneBreakerView[];
 	/** Engine configurations whose server refused the model by name, which no retry can change. */
@@ -147,12 +124,12 @@ function estimateTokens(value: unknown): number {
 }
 
 /** One key per engine configuration, site and moment, shared by the breaker and the answered builds. */
-function momentKey(digest: string, site: SiteId, moment: string | undefined): string {
+function momentKey(digest: string, site: SiteId, moment?: string): string {
 	return `${digest}|${site}${moment !== undefined ? `|${moment}` : ""}`;
 }
 
 function breakerKey(route: RunnerRoute, site: { readonly id: SiteId; readonly moment?: string }): string {
-	return momentKey(route.digest, site.id, site.moment);
+	return momentKey(route.digest, site.id);
 }
 
 /** A server that does not know the model answers every later decision the same way, so one request settles it. */
@@ -172,8 +149,6 @@ export function createRunner(deps: RunnerDeps): Runner {
 	// slow answer, and the call goes on to record it whenever it settles, so a
 	// process that exits in between would lose the row without something to wait on.
 	const inflight = new Set<Promise<unknown>>();
-	const knownBuilds = new Map<string, { build: string; at: number }>();
-	const answered = new Map<string, { identity: string; contract: CallContract; at: number }>();
 
 	function sessionAtStart(): string | null | undefined {
 		if (deps.currentSession === undefined) return undefined;
@@ -182,14 +157,6 @@ export function createRunner(deps: RunnerDeps): Runner {
 		} catch {
 			// The record goes without a session and the recorder files it under the one current on arrival.
 			return undefined;
-		}
-	}
-
-	function record(row: DecisionRecord): void {
-		try {
-			deps.recorder?.()?.decision(row);
-		} catch {
-			// Recording never costs the decision it describes.
 		}
 	}
 
@@ -222,13 +189,10 @@ export function createRunner(deps: RunnerDeps): Runner {
 		readonly tasks: Set<DecisionTask>;
 		readonly questions: Record<string, Question>;
 		readonly taskOf: Record<string, DecisionTask>;
-		readonly compact: Record<string, Question>;
 		readonly abstained: Record<string, string>;
 		outcome: CallOutcome;
 		reply?: EngineReply;
 		error?: string;
-		cuts?: SiteCuts;
-		identity?: string;
 	}
 
 	async function runCall<O, V>(
@@ -260,7 +224,6 @@ export function createRunner(deps: RunnerDeps): Runner {
 		if (state === null) return null;
 
 		const callId = `dc_${randomUUID()}`;
-		const at = new Date().toISOString();
 		const session = sessionAtStart();
 		const started = performance.now();
 		const deadlineMs = binding.timeoutMs ?? site.deadlineMs;
@@ -269,12 +232,9 @@ export function createRunner(deps: RunnerDeps): Runner {
 			tasks: new Set(route.tasks ?? []),
 			questions: {},
 			taskOf: {},
-			compact: {},
 			abstained: {},
 			outcome: "unsupported",
 		}));
-		// Cut keys the site's policy read, so a route's validation names only cuts that mattered.
-		const cutKeys = new Set<string>();
 		// What this call did to each route's breaker, and the calls its engines opened (#429).
 		const breakerMoves = new Map<RoutePlan, "opened" | "probe" | "closed">();
 		// A probe that dies without the engine's answer, cancelled or never sent, proves nothing about the engine, so its
@@ -289,16 +249,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 		const planOf = (task: DecisionTask): RoutePlan =>
 			plans.find((plan, index) => index > 0 && plan.tasks.has(task)) ?? (plans[0] as RoutePlan);
 
-		const finish = (
-			outcome: CallOutcome,
-			detail: {
-				questions?: Readonly<Record<string, Question>>;
-				error?: unknown;
-				answers?: Readonly<Record<string, Answer>>;
-				fitted?: boolean;
-				policy?: DecisionRecord["policy"];
-			} = {},
-		): number => {
+		const finish = (outcome: CallOutcome, detail: { error?: unknown } = {}): number => {
 			if (outcome !== "answered") {
 				try {
 					options.onFailure?.(scrub(errorText(detail.error ?? outcome), createRedactionTally(), false));
@@ -307,76 +258,10 @@ export function createRunner(deps: RunnerDeps): Runner {
 				}
 			}
 			const latencyMs = Math.round(performance.now() - started);
-			const responded = plans.filter((plan) => plan.reply !== undefined);
-			// One build names the call only when one engine answered all of it.
-			const build = responded.length === 1 ? (responded[0]?.reply?.build ?? null) : null;
-			const usage = responded.reduce<{ input: number; output: number } | undefined>((sum, plan) => {
-				const used = plan.reply?.usage;
-				if (used === undefined) return sum;
-				return { input: (sum?.input ?? 0) + used.input, output: (sum?.output ?? 0) + used.output };
-			}, undefined);
-			const notes = responded
-				.filter((plan) => plan.reply?.note !== undefined)
-				.map((plan) => (plans.length > 1 ? `${plan.route.name}: ${plan.reply?.note}` : (plan.reply?.note as string)));
-			const routes: RouteRecord[] = plans
-				.filter((plan) => Object.keys(plan.questions).length > 0 || Object.keys(plan.abstained).length > 0)
-				.map((plan) => {
-					const abstained = { ...plan.abstained, ...(plan.reply?.abstained ?? {}) };
-					return {
-						engine: plan.route.name,
-						kind: plan.route.engine.kind,
-						target: plan.route.engine.target,
-						model: plan.route.engine.model,
-						profile: plan.route.engine.profile,
-						renderer: plan.route.engine.renderer,
-						tasks: [...new Set([...Object.values(plan.taskOf)])],
-						questions: Object.keys(plan.questions),
-						outcome: plan.outcome,
-						build: plan.reply?.build ?? null,
-						identity: plan.identity ?? null,
-						validation: plan.cuts === undefined ? "none" : plan.cuts.fitted ? validationOf(plan.cuts, cutKeys) : "none",
-						...(plan.error !== undefined ? { error: plan.error } : {}),
-						...(plan.reply?.note !== undefined ? { note: plan.reply.note } : {}),
-						...(Object.keys(abstained).length > 0 ? { abstained } : {}),
-						...(plan.reply?.usage !== undefined ? { usage: plan.reply.usage } : {}),
-						...(plan.reply?.roundTripMs !== undefined ? { roundTripMs: plan.reply.roundTripMs } : {}),
-						// What actually left, for replay and training: the semantic question is in `questions`.
-						...(plan.reply?.rendered !== undefined ? { rendered: plan.reply.rendered } : {}),
-						...(Object.keys(plan.compact).length > 0 && site.compact !== undefined
-							? { compactVersion: site.compact.version }
-							: {}),
-					};
-				});
-			record({
-				v: 1,
-				callId,
-				at,
-				...(session !== undefined ? { session } : {}),
-				...(options.ref !== undefined ? { ref: options.ref } : {}),
-				site: site.id,
-				siteVersion: site.version,
-				engine: primary.name,
-				kind: primary.engine.kind,
-				target: primary.engine.target,
-				model: primary.engine.model,
-				build,
-				outcome,
-				...(detail.error !== undefined ? { error: errorText(detail.error) } : {}),
-				latencyMs,
-				deadlineMs,
-				state: state as Readonly<Record<string, unknown>>,
-				questions: detail.questions ?? {},
-				...(detail.answers !== undefined ? { answers: detail.answers } : {}),
-				...(usage !== undefined ? { usage } : {}),
-				...(notes.length > 0 ? { note: notes.join("; ") } : {}),
-				...(detail.fitted !== undefined ? { fitted: detail.fitted } : {}),
-				...(detail.policy !== undefined ? { policy: detail.policy } : {}),
-				...(routes.length > 0 ? { routes } : {}),
-			});
-			recordDecision(outcome, latencyMs, detail.fitted);
+			recordDecision(outcome, latencyMs);
 			return latencyMs;
 		};
-		const recordDecision = (outcome: CallOutcome, latencyMs: number, fitted: boolean | undefined): void => {
+		const recordDecision = (outcome: string, latencyMs: number): void => {
 			if (typeof session !== "string" || session.length === 0) return;
 			const asked = plans.filter(
 				(plan) => Object.keys(plan.questions).length > 0 || Object.keys(plan.abstained).length > 0,
@@ -399,11 +284,9 @@ export function createRunner(deps: RunnerDeps): Runner {
 					"system_one.decided",
 					{
 						site: site.id,
-						...(site.moment !== undefined ? { moment: site.moment } : {}),
-						outcome,
+						outcome: outcome as EventPayload<"system_one.decided">["outcome"],
 						latencyMs,
 						deadlineMs,
-						...(fitted !== undefined ? { fitted } : {}),
 						routes,
 						callIds: [...callIds],
 					},
@@ -428,23 +311,20 @@ export function createRunner(deps: RunnerDeps): Runner {
 				const problem = validateQuestion(questions[id] as Question);
 				if (problem !== null) throw new Error(`question '${id}': ${problem}`);
 			}
-			const compact = site.compact === undefined ? {} : redactAll(site.compact.questions(cleared));
 			const asked = SITE_TASKS[site.id];
 			for (const id of ids) {
-				const task = site.taskOf?.(id) ?? primaryTask(site.id);
+				const task = primaryTask(site.id);
 				// A task outside the source matrix would be routed by a rule nobody configured.
 				if (!asked.includes(task)) throw new Error(`question '${id}': task ${task} is not asked at site ${site.id}`);
 				const plan = planOf(task);
 				const question = questions[id] as Question;
-				const short = Object.hasOwn(compact, id) ? compact[id] : undefined;
-				const refused = plan.route.engine.unsupported(task, question, short);
+				const refused = plan.route.engine.unsupported(task, question);
 				if (refused !== null) {
 					plan.abstained[id] = refused;
 					continue;
 				}
 				plan.questions[id] = question;
 				plan.taskOf[id] = task;
-				if (short !== undefined) plan.compact[id] = short;
 			}
 			serialized = JSON.stringify(state) ?? "";
 		} catch (error) {
@@ -453,49 +333,19 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}
 
 		if (options.signal?.aborted) {
-			finish("canceled", { questions });
+			finish("canceled");
 			return null;
 		}
 
 		const live = plans.filter((plan) => Object.keys(plan.questions).length > 0);
 		if (live.length === 0) {
 			// Every question was refused by its engine's profile: the baseline, not a failure.
-			finish("unsupported", { questions, error: "no routed engine answers these questions" });
+			finish("unsupported", { error: "no routed engine answers these questions" });
 			return null;
 		}
 
-		let overrides: ReturnType<typeof deps.cutOverrides> | undefined;
-		try {
-			overrides = deps.cutOverrides();
-		} catch {
-			// Unreadable overrides grant no operator cut.
-		}
-		// Routes skipped because the identity has no cut the site requires. A call
-		// that no route could send for that reason was never a decision: it leaves no
-		// row, or every large listing would file one while the cut does not exist.
-		let missingCut = 0;
 		for (const plan of live) {
 			const { route } = plan;
-			const { requiredCut } = site;
-			if (requiredCut !== undefined) {
-				const known = knownBuilds.get(route.digest);
-				const builds =
-					known !== undefined && performance.now() - known.at <= ANSWERED_BUILD_TTL_MS
-						? [known.build]
-						: route.engine.expectedBuilds();
-				const compactVersion = Object.keys(plan.compact).length > 0 ? site.compact?.version : undefined;
-				const hasCut = builds.some((build) => {
-					const identity = thresholdIdentity(build, route.engine.renderer, site.version, compactVersion);
-					const contract = { siteVersion: site.version, renderer: route.engine.renderer };
-					return cutsFor(identity, site.id, overrides, contract).cut(requiredCut) !== undefined;
-				});
-				if (!hasCut) {
-					plan.outcome = "unsupported";
-					plan.error = `decision ${site.id}/${site.moment ?? "main"} requires a ${site.requiredCut} cut for the engine identity`;
-					missingCut += 1;
-					continue;
-				}
-			}
 			// Laya keeps the head of an oversized state and CLM the tail, both
 			// silently, so evidence at the far end is simply not read. An LLM engine
 			// truncates or errors at its own window. Asking nothing is the only answer
@@ -560,9 +410,8 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}
 		const sending = live.filter((plan) => plan.outcome === "answered");
 		if (sending.length === 0) {
-			if (missingCut === live.length) return null;
 			const first = live[0] as RoutePlan;
-			finish(first.outcome, { questions, error: first.error });
+			finish(first.outcome, { error: first.error });
 			return null;
 		}
 
@@ -576,7 +425,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 				breakerMoves.delete(plan);
 				plan.outcome = "timeout";
 			}
-			finish("timeout", { questions, error: `decision preflight used the ${deadlineMs}ms deadline` });
+			finish("timeout", { error: `decision preflight used the ${deadlineMs}ms deadline` });
 			return null;
 		}
 		const controller = new AbortController();
@@ -607,7 +456,6 @@ export function createRunner(deps: RunnerDeps): Runner {
 									state: state as Readonly<Record<string, unknown>>,
 									questions: plan.questions,
 									tasks: plan.taskOf,
-									...(Object.keys(plan.compact).length > 0 ? { compact: plan.compact } : {}),
 									signal: controller.signal,
 								}),
 								aborted,
@@ -622,7 +470,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 									openUntil: failures >= BREAKER_THRESHOLD ? performance.now() + BREAKER_COOLDOWN_MS : 0,
 									engine: plan.route.name,
 									site: site.id,
-									moment: site.moment ?? null,
+									moment: null,
 								});
 								if (failures >= BREAKER_THRESHOLD) breakerMoves.set(plan, "opened");
 								plan.outcome = "timeout";
@@ -650,7 +498,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 		const replied = sending.filter((plan) => plan.reply !== undefined);
 		if (replied.length === 0) {
 			const first = sending[0] as RoutePlan;
-			finish(first.outcome, { questions, error: first.error });
+			finish(first.outcome, { error: first.error });
 			return null;
 		}
 
@@ -662,60 +510,18 @@ export function createRunner(deps: RunnerDeps): Runner {
 				const answer = reply.answers[id];
 				if (answer !== undefined) answers[id] = answer;
 			}
-			const compactVersion =
-				Object.keys(plan.compact).length > 0 && site.compact !== undefined ? site.compact.version : undefined;
-			plan.identity = thresholdIdentity(reply.build, plan.route.engine.renderer, site.version, compactVersion);
-			plan.cuts = cutsFor(plan.identity, site.id, overrides, {
-				siteVersion: site.version,
-				renderer: plan.route.engine.renderer,
-			});
-			knownBuilds.set(plan.route.digest, { build: reply.build, at: performance.now() });
-			answered.set(momentKey(plan.route.digest, site.id, site.moment), {
-				identity: plan.identity,
-				contract: { siteVersion: site.version, renderer: plan.route.engine.renderer },
-				at: performance.now(),
-			});
 		}
-		// A cut is read from the route that answered the task it is compared with,
-		// so a Jev cut is never applied to another engine's number.
-		const cutPlan = (key: string): RoutePlan | undefined => {
-			cutKeys.add(key);
-			const plan = planOf(site.cutTask?.(key) ?? primaryTask(site.id));
-			return plan.cuts !== undefined && plan.cuts.fitted ? plan : undefined;
-		};
-		const fitted = replied.some((plan) => plan.cuts?.fitted === true);
-		const builds = [...new Set(replied.map((plan) => plan.identity as string))];
-		const cuts: SiteCuts = {
-			build: builds.join(" + "),
-			fitted,
-			cut: (key) => cutPlan(key)?.cuts?.cut(key),
-			source: (key) => cutPlan(key)?.cuts?.source(key),
-		};
 		let value: V | null = null;
 		let readError: unknown;
 		try {
-			value = site.read(answers, object, cuts);
+			value = site.read(answers, object);
 		} catch (error) {
 			readError = error;
 		}
-		let policy: DecisionRecord["policy"] | undefined;
-		if (value !== null) {
-			try {
-				policy = site.summarize(value);
-			} catch {
-				// The verdict stands without its ledger summary.
-			}
-		}
-		const latencyMs = finish("answered", {
-			questions,
-			answers,
-			fitted,
-			...(readError !== undefined ? { error: readError } : {}),
-			...(policy !== undefined ? { policy } : {}),
-		});
+		const latencyMs = finish("answered", readError !== undefined ? { error: readError } : {});
 		if (value === null) return null;
-		const build = replied.length === 1 ? (replied[0]?.reply?.build as string) : cuts.build;
-		return { value, callId, engine: primary.name, build, fitted, latencyMs };
+		const builds = [...new Set(replied.map((plan) => (plan.reply as EngineReply).build))];
+		return { value, callId, engine: primary.name, build: builds.join(" + "), latencyMs };
 	}
 
 	function run<O, V>(
@@ -753,17 +559,6 @@ export function createRunner(deps: RunnerDeps): Runner {
 		}
 	}
 
-	function answeredIdentity(
-		digest: string,
-		site: SiteId,
-		moment?: string,
-	): { identity: string; contract: CallContract } | null {
-		const last = answered.get(momentKey(digest, site, moment));
-		return last !== undefined && performance.now() - last.at < ANSWERED_BUILD_TTL_MS
-			? { identity: last.identity, contract: last.contract }
-			: null;
-	}
-
 	function breakerViews(): SystemOneBreakerView[] {
 		const now = performance.now();
 		const views: SystemOneBreakerView[] = [];
@@ -782,5 +577,5 @@ export function createRunner(deps: RunnerDeps): Runner {
 		return views;
 	}
 
-	return { run, settled, answeredIdentity, breakers: breakerViews, refused: () => [...refused.values()] };
+	return { run, settled, breakers: breakerViews, refused: () => [...refused.values()] };
 }

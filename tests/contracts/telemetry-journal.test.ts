@@ -18,12 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
-import {
-	captureAdmits,
-	effectiveTelemetryCapture,
-	STANDARD_CAPTURE,
-	systemOneDatasetRecording,
-} from "../../src/core/telemetry/capture.js";
+import { captureAdmits, effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../src/core/telemetry/capture.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { CostReportV1, ExplanationV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
@@ -622,14 +617,14 @@ test("a segment header says what its mode admits, and a mode change opens a new 
 	try {
 		telemetryHub().emit("session.opened", {}, context);
 		await journal.flush();
-		const research = { content: true, deltas: true, providerHeaders: false, systemOneDataset: true, busTrace: false };
+		const research = { content: true, deltas: true, providerHeaders: false, busTrace: false };
 		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
 		telemetryHub().emit("session.resumed", { via: "resume" }, context);
 		await journal.flush();
 		const rows = scanTelemetrySegment(await readFile(join(sessionDirectory, "journal.jsonl"))).rows;
 		deepStrictEqual(
 			rows.map((row) =>
-				row.kind === "header" ? `header:${row.header.mode}` : row.kind === "record" ? row.record.k : row.reason,
+				row.kind === "header" ? `header:${row.header.mode}` : row.kind === "record" ? row.record.k : row.kind,
 			),
 			["header:standard", "session.opened", "journal.segment_closed", "header:research", "session.resumed"],
 		);
@@ -644,7 +639,7 @@ test("a segment header says what its mode admits, and a mode change opens a new 
 
 test("standard mode writes no content-bearing record; content needs research, the flag and consent, under a cap (#434)", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const research = { content: true, deltas: true, providerHeaders: true, systemOneDataset: true, busTrace: false };
+	const research = { content: true, deltas: true, providerHeaders: true, busTrace: false };
 	let capture = STANDARD_CAPTURE;
 	const journal = await openCallJournal({
 		directory: sessionDirectory,
@@ -703,7 +698,7 @@ test("standard mode writes no content-bearing record; content needs research, th
 
 test("a session stores prompt text only under content capture, once per distinct prompt (#434)", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+	const research = { content: true, deltas: false, providerHeaders: false, busTrace: false };
 	let capture = STANDARD_CAPTURE;
 	const journals = createSessionJournals(stateDir, () => {}, { current: () => capture });
 	const origin = { id: "prompt-session", cwdHash: "prompthash" };
@@ -738,7 +733,7 @@ test("a session stores prompt text only under content capture, once per distinct
 
 test("memory and observation traces journal content only under research capture with consent (#434)", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+	const research = { content: true, deltas: false, providerHeaders: false, busTrace: false };
 	let capture = STANDARD_CAPTURE;
 	const journals = createSessionJournals(stateDir, () => {}, { current: () => capture });
 	const origin = { id: "trace-session", cwdHash: "tracehash" };
@@ -895,7 +890,7 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		const structure = await storeTelemetryObject(keptDirectory, "tool-schemas", [{ name: "kept" }]);
 		const text = await storeTelemetryObject(keptDirectory, "prompt-text", { text: "old prompt" });
 		const orphan = await storeTelemetryObject(keptDirectory, "tool-schemas", [{ name: "orphan" }]);
-		const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+		const research = { content: true, deltas: false, providerHeaders: false, busTrace: false };
 		const keptJournal = await openCallJournal({
 			directory: keptDirectory,
 			context: { sessionId: "kept", agent: { role: "main", id: "kept" } },
@@ -1052,21 +1047,12 @@ test("a project layer may lower telemetry capture but never raise it above user 
 	const research = readLayeredSettings(workspace);
 	deepStrictEqual(research.settings.telemetry, {
 		mode: "research",
-		research: { content: false, deltas: false, providerHeaders: true, systemOneDataset: true, busTrace: false },
+		research: { content: false, deltas: false, providerHeaders: true, busTrace: false },
 	});
 	deepStrictEqual(
 		research.issues.filter((issue) => issue.origin === "project").map((issue) => issue.path),
 		["telemetry.research.content", "telemetry.research.busTrace"],
 	);
-	const flags = { content: false, deltas: false, providerHeaders: false, systemOneDataset: true, busTrace: false };
-	strictEqual(systemOneDatasetRecording(effectiveTelemetryCapture({ mode: "research", research: flags }, true)), false);
-	const content = { ...flags, content: true };
-	strictEqual(
-		systemOneDatasetRecording(effectiveTelemetryCapture({ mode: "research", research: content }, false)),
-		false,
-	);
-	strictEqual(systemOneDatasetRecording(effectiveTelemetryCapture({ mode: "research", research: content }, true)), true);
-	strictEqual(systemOneDatasetRecording(STANDARD_CAPTURE), false);
 	await writeFile(user, "version: 2\n");
 	const standard = readLayeredSettings(workspace);
 	strictEqual(standard.settings.telemetry.mode, "standard");

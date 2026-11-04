@@ -118,10 +118,5 @@ export function consultSite(
 			}
 			return answered > 0 ? { answers: readings } : null;
 		},
-		summarize(value) {
-			const items = Object.values(value.answers);
-			const abstained = items.filter((item) => "abstained" in item).length;
-			return { answered: items.length - abstained, abstained };
-		},
 	};
 }

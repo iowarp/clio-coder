@@ -2,28 +2,15 @@
  * The one setting that opts in to System One.
  *
  * `systemOne.use` names what answers: `jev`, `memory`, `main`, a declared engine
- * or a target. Unset is off, except for sites bound one by one under
- * `systemOne.sites`; `off` masks everything, per-site entries included. A task
- * or session override and `clio-coder run --systemone` set the same choice, so
- * no second way of opting in exists. Nothing here constructs an engine, reads a
- * credential or sends a request.
+ * or a target. Unset and `off` both send nothing. `clio-coder run --systemone`
+ * sets the same choice for one run, so no second way of opting in exists.
+ * Nothing here constructs an engine, reads a credential or sends a request.
  */
 
 import type { ClioSettings } from "../../core/config.js";
 import { getRuntimeRegistry } from "../providers/registry.js";
 import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
 import { TYPESAFE_DEFAULT_MODEL } from "../providers/runtimes/typesafe-model.js";
-import type { SiteId } from "./types.js";
-
-/**
- * What the one setting binds. The record-only sites stay out because they spend requests without changing behavior.
- * `consult` stays out because its tool sends agent-supplied state and file excerpts, which takes its own
- * `systemOne.sites.consult` entry on every engine.
- */
-export const ACTIVE_PROFILE: ReadonlyArray<SiteId> = ["turn", "workerPrepare", "toolCall", "relevance", "drafts"];
-
-/** Asked only for the dataset: no reader takes these answers, so `use` never binds them. */
-export const RECORD_ONLY_SITES: ReadonlyArray<SiteId> = ["toolResult", "turnEnd", "steer"];
 
 export const SYSTEM_ONE_OFF = "off";
 
@@ -86,37 +73,19 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 	};
 }
 
-/** The settings System One resolves bindings from: the choice expanded, a site's own entry winning over it. */
+/** The settings System One resolves its engine from: the choice expanded into a declared engine and any target it brings. */
 export function effectiveSystemOne(
 	settings: Readonly<ClioSettings>,
 	choice: string | null | undefined = settings.systemOne.use,
 ): Readonly<ClioSettings> {
 	const resolved = resolveChoice(settings, choice);
-	const explicit = Object.fromEntries(
-		Object.entries(settings.systemOne.sites).filter(([, binding]) => binding !== null),
-	) as ClioSettings["systemOne"]["sites"];
-	if (resolved.kind === "off") return { ...settings, systemOne: { ...settings.systemOne, sites: {} } };
-	if (resolved.kind === "none") return { ...settings, systemOne: { ...settings.systemOne, sites: explicit } };
-	const sites: ClioSettings["systemOne"]["sites"] = {};
-	for (const site of ACTIVE_PROFILE) sites[site] = resolved.name;
-	// A later entry for a site overrides the one setting, and a null turns that site off.
-	for (const [site, binding] of Object.entries(settings.systemOne.sites)) {
-		if (binding === null) delete sites[site as SiteId];
-		else if (binding !== undefined) sites[site as SiteId] = binding;
-	}
+	if (resolved.kind !== "engine") return settings;
 	return {
 		...settings,
-		targets:
-			resolved.kind === "engine" && resolved.impliedTarget !== undefined
-				? [...settings.targets, resolved.impliedTarget]
-				: settings.targets,
+		targets: resolved.impliedTarget !== undefined ? [...settings.targets, resolved.impliedTarget] : settings.targets,
 		systemOne: {
 			...settings.systemOne,
-			engines:
-				resolved.kind === "engine"
-					? { ...settings.systemOne.engines, [resolved.name]: resolved.engine }
-					: settings.systemOne.engines,
-			sites,
+			engines: { ...settings.systemOne.engines, [resolved.name]: resolved.engine },
 		},
 	};
 }

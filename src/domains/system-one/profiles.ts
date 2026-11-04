@@ -131,7 +131,7 @@ export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 	"gliner2.5-small": {
 		id: "gliner2.5-small",
 		renderer: "gliner-label-v1",
-		tasks: new Set<DecisionTask>(["intent", "recipe", "relevance", "clusterSelect"]),
+		tasks: new Set<DecisionTask>(["relevance", "consult"]),
 		kinds: new Set<SemanticKind>(["exclusive", "independent"]),
 		minOptions: 2,
 		maxOptions: MAX_CHOICE_OPTIONS,
@@ -148,7 +148,7 @@ export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 	"gliner2.5-decide": {
 		id: "gliner2.5-decide",
 		renderer: "gliner-label-v1",
-		tasks: new Set<DecisionTask>(["intent", "recipe", "relevance", "clusterSelect", "turnEnd"]),
+		tasks: new Set<DecisionTask>(["relevance", "consult"]),
 		kinds: ALL_KINDS,
 		minOptions: 2,
 		maxOptions: MAX_CHOICE_OPTIONS,
