@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { createHeadlessJsonProjector, createJsonCredentialScrub, projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
@@ -157,4 +158,17 @@ test("a stream cut off inside an opaque username sends none of it", () => {
 		done.push("https://abcdef0123456789abcdef0123456789") + done.end(true),
 		"https://abcdef0123456789abcdef0123456789",
 	);
+});
+
+test("--json tool progress holds an open URL and leaves complete args alone", () => {
+	const progress = {
+		type: "tool_execution_update",
+		toolCallId: "t",
+		toolName: "bash",
+		args: { url: "postgres://db:5432" },
+		partialResult: { content: [{ type: "text", text: "cloning https://u:hunter" }] },
+	};
+	const [frame] = createHeadlessJsonProjector().project(progress as never) as unknown as (typeof progress)[];
+	strictEqual(frame?.partialResult.content[0]?.text, "cloning https://u:");
+	strictEqual(frame?.args.url, "postgres://db:5432");
 });

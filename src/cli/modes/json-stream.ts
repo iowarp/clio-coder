@@ -117,6 +117,8 @@ function mapStrings(value: unknown, map: (text: string) => string, depth = 0): u
 
 const isDeltaType = (type: unknown): boolean => type === "text_delta" || type === "thinking_delta";
 
+const heldText = (text: string): string => redactStreamingUrlCredentials(text);
+
 /**
  * URL credentials off a JSON stream, whose reader appends deltas and cannot take one back, so a delta waits in a filter
  * and every other string is redacted whole. A frame whose delta is held stays unwritten until it has text (#446).
@@ -171,6 +173,14 @@ export function createJsonCredentialScrub(): {
 			return [...finish(completed), mapStrings(frame, (text) => redactStreamingUrlCredentials(text, completed))];
 		}
 		const ended = frame.type === "agent_end" ? finish(false) : [];
+		if (frame.type === "tool_execution_update") {
+			// Progress can stop inside a URL, unlike the arguments it repeats, and its end frame carries the settled text (#446).
+			const { partialResult, ...rest } = frame;
+			return [
+				...ended,
+				{ ...(mapStrings(rest, redactUrlCredentials) as object), partialResult: mapStrings(partialResult, heldText) },
+			];
+		}
 		return [...ended, mapStrings(frame, redactUrlCredentials)];
 	};
 	return { scrub: scrub as <T>(frame: T) => T[], finish: finish as <T>(completed: boolean) => T[] };
