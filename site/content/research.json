@@ -73,5 +73,20 @@
       "Terminal"
     ],
     "source": "fleets-and-local-models.md"
+  },
+  {
+    "slug": "scientific-and-hpc-workflows",
+    "title": "What would make a scientist trust an agent's change?",
+    "description": "Pre-registered checks, validated modernization and scheduler use on scientific code, with a first experiment on catching a numerical error.",
+    "category": "Scientific and HPC work",
+    "time": "8 min",
+    "basis": "Read from source; first experiment not yet run",
+    "status": "Open question. The skills have shipped; no study exists.",
+    "author": "The Clio Coder team",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ],
+    "source": "scientific-and-hpc-workflows.md"
   }
 ]
