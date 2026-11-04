@@ -1,3 +1,4 @@
+import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import type { AcpAsideAnswer, AcpDraftOutcome } from "./types.js";
 
 export type { AcpAsideAnswer, AcpDraftOutcome } from "./types.js";
@@ -38,7 +39,10 @@ function clean(text: string, maxBytes: number): { text: string; truncated: boole
 	return { text: cut, truncated: true };
 }
 
-const reasonText = (reason: string) => clean(reason, MAX_REASON_BYTES).text;
+// Redacted ahead of the bound, which could cut a password out of the pattern's reach. An aborted round's text stopped short (#446).
+const reasonText = (reason: string) => clean(redactUrlCredentials(reason), MAX_REASON_BYTES).text;
+const boundedText = (text: string, completed: boolean) =>
+	clean(redactFinalUrlCredentials(text, completed), MAX_ANSWER_BYTES);
 const ROUND_FAILED = "the model round failed; the agent's diagnostics carry the provider's answer";
 export function projectAsideAnswer(answer: AcpAsideAnswer, diagnostics?: (line: string) => void) {
 	if (answer.status === "refused") return { status: answer.status, reason: reasonText(answer.reason) };
@@ -46,7 +50,7 @@ export function projectAsideAnswer(answer: AcpAsideAnswer, diagnostics?: (line: 
 		diagnostics?.(`side question failed: ${reasonText(answer.reason)}`);
 		return { status: answer.status, reason: ROUND_FAILED };
 	}
-	const bounded = clean(answer.text, MAX_ANSWER_BYTES);
+	const bounded = boundedText(answer.text, answer.status === "answered");
 	return { status: answer.status, text: bounded.text, truncated: bounded.truncated };
 }
 
@@ -61,7 +65,7 @@ export function projectDraftOutcome(outcome: AcpDraftOutcome, diagnostics?: (lin
 				diagnostics?.(`draft ${label} failed: ${reasonText(candidate.reason)}`);
 				return { label, status: "failed" as const, reason: ROUND_FAILED };
 			}
-			const bounded = clean(candidate.text, MAX_ANSWER_BYTES);
+			const bounded = boundedText(candidate.text, !outcome.aborted);
 			return { label, status: "drafted" as const, text: bounded.text, truncated: bounded.truncated };
 		}),
 	};

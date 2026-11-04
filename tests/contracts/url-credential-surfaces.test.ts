@@ -21,6 +21,7 @@ import {
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
+import { projectAsideAnswer, projectDraftOutcome } from "../../src/engine/acp/aside.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
@@ -984,6 +985,66 @@ test("a headless failure hides the password in the target URL it names", () => {
 		"target 'mock-chat' (openai-compat https://alice:[redacted]@127.0.0.1:9/v1): Connection error",
 	);
 	ok(!prefixHeadlessFailure(chat, `fetch failed for ${url}`).includes("hunter2"));
+});
+
+test("an ACP aside round hides URL credentials in its text and its reasons", () => {
+	const url = "https://alice:hunter2@h.example/r";
+	const shown = "https://alice:[redacted]@h.example/r";
+	const lines: string[] = [];
+	const diagnostics = (line: string): void => void lines.push(line);
+	deepStrictEqual(projectAsideAnswer({ status: "answered", text: `Use ${url} to clone` }), {
+		status: "answered",
+		text: `Use ${shown} to clone`,
+		truncated: false,
+	});
+	strictEqual(projectAsideAnswer({ status: "refused", reason: `no ${url}` }).reason, `no ${shown}`);
+	projectAsideAnswer({ status: "failed", reason: `boom ${url}` }, diagnostics);
+	const drafted = projectDraftOutcome(
+		{
+			status: "drafted",
+			aborted: false,
+			candidates: [
+				{ status: "drafted", text: `Use ${url} to clone` },
+				{ status: "failed", reason: `boom ${url}` },
+			],
+		},
+		diagnostics,
+	);
+	strictEqual(JSON.stringify(drafted).includes("hunter2"), false, JSON.stringify(drafted));
+	ok(JSON.stringify(drafted).includes(shown));
+	strictEqual(
+		(projectDraftOutcome({ status: "refused", reason: `no ${url}` }) as { reason: string }).reason,
+		`no ${shown}`,
+	);
+	strictEqual(lines.length, 2);
+	ok(!lines.join("\n").includes("hunter2"), lines.join("\n"));
+	ok(lines.every((line) => line.includes(shown)));
+});
+
+test("an aborted ACP aside round stopped short, so an open URL and an opaque name stay hidden", () => {
+	const open = "see https://alice:hunter2";
+	const opaque = "see https://abcdef0123456789abcdef0123456789";
+	deepStrictEqual(projectAsideAnswer({ status: "aborted", text: open }), {
+		status: "aborted",
+		text: "see https://alice:",
+		truncated: false,
+	});
+	strictEqual((projectAsideAnswer({ status: "aborted", text: opaque }) as { text: string }).text, "see https://");
+	const aborted = projectDraftOutcome({
+		status: "drafted",
+		aborted: true,
+		candidates: [
+			{ status: "drafted", text: open },
+			{ status: "drafted", text: opaque },
+		],
+	});
+	strictEqual(JSON.stringify(aborted).includes("hunter2"), false);
+	strictEqual(JSON.stringify(aborted).includes("abcdef0123"), false);
+	// A round that finished can end on a host, and its text is whole.
+	strictEqual(
+		(projectAsideAnswer({ status: "answered", text: "at http://localhost:8080" }) as { text: string }).text,
+		"at http://localhost:8080",
+	);
 });
 
 test("a feed bound keeps a scheme's last character with the :// that follows it", async () => {
