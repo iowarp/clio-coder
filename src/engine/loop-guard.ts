@@ -976,7 +976,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					kind: "block_tool",
 					reason:
 						`tool-call budget exhausted: ${callsThisTurn} tool calls in this turn reached the hard ceiling ` +
-						`(${turnBudget.hard}); the turn is being stopped. Summarize what you found and wait for the operator.`,
+						`(${turnBudget.hard}); the turn is being stopped. Summarize what you found and end your reply.`,
 					severity: "hard-block",
 				},
 			];
@@ -997,7 +997,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
 						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
 						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
-						`propose, and wait for the operator.`,
+						`propose, and end your reply.`,
 					severity: "hard-block",
 				},
 			];
