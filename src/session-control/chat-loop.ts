@@ -330,12 +330,6 @@ export type ToolApprovalStateEvent =
 			state: "resumed";
 	  };
 
-export interface SpeculativeDispatchCounts {
-	held: number;
-	adopted: number;
-	discarded: number;
-}
-
 /** The first `limit` code points of `value`, so a slice never lands inside a surrogate pair. */
 function boundedCodePoints(value: string, limit: number): string {
 	// A pasted log can be megabytes; 2 × limit code units always hold `limit` code points.
@@ -480,7 +474,6 @@ export type ChatLoopEvent = (
 	| ChatNoticeEvent
 	| AgentStatusEvent
 	| ToolApprovalStateEvent
-	| { type: "speculative_dispatch"; counts: SpeculativeDispatchCounts }
 ) & { modelTimeMs?: number };
 
 export interface PromptSubmitInput {
@@ -1007,7 +1000,7 @@ export interface CreateChatLoopDeps {
 	/** The operator request the run is working on, for the steering triage round. Absent, triage sends no task. */
 	currentOperatorTask?: () => string;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
-	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
+	onTurnSettled?: () => void;
 	/**
 	 * Memory scores for the section this request builds, or undefined when the
 	 * `relevance` site is unbound or ranking could not change the section. It runs
@@ -4035,8 +4028,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			turnActive = false;
 			keepalive.cancel();
 			try {
-				const counts = deps.onTurnSettled?.();
-				if (counts !== undefined) emit({ type: "speculative_dispatch", counts });
+				deps.onTurnSettled?.();
 			} catch {
 				// Settle hooks are housekeeping and never cost the turn.
 			}

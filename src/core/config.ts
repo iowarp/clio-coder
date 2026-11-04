@@ -1029,6 +1029,7 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"systemOne.retentionDays":
 		"System One samples are research content in session journals, which telemetry retention expires",
 	"systemOne.maxMiB": "System One samples are research content in session journals, which telemetry retention bounds",
+	"fleet.speculativeDispatch": "workers are no longer held ahead of a predicted dispatch",
 	"turnControl.interpretation": "no harness workflow reads the request before a turn any more",
 	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
 } as const);
@@ -1947,10 +1948,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				}
 				settings.fleet.agentProfiles = bindings;
 			}
-		}
-		if ("speculativeDispatch" in rawFleet) {
-			const parsed = expectBoolean(issues, "fleet.speculativeDispatch", rawFleet.speculativeDispatch);
-			if (parsed !== undefined) settings.fleet.speculativeDispatch = parsed;
 		}
 		if ("adaptiveRouting" in rawFleet) {
 			if (!isPlainObject(rawFleet.adaptiveRouting))

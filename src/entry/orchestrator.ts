@@ -95,7 +95,6 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
-import { scheduleSpeculativeHold } from "../domains/dispatch/held-workers.js";
 import {
 	compileFleetRunPreview,
 	createDispatchDomainModule,
@@ -386,7 +385,7 @@ import { createReloadClasses } from "./reload-classes.js";
 import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
 import { createSideRequestAdmission } from "./side-request-admission.js";
 import { createSystemOneControl, SYSTEM_ONE_SCOPE_ENTRY } from "./system-one-control.js";
-import { createDecisionUsageTally, createSystemOneHost, type TurnPrewarmPrediction } from "./system-one-host.js";
+import { createDecisionUsageTally, createSystemOneHost } from "./system-one-host.js";
 import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
@@ -3946,13 +3945,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 	);
 	const followUps = createFollowUpTracker((outcome) => systemOneRecorder.outcome(outcome));
-	let holdPredictedWorker: ((prediction: TurnPrewarmPrediction) => void) | null = null;
 	const systemOneHost = createSystemOneHost({
 		systemOne,
 		usage: decisionUsage,
 		readSessionEntries: () => readCurrentSessionEntries(),
 		listRecipes: () =>
-			agents !== undefined && getCurrentSettings().fleet.speculativeDispatch
+			agents !== undefined
 				? agents
 						.listSpecs()
 						.filter((spec) => spec.audience !== "internal")
@@ -3966,7 +3964,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				: null,
 		currentSession: currentSessionId,
 		recording: systemOneRecording,
-		onPrediction: (prediction) => holdPredictedWorker?.(prediction),
 	});
 	let lastMemoryPromptRuntimeId: string | undefined;
 	const memoryReader = createMemoryPromptReader({
@@ -4815,18 +4812,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// and a prewarm timer whose notices, like the lease diagnostics taken below,
 	// reach only subscribers the interactive application registers; a loop turn
 	// in between would deliver them to nobody.
-	let cancelQueuedSpeculativeHold: (() => void) | null = null;
-	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
-	// The host hands over a prediction when its reading lands, usually while the
-	// main model is still generating, so a reading later than the prompt can still
-	// hold the worker before the dispatch it predicts. Settlement cancels a queued hold.
-	holdPredictedWorker = (prediction) => {
-		cancelQueuedSpeculativeHold?.();
-		cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
-			cancelQueuedSpeculativeHold = null;
-			dispatch?.speculate?.(prediction);
-		});
-	};
 	const chat = createChatLoop({
 		...(acpInterviews ? { eggAsk: askUserBridge } : {}),
 		turnControl,
@@ -4934,32 +4919,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// The verdict is about the request that just finished; a continuation or
 			// the next turn must not read it.
 			systemOneHost.clearVerdict();
-			cancelQueuedSpeculativeHold?.();
-			cancelQueuedSpeculativeHold = null;
-			dispatch?.releaseSpeculative?.("turn settled");
-			const current = dispatch?.speculativeStats?.();
-			if (current === undefined) return;
-			const counts = {
-				held: Math.max(0, current.held - previousSpeculativeStats.held),
-				adopted: Math.max(0, current.adopted - previousSpeculativeStats.adopted),
-				discarded: Math.max(0, current.discarded - previousSpeculativeStats.discarded),
-			};
-			previousSpeculativeStats = current;
-			if (counts.held === 0 && counts.adopted === 0 && counts.discarded === 0) return;
-			try {
-				const meta = session?.current();
-				if (!meta) return;
-				session?.appendEntry({
-					kind: "custom",
-					customType: "speculativeDispatch",
-					parentTurnId: session?.tree(meta.id).leafId ?? null,
-					display: false,
-					data: counts,
-				});
-				return counts;
-			} catch {
-				// Accounting is best effort and cannot change turn settlement.
-			}
 		},
 		flushSystemOne,
 		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
