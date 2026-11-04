@@ -18,9 +18,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
-// The name stops at its first colon and the password runs to the authority's last `@`, so `https://:pw@h`, `u:pa:ss@h` and
+// Any scheme can carry a password, as `postgres://`, `redis://`, `mongodb+srv://` and `ssh://` do, and matching from `://`
+// back one character needs no scan of a long word. The name stops at its first colon and the password runs to the authority's last `@`, so `https://:pw@h`, `u:pa:ss@h` and
 // `u:p@ss@h` hide the whole password. A `[` opens an IPv6 host or an earlier pass's marker, never a name. Each attempt starts at a scheme and ends at the next `/`, so the scan is linear (#446).
-const SECRET_STRING_RE = /(https?:\/\/[^\s/@:[]*:)([^\s/]*)@/giu;
+const SECRET_STRING_RE = /(?<=[a-z0-9+.-])(:\/\/[^\s/@:[]*:)([^\s/]*)@/giu;
 // A token can be the whole username, as in `https://<token>@github.com`. `alice` and `first.last` are ordinary names, while
 // a long opaque run holding a digit is not one worth keeping. A known git host token also counts ahead of a colon, where a
 // long opaque name would more often be a host and its port (#446).
@@ -206,15 +207,23 @@ export function redactSecretString(value: string): string {
 	return value.includes("\u001b") ? redactStyledString(value) : redactPlainSecretString(value);
 }
 
+/**
+ * URL credentials alone: userinfo, username tokens and query parameters. This is the rule for prose a person reads or a
+ * script consumes, where `BASE_TOKENS=100` or "pass --token to it" are ordinary text the wider rule would blank (#446).
+ */
+export function redactUrlCredentials(value: string): string {
+	return redactSecretUrlParams(
+		value
+			.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
+				urlUserinfoHoldsSecret(secret) ? `${prefix}[redacted]@` : match,
+			)
+			.replace(URL_USERNAME_TOKEN_RE, "[redacted]"),
+	);
+}
+
 function redactPlainSecretString(value: string): string {
 	return redactSecretFlags(
-		redactSecretUrlParams(
-			value
-				.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
-					urlUserinfoHoldsSecret(secret) ? `${prefix}[redacted]@` : match,
-				)
-				.replace(URL_USERNAME_TOKEN_RE, "[redacted]"),
-		).replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
+		redactUrlCredentials(value).replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
 			redactUnlessEnvReference(match, prefix, secret),
 		),
 	);

@@ -187,6 +187,11 @@ test("one-shot redaction hides the whole password of every userinfo shape", () =
 		["https://u:ZQ@XJ@h:8443/p", "https://u:[redacted]@h:8443/p"],
 		["https://u:ZQ@h/a@b", "https://u:[redacted]@h/a@b"],
 		["https://a:ZQ@h,https://b:XJ@h", "https://a:[redacted]@h,https://b:[redacted]@h"],
+		["postgres://u:ZQ@h/db", "postgres://u:[redacted]@h/db"],
+		["redis://:ZQ@h:6379", "redis://:[redacted]@h:6379"],
+		["mongodb+srv://u:ZQ@c.example.net", "mongodb+srv://u:[redacted]@c.example.net"],
+		["ssh://u:ZQ@h", "ssh://u:[redacted]@h"],
+		["jdbc:mysql://u:ZQ@h:3306/db", "jdbc:mysql://u:[redacted]@h:3306/db"],
 		["https://ZQXJ0ZQXJZQXJZQXJZQXJZ@github.com/r", "https://[redacted]@github.com/r"],
 		["https://glpat-ZQXJZQXJZQXJ:ZQ@gitlab.com/r", "https://[redacted]:[redacted]@gitlab.com/r"],
 	] as const) {
@@ -206,6 +211,10 @@ test("an ordinary name or host stays readable beside a username token", () => {
 		"ssh://git@github.com/o/r.git",
 		"http://my-service-12345-abcdefghij:8080/health",
 		"https://abcdefghijklmnopqrstuvwxyz.example.com/",
+		"redis://localhost:6379/0",
+		"sqlite:///a:b/c@d",
+		"file:///C:/x@y",
+		"ssh://git@github.com:22/o/r.git",
 	]) {
 		strictEqual(redactSecretString(text), text);
 		strictEqual(redactStreamingSecretString(text), text);
