@@ -12,8 +12,8 @@
  * a verdict that lands after the queue changed is dropped, and a failed round
  * leaves the queue exactly as the operator left it.
  *
- * The relation and urgency vocabularies are the steer site's, so the dataset
- * rows this writes and the rows the site writes read the same labels.
+ * The relation and urgency vocabularies live in `core/steering-vocabulary.ts`,
+ * so the typed picks and the side-model round read the same labels.
  */
 
 import type { SteeringTriageSettings } from "../core/defaults.js";

@@ -814,7 +814,7 @@ export interface SessionCommandContext {
 	openUsage?: () => void;
 	/** `/health`: telemetry journal losses, event-loop lag, the session's transport, quota, route and System One breakers. */
 	openHealth?: () => void;
-	/** `/systemone`: its lines come from the composition root, which owns the scopes. */
+	/** `/systemone`: its lines come from the composition root, which owns the routes. */
 	systemOne?: { run(): string[] };
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.

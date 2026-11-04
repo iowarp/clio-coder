@@ -595,12 +595,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	/**
-	 * `/draft [N] <request>`: N candidate rounds in parallel, then one judgment.
-	 *
-	 * The judge runs only once every candidate has settled, because a `choice`
-	 * over half-denoised text is a judgment about noise. A failed candidate is
-	 * left out of the judgment rather than failing it, and fewer than two
-	 * drafted candidates leaves nothing to choose between.
+	 * `/draft [N] <request>`: N candidate rounds in parallel.
 	 */
 	const openDraft = (request: string, count: number): void => {
 		if (deps.transitions.state !== "closed") return;

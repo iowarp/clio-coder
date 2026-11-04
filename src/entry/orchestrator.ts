@@ -4704,12 +4704,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		{ timeoutMs: chatShutdownAllowanceMs },
 	);
 
-	// System One rows reach the ledger at turn boundaries, so whatever was recorded
-	// since the last settle (a /draft judgment, an answer that arrived after its
-	// deadline) is still pending here and would die with the process. Registered
-	// after the chat hook so the aborted turn's calls are in, and the persist phase
-	// that closes the session runs after it. The ledger rows go before the dataset
-	// queue.
 	// Every Ollama chat pins its model with keep_alive -1, and the ownership
 	// record dies with this process, so release the models this process loaded
 	// once the drain above has stopped the turn that could pin them again
