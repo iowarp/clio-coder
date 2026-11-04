@@ -246,5 +246,19 @@
     "interfaces": [
       "Terminal"
     ]
+  },
+  {
+    "slug": "pre-register-a-benchmark",
+    "title": "Pre-register a benchmark before you measure",
+    "description": "Use the experiment-protocol skill to lock thresholds, tolerances, and verdict conditions into a contract you commit before any result exists.",
+    "category": "Scientific software",
+    "time": "5 min",
+    "source": "pre-register-a-benchmark.md",
+    "author": "The Clio Coder team",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ]
   }
 ]
