@@ -39,7 +39,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
-import { redactStreamingUrlCredentials } from "../../domains/safety/redaction.js";
+import { redactStreamingUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -228,11 +228,18 @@ export function recordBlockedAttempt(
 		stats.blockedAttemptsTruncated += 1;
 		return;
 	}
-	const reason = attempt.reason;
+	// A reason can quote the refused call, and redacted ahead of its bound, which could cut a password out of the pattern's sight (#446).
+	const reason = attempt.reason === undefined ? undefined : redactUrlCredentials(attempt.reason);
 	stats.blockedAttempts.push(
-		reason !== undefined && reason.length > BLOCKED_ATTEMPT_REASON_MAX_CHARS
-			? { ...attempt, reason: `${reason.slice(0, BLOCKED_ATTEMPT_REASON_MAX_CHARS)}…` }
-			: attempt,
+		reason === undefined
+			? attempt
+			: {
+					...attempt,
+					reason:
+						reason.length > BLOCKED_ATTEMPT_REASON_MAX_CHARS
+							? `${reason.slice(0, BLOCKED_ATTEMPT_REASON_MAX_CHARS)}…`
+							: reason,
+				},
 	);
 }
 
@@ -267,7 +274,8 @@ function assistantError(message: AgentMessage | undefined): string | null {
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted") return null;
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
-	if (typeof raw === "string" && raw.length > 0) return raw;
+	// A provider's error can quote the URL it failed on, and from here it reaches stderr, the frame and the run record (#446).
+	if (typeof raw === "string" && raw.length > 0) return redactUrlCredentials(raw);
 	return stopReason === "aborted" ? "request aborted" : "provider returned an error";
 }
 
@@ -289,17 +297,18 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	}
 	if (event.type === "notice") {
 		if (event.surface !== "transcript") return current;
+		const text = redactUrlCredentials(event.text);
 		// Every admission notice ends the turn before the provider is called. Only
 		// the image case used to count as a failure, so an empty home's "not
 		// configured" notice was chased by "provider stream ended without an
 		// assistant response", which blamed a provider nobody had reached.
 		if (event.admission !== undefined) {
-			return { ...current, lastNotice: event.text, error: event.text, admissionRefused: true };
+			return { ...current, lastNotice: text, error: text, admissionRefused: true };
 		}
 		if (event.key === "turn.interrupted") {
-			return { ...current, lastNotice: event.text, abortReason: event.text };
+			return { ...current, lastNotice: text, abortReason: text };
 		}
-		return { ...current, lastNotice: event.text };
+		return { ...current, lastNotice: text };
 	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
@@ -965,7 +974,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			}
 		}
 		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {
-			process.stderr.write(`clio-coder run: ${event.text}\n`);
+			process.stderr.write(`clio-coder run: ${redactUrlCredentials(event.text)}\n`);
 		}
 		recordToolEnd(runStats, event);
 		if (event.type === "message_end") {
