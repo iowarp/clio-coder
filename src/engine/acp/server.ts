@@ -90,7 +90,12 @@ import {
 	decisionActionClass,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
+import {
+	messageStopCompleted,
+	redactSecretString,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
+} from "../../domains/safety/redaction.js";
 import { jobIsComplete } from "../../domains/scheduling/index.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
@@ -659,6 +664,9 @@ interface ActivePrompt {
 	admissionReason?: string;
 	sentAssistantChars: number;
 	sentThinkingChars: number;
+	/** Chunks only append, so URL credentials are settled before they are sent (#446). */
+	textCredentials: UrlCredentialStreamFilter;
+	thinkingCredentials: UrlCredentialStreamFilter;
 	/** `session/update` notifications emitted for this turn. */
 	updatesSent: number;
 	/** True once the engine reported a turn end (`message_end` or `agent_end`). */
@@ -1373,6 +1381,8 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 		errored: false,
 		sentAssistantChars: 0,
 		sentThinkingChars: 0,
+		textCredentials: new UrlCredentialStreamFilter(),
+		thinkingCredentials: new UrlCredentialStreamFilter(),
 		updatesSent: 0,
 		sawTurnEnd: false,
 		stopReason: "end_turn",
@@ -1635,6 +1645,27 @@ function sendTextChunks(
 	}
 }
 
+function sendSafeChunks(
+	transport: AcpJsonRpcPeerTransport,
+	sessionId: string,
+	active: ActivePrompt,
+	sessionUpdate: "agent_message_chunk" | "agent_thought_chunk",
+	text: string,
+): void {
+	if (text.length > 0) sendTextChunks(transport, sessionId, active, sessionUpdate, text);
+}
+
+/** Send what the filters still hold. A message that did not complete keeps its open URL back. */
+function flushChunkCredentials(
+	transport: AcpJsonRpcPeerTransport,
+	sessionId: string,
+	active: ActivePrompt,
+	completed: boolean,
+): void {
+	sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.end(completed));
+	sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.end(completed));
+}
+
 /**
  * Closes out every tool call that never received a terminal update. A client
  * that renders a running spinner per `tool_call` otherwise keeps spinning after
@@ -1745,14 +1776,14 @@ function handleChatEvent(
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
 		active.sentAssistantChars += text.length;
-		sendTextChunks(transport, sessionId, active, "agent_message_chunk", text);
+		sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(text));
 		return;
 	}
 	if (event.type === "thinking_delta") {
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
 		active.sentThinkingChars += text.length;
-		sendTextChunks(transport, sessionId, active, "agent_thought_chunk", text);
+		sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(text));
 		return;
 	}
 	if (event.type === "notice") {
@@ -1896,14 +1927,20 @@ function handleChatEvent(
 		if (thinking.length > active.sentThinkingChars) {
 			const tail = thinking.slice(active.sentThinkingChars);
 			active.sentThinkingChars = thinking.length;
-			sendTextChunks(transport, sessionId, active, "agent_thought_chunk", tail);
+			sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(tail));
 		}
 		const text = assistantText(message);
 		if (text.length > active.sentAssistantChars) {
 			const tail = text.slice(active.sentAssistantChars);
 			active.sentAssistantChars = text.length;
-			sendTextChunks(transport, sessionId, active, "agent_message_chunk", tail);
+			sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(tail));
 		}
+		flushChunkCredentials(
+			transport,
+			sessionId,
+			active,
+			messageStopCompleted((message as { stopReason?: unknown })?.stopReason),
+		);
 		return;
 	}
 	if (event.type === "agent_start" || event.type === "agent_end") {
@@ -2140,7 +2177,8 @@ function replayMessageChunks(
 	texts: ReadonlyArray<string>,
 ): void {
 	for (const text of texts) {
-		for (const chunk of chunkText(text, ACP_MAX_CHUNK_BYTES)) {
+		const shown = sessionUpdate === "user_message_chunk" ? text : redactUrlCredentials(text);
+		for (const chunk of chunkText(shown, ACP_MAX_CHUNK_BYTES)) {
 			if (chunk.length === 0) continue;
 			frames.push({ update: { sessionUpdate, content: textContent(chunk) } });
 		}
@@ -2243,7 +2281,10 @@ function prepareAcpReplay(
 				entry.tokensAfter === undefined
 					? `${entry.tokensBefore} tokens before`
 					: `${entry.tokensBefore} → ${entry.tokensAfter} tokens`;
-			for (const chunk of chunkText(`[context engine] compacted ${reduction}\n${entry.summary}`, ACP_MAX_CHUNK_BYTES)) {
+			for (const chunk of chunkText(
+				`[context engine] compacted ${reduction}\n${redactUrlCredentials(entry.summary)}`,
+				ACP_MAX_CHUNK_BYTES,
+			)) {
 				current.frames.push({
 					update: { sessionUpdate: "agent_message_chunk", content: textContent(chunk) },
 					meta: { [ACP_NOTICE_META_KEY]: { level: "info" } },
@@ -6905,6 +6946,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				active.acceptsContinuation = false;
 				detach();
 				if (request.signal.aborted) active.cancelled = true;
+				flushChunkCredentials(options.transport, session.id, active, false);
 				settleOpenToolCalls(
 					options.transport,
 					session.id,

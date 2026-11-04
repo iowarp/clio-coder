@@ -10,6 +10,8 @@ import {
 	RedactedStringProjection,
 	redactSecretString,
 	redactStreamingSecretString,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
 import {
 	createWorkerProgressFold,
@@ -257,6 +259,40 @@ test("a side question hides URL credentials while it streams and when it ends", 
 	strictEqual(leaked(answered, "").join(""), "");
 	ok(answered.includes("postgres://u:[redacted]@h/db") && answered.includes("BASE_TOKENS=100"), answered);
 	ok(shown({ kind: "answered", text: "open http://h:8080" }).includes("http://h:8080"));
+});
+
+test("what an append-only stream sends joins to the one-shot output and never shows a secret early", () => {
+	const next = random(SEED);
+	const inputs = [
+		...CORPUS,
+		"日本語の文章は空白がないまま続く",
+		...Array.from({ length: DOCUMENTS }, () => document(next)),
+	];
+	for (const text of inputs) {
+		const oneShot = redactUrlCredentials(text);
+		for (let chunking = 0; chunking <= CHUNKINGS; chunking += 1) {
+			const points =
+				chunking === 0 ? Array.from({ length: text.length }, (_, index) => index + 1) : cuts(next, text.length);
+			const filter = new UrlCredentialStreamFilter();
+			const cutOff = new UrlCredentialStreamFilter();
+			let sent = "";
+			let at = 0;
+			for (const point of points) {
+				const piece = filter.push(text.slice(at, point));
+				cutOff.push(text.slice(at, point));
+				sent += piece;
+				at = point;
+				strictEqual(leaked(sent, oneShot).join(""), "", `at ${point} of ${JSON.stringify(text)}`);
+			}
+			strictEqual(sent + filter.end(true), oneShot, JSON.stringify(text));
+			strictEqual(leaked(sent + cutOff.end(false), oneShot).join(""), "", JSON.stringify(text));
+		}
+	}
+	const prose = new UrlCredentialStreamFilter();
+	strictEqual(prose.push("日本語の文章"), "日本語の文章");
+	strictEqual(prose.push("https"), "https");
+	strictEqual(prose.push("://u:ZQ"), "");
+	strictEqual(prose.push("XJ@h "), "://u:[redacted]@h ");
 });
 
 function proseFrame(panel: ChatPanel): string {

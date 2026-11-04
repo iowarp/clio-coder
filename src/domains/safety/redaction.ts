@@ -391,6 +391,48 @@ export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
 	return out;
 }
 
+/** Where text that a reader cannot retract becomes unsafe to send: from anything in its last token a later character could make a credential. */
+function appendOnlySafeEnd(text: string): number {
+	let tokenStart = text.length;
+	while (tokenStart > 0 && !/\s/u.test(text.charAt(tokenStart - 1))) tokenStart -= 1;
+	const unsafe = text.slice(tokenStart).search(/:\/\/|[?&]|:\/?$/u);
+	return unsafe < 0 ? text.length : tokenStart + unsafe;
+}
+
+/**
+ * URL credentials for text sent as increments, where a reader only appends and nothing shown can be rewritten. A frame's hold
+ * cannot serve here, since `https://abc` shows before an `@` makes it a token. Prose passes at once, including text with no
+ * spaces, and a token holding a URL or a query waits from there for its whitespace. What it sends joins to the one-shot
+ * output (#446).
+ */
+export class UrlCredentialStreamFilter {
+	private pending = "";
+	/** The last character sent, which is all the pattern reads ahead of a `://`. */
+	private context = "";
+
+	private send(text: string, redact: (value: string) => string): string {
+		const safe = redact(this.context + text).slice(this.context.length);
+		if (text.length > 0) this.context = text.slice(-1);
+		return safe;
+	}
+
+	push(delta: string): string {
+		this.pending += delta;
+		const end = appendOnlySafeEnd(this.pending);
+		if (end === 0) return "";
+		const safe = this.send(this.pending.slice(0, end), redactUrlCredentials);
+		this.pending = this.pending.slice(end);
+		return safe;
+	}
+
+	/** Send what is left. Only a stream that completed releases a hold. */
+	end(completed: boolean): string {
+		const rest = this.pending;
+		this.pending = "";
+		return this.send(rest, (value) => redactStreamingUrlCredentials(value, completed));
+	}
+}
+
 /** Keep completed tokens while an appended display string changes only its tail (#428). */
 export class RedactedStringProjection {
 	private source = "";
