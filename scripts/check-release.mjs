@@ -89,8 +89,8 @@ const SIZE_BUDGETS = [
 			!path.startsWith("dist/assets/grammars/") &&
 			path !== "dist/assets/codemap.json" &&
 			!path.startsWith("dist/gui/client/"),
-		// 0.6.6 measured 16,406,845 bytes: re-pinned to 16.5 MB with the maintainer's approval in the release session (#442).
-		maxBytes: 16_500_000,
+		// 0.6.7 measured 16,478,025 bytes: re-pinned to 17.0 MB, 16.5 MB rounded up plus a 0.5 MB cycle allowance, with the maintainer's approval in the release session (#442).
+		maxBytes: 17_000_000,
 	},
 	{
 		class: "gui client",
@@ -100,9 +100,8 @@ const SIZE_BUDGETS = [
 	{
 		class: "src",
 		match: (path) => path.startsWith("src/"),
-		// 0.6.5 shipped 19,059,405 bytes: 19.5 MB rounded up plus a 0.5 MB cycle allowance,
-		// confirmed by the maintainer for the 0.6.6 cycle (#442).
-		maxBytes: 20_000_000,
+		// 0.6.7 measured 19,881,354 bytes: 20.0 MB rounded up plus a 0.5 MB cycle allowance, with the maintainer's approval in the release session (#442).
+		maxBytes: 20_500_000,
 	},
 	{
 		class: "docs",
@@ -119,8 +118,8 @@ const SIZE_BUDGETS = [
 		maxBytes: 2_000_000,
 	},
 ];
-// Maintainer decision: retain 16 MB; the reviewed package measured 15,098,702 packed bytes.
-const MAX_TARBALL_BYTES = 16_000_000;
+// Maintainer decision: 16.5 MB; the 0.6.8 candidate measured 15,997,196 packed bytes.
+const MAX_TARBALL_BYTES = 16_500_000;
 const MAX_UNPACKED_BYTES = SIZE_BUDGETS.reduce((total, budget) => total + budget.maxBytes, 0);
 const MAX_ENTRY_COUNT = 3_000;
 
