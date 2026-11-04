@@ -1881,7 +1881,8 @@ function handleChatEvent(
 		}
 		active.openToolCalls.delete(toolCallId);
 		active.terminalToolCalls.add(toolCallId);
-		const output = boundString(outputText(event.result), ACP_MAX_CHUNK_BYTES);
+		// Redacted before the bound, which could otherwise cut a password into a piece nothing recognizes (#446).
+		const output = boundString(redactUrlCredentials(outputText(event.result)), ACP_MAX_CHUNK_BYTES);
 		const started = active.toolCallSnapshots.get(toolCallId);
 		sendUpdate(
 			transport,
@@ -2221,7 +2222,7 @@ function replayShellLine(entry: BashExecutionEntry): AcpReplayFrame[] {
 	const toolCallId = `shell_${entry.turnId}`;
 	const command = safeStoredString(entry.command, ACP_MAX_SHELL_COMMAND_BYTES);
 	const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
-	const output = shellOutputTail(entry.output);
+	const output = shellOutputTail(redactUrlCredentials(entry.output));
 	return [
 		{
 			update: {
@@ -2379,7 +2380,7 @@ function prepareAcpReplay(
 			ids.openToolCalls.delete(toolCallId);
 			ids.terminalToolCalls.add(toolCallId);
 			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
-			const output = boundString(outputText(payload?.result), ACP_MAX_CHUNK_BYTES);
+			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
 			current.frames.push({
 				update: {

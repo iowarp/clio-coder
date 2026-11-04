@@ -131,6 +131,23 @@ function progressText(update: Record<string, unknown>): string {
 }
 
 describe("contracts/acp streams a running tool's cumulative output only to a client that opted in", () => {
+	it("keeps URL credentials out of a tool's terminal content and leaves other output alone (#446)", async () => {
+		const turn = await runTurn({
+			optIn: false,
+			script: ({ emit }) => {
+				emit(TOOL_START);
+				emit({
+					...TOOL_END,
+					result: { output: "cloned https://user:hunter2@host/x; BASE_TOKENS=100 at http://h:8080/health" },
+				});
+			},
+		});
+		strictEqual(
+			progressText(turn.terminal[0] ?? {}),
+			"cloned https://user:[redacted]@host/x; BASE_TOKENS=100 at http://h:8080/health",
+		);
+	});
+
 	it("keeps URL credentials out of progress frames, and an open URL back until it resolves (#446)", async () => {
 		const turn = await runTurn({
 			optIn: true,
