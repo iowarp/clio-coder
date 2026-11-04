@@ -32,7 +32,27 @@ These were measured on the current design, on small samples. They show what the 
 
 Read those together. A digest holds up better than a file's opening characters on two of the three sets and ties on the third. It finds what a file is for and misses much of what a file does, which fits a digest that never carries the body.
 
-Precision is weak. Between a third and more than half of filter matches can be wrong, so a filter can narrow a list and cannot settle anything. The screen result covers injected pages only, and it says nothing about how often the screen would park an honest page.
+Precision is weak. Between a third and more than half of filter matches can be wrong, so a filter can narrow a list and cannot settle anything.
+
+### Filter across routes
+
+These also ran on the current design. They are small samples, and the query sets were regression sets, so they were not independent of the work being tested.
+
+::: compare
+| Route | Recall | Precision | Median latency | Returns |
+| --- | --- | --- | --- | --- |
+| Haiku, as a chat route | 0.81 | 0.68 | 2.5 s | Labels |
+| Jev | 0.85 | 0.47 | 163 ms | Probabilities |
+| A self-hosted chat model | 0.87 | 0.67 | 6.3 s | Labels |
+:::
+
+On 3 fresh queries, with about 3 samples, Haiku scored recall 0.83 and precision 1.00, and Jev scored recall 0.50 and precision 0.26. Those figures moved a long way from the table above, which shows how unstable these numbers are. Do not rank the routes from them.
+
+Jev and other engines whose profile declares real probabilities return a score. Any chat route returns one label per question, so its match has no score, and it never drives the judge screen.
+
+### What the screen result covers
+
+The screen result covers injected pages only, and it says nothing about how often the screen would park an honest page.
 
 The most important number is the last row. Given the tool, the agent did not call it once. Nothing has measured a benefit from `consult`, because none of the measured sessions used it on its own.
 
@@ -40,7 +60,7 @@ The most important number is the last row. Given the tool, the agent did not cal
 
 An on/off evaluation ran the older fixed-site design, where Clio Coder asked its own questions at fixed points in a turn. That design is gone, and so is the run's raw data. Only these numbers remain, so nobody can reanalyze them.
 
-The run used build `jev-1.14.0` with Haiku as the main model, over 24 episodes. Total time with System One on was 1.237 times total time with it off, meaning slower, with an interval of 1.037 to 1.484. Acceptance was 24 of 24 in both arms. Hints fired on 4 of 32 turns and changed no rounds.
+The run used build `jev-1.14.0` with Haiku as the main model, over 24 episodes per arm. Total time with System One on was 1.237 times total time with it off, meaning slower, with an interval of 1.037 to 1.484. Acceptance was 24 of 24 per arm. Hints fired on 4 of 32 turns and changed no rounds.
 
 Do not read that as a verdict on `consult` or on decision models in general. It says that one design cost time and bought nothing visible on that sample.
 
