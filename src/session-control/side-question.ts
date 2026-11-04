@@ -124,6 +124,8 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	runtimeId?: string;
 	/** A System One ask, whose schema also binds on a runtime that takes `output_config.format`. */
 	holdReply?: boolean;
+	/** `none` for a request that will not be repeated, so it pays for no cache write nothing reads. */
+	cacheRetention?: "none";
 	/** Sampling temperature; absent leaves the provider's default. `/draft` spreads it across candidates. */
 	temperature?: number;
 	/**
@@ -347,6 +349,7 @@ async function runRound(
 		if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 		if (input.signal !== undefined) options.signal = input.signal;
 		if (input.temperature !== undefined) options.temperature = input.temperature;
+		if (input.cacheRetention !== undefined) options.cacheRetention = input.cacheRetention;
 		// The agent loop's convention: "off" sends no reasoning option, which the
 		// simple-stream seam resolves to thinking off for every provider.
 		if (input.thinkingLevel !== "off") options.reasoning = input.thinkingLevel;

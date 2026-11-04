@@ -203,6 +203,7 @@ describe("a typed triage ask on anthropic-max", () => {
 		});
 		strictEqual(side, 0);
 		strictEqual(oneShotRoundOptions(asked[0] as Parameters<OneShotPort>[0]).holdReply, true);
+		strictEqual(oneShotRoundOptions(asked[0] as Parameters<OneShotPort>[0]).cacheRetention, "none");
 		const verdict = applied[0] as TriageVerdict;
 		strictEqual(verdict.relation, "stop");
 		strictEqual(verdict.confidence, undefined);
@@ -294,7 +295,7 @@ describe("an out-of-turn round on the subscription", () => {
 		};
 	}
 
-	const ask = () => ({ ...input(), holdReply: true });
+	const ask = () => ({ ...input(), holdReply: true, cacheRetention: "none" as const });
 
 	it("holds a System One ask through output_config.format", async () => {
 		bodies = [];
@@ -305,6 +306,7 @@ describe("an out-of-turn round on the subscription", () => {
 			schema: { type: "object", additionalProperties: false, properties: {} },
 		});
 		strictEqual(bodies[0]?.response_format, undefined);
+		ok(!JSON.stringify(bodies[0]).includes("cache_control"));
 	});
 
 	it("sends the plain request after a schema the API will not compile", async () => {
@@ -350,11 +352,12 @@ describe("an out-of-turn round on the subscription", () => {
 		});
 		const request = seen[0] as Parameters<OneShotPort>[0];
 		strictEqual(request.engine, undefined);
-		strictEqual(oneShotRoundOptions(request).holdReply, undefined);
+		deepStrictEqual(Object.keys(oneShotRoundOptions(request)), ["responseSchema"]);
 		bodies = [];
 		const { responseSchema: _own, ...round } = input();
 		await runOutOfTurnRound({ ...round, ...oneShotRoundOptions(request) });
 		ok(bodies[0] !== undefined);
 		strictEqual(bodies[0]?.output_config, undefined);
+		ok(JSON.stringify(bodies[0]).includes("cache_control"));
 	});
 });
