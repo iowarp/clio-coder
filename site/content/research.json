@@ -58,5 +58,20 @@
       "Terminal"
     ],
     "source": "context-and-retrieval.md"
+  },
+  {
+    "slug": "fleets-and-local-models",
+    "title": "When do several agents or small models pay off?",
+    "description": "Compete, council, heterogeneous fleets and local models, with no comparative numbers yet and a first experiment on one seeded bug.",
+    "category": "Fleets and local models",
+    "time": "7 min",
+    "basis": "Read from source; first experiment not yet run",
+    "status": "Open question. The controls have shipped; no comparison exists.",
+    "author": "The Clio Coder team",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ],
+    "source": "fleets-and-local-models.md"
   }
 ]
