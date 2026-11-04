@@ -99,6 +99,10 @@ export function noteSystemOneCall(callId: string): void {
 /** A server that does not know the model answers every later ask the same way, so one request settles it. */
 const UNKNOWN_MODEL_RE = /\b400\b.*\bunknown model\b/isu;
 
+/** An abstention is a reply, so it must not read as a route that failed. The batch wire's `unsure` lands here. */
+const DID_NOT_DECIDE = "the engine answered but did not decide this";
+const DECIDED_NOTHING = "the engine answered but decided nothing it was asked, so the evidence may not settle it";
+
 function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
@@ -449,7 +453,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 		for (const id of Object.keys(form.questions)) {
 			const raw = reply.answers[id];
 			const answer = raw === undefined ? null : form.decode(id, raw);
-			answers[id] = answer ?? { abstained: "the engine gave no usable answer" };
+			answers[id] = answer ?? { abstained: DID_NOT_DECIDE };
 			if (answer !== null) readout ??= answer.readout;
 		}
 		const abstainedCount = Object.values(answers).filter((answer) => "abstained" in answer).length;
@@ -468,7 +472,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 			return null;
 		}
 		if (value === null) {
-			fail("the engine gave no usable answer");
+			fail(DECIDED_NOTHING);
 			return null;
 		}
 		return {
