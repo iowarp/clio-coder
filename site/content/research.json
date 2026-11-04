@@ -28,5 +28,20 @@
       "Terminal"
     ],
     "source": "sealed-run-records.md"
+  },
+  {
+    "slug": "proactive-memory",
+    "title": "Does agent memory change outcomes?",
+    "description": "Whether lessons change what an agent does, whether self-approval is safe, and a first experiment on one repeated mistake.",
+    "category": "Memory",
+    "time": "8 min",
+    "basis": "Read from source; first experiment not yet run",
+    "status": "Open question. Memory has shipped; its effect is unmeasured.",
+    "author": "The Clio Coder team",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ],
+    "source": "proactive-memory.md"
   }
 ]
