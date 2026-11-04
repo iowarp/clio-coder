@@ -55,7 +55,9 @@ const CHAT_WIRES: Readonly<Record<string, BaseStyle>> = {
  * llama.cpp, vLLM and SGLang read the template flag. A LiteLLM gateway may
  * front either, and a wrong spelling reads as no preference rather than an
  * error, so it sends both, and so does `openai-compat`, which can front any
- * server. Runtimes absent here get no extra field rather than a guessed one.
+ * server. Lemonade sends both for the same reason: it fronts llama.cpp and FLM,
+ * and those read different spellings. Runtimes absent here get no extra field
+ * rather than a guessed one.
  */
 const THINKING_OFF: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
 	lmstudio: { reasoning_effort: "none" },
@@ -63,6 +65,7 @@ const THINKING_OFF: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
 	vllm: { chat_template_kwargs: { enable_thinking: false } },
 	sglang: { chat_template_kwargs: { enable_thinking: false } },
 	litellm: { reasoning_effort: "none", chat_template_kwargs: { enable_thinking: false } },
+	lemonade: { reasoning_effort: "none", chat_template_kwargs: { enable_thinking: false } },
 	"openai-compat": { reasoning_effort: "none", chat_template_kwargs: { enable_thinking: false } },
 	deepseek: { thinking: { type: "disabled" } },
 };
