@@ -914,6 +914,24 @@ describe("wiki generation outcomes", () => {
 		assert.equal(result.pending, 0);
 		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.attempts, 2);
 	});
+	it("does not hold a page pending for citing the generator's own lock file", async () => {
+		await initialize();
+		const dir = join(cwd, ".clio-coder/wiki-staging-lock");
+		mkdirSync(dir);
+		const saved = readWikiMeta(cwd)?.plan;
+		assert.ok(saved?.pages[0]);
+		saved.pages[0].status = "pending";
+		writeWikiPlanFile(dir, saved);
+		writeFileSync(join(dir, "b.md"), content("b", 1));
+		const result = await run(
+			generator((_spec, path) => {
+				assert.ok(path);
+				writeFileSync(path, `${content("a", 2)}A run holds \`.clio-coder/wiki.lock\` while it works.\n`);
+			}),
+		);
+		assert.equal(result.pending, 0);
+		assert.equal(readWikiMeta(cwd)?.plan?.pages[0]?.status, "written");
+	});
 	it("checkpoints authored JS aliases against the actual TypeScript source bytes", async () => {
 		await initialize(["src/a.js"]);
 		assert.equal(wikiStaleness(cwd).state, "fresh");
