@@ -6,12 +6,13 @@
  * one-hot and the profile's readout says so, so nothing may read it as a probability.
  */
 
+import { filterItemOf } from "../questions.js";
 import type { EngineReply, Question } from "../types.js";
 
 type RawAnswer = EngineReply["answers"][string];
 
 /** Part of every batch build key. Bump it with any wording or schema change below. */
-export const BATCH_PROMPT_VERSION = "b1";
+export const BATCH_PROMPT_VERSION = "b2";
 
 const ABSTAIN = "unsure";
 
@@ -21,14 +22,28 @@ export interface Prompt {
 }
 
 /** The serialized state, shared by every question of one call. */
-export function renderState(state: Readonly<Record<string, unknown>>): string {
+function renderState(state: Readonly<Record<string, unknown>>): string {
 	return JSON.stringify(state, null, 1) ?? "";
 }
 
-const SYSTEM_PROMPT = `You are a strict decision function. You receive a STATE and QUESTIONS. Each question lists the only labels it accepts and what each label means. Reply with ONLY a JSON object mapping every question id to one of its labels, or to "${ABSTAIN}" when the STATE does not decide that question. No explanation.`;
+/**
+ * How a reply lays out its answers. `by-id` maps each id to its label and holds every id,
+ * and a grammar for it stops compiling on the Messages API between 57 and 94 required
+ * properties, under the 256 items one filter carries. `list` is one small schema at any
+ * length and takes every id as data, so a route that holds replies through that API uses it.
+ */
+export type ReplyShape = "by-id" | "list";
+
+const SYSTEM_INTRO =
+	"You are a strict decision function. You receive a STATE and QUESTIONS. Each question lists the only labels it accepts and what each label means. Read the STATE and the question together and decide every question on its own.";
+
+const REPLY_LINE: Readonly<Record<ReplyShape, string>> = {
+	"by-id": `Reply with ONLY a JSON object mapping every question id to one of its labels, using "${ABSTAIN}" only when neither says enough to decide that question. No explanation.`,
+	list: `Reply with ONLY a JSON object whose "answers" list holds one {"id", "label"} entry for every question id, in order, using the label "${ABSTAIN}" only when neither says enough to decide that question. No explanation.`,
+};
 
 /** Room for the JSON punctuation of one answer line, in tokens. */
-const TOKENS_PER_ANSWER = 8;
+const TOKENS_PER_ANSWER: Readonly<Record<ReplyShape, number>> = { "by-id": 8, list: 16 };
 /** Headroom for a model that pretty-prints or a tokenizer that splits ids finely. */
 const TOKENS_RESERVE = 32;
 
@@ -48,32 +63,102 @@ export function isDecided(question: Question): boolean {
 	return question.type === "choice" && Object.keys(question.criteria).length === 1;
 }
 
-export function batchPrompt(stateText: string, questions: Readonly<Record<string, Question>>): Prompt {
-	const lines = Object.entries(questions).map(([id, question]) => {
-		const labels = labelsOf(question)
-			.map(([label, meaning]) => `  ${label}: ${meaning}`)
-			.join("\n");
-		return `${id}: ${question.instructions}\n${labels}`;
-	});
-	return { system: SYSTEM_PROMPT, user: `STATE:\n${stateText}\n\nQUESTIONS:\n${lines.join("\n")}` };
+function labelLines(question: Question): string {
+	return labelsOf(question)
+		.map(([label, meaning]) => `  ${label}: ${meaning}`)
+		.join("\n");
 }
 
-export function batchSchema(questions: Readonly<Record<string, Question>>): Record<string, unknown> {
-	const properties: Record<string, unknown> = {};
+/**
+ * A call whose questions all ask one rule of one item each, which reads as one rule over
+ * items held in the state: the item is what the rule reads, and a state that lacked it told
+ * a literal model to abstain on everything. Null for any other call.
+ */
+function filterOf(
+	questions: Readonly<Record<string, Question>>,
+): { rule: string; labels: string; items: Record<string, string> } | null {
+	let filter: { rule: string; labels: string; items: Record<string, string> } | null = null;
 	for (const [id, question] of Object.entries(questions)) {
-		properties[id] = { type: "string", enum: [...labelsOf(question).map(([label]) => label), ABSTAIN] };
+		const parts = filterItemOf(question);
+		if (parts === null) return null;
+		const labels = labelLines(question);
+		filter ??= { rule: parts.rule, labels, items: {} };
+		if (parts.rule !== filter.rule || labels !== filter.labels) return null;
+		filter.items[id] = parts.item;
 	}
-	return { type: "object", additionalProperties: false, required: Object.keys(questions), properties };
+	return filter;
+}
+
+function replySchema(questions: Readonly<Record<string, Question>>, shape: ReplyShape): Record<string, unknown> {
+	if (shape === "by-id") {
+		const properties: Record<string, unknown> = {};
+		for (const [id, question] of Object.entries(questions)) {
+			properties[id] = { type: "string", enum: [...labelsOf(question).map(([label]) => label), ABSTAIN] };
+		}
+		return { type: "object", additionalProperties: false, required: Object.keys(questions), properties };
+	}
+	const labels = new Set<string>([ABSTAIN]);
+	for (const question of Object.values(questions)) for (const [label] of labelsOf(question)) labels.add(label);
+	const entry = {
+		type: "object",
+		additionalProperties: false,
+		required: ["id", "label"],
+		properties: { id: { type: "string" }, label: { type: "string", enum: [...labels] } },
+	};
+	return {
+		type: "object",
+		additionalProperties: false,
+		required: ["answers"],
+		properties: { answers: { type: "array", items: entry } },
+	};
 }
 
 /** An upper bound on the reply: each id and its longest label, plus punctuation. */
-export function batchMaxTokens(questions: Readonly<Record<string, Question>>): number {
+function replyMaxTokens(
+	questions: Readonly<Record<string, Question>>,
+	wireIds: Readonly<Record<string, string>>,
+	shape: ReplyShape,
+): number {
 	let chars = 0;
 	for (const [id, question] of Object.entries(questions)) {
 		const longest = Math.max(ABSTAIN.length, ...labelsOf(question).map(([label]) => label.length));
-		chars += id.length + longest;
+		chars += (wireIds[id] ?? id).length + longest;
 	}
-	return TOKENS_RESERVE + Object.keys(questions).length * TOKENS_PER_ANSWER + Math.ceil(chars / 2);
+	return TOKENS_RESERVE + Object.keys(questions).length * TOKENS_PER_ANSWER[shape] + Math.ceil(chars / 2);
+}
+
+export interface Batch {
+	readonly prompt: Prompt;
+	readonly schema: Record<string, unknown>;
+	readonly maxTokens: number;
+	/** Answers per question id, or null when the reply holds no JSON object. */
+	read(text: string): Record<string, RawAnswer> | null;
+}
+
+/** One request for every question of a call, and how to read what comes back. */
+export function formBatch(
+	state: Readonly<Record<string, unknown>>,
+	questions: Readonly<Record<string, Question>>,
+	shape: ReplyShape,
+): Batch {
+	const filter = filterOf(questions);
+	// A filter's ids are paths and caller text, which cost output tokens on every line and
+	// invite a respelled id, so a list reply takes them by position. The item text keeps what they said.
+	const byPosition = filter !== null && shape === "list";
+	const wireIds = Object.fromEntries(Object.keys(questions).map((id, index) => [id, byPosition ? `q${index + 1}` : id]));
+	const wire = (id: string) => wireIds[id] ?? id;
+	const user =
+		filter !== null
+			? `STATE:\n${renderState({ ...state, items: Object.fromEntries(Object.entries(filter.items).map(([id, item]) => [wire(id), item])) })}\n\nQUESTIONS:\nEvery id in STATE.items is one question, asked of that item alone: ${filter.rule}\n${filter.labels}`
+			: `STATE:\n${renderState(state)}\n\nQUESTIONS:\n${Object.entries(questions)
+					.map(([id, question]) => `${wire(id)}: ${question.instructions}\n${labelLines(question)}`)
+					.join("\n")}`;
+	return {
+		prompt: { system: `${SYSTEM_INTRO} ${REPLY_LINE[shape]}`, user },
+		schema: replySchema(questions, shape),
+		maxTokens: replyMaxTokens(questions, wireIds, shape),
+		read: (text) => readBatchReply(text, questions, wireIds),
+	};
 }
 
 function answerFrom(question: Question, label: unknown): RawAnswer | null {
@@ -103,19 +188,33 @@ function parseObject(text: string): Record<string, unknown> | null {
 	}
 }
 
+/** Labels per wire id from either shape. A route that did not hold the reply may answer in the other. */
+function labelsByWireId(parsed: Record<string, unknown>): Record<string, unknown> {
+	if (!Array.isArray(parsed.answers)) return parsed;
+	const labels: Record<string, unknown> = {};
+	for (const entry of parsed.answers as unknown[]) {
+		const { id, label } = (typeof entry === "object" && entry !== null ? entry : {}) as { id?: unknown; label?: unknown };
+		if (typeof id === "string" && !Object.hasOwn(labels, id)) labels[id] = label;
+	}
+	return labels;
+}
+
 /**
  * Answers per question id, or null when the reply holds no JSON object. A label
  * outside a question's list, or the abstention, leaves that question unanswered.
  */
-export function readBatchReply(
+function readBatchReply(
 	text: string,
 	questions: Readonly<Record<string, Question>>,
+	wireIds: Readonly<Record<string, string>>,
 ): Record<string, RawAnswer> | null {
 	const parsed = parseObject(text);
 	if (parsed === null) return null;
+	const labels = labelsByWireId(parsed);
 	const answers: Record<string, RawAnswer> = {};
 	for (const [id, question] of Object.entries(questions)) {
-		const answer = Object.hasOwn(parsed, id) ? answerFrom(question, parsed[id]) : null;
+		const wire = wireIds[id] ?? id;
+		const answer = Object.hasOwn(labels, wire) ? answerFrom(question, labels[wire]) : null;
 		if (answer !== null) answers[id] = answer;
 	}
 	return answers;

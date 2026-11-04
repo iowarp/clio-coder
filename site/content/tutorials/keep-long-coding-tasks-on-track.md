@@ -1,7 +1,7 @@
 Long coding work needs more than saved chat history. You need the current objective, the decisions that still apply, the relevant files, and the checks left to run. Clio Coder gives you controls for inspecting that context and continuing after a session grows.
 
 ::: note Version scope
-This guide describes the v0.6.0 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
+This guide describes the v0.6.8 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
 :::
 
 ::: diagram context-controls
@@ -65,14 +65,18 @@ A restarted process records an interrupted handoff as paused and waits for your 
 
 ## Keep memory reviewable
 
-Proactive memory is separate from the working context. Review a proposed lesson before accepting it as durable material; an observation about one repository should not quietly become a rule for every project.
+Proactive memory is separate from the working context. Open `/memory` and use its **Review** tab to approve a proposed lesson with `a` or reject it with `x`; an observation about one repository should not quietly become a rule for every project.
 
-Settings lets you choose the memory route, including **Rules only** when you do not want a background model call. Stored memory is not fine-tuning of the underlying model. Its value depends on selection, scope, and whether it is still relevant.
+Global, procedural, runtime, and agent lessons wait for you. A repository knowledge lesson can be approved automatically once a session records that it held with no contradiction, and a later contradiction demotes it.
+
+In `/settings`, **Memory connection** and **Memory model** choose where memory's model calls run. With neither set, memory uses your chat route and spends model calls there. Turning **Proactive memory** off stops those calls, along with task memory and the memory section of the prompt.
+
+Stored memory is not fine-tuning of the underlying model. Its value depends on selection, scope, and whether it is still relevant.
 
 ::: limits
 - A summary is a model's reduction, so check it against sources when it matters.
 - A handoff belongs to the branch that prepared it; a fork recalls its notes but cannot resume it.
-- Memory proposals need review before they influence later sessions.
+- Only approved lessons influence later sessions, and a repository knowledge lesson can be approved automatically, so check `/memory`.
 :::
 
 ::: next

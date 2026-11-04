@@ -8,6 +8,7 @@ import {
 	type ToolCall,
 } from "@earendil-works/pi-ai";
 import { ToolNames } from "../core/tool-names.js";
+import { explainToolArgumentsError } from "./tool-argument-refusal.js";
 
 /**
  * Turn a call to a tool that carries no attached schema into the gateway call
@@ -18,19 +19,23 @@ import { ToolNames } from "../core/tool-names.js";
  * in every admission step, and it grants nothing: the model could have sent this
  * gateway call itself, and an unknown or unadmitted name gets the gateway's own
  * refusal, which names the capabilities it can use. Malformed arguments stay on
- * the original call, since the gateway would run on the empty object Pi left.
+ * the original call, since the gateway would run on the empty object Pi left,
+ * and their parse error is rewritten here so Pi's refusal says what to resend.
  */
 export function routeUnattachedToolCalls(
 	source: AssistantMessageEventStream,
 	tools: ReadonlyArray<Tool> | undefined,
 	model: Model<Api>,
 ): AssistantMessageEventStream {
-	if (!tools?.some((tool) => tool.name === ToolNames.Gateway)) return source;
+	if (!tools?.length) return source;
 	const attached = new Set(tools.map((tool) => tool.name));
-	const routeCall = (call: ToolCall): ToolCall =>
-		attached.has(call.name) || call.argumentsError !== undefined
-			? call
-			: { ...call, name: ToolNames.Gateway, arguments: { op: "call", capability: call.name, args: call.arguments } };
+	const gateway = attached.has(ToolNames.Gateway);
+	const routeCall = (call: ToolCall): ToolCall => {
+		if (call.argumentsError !== undefined)
+			return { ...call, argumentsError: explainToolArgumentsError(call.argumentsError) };
+		if (attached.has(call.name) || !gateway) return call;
+		return { ...call, name: ToolNames.Gateway, arguments: { op: "call", capability: call.name, args: call.arguments } };
+	};
 	const route = (message: AssistantMessage): AssistantMessage => ({
 		...message,
 		content: message.content.map((block) => (block.type === "toolCall" ? routeCall(block) : block)),

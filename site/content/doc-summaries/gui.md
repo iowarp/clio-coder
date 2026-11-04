@@ -22,7 +22,7 @@ Any number of tasks can be open. Up to four turns run at once; a further turn sh
 
 ## Read the Session column
 
-Beside each conversation, the Session column shows the workspace's path, branch and Git state, the model and its health, context, tokens and cost, the plan, artifacts, changed files, branches, agents, and evidence from receipts. It updates as the task runs. **App activity** counts working, queued, and approval-waiting tasks across workspaces.
+Beside each conversation, the Session column shows the workspace's path, branch and Git state, the model and its health, context, tokens and cost, the plan, artifacts, changed files, branches, agents, and evidence from run records. It updates as the task runs. **App activity** counts working, queued, and approval-waiting tasks across workspaces.
 
 Type `/` in the composer for session commands such as `/context`, `/usage`, `/tree`, `/fork`, and `/handoff`.
 

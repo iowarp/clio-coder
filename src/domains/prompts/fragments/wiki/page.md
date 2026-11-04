@@ -15,7 +15,9 @@ Write the file `{{pagePath}}` and nothing else. Do not write anywhere else, do n
 code or configuration, and do not create `quickstart.md` or any `index.md`: those are generated
 from your front matter after every run.
 
-The page is `{{pageRelPath}}`, titled `{{pageTitle}}`. Its subject and anchor sources are below.
+The page is `{{pageRelPath}}`. Its working title `{{pageTitle}}` is derived from a directory name,
+so give the front matter and the `#` heading a title a reader would search for, such as
+"Command-line surfaces" rather than "Cli". Its subject and anchor sources are below.
 
 Begin the file with this front matter, then the body:
 
@@ -77,7 +79,19 @@ nonempty `coverage_gaps` frontmatter list, for example
 Coverage gaps prevent completion and require normal writing, not mechanical repair. Omit the key
 when no central assignment remains uncovered; never remove a gap merely to pass validation.
 
+This page is published to readers outside the project and describes the tree as it is now. Never
+write absolute local paths, host names, private network addresses, user names, or credentials. Do
+not narrate sessions, tickets, reviews, or how the code used to work, and do not describe removed
+behavior. A source comment that mentions history is not a reason to repeat it.
+
+A broad assigned scope is an overview, not a file-by-file audit. When its files cannot all be read
+within your budget, choose the workflows a reader of this area most needs, trace those, describe
+the rest at the level you read them, and link to their owning pages. An area you describe only at
+the level you inspected is not a coverage gap; a gap is a central workflow you set out to explain
+and could not ground.
+
 What the body must contain, in whatever order fits the subject:
+- An opening paragraph in plain language: what this area is for and when a reader needs it.
 - What this area does; include intent or rationale only when explicitly supported.
 - What owns it: exact source paths and the important symbols in them.
 - How data or control flows through an actual caller, arguments forwarded, and callee branch.
@@ -104,6 +118,7 @@ Grounding rules:
 - Cite source paths in backticks: `src/domains/dispatch/validation.ts`. Prefer a stable path plus
   a symbol name over a line number; use `path:line` only when the exact location is load-bearing.
   When a line matters, write `path:line:Symbol` so the cited symbol can be checked at that line.
+  Never write "line N" in prose: it goes stale with the next edit and no check can catch it.
 - A backticked standalone path must resolve to a repository file, occur with that exact spelling
   in a cited source, or be a plain glob matching tracked repository files. Source-text occurrence
   establishes only the spelling, not the resulting runtime path. Put synthesized templates and
@@ -115,6 +130,7 @@ Grounding rules:
   their complete verified command rather than as isolated file citations; frontmatter lists
   concrete files, never glob patterns.
 - Link other wiki pages relative to the current page's directory, using the list of other pages below.
+  Use a Markdown link for a wiki page, never a backticked path, which is checked as a repository file.
   Do not link to a page that is not on that list; it does not exist.
 - Separate implemented behavior from partial, planned, or unverified behavior. Verify exact
   commands, configuration keys, test filenames, and CI claims against their current definitions

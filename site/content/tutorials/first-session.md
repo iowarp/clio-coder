@@ -21,7 +21,9 @@ Choose **Guided setup**, then select an app on this computer, a model server, an
 
 **Connect by endpoint** is the shortcut when you already know the URL. LM Studio commonly serves at `http://localhost:1234`; Ollama commonly serves at `http://localhost:11434`. The [connection guide](/docs/guide/configuration-and-targets.html) covers setup and credentials.
 
-If you have used Clio Coder before, you can skip this step: starting `clio-coder` looks for a saved connection, a provider key in your environment, a stored sign-in, or a local model server, and opens chat with the first one that has a model.
+If you have used Clio Coder before, you can skip this step. A chat route you already chose stays in use, and Clio Coder will not swap it for another when it stops working.
+
+With no route chosen, starting `clio-coder` looks for a saved connection, a provider key in your environment, a stored sign-in, or a local model server, and opens chat with the first one that has a model.
 
 If a connection fails, run:
 

@@ -922,7 +922,7 @@ async function runFilter(
 		gathering.note("no route answered", Object.keys(fitted).length);
 		return empty(
 			failure
-				? `The decision model could not answer: ${failure}. Proceed on your own judgment.`
+				? `The decision model gave no answer: ${failure}. Proceed on your own judgment.`
 				: "The decision model gave no usable answer. Proceed on your own judgment.",
 			failure,
 		);
@@ -1052,7 +1052,7 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 				const output = {
 					answered: false,
 					note: failure
-						? `The decision model could not answer: ${failure}. Proceed on your own judgment.`
+						? `The decision model gave no answer: ${failure}. Proceed on your own judgment.`
 						: "The decision model gave no usable answer. Proceed on your own judgment.",
 					...(failure !== undefined ? { error: failure } : {}),
 					...evidenceNote,

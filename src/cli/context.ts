@@ -12,7 +12,7 @@ const HELP = `Usage:
   clio-coder context init [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
                          [--depth quick|standard|deep]
   clio-coder context refresh [--wiki]
-  clio-coder context wiki [--update|--retry-pending] [--replan] [--status] [--depth auto|simple|medium|detailed]
+  clio-coder context wiki [--update|--retry-pending] [--replan] [--status] [--depth auto|simple|medium|detailed] [--pages <path,path>]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
   clio-coder context reset [--all] [--yes]
   clio-coder context index [--json]
@@ -249,7 +249,7 @@ async function runWikiStatusCommand(): Promise<number> {
 type WikiCliDepth = "auto" | "simple" | "medium" | "detailed";
 type WikiCliThinking = "off" | "low" | "medium" | "high";
 
-const VALUE_FLAGS = new Set(["--target", "--model", "--thinking", "--depth"]);
+const VALUE_FLAGS = new Set(["--target", "--model", "--thinking", "--depth", "--pages"]);
 
 function isWikiDepth(value: unknown): value is WikiCliDepth {
 	return value === "auto" || value === "simple" || value === "medium" || value === "detailed";
@@ -268,6 +268,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 	let target: string | undefined;
 	let model: string | undefined;
 	let thinkingLevel: WikiCliThinking | undefined;
+	let onlyPages: string[] | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--help" || arg === "-h") {
@@ -300,6 +301,18 @@ async function runWikiCommand(args: string[]): Promise<number> {
 				}
 				if (arg === "--target") target = value;
 				else model = value;
+				continue;
+			}
+			if (arg === "--pages") {
+				const paths = (value ?? "")
+					.split(",")
+					.map((path) => path.trim())
+					.filter((path) => path.length > 0);
+				if (paths.length === 0 || value?.startsWith("--")) {
+					process.stderr.write("clio-coder context wiki: --pages requires comma-separated plan page paths\n");
+					return 2;
+				}
+				onlyPages = paths;
 				continue;
 			}
 			if (arg === "--thinking") {
@@ -340,6 +353,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			...(forceUpdate ? { mode: "update" as const } : {}),
 			...(retryPending ? { retryPending: true } : {}),
 			...(replan ? { replan: true } : {}),
+			...(onlyPages ? { onlyPages } : {}),
 			depth,
 			model: await resolveDocumenterModelId(route),
 			generate: modelWikiGenerate({ route }),

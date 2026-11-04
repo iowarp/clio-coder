@@ -4,7 +4,7 @@ Add reusable resources to your Clio Coder installation.
 
 ## Install a bundle of resources
 
-Plugins keep related skills, prompts, agents, fleets, and supporting files together. Browse the shipped catalog and preview an installation before writing it:
+Plugins keep related skills, prompts, agents, playbooks, and supporting files together. Browse the shipped catalog and preview an installation before writing it:
 
 ```sh
 clio-coder library list --kind plugin
@@ -37,6 +37,6 @@ In the terminal, open **Library → Plugins** to browse members and review lifec
 
 ## Choose the right kind of extension
 
-Library plugins supply portable recipes. Executable harness extensions provide runtime tools, hooks, and interface behavior and use `clio-coder extensions` instead. Project extensions follow the same approval through `clio-coder config trust extensions`. Adding tool schemas requires a new session; recipe reload does not change those schemas.
+A plugin carries content. An extension is code that runs in its own process, declares everything it may do, and loads only after you approve those capabilities; manage it with `clio-coder extensions`. The runtime is sandboxed where the host has a backend. Project extensions also need `clio-coder config trust extensions`. See [the extension tutorial](/tutorials/write-an-extension-with-declared-capabilities.html). Adding tool schemas requires a new session; recipe reload does not change those schemas.
 
 See [skills and resources](/docs/guide/resource-library.html) for everyday Library controls. The full plugin guide covers private catalogs and package authoring.

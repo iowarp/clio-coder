@@ -4,7 +4,9 @@ Browse and use skills, prompts, agents, fleets, and plugins.
 
 ## Find a useful skill
 
-The Library contains **skills, agents, prompts, fleets, and plugins**. Open `/library` or press **Alt+L**. Switch categories with left/right, search with `/`, and open a package with Enter.
+The Library contains **skills, agents, prompts, playbooks, and plugins**. Open `/library` or press **Alt+L**. Switch categories with left/right, search with `/`, and open a package with Enter.
+
+`clio-coder library update --all` updates eligible copies, `clio-coder library package <directory>` turns a skill directory into a package, and `clio-coder library validate` checks what you author.
 
 Use **Browse** to find available content and **Installed** to manage your copies. Choose **User** for tools shared across projects or **Project** for resources specific to this workspace.
 
