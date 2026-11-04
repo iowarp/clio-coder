@@ -17,7 +17,9 @@ The terminal combines the conversation, tool calls, permissions, and worker acti
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
 
-During a turn, **Enter** queues a message that Clio reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run. Review a permission card before allowing an action. **Deny** skips that call; **Stop** ends the turn.
+During a turn, **Enter** queues a message that Clio reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
+
+On a permission card, **Enter** allows the call. **Esc** denies it, which skips that call and leaves the run going. **Alt+X** stops the turn.
 
 ## Clio Coder on the desktop
 
