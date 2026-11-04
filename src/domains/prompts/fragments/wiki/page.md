@@ -84,6 +84,12 @@ write absolute local paths, host names, private network addresses, user names, o
 not narrate sessions, tickets, reviews, or how the code used to work, and do not describe removed
 behavior. A source comment that mentions history is not a reason to repeat it.
 
+A broad assigned scope is an overview, not a file-by-file audit. When its files cannot all be read
+within your budget, choose the workflows a reader of this area most needs, trace those, describe
+the rest at the level you read them, and link to their owning pages. An area you describe only at
+the level you inspected is not a coverage gap; a gap is a central workflow you set out to explain
+and could not ground.
+
 What the body must contain, in whatever order fits the subject:
 - An opening paragraph in plain language: what this area is for and when a reader needs it.
 - What this area does; include intent or rationale only when explicitly supported.
