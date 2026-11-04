@@ -124,20 +124,20 @@ import {
 	createTaskMemoryTrace,
 	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
-	memoryFlowSweepNotice,
 	MemoryRuntime,
 	markMemoryOffRecording,
+	memoryFlowSweepNotice,
 	memoryStatus,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
+	sweepRestrictedMemory,
 	type TaskMemoryHandoffSnapshot,
 	type TaskMemoryModelClient,
 	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
-	sweepRestrictedMemory,
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
@@ -247,6 +247,7 @@ import { expandSubmitText } from "../domains/resources/submit-expansion.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
+import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } from "../domains/safety/hook-drift.js";
 import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domains/safety/index.js";
 import {
@@ -289,7 +290,6 @@ import type { SessionContract, SessionMeta } from "../domains/session/contract.j
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
-import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
 import { observationCheckpoint, observationSourceUnits, SessionDomainModule } from "../domains/session/index.js";
 import {
