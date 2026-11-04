@@ -196,7 +196,8 @@ export function createJsonCredentialScrub(): {
 			const released = assistant && stopped && frame.type !== "message_start" && frame.type !== "message_update";
 			return [...finish(released), mapStrings(frame, (text) => redactStreamingUrlCredentials(text, whole))];
 		}
-		const ended = frame.type === "agent_end" ? finish(false) : [];
+		// A failover can start mid-URL, and nothing of the next attempt continues what waits (#446).
+		const ended = frame.type === "agent_end" || frame.type === "attempt_start" ? finish(false) : [];
 		if (frame.type === "tool_execution_update") {
 			// Progress can stop inside a URL, unlike the arguments it repeats, and its end frame carries the settled text (#446).
 			const { partialResult, ...rest } = frame;

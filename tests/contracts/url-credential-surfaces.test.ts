@@ -252,3 +252,31 @@ test("a finished text block releases what waited in its filter as complete", () 
 	strictEqual(deltas.map((inner) => inner.delta).join(""), "open http://localhost:8080");
 	strictEqual(innerOf(frames).at(-1)?.type, "text_end");
 });
+
+test("a new attempt, or any message start, closes an open URL as cut off", () => {
+	const textDelta = (delta: string): unknown => updateFrame({ type: "text_delta", contentIndex: 0, delta });
+	const textOf = (frames: unknown[]): string =>
+		innerOf(frames.filter((frame) => (frame as { type?: string }).type === "message_update"))
+			.map((inner) => inner.delta)
+			.join("");
+	const failover = createJsonCredentialScrub();
+	strictEqual(
+		textOf([
+			...failover.scrub(textDelta("see https://u:hun")),
+			...failover.scrub(projectDispatchJsonEvent({ type: "attempt_start", runId: "r2" })),
+			...failover.scrub(textDelta("Hello there ")),
+		]),
+		"see https://u:Hello there ",
+	);
+	for (const message of [
+		{ role: "assistant", stopReason: "stop", content: [] },
+		{ role: "user", content: [{ type: "text", text: "task" }] },
+	]) {
+		const scrub = createJsonCredentialScrub();
+		const frames = [
+			...scrub.scrub(textDelta("see https://u:hun")),
+			...scrub.scrub(projectDispatchJsonEvent({ type: "message_start", message })),
+		];
+		strictEqual(textOf(frames), "see https://u:");
+	}
+});
