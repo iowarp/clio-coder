@@ -79,6 +79,8 @@ export interface TurnRecovery {
 	): Promise<boolean>;
 	ensureFailureVisibleAndPersisted(failure: TerminalAssistantFailure): void;
 	cancelRetryCountdown(): void;
+	/** A rate limit litellm reads as terminal is still worth waiting for at yolo, however the failure arrived (#445). */
+	waitsOutRateLimit(failure: RecoveryFailure): boolean;
 	/** Sit out a failed turn's delay before its yolo continuation, in the countdown Esc already cancels (#445). */
 	waitBeforeContinuation(
 		delayMs: number,
@@ -225,6 +227,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			}
 		});
 	};
+
+	const waitsOutRateLimitMessage = (errorMessage: string | null | undefined): boolean =>
+		deps.isYolo?.() === true && isRateLimitErrorMessage(errorMessage);
+	const waitsOutRateLimit = (failure: RecoveryFailure): boolean =>
+		failure.kind === "terminal-provider" && waitsOutRateLimitMessage(failure.message);
 
 	/**
 	 * Shared compact-and-retry worker used by both the post-resolve
@@ -405,11 +412,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		};
 		// Auth recovery has its own one-shot budget even when transient retries are disabled (#427).
 		if (classified.kind === "auth") return retryAuth(initialFailure);
-		const waitsOut = (errorMessage: string | null | undefined): boolean =>
-			deps.isYolo?.() === true && isRateLimitErrorMessage(errorMessage);
-		// litellm reads any provider status as terminal; a rate limit at yolo is still worth waiting for.
 		const retryable = (failure: RecoveryFailure): boolean =>
-			isRetryableRecoveryFailure(failure) || (failure.kind === "terminal-provider" && waitsOut(failure.message));
+			isRetryableRecoveryFailure(failure) || waitsOutRateLimit(failure);
 		const recordRetriesExhausted = (errorMessage: string | null | undefined, message?: unknown): void => {
 			const retryAfterMs = failureRetryAfterMs(message, errorMessage);
 			state.turnStop = {
@@ -430,13 +434,13 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		let waitedMs = 0;
 		// A rate limit at yolo is bounded by time spent waiting, everything else by attempts.
 		const mayAttempt = (attempt: number, errorMessage: string | null | undefined): boolean =>
-			waitsOut(errorMessage) ? waitedMs < RATE_LIMIT_WAIT_BUDGET_MS : attempt <= settings.maxRetries;
+			waitsOutRateLimitMessage(errorMessage) ? waitedMs < RATE_LIMIT_WAIT_BUDGET_MS : attempt <= settings.maxRetries;
 		for (let attempt = 1; mayAttempt(attempt, failure.errorMessage); attempt += 1) {
 			ensureFailureVisibleAndPersisted(failure);
 			pruneFailedAssistantFromContext(agentRuntime.agent);
 
 			const backoffMs = recoveryRetryDelayMs(attempt, settings, classified);
-			const delayMs = waitsOut(failure.errorMessage)
+			const delayMs = waitsOutRateLimitMessage(failure.errorMessage)
 				? Math.min(
 						Math.max(backoffMs, failureRetryAfterMs(failure.message, failure.errorMessage) ?? 0),
 						RATE_LIMIT_WAIT_BUDGET_MS - waitedMs,
@@ -557,6 +561,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		cancelRetryCountdown(): void {
 			retryCountdown?.cancel();
 		},
+		waitsOutRateLimit,
 		waitBeforeContinuation(delayMs, attempt, maxAttempts, reason) {
 			const status: RetryStatusPayload = { phase: "scheduled", attempt, maxAttempts, delayMs, errorMessage: reason };
 			recordRetryStatus(status);

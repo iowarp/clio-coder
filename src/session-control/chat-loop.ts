@@ -3119,7 +3119,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							cause: err,
 							...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
 						});
-						if (isRetryableRecoveryFailure(classification) || classification.kind === "auth") {
+						if (
+							isRetryableRecoveryFailure(classification) ||
+							classification.kind === "auth" ||
+							recovery.waitsOutRateLimit(classification)
+						) {
 							const failureMessage = {
 								role: "assistant",
 								content: [{ type: "text", text: "" }],
