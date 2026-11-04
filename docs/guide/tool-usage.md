@@ -1174,7 +1174,7 @@ The tool registers only when `integrations.music.agentControl` is on, cliamp res
 
 ## consult: ask a fast decision model
 
-`consult` asks the routes `systemOne.use` names. It is a direct tool in the main session, present only when a route is named at startup. Source: [consult.ts](../../src/tools/consult.ts). Read class; parallel. See the [System One guide](system-one.md) for the opt-in and the limits.
+`consult` asks the routes `systemOne.use` names. It is a direct tool in the main session, present only when a route is named at startup. `consult` ships as experimental. Nothing yet measures whether agents reach for it or whether it speeds anything up. Source: [consult.ts](../../src/tools/consult.ts). Read class; parallel. See the [System One guide](system-one.md) for the opt-in and the limits.
 
 A call takes one form. `filter` scores things you do not hold against one criterion and returns only ids and scores:
 
@@ -1184,7 +1184,7 @@ A call takes one form. `filter` scores things you do not hold against one criter
 | `source` | `files` (with `paths`, workspace paths or globs), `output` (with `path`, an offload a truncated result named, and optional `chunkLines`), `capabilities` (MCP and gateway tools) or `items` (with `items`, your own id-to-text map). |
 | `limit` | Matches returned, default 16, at most 32. `matchCount` still counts them all. |
 
-A filter answers what a file is for, from its path and a digest of its leading comment, exports and imports. It misses behavior inside a body, which is a question for `grep`, and about 1 match in 3 is wrong, so read a match before you rely on it. An LLM route returns a label, so its matches carry no score.
+A filter answers what a file is for, from its path and a digest of its leading comment, exports and imports. It misses behavior inside a body, which is a question for `grep`, and between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. An LLM route returns a label, so its matches carry no score.
 
 `questions` asks typed questions over evidence you supply:
 
