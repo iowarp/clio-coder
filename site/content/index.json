@@ -83,8 +83,22 @@
     "summary": "continuity.md",
     "headings": [
       "Pick up a conversation",
+      "Find sessions from the shell",
       "Keep long work focused",
       "Recover an interrupted handoff"
+    ]
+  },
+  {
+    "path": "guide/proactive-memory.md",
+    "source": "docs/guide/proactive-memory.md",
+    "title": "Memory and lessons",
+    "group": "Everyday use",
+    "excerpt": "See what Clio Coder remembers, approve lessons, or turn memory off.",
+    "summary": "memory.md",
+    "headings": [
+      "What memory does",
+      "See and approve lessons",
+      "Turn it off or route it elsewhere"
     ]
   },
   {
@@ -125,7 +139,8 @@
       "Delegate a focused task",
       "Follow the work",
       "Permissions, sandbox, and merges",
-      "Compose a fleet when you need one"
+      "Run a playbook when you need one",
+      "Give workers MCP tools"
     ]
   },
   {
@@ -152,6 +167,20 @@
       "Install a bundle of resources",
       "Keep the installed copy under control",
       "Choose the right kind of extension"
+    ]
+  },
+  {
+    "path": "guide/harness-extensions.md",
+    "source": "docs/guide/harness-extensions.md",
+    "title": "Extensions",
+    "group": "Extend Clio Coder",
+    "excerpt": "Install and write extensions that declare what they may do.",
+    "summary": "extensions.md",
+    "headings": [
+      "Plugin or extension",
+      "Manage extensions",
+      "What an extension can add",
+      "Write one"
     ]
   },
   {

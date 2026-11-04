@@ -79,12 +79,12 @@ clio-coder run --agent scout --record "Check the experiment on the worker node"
 
 In a session, the dispatch tool accepts `record: true` for a call or a single task, including work placed on an SSH node. Clio Coder writes a bounded display stream beside the worker's own protocol. It copies a redacted `.cast` into the run's evidence bundle with the run, node, timestamps, byte count, and SHA-256.
 
-A capture error or a partial run is labeled incomplete. The sealed receipt, not the recording, decides whether the worker succeeded.
+A capture error or a partial run is labeled incomplete. The sealed run record, not the recording, decides whether the worker succeeded.
 
 Capture needs no extra program. For playback, `clio-coder tools install asciinema` installs a checksum-pinned asciinema. `clio-coder fleet nodes tools install <node> asciinema` previews the same user-level install on a worker node, and `--yes` performs it without sudo. asciinema is GPL-3.0-or-later, and its license and exact source ship with the pinned install.
 
 ::: limits
-- Similarity finds candidates. It is not proof of a scientific result or of a worker's success, and receipts and memory approval rules stay authoritative.
+- Similarity finds candidates. It is not proof of a scientific result or of a worker's success, and run records and memory approval rules stay authoritative.
 - Matching model and projector hashes do not make vectors compatible across serving stacks. Keep each stack's index separate.
 - An extension can request embeddings only when its manifest declares the service and you approve it, and it never receives the target's credentials.
 - A recording is bounded, timed terminal output. It is not a video of the screen.

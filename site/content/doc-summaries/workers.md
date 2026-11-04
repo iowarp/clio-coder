@@ -21,21 +21,27 @@ A steering message first reports queued, then received when the worker acknowled
 
 ## Permissions, sandbox, and merges
 
-Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental `sandbox-exec` profile on macOS. With the default `safety.sandbox: auto`, they run unsandboxed when no sandbox works; `required` refuses them instead, and `off` disables it. `safety.sandboxNetwork: true` allows network access. Your own session's commands are not sandboxed.
+Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental `sandbox-exec` profile on macOS. With the default `safety.sandbox: auto`, they run unsandboxed when no sandbox works; `required` refuses them instead, and `off` disables it. `safety.sandboxNetwork: true` allows network access. At `default` your own session's shell commands run in the same kind of sandbox; at `yolo` they do not, and workers keep theirs. A worker's ordinary asks go to the safety judge by default (`fleet.permissions.mode: judge`).
 
 When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch.
 
-## Compose a fleet when you need one
+## Run a playbook when you need one
 
 ```sh
-clio-coder fleet list
+clio-coder playbook list
+clio-coder fleet run sdlc --var task="Add empty-input handling to the parser"
 clio-coder fleet status
+clio-coder fleet land
 ```
 
-Fleet recipes combine workers into workflows such as a review gate, competing solutions, or a council. Inspect the recipe and approval preview before starting one.
+A playbook combines workers into a workflow such as a review gate, competing solutions, or a council. The fleet runs it. Copy a builtin with `clio-coder playbook new <name> --from sdlc`, check it with `clio-coder playbook validate <name>`, and inspect the approval preview before starting. `fleet land` lists, previews, and lands the task branches a run kept. See [the playbook tutorial](/tutorials/run-a-playbook-and-land-it.html).
+
+## Give workers MCP tools
+
+A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an untrusted or stale server. Check a server with `clio-coder mcp test <id>` and grant one project server with `clio-coder mcp trust <id>`. Add `--network` to allow it network inside the worker sandbox.
 
 Remote native workers use SSH and need the same Clio Coder version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings fleet`.
 
 A node receives work only after `clio-coder fleet nodes test <id> --record` passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.
 
-Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipe contracts, and failure recovery.
+Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipes, and failure recovery.

@@ -29,7 +29,7 @@ clio-coder gui --open
 
 The command opens the local application with its access link. Open a workspace folder, describe a task, and choose a model and thinking level from the composer.
 
-The rail on the left groups tasks by workspace. The Session column on the right shows the workspace's Git state, the model, context, usage, the plan, artifacts, changes, and receipts as the task runs.
+The rail on the left groups tasks by workspace. The Session column on the right shows the workspace's Git state, the model, context, usage, the plan, artifacts, changes, and run records as the task runs.
 
 You can keep any number of tasks open. Launching again brings the existing window forward instead of opening another. Up to four turns run at once and later ones wait for a slot. A task nobody has looked at for five minutes is paused with its conversation kept; choose **Resume session** to continue it.
 
