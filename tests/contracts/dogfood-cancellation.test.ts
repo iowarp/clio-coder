@@ -221,7 +221,6 @@ function readFixtureEntries(path: string): SessionEntry[] {
 
 function fixture(
 	initialMode: WireMode,
-	readTurn?: () => void,
 	visionSidecar?: VisionSidecar,
 	visionCapable = false,
 	refuseHandoffSkill?: (inlinedPaths: ReadonlyArray<string>) => string | null,
@@ -284,7 +283,6 @@ function fixture(
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		...(visionSidecar ? { visionSidecar } : {}),
-		...(readTurn ? { readTurn } : {}),
 		...(refuseHandoffSkill ? { refuseHandoffSkill } : {}),
 		...(labelReferencedPaths ? { labelReferencedPaths } : {}),
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
@@ -337,26 +335,6 @@ function fixture(
 		},
 	};
 }
-
-it("starts the decision brief once per operator turn and never holds the chat request on it", {
-	timeout: 10_000,
-}, async () => {
-	let briefs = 0;
-	const h = fixture("success", () => {
-		briefs += 1;
-	});
-	try {
-		await h.loop.submit("The brief is started, not awaited.");
-		strictEqual(briefs, 1);
-		strictEqual(h.wire().calls(), 1, "the turn reached the chat model");
-
-		await h.loop.submit("A later turn starts its own brief.");
-		strictEqual(briefs, 2);
-		strictEqual(h.wire().calls(), 2);
-	} finally {
-		await h.close();
-	}
-});
 
 it("the screen window's clock starts when the operator speaks, over the live messages", {
 	timeout: 10_000,
@@ -689,7 +667,7 @@ it("the real chat loop persists and displays one genuine gateway failure without
 });
 
 it("a refused context-handoff request sends nothing and starts no turn", { timeout: 15_000 }, async () => {
-	const f = fixture("success", undefined, undefined, false, () => "use /handoff");
+	const f = fixture("success", undefined, false, () => "use /handoff");
 	const notices: string[] = [];
 	f.loop.onEvent((event) => {
 		if (event.type === "notice" && event.admission?.reason === "handoff-skill-refused") notices.push(event.text);
@@ -712,7 +690,6 @@ it("a refused context-handoff request is judged on the file it inlines and label
 	let labeled = false;
 	const f = fixture(
 		"success",
-		undefined,
 		undefined,
 		false,
 		(paths) => (paths.includes("secrets/notes.txt") ? "remove the file" : null),
@@ -775,7 +752,7 @@ it("a text-only route uses the vision sidecar while keeping the original image i
 			};
 		},
 	};
-	const f = fixture("success", undefined, sidecar);
+	const f = fixture("success", sidecar);
 	try {
 		const image = { type: "image" as const, mimeType: "image/png", data: "SIDECAR_IMAGE_SENTINEL" };
 		await f.loop.submit("What color is this?", { images: [image] });
@@ -798,7 +775,7 @@ it("a text-only route uses the vision sidecar while keeping the original image i
 
 it("an image-only submission asks the sidecar for a description", { timeout: 15_000 }, async () => {
 	let question = "";
-	const f = fixture("success", undefined, {
+	const f = fixture("success", {
 		configured: () => true,
 		label: () => "MiniCPM-V-4.6",
 		analyze: async (_images, prompt) => {
@@ -821,7 +798,7 @@ it("an image-only submission asks the sidecar for a description", { timeout: 15_
 });
 
 it("sidecar failure refuses admission without sending the image to the main model", { timeout: 15_000 }, async () => {
-	const f = fixture("success", undefined, {
+	const f = fixture("success", {
 		configured: () => true,
 		label: () => "MiniCPM-V-4.6",
 		analyze: async () => {
@@ -844,7 +821,6 @@ it("a vision-capable Qwopus-style route receives images directly without invokin
 	let calls = 0;
 	const f = fixture(
 		"success",
-		undefined,
 		{
 			configured: () => true,
 			label: () => "MiniCPM-V-4.6",
@@ -872,7 +848,7 @@ it("cancelling image processing stops admission and leaves the next turn usable"
 	const entered = new Promise<void>((resolve) => {
 		started = resolve;
 	});
-	const f = fixture("success", undefined, {
+	const f = fixture("success", {
 		configured: () => true,
 		label: () => "MiniCPM-V-4.6",
 		analyze: async (_images, _question, signal) => {
