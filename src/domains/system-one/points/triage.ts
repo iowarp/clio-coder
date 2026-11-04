@@ -86,7 +86,9 @@ export function triagePoint(deadlineMs: number): DecisionPoint<TriageObject, Tri
 				questions[relationId(index)] = pointQuestion(
 					pick(`How does \`message\` relate to the work in \`task\`?\n${line}`, STEER_RELATIONS),
 				);
-				questions[urgencyId(index)] = pointQuestion(pick(`How soon should \`message\` reach the assistant?\n${line}`, STEER_URGENCIES));
+				questions[urgencyId(index)] = pointQuestion(
+					pick(`How soon should \`message\` reach the assistant?\n${line}`, STEER_URGENCIES),
+				);
 			}
 			return questions;
 		},

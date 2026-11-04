@@ -358,6 +358,22 @@ it("starts the decision brief once per operator turn and never holds the chat re
 	}
 });
 
+it("the screen window's clock starts when the operator speaks, over the live messages", {
+	timeout: 10_000,
+}, async () => {
+	const h = fixture("success");
+	try {
+		const before = Date.now();
+		await h.loop.submit("Read the page.");
+		const window = h.loop.screenWindow();
+		ok(window);
+		ok(window.since >= before);
+		ok(window.messages.some((message) => message.role === "user"));
+	} finally {
+		await h.close();
+	}
+});
+
 for (const mode of ["partial", "thinking", "empty"] as const) {
 	it(`${mode} cancellation closes once and remains usable live, after resume, and in export`, {
 		timeout: 15_000,

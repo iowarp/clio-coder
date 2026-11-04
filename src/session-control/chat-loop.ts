@@ -2264,10 +2264,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
-	const applyTriage = (
-		verdicts: ReadonlyArray<TriageVerdict>,
-		autoInterrupt: boolean,
-	): void => {
+	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): void => {
 		for (const verdict of verdicts) {
 			const entry = queues.entries().find((candidate) => candidate.id === verdict.id);
 			if (entry === undefined) continue;
@@ -3422,8 +3419,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			});
 		},
 		contextLedger: () => context.contextLedger(),
-		screenWindow: () =>
-			state.runtime ? { messages: state.runtime.agent.state.messages, since: operatorSpokeAt } : null,
+		screenWindow: () => (state.runtime ? { messages: state.runtime.agent.state.messages, since: operatorSpokeAt } : null),
 		liveBudget: () => context.liveBudget(),
 		inspectLiveBudget: () => context.inspectLiveBudget(),
 		refreshLiveBudget: () => context.refreshLiveBudget(),
