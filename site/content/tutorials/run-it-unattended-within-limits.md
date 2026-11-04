@@ -1,7 +1,7 @@
 You can start a task and leave. Headless `clio-coder run` does one turn with nobody attached, and the limits you set are enforced. This guide covers a bounded headless run, a read-only one, the timeouts that apply when you walk away from an open session, and scheduled turns.
 
 ::: note Version scope
-This guide describes v0.6.7. A headless run has no one to ask: it denies whatever the safety judge does not allow, and `ask_user` is not available.
+This guide describes v0.6.8. A headless run has no one to ask: it denies whatever the safety judge does not allow, and `ask_user` is not available.
 :::
 
 ::: needs

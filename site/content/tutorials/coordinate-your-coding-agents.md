@@ -1,7 +1,7 @@
 You can use Clio Coder to coordinate the coding agents you already have installed. Give a peer a focused assignment, follow a managed run where the connector supports it, and review its output before accepting the change.
 
 ::: note Version scope
-In v0.6.7 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
+In v0.6.8 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
 :::
 
 ::: needs
@@ -52,7 +52,7 @@ A native worker inherits the main session's level inside its own permit and OS s
 Each peer enforces read-only through its own mechanism. Check the mode you select instead of assuming one contract for all of them.
 
 ::: compare
-| Peer | Read-only headless run in v0.6.7 |
+| Peer | Read-only headless run in v0.6.8 |
 | --- | --- |
 | Codex | Its read-only sandbox mode |
 | Claude Code | Plan mode with read tools |

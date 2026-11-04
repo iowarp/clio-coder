@@ -30,7 +30,7 @@
     "author": "The Clio Coder team",
     "source": "let-it-work-with-containment-and-rewind.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "run-a-playbook-and-land-it",
@@ -41,7 +41,7 @@
     "author": "The Clio Coder team",
     "source": "run-a-playbook-and-land-it.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "run-it-unattended-within-limits",
@@ -52,7 +52,7 @@
     "author": "The Clio Coder team",
     "source": "run-it-unattended-within-limits.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "see-what-a-session-cost-and-what-a-run-did",
@@ -63,7 +63,7 @@
     "author": "The Clio Coder team",
     "source": "see-what-a-session-cost-and-what-a-run-did.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "temperature-calibration",
@@ -86,7 +86,7 @@
     "source": "choose-model-for-your-project.md",
     "cover": "tui-configure-review",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "coordinate-your-coding-agents",
@@ -98,7 +98,7 @@
     "source": "coordinate-your-coding-agents.md",
     "cover": "tui-interop",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "keep-long-coding-tasks-on-track",
@@ -110,7 +110,7 @@
     "source": "keep-long-coding-tasks-on-track.md",
     "cover": "tui-context",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "check-a-change-against-your-repository",
@@ -122,7 +122,7 @@
     "source": "check-a-change-against-your-repository.md",
     "cover": "tui-verify-result",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "add-skills-and-plugins-deliberately",
@@ -134,7 +134,7 @@
     "source": "add-skills-and-plugins-deliberately.md",
     "cover": "tui-library-installed",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "work-from-a-laptop-with-remote-workers",
@@ -146,7 +146,7 @@
     "source": "work-from-a-laptop-with-remote-workers.md",
     "cover": "tui-settings-fleet",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   },
   {
     "slug": "write-an-extension-with-declared-capabilities",
@@ -157,6 +157,6 @@
     "author": "The Clio Coder team",
     "source": "write-an-extension-with-declared-capabilities.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7"
+    "versionScope": "0.6.8"
   }
 ]

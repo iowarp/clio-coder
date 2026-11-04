@@ -12,7 +12,7 @@
     {
       "path": "README.md",
       "source": "README.md",
-      "sha256": "a1bc4cf264931a209c6d5b3e202a294ef0c9971358e65512a83e1954a89613ae",
+      "sha256": "850acce04ec7aa507ad95ac3bf73c933ee5538c268c48172f1c0682569d84bcf",
       "sourceSha256": "f9e0447b3f2bec9c5cffcd6a741231f4bab7900b65861605eeb60ed0b4529916"
     },
     {
@@ -48,7 +48,7 @@
     {
       "path": "guide/proactive-memory.md",
       "source": "docs/guide/proactive-memory.md",
-      "sha256": "d2d6600b5942e004bf33b18938f77b587c0d8fec30d7b4c5b81a035936de8563",
+      "sha256": "46e10164a827fb7df1c4ebcaef98ad18faeef9b76ed82208db5abce8c7bdffb9",
       "sourceSha256": "a2de2267468d811caecb45cbbd7b04ec035c7cb63f860361c755e6720d598938"
     },
     {
@@ -72,7 +72,7 @@
     {
       "path": "guide/resource-library.md",
       "source": "docs/guide/resource-library.md",
-      "sha256": "aff39f9e182d564d37a3e1b848e1108b53282710d4186593b9bbd445b6cabf23",
+      "sha256": "2c8e220dd804cc0b0156a8dc14272edfa345baa887e5066d5735848ea085b6b6",
       "sourceSha256": "08c628957c6a364b65ab0e7eeaa13f9e13b2486535bb2fb1e3705f7906d45b62"
     },
     {
@@ -120,7 +120,7 @@
     {
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
-      "sha256": "b433b34cacc30f0a02e9f91e42473df73651bb5b99ba09faafa152d3fab2181c",
+      "sha256": "701d352f511ac8c659bd520ea43cb7dc7e58a34bcc7552a5ed857d5e9dc38f39",
       "sourceSha256": "f7677e8ce41de62dae035bad3896bb4b12072ee88b1cdbc51d47ad736fbfa450"
     },
     {

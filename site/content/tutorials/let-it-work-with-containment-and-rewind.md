@@ -3,7 +3,7 @@ Most of a coding task should not need you. At the `default` level, Clio Coder ru
 This guide shows how to check that setup, undo a change, and choose when to step up to `yolo`.
 
 ::: note Version scope
-This guide describes v0.6.7. The sandbox needs bubblewrap on Linux; on macOS it uses an experimental `sandbox-exec` profile. Snapshots need a Git work tree. Native Windows has neither guarantee, so read what `doctor` reports on your host.
+This guide describes v0.6.8. The sandbox needs bubblewrap on Linux; on macOS it uses an experimental `sandbox-exec` profile. Snapshots need a Git work tree. Native Windows has neither guarantee, so read what `doctor` reports on your host.
 :::
 
 ::: needs

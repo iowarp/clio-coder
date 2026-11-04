@@ -1,7 +1,7 @@
 Long coding work needs more than saved chat history. You need the current objective, the decisions that still apply, the relevant files, and the checks left to run. Clio Coder gives you controls for inspecting that context and continuing after a session grows.
 
 ::: note Version scope
-This guide describes the v0.6.7 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
+This guide describes the v0.6.8 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
 :::
 
 ::: diagram context-controls

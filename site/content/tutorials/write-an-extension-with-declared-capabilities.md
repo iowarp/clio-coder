@@ -1,7 +1,7 @@
 A plugin carries content such as skills and prompts. An extension is code: it runs in its own process, declares everything it may do, and loads only after you approve those capabilities. This guide scaffolds a small extension, tests it, installs it, and shows what the approval covers.
 
 ::: note Version scope
-This guide describes v0.6.7, runtime api 2. The runtime runs inside bubblewrap on Linux or Seatbelt on macOS when a backend exists. Check `/extensions` for the confinement your host gives it.
+This guide describes v0.6.8, runtime api 2. The runtime runs inside bubblewrap on Linux or Seatbelt on macOS when a backend exists. Check `/extensions` for the confinement your host gives it.
 :::
 
 ::: needs

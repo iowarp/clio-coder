@@ -1,7 +1,7 @@
 Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact Clio Coder build if needed, verify its project and model route, then choose where the first bounded task runs.
 
 ::: note Version scope
-This guide describes the v0.6.7 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
+This guide describes the v0.6.8 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
 :::
 
 ::: needs

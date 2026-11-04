@@ -8,7 +8,7 @@
     "author": "The Clio Coder team",
     "source": "system-one-decisions.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7",
+    "versionScope": "0.6.8",
     "status": "Experimental, off by default"
   },
   {
@@ -20,7 +20,7 @@
     "author": "The Clio Coder team",
     "source": "diffusion-models.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7",
+    "versionScope": "0.6.8",
     "status": "Available since 0.5.3, terminal display only"
   },
   {
@@ -32,7 +32,7 @@
     "author": "The Clio Coder team",
     "source": "panes-and-docks.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7",
+    "versionScope": "0.6.8",
     "status": "Experimental, off by default, needs Herdr"
   },
   {
@@ -44,7 +44,7 @@
     "author": "The Clio Coder team",
     "source": "remote-workers-and-clusters.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7",
+    "versionScope": "0.6.8",
     "status": "Experimental, new in 0.6.0"
   },
   {
@@ -56,7 +56,7 @@
     "author": "The Clio Coder team",
     "source": "information-flow-rules.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7",
+    "versionScope": "0.6.8",
     "status": "Advanced, opt-in, new in 0.6.0"
   },
   {
@@ -68,7 +68,7 @@
     "author": "The Clio Coder team",
     "source": "semantic-context-and-recordings.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.7",
+    "versionScope": "0.6.8",
     "status": "Beta, off by default, new in 0.6.2"
   }
 ]

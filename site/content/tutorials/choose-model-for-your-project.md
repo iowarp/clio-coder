@@ -1,7 +1,7 @@
 Clio Coder lets you choose the model connection around your project. Start with the place your code is allowed to go, then choose a model and runtime that can do the task. A local GPU, a model server, an institutional gateway, and a cloud API are different deployment choices.
 
 ::: note Version scope
-This guide describes v0.6.7. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
+This guide describes v0.6.8. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
 :::
 
 ::: needs

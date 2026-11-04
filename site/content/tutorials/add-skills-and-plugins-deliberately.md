@@ -1,7 +1,7 @@
 Clio Coder's Library contains skills, agents, prompts, playbooks, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
 
 ::: note Version scope
-This guide describes v0.6.7. Library recipes and extensions have different roles, and installing either is not a grant of authority.
+This guide describes v0.6.8. Library recipes and extensions have different roles, and installing either is not a grant of authority.
 :::
 
 ::: diagram library-flow

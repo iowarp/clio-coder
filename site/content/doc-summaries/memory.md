@@ -14,6 +14,6 @@ Memory also keeps commands a completed task proved to work, from its own run rec
 
 ## Turn it off or route it elsewhere
 
-Set `context.memory.enabled: false`, or use `/settings` → **Context & Memory** → **Proactive memory**. To run memory on its own route, set both `context.memory.target` and `context.memory.model`.
+Set `context.memory.enabled: false`, or use `/settings` → **Context & Memory** → **Proactive memory**. Off means off: the `# Memory` section leaves main and worker prompts, and history review reads nothing from a session that ran with memory off. To run memory on its own route, set both `context.memory.target` and `context.memory.model`.
 
 Memory gives reminders; it does not replace reading the code or running the checks. See the full guide for how reminders are selected and when a lesson is promoted.

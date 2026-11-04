@@ -32,3 +32,5 @@ Saved routes seed a new session. A settings write from another process does not 
 The full reference covers supported settings keys, defaults, CLI flags, project file ownership, and MCP trust. Use **Read the full guide** above or ask Clio Coder to retrieve the relevant bundled documentation before editing YAML.
 
 Settings validation is strict. For an older installation, `clio-coder upgrade` applies the registered migration and preserves a version-1 backup. For connection and installation diagnostics, use [doctor](/docs/guide/doctor.html).
+
+A session started in a repository subdirectory reads the repository's `.clio-coder/` settings, agents, skills, rules, hooks, and MCP servers. Clio Coder writes an allow-list `.clio-coder/.gitignore`, so authored files can be committed while generated files stay out. A blanket `.clio-coder/` rule in your own `.gitignore` still hides them.

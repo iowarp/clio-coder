@@ -1,6 +1,6 @@
 When Clio Coder runs inside Herdr, a terminal multiplexer, it can open panes of its own beside the conversation: a file browser below, a live view of workers on the right, and a small radio. Each is a dock. One key shows or hides it, and hiding keeps it running.
 
-::: note Experimental in v0.6.7
+::: note Experimental in v0.6.8
 Panes need the Herdr pane host. On Linux and macOS the first bare `clio-coder` asks once whether to open a workspace, and `interface.panes.enabled: off` stops asking. Music is off until you enable it. Keys, commands, and settings may change. Herdr has no Windows build.
 :::
 

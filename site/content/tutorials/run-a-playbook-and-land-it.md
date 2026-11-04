@@ -1,7 +1,7 @@
 A playbook is a sequence of workers and code steps that the fleet runs for you. The builtin `sdlc` playbook plans, builds, tests with a bounded fix loop, reviews with a bounded revise loop, and documents, with three commits along the way. This guide runs it on one task and lands the result on your branch.
 
 ::: note Version scope
-This guide describes v0.6.7. `fleet land` needs Git 2.38 or newer. Run time and cost depend on your repository and the model you connect, so start with a small task.
+This guide describes v0.6.8. `fleet land` needs Git 2.38 or newer. Run time and cost depend on your repository and the model you connect, so start with a small task.
 :::
 
 ::: needs

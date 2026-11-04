@@ -1,6 +1,6 @@
 System One is an optional decision layer. At a few fixed points in a session, Clio Coder can ask a small, fast model a typed question, such as "which of these drafts answers the request best?", and get back probabilities instead of prose. It never answers you, never edits files, and never removes an approval.
 
-::: note Experimental in v0.6.7
+::: note Experimental in v0.6.8
 System One is off until you bind a decision site to an engine. Settings, `clio-coder doctor`, and `/usage` label it experimental. Site names, engine options, and the settings format may change between releases.
 :::
 
