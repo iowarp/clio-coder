@@ -1173,3 +1173,13 @@ test("a TUI error shows no password, since Node's own fetch error quotes the who
 		ok(text.includes(shown), text);
 	}
 });
+
+test("an aborted side question stopped short, so an opaque name stays hidden while a frame's stays", () => {
+	const opaque = "see https://abcdef0123456789abcdef0123456789";
+	const aborted = new SideQuestionOverlayBody("q", () => 0);
+	aborted.set({ kind: "aborted", text: opaque });
+	ok(!PLAIN(aborted.render(200)).includes("abcdef0123"), PLAIN(aborted.render(200)));
+	const streaming = new SideQuestionOverlayBody("q", () => 0);
+	streaming.set({ kind: "streaming", text: opaque });
+	ok(PLAIN(streaming.render(200)).includes("abcdef0123"));
+});
