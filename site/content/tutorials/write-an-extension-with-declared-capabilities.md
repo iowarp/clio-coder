@@ -49,6 +49,9 @@ The install prints what the package would be allowed to do, then records the dig
 `/extensions` shows each package's state, generation, failures, commands, and confinement. From the shell, use `clio-coder extensions list`, `disable`, `enable`, and `remove`.
 :::
 
+::: capture cli-extension-validate
+:::
+
 ::: result What you should see
 The extension listed with its confinement, and its status in the session. This shows it loaded under the approved envelope. It does not make the code safe, so review what you install as you would any dependency.
 :::

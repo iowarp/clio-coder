@@ -300,6 +300,71 @@
 			"version": "0.6.0-dev",
 			"capturedAt": "2026-10-03",
 			"source": "Current main-checkout dist/ (v060 source HEAD a7505259128dcd00cd7d63f958aa67c6a89c70dd), private clio-coder gui --foreground --no-open server on an OS-assigned free port, isolated CLIO_CODER config/data/state/cache under the site-design scratch directory. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Live tasks used only target litellm, model dynamo/qwopus3.8-27b-flash@q5_k_m, one task at a time. Opened a separate private GUI server with an empty isolated profile; captured the setup welcome without entering credentials."
+		},
+		"tui-local-model-tools": {
+			"image": "assets/guides/tui-local-model-tools.webp",
+			"original": "assets/guides/tui-local-model-tools.png",
+			"width": 2154,
+			"height": 1692,
+			"label": "Local model",
+			"alt": "Terminal transcript in which Qwopus3.8 runs ls, reads package.json, and runs npm test with exit 0, then names npm test as the test command and reports one test passed and none failed.",
+			"caption": "Tool calls that really ran on a self-hosted model reached through a LiteLLM gateway, then an answer that matches the project.",
+			"interface": "Terminal",
+			"version": "0.6.8",
+			"capturedAt": "2026-11-04",
+			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. Chat: qwopus3.8-27b-flash-v2, a self-hosted model, through a LiteLLM gateway rather than a server on the capture machine. The guide's example prompt in a fixture Node project. Rows 8-51 at the end of the turn; the rows above them, which name the route, are cropped out."
+		},
+		"cli-slurm-doctor": {
+			"image": "assets/guides/cli-slurm-doctor.webp",
+			"original": "assets/guides/cli-slurm-doctor.png",
+			"width": 2154,
+			"height": 656,
+			"label": "No cluster yet",
+			"alt": "Terminal output: doctor --verbose reports clio-kit and the slurm MCP server as OK and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows five slurm tools; the skill install dry run plans skill:slurm-jobs.",
+			"caption": "The setup checks on a machine with no Slurm client: the server is declared, its tools are listed, and doctor says the scheduler is missing.",
+			"interface": "Terminal",
+			"version": "0.6.8",
+			"capturedAt": "2026-11-04",
+			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. No model and no cluster: clio-kit 2.11.1 installed with uv tool install, mcp.yaml as the guide gives it, sbatch and squeue absent. No job was submitted. The full screen for the three commands."
+		},
+		"cli-playbook-graph": {
+			"image": "assets/guides/cli-playbook-graph.webp",
+			"original": "assets/guides/cli-playbook-graph.png",
+			"width": 2154,
+			"height": 1728,
+			"label": "Waves",
+			"alt": "Terminal output: playbook validate sdlc reports 8 declared steps, 6 code steps, 4 agents and 14 plan steps; playbook graph lists waves 1 to 14 with each step's kind, agent or command, and scope, then the suite and review loops.",
+			"caption": "Validate and graph print the compiled plan for the built-in sdlc playbook without running a step.",
+			"interface": "Terminal",
+			"version": "0.6.8",
+			"capturedAt": "2026-11-04",
+			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. No model: the guide's commands.yaml in a fixture Node project. The full screen for the two commands."
+		},
+		"cli-telemetry-session": {
+			"image": "assets/guides/cli-telemetry-session.webp",
+			"original": "assets/guides/cli-telemetry-session.png",
+			"width": 2154,
+			"height": 618,
+			"label": "Session record",
+			"alt": "Terminal output: telemetry why-stopped shows a closed session with spend not measured, telemetry verify reports the session sealed with 66 lines in one segment, and telemetry cost by turn shows tokens as lower bounds and cost as not measured.",
+			"caption": "A gateway that reports no usage: token figures are lower bounds, cost reads not measured, and the record still verifies.",
+			"interface": "Terminal",
+			"version": "0.6.8",
+			"capturedAt": "2026-11-04",
+			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. Chat: qwopus3.8-27b-flash-v2 through a LiteLLM gateway. Commands run on the session from the local-model guide's prompt. cost --by turn is shown because the --by model table prints a private route name. The full screen for the three commands."
+		},
+		"cli-extension-validate": {
+			"image": "assets/guides/cli-extension-validate.webp",
+			"original": "assets/guides/cli-extension-validate.png",
+			"width": 2154,
+			"height": 1988,
+			"label": "Envelope",
+			"alt": "Terminal output: extensions init creates lint-status, validate prints its capability envelope with exec and net false, its SHA-256, and a passed registration check, and test reports one test passed.",
+			"caption": "Validate prints the capability envelope you are consenting to, before anything is installed.",
+			"interface": "Terminal",
+			"version": "0.6.8",
+			"capturedAt": "2026-11-04",
+			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. No model: the status template in a fixture project. The full screen for the three commands, ending at the test summary."
 		}
 	}
 }

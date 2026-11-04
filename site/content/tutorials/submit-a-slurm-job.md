@@ -48,6 +48,9 @@ clio-coder library install skill:slurm-jobs --project --dry-run
 clio-coder library install skill:slurm-jobs --project
 ```
 
+::: capture cli-slurm-doctor
+:::
+
 ## Submit one job
 
 ::: prompt Example

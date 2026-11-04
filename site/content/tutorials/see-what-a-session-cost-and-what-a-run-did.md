@@ -60,6 +60,9 @@ clio-coder telemetry share --session <id> --profile content-free --out report.ta
 `share` writes an archive and uploads nothing. `content-free` is the default profile, with structural records and no objects or content. `structural` adds objects that hold structure, such as prompt manifests. Read the dry run before you send anything.
 :::
 
+::: capture cli-telemetry-session
+:::
+
 ::: result What you should see
 Figures labelled by provenance, and a `verify` result that names any gap. A clean verify shows the journals are internally consistent. The chain is unsigned, so it does not show who wrote them, and it says nothing about whether the work was correct.
 :::

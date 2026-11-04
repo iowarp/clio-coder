@@ -39,6 +39,9 @@ Read the build configuration and name the command that runs the tests. Run it an
 Tool calls that really run, followed by an answer that matches your project. If the model writes out a command as text and never calls a tool, this model or server is not handling tool calls correctly, so try another before going further.
 :::
 
+::: capture tui-local-model-tools
+:::
+
 ## Keep the work on your machine
 
 A local chat route does not by itself make the whole session local.

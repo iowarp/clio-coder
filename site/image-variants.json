@@ -474,6 +474,131 @@
       }
     ]
   },
+  "assets/guides/tui-local-model-tools.webp": {
+    "width": 2154,
+    "height": 1692,
+    "sha256": "9edb8b604f363302f89096c753eaffa6c358f1afb916cdf1843410b4bac2afd9",
+    "variants": [
+      {
+        "path": "assets/responsive/tui-local-model-tools-640.webp",
+        "width": 640,
+        "height": 503,
+        "sha256": "dfbd1dcaa62888fc1e337ccd4db8af4ad61d716a160127163d081f4e12e40dd7"
+      },
+      {
+        "path": "assets/responsive/tui-local-model-tools-1024.webp",
+        "width": 1024,
+        "height": 804,
+        "sha256": "d3574b80dd88bcb44aa9ee5bc036b2ad252741a4f34855be46eef2121ae7abc9"
+      },
+      {
+        "path": "assets/responsive/tui-local-model-tools-1600.webp",
+        "width": 1600,
+        "height": 1257,
+        "sha256": "d88d4c52926ead8a2f833796154a174cfbebaada9e6e4c31658061428804ca1c"
+      }
+    ]
+  },
+  "assets/guides/cli-slurm-doctor.webp": {
+    "width": 2154,
+    "height": 656,
+    "sha256": "1d24eaaf24c6c17a2ec1fa8f38667d5483b70ef1be60e2fcafceba991f151146",
+    "variants": [
+      {
+        "path": "assets/responsive/cli-slurm-doctor-640.webp",
+        "width": 640,
+        "height": 195,
+        "sha256": "7ef77f74d73b233ef40c8be2460e65235db25cb4bc95302aa1e76769c6264d8d"
+      },
+      {
+        "path": "assets/responsive/cli-slurm-doctor-1024.webp",
+        "width": 1024,
+        "height": 312,
+        "sha256": "ef3e845ed0576b58e203fe5e999cb40f53cc0a49fd2a665f3b92f95d8b2351aa"
+      },
+      {
+        "path": "assets/responsive/cli-slurm-doctor-1600.webp",
+        "width": 1600,
+        "height": 487,
+        "sha256": "c30f0398a64ac2b7d26cb61bf7b49add053ef2a1fd675ed52c458ca1fc1ce6db"
+      }
+    ]
+  },
+  "assets/guides/cli-playbook-graph.webp": {
+    "width": 2154,
+    "height": 1728,
+    "sha256": "0110407b2b181c1fa1c9508b139fcdd69a969d50836fffc3fb77a3f74cb93bc1",
+    "variants": [
+      {
+        "path": "assets/responsive/cli-playbook-graph-640.webp",
+        "width": 640,
+        "height": 513,
+        "sha256": "75750f1a88416574e0bb2bdbf05cac72d3025bd908ffd179be438ef517801d9f"
+      },
+      {
+        "path": "assets/responsive/cli-playbook-graph-1024.webp",
+        "width": 1024,
+        "height": 821,
+        "sha256": "bdffe7622b76d9eb49d21e767ec610cabb1027e6dd68dc989109a24707b22c49"
+      },
+      {
+        "path": "assets/responsive/cli-playbook-graph-1600.webp",
+        "width": 1600,
+        "height": 1284,
+        "sha256": "bcbd19cd23f6037a7c6abe7cec300567448ee397fa825938e14cefecf28e49a0"
+      }
+    ]
+  },
+  "assets/guides/cli-telemetry-session.webp": {
+    "width": 2154,
+    "height": 618,
+    "sha256": "f4fadcd7f05fd95e519d0110c12e0f84d9fdc741c7c158276c660b80d07246d1",
+    "variants": [
+      {
+        "path": "assets/responsive/cli-telemetry-session-640.webp",
+        "width": 640,
+        "height": 184,
+        "sha256": "11b42e6f0c95b56491473813f239a67293f1ccb60673fd6cf563b830f19dd7ac"
+      },
+      {
+        "path": "assets/responsive/cli-telemetry-session-1024.webp",
+        "width": 1024,
+        "height": 294,
+        "sha256": "0b3c78bab8892ab80f66c4edd95d048d2d2b83e3d0f8c8f24a32f3fd643bf2ac"
+      },
+      {
+        "path": "assets/responsive/cli-telemetry-session-1600.webp",
+        "width": 1600,
+        "height": 459,
+        "sha256": "054608e632b6449971d46802f4d5724dfcdd1f77e237a249880b493c16210a09"
+      }
+    ]
+  },
+  "assets/guides/cli-extension-validate.webp": {
+    "width": 2154,
+    "height": 1988,
+    "sha256": "7b42e28f3a87e0d629cd70f2a6a22e40ea24cd77105d129a2f28dea2fc9f01f1",
+    "variants": [
+      {
+        "path": "assets/responsive/cli-extension-validate-640.webp",
+        "width": 640,
+        "height": 591,
+        "sha256": "d13245d9c123ff958628d207e1322b33f0abcf5bc42e7d138cd94922d6b79bfe"
+      },
+      {
+        "path": "assets/responsive/cli-extension-validate-1024.webp",
+        "width": 1024,
+        "height": 945,
+        "sha256": "114579f79d1c1d076eea855f60a1b9ccf93ab87ee08a815d746e65bade306648"
+      },
+      {
+        "path": "assets/responsive/cli-extension-validate-1600.webp",
+        "width": 1600,
+        "height": 1477,
+        "sha256": "ff952eda60fa365ca5e316a7ce4ba2d55b7af060573a493828627734b69e9aed"
+      }
+    ]
+  },
   "assets/gui-task.webp": {
     "width": 2880,
     "height": 1920,

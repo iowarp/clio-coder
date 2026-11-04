@@ -40,7 +40,7 @@
     "time": "8 min",
     "author": "The Clio Coder team",
     "source": "run-a-playbook-and-land-it.md",
-    "basis": "Documented workflow",
+    "basis": "Documented workflow with 0.6.8 captures",
     "versionScope": "0.6.8"
   },
   {
@@ -62,7 +62,7 @@
     "time": "6 min",
     "author": "The Clio Coder team",
     "source": "see-what-a-session-cost-and-what-a-run-did.md",
-    "basis": "Documented workflow",
+    "basis": "Documented workflow with 0.6.8 captures",
     "versionScope": "0.6.8"
   },
   {
@@ -156,7 +156,7 @@
     "time": "8 min",
     "author": "The Clio Coder team",
     "source": "write-an-extension-with-declared-capabilities.md",
-    "basis": "Documented workflow",
+    "basis": "Documented workflow with 0.6.8 captures",
     "versionScope": "0.6.8"
   },
   {
@@ -227,7 +227,7 @@
     "time": "5 min",
     "source": "run-on-a-local-model.md",
     "author": "The Clio Coder team",
-    "basis": "Documented workflow",
+    "basis": "Documented workflow with 0.6.8 captures",
     "versionScope": "0.6.8",
     "interfaces": [
       "Terminal"
@@ -241,7 +241,7 @@
     "time": "5 min",
     "source": "submit-a-slurm-job.md",
     "author": "The Clio Coder team",
-    "basis": "Documented workflow",
+    "basis": "Documented workflow with 0.6.8 captures",
     "versionScope": "0.6.8",
     "interfaces": [
       "Terminal"

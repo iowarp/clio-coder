@@ -64,6 +64,9 @@ clio-coder fleet land <run id> --yes --plan <id>
 The first command lists the task branches finished runs kept. The second previews one: commits, changes, destination, whether it fast-forwards, and any conflict. It changes nothing. The third lands exactly that preview. Add `--squash` for one commit instead of the history.
 :::
 
+::: capture cli-playbook-graph
+:::
+
 ::: result What you should see
 A summary with each loop's terminal reason and any steps that need your decision, then commits on your branch after you land. A finished run shows the playbook ran and its checks passed. It does not show the change is right, so read the diff.
 :::
