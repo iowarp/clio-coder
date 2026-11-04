@@ -1526,6 +1526,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let providerRetryAttempts = 0;
 	const recovery = createTurnRecovery({
 		auth: deps.providers.auth,
+		isYolo: () => (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo",
 		turnSignal: () => submitOwner?.signal,
 		turnIdentity: () => submitGeneration,
 		state,
@@ -2592,6 +2593,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnToolNames = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
 				state.pendingInRunContinuation = false;
+				state.turnStop = null;
 				middlewareToolChoice.reset();
 				if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
 				const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;

@@ -157,6 +157,40 @@ export function isRetryableRecoveryFailure(failure: RecoveryFailure): boolean {
 	return failure.kind === "connection" || failure.kind === "model-loading" || failure.kind === "transient-provider";
 }
 
+/** The longest one turn at yolo waits out a provider telling it to back off (#445). */
+export const RATE_LIMIT_WAIT_BUDGET_MS = 3_600_000;
+
+const RATE_LIMIT_PATTERN =
+	/rate.?limit|too many requests|(?<![a-z0-9.$])429(?![a-z0-9])|overloaded|server_busy|model is at capacity|high demand/i;
+
+/** A provider asking for time. Quota and billing exhaustion stay terminal, because waiting does not clear them. */
+export function isRateLimitErrorMessage(errorMessage: string | null | undefined): boolean {
+	if (!errorMessage || errorMessage.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return false;
+	if (isHarmonyTerminalFailure(errorMessage)) return false;
+	return isEngineRetryableAssistantError(errorMessage) && RATE_LIMIT_PATTERN.test(errorMessage);
+}
+
+/** The provider's own wait for this failure, from the Anthropic response facts or the error text; null when it named none. */
+export function failureRetryAfterMs(message: unknown, errorMessage: string | null | undefined): number | null {
+	const observed = (message as { anthropicResponse?: { retryAfterSeconds?: unknown } } | null | undefined)
+		?.anthropicResponse?.retryAfterSeconds;
+	if (typeof observed === "number" && Number.isFinite(observed) && observed >= 0) return observed * 1000;
+	const named = errorMessage?.match(
+		/(?:retry[- ]after[:=\s]+|try again in\s+)(\d+(?:\.\d+)?)\s*(ms|milliseconds?|m|mins?|minutes?|h|hours?)?/i,
+	);
+	if (!named?.[1]) return null;
+	const unit = (named[2] ?? "s").toLowerCase();
+	const scale =
+		unit.startsWith("ms") || unit.startsWith("milli")
+			? 1
+			: unit.startsWith("h")
+				? 3_600_000
+				: unit.startsWith("m")
+					? 60_000
+					: 1000;
+	return Number(named[1]) * scale;
+}
+
 /**
  * Compute the delay before attempt `attempt` (1-indexed). Matches pi-mono's
  * formula `baseDelayMs * 2 ** (attempt - 1)`, then clamps to `maxDelayMs` so

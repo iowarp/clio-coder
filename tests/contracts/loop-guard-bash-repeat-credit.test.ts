@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createLoopState, hashToolCall, observe } from "../../src/domains/safety/loop-detector.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { createLoopState, hashToolCall, observe } from "../../src/domains/safety/loop-detector.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 
 /**
