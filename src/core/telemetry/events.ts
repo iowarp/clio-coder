@@ -44,6 +44,7 @@ import type {
 	SessionTurnSwitchedPayload,
 	ToolBudgetExceededPayload,
 	TurnAbortedPayload,
+	TurnContinuedPayload,
 } from "./live-events.js";
 import type { CallSettled, ObjectRef } from "./schemas.js";
 import * as S from "./schemas.js";
@@ -414,6 +415,12 @@ export const EVENTS = {
 		cc: "content-free",
 		scope: "session",
 		project: (p: JobClockResumedPayload) => pick(p, ["jobId", "boundMs"]),
+	}),
+	"turn.continued": journal(S.TurnContinuedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		scope: "session",
+		project: (p: TurnContinuedPayload) => pick(p, ["cause", "attempt", "cap", "jobId"]),
 	}),
 	"session.eggs_changed": live<{ sessionId: string | null; active: readonly string[] }>(),
 	"session.started": live<SessionStartPayload>(),

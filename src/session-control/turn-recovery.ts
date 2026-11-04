@@ -12,7 +12,10 @@ import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../do
 import {
 	classifyRecoveryFailure,
 	createRetryCountdown,
+	failureRetryAfterMs,
+	isRateLimitErrorMessage,
 	isRetryableRecoveryFailure,
+	RATE_LIMIT_WAIT_BUDGET_MS,
 	recoveryRetryDelayMs,
 } from "../domains/session/retry.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
@@ -52,6 +55,8 @@ export interface TurnRecoveryDeps {
 	persistence: TurnPersistence;
 	context: TurnContext;
 	retrySettings: () => RetrySettings;
+	/** Autonomy yolo waits out a rate limit, because nobody is there to send the turn again (#445). */
+	isYolo?: () => boolean;
 	markPersistedUserEcho: (text: string, prompt: () => Promise<void>) => Promise<void>;
 	emitRetryStatus: (status: RetryStatusPayload) => void;
 	emitFailureMessage: (message: AgentMessage) => void;
@@ -74,6 +79,15 @@ export interface TurnRecovery {
 	): Promise<boolean>;
 	ensureFailureVisibleAndPersisted(failure: TerminalAssistantFailure): void;
 	cancelRetryCountdown(): void;
+	/** A rate limit litellm reads as terminal is still worth waiting for at yolo, however the failure arrived (#445). */
+	waitsOutRateLimit(failure: RecoveryFailure): boolean;
+	/** Sit out a failed turn's delay before its yolo continuation, in the countdown Esc already cancels (#445). */
+	waitBeforeContinuation(
+		delayMs: number,
+		attempt: number,
+		maxAttempts: number,
+		reason: string,
+	): Promise<"done" | "cancelled">;
 }
 
 /**
@@ -214,6 +228,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		});
 	};
 
+	const waitsOutRateLimitMessage = (errorMessage: string | null | undefined): boolean =>
+		deps.isYolo?.() === true && isRateLimitErrorMessage(errorMessage);
+	const waitsOutRateLimit = (failure: RecoveryFailure): boolean =>
+		failure.kind === "terminal-provider" && waitsOutRateLimitMessage(failure.message);
+
 	/**
 	 * Shared compact-and-retry worker used by both the post-resolve
 	 * (state-based) and catch (throw-based) overflow paths in `submit`.
@@ -250,6 +269,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				compacted = await context.runAutoCompact(agentRuntime, true, undefined, "overflow");
 			} catch (compactErr) {
 				if (cancelled()) return;
+				state.turnStop = {
+					cause: "compaction",
+					reason: compactErr instanceof Error ? compactErr.message : String(compactErr),
+				};
 				deps.emitNotice(
 					`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
 				);
@@ -389,24 +412,47 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		};
 		// Auth recovery has its own one-shot budget even when transient retries are disabled (#427).
 		if (classified.kind === "auth") return retryAuth(initialFailure);
-		if (agentRuntime.runtimeId === "litellm" && !isRetryableRecoveryFailure(classified)) {
+		const retryable = (failure: RecoveryFailure): boolean =>
+			isRetryableRecoveryFailure(failure) || waitsOutRateLimit(failure);
+		const recordRetriesExhausted = (errorMessage: string | null | undefined, message?: unknown): void => {
+			const retryAfterMs = failureRetryAfterMs(message, errorMessage);
+			state.turnStop = {
+				cause: "retries_exhausted",
+				reason: errorMessage ?? "provider retries ran out",
+				...(retryAfterMs === null ? {} : { retryAfterMs }),
+			};
+		};
+		if (agentRuntime.runtimeId === "litellm" && !retryable(classified)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
 			return true;
 		}
 		const settings = deps.retrySettings();
 		if (!settings.enabled || settings.maxRetries <= 0) return false;
-		if (!isRetryableRecoveryFailure(classified)) return false;
+		if (!retryable(classified)) return false;
 
 		let failure = initialFailure;
-		for (let attempt = 1; attempt <= settings.maxRetries; attempt += 1) {
+		let waitedMs = 0;
+		// A rate limit at yolo is bounded by time spent waiting, everything else by attempts.
+		const mayAttempt = (attempt: number, errorMessage: string | null | undefined): boolean =>
+			waitsOutRateLimitMessage(errorMessage) ? waitedMs < RATE_LIMIT_WAIT_BUDGET_MS : attempt <= settings.maxRetries;
+		for (let attempt = 1; mayAttempt(attempt, failure.errorMessage); attempt += 1) {
 			ensureFailureVisibleAndPersisted(failure);
 			pruneFailedAssistantFromContext(agentRuntime.agent);
 
+			const backoffMs = recoveryRetryDelayMs(attempt, settings, classified);
+			const delayMs = waitsOutRateLimitMessage(failure.errorMessage)
+				? Math.min(
+						Math.max(backoffMs, failureRetryAfterMs(failure.message, failure.errorMessage) ?? 0),
+						RATE_LIMIT_WAIT_BUDGET_MS - waitedMs,
+					)
+				: backoffMs;
+			waitedMs += delayMs;
+			const maxAttempts = Math.max(attempt, settings.maxRetries);
 			const scheduled: RetryStatusPayload = {
 				phase: "scheduled",
 				attempt,
-				maxAttempts: settings.maxRetries,
-				delayMs: recoveryRetryDelayMs(attempt, settings, classified),
+				maxAttempts,
+				delayMs,
 				errorMessage: failure.errorMessage,
 			};
 			recordRetryStatus(scheduled);
@@ -416,7 +462,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				recordRetryStatus({
 					phase: "cancelled",
 					attempt,
-					maxAttempts: settings.maxRetries,
+					maxAttempts,
 					errorMessage: failure.errorMessage,
 				});
 				pruneFailedAssistantFromContext(agentRuntime.agent);
@@ -427,7 +473,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				{
 					phase: "retrying",
 					attempt,
-					maxAttempts: settings.maxRetries,
+					maxAttempts,
 					errorMessage: failure.errorMessage,
 				},
 				false,
@@ -450,13 +496,14 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				if (classified.kind === "auth") {
 					if (await retryAuth({ stopReason: "error", errorMessage: message })) return true;
 				}
-				if (!isRetryableRecoveryFailure(classified) || attempt >= settings.maxRetries) {
+				if (!retryable(classified) || !mayAttempt(attempt + 1, message)) {
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt,
-						maxAttempts: settings.maxRetries,
+						maxAttempts,
 						errorMessage: message,
 					});
+					if (retryable(classified)) recordRetriesExhausted(message);
 					// The exhausted status already exposes this failure and retains its full
 					// diagnostic. A second raw notice bypasses bounded error presentation.
 					pruneFailedAssistantFromContext(agentRuntime.agent);
@@ -478,7 +525,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				recordRetryStatus({
 					phase: "recovered",
 					attempt,
-					maxAttempts: settings.maxRetries,
+					maxAttempts,
 				});
 				return true;
 			}
@@ -489,7 +536,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			ensureFailureVisibleAndPersisted(nextFailure);
 			classified = classify(nextFailure, agentRuntime.agent.state.messages.slice(attemptStart));
 			if (classified.kind === "auth" && (await retryAuth(nextFailure))) return true;
-			if (!isRetryableRecoveryFailure(classified)) {
+			if (!retryable(classified)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}
@@ -502,6 +549,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			maxAttempts: settings.maxRetries,
 			errorMessage: failure.errorMessage,
 		});
+		recordRetriesExhausted(failure.errorMessage, failure.message);
 		pruneFailedAssistantFromContext(agentRuntime.agent);
 		return true;
 	};
@@ -512,6 +560,12 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		ensureFailureVisibleAndPersisted,
 		cancelRetryCountdown(): void {
 			retryCountdown?.cancel();
+		},
+		waitsOutRateLimit,
+		waitBeforeContinuation(delayMs, attempt, maxAttempts, reason) {
+			const status: RetryStatusPayload = { phase: "scheduled", attempt, maxAttempts, delayMs, errorMessage: reason };
+			recordRetryStatus(status);
+			return waitForRetryCountdown(status);
 		},
 	};
 }

@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { JobClockExpired } from "../../core/job-types.js";
+import {
+	continuationCountsAgainstCap,
+	JOB_FAILED_POLL_WAKE,
+	JobClockExpired,
+	TURN_CONTINUATION_CAP,
+	type TurnContinuationCause,
+	turnContinuationDelayMs,
+} from "../../core/job-types.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import {
 	clipJobText,
@@ -40,8 +47,6 @@ interface LiveExecution {
 	promise: Promise<void>;
 }
 const POLL_MS = 250;
-/** One job, one cause, one continuation: a turn that dies on the clock twice is not a slow turn (#445). */
-const JOB_CLOCK_RESUME_CAP = 1;
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -122,14 +127,42 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		return `execution timeout after ${bound}ms (${job.spec.timeoutDefaulted === true ? "the job's default" : "the job's timeout_ms"})`;
 	}
 	/**
-	 * A later occurrence already continues a timed-out run, so this answers only
+	 * A later occurrence already continues a stopped run, so this answers only
 	 * for the turn nothing would pick up: a main job's final occurrence or a
-	 * follow-up. An explicit timeout is a bound someone chose and never resumes.
+	 * follow-up. An explicit timeout is a bound someone chose and never resumes,
+	 * and a person's cancel is forced without a clock, so it never does either.
 	 */
-	function clockResumeDue(job: JobRecord, execution: LiveExecution, evidence: JobEvidence): boolean {
-		if (execution.clockExpired !== true || evidence.cleanupUnresolved) return false;
-		if (job.spec.timeoutDefaulted !== true || (job.clockResumes ?? 0) >= JOB_CLOCK_RESUME_CAP) return false;
-		if (job.generation !== execution.generation) return false;
+	function pollFailed(evidence: JobEvidence): boolean {
+		return evidence.outcome === "failed" || evidence.outcome === "timed_out";
+	}
+	function continuationCause(
+		job: JobRecord,
+		execution: LiveExecution,
+		evidence: JobEvidence,
+		result: JobRunResult,
+	): TurnContinuationCause | null {
+		if (evidence.cleanupUnresolved || job.generation !== execution.generation) return null;
+		if (execution.kind === "run" && job.spec.runner.kind === "command") {
+			// The turn that made this job ended waiting on its match, so without this nothing ever wakes it (#445).
+			const waited =
+				job.spec.until !== null &&
+				job.spec.onMatch.kind === "main_turn" &&
+				job.state === "active" &&
+				(execution.forced === null || execution.clockExpired === true) &&
+				options.continuation?.allowed(job) === true;
+			if (!waited) return null;
+			if (job.spec.count !== null && job.starts >= job.spec.count) return "job_exhausted";
+			return pollFailed(evidence) && (job.failedPolls ?? 0) + 1 >= JOB_FAILED_POLL_WAKE && job.pollFailureWoken !== true
+				? "polls_failing"
+				: null;
+		}
+		let cause: TurnContinuationCause | null = null;
+		if (execution.clockExpired === true) cause = job.spec.timeoutDefaulted === true ? "clock" : null;
+		else if (execution.forced !== null) cause = null;
+		else if (result.stoppedBy !== undefined) cause = result.stoppedBy;
+		else if (evidence.errorClass === "infrastructure") cause = "failure";
+		if (cause === null) return null;
+		if (continuationCountsAgainstCap(cause) && (job.clockResumes ?? 0) >= TURN_CONTINUATION_CAP) return null;
 		const uncontinued =
 			execution.kind === "delivery"
 				? job.delivery?.kind === "main_turn"
@@ -137,20 +170,38 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					job.spec.runner.kind === "main" &&
 					job.spec.count !== null &&
 					job.starts >= job.spec.count;
-		return uncontinued && options.clockResume?.allowed(job) === true;
+		return uncontinued && options.continuation?.allowed(job) === true ? cause : null;
 	}
-	function queueClockResume(draft: JobRecord, occurrenceId: string): void {
-		draft.clockResumes = (draft.clockResumes ?? 0) + 1;
+	const CONTINUATION_REASON: Record<TurnContinuationCause, string> = {
+		clock: "the job's default timeout ended it",
+		failure: "it failed",
+		tool_budget: "it reached the per-turn tool budget",
+		loop_guard: "the loop guard locked its tools",
+		retries_exhausted: "provider retries ran out",
+		compaction: "context compaction failed",
+		job_exhausted: "it ran out of its starts before its condition matched",
+		polls_failing: "its polls keep failing",
+	};
+	function queueContinuation(
+		draft: JobRecord,
+		occurrenceId: string,
+		cause: TurnContinuationCause,
+		evidence: JobEvidence,
+	): void {
+		const counted = continuationCountsAgainstCap(cause);
+		if (counted) draft.clockResumes = (draft.clockResumes ?? 0) + 1;
+		const detail = cause === "failure" && evidence.summary ? `: ${evidence.summary.slice(0, 200)}` : "";
 		draft.delivery = {
-			id: `${draft.id}:clock-resume:${draft.clockResumes}`,
+			id: `${draft.id}:clock-resume:${counted ? draft.clockResumes : randomUUID()}`,
 			occurrenceId,
 			kind: "main_turn",
 			state: "pending",
 			createdAt: now(),
 			startedAt: null,
 			endedAt: null,
-			reason: null,
+			reason: `${CONTINUATION_REASON[cause]}${detail}`,
 			evidence: null,
+			continuation: cause,
 		};
 	}
 	function abortLive(id: string, reason: string, outcome: JobEvidence["outcome"]): void {
@@ -342,7 +393,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			JSON.stringify(previous.json) === JSON.stringify(evidence.json)
 		)
 			evidence.outcome = "noop";
-		const resuming = clockResumeDue(job, execution, evidence);
+		const resuming = continuationCause(job, execution, evidence, result);
 		commit(job, (draft) => {
 			if (!evidence.cleanupUnresolved) draft.cancelRequested = false;
 			draft.costUsd = draft.costUsd === null || evidence.costUsd === null ? null : draft.costUsd + evidence.costUsd;
@@ -361,7 +412,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				if (draft.reason === "condition") draft.state = "terminal";
 				draft.pendingReason = null;
 				if (evidence.cleanupUnresolved) blockUnresolvedCleanup(draft);
-				else if (resuming) queueClockResume(draft, draft.delivery.occurrenceId);
+				else if (resuming !== null) queueContinuation(draft, draft.delivery.occurrenceId, resuming, evidence);
 				return;
 			}
 			if (!draft.active || draft.active.id !== execution.id) throw new Error("job: mismatched occurrence settlement");
@@ -370,6 +421,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			draft.active = null;
 			// Evidence and counters cross one durable commit barrier (#411).
 			draft.settled += 1;
+			if (draft.spec.runner.kind === "command")
+				draft.failedPolls = pollFailed(evidence) ? (draft.failedPolls ?? 0) + 1 : 0;
 			if (evidence.cleanupUnresolved) {
 				blockUnresolvedCleanup(draft);
 				return;
@@ -403,7 +456,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				draft.reason = "count";
 				draft.pending = null;
 				draft.nextDueAt = null;
-				if (resuming) queueClockResume(draft, occurrence.id);
+				if (resuming !== null) queueContinuation(draft, occurrence.id, resuming, evidence);
 			} else if (draft.generation !== execution.generation) {
 				return;
 			} else if (evidence.errorClass === "permission") {
@@ -414,10 +467,13 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			} else if (evidence.errorClass === "infrastructure" || evidence.outcome === "timed_out") {
 				draft.consecutiveFailures += 1;
 				draft.pending = null;
-				if (draft.consecutiveFailures >= 3) {
+				// At yolo nobody is there to resume it, so it backs off until its count or deadline ends it (#445).
+				if (draft.consecutiveFailures >= 3 && options.continuation?.allowed(draft) !== true) {
 					draft.state = "paused";
 					draft.nextDueAt = null;
-					draft.pendingReason = "three consecutive infrastructure failures";
+					// The operator reads this after the fact, so it carries the failure and not only the count (#445).
+					const last = evidence.summary.slice(0, 200);
+					draft.pendingReason = `three consecutive infrastructure failures${last ? `; last: ${last}` : ""}`;
 				} else if (draft.state === "active") {
 					const retryAfter =
 						typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs)
@@ -428,11 +484,22 @@ export function createJobController(options: JobControllerOptions): JobControlle
 						Math.max(draft.spec.intervalMs, Math.min(300_000, 1000 * 2 ** (draft.consecutiveFailures - 1)), retryAfter);
 				}
 			} else draft.consecutiveFailures = 0;
+			// The job stays active behind this wake. Only one execution per job runs at a time, so polls wait for it (#445).
+			if (resuming === "polls_failing" && draft.state === "active") {
+				draft.pollFailureWoken = true;
+				queueContinuation(draft, occurrence.id, resuming, evidence);
+			}
 		});
 		// The commit is the authority: a branch that returned early queued nothing to announce.
-		if (resuming && (current(id).clockResumes ?? 0) > (job.clockResumes ?? 0)) {
+		const queued = current(id).delivery;
+		if (resuming !== null && queued?.continuation !== undefined && queued.id !== job.delivery?.id) {
+			if (resuming === "failure") {
+				const attempt = current(id).clockResumes ?? 1;
+				retryAt.set(id, spanNow() + turnContinuationDelayMs(attempt, result.retryAfterMs));
+				schedule();
+			}
 			try {
-				options.clockResume?.resumed(current(id), jobExecutionTimeoutMs(job.spec, execution.kind));
+				options.continuation?.resumed(current(id), jobExecutionTimeoutMs(job.spec, execution.kind), resuming);
 			} catch (error) {
 				report(error);
 			}
@@ -512,7 +579,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					report(settleError);
 				}
 				live.delete(id);
-				retryAt.set(id, spanNow() + POLL_MS);
+				// Settlement may have queued a longer wait for a failed continuation; the poll must not shorten it (#445).
+				retryAt.set(id, Math.max(retryAt.get(id) ?? 0, spanNow() + POLL_MS));
 				schedule();
 			}
 		})();

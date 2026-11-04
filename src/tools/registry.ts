@@ -3198,6 +3198,11 @@ function buildToolHookInput(
 			metadata.resultFingerprint = createHash("sha256").update(result.output).digest("hex");
 			metadata.resultBytes = Buffer.byteLength(result.output, "utf8");
 		}
+		// Unlike the stagnation identity this covers a failing result too: a poll
+		// that exits nonzero while it waits still reports new information (#445).
+		const outcomeText = result.kind === "ok" ? result.output : result.kind === "error" ? result.message : null;
+		if (typeof outcomeText === "string")
+			metadata.outcomeFingerprint = createHash("sha256").update(outcomeText).digest("hex");
 	}
 
 	const input: MiddlewareHookInput = {
