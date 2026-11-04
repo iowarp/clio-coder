@@ -1,14 +1,17 @@
 [
   {
     "slug": "system-one-decisions",
-    "title": "Bring a fast decision model with System One",
-    "description": "Name one route to give the agent a consult tool, a screen beside the safety judge, and optional steering triage, with limits stated up front.",
-    "category": "Decision engines",
-    "time": "5 min",
+    "title": "Can a small decision model improve an agent's work?",
+    "description": "System One's open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment.",
+    "category": "Decision models",
+    "time": "12 min",
     "author": "The Clio Coder team",
     "source": "system-one-decisions.md",
-    "basis": "Documented workflow",
+    "basis": "Small samples; first experiment not yet run",
     "versionScope": "0.6.8",
-    "status": "Experimental, off by default"
+    "status": "Open question. System One is off by default.",
+    "interfaces": [
+      "Terminal"
+    ]
   }
 ]
