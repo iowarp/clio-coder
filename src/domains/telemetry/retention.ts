@@ -193,6 +193,7 @@ async function readSessionTelemetry(
 		// Interior damage or a record this version cannot read may hide a reference (R12).
 		if (scan.corruptOffset !== null) session.partial = true;
 		for (const row of scan.rows) {
+			// A retired kind hides nothing a reader still needs, and the objects only it cited become unreferenced.
 			if (row.kind === "skipped") {
 				session.partial = true;
 				continue;

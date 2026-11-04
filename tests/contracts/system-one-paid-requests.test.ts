@@ -1,25 +1,21 @@
-import { match, ok, rejects, strictEqual } from "node:assert/strict";
+import { ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
-import anthropicRuntime from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import { foregroundStreamUsage } from "../../src/domains/providers/endpoint-capacity.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
-import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
-import type { OneShotPort } from "../../src/domains/system-one/index.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
-import { createRunner } from "../../src/domains/system-one/runner.js";
-import type { DecisionEngine, DecisionRecord, SiteDefinition } from "../../src/domains/system-one/types.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
-import { createSystemOneRequestAdmission } from "../../src/entry/system-one-host.js";
+import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 
 /**
@@ -79,7 +75,7 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 	const telemetry: Pick<TelemetryContract, "acquireTelemetrySession"> = {
 		acquireTelemetrySession: journals.acquire,
 	};
-	const admit = createSystemOneRequestAdmission({
+	const admit = createSideRequestAdmission({
 		providers: { getTarget: (id) => (id === target.id ? target : null) },
 		scheduling: scheduling as SchedulingContract,
 		telemetry: telemetry as unknown as TelemetryContract,
@@ -186,30 +182,34 @@ describe("System One paid requests: admission and accounting", () => {
 	it("admits each HTTP request, the schema retry included, and charges the usage of a decision that failed", async () => {
 		const target = paidTarget("llamacpp", "http://accounting.test");
 		const { admit, charges: journaled, admitted, calls } = ledger(target);
-		const bodies = fakeFetch(async (body) =>
-			body.response_format !== undefined
+		const slotsHeld: number[] = [];
+		const bodies = fakeFetch(async (body) => {
+			slotsHeld.push(Object.keys(foregroundStreamUsage()).length);
+			return body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
-				: json(200, { choices: [{ message: { content: "I cannot say" } }], usage: REPORTED }),
-		);
+				: json(200, { choices: [{ message: { content: "I cannot say" } }], usage: REPORTED });
+		});
 		const engine = createLlmEngine({
 			name: "paid",
 			target,
 			runtime: llamacppRuntime,
 			model: null,
-			mode: "answer",
 			host: { ...host, admitLlmRequest: admit },
 		});
 		await rejects(
 			engine.decide({ state: { task: "t" }, questions: urgent, signal: new AbortController().signal }),
-			/no usable answer/u,
+			/names no model/u,
 		);
-		// Five votes; the first went out once with the schema and once without it.
-		strictEqual(bodies.length, 6);
+		// One batch request, which went out once with the schema and once without it.
+		strictEqual(bodies.length, 2);
+		// Each went out holding a foreground slot, which is what preempts background memory, and none outlives the ask.
+		ok(slotsHeld.every((held) => held === 1));
+		strictEqual(Object.keys(foregroundStreamUsage()).length, 0);
 		ok(bodies[0]?.response_format !== undefined);
 		strictEqual(admitted(), bodies.length, "every request was admitted, the retry included");
 		// The rejected request reported no usage and is recorded as unmetered; every answered one is charged.
 		const charges = await journaled();
-		strictEqual(charges.length, 6);
+		strictEqual(charges.length, 2);
 		const unmetered = charges.filter((charge) => charge.pricedBy === "none");
 		strictEqual(unmetered.length, 1);
 		assertUnmetered(unmetered[0]);
@@ -217,7 +217,7 @@ describe("System One paid requests: admission and accounting", () => {
 		const settled = await calls();
 		strictEqual(settled.length, bodies.length);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
-		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 5);
+		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 1);
 		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.ctx.agent.role === "system-one"));
 	});
 
@@ -260,136 +260,4 @@ describe("System One paid requests: admission and accounting", () => {
 		assertUnmetered(charges[0]);
 		assertCharged(charges[1]);
 	});
-});
-
-describe("System One paid requests: a ceiling refusal", () => {
-	const site: SiteDefinition<string, string> = {
-		id: "turn",
-		version: "test-v1",
-		deadlineMs: 10_000,
-		state: (object) => ({ task: object }),
-		questions: () => ({ ...urgent, blocked: yesNo("Blocked?", "it is", "it is not") }),
-		read: () => "read",
-		summarize: (value) => ({ value }),
-	};
-
-	/**
-	 * The first request is the scheduler's warm one and runs alone. After it the
-	 * second is admitted and hangs, and every later admission waits for that hang
-	 * before the ceiling refuses it. The hung request ignores its abort and
-	 * settles only on `release`, so the decision cannot be waiting on it.
-	 */
-	function hangThenRefuse() {
-		let inFlight!: () => void;
-		const hanging = new Promise<void>((resolve) => {
-			inFlight = resolve;
-		});
-		let release!: () => void;
-		const released = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const state = { hung: undefined as AbortSignal | undefined, released: false, sent: 0 };
-		const gate = async (admission: number): Promise<void> => {
-			if (admission <= 2) return;
-			await hanging;
-			throw new SessionCostCeilingError(1, 1);
-		};
-		const hang = async (signal: AbortSignal | undefined): Promise<void> => {
-			state.hung = signal;
-			inFlight();
-			await released;
-		};
-		return {
-			state,
-			gate,
-			hang,
-			release: () => {
-				state.released = true;
-				release();
-			},
-		};
-	}
-
-	const wires: Array<[string, (scenario: ReturnType<typeof hangThenRefuse>) => DecisionEngine]> = [
-		[
-			"HTTP",
-			(scenario) => {
-				const target = paidTarget("llamacpp", "http://refusal.test");
-				const { admit } = ledger(target, scenario.gate);
-				fakeFetch(async (_body, call, signal) => {
-					scenario.state.sent = call;
-					if (call > 1) await scenario.hang(signal);
-					return json(200, {
-						choices: [
-							{
-								message: { content: "A" },
-								logprobs: { content: [{ token: "A", logprob: 0, top_logprobs: [{ token: "A", logprob: 0 }] }] },
-							},
-						],
-						usage: REPORTED,
-					});
-				});
-				return createLlmEngine({
-					name: "paid",
-					target,
-					runtime: llamacppRuntime,
-					model: null,
-					mode: "logprobs",
-					host: { ...host, admitLlmRequest: admit },
-				});
-			},
-		],
-		[
-			"one-shot",
-			(scenario) => {
-				const target = paidTarget("anthropic");
-				const { admit } = ledger(target, scenario.gate);
-				const oneShot: OneShotPort = async (request) => {
-					const charge = await admit({ targetId: request.targetId, model: "m", signal: request.signal });
-					scenario.state.sent += 1;
-					if (scenario.state.sent > 1) await scenario.hang(request.signal);
-					charge(null);
-					return { text: "A" };
-				};
-				return createLlmEngine({
-					name: "paid",
-					target,
-					runtime: anthropicRuntime,
-					model: null,
-					mode: "answer",
-					host,
-					oneShot,
-				});
-			},
-		],
-	];
-
-	for (const [wire, build] of wires) {
-		it(`fails the ${wire} decision without throwing and cancels the sibling request still in flight`, async () => {
-			const scenario = hangThenRefuse();
-			const engine = build(scenario);
-			const records: DecisionRecord[] = [];
-			const runner = createRunner({
-				recorder: () => ({ decision: (record) => records.push(record), outcome: () => {} }),
-				cutOverrides: () => ({}),
-			});
-			try {
-				const verdict = await runner.run(
-					{ routes: [{ name: "paid", engine, digest: `refusal-${wire}`, tasks: null }] },
-					site,
-					"task",
-					{},
-				);
-				strictEqual(verdict, null);
-				strictEqual(records.length, 1);
-				strictEqual(records[0]?.outcome, "failed");
-				match(records[0]?.error ?? "", /ceiling/u);
-				strictEqual(scenario.state.sent, 2, "refused requests never went out");
-				strictEqual(scenario.state.released, false, "the decision ended while its sibling still hung");
-				strictEqual(scenario.state.hung?.aborted, true, "the hung sibling was cancelled");
-			} finally {
-				scenario.release();
-			}
-		});
-	}
 });

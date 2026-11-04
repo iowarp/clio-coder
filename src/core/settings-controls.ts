@@ -503,7 +503,7 @@ const STRUCTURED = new Set([
 	"integrations.externalAgents.entries",
 ]);
 const OPTIONAL_NUMBERS = new Set(["safety.review.cadenceToolCalls"]);
-const NULLABLE_NUMBERS = new Set(["turnControl.orientation.maxCostUsdPerTurn"]);
+const NULLABLE_NUMBERS = new Set<string>([]);
 const OPTIONAL_STRINGS = new Set([
 	"fleet.default.node",
 	"safety.review.target",
@@ -683,25 +683,13 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Research: provider headers",
 		"In research mode, record each provider call's response status and its allow-listed response headers: rate-limit and quota windows, request ids and server timing, each value cut to 256 characters. Cookies, auth echoes and every other header are never kept.",
 	],
-	"telemetry.research.systemOneDataset": [
-		"Research: decision dataset",
-		"In research mode, keep the System One decision dataset. It holds redacted prompts and decision state, so it also needs Research: capture content and consent for the workspace.",
-	],
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
 		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
 	],
 	"turnControl.workflows": [
 		"Before Clio answers",
-		"Choose whether Clio may explore the project, check recent Git activity, recall earlier work, or collect finished background runs before answering. Project exploration and Git checks (orientation and direction) need a fitted System One turn site, which is experimental.",
-	],
-	"turnControl.orientation.maxSplit": [
-		"Scouts per project tour",
-		"Maximum number of read-only Scouts Clio may start to explore a project before answering.",
-	],
-	"turnControl.orientation.maxCostUsdPerTurn": [
-		"Project tour cost limit",
-		"Maximum cost in USD for Scouts started before one answer. Leave blank to use the worker cost limit.",
+		"Choose whether Clio collects finished background runs before answering.",
 	],
 	"fleet.rosters": [
 		"Fleet rosters",
@@ -723,9 +711,9 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Keep prompt cache warm",
 		"While a turn waits on its own tools, such as an attached dispatch, refresh a hosted provider's prompt cache shortly before it expires when that is expected to save more than it costs. Applies to Anthropic, OpenAI and Codex routes.",
 	],
-	"fleet.speculativeDispatch": [
-		"Start predicted work early",
-		"Experimental. System One's workerPrepare site is asked which recipe a dispatch would name first. Only a fitted build's answer starts a worker early, and the result is held. The agent still decides whether to use that work.",
+	"systemOne.use": [
+		"Decision engine",
+		"Experimental opt-in. Off until chosen. Names what answers the consult tool, the judge screen and steering triage, one route or an ordered list: jev, memory, main, a declared engine or a target. Applies on the next start. A hosted route receives web and MCP result text at judge time.",
 	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",

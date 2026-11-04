@@ -264,28 +264,6 @@ export const ORCHESTRATOR_STDOUT_UNREAD_REASON = "orchestrator did not read work
 export const WORKER_REPORTED_EVIDENCE_PREFIX = "the worker reported ";
 
 /**
- * Signal a whole process group when the platform has one, so a runtime that
- * spawned its own children cannot strand them. Falls back to the single child
- * where no group exists or the group has already gone.
- */
-function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
-	const pid = child.pid;
-	if (pid !== undefined && pid !== null) {
-		try {
-			process.kill(-pid, signal);
-			return;
-		} catch {
-			// No group (or already reaped); fall through to the direct signal.
-		}
-	}
-	try {
-		child.kill(signal);
-	} catch {
-		// Exited between the liveness check and the signal.
-	}
-}
-
-/**
  * Bytes the bulk reader may hold unsplit: one partial frame at the lane
  * ceiling plus the rest of the chunk that arrived as the lane paused. Only a
  * source that keeps delivering after the pause can pass it.
@@ -1152,92 +1130,6 @@ function attachWorkerChannel(
 			};
 		},
 	};
-}
-
-/**
- * A worker process started before its spec exists, for speculative dispatch.
- *
- * The child boots, loads the worker's module graph and blocks reading stdin,
- * which is the whole of what a prewarm buys. Nothing about the run is decided
- * here: `adopt` writes the spec and derives the approved identity from it at
- * that moment, so attestation is exactly as strong as a cold spawn's, and a
- * child that announces anything before its spec arrives fails attestation.
- *
- * While held, the child and its pipes do not keep this process alive, and a
- * held child whose parent dies reads end-of-file on stdin and exits, so a
- * crash cannot leave one behind.
- */
-export interface HeldWorkerProcess {
-	readonly pid: number | null;
-	/** True while the child is running and still waiting for its spec. */
-	alive(): boolean;
-	/** Write the spec and hand back the worker, or null when the held child is gone. */
-	adopt(spec: WorkerSpec, opts?: WorkerProcessOptions): SpawnedWorker | null;
-	/** Kill the held child's process group. A no-op once adopted or discarded. */
-	discard(): void;
-}
-
-function setChildReferenced(child: ChildProcess, referenced: boolean): void {
-	const streams = [child.stdin, child.stdout, child.stderr] as Array<{ ref?: () => void; unref?: () => void } | null>;
-	for (const stream of streams) {
-		if (referenced) stream?.ref?.();
-		else stream?.unref?.();
-	}
-	if (referenced) child.ref();
-	else child.unref();
-}
-
-export function spawnHeldWorkerProcess(
-	command: string,
-	args: ReadonlyArray<string>,
-	opts?: Pick<WorkerProcessOptions, "cwd" | "env">,
-): HeldWorkerProcess {
-	const child = launchWorkerChild(command, args, opts);
-	let state: "held" | "adopted" | "discarded" = "held";
-	let gone = false;
-	child.once("exit", () => {
-		gone = true;
-	});
-	child.once("error", () => {
-		gone = true;
-	});
-	// The pipe raises EPIPE asynchronously when a held child dies; without a
-	// listener that is an unhandled stream error in the orchestrator.
-	child.stdin?.on("error", () => {
-		gone = true;
-	});
-	setChildReferenced(child, false);
-	const alive = (): boolean =>
-		state === "held" && !gone && child.pid !== undefined && child.exitCode === null && child.signalCode === null;
-	return {
-		pid: child.pid ?? null,
-		alive,
-		adopt(spec, adoptOptions) {
-			if (!alive()) return null;
-			state = "adopted";
-			setChildReferenced(child, true);
-			return attachWorkerChannel(child, command, args, spec, adoptOptions);
-		},
-		discard() {
-			if (state !== "held") return;
-			state = "discarded";
-			try {
-				child.stdin?.end();
-			} catch {
-				// Already closed.
-			}
-			signalProcessGroup(child, "SIGKILL");
-		},
-	};
-}
-
-/** The native worker entry, held for its spec. Same argv and environment as `spawnNativeWorker`. */
-export function spawnHeldNativeWorker(opts?: Pick<SpawnOptions, "cwd" | "env" | "workerEntryPath">): HeldWorkerProcess {
-	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
-	return spawnHeldWorkerProcess(process.execPath, [workerEntry], {
-		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
-		env: withCompileCacheEnvironment(opts?.env ?? process.env),
-	});
 }
 
 export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {

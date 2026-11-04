@@ -25,7 +25,6 @@ import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { DispatchResultSummaryAllowance, ExecutionRole } from "./execution-role.js";
-import type { HeldWorkerStats } from "./held-workers.js";
 import type { DispatchOwner } from "./ownership.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
@@ -398,16 +397,6 @@ export interface DispatchContract {
 	 * cannot observe.
 	 */
 	derivedGrants?(req: DispatchRequest): DispatchDerivedGrants | null;
-	/**
-	 * Speculative dispatch: hold up to `count` worker processes for the recipe a
-	 * pre-turn forecast predicted, so a matching dispatch skips process start.
-	 * Returns how many were started; zero unless `fleet.speculativeDispatch` is
-	 * on. Never changes, delays or narrows a dispatch.
-	 */
-	speculate?(prediction: { agentId: string; count: number }): number;
-	/** Kill every held process. Hosts call it when a turn settles or is cancelled. */
-	releaseSpeculative?(reason: string): number;
-	speculativeStats?(): HeldWorkerStats;
 	/** One shared joint-resolver proposal for a typed Scout successor; never a second agent selector. */
 	planAgentSelection(input: DispatchAgentPlanInput): DispatchAgentPlanResolution;
 	/**

@@ -30,7 +30,7 @@ tests/
 
 `src/domains/` holds 31 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
 
-System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the interactive host ([system-one-host.ts](../../src/entry/system-one-host.ts)). The remaining directories, which are components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
+System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
@@ -60,9 +60,9 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | semantic-app | `src/domains/semantic-app/**` | The application boundary of the semantic index: the embedding service, search for the `context` tool and CLI, the extension embedding capability, and the session-scoped background refresh. No model is contacted at startup. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction, handoff, `/view` artifact providers. |
 | share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
-| system-one | `src/domains/system-one/**` | The decision layer: typed questions about one object, pluggable engines, fitted cuts, and the decision ledger. See [System One](system-one.md). |
+| system-one | `src/domains/system-one/**` | The opt-in decision layer: typed questions about one object, pluggable engines and the runner. See [System One](system-one.md). |
 | toolchain | `src/domains/toolchain/**` | Pinned external-tool discovery, installation, and resolution (`asciinema`, `herdr`, `yazi`, `croc`, `cliamp`). |
-| turn-control | `src/domains/turn-control/**` | Pure turn facts, workflow decisions, turn outcome reduction, and the orientation and direction blocks. |
+| turn-control | `src/domains/turn-control/**` | Pure turn facts, the detached-collection decision and turn outcome reduction. |
 | user-tasks | `src/domains/user-tasks/**` | Library and CLI-owned durable user task list plus board handoff state. |
 | workspace-snapshots | `src/domains/workspace-snapshots/**` | Git snapshots of the worktree taken before mutating calls, built in a private per-session index under `refs/clio-coder/snapshots/`, and the `/rewind` plan and restore. |
 
@@ -125,7 +125,7 @@ Around the loader, `bootOrchestrator` does the work that must precede or follow 
 
 - Ensures the state directories and reports untrusted project settings and safety surfaces.
 - Recovers state a hard-killed coordinator left behind, namely compete-group and task worktrees.
-- Emits the `session.start` bus event, then composes the tool registry, System One host, safety wiring, and chat.
+- Emits the `session.start` bus event, then composes the tool registry, System One, safety wiring, and chat.
 - Hands off to one surface. Interactive boot imports `startInteractive` from `src/interactive/index.ts`. A headless run calls `runHeadlessMainAgent` in [print.ts](../../src/cli/modes/print.ts). An ACP boot serves the protocol through `src/engine/acp/server.ts`.
 
 ---
@@ -151,7 +151,7 @@ A workspace probe ([snapshot.ts](../../src/domains/session/workspace/snapshot.ts
 
 ## The decision layer is System One
 
-System One at `src/domains/system-one/` is the only decision layer. The providers domain owns no per-turn decisions. A site names one object, an engine answers a typed question set about it, and the site's policy reads the answers under cuts fitted for the build that answered. Every entry point returns `null` instead of throwing, and `null` means the caller behaves as if System One did not exist. The contract, sites, engines, calibration, and ledger are in [System One](system-one.md).
+System One at `src/domains/system-one/` is the only decision layer, and it is off until `systemOne.use` names a route. The providers domain owns no per-turn decisions. A decision point names one object, an engine answers a typed question set about it, and the point reads the answers into a typed value. Every ask returns a verdict or `null`, and `null` means the caller behaves as if System One did not exist. The agent's `consult` tool, the judge screen and typed steering triage are its only callers. The contract, engines and runner are in [System One](system-one.md).
 
 ---
 

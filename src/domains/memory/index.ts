@@ -45,8 +45,6 @@ export {
 } from "./guardian-gate.js";
 export { completedLessonSource } from "./history-review.js";
 export { type LessonSubject, lessonSubject } from "./lesson-evidence.js";
-export type { MemoryLessonJudge } from "./lesson-judge.js";
-export { createMemoryLessonJudge } from "./lesson-judge.js";
 export {
 	createTaskMemoryTelemetrySink,
 	type TaskMemoryBankDelta,
@@ -108,12 +106,7 @@ export {
 	renderMemoryRecall,
 } from "./recall.js";
 export { entriesBeforeMemoryOff, MEMORY_OFF_ENTRY_TYPE, markMemoryOffRecording } from "./recording-marker.js";
-export {
-	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
-	type PrecomputedMemoryCandidate,
-	type PrecomputedMemoryRelevance,
-	rankMemoryByPrecomputedScore,
-} from "./relevance.js";
+export {} from "./relevance.js";
 export { MemoryRuntime } from "./runtime.js";
 export {
 	loadMemoryRecords,

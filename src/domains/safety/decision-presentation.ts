@@ -1,6 +1,5 @@
 import type { ActionClass } from "./action-classifier.js";
 import type { AutonomyExposure } from "./autonomy.js";
-import { sanitizeCallTargetText } from "./call-target.js";
 import { SESSION_CODE_CONSENT_RULE_ID, SESSION_CODE_CONSENT_TEXT } from "./session-code-consent.js";
 
 /** Closed consequence categories used only to explain an already-made decision request. */
@@ -21,30 +20,8 @@ export type DecisionAxis =
 
 export type DecisionOrigin = { kind: "main" } | { kind: "worker"; agentId: string; runId: string };
 
-/**
- * The rail id of a park the System One gate raised. The classifier's own allow
- * for these calls carries `bash-unrecognized`, which says why yolo would have
- * run the command and nothing about why it parked, so the registry sets this id
- * on the ask and the policy it carries, and the card, the audit row and the
- * approval note name the gate instead. It reaches a card as an ordinary
- * safety-net axis, so the presentation and the transcript rows recognize the
- * gate by this id rather than by a fact no other surface carries.
- */
-export const SYSTEM_ONE_GATE_RULE_ID = "system-one-gate";
-
-/**
- * The gate as the axis that asked, in the words the card, the parked row and
- * the grant row share. The build comes from an engine reply, so it is drawn
- * only after the sanitizer a call target takes.
- */
-function systemOneGateText(build?: string): string {
-	const named = build === undefined ? "" : sanitizeCallTargetText(build);
-	return named === "" ? "System One gate (experimental)" : `System One gate (experimental, ${named})`;
-}
-
 /** A safety-net rail as the parked row, the grant row and the notice name it. */
-export function safetyNetRailText(ruleId: string, gateBuild?: string): string {
-	if (ruleId === SYSTEM_ONE_GATE_RULE_ID) return systemOneGateText(gateBuild);
+export function safetyNetRailText(ruleId: string): string {
 	if (ruleId === SESSION_CODE_CONSENT_RULE_ID) return SESSION_CODE_CONSENT_TEXT;
 	return `safety-net rail ${ruleId}`;
 }
@@ -64,8 +41,6 @@ export interface TrustedDecisionFacts {
 	authorityEffect: DecisionAuthorityEffect;
 	tool?: string;
 	actionClass?: ActionClass;
-	/** The build that answered the System One gate. Read only when the axis is the gate's. */
-	gateBuild?: string;
 }
 
 export interface DecisionPresentationAction {
@@ -135,7 +110,6 @@ export function decisionFactsForPermission(input: {
 	axis: Exclude<DecisionAxis, { kind: "answer" }>;
 	origin: DecisionOrigin;
 	exposure?: AutonomyExposure;
-	gateBuild?: string | undefined;
 }): TrustedDecisionFacts {
 	const exposure = input.exposure ?? "local";
 	const consequence = actionConsequence(input.actionClass);
@@ -149,7 +123,6 @@ export function decisionFactsForPermission(input: {
 		authorityEffect: "grants-once",
 		tool: input.tool,
 		actionClass: input.actionClass,
-		...(input.gateBuild !== undefined ? { gateBuild: input.gateBuild } : {}),
 	};
 }
 
@@ -172,10 +145,6 @@ function classifyTier(facts: TrustedDecisionFacts): DecisionTier {
 	if (facts.axis.kind === "safety-net") return "safety-net";
 	if (facts.authorityEffect === "grants-once") return "workspace";
 	return "conversation";
-}
-
-function isSystemOneGate(facts: TrustedDecisionFacts): boolean {
-	return facts.axis.kind === "safety-net" && facts.axis.ruleId === SYSTEM_ONE_GATE_RULE_ID;
 }
 
 /** The once-per-session test-runner ask. Approving it covers later test runners, so its copy cannot say "once". */
@@ -220,21 +189,12 @@ function tierIdentity(
 					semanticToken: "warning",
 				};
 			}
-			// The gate is System One's judgment of one command, not a standing
-			// rail, so the card is titled for who asked.
-			return isSystemOneGate(facts)
-				? {
-						tierLabel: "System One confirmation (experimental)",
-						title: "System One confirmation (experimental)",
-						kind: "System One gate",
-						semanticToken: "warning",
-					}
-				: {
-						tierLabel: "Safety-net confirmation",
-						title: "Safety-net confirmation",
-						kind: "safety-net rail",
-						semanticToken: "warning",
-					};
+			return {
+				tierLabel: "Safety-net confirmation",
+				title: "Safety-net confirmation",
+				kind: "safety-net rail",
+				semanticToken: "warning",
+			};
 		case "system":
 			return {
 				tierLabel: "System change",
@@ -256,7 +216,6 @@ function requestedByCopy(facts: TrustedDecisionFacts): string {
 	const requester =
 		facts.origin.kind === "worker" ? `worker ${facts.origin.agentId} (run ${facts.origin.runId})` : "main agent";
 	if (facts.axis.kind === "answer") return requester;
-	if (isSystemOneGate(facts)) return `${requester} through ${systemOneGateText(facts.gateBuild)}`;
 	if (isSessionCodeConsent(facts)) return `${requester} through ${SESSION_CODE_CONSENT_TEXT}`;
 	if (facts.axis.kind === "safety-net") return `${requester} through safety-net rail ${facts.axis.ruleId}`;
 	return `${requester} through autonomy level (${facts.axis.level})`;
@@ -296,12 +255,7 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 			if (isSessionCodeConsent(facts)) {
 				return "A test runner executes repository code under your account without a sandbox, whoever wrote it: this session, an earlier one, a worker or a checkout.";
 			}
-			// A gate park is System One's judgment of this one command, not a
-			// standing rule, so "always-on rail" would tell the operator something
-			// false about why the card exists.
-			return isSystemOneGate(facts)
-				? "System One judged this unrecognized command under yolo as possibly destructive and asked for a one-shot approval."
-				: "An always-on safety-net rail requires a one-shot operator decision before this call can run.";
+			return "An always-on safety-net rail requires a one-shot operator decision before this call can run.";
 		case "system":
 			return "The call can change state outside the workspace or state the classifier cannot safely bound.";
 		case "worker":

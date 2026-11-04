@@ -1054,7 +1054,8 @@ test("no secret survives redaction wherever a styled line holds it, and every SG
 		"named outside an APC payload": `--token \u001b_${secret}${end} ${sgr}x${reset}`,
 		"twice in one line": `--token ${secret} ${sgr}mid${reset} API_KEY=${secret}`,
 	};
-	const sgrOf = (text: string) => text.match(new RegExp("\\u001b\\[[0-9;]*m", "gu")) ?? [];
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: an SGR escape is what this test counts.
+	const sgrOf = (text: string) => text.match(/\u001b\[[0-9;]*m/gu) ?? [];
 	for (const [name, line] of Object.entries(cases)) {
 		const out = redactSecretString(line);
 		strictEqual(/ZQXJ|SECRET/u.test(out), false, `${name}: ${JSON.stringify(out)}`);

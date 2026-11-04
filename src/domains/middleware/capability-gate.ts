@@ -1,5 +1,3 @@
-import type { RelevanceRanker } from "../system-one/rank.js";
-
 export type CapabilityKind = "skills" | "capabilities" | "agents";
 
 export interface CapabilityCandidate {
@@ -23,12 +21,6 @@ export interface CapabilityMatch extends CapabilityCandidate {
 export interface CapabilityGate {
 	rank(request: CapabilityRequest): ReadonlyArray<CapabilityMatch>;
 	used(kind: CapabilityKind, id: string): void;
-}
-
-export interface CapabilityGateOptions {
-	relevance?: RelevanceRanker;
-	allowRelevance?: () => boolean;
-	relevanceCandidateLimit?: () => number;
 }
 
 const STOP = new Set(
@@ -84,8 +76,8 @@ function rankCapabilitiesLexically(
 		.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
-/** One session-owned gate: synchronous lexical advice, opportunistic cached inference, no awaited model pass. */
-export function createCapabilityGate(options: CapabilityGateOptions = {}): CapabilityGate {
+/** One session-owned gate: synchronous lexical advice with a bounded usage prior. */
+export function createCapabilityGate(): CapabilityGate {
 	const history = new Map<CapabilityKind, Map<string, number>>();
 	return {
 		used(kind, id) {
@@ -96,37 +88,12 @@ export function createCapabilityGate(options: CapabilityGateOptions = {}): Capab
 		rank(request) {
 			const lexical = rankCapabilitiesLexically(request, history.get(request.kind));
 			const limit = Math.max(0, Math.min(10, request.limit ?? 5));
-			const candidates = [...lexical, ...request.candidates.filter((c) => !lexical.some((hit) => hit.id === c.id))].slice(
-				0,
-				options.relevanceCandidateLimit?.() ?? 64,
-			);
-			const semantic: Record<string, number> = {};
-			const relevance =
-				request.task.trim() && options.allowRelevance?.() !== false && options.relevance?.asks()
-					? options.relevance({
-							use: request.kind === "agents" ? "capabilities" : request.kind,
-							need: request.task,
-							candidates: candidates.map((c) => ({ id: c.id, summary: c.description })),
-						})
-					: null;
-			// An entry joins on a score only past the build's measured cut, and with no cut the list stays lexical.
-			const relatedAt = relevance?.relatedAt;
-			if (relevance && relatedAt !== undefined) Object.assign(semantic, relevance.scores);
 			const best = lexical[0]?.score ?? 0;
-			const ordered = new Map(
-				lexical
-					.filter((hit) => hit.score >= best * 0.22)
-					.map((hit) => [hit.id, { ...hit, score: hit.score / Math.max(1, best) }]),
-			);
-			for (const candidate of candidates) {
-				const score = semantic[candidate.id];
-				if (score === undefined || !Number.isFinite(score) || relatedAt === undefined || score < relatedAt || score > 1)
-					continue;
-				const local = ordered.get(candidate.id);
-				// FW-1: a measured paraphrase match outranks a lexical-only leader, whose normalized score tops out at 1.
-				ordered.set(candidate.id, { ...candidate, ...local, score: 1 + score });
-			}
-			return [...ordered.values()].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, limit);
+			return lexical
+				.filter((hit) => hit.score >= best * 0.22)
+				.map((hit) => ({ ...hit, score: hit.score / Math.max(1, best) }))
+				.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+				.slice(0, limit);
 		},
 	};
 }

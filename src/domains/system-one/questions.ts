@@ -1,13 +1,13 @@
 /**
  * Question builders, validation and the spec hash.
  *
- * A site's wording is part of what a fitted cut was measured against, so the
- * hash of a question's spec is what a dataset row carries to say which wording
- * produced an answer.
+ * A point's wording is part of what any later measurement of it means, so the
+ * hash of a question's spec says which wording produced an answer.
  */
 
 import { createHash } from "node:crypto";
-import type { Question } from "./types.js";
+import type { SemanticKind } from "./contract.js";
+import type { PointQuestion, Question } from "./types.js";
 
 export const MAX_CHOICE_OPTIONS = 255;
 export const MIN_SCORE_LEVELS = 2;
@@ -26,6 +26,32 @@ export function pick(instructions: string, options: Readonly<Record<string, stri
 /** A rating on an ordered ladder, lowest level first. */
 export function rate(instructions: string, levels: ReadonlyArray<string>): Question {
 	return { type: "score", instructions, criteria: levels };
+}
+
+/** What a question means by its shape alone: one claim, an exclusive choice, or an ordered level. */
+export function pointQuestion(question: Question): PointQuestion {
+	const semantic: SemanticKind =
+		question.type === "noul" ? "boolean" : question.type === "choice" ? "exclusive" : "ordinal";
+	return { question, semantic };
+}
+
+/**
+ * One independent yes/no per item, keyed by the item's id, each asked under the same
+ * rule. The numbers do not compete with each other's, which is what makes this a filter
+ * and not a pick: an item matching says nothing about whether its neighbor does.
+ */
+export function filterQuestions(
+	rule: { readonly instructions: string; readonly whenTrue: string; readonly whenFalse: string },
+	items: Readonly<Record<string, string>>,
+): Readonly<Record<string, PointQuestion>> {
+	const questions: Record<string, PointQuestion> = {};
+	for (const [id, item] of Object.entries(items)) {
+		questions[id] = {
+			semantic: "independent",
+			question: yesNo(`${rule.instructions}\nItem: ${item}`, rule.whenTrue, rule.whenFalse),
+		};
+	}
+	return questions;
 }
 
 function blank(text: unknown): boolean {

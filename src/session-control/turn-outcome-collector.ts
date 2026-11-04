@@ -81,8 +81,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		clarificationStreak: () => previousClarificationStreak,
 		recordControl(record) {
 			userTurnId = record.turnId;
-			// A refused act may still have started workers (a cancel during orientation
-			// aborts a Scout that already spent tokens); those runs belong to the turn.
+			// A refused act may still have started workers; those runs belong to the turn.
 			const runIds =
 				record.executed === null
 					? []
@@ -92,7 +91,6 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			active = {
 				...active,
 				control: {
-					producer: record.producer,
 					decision: record.decision.kind,
 					decisionHash: record.decisionHash,
 					executed: record.executed !== null && "runIds" in record.executed,

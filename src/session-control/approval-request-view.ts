@@ -62,7 +62,6 @@ export interface ApprovalRequestView {
 	 * raised. The card and the transcript rows name it so an operator can tell
 	 * which build's judgment they overrode.
 	 */
-	gateBuild?: string;
 	/**
 	 * A worker ask routed through the main agent (Phase D): who may discharge
 	 * it, and whether the main agent asked for it. The card names both so the

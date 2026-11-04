@@ -24,6 +24,15 @@ export interface PrecomputedRanking {
 	readonly source: string;
 }
 
+/**
+ * Orders a listing the model asked for and never shortens it. An empty need means the turn's task.
+ * The session supplies its capability gate; a worker's registry carries none.
+ */
+export type CatalogRanker = (request: {
+	readonly need: string;
+	readonly candidates: ReadonlyArray<{ readonly id: string; readonly summary: string }>;
+}) => PrecomputedRanking | null;
+
 export interface PrecomputedRanked<T> {
 	readonly item: T;
 	/** Null when the pass abstained, which is not the same as a zero. */

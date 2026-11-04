@@ -4,16 +4,12 @@
  * in `postSystemOne`; this converts what it returns into contract answers.
  */
 
-import { TYPESAFE_DEFAULT_MODEL } from "../../providers/runtimes/typesafe-model.js";
 import type { DecisionAnswer, DecisionQuestion } from "../../providers/types/inference.js";
 import type { ProbeContext, RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
-import { certaintyFromMass } from "../answers.js";
-import type { DecisionTask, ReadoutKind } from "../contract.js";
-import { semanticKind } from "../contract.js";
 import type { ProfileId } from "../profiles.js";
-import { engineWindow, profileFor, render } from "../profiles.js";
-import type { Answer, DecisionEngine, EngineReply, EngineRequest, Question } from "../types.js";
+import { engineCapabilities, profileFor } from "../profiles.js";
+import type { DecisionEngine, EngineReply, EngineRequest, Question } from "../types.js";
 import type { EngineHost } from "./shared.js";
 import { resolveToken } from "./shared.js";
 
@@ -32,33 +28,16 @@ export interface SystemOneEngineInput {
  */
 const HTTP_CEILING_MS = 120_000;
 
-function convert(raw: DecisionAnswer, question: Question, readout: ReadoutKind): Answer | null {
+function convert(raw: DecisionAnswer, question: Question): EngineReply["answers"][string] | null {
 	if (raw.type !== question.type) return null;
-	if (question.type === "noul") {
-		if (raw.noul === undefined) return null;
-		return {
-			type: "noul",
-			noul: raw.noul,
-			certainty: certaintyFromMass("noul", { noul: raw.noul }),
-			calibrated: true,
-			readout,
-		};
-	}
+	if (question.type === "noul") return raw.noul === undefined ? null : { type: "noul", noul: raw.noul };
 	if (raw.probabilities === undefined) return null;
-	const certainty = certaintyFromMass(question.type, { probabilities: raw.probabilities });
 	if (question.type === "choice") {
-		if (raw.choice === undefined || !Object.hasOwn(question.criteria, raw.choice)) return null;
-		return {
-			type: "choice",
-			choice: raw.choice,
-			probabilities: raw.probabilities,
-			certainty,
-			calibrated: true,
-			readout,
-		};
+		if (raw.choice === undefined) return null;
+		return { type: "choice", choice: raw.choice, probabilities: raw.probabilities };
 	}
 	if (raw.score === undefined) return null;
-	return { type: "score", score: raw.score, probabilities: raw.probabilities, certainty, calibrated: true, readout };
+	return { type: "score", score: raw.score, probabilities: raw.probabilities };
 }
 
 const NO_CREDENTIALS: ReadonlySet<string> = new Set();
@@ -67,46 +46,33 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 	const { name, target, runtime, model, host } = input;
 	const decide = runtime.decide;
 	if (decide === undefined) throw new Error(`runtime '${runtime.id}' does not answer typed decisions`);
-	const asked = model ?? target.defaultModel ?? (runtime.id === "typesafe-jev" ? TYPESAFE_DEFAULT_MODEL : null);
+	const asked = model ?? target.defaultModel ?? runtime.decisionAlias?.defaultModel ?? null;
 	const profile = profileFor(input.profile);
-	// Julia-1's options are counted with its own tokenizer once it is cached; until then the byte proof applies.
-	if (profile.id === "julia-1") void import("../julia-tokenizer.js").then((module) => module.loadJuliaTokenizer());
-	const windowTokens = engineWindow(
-		profile,
-		target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow,
-	);
+	// A profile's tokenizer counts options once it is cached; until then its byte proof applies.
+	void profile.tokenizer?.load().catch(() => {
+		// A tokenizer that will not load leaves the byte proof in force, which is the stricter bound.
+	});
 	return {
 		name,
 		kind: "systemone",
-		target: target.id,
-		model,
-		windowTokens,
-		runtime: runtime.id,
-		url: target.url ?? null,
 		profile: profile.id,
-		renderer: profile.renderer,
-		expectedBuilds: () => (asked === null ? [] : [asked]),
-		unsupported(task: DecisionTask, question: Question, compact?: Question): string | null {
-			const rendered = render(profile, task, question, compact);
-			return "abstain" in rendered ? rendered.abstain : null;
+		capabilities: engineCapabilities(
+			profile,
+			target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow,
+		),
+		destination: {
+			targetId: target.id,
+			runtimeId: runtime.id,
+			wireModelId: asked,
+			...(target.url !== undefined ? { url: target.url } : {}),
 		},
 		async decide(request: EngineRequest): Promise<EngineReply> {
-			// Every question passes the renderer here too, so no caller can reach the
-			// wire with one this profile refuses, and what is sent is what was rendered.
-			const sent: Record<string, Question> = {};
-			const abstained: Record<string, string> = {};
-			for (const [id, question] of Object.entries(request.questions)) {
-				const rendered = render(profile, request.tasks?.[id] ?? "consult", question, request.compact?.[id]);
-				if ("abstain" in rendered) abstained[id] = rendered.abstain;
-				else sent[id] = rendered.question;
-			}
-			if (Object.keys(sent).length === 0) throw new Error(`profile ${profile.id} answers none of the questions`);
 			const authToken = await resolveToken(host, target, runtime, request.signal);
 			request.signal.throwIfAborted();
 			const ctx: ProbeContext = {
 				// The runtimes read this set only to find an env key when no token
-				// resolved, and building it reparses the auth store, which a gate or a
-				// screen on every tool call must not pay for.
+				// resolved, and building it reparses the auth store, which a question
+				// asked on every tool call must not pay for.
 				credentialsPresent: authToken !== undefined ? NO_CREDENTIALS : host.credentialsPresent(),
 				httpTimeoutMs: HTTP_CEILING_MS,
 				signal: request.signal,
@@ -117,26 +83,24 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 				target,
 				{
 					state: request.state,
-					questions: sent as Record<string, DecisionQuestion>,
+					questions: request.questions as Record<string, DecisionQuestion>,
 					...(model !== null ? { model } : {}),
 					signal: request.signal,
 				},
 				ctx,
 			);
-			const answers: Record<string, Answer> = {};
+			const answers: Record<string, EngineReply["answers"][string]> = {};
 			for (const [id, raw] of Object.entries(result.answers)) {
-				const question = sent[id];
+				const question = request.questions[id];
 				if (question === undefined) continue;
-				const task = request.tasks?.[id] ?? "consult";
-				const answer = convert(raw, question, profile.readout[semanticKind(task, question.type)]);
+				const answer = convert(raw, question);
 				if (answer !== null) answers[id] = answer;
 			}
 			if (Object.keys(answers).length === 0) {
 				throw new Error(`System One (${target.id}) returned no usable answer`);
 			}
 			// The wire reports "unknown" when a server names no model. The requested
-			// id is no substitute: a server that does not echo its build could be
-			// anything, and a fitted cut applied to it would gate on foreign numbers.
+			// id is no substitute: a server that does not echo its build could be anything.
 			const reported = result.model.trim();
 			const build = reported.length > 0 && reported !== "unknown" ? reported : `${target.id}/${asked ?? "default"}`;
 			return {
@@ -144,8 +108,6 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 				answers,
 				...(result.tokensUsed !== undefined ? { usage: result.tokensUsed } : {}),
 				...(result.roundTripMs !== undefined ? { roundTripMs: result.roundTripMs } : {}),
-				...(Object.keys(abstained).length > 0 ? { abstained } : {}),
-				...(profile.renderer !== "systemone-v1" ? { rendered: sent } : {}),
 			};
 		},
 	};

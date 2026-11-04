@@ -1,5 +1,5 @@
 /**
- * What may reach the dataset file. A decision's state is the operator's own
+ * What may leave in a decision request. A decision's state is the operator's own
  * request, tool arguments and tool output, so nothing leaves this module
  * without passing the two secret filters the rest of the harness already
  * trusts, plus a key-name pass for values that carry no secret-shaped text of
@@ -7,16 +7,11 @@
  */
 
 import { homedir } from "node:os";
-import type { RedactionTally } from "../../evidence/redact.js";
-import { createRedactionTally, headForRedaction, redactSecretsDeep, redactSecretsText } from "../../evidence/redact.js";
-import { cutHeadGuard, dropCutHead, isSecretArgKey, redactSecretString } from "../../safety/redaction.js";
-
-/** One row's serialized state is capped here; the rest is dropped and flagged. */
-export const STATE_MAX_BYTES = 16 * 1024;
+import type { RedactionTally } from "../evidence/redact.js";
+import { createRedactionTally, headForRedaction, redactSecretsDeep, redactSecretsText } from "../evidence/redact.js";
+import { cutHeadGuard, dropCutHead, isSecretArgKey, redactSecretString } from "../safety/redaction.js";
 
 const MAX_DEPTH = 12;
-const TRUNCATION_MARKER = "…[truncated]";
-
 let homePattern: { home: string; re: RegExp | null } | null = null;
 
 /**
@@ -47,7 +42,7 @@ function homeRegExp(): RegExp | null {
 	return re;
 }
 
-/** Replace the operator's home directory prefix with `~`, so a dataset row does not name the account. */
+/** Replace the operator's home directory prefix with `~`, so a request does not name the account. */
 function tildeHome(text: string): string {
 	const re = homeRegExp();
 	return re === null ? text : text.replace(re, "~");
@@ -96,11 +91,11 @@ export function scrubbed<T>(value: T): { value: T; redactions: number } {
 	return { value: out, redactions: tally.count };
 }
 
-/** Each end kept of a longer string in a site's object, well past the 6000 code points any site reads from one end. */
+/** Each end kept of a longer string in a point's object, well past the 6000 code points any point reads from one end. */
 const SITE_TEXT_WINDOW_CHARS = 32 * 1024;
 
 /** The two ends of a text too long to redact on the pre-turn path. Neither cut can leave a partial secret behind. */
-function siteTextWindow(text: string): string {
+function objectTextWindow(text: string): string {
 	if (text.length <= SITE_TEXT_WINDOW_CHARS * 2) return text;
 	const head = headForRedaction(text, SITE_TEXT_WINDOW_CHARS);
 	const tail = dropCutHead(text.slice(-SITE_TEXT_WINDOW_CHARS), cutHeadGuard());
@@ -112,65 +107,17 @@ function siteTextWindow(text: string): string {
 }
 
 /**
- * A site's object with every string redacted, whole, before the site sees it. A site bounds its text, and a cut can leave
+ * A point's object with every string redacted, whole, before the point sees it. A point bounds its text, and a cut can leave
  * a partial secret no pattern recognizes, so the runner hands out only this copy. Ids stay usable: home paths are left
  * alone here, and only an id that itself looks like a secret changes.
  */
-export function clearedSiteObject<T>(value: T, tally: RedactionTally): T {
+export function clearedObject<T>(value: T, tally: RedactionTally): T {
 	if (typeof value === "string") {
-		return redactSecretString(redactSecretsText(siteTextWindow(value), tally)) as T;
+		return redactSecretString(redactSecretsText(objectTextWindow(value), tally)) as T;
 	}
-	if (Array.isArray(value)) return value.map((item) => clearedSiteObject(item, tally)) as T;
+	if (Array.isArray(value)) return value.map((item) => clearedObject(item, tally)) as T;
 	if (value === null || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) return value;
 	const out: Record<string, unknown> = {};
-	for (const [key, item] of Object.entries(value)) out[key] = clearedSiteObject(item, tally);
+	for (const [key, item] of Object.entries(value)) out[key] = clearedObject(item, tally);
 	return out as T;
-}
-
-function bytes(text: string): number {
-	return Buffer.byteLength(text, "utf8");
-}
-
-function truncateString(value: string, room: number): string | null {
-	let length = Math.min(value.length, room);
-	while (length > 0) {
-		let head = value.slice(0, length);
-		// A cut between the halves of a surrogate pair would serialize as a lone surrogate.
-		const last = head.charCodeAt(head.length - 1);
-		if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
-		if (bytes(JSON.stringify(head + TRUNCATION_MARKER)) <= room) return head + TRUNCATION_MARKER;
-		length = Math.floor(length * 0.9) - 1;
-	}
-	return null;
-}
-
-/**
- * The head of an oversized state: whole top-level entries in their own order
- * while they fit, then a truncated string when the next entry is one, then
- * nothing. The result stays a parseable object, and `truncated` says it is not
- * the whole state.
- */
-export function boundState(
-	state: Readonly<Record<string, unknown>>,
-	maxBytes = STATE_MAX_BYTES,
-): { state: Record<string, unknown>; truncated: boolean } {
-	if (bytes(JSON.stringify(state)) <= maxBytes) return { state: { ...state }, truncated: false };
-	const out: Record<string, unknown> = {};
-	// Braces, and the comma each entry after the first adds.
-	let used = 2;
-	for (const [key, value] of Object.entries(state)) {
-		const prefix = bytes(JSON.stringify(key)) + 1 + (used > 2 ? 1 : 0);
-		const whole = prefix + bytes(JSON.stringify(value) ?? "null");
-		if (used + whole <= maxBytes) {
-			out[key] = value;
-			used += whole;
-			continue;
-		}
-		if (typeof value === "string") {
-			const cut = truncateString(value, maxBytes - used - prefix);
-			if (cut !== null) out[key] = cut;
-		}
-		break;
-	}
-	return { state: out, truncated: true };
 }

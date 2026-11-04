@@ -108,7 +108,7 @@ test("transient error followed by tool use and recovery retains one final succes
 	assert.ok(output.indexOf("Done") > output.indexOf("Recovered answer"));
 });
 
-test("speculative dispatch counts land in the Detailed receipt live and on replay", () => {
+test("an old speculativeDispatch row replays as nothing", () => {
 	const message = {
 		role: "assistant" as const,
 		stopReason: "stop",
@@ -143,23 +143,9 @@ test("speculative dispatch counts land in the Detailed receipt live and on repla
 			data: counts,
 		},
 	];
-	const live = createChatPanel({ getOutputStyle: () => "detailed", now: () => 1_000 });
-	live.appendUser("Do it");
-	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
-	live.applyEvent({ type: "message_start", message } as unknown as ChatLoopEvent);
-	live.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
-	live.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
-	live.applyEvent({ type: "speculative_dispatch", counts } as unknown as ChatLoopEvent);
 	const resumed = createChatPanel({ getOutputStyle: () => "detailed" });
 	rehydrateChatPanelFromTurns(resumed, entries);
-	for (const panel of [live, resumed]) {
-		const rendered = panel.render(100).map(stripTerminalSequences).join("\n");
-		assert.match(rendered, /prewarm 1 adopted, 1 unused/u);
-		assert.equal((rendered.match(/prewarm/g) ?? []).length, 1);
-	}
-	const standard = createChatPanel({ getOutputStyle: () => "standard" });
-	rehydrateChatPanelFromTurns(standard, entries);
-	assert.doesNotMatch(standard.render(100).map(stripTerminalSequences).join("\n"), /prewarm/u);
+	assert.doesNotMatch(resumed.render(100).map(stripTerminalSequences).join("\n"), /prewarm/u);
 });
 
 test("actual final failure after tool use retains a failed outcome while success remains Done", () => {
@@ -907,50 +893,7 @@ test("/export reports a workspace file by its relative path", () => {
 	}
 });
 
-test("settled speculative counts reach the live event stream after persistence", async () => {
-	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.chat.prewarm = false;
-	const context = dispatchStubContext({ settings });
-	const target = settings.targets[0];
-	assert.ok(target);
-	settings.chat.target = target.id;
-	settings.chat.model = target.defaultModel ?? "gpt-4o";
-	const counts = { held: 2, adopted: 1, discarded: 1 };
-	let persisted = false;
-	const events: ChatLoopEvent[] = [];
-	const loop = createChatLoop({
-		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
-		knownTargets: () => new Set([target.id]),
-		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
-			agent: {
-				state: options?.initialState,
-				subscribe: () => () => {},
-				abort() {},
-				async prompt() {},
-			},
-		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
-		onTurnSettled: () => {
-			persisted = true;
-			return counts;
-		},
-	});
-	loop.onEvent((event) => {
-		if (event.type === "speculative_dispatch") {
-			assert.equal(persisted, true);
-			events.push(event);
-		}
-	});
-	try {
-		await loop.submit("Summarize the fixture");
-		assert.deepEqual(events, [{ type: "speculative_dispatch", counts }]);
-	} finally {
-		loop.dispose();
-		await loop.whenSettled();
-	}
-});
-
-test("orientation is persisted before the first model call while operator text stays raw", async () => {
+test("a collected block is persisted before the first model call while operator text stays raw", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	const context = dispatchStubContext({ settings });
@@ -982,7 +925,7 @@ test("orientation is persisted before the first model call while operator text s
 			return row;
 		},
 	} as unknown as SessionContract;
-	const block = "[Orientation] run scout-1\nFindings (cited):\n- Entry point (src/cli/index.ts:1)";
+	const block = "[Collected]\nfinished batch results";
 	let submitted = "";
 	const loop = createChatLoop({
 		getSettings: () => settings,
@@ -991,8 +934,6 @@ test("orientation is persisted before the first model call while operator text s
 		session,
 		readSessionEntries: () => entries,
 		turnControl: {
-			seedOrientation() {},
-			controllerActed: () => true,
 			async run(input) {
 				assert.equal(entries.filter((entry) => entry.kind === "message" && entry.role === "user").length, 0);
 				return {
@@ -1000,16 +941,8 @@ test("orientation is persisted before the first model call while operator text s
 					record: {
 						version: 1,
 						turnId: input.userTurnId,
-						producer: "system-one",
-						interpretation: null,
 						factsDigest: "facts",
-						decision: {
-							kind: "orientation",
-							question: "Tour",
-							breadth: "repository",
-							reuse: null,
-							budget: { maxScouts: 1, toolCallsPerScout: 36 },
-						},
+						decision: { kind: "collect", batchIds: ["finished"] },
 						decisionHash: "decision",
 						executed: { runIds: ["scout-1"], blockChars: block.length, durationMs: 1 },
 					},
@@ -1034,7 +967,7 @@ test("orientation is persisted before the first model call while operator text s
 		assert.ok(user?.kind === "message");
 		const payload = user.payload as { text: string; operatorText: string };
 		assert.equal(payload.text, submitted);
-		assert.match(payload.text, /\[Orientation\]/);
+		assert.match(payload.text, /\[Collected\]/);
 		assert.equal(payload.operatorText, "explore this repo");
 		const control = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnControl");
 		assert.ok(control?.kind === "custom");
@@ -1042,8 +975,7 @@ test("orientation is persisted before the first model call while operator text s
 		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		assert.ok(outcome?.kind === "custom");
 		assert.deepEqual((outcome.data as { control: unknown }).control, {
-			producer: "system-one",
-			decision: "orientation",
+			decision: "collect",
 			decisionHash: "decision",
 			executed: true,
 		});

@@ -96,6 +96,7 @@ const typesafeJevRuntime: RuntimeDescriptor = {
 	defaultCapabilities,
 	// Not a conversational target; the configure wizard must not offer it.
 	hidden: true,
+	decisionAlias: { name: "jev", defaultModel: DEFAULT_MODEL, profile: "jev" },
 	probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return fetchModels(target, ctx);
 	},

@@ -26,7 +26,6 @@ import type {
 } from "./intervention.js";
 import { createMemoryInterventionRegistration } from "./intervention.js";
 import { type HistoryFiling, type HistoryLessons, MemoryLessonFeedback } from "./lesson-feedback.js";
-import type { MemoryLessonJudge } from "./lesson-judge.js";
 import { createKeptLessonSource, type KeptLesson } from "./lesson-projection.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationEvent, observationTracing, traceObservation } from "./observation-events.js";
@@ -70,7 +69,6 @@ export interface MemoryRuntimeInfrastructure {
 	 * Session owns the reading.
 	 */
 	closedLessonSource?(sessionId: string): { scope: MemoryCommitScope; source: CompletedLessonSource } | null;
-	getLessonJudge?(): MemoryLessonJudge | null;
 	settings(): { enabled: boolean; observations: { enabled: boolean }; maxOutputTokens: number; timeoutMs: number };
 	/** Session owns active ancestry, original bytes and checkpoint lineage. */
 	source(): ObservationSource | null;
@@ -1002,7 +1000,6 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			attempts: (readRetention(retentionPath(infra.stateDir(), scope, source))?.attempts ?? 0) + 1,
 			revision: source.revision,
 		});
-		const judge = infra.getLessonJudge?.();
 		try {
 			const retained = await retainCompletedTask({
 				stateDir: infra.stateDir(),
@@ -1023,7 +1020,6 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				timeoutMs,
 				signal: controller.signal,
 				isCurrent,
-				...(judge ? { judge } : {}),
 				onProgress: (next) => {
 					if (isCurrent()) publish(next);
 				},

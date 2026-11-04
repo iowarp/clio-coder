@@ -57,7 +57,6 @@ import type {
 } from "../core/cache-telemetry.js";
 import { buildCacheCallObservation, firstChangedSection, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
-import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
@@ -235,15 +234,6 @@ export interface TurnContextDeps {
 	/** False while `context.memory.enabled` is off: no section, held or live, and no update reminder. */
 	memoryEnabled?: (() => boolean) | undefined;
 	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryStatus | "deleted">) | undefined;
-	/**
-	 * Memory scores for the section this request builds, or undefined when the
-	 * `relevance` site is unbound, ranking could not change the section, or the
-	 * ranking failed. Awaited while the prompt is composed, so it is asked only
-	 * when the order decides what the prompt carries.
-	 */
-	getMemoryRelevance?:
-		| ((request: MemoryPromptRequest) => Promise<PrecomputedRanking | undefined> | PrecomputedRanking | undefined)
-		| undefined;
 	getReadySkillCount?: (() => number) | undefined;
 	/** Live source of each active route for the attended prompt; absent for headless runs. */
 	getRouteSources?: (() => Readonly<Record<RouteName, RouteSource>>) | undefined;
@@ -2800,20 +2790,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						taskText: memoryTurn?.taskText ?? "",
 						activePaths: memoryTurn?.activePaths ?? [],
 					};
-					// The scores rank the records; they never admit one. Every
-					// eligibility gate still runs inside the selection below.
-					let relevance: PrecomputedRanking | undefined;
-					try {
-						relevance = await deps.getMemoryRelevance?.(memoryRequest);
-					} catch {
-						// A ranking that cannot be produced leaves memory in its base order.
-						relevance = undefined;
-					}
-					if (!current()) return null;
-					const memorySection = deps.getMemorySection({
-						...memoryRequest,
-						...(relevance === undefined ? {} : { precomputedRelevance: relevance }),
-					});
+					const memorySection = deps.getMemorySection(memoryRequest);
 					if (memorySection.length > 0) sessionInputs.memorySection = memorySection;
 				} catch (err) {
 					deps.emitNotice(

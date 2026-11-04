@@ -188,8 +188,7 @@ type ProjectedLoopEventType =
 /**
  * Chat-loop events that cross unchanged: `agent_start`, `turn_start`,
  * `message_start`, `text_frame`, `retry_status`, `queue_update`,
- * `queued_user_turn`, `notice`, `agent_status`, `tool_approval_state` and
- * `speculative_dispatch`.
+ * `queued_user_turn`, `notice`, `agent_status` and `tool_approval_state`.
  */
 export type RunJsonPassThroughFrame = Exclude<ChatLoopEvent, { type: ProjectedLoopEventType }>;
 

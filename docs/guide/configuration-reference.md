@@ -40,9 +40,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | Key | Default | Accepted values and meaning | Effect |
 | --- | --- | --- | --- |
 | `version` | `2` | Schema version. Any other value fails validation and points at `clio-coder upgrade`. | restart required |
-| `turnControl.workflows` | `["orientation", "direction", "ledger-facts", "detached-collection"]` | Subset of those four names: which pre-answer workflows the turn controller may run. `orientation` and `direction` need a fitted System One `turn` site, which is experimental. | next turn |
-| `turnControl.orientation.maxSplit` | `4` | Integer 1 to 4. Most read-only scouts started to tour a project before answering. | next turn |
-| `turnControl.orientation.maxCostUsdPerTurn` | `null` | Number or `null`. USD ceiling for the scouts started before one answer; `null` sets no per-turn ceiling and a scout split is sized against `safety.limits.sessionCostUsd`, where a session ceiling of 0 gives the split a ceiling of 0 that enforces nothing. | next turn |
+| `turnControl.workflows` | `["detached-collection"]` | Which turn-control workflows may run. `detached-collection` collects finished detached batches before an answer. The retired values `orientation`, `direction` and `ledger-facts` load silently and do nothing. | next turn |
 | `targets` | `[]` | List of target entries with unique ids. Fields are in [target fields](configuration-and-targets.md#target-fields). | next turn |
 | `chat.target` | `null` | Target id that answers chat. An id that is not in `targets` normalizes to `null`. | next turn |
 | `chat.model` | `null` | Wire model id. With a target set, `null` resolves to that target's `defaultModel`; with no target it is `null`. | next turn |
@@ -59,10 +57,10 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `chat.retry.maxDelayMs` | `60000` | Integer at least 0. Longest retry delay. | next turn |
 | `chat.retry.streamStallMs` | `180000` | Integer at least 0. Silence mid-stream past this many ms aborts the call and retries. | next turn |
 | `chat.retry.firstTokenStallMs` | `600000` | Integer at least 0. Silence allowed before the first token; `0` never aborts a call that has not started streaming. | next turn |
-| `chat.steering.triage.enabled` | `false` | Boolean, experimental. A side model reads queued steering messages once the queue settles: an unrelated task waits for the end of the turn and a confident stop may interrupt the run. | next turn |
-| `chat.steering.triage.target` | `null` | Target id for the triage round; `null` uses the session's active target. | next turn |
+| `chat.steering.triage.enabled` | `false` | Boolean, experimental. A bound System One route, or else a side model, reads queued steering messages once the queue settles: an unrelated task waits for the end of the turn and a confident stop may interrupt the run. | next turn |
+| `chat.steering.triage.target` | `null` | Target id for the side-model triage round; `null` uses a bound System One route, or the session's active target when none is bound. Naming a target keeps the side model. | next turn |
 | `chat.steering.triage.model` | `null` | Wire model id on that target; cleared when `target` is `null`. | next turn |
-| `chat.steering.triage.minQueued` | `2` | Integer at least 1. Queue length that starts a round. | next turn |
+| `chat.steering.triage.minQueued` | `2` | Integer at least 1. Queue length that starts a side-model round. A bound route starts at one message. | next turn |
 | `chat.steering.triage.timeoutMs` | `8000` | Integer at least 1. A slower round is dropped and the queue stays as it was. | next turn |
 | `chat.steering.triage.autoInterrupt` | `true` | Boolean. Let a confident `stop` reading cancel the run and deliver that message now. | next turn |
 | `fleet.defaultNode` | `null` | `null`, `local`, or a `fleet.nodes[].id`. Standing placement preference for unpinned work; explicit and profile pins win. | next turn |
@@ -72,7 +70,6 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `fleet.profiles` | `{}` | Map of profile name to `{ target, model, thinkingLevel, node? }`. | next turn |
 | `fleet.rosters` | `{}` | Map of roster name to `members`, two to five entries of `{ label, target, model?, thinkingLevel?, color? }` with unique labels matching `[a-z][a-z0-9_-]{0,31}`. | next turn |
 | `fleet.agentProfiles` | `{}` | Map of native agent id to a `fleet.profiles` name. | next turn |
-| `fleet.speculativeDispatch` | `false` | Boolean, experimental. A fitted System One `turn` reading may start the worker a dispatch is predicted to name and hold it. | next turn |
 | `fleet.nodes` | `[]` | List of SSH nodes: `id` (not `local`), `host`, `user?`, `port?`, `identityFile?`, `clioCoderEntry?`, `clioCoderVersionCommand?`, `labels?`, `maxWorkers` (default 2), `residency?` (`observe` or `manage`). | next turn |
 | `fleet.adaptiveRouting.roles` | `[]` | Subset of `researcher`, `verifier`, `reviewer`, `judge`. | next turn |
 | `fleet.adaptiveRouting.postures` | `[]` | Subset of `quality`, `balanced`, `latency`, `economy`. | next turn |
@@ -119,9 +116,8 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.semantic.modalities` | `[text]` | Enabled subset of `text`, `image`, `audio`, and `mixed`. | next semantic request |
 | `context.semantic.background` | `false` | Boolean. Schedule bounded refresh at session start and after code map changes. | next session |
 | `context.semantic.inboxes` | `[]` | Explicit project or global artifact roots registered with `semantic inbox add`. | next refresh or search |
-| `systemOne.use` | `null` | The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers every active site except `consult`, which takes its own `systemOne.sites.consult` entry. `off` masks every binding. | next turn |
-| `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, mode?, profile? }`. | next turn |
-| `systemOne.sites` | `{}` | Map of site id to an engine name or `{ engine, timeoutMs?, tasks? }`. A site with no entry follows `systemOne.use`, and `null` turns it off. | next turn; `systemOne.sites.consult` needs a restart |
+| `systemOne.use` | `null` | The opt-in: one route or an ordered list of `jev`, `memory`, `main`, a declared engine or a target. A named route answers the `consult` tool, the judge screen and steering triage, so on a hosted route web and MCP result text leaves the machine at judge time. `off` anywhere in the list turns System One off. | restart required |
+| `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, profile? }`. An engine does nothing until `systemOne.use` names it. | next turn |
 | `safety.autonomy` | `"default"` | `default` or `yolo`. User layer or operator session control. A project layer can only tighten the user level (`default` over `yolo`); a looser value is ignored with a layer issue. | hot reload |
 | `safety.limits.sessionCostUsd` | `5` | Finite number at least 0, in USD; a negative value fails validation. Session cost ceiling. It gates requests on routes priced by target rates or the catalog; see [pricing](configuration-and-targets.md#pricing-and-cost-provenance). `0` means no session ceiling: paid requests are admitted, dispatch plans and Scout continuations carry a ceiling of 0, and fleet previews skip the remaining-budget check. A parked request re-reads the ceiling every 250 ms and dispatch admission reads it per call, so raising it releases a waiting request. | hot reload |
 | `safety.limits.chatToolCallsPerTurn` | `60` | Integer at least 1. At the limit Clio stops using tools and summarizes the turn. | next turn |
@@ -181,10 +177,9 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `telemetry.research.content` | `false` | Boolean. In research mode with workspace consent, keep prompts, request bodies and background memory and compaction text as telemetry objects. | next turn |
 | `telemetry.research.deltas` | `true` | Boolean. In research mode, keep each call's inter-delta gaps as one `call.timing_captured` histogram. | next turn |
 | `telemetry.research.providerHeaders` | `true` | Boolean. In research mode, keep allow-listed provider response headers as `provider.headers_captured`. | next turn |
-| `telemetry.research.systemOneDataset` | `true` | Boolean. In research mode with `content` and consent, keep the System One dataset as `system_one.sample_captured` records. | next turn |
 | `telemetry.research.busTrace` | `false` | Boolean. In research mode, journal a `bus.traced` record naming each live event the telemetry hub delivers. | next turn |
 
-`systemOne.*` and `fleet.speculativeDispatch` are experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field (`generic`, `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small`, `gliner2.5-decide` or `strands-decider`) and the per-site `tasks` routes, which have no default. A decision engine's window is the `capabilities.contextWindow` of its `systemone` target (480 when unset), bounded by the profile's ceiling. There is no placement setting: which processor an engine runs on is decided by the server behind its target, as the placing-engines section of the [System One guide](system-one.md) describes.
+`systemOne.*` is experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field (`generic`, `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small`, `gliner2.5-decide` or `strands-decider`), which has no default. A decision engine's window is the `capabilities.contextWindow` of its `systemone` target (480 when unset), bounded by the profile's ceiling. There is no placement setting: which processor an engine runs on is decided by the server behind its target.
 
 The music keys are documented in the [music guide](music.md). The exit summary is part of [commands and modes](commands-and-modes.md).
 
@@ -373,11 +368,14 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 | `compaction.excludeLastTurns` and `context.compaction.excludeLastTurns` | Only the temporary legacy mask used it. Use `context.workingSet.protectLastTurns`. |
 | `delegation.agents[].permissionTimeoutMs` and `integrations.externalAgents.entries[].permissionTimeoutMs` | A delegated agent's permission ask is decided at once and never waits for the operator. `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds Clio Coder's own ACP server. |
 | `delegation.agents[].labels` and `integrations.externalAgents.entries[].labels` | Nothing read or displayed external agent labels. |
-| `fleet.decisionProfiles` | System One replaced decision profiles. Bind an engine under `systemOne.engines` and `systemOne.sites`. An empty `{}` is accepted silently. |
-| `turnControl.interpretation` | The `systemOne.sites.turn` site reads the request, and nothing falls back to the main model. |
-| `systemOne.cuts` | A number acts only when it was measured on the exact build. |
-| `systemOne.record` | Research capture keeps the System One dataset: `telemetry.research.systemOneDataset` with `content`. |
-| `systemOne.retentionDays` and `systemOne.maxMiB` | System One samples are research content in session journals, which telemetry retention bounds. |
+| `fleet.decisionProfiles` | System One replaced decision profiles. Name an engine with `systemOne.use`. An empty `{}` is accepted silently. |
+| `turnControl.interpretation` | No harness workflow reads the request before a turn any more. |
+| `turnControl.orientation` | The orientation workflow is gone. The main agent dispatches Scout when it wants a tour. |
+| `fleet.speculativeDispatch` | Workers are no longer held ahead of a predicted dispatch. |
+| `systemOne.sites` | There are no decision sites any more. `systemOne.use` binds one route to the `consult` tool, the judge screen and steering triage. An empty `{}` is accepted silently. |
+| `systemOne.engines.<name>.mode` | Every `llm` engine reads as one batch request. |
+| `systemOne.cuts` | No build-keyed cut acts any more. An empty `{}` is accepted silently. |
+| `systemOne.record`, `systemOne.retentionDays`, `systemOne.maxMiB` and `telemetry.research.systemOneDataset` | The decision dataset is gone. |
 
 Three enum spellings are retired and stay validation errors until `clio-coder doctor --fix` rewrites them, so loading never changes policy silently.
 

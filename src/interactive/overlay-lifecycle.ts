@@ -1,7 +1,5 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { unattendedWindowMs } from "../domains/safety/unattended.js";
-import { TOOL_CALL_CARD_SITE } from "../domains/system-one/sites/tool-call.js";
-import { judgeDraftsAtSite } from "../session-control/drafts.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
@@ -50,7 +48,6 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "sessionFlowRestricted"
 	| "getTaskMemoryStatus"
 	| "systemOne"
-	| "recordOutcome"
 	| "interop"
 	| "telemetry"
 	| "onConfigure"
@@ -316,25 +313,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		bus: deps.app.bus,
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "default",
-		/**
-		 * The blast-radius sentence for one parked call, or nothing at all.
-		 *
-		 * The `toolCall` binding is read per run: an operator who unbinds the site
-		 * mid-session stops seeing the line on the next approval instead of at the
-		 * next restart. The request id is the join key, so the operator's answer
-		 * lands beside the advisory in the dataset. Every path that cannot produce
-		 * a sentence returns the empty string, and the caller never waits on this.
-		 */
-		describeToolRisk: async (subject) => {
-			const systemOne = deps.app.systemOne;
-			if (!systemOne) return "";
-			const verdict = await systemOne.run(
-				TOOL_CALL_CARD_SITE,
-				{ tool: subject.tool, actionClass: subject.actionClass, target: subject.target, moment: "card" },
-				subject.requestId !== undefined ? { ref: subject.requestId } : {},
-			);
-			return verdict?.value.line ?? "";
-		},
 		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view, inspect, invocation, advisory, countdown) => {
 			if (overlayTransitions.state === "permission-confirm") return false;
@@ -579,14 +557,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
 		askSideQuestion: (question, options) => deps.app.chat.askSideQuestion(question, options),
 		draftCandidates: (request, count, options) => deps.app.chat.draftCandidates(request, count, options),
-		/**
-		 * Read per call, like the card advisory, so binding or unbinding `drafts`
-		 * mid-session applies to the next draft.
-		 */
-		judgeDrafts: (request, candidates, signal, ref) =>
-			judgeDraftsAtSite({ systemOne: deps.app.systemOne }, request, candidates, signal, ref),
 		composer: editor,
-		...(deps.app.recordOutcome ? { recordOutcome: deps.app.recordOutcome } : {}),
 		...(deps.app.agents ? { agents: deps.app.agents } : {}),
 		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
 		isTurnInFlight: () => deps.app.chat.isStreaming(),

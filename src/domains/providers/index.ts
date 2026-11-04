@@ -38,6 +38,7 @@ export { credentialsPresent } from "./credentials.js";
 export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 export {
 	backgroundMemoryAdmissionLimit,
+	backgroundSlotKey,
 	canonicalEndpointKey,
 	type EndpointCapacity,
 	type EndpointCapacityInput,

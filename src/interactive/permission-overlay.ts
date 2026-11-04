@@ -142,9 +142,7 @@ function toolChip(theme: ClioTheme, tool: string): string {
 
 /** The axis that asked, in the words the parked row and the notice use. */
 function axisText(view: ApprovalRequestView): string {
-	return view.axis.kind === "net"
-		? safetyNetRailText(view.axis.ruleId, view.gateBuild)
-		: `autonomy level ${view.axis.level}`;
+	return view.axis.kind === "net" ? safetyNetRailText(view.axis.ruleId) : `autonomy level ${view.axis.level}`;
 }
 
 /**
@@ -215,7 +213,6 @@ function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPres
 					: { kind: "autonomy", level: view.axis.level },
 			origin: view.origin,
 			...(view.exposure !== undefined ? { exposure: view.exposure } : {}),
-			gateBuild: view.gateBuild,
 		}),
 	);
 }

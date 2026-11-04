@@ -22,12 +22,16 @@ function projection(descriptor: {
 	auth: RuntimeBootMetadata["auth"];
 	credentialsEnvVar?: string;
 	oauthProviderId?: string;
+	decide?: unknown;
+	decisionAlias?: RuntimeBootMetadata["decisionAlias"];
 }): RuntimeBootMetadata {
 	const entry: RuntimeBootMetadata = { id: descriptor.id, kind: descriptor.kind, auth: descriptor.auth };
 	if (descriptor.aliases && descriptor.aliases.length > 0) entry.aliases = [...descriptor.aliases];
 	if (descriptor.tier !== undefined) entry.tier = descriptor.tier;
 	if (descriptor.credentialsEnvVar !== undefined) entry.credentialsEnvVar = descriptor.credentialsEnvVar;
 	if (descriptor.oauthProviderId !== undefined) entry.oauthProviderId = descriptor.oauthProviderId;
+	if (descriptor.decide !== undefined) entry.decides = true;
+	if (descriptor.decisionAlias !== undefined) entry.decisionAlias = descriptor.decisionAlias;
 	return entry;
 }
 
