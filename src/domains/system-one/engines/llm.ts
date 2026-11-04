@@ -5,22 +5,14 @@
  * readout. Another readout would be another declared capability, not a mode.
  */
 
+import { speaksOutputConfigFormat } from "../../../core/response-schema.js";
 import { modelEndpointKey, registerForegroundStream } from "../../providers/endpoint-capacity.js";
 import type { OneShotPort } from "../../providers/one-shot.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
 import { engineCapabilities, PROFILES } from "../profiles.js";
 import type { DecisionEngine, EngineDestination, EngineReply, EngineRequest } from "../types.js";
-import {
-	BATCH_PROMPT_VERSION,
-	batchMaxTokens,
-	batchPrompt,
-	batchSchema,
-	decidedAnswer,
-	isDecided,
-	readBatchReply,
-	renderState,
-} from "./llm-batch.js";
+import { BATCH_PROMPT_VERSION, decidedAnswer, formBatch, isDecided } from "./llm-batch.js";
 import type { AnsweredIdentity, Channel } from "./llm-wire.js";
 import { chatBaseUrl, createHttpChannel, createOneShotChannel, hasChatWire } from "./llm-wire.js";
 import type { EngineHost } from "./shared.js";
@@ -93,15 +85,12 @@ async function decideBatch(
 		const only = decidedAnswer(question);
 		if (only !== null) answers[id] = only;
 	}
-	const reply = await channel.batch(
-		batchPrompt(renderState(request.state), asked),
-		batchSchema(asked),
-		batchMaxTokens(asked),
-	);
+	const batch = formBatch(request.state, asked, speaksOutputConfigFormat(runtimeId) ? "list" : "by-id");
+	const reply = await channel.batch(batch.prompt, batch.schema, batch.maxTokens);
 	// A response that names no model can't be told apart from any other server's.
 	if (reply.answered === null)
 		throw new Error(`llm engine '${name}': the response names no model, so no identity is established`);
-	const read = readBatchReply(reply.text, asked);
+	const read = batch.read(reply.text);
 	if (read === null) throw new Error(`llm engine '${name}' returned no JSON object`);
 	return {
 		build: batchBuild(target, runtimeId, reply.answered),
