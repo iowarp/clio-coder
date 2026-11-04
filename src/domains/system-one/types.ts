@@ -276,6 +276,8 @@ export interface SystemOne {
 	identity?(site: SiteId): string | null;
 	/** Every engine breaker that counts a failure or is tripped, in this process and the current session. */
 	breakers?(): ReadonlyArray<SystemOneBreakerView>;
+	/** Why each engine's server refused its current model by name; it is not asked again. */
+	refusedEngines?(): ReadonlyMap<string, string>;
 }
 
 export type CallOutcome =

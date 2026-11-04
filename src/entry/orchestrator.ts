@@ -3895,6 +3895,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		settled: (maxWaitMs) => systemOneCore.settled(maxWaitMs),
 		measuredDeadlineMs: (site) => systemOneCore.measuredDeadlineMs(site),
 		breakers: () => systemOneCore.breakers?.() ?? [],
+		refusedEngines: () => systemOneCore.refusedEngines?.() ?? new Map(),
 		...(systemOneCore.limits !== undefined ? { limits: (site, task) => systemOneCore.limits?.(site, task) ?? null } : {}),
 		run: (site, object, options) => {
 			const carried = flowLedger.current();
@@ -3932,6 +3933,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		runtimes: { get: (id) => providers.getRuntime(id) },
 		recording: systemOneRecording,
 		latencyMs: (site) => decisionUsage.latency(site),
+		refusedEngines: () => systemOne.refusedEngines?.() ?? new Map(),
 		persistSession: (use) => {
 			unsavedSystemOneScope = { use };
 			saveSystemOneScope();

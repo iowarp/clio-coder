@@ -1466,6 +1466,7 @@ function systemOneEngineFindings(
 		const where = target.url ?? `${runtime.displayName} endpoint`;
 		const observation = observations.get(target.id);
 		const rowName = `system one (experimental) engine ${name}`;
+		const confirm = `\`clio-coder systemone check ${name} --live\` asks one decision`;
 		if (observation === undefined || observation === null) {
 			rows.push({
 				ok: true,
@@ -1480,7 +1481,7 @@ function systemOneEngineFindings(
 				ok: true,
 				level: "warn",
 				name: rowName,
-				detail: `${head}; ${where} did not answer: ${observation.probe.error ?? "no reply"}; every site it serves behaves as if unbound`,
+				detail: `${head}; ${where} did not answer: ${observation.probe.error ?? "no reply"}; every site it serves behaves as if unbound; ${confirm}`,
 			});
 			continue;
 		}
@@ -1488,10 +1489,12 @@ function systemOneEngineFindings(
 		const serving = observation.advertised.length > 0 ? `; serving ${observation.advertised.join(", ")}` : "";
 		rows.push({
 			ok: true,
+			// Not a pass: a pin the runtime knows skips the `/models` check, and a retired one still answers 400 to every decision.
+			level: "info",
 			name: rowName,
 			// `/models` lists names a server is willing to serve, and a hosted one lists moving aliases, so
 			// this proves the endpoint answers and never which build would answer a decision.
-			detail: `${head}; ${where} answered${latency === undefined ? "" : `, round trip ${latency} ms`}${serving}; passive check, no decision asked, so the requested build is not verified`,
+			detail: `${head}; ${where} answered${latency === undefined ? "" : `, round trip ${latency} ms`}${serving}; passive check, no decision asked, so the requested build is not verified; ${confirm}`,
 		});
 	}
 	return rows;

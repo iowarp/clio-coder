@@ -29,6 +29,7 @@ export function createSystemOneControl(deps: {
 	runtimes: RuntimeLookup;
 	recording: () => boolean;
 	latencyMs: (site: SiteId) => number | null;
+	refusedEngines: () => ReadonlyMap<string, string>;
 	persistSession: (use: string | null) => void;
 }): SystemOneControl {
 	const measurements = createMeasurementReader();
@@ -42,6 +43,7 @@ export function createSystemOneControl(deps: {
 				hasCredential: credentialAvailable,
 				recording: deps.recording(),
 				latencyMs: deps.latencyMs,
+				refusedEngines: deps.refusedEngines(),
 				measurements: measurements(),
 			}),
 		);

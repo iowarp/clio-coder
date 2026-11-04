@@ -46,6 +46,8 @@ export interface StatusInput {
 	readonly localCuts?: LocalCuts;
 	readonly measurements?: MeasurementIndex;
 	readonly latencyMs?: (site: SiteId) => number | null;
+	/** What this process's engines have refused to serve; a separate process cannot know. */
+	readonly refusedEngines?: ReadonlyMap<string, string>;
 }
 
 export const IDENTITY_LIMIT =
@@ -78,6 +80,10 @@ export function describeStatus(input: StatusInput): SystemOneStatus {
 		const cfg = effective.systemOne.engines[engine];
 		const target = effective.targets.find((entry) => entry.id === binding.target);
 		const destination = `${binding.target}/${binding.model ?? target?.defaultModel ?? "target default"}`;
+		const refusal = input.refusedEngines?.get(engine);
+		if (refusal !== undefined) {
+			return { site, state: "unavailable", engine, destination, detail: `${refusal}; nothing more is sent` };
+		}
 		// A key named on the target or by a gateway is the runtime's own affair; only a declared runtime key is checked.
 		const runtimeId = target?.runtime ?? "";
 		const required = findBuiltinRuntimeBootMetadata(runtimeId)?.credentialsEnvVar;

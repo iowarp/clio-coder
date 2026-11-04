@@ -395,6 +395,25 @@ describe("System One runner", () => {
 		strictEqual(fake.calls(), BREAKER_THRESHOLD);
 	});
 
+	it("does not ask again after the server refuses the model by name", async () => {
+		const { runner, bind, records } = harness();
+		const reason = 'TypeSafe decide failed: HTTP 400: Bad Request: {"message":"Unknown model: jev-9.9.9"}';
+		const fake = fakeEngine(async () => {
+			throw new Error(reason);
+		});
+		const binding = bind(fake);
+		for (let index = 0; index < 3; index += 1) strictEqual(await runner.run(binding, site(), "x", {}), null);
+		strictEqual(fake.calls(), 1);
+		deepStrictEqual(
+			records.map((record) => record.outcome),
+			["failed", "breaker-open", "breaker-open"],
+		);
+		deepStrictEqual(
+			runner.refused().map((entry) => [entry.engine, entry.reason]),
+			[["fake", reason]],
+		);
+	});
+
 	it("reports each engine breaker for /health, counting timeouts and then open (#434)", async () => {
 		const { runner, bind } = harness();
 		const binding = bind(fakeEngine(hangs));

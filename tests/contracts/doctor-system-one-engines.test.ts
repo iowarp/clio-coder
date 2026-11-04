@@ -55,7 +55,8 @@ test("doctor shows each bound System One engine's profile, window and passive ro
 	assert.equal(rows.length, 1, "one row per engine, however many sites it serves");
 	const row = rows[0];
 	assert.equal(row?.ok, true);
-	assert.equal(row?.level, undefined);
+	assert.equal(row?.level, "info");
+	assert.match(row?.detail ?? "", /`clio-coder systemone check [^`]+ --live`/u);
 	assert.match(
 		row?.detail ?? "",
 		/profile strands-decider; window 4096 tokens \(target decider-npu declares 8192, profile ceiling 4096\)/u,
