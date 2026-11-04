@@ -39,6 +39,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import { redactStreamingUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -1054,6 +1055,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	options.deadline?.settle();
 
 	const endedAt = new Date().toISOString();
+	// Every exit of the answer. A reply the token limit stopped can end inside a URL, which a terminating tool's result cannot (#446).
+	const settledAnswer = (answer: string): string =>
+		redactStreamingUrlCredentials(answer, result.sawTerminatingToolResult || !result.outputExhausted);
 	let terminal: HeadlessTerminalOutcome = {
 		exitCode: 0,
 		outcome: "succeeded",
@@ -1105,7 +1109,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			"clio-coder run: output token limit reached (stopReason=length); generation incomplete. Consider resuming with a narrower task, lower reasoning effort, or a larger output budget.";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
-		if (mode === "text" && result.text.length > 0) stdoutMessage = result.text;
+		if (mode === "text" && result.text.length > 0) stdoutMessage = settledAnswer(result.text);
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
@@ -1145,12 +1149,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// result is the answer and any assistant text before it is mid-workflow
 			// chatter the model never offered as a reply. Printing that chatter instead
 			// hands the operator a dangling "let me try..." for a turn that succeeded.
-			stdoutMessage =
+			const answer =
 				result.sawTerminatingToolResult && result.terminatingToolText.length > 0
 					? result.terminatingToolText
-					: result.text.length > 0
-						? result.text
-						: null;
+					: result.text;
+			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		}
 	}
 	const exitCode = terminal.exitCode;
@@ -1162,7 +1165,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			startedAt,
 			endedAt,
 			exitCode,
-			text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
+			text: settledAnswer(result.sawTerminatingToolResult ? result.terminatingToolText : result.text),
 			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
 			// The run's own verdict, so a host bridge reads why the run ended,
 			// and which calls a headless run refused, without parsing prose.

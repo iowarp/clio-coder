@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createHeadlessJsonProjector, createJsonCredentialScrub, projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
+import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
@@ -305,6 +306,7 @@ test("the human answer of a run that was cut off holds an open URL", () => {
 			startedAt: "2026-01-01T00:00:00Z",
 			endedAt: "2026-01-01T00:00:01Z",
 			spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+			quality: {},
 			...fields,
 		}) as never;
 	const first = (answer: string, fields: object): string =>
@@ -313,4 +315,88 @@ test("the human answer of a run that was cut off holds an open URL", () => {
 	strictEqual(first("see https://u:hunter", {}), "see https://u:");
 	strictEqual(first("see http://h:8080", { exitCode: 0 }), "see http://h:8080");
 	strictEqual(first("see http://h:8080", { output: { state: "final", text: "x" } }), "see http://h:8080");
+});
+
+const CREDENTIAL_URL = "https://alice:hunter2@git.example.com/r.git";
+const SAFE_URL = "https://alice:[redacted]@git.example.com/r.git";
+
+/** Run a headless turn over a stub chat that settles one message, and read what reached stdout. */
+async function headlessStdout(
+	mode: "text" | "json",
+	jsonEvents: string | undefined,
+	message: object,
+	events: object[] = [],
+): Promise<string> {
+	let handler: (event: unknown) => void = () => {};
+	const stub: Record<string, unknown> = {
+		onEvent: (next: (event: unknown) => void) => {
+			handler = next;
+			return () => {};
+		},
+		getSessionId: () => null,
+		submit: async () => {
+			handler({ type: "agent_start" });
+			for (const event of events) handler(event);
+			handler({ type: "message_end", message });
+			handler({ type: "turn_end", message, toolResults: [] });
+			handler({ type: "agent_end", messages: [message] });
+		},
+		whenSettled: async () => {},
+		lastRunSnapshot: () => null,
+		isStreaming: () => false,
+	};
+	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
+	const written: string[] = [];
+	const write = process.stdout.write;
+	const writeError = process.stderr.write;
+	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		written.push(String(chunk));
+		for (const argument of rest) if (typeof argument === "function") argument();
+		return true;
+	}) as typeof process.stdout.write;
+	process.stderr.write = (() => true) as typeof process.stderr.write;
+	try {
+		await runHeadlessMainAgent(
+			chat as never,
+			{
+				prompt: "x",
+				mode,
+				...(jsonEvents !== undefined ? { jsonEvents } : {}),
+				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+			} as never,
+		);
+	} finally {
+		process.stdout.write = write;
+		process.stderr.write = writeError;
+	}
+	return written.join("");
+}
+
+const assistantAnswer = (text: string, stopReason = "stop"): object => ({
+	role: "assistant",
+	stopReason,
+	content: [{ type: "text", text }],
+	usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+});
+
+test("a headless main-agent answer hides URL credentials at both exits", async () => {
+	const answer = `Use ${CREDENTIAL_URL} to clone, BASE_TOKENS=100 and --token to pass`;
+	const shown = `Use ${SAFE_URL} to clone, BASE_TOKENS=100 and --token to pass`;
+	const env = await isolateClioEnv("url-surfaces-headless-");
+	try {
+		const text = await headlessStdout("text", undefined, assistantAnswer(answer));
+		ok(!text.includes("hunter2"), text);
+		ok(text.includes(shown), text);
+		const terminal = await headlessStdout("json", "terminal", assistantAnswer(answer));
+		ok(!terminal.includes("hunter2"), terminal);
+		ok(terminal.includes(shown), terminal);
+		const whole = await headlessStdout("text", undefined, assistantAnswer("open http://localhost:8080"));
+		ok(whole.includes("open http://localhost:8080"), whole);
+		const cut = await headlessStdout("text", undefined, assistantAnswer("see https://u:hunter", "length"));
+		ok(!cut.includes("hunter"), cut);
+		const endFrame = await headlessStdout("json", "terminal", assistantAnswer("see https://u:hunter", "length"));
+		ok(!endFrame.includes("hunter"), endFrame);
+	} finally {
+		env.restore();
+	}
 });
