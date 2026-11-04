@@ -588,6 +588,7 @@ async function gatherFiles(
 		}
 		candidates.add(raw);
 	}
+	if (candidates.size === 0) return null;
 	const heads = Math.min(candidates.size, CONSULT_LIMITS.filterItems);
 	const reservation = reserveObservation(heads * CONSULT_LIMITS.filterHeadChars, options);
 	if (reservation.exhausted) return evidenceExhausted(reservation, "Continue in a follow-up turn.");
@@ -689,7 +690,8 @@ async function runFilter(
 	if (filter.source === "items") gatherEntries(Object.entries(filter.items), gathering);
 	if (filter.source === "capabilities") {
 		try {
-			const capabilities = deps.capabilities?.(options) ?? [];
+			// A coordinator session places consult behind the gateway too, and it is no answer to itself.
+			const capabilities = (deps.capabilities?.(options) ?? []).filter((entry) => entry.name !== ToolNames.Consult);
 			gatherEntries(
 				capabilities.map((entry) => [entry.name, `${entry.name}: ${entry.description}`] as const),
 				gathering,

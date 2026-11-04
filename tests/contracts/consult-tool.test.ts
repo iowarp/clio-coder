@@ -324,6 +324,14 @@ describe("contracts/consult tool", () => {
 			"withheld by the protected-path policy": 1,
 			"not found": 1,
 		});
+		const nothing = await filter(bound([engine]), {
+			criterion: "names a component",
+			source: "files",
+			paths: ["none/*.ts"],
+		});
+		strictEqual(nothing.answered, false);
+		strictEqual(nothing.offered, 0);
+		strictEqual(nothing.remainingCalls, 3);
 		const sent = JSON.stringify(engine.asked);
 		ok(!sent.includes(TOKEN));
 		ok(!sent.includes("API_KEY"));
