@@ -110,13 +110,16 @@ function random(seed: number): () => number {
 	};
 }
 
-/** The stated contract, written apart from the code: the last run after a scheme shows through its first colon. */
+/** The stated contract, written apart from the code: the last run after a scheme shows through its first colon, or its last `@`. */
 function expectedFrame(prefix: string): string {
-	const open = /https?:\/\/([^\s/@]*)$/iu.exec(prefix);
+	const open = /https?:\/\/([^\s/]*)$/iu.exec(prefix);
 	if (open === null) return redactSecretString(prefix);
-	const runStart = open.index + open[0].length - (open[1]?.length ?? 0);
-	const colon = prefix.indexOf(":", runStart);
-	return redactSecretString(colon < 0 ? prefix : prefix.slice(0, colon + 1));
+	const name = open[1] ?? "";
+	const colon = name.indexOf(":");
+	const at = name.indexOf("@");
+	if (colon < 0 || (at >= 0 && at < colon)) return redactSecretString(prefix);
+	const end = prefix.length - name.length + (at >= 0 ? name.lastIndexOf("@") + 1 : colon + 1);
+	return redactSecretString(prefix.slice(0, end));
 }
 
 function leaked(frame: string, oneShot: string): string[] {
@@ -171,10 +174,29 @@ test("every chunking of the corpus streams to the one-shot output without showin
 	}
 });
 
+test("one-shot redaction hides the whole password of every userinfo shape", () => {
+	for (const [text, redacted] of [
+		["https://:ZQXJ@h", "https://:[redacted]@h"],
+		["https://u:ZQ:XJ@h", "https://u:[redacted]@h"],
+		["https://u:ZQ@XJ@h", "https://u:[redacted]@h"],
+		["https://u:ZQ@XJ@h:8443/p", "https://u:[redacted]@h:8443/p"],
+		["https://u:ZQ@h/a@b", "https://u:[redacted]@h/a@b"],
+		["https://a:ZQ@h,https://b:XJ@h", "https://a:[redacted]@h,https://b:[redacted]@h"],
+	] as const) {
+		strictEqual(redactSecretString(text), redacted);
+		strictEqual(redactSecretString(redacted), redacted);
+		const tally = createRedactionTally();
+		const evidence = redactSecretsText(text, tally);
+		strictEqual(leaked(evidence, "").join(""), "", text);
+		strictEqual(redactSecretsText(evidence, tally), evidence);
+	}
+});
+
 test("a run that never ends gains a marker past the limit and never shows what it holds", () => {
 	const run = `https://u:${"Z".repeat(5000)}`;
 	strictEqual(redactStreamingSecretString(run), "https://u:[held]");
-	strictEqual(redactStreamingSecretString(`${run}@h`), "https://u:[redacted]@h");
+	strictEqual(redactStreamingSecretString(`${run}@h`), "https://u:[redacted]@");
+	strictEqual(redactStreamingSecretString(`${run}@h/`), "https://u:[redacted]@h/");
 	strictEqual(redactStreamingSecretString(run, true), run);
 });
 
@@ -986,9 +1008,9 @@ test("userinfo redaction counts once, survives a second pass and spans display f
 	strictEqual(redactSecretsText(redactSecretString("https://u:ZQXJ@h"), tally), "https://u:[redacted]@h");
 	strictEqual(redactSecretString(once), once);
 	const deeper = redactSecretsText("https://a:b:ZQ@h", tally);
-	strictEqual(deeper, "https://a:b:[redacted:url-userinfo]@h");
+	strictEqual(deeper, "https://a:[redacted:url-userinfo]@h");
 	strictEqual(redactSecretsText(deeper, tally), deeper);
-	strictEqual(redactSecretString("https://u:ZQ[redacted:abc]@h"), "https://u:ZQ[redacted:[redacted]@h");
+	strictEqual(redactSecretString("https://u:ZQ[redacted:abc]@h"), "https://u:[redacted]@h");
 	strictEqual(tally.count, 2);
 	deepStrictEqual(redactSecretSegments(["clone https://u:ZQ", "XJ@h/r"], createRedactionTally()), [
 		"clone https://u:[redacted:url-userinfo]",

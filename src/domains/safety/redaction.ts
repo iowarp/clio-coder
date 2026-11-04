@@ -18,9 +18,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
-// The lookahead changes no match, since `@` can only follow the whole run. It stops a run that ends elsewhere from
-// retrying at each of its colons: this also reads journal records and tool output now, and 80 KB took 1.4 s (#446).
-const SECRET_STRING_RE = /(https?:\/\/(?=[^\s/@]+@)[^\s/@]+:)([^\s/@]+)@/giu;
+// The name stops at its first colon and the password runs to the authority's last `@`, so `https://:pw@h`, `u:pa:ss@h` and
+// `u:p@ss@h` hide the whole password. Each attempt starts at a scheme and ends at the next `/`, so the scan is linear (#446).
+const SECRET_STRING_RE = /(https?:\/\/[^\s/@:]*:)([^\s/]*)@/giu;
 const SECRET_URL_PARAM_NAME_RE =
 	/[?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)/giu;
 const SECRET_URL_PARAM_STOP_RE = /[=\s]/gu;
@@ -44,12 +44,11 @@ export function isEnvReference(value: string): boolean {
 export const URL_USERINFO_RE = SECRET_STRING_RE;
 
 // Text passes both redactors, and again on a re-export, where promotion and handoff mask earlier markers as private-use
-// tokens. The marker's own colon lands in the prefix, so `[redacted:kind]` arrives split and would corrupt on a rewrite.
-const REDACTED_USERINFO_RE = /^(?:\[redacted\]|\uE000[\uE100-\uF8FF])$/u;
+// tokens. Only a password that is entirely one marker is exempt, so `https://u:REAL[redacted:abc]@h` is still rewritten.
+const REDACTED_USERINFO_RE = /^(?:\[redacted(?::[a-z-]+)?\]|\uE000[\uE100-\uF8FF])$/u;
 const REDACTED_KIND_RE = /^[a-z-]+\]$/u;
-// Only a password that is entirely one marker is exempt. `https://u:REAL[redacted:abc]@h` is rewritten, though REAL stays
-// visible as `pa:` does in `https://u:pa:ss@h`, because one-shot redaction shows everything through the last colon.
-const REDACTED_PREFIX_RE = /(?::|\/\/)\[redacted:$/u;
+// A marker that replaced a username token holds the first colon itself: `https://[redacted:github-token]@h`.
+const REDACTED_PREFIX_RE = /\/\/\[redacted:$/u;
 
 /** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
 export function urlUserinfoHoldsSecret(prefix: string, secret: string): boolean {
@@ -214,9 +213,10 @@ function redactPlainSecretString(value: string): string {
 }
 
 // A hold ends only where SECRET_STRING_RE's userinfo run ends. A friendlier stop such as `)`, `,` or a quote sits inside
-// that run, so `https://u:pa)ss@h` would show `pa)` before the pattern could ever match it (#446).
+// that run, so `https://u:pa)ss@h` would show `pa)` before the pattern could ever match it, and `@` does too, since the
+// text after one can still be password (#446).
 function endsUserinfoRun(code: number): boolean {
-	if (code === 0x2f || code === 0x40) return true;
+	if (code === 0x2f) return true;
 	if (code > 0x20 && code < 0x7f) return false;
 	return /\s/u.test(String.fromCharCode(code));
 }
@@ -228,9 +228,10 @@ const USERINFO_HOLD_MARKER = "[held]";
 
 /**
  * The part of text still being written that is safe to show when its last run may become URL userinfo. Everything
- * through the run's first colon appears in every completion, because the pattern's prefix always contains it; a later
- * colon does not, since `https://u:pw:@h` redacts `pw:`. No length or timeout ever shows held text: past the limit the
- * frame only gains a marker, so a run that never ends cannot reveal what it holds.
+ * through the run's first colon appears in every completion, because the pattern's prefix always ends there, and so does
+ * everything through a later `@`, which the pattern replaces. What follows that `@` stays back, since `https://u:p@ss@h`
+ * makes it password. A name that already reached an `@` before any colon holds no password. No length or timeout ever
+ * shows held text: past the limit the frame only gains a marker, so a run that never ends cannot reveal what it holds.
  */
 export function holdUnresolvedUserinfo(value: string): string {
 	let runStart = value.length;
@@ -238,7 +239,11 @@ export function holdUnresolvedUserinfo(value: string): string {
 	if (!URL_SCHEME_END_RE.test(value.slice(Math.max(0, runStart - LONGEST_URL_SCHEME), runStart))) return value;
 	const colon = value.indexOf(":", runStart);
 	if (colon < 0 || colon === value.length - 1) return value;
-	return `${value.slice(0, colon + 1)}${value.length - colon - 1 > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
+	const firstAt = value.indexOf("@", runStart);
+	if (firstAt >= 0 && firstAt < colon) return value;
+	const keep = firstAt >= 0 ? value.lastIndexOf("@") + 1 : colon + 1;
+	if (keep === value.length) return value;
+	return `${value.slice(0, keep)}${value.length - keep > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
 }
 
 /**
