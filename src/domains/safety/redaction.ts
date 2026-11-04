@@ -43,10 +43,19 @@ export const URL_USERNAME_TOKEN_RE = new RegExp(
 	"giu",
 );
 const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
+// A secret word has to be a whole word of the name, so `author`, `tokens`, `authenticated` and `credentials` keep their values
+// while `db_password`, `password_confirmation`, `token[]` and `pageToken` lose theirs. A glued qualifier counts only when it is a
+// known one. `auth` alone can be qualified into a setting, as `no_auth=1` is, so it stands only by itself (#446).
 const SECRET_URL_PARAM_NAME_RE =
-	/[?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)/giu;
-const SECRET_URL_PARAM_STOP_RE = /[=\s]/gu;
+	/(?:^|_)(?:authorization|credential|pass(?:word|wd|phrase)?|pwd|secret|token|(?:access|api|auth|private|secret)_?key|(?:access|auth|oauth|refresh|id|session)token|clientsecret|(?:db|ssl)pass(?:word)?)(?:_|$)|^o?auth$/u;
+const URL_PARAM_WORD_BREAK_RE = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/gu;
+const URL_PARAM_WORD_SEPARATOR_RE = /[-_.[\]\d]+/u;
+// A delimiter opens a name, `://` opens a URL, and whitespace or a `"` closes one. `;` divides parameters only inside a URL, as
+// in `jdbc:sqlserver://db:1433;user=sa;password=x;`, since code such as `a=1;token=next()` is full of them. Names stop at every
+// delimiter, so runs are disjoint and each name is read once: `&token` repeated took 8 s at 320 KB when each walked to the `=`.
+const URL_PARAM_SCAN_RE = /\s+|:\/\/|"|[?&;]([^?&;=\s:"]*)/gu;
 const SECRET_URL_PARAM_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^&#\s"]`)}`, "uy");
+const SECRET_URL_SEMICOLON_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^;\s"]`)}`, "uy");
 // A name's run must reach the `=`, so only the run's start can match and the secret word need only be found once. Two
 // stars around the word retried at every occurrence: `api_key_` repeated took 9 s at 320 KB, on a path a frame can wait on.
 const SECRET_ASSIGNMENT_RE =
@@ -125,27 +134,34 @@ function redactSecretFlags(value: string): string {
 	return out.join("");
 }
 
-/**
- * `?token=value`, where a parameter name runs on to the next `=`. A scan rather than one pattern: every name in a run shares
- * that `=` or its absence, and a pattern walks to it again from each one, so `&token` repeated took 8 s at 320 KB.
- */
+function isSecretUrlParamName(name: string): boolean {
+	const words = name.replace(URL_PARAM_WORD_BREAK_RE, "_").toLowerCase().split(URL_PARAM_WORD_SEPARATOR_RE);
+	return SECRET_URL_PARAM_NAME_RE.test(words.filter((word) => word.length > 0).join("_"));
+}
+
+/** The value spans of `?token=value` and of `;password=value` inside a URL. */
 export function secretUrlParamValues(value: string): Array<{ start: number; end: number }> {
-	const names = new RegExp(SECRET_URL_PARAM_NAME_RE);
-	const stops = new RegExp(SECRET_URL_PARAM_STOP_RE);
-	const secrets = new RegExp(SECRET_URL_PARAM_VALUE_RE);
 	const found: Array<{ start: number; end: number }> = [];
-	let stop = -1;
-	for (let name = names.exec(value); name !== null; name = names.exec(value)) {
-		if (stop < names.lastIndex) {
-			stops.lastIndex = names.lastIndex;
-			stop = stops.exec(value)?.index ?? value.length;
+	if (!value.includes("=")) return found;
+	const scan = new RegExp(URL_PARAM_SCAN_RE);
+	const secrets = new RegExp(SECRET_URL_PARAM_VALUE_RE);
+	const semicolonSecrets = new RegExp(SECRET_URL_SEMICOLON_VALUE_RE);
+	let inUrl = false;
+	for (let match = scan.exec(value); match !== null; match = scan.exec(value)) {
+		const name = match[1];
+		if (name === undefined) {
+			inUrl = match[0] === "://";
+			continue;
 		}
-		if (value[stop] !== "=") continue;
-		secrets.lastIndex = stop + 1;
-		if (!secrets.exec(value)?.[0]) continue;
-		names.lastIndex = secrets.lastIndex;
-		if (ENV_REFERENCE_RE.test(value.slice(stop + 1, secrets.lastIndex))) continue;
-		found.push({ start: stop + 1, end: secrets.lastIndex });
+		const semicolon = match[0].startsWith(";");
+		if (value[scan.lastIndex] !== "=" || (semicolon && !inUrl) || !isSecretUrlParamName(name)) continue;
+		const start = scan.lastIndex + 1;
+		const secret = semicolon ? semicolonSecrets : secrets;
+		secret.lastIndex = start;
+		if (!secret.exec(value)?.[0]) continue;
+		scan.lastIndex = secret.lastIndex;
+		if (ENV_REFERENCE_RE.test(value.slice(start, secret.lastIndex))) continue;
+		found.push({ start, end: secret.lastIndex });
 	}
 	return found;
 }
@@ -248,7 +264,7 @@ function redactPlainSecretString(value: string): string {
 	);
 }
 
-const SCHEME_CHAR_RE = /[a-z0-9+.-]/iu;
+export const SCHEME_CHAR_RE = /[a-z0-9+.-]/iu;
 const USERINFO_HOLD_LIMIT = 2048;
 const USERINFO_HOLD_MARKER = "[held]";
 
@@ -320,15 +336,14 @@ export interface CutHeadGuard {
 	token: string;
 }
 
-// `https://u` or `?token=abc`, each of which goes on to hold a secret.
-const OPEN_CREDENTIAL_END_RE = new RegExp(
-	String.raw`:\/\/${stringRun(String.raw`[^\s/"]`)}"?$|${SECRET_URL_PARAM_NAME_RE.source}[^=\s&#]*=[^&#\s]*$`,
-	"iu",
-);
+// `https://u`, which goes on to hold a secret.
+const OPEN_URL_END_RE = new RegExp(String.raw`:\/\/${stringRun(String.raw`[^\s/"]`)}"?$`, "iu");
 
 /** Whether a cut at the end of this text would leave a piece of a credential on each side, neither of which matches (#446). */
 export function endsInOpenCredential(text: string): boolean {
-	return OPEN_CREDENTIAL_END_RE.test(text);
+	if (OPEN_URL_END_RE.test(text)) return true;
+	// One more character shows whether a value is open here, even an empty one or a variable's name so far.
+	return secretUrlParamValues(`${text}x`).at(-1)?.end === text.length + 1;
 }
 
 const OPEN_NAME_CHARS = 64;

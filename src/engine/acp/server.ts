@@ -49,7 +49,7 @@ export type { AcpSafeSettingsPatch, AcpThinkingLevel } from "./types.js";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import { type BashCommandProgress, combineBashOutput } from "../../core/bash-exec.js";
+import { type BashCommandProgress, combineLiveBashOutput } from "../../core/bash-exec.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { emitApproval } from "../../core/telemetry/approvals.js";
@@ -6679,7 +6679,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		let lastSentAt = Number.NEGATIVE_INFINITY;
 		let lastText = "";
 		const onUpdate = (progress: BashCommandProgress): void => {
-			const text = shellOutputTail(redactStreamingUrlCredentials(combineBashOutput(progress)));
+			const text = shellOutputTail(redactStreamingUrlCredentials(combineLiveBashOutput(progress)));
 			const sentAt = now();
 			if (
 				text.length === 0 ||

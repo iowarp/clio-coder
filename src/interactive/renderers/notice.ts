@@ -16,6 +16,7 @@
  */
 import { taskMemoryNoteForDisplay } from "../../domains/memory/task-memory-ref.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { NoticeSource } from "../../session-control/notice-source.js";
 import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
@@ -55,7 +56,7 @@ function styleTaggedNotice(line: string): string {
 
 /** The notice as the operator reads it: one line, without the product tag. */
 function noticeText(text: string): string {
-	return sanitizeCallTargetText(text).replace(PRODUCT_TAG, "").trim();
+	return sanitizeCallTargetText(redactUrlCredentials(text)).replace(PRODUCT_TAG, "").trim();
 }
 
 /** The text without a leading `[tag]` the callout title already says. */

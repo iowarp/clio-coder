@@ -21,6 +21,7 @@ import {
 	proposeTaskBankPromotion,
 	rejectMemoryRecord,
 } from "../domains/memory/index.js";
+import { holdCutOffText } from "../domains/safety/redaction.js";
 import type { BudgetPreflight } from "../domains/scheduling/contract.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
@@ -641,7 +642,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				session.setCandidate(
 					index,
 					candidate.status === "drafted"
-						? { kind: "drafted", text: candidate.text }
+						? // An abort leaves whatever a candidate had, which no later text can resolve (#446).
+							{ kind: "drafted", text: outcome.aborted ? holdCutOffText(candidate.text) : candidate.text }
 						: { kind: "failed", reason: candidate.reason },
 				);
 			});

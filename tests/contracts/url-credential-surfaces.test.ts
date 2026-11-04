@@ -6,7 +6,7 @@ import {
 	createJsonCredentialScrub,
 	projectDispatchJsonEvent,
 } from "../../src/cli/modes/json-stream.js";
-import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { withRunFailureReporting, writeRunDiagnostic } from "../../src/cli/run-failure.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -14,14 +14,20 @@ import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-j
 import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
+	endsInOpenCredential,
 	holdUnresolvedUserinfo,
+	redactFinalUrlCredentials,
 	redactSecretString,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
+import { projectAsideAnswer, projectDraftOutcome } from "../../src/engine/acp/aside.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
+import { formatDraftOverlayBody } from "../../src/interactive/overlays/draft.js";
+import { SideQuestionOverlayBody } from "../../src/interactive/overlays/side-question.js";
+import { renderNoticeRow } from "../../src/interactive/renderers/notice.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Secrets draw on letters nothing else here uses, so one leaked character is enough to fail.
@@ -615,6 +621,20 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 			.map((update) => JSON.stringify(update.content));
 		ok(frames.length > 0, "no live frame reached the client");
 		ok(!frames.some((frame) => frame.includes("hun")), JSON.stringify(frames));
+		// Stderr's newline closes no URL on stdout, which is still growing behind it.
+		await live.call("_clio-coder/session/shell", {
+			sessionId: meta.id,
+			command: "printf 'https://alice:hunter2'; printf 'warn\\n' >&2; sleep 1; printf '@h/ done\\n'",
+		});
+		const merged = live
+			.updates()
+			.filter((update) => update.status === "in_progress" && update.content !== undefined)
+			.map((update) => JSON.stringify(update.content));
+		ok(
+			merged.some((frame) => frame.includes("warn")),
+			JSON.stringify(merged),
+		);
+		ok(!merged.some((frame) => frame.includes("hunter2")), JSON.stringify(merged));
 	} finally {
 		live.transport.close();
 		await served;
@@ -970,4 +990,290 @@ test("a reply cut off inside an opaque token shows none of it at any headless or
 	} finally {
 		env.restore();
 	}
+});
+
+test("a headless failure hides the password in the target URL it names", () => {
+	const url = "https://alice:hunter2XY@127.0.0.1:9/v1";
+	const chat = {
+		lastRunSnapshot: () => ({ targetId: "mock-chat", runtimeId: "openai-compat", targetUrl: url }),
+	} as never;
+	strictEqual(
+		prefixHeadlessFailure(chat, "Connection error"),
+		"target 'mock-chat' (openai-compat https://alice:[redacted]@127.0.0.1:9/v1): Connection error",
+	);
+	ok(!prefixHeadlessFailure(chat, `fetch failed for ${url}`).includes("hunter2"));
+});
+
+test("an ACP aside round hides URL credentials in its text and its reasons", () => {
+	const url = "https://alice:hunter2@h.example/r";
+	const shown = "https://alice:[redacted]@h.example/r";
+	const lines: string[] = [];
+	const diagnostics = (line: string): void => void lines.push(line);
+	deepStrictEqual(projectAsideAnswer({ status: "answered", text: `Use ${url} to clone` }), {
+		status: "answered",
+		text: `Use ${shown} to clone`,
+		truncated: false,
+	});
+	strictEqual(projectAsideAnswer({ status: "refused", reason: `no ${url}` }).reason, `no ${shown}`);
+	projectAsideAnswer({ status: "failed", reason: `boom ${url}` }, diagnostics);
+	const drafted = projectDraftOutcome(
+		{
+			status: "drafted",
+			aborted: false,
+			candidates: [
+				{ status: "drafted", text: `Use ${url} to clone` },
+				{ status: "failed", reason: `boom ${url}` },
+			],
+		},
+		diagnostics,
+	);
+	strictEqual(JSON.stringify(drafted).includes("hunter2"), false, JSON.stringify(drafted));
+	ok(JSON.stringify(drafted).includes(shown));
+	strictEqual(
+		(projectDraftOutcome({ status: "refused", reason: `no ${url}` }) as { reason: string }).reason,
+		`no ${shown}`,
+	);
+	strictEqual(lines.length, 2);
+	ok(!lines.join("\n").includes("hunter2"), lines.join("\n"));
+	ok(lines.every((line) => line.includes(shown)));
+});
+
+test("an aborted ACP aside round stopped short, so an open URL and an opaque name stay hidden", () => {
+	const open = "see https://alice:hunter2";
+	const opaque = "see https://abcdef0123456789abcdef0123456789";
+	deepStrictEqual(projectAsideAnswer({ status: "aborted", text: open }), {
+		status: "aborted",
+		text: "see https://alice:",
+		truncated: false,
+	});
+	strictEqual((projectAsideAnswer({ status: "aborted", text: opaque }) as { text: string }).text, "see https://");
+	const aborted = projectDraftOutcome({
+		status: "drafted",
+		aborted: true,
+		candidates: [
+			{ status: "drafted", text: open },
+			{ status: "drafted", text: opaque },
+		],
+	});
+	strictEqual(JSON.stringify(aborted).includes("hunter2"), false);
+	strictEqual(JSON.stringify(aborted).includes("abcdef0123"), false);
+	// A round that finished can end on a host, and its text is whole.
+	strictEqual(
+		(projectAsideAnswer({ status: "answered", text: "at http://localhost:8080" }) as { text: string }).text,
+		"at http://localhost:8080",
+	);
+});
+
+test("a feed bound keeps a scheme's last character with the :// that follows it", async () => {
+	const env = await isolateClioEnv("url-surfaces-bound-");
+	try {
+		const stop: RunEventJournalBody = { kind: "event", type: "message_end", stopReason: "stop" };
+		for (const scheme of ["https", "postgres"]) {
+			const head = `${"x".repeat(4100)}${scheme}`;
+			const rows = feedText(`bound-scheme-${scheme}`, head, "://alice:hunter2XY@h/ next words", stop);
+			ok(!rows.join("\n").includes("hunter2"), rows.join("\n").slice(-80));
+			strictEqual(rows.join(""), `${head}://alice:[redacted:url-userinfo]@h/ next words`);
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+const PARAM_SECRET = "hunter2XY";
+
+test("a feed bound inside a URL with no credential loses nothing of a completed stream", async () => {
+	const env = await isolateClioEnv("url-surfaces-bound-free-");
+	try {
+		const shapes = [
+			"http://localhost:8080/x next words",
+			"http://localhost:8080?a=1&b=2 next words",
+			"http://localhost:PORT/x next words",
+			'{"http://localhost:8080":1} next words',
+			"see-http://a.example,http://localhost:8080 next words",
+		];
+		for (const [index, shape] of shapes.entries()) {
+			for (let cut = 0; cut <= shape.length; cut += 1) {
+				const lead = "x".repeat(4090);
+				const rows = feedText(`bound-free-${index}-${cut}`, lead + shape.slice(0, cut), shape.slice(cut), MESSAGE_STOP);
+				strictEqual(rows.join(""), lead + shape, `${shape} cut at ${cut}`);
+			}
+		}
+		const json = JSON.stringify(
+			Array.from({ length: 150 }, (_, i) => ({ name: `svc${i}`, url: `http://localhost:${8000 + i}/x`, ok: true })),
+		);
+		for (let shift = 0; shift < 8; shift += 1) {
+			const text = "x".repeat(shift) + json;
+			const deltas = text.match(/.{1,8}/gu) ?? [];
+			strictEqual(feedText(`bound-free-json-${shift}`, ...deltas, MESSAGE_STOP).join(""), text);
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("a feed bound holds a password back whatever the URL around it, in every split", async () => {
+	const env = await isolateClioEnv("url-surfaces-bound-secret-");
+	try {
+		for (const [index, shape] of [
+			`https://alice:${PARAM_SECRET}@h/ next words`,
+			`https://alice:${PARAM_SECRET}?x@h/ next words`,
+			`https://h?token=${PARAM_SECRET}&x=1 next words`,
+			`jdbc:sqlserver://db:1433;user=sa;password=${PARAM_SECRET}; next words`,
+		].entries()) {
+			for (let cut = 0; cut <= shape.length; cut += 1) {
+				const rows = feedText(
+					`bound-secret-${index}-${cut}`,
+					"x".repeat(4090) + shape.slice(0, cut),
+					shape.slice(cut),
+					MESSAGE_STOP,
+				);
+				ok(!rows.join("").includes("hunter"), `${shape} cut at ${cut}: ${rows.join("").slice(-60)}`);
+			}
+		}
+		// Past the keep nothing tells a password from a host, so the run's tail goes and none of the password shows.
+		const long = `https://alice:${"p".repeat(5000)}${PARAM_SECRET}@h/ next words`;
+		const rows = feedText("bound-secret-long", "x".repeat(4090) + long.slice(0, 3000), long.slice(3000), MESSAGE_STOP);
+		ok(!rows.join("").includes("pp"), rows.join("").slice(-60));
+		ok(!rows.join("").includes("hunter"), rows.join("").slice(-60));
+	} finally {
+		env.restore();
+	}
+});
+
+test("the URL rule hides a value by what its whole parameter name means", () => {
+	for (const name of [
+		"password",
+		"db_password",
+		"dbPassword",
+		"pwd",
+		"pass",
+		"passwd",
+		"secret",
+		"client_secret",
+		"clientSecret",
+		"token",
+		"access_token",
+		"accessToken",
+		"refresh_token",
+		"oauth_token",
+		"X-Amz-Security-Token",
+		"auth",
+		"authorization",
+		"api_key",
+		"apiKey",
+		"apikey",
+		"credential",
+	]) {
+		for (const lead of ["?", "?a=1&"]) {
+			const text = `https://h.example/p${lead}${name}=${PARAM_SECRET}&next=1 words`;
+			strictEqual(redactUrlCredentials(text), `https://h.example/p${lead}${name}=[redacted]&next=1 words`);
+			ok(!redactSecretsText(text, createRedactionTally()).includes(PARAM_SECRET), name);
+		}
+	}
+	strictEqual(
+		redactUrlCredentials(`jdbc:sqlserver://db:1433;user=sa;password=${PARAM_SECRET};encrypt=true`),
+		"jdbc:sqlserver://db:1433;user=sa;password=[redacted];encrypt=true",
+	);
+	strictEqual(redactUrlCredentials("https://h?token=$TOKEN"), "https://h?token=$TOKEN");
+});
+
+test("a secret word hides a value from anywhere in its parameter name, as a whole word", () => {
+	for (const name of [
+		"password_confirmation",
+		"passwordConfirmation",
+		"password1",
+		"token2",
+		"secret_value",
+		"auth[password]",
+		"token[]",
+		"sslpassword",
+		"dbpass",
+		"pass_word",
+		"page_token",
+		"pageToken",
+		"max_token",
+		"token_type",
+		"APIToken",
+	]) {
+		strictEqual(
+			redactUrlCredentials(`https://h.example/p?${name}=${PARAM_SECRET}&next=1 words`),
+			`https://h.example/p?${name}=[redacted]&next=1 words`,
+		);
+	}
+	for (const text of [
+		"https://h/?author=alice",
+		"https://h/?tokens=100",
+		"https://h/?authenticated=true",
+		"https://h/?credentials=include",
+		"https://h/?no_auth=1&authorId=7&compass=n",
+		"BASE_TOKENS=100 and --token in prose",
+	]) {
+		strictEqual(redactUrlCredentials(text), text);
+	}
+});
+
+test("a name that only starts with a secret word keeps its value, so a completed stream loses nothing", () => {
+	for (const text of [
+		"see https://github.com/o/r/commits?author=alice for it",
+		"https://h/usage?tokens=100&max_tokens=200",
+		"https://h/?authenticated=true",
+		"fetch('https://h/', ?credentials=include)",
+		"https://h/?authority=x&secrets=y&passwords=z&bypass=w",
+		"https://h/?token&x=1",
+		// Semicolons divide parameters only inside a URL, so code keeps its statements.
+		"let a=1;token=next();password=b",
+		'{"u":"https://h/a","v":"x;token=1"}',
+	]) {
+		strictEqual(redactUrlCredentials(text), text);
+		strictEqual(redactFinalUrlCredentials(text, true), text);
+		const filter = new UrlCredentialStreamFilter();
+		let joined = "";
+		for (let at = 0; at < text.length; at += 3) joined += filter.push(text.slice(at, at + 3));
+		strictEqual(joined + filter.end(true), text);
+	}
+	ok(!endsInOpenCredential("https://h/?author=ali"));
+	ok(endsInOpenCredential("https://h/?a=1&pwd=hun"));
+	ok(endsInOpenCredential("https://h/?pwd="));
+	ok(endsInOpenCredential("jdbc:sqlserver://db;password=hun"));
+	strictEqual(redactUrlCredentials("BASE_TOKENS=100 and --token to pass"), "BASE_TOKENS=100 and --token to pass");
+});
+
+test("a long run of parameter delimiters stays linear", () => {
+	for (const unit of ["&token", "?a", ";b=", "&", "://;"]) {
+		const started = performance.now();
+		redactUrlCredentials(unit.repeat(Math.ceil(320_000 / unit.length)));
+		ok(performance.now() - started < 1_000, unit);
+	}
+});
+
+const PLAIN = (lines: string[]): string =>
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips the rows' own styling to read their text
+	lines.join(" ").replace(/\u001b\[[0-9;:]*[A-Za-z]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/gu, "");
+
+test("a TUI error shows no password, since Node's own fetch error quotes the whole URL", () => {
+	const reason =
+		"Request cannot be constructed from a URL that includes credentials: https://alice:hunter2@h.example/v1";
+	const shown = "https://alice:[redacted]@h.example/v1";
+	const side = new SideQuestionOverlayBody("q", () => 0);
+	side.set({ kind: "error", reason });
+	const failed = PLAIN(
+		formatDraftOverlayBody({ request: "r", selected: 0, scroll: 0, candidates: [{ kind: "failed", reason }] }, 200, 10),
+	);
+	const refused = PLAIN(
+		formatDraftOverlayBody({ request: "r", selected: 0, scroll: 0, candidates: [], refused: reason }, 200, 10),
+	);
+	for (const text of [PLAIN(side.render(200)), failed, refused, PLAIN(renderNoticeRow(reason, "error", 200))]) {
+		ok(!text.includes("hunter2"), text);
+		ok(text.includes(shown), text);
+	}
+});
+
+test("an aborted side question stopped short, so an opaque name stays hidden while a frame's stays", () => {
+	const opaque = "see https://abcdef0123456789abcdef0123456789";
+	const aborted = new SideQuestionOverlayBody("q", () => 0);
+	aborted.set({ kind: "aborted", text: opaque });
+	ok(!PLAIN(aborted.render(200)).includes("abcdef0123"), PLAIN(aborted.render(200)));
+	const streaming = new SideQuestionOverlayBody("q", () => 0);
+	streaming.set({ kind: "streaming", text: opaque });
+	ok(PLAIN(streaming.render(200)).includes("abcdef0123"));
 });
