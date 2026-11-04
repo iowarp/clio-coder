@@ -17,6 +17,7 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm pi:surface-diff` / `pnpm pi:surface-snapshot` | Review consumed Pi declarations or refresh their snapshot during dependency maintenance. |
 | `pnpm herdr:pin` | Fetch and verify the selected Herdr release and its schema. |
 | `pnpm hooks:install` | Install guards against committing ignored files. |
+| `node scripts/export-github-wiki.mjs --from <wiki> --to <checkout>` | Render a complete generated wiki into a GitHub wiki checkout, replacing its pages. It refuses partial generations, broken links and private material, and never commits or pushes. |
 | `pnpm install:local --dry-run` | Preview checkout installation. Actual installation can build, replace the launcher and run local repair. |
 | `sh scripts/install.sh --dry-run` | Preview the Unix managed installer, which accepts Clio 0.6.0 or newer. Actual installation downloads and activates a package. |
 | `pnpm release:readiness` | Check public versions, documentation provenance, media and an isolated website build. |
