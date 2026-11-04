@@ -49,7 +49,7 @@ Off is the default, and off is byte-identical to a build that has no System One.
 - **A filter answers what a file is for.** A file reaches the model as its path and a digest, so a filter misses behavior inside a body. Use `grep` for that.
 - **Matches are often wrong.** On the query sets tried so far, between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. Do not treat a miss as proof either, especially when `carried.partial` is above zero.
 - **`consult` is unproven.** `consult` ships as experimental. Nothing yet measures whether agents reach for it or whether it speeds anything up.
-- **LLM routes return labels, not probabilities.** `memory`, `main` and any chat target answer one label per question, so a filter match from them has no score and a `yesNo` is 0 or 1.
+- **LLM routes return labels, not probabilities.** `memory`, `main` and any chat target answer one label per question, so a filter match from them has no score and a question comes back as `label` (`yes` or `no`, an option, or a rung) with no `pTrue`, mass or `certainty`.
 - **Generic routes never screen.** A route without declared real probabilities (any `kind: llm` engine, and a `kind: systemone` engine on the `generic` profile) is skipped by the judge screen before any byte leaves.
 - **It is not a safety net.** The deterministic safety rules and the safety judge decide. The screen can only park a call the judge would have allowed.
 - **Nothing measures your engine for you.** There are no fitted thresholds. A profile declares what a model family reads and how its numbers are read, and it makes no accuracy claim.
