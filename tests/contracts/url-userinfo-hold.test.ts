@@ -1062,3 +1062,28 @@ test("no secret survives redaction wherever a styled line holds it, and every SG
 		deepStrictEqual(sgrOf(out), sgrOf(line), name);
 	}
 });
+
+test("a /view row whose redaction outgrows it is fitted to its width again", async () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	const text = "it does not govern auth-token x refresh or login in any code path that exists and auth-token y";
+	panel.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "c",
+		toolName: "bash",
+		args: { command: "run" },
+	} as never);
+	panel.applyEvent({
+		type: "tool_execution_end",
+		toolCallId: "c",
+		toolName: "bash",
+		isError: false,
+		result: { content: [{ type: "text", text }] },
+	} as never);
+	for (const artifact of panel.inspectionArtifacts()) {
+		const { render } = await artifact.load();
+		for (let width = 20; width <= 120 && render !== undefined; width += 1) {
+			for (const row of render(width)) strictEqual(visibleWidth(row) <= width, true, `${width}: ${JSON.stringify(row)}`);
+		}
+	}
+});

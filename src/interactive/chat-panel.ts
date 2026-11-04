@@ -2403,6 +2403,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const redacted = redactSecretString(plain);
 				return redacted === plain ? row : redacted;
 			};
+			// A fitted row's marker can outgrow what it replaced, and the TUI throws on a row past the terminal's width.
+			const redactFittedRow = (row: string, width: number): string => {
+				const redacted = redactInspectionRow(row);
+				return redacted === row ? row : truncateToWidth(redacted, width, GLYPH.ellipsis, false);
+			};
 			// Newest first by the time each act happened; acts stamped in the same
 			// millisecond keep their transcript order.
 			let previousAt = Number.NEGATIVE_INFINITY;
@@ -2427,7 +2432,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					load: async () => ({
 						format: "text",
 						lines: lines().map(redactInspectionRow),
-						...(render === undefined ? {} : { render: (width: number) => render(width).map(redactInspectionRow) }),
+						...(render === undefined
+							? {}
+							: { render: (width: number) => render(width).map((row) => redactFittedRow(row, width)) }),
 					}),
 				});
 			};
