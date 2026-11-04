@@ -13,6 +13,7 @@ import type {
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createJobRuntime } from "../../src/entry/job-runtime.js";
 import { loopSegment } from "../../src/interactive/footer-panel.js";
+import { formatCompactMs } from "../../src/interactive/theme/labels.js";
 import type { ChatLoop } from "../../src/session-control/chat-loop.js";
 import type { MachineTurnRequest } from "../../src/session-control/job-turn-types.js";
 import { loopJobDetail } from "../../src/session-control/loop-command.js";
@@ -577,6 +578,11 @@ describe("job continuation at yolo (#445)", () => {
 		const footer = loopSegment([record], 200, clock) ?? "";
 		match(footer, /Loop failing/u);
 		match(footer, /last poll exit 3/u);
+	});
+
+	it("rounds a job's footer countdown to whole seconds before splitting minutes from seconds", () => {
+		strictEqual(formatCompactMs(10_799_600), "180m0s");
+		strictEqual(formatCompactMs(59_600), "1m0s");
 	});
 
 	it("passes only GH_TOKEN and GITHUB_TOKEN to a job command, and only at yolo", async () => {
