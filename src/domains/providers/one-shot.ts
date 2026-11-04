@@ -56,3 +56,13 @@ export type OneShotPort = (request: {
 	maxTokens: number;
 	signal: AbortSignal;
 }) => Promise<{ text: string; usage?: { input: number; output: number }; model?: string }>;
+
+/** What a port reports: a cached prompt is still input the model read, which is what a chat wire's prompt count says. */
+export function oneShotTokens(usage: {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead?: number;
+	readonly cacheWrite?: number;
+}): { input: number; output: number } {
+	return { input: usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0), output: usage.output };
+}
