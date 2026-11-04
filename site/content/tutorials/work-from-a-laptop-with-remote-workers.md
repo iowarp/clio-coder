@@ -1,7 +1,7 @@
 Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact Clio Coder build if needed, verify its project and model route, then choose where the first bounded task runs.
 
 ::: note Version scope
-This guide describes the v0.6.0 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
+This guide describes the v0.6.7 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
 :::
 
 ::: needs
@@ -124,7 +124,7 @@ When a verified node suits substantial work and no preference or pin exists, Cli
 
 A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
-Remote workers retain default worker authority even when the coordinator uses yolo. Worker slots limit concurrency; they do not create a scheduler allocation. On a university or laboratory cluster, use an approved execution environment. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling.
+Remote workers run under their own permits. The safety judge does not answer for a remote placement, so at `default` a remote worker's ordinary ask is denied. Worker slots limit concurrency; they do not create a scheduler allocation. On a university or laboratory cluster, use an approved execution environment. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling.
 
 ## Return edits from an independent checkout
 
@@ -134,7 +134,7 @@ Clio creates a matching branch and worktree on the node at the approved baseline
 
 The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
 
-Transfer, verification and application failures preserve the node branch for recovery. The receipt names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
+Transfer, verification and application failures preserve the node branch for recovery. The run record names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
 
 ## Follow the result
 

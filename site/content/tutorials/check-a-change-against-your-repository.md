@@ -1,4 +1,4 @@
-A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. Clio Coder v0.6.0 can use your repository's declared checks and a project quality policy to make those questions explicit.
+A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. Clio Coder v0.6.7 can use your repository's declared checks and a project quality policy to make those questions explicit.
 
 ::: note What this establishes
 Recorded verification is evidence about named checks and named inputs. It is not proof of correctness; your tests still need to cover the behavior that matters.
@@ -78,13 +78,13 @@ Required checks run through `verify` without argument or working-directory overr
 
 ## Read the result where you work
 
-On the desktop alpha, the Session column's **Artifacts** card lists receipts, outputs, and session records, **Changes** lists the files a turn changed, and **Evidence** appears once a run has a receipt. In the terminal, `/view` opens artifacts and receipts.
+On the desktop alpha, the Session column's **Artifacts** card lists outputs and session records, **Changes** lists the files a turn changed, and **Evidence** appears once a run has a record. In the terminal, `/view` opens artifacts and run records.
 
 ::: capture tui-view-result
 :::
 
 ::: result What to look for
-The actual check, its result, and any missing evidence. A receipt is an inspectable record of the run; it is not a certificate that every scientific or operational requirement was met. Receipts sealed by 0.5 releases still verify; one sealed under an older integrity format is reported as retired and is not read as evidence.
+The actual check, its result, and any missing evidence. A sealed run record is an inspectable account of the run, and `clio-coder telemetry verify` checks its journals. It is not a certificate that every scientific or operational requirement was met.
 :::
 
 ::: limits

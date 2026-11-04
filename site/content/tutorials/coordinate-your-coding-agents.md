@@ -1,7 +1,7 @@
 You can use Clio Coder to coordinate the coding agents you already have installed. Give a peer a focused assignment, follow a managed run where the connector supports it, and review its output before accepting the change.
 
 ::: note Version scope
-In v0.6.0 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
+In v0.6.7 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
 :::
 
 ::: needs
@@ -30,12 +30,12 @@ The three commands answer different needs. Pick by whether you want a recorded r
 ::: compare
 | Command | What happens | What Clio Coder records |
 | --- | --- | --- |
-| `/delegate <peer> <task>` | A configured ACP peer runs the task | The result and a receipt |
-| `/run --target <target> <agent> <task>` | A configured headless target runs it | The result and a receipt |
-| `/peer <peer> <brief>` | A Herdr pane opens for you to work in (start Clio Coder inside Herdr with `--with-panes`) | No managed receipt |
+| `/delegate <peer> <task>` | A configured ACP peer runs the task | The result and a sealed run record |
+| `/run --target <target> <agent> <task>` | A configured headless target runs it | The result and a sealed run record |
+| `/peer <peer> <brief>` | A Herdr pane opens for you to work in (start Clio Coder inside Herdr with `--with-panes`) | No run record |
 :::
 
-Panes are [experimental and off by default](/experimental/panes-and-docks.html). Do not infer that a pane completed a task because it opened. Do not infer that a managed receipt contains every internal reasoning step or mediates every operation inside a peer-owned loop.
+Panes are [experimental](/experimental/panes-and-docks.html). Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
 
 ## Give one bounded assignment
 
@@ -43,16 +43,16 @@ Panes are [experimental and off by default](/experimental/panes-and-docks.html).
 Inspect the parser's handling of empty input. Identify the existing tests and propose a regression test. Do not edit files.
 :::
 
-That last sentence is a task instruction, not an enforced boundary. Where the peer supports it, add `--read-only` to `/run` or `/delegate`, then confirm in the run's receipt that the restriction applied. A connector that cannot enforce a restriction is not equivalent to one that can.
+That last sentence is a task instruction, not an enforced boundary. Where the peer supports it, add `--read-only` to `/run` or `/delegate`, then confirm in the run's record that the restriction applied. A connector that cannot enforce a restriction is not equivalent to one that can.
 
 ## Keep worker authority separate
 
-Dispatched workers and external peers run at `default`, even when the main session uses `yolo`. Read-only is a restriction on one dispatch; Clio Coder does not carry the main session's unrestricted setting into every worker.
+A native worker inherits the main session's level inside its own permit and OS sandbox, so at `yolo` a mediated worker runs the yolo way within its dispatch scope. A read-only worker stays at `default`. Managed peer dispatches run at default permissions, even when the main session uses `yolo`, and each external agent runs its own tool loop.
 
 Each peer enforces read-only through its own mechanism. Check the mode you select instead of assuming one contract for all of them.
 
 ::: compare
-| Peer | Read-only headless run in v0.6.0 |
+| Peer | Read-only headless run in v0.6.7 |
 | --- | --- |
 | Codex | Its read-only sandbox mode |
 | Claude Code | Plan mode with read tools |
@@ -79,7 +79,7 @@ When comparing agents, give them the same task and evaluate the actual output. R
 
 ::: limits
 - Supported modes differ by peer, and some cannot receive live steering.
-- A pane is an interactive handoff; it produces no managed receipt.
+- A pane is an interactive handoff; it produces no run record.
 - Peer accounts, subscriptions, and usage limits stay with each peer's own provider.
 :::
 

@@ -1,6 +1,6 @@
 Some files should reach only a model you chose. An information-flow rule names a source, such as everything under `secrets/`, and the destinations its content may go to. Once a session has read that source, Clio Coder refuses to send the conversation anywhere else, in every permission mode.
 
-::: note Advanced, new in v0.6.0
+::: note Advanced, described for v0.6.7
 Information flow does nothing until a project declares source rules and you approve them. The policy format is new and may change. It tracks what a session has read; it is not an operating-system sandbox.
 :::
 

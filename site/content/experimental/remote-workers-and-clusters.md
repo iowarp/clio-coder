@@ -1,7 +1,7 @@
 A worker does not have to run where your conversation does. Clio Coder can send a bounded task to another machine over the SSH access you already have, and it installs without root on a cluster login node. Both are for people who know their machines and their site's rules.
 
-::: note Experimental in v0.6.0
-Verified SSH nodes, the exact-build installer, Tailscale discovery, and returning edits from a separate checkout are new in v0.6.0. Commands and prerequisites may change. None of this replaces a scheduler or an institution's access policy.
+::: note Experimental in v0.6.7
+Verified SSH nodes, the exact-build installer, Tailscale discovery, and returning edits from a separate checkout were new in v0.6.0. Commands and prerequisites may change. None of this replaces a scheduler or an institution's access policy.
 :::
 
 ::: needs

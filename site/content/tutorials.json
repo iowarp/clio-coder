@@ -86,7 +86,7 @@
     "source": "choose-model-for-your-project.md",
     "cover": "tui-configure-review",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.7"
   },
   {
     "slug": "coordinate-your-coding-agents",
@@ -98,7 +98,7 @@
     "source": "coordinate-your-coding-agents.md",
     "cover": "tui-interop",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.7"
   },
   {
     "slug": "keep-long-coding-tasks-on-track",
@@ -110,7 +110,7 @@
     "source": "keep-long-coding-tasks-on-track.md",
     "cover": "tui-context",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.7"
   },
   {
     "slug": "check-a-change-against-your-repository",
@@ -122,7 +122,7 @@
     "source": "check-a-change-against-your-repository.md",
     "cover": "tui-verify-result",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.7"
   },
   {
     "slug": "add-skills-and-plugins-deliberately",
@@ -134,7 +134,7 @@
     "source": "add-skills-and-plugins-deliberately.md",
     "cover": "tui-library-installed",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.7"
   },
   {
     "slug": "work-from-a-laptop-with-remote-workers",
@@ -146,7 +146,7 @@
     "source": "work-from-a-laptop-with-remote-workers.md",
     "cover": "tui-settings-fleet",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.0"
+    "versionScope": "0.6.7"
   },
   {
     "slug": "write-an-extension-with-declared-capabilities",

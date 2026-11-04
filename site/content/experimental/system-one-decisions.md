@@ -1,11 +1,11 @@
 System One is an optional decision layer. At a few fixed points in a session, Clio Coder can ask a small, fast model a typed question, such as "which of these drafts answers the request best?", and get back probabilities instead of prose. It never answers you, never edits files, and never removes an approval.
 
-::: note Experimental in v0.6.0
+::: note Experimental in v0.6.7
 System One is off until you bind a decision site to an engine. Settings, `clio-coder doctor`, and `/usage` label it experimental. Site names, engine options, and the settings format may change between releases.
 :::
 
 ::: needs
-- Clio Coder 0.6.0 with a working chat model.
+- Clio Coder 0.6.7 with a working chat model.
 - One engine: a chat target you already configured, a self-hosted `systemone` server, or a hosted decision engine account.
 - A reason to try it. Nothing else in Clio Coder depends on System One.
 :::
@@ -71,7 +71,7 @@ A `systemone` engine is a server built for these questions: a hosted decision en
 
 An engine acts on the `turn` and `relevance` sites only when Clio Coder has measured confidence thresholds, called cuts, for that exact model build. Without cuts the engine runs in shadow: its answers are recorded and change nothing. The approval advisory, `consult`, and `/draft` show any engine's answer and name the build that gave it.
 
-`clio-coder doctor` prints one row per bound site and per engine. To keep a local dataset of decisions and outcomes, set `systemOne.record: true`, then use `clio-coder systemone status` and `clio-coder systemone export --out <file>`. Rows are redacted, kept 30 days by default, and stay on your machine.
+`clio-coder doctor` prints one row per bound site and per engine. To keep a local dataset of decisions and outcomes, set `telemetry.mode: research` and `telemetry.research.content: true`, record consent with `clio-coder telemetry consent`, then use `clio-coder systemone status` and `clio-coder systemone export --out <file>`. Rows are redacted, kept 30 days by default, and stay on your machine.
 
 ::: limits Know what leaves your machine
 - State is redacted before any engine sees it, but a hosted engine still receives request text and bounded tool output. A local server keeps that data on your machine.
