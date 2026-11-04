@@ -1,5 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { SYSTEM_ONE_HELP } from "../../src/cli/system-one.js";
+import { SETTINGS_V1_RETIRED_PATHS } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
@@ -9,6 +11,7 @@ import { filterQuestions, pick, pointQuestion, yesNo } from "../../src/domains/s
 import type { RunnerRoute } from "../../src/domains/system-one/runner.js";
 import { BREAKER_THRESHOLD, createRunner } from "../../src/domains/system-one/runner.js";
 import { resolveChoice, routeNames } from "../../src/domains/system-one/selection.js";
+import { describeStatus, formatStatus, SYSTEM_ONE_REACH } from "../../src/domains/system-one/status.js";
 import type {
 	DecisionEngine,
 	DecisionPoint,
@@ -364,4 +367,24 @@ test("use names routes: a list keeps its order, off ends it, and nothing unnamed
 	strictEqual(jev.engine.profile, "jev");
 	strictEqual(jev.impliedTarget?.runtime, "typesafe-jev");
 	strictEqual(resolveChoice(settings, "main").kind, "unavailable");
+});
+
+test("every surface says a bound route reaches past consult, and the CLI lists only what exists", () => {
+	const help = SYSTEM_ONE_HELP.replace(/\s+/g, " ");
+	for (const words of ["safety judge", "web and MCP results", "steering triage", "leaves the machine"]) {
+		ok(help.includes(words), `help says ${words}`);
+	}
+	deepStrictEqual(
+		SYSTEM_ONE_HELP.split("\n")
+			.filter((line) => line.startsWith("clio-coder systemone "))
+			.map((line) => line.split(" ")[2]),
+		["status", "use", "off", "check"],
+	);
+	ok(!/calibrate|\bexport\b/.test(SYSTEM_ONE_HELP));
+	ok(SETTINGS_V1_RETIRED_PATHS["systemOne.sites"].includes("judge screen"));
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.systemOne.use = "jev";
+	ok(formatStatus(describeStatus({ settings })).join("\n").includes(SYSTEM_ONE_REACH));
+	settings.systemOne.use = "off";
+	ok(!formatStatus(describeStatus({ settings })).join("\n").includes(SYSTEM_ONE_REACH));
 });

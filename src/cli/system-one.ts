@@ -2,14 +2,17 @@ import type { ClioSettings } from "../core/config.js";
 import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder systemone status
+export const SYSTEM_ONE_HELP = `clio-coder systemone status
 clio-coder systemone use <route>[,<route>...] [--scope user|project]
 clio-coder systemone off [--scope user|project]
 clio-coder systemone check <engine> --live
 
 System One is experimental and off until you name a route or an ordered list of
-them: jev, memory, main, a declared engine or a target. Naming one registers the
-consult tool on the next start. A decision engine answers typed questions; keys may
+them: jev, memory, main, a declared engine or a target. From the next start a named
+route answers the consult tool. A route that declares real probabilities also reads
+web and MCP results when the safety judge reviews a call, and a route answers steering
+triage when chat.steering.triage is on. On a hosted route, what these send leaves the
+machine: file digests and heads, web and MCP result text and queued messages. Keys may
 change between releases.
 
 status   whether System One is on, and why not when it cannot run
@@ -166,22 +169,22 @@ export async function runSystemOneCommand(argv: ReadonlyArray<string>): Promise<
 		parsed = parseArgs(argv);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stderr.write(HELP);
+		process.stderr.write(SYSTEM_ONE_HELP);
 		return 2;
 	}
 	if (parsed.help) {
-		process.stdout.write(HELP);
+		process.stdout.write(SYSTEM_ONE_HELP);
 		return 0;
 	}
 	const known = ["status", "use", "off", "check"];
 	if (parsed.command === undefined || !known.includes(parsed.command)) {
 		if (parsed.command !== undefined) printError(`unknown systemone command: ${parsed.command}`);
-		process.stderr.write(HELP);
+		process.stderr.write(SYSTEM_ONE_HELP);
 		return 2;
 	}
 	if ((parsed.command === "use" || parsed.command === "check") && parsed.name === undefined) {
 		printError(`${parsed.command} requires an engine`);
-		process.stderr.write(HELP);
+		process.stderr.write(SYSTEM_ONE_HELP);
 		return 2;
 	}
 	if (parsed.command === "check" && parsed.live !== true) {

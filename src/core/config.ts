@@ -1018,7 +1018,8 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"integrations.externalAgents.entries[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
 	// Written as an empty map by `init` from 0.5.3 through 0.5.7, so most upgraded files carry it.
 	"fleet.decisionProfiles": "System One replaced decision profiles; name an engine with systemOne.use",
-	"systemOne.sites": "there are no decision sites any more; set systemOne.use to bind the consult tool",
+	"systemOne.sites":
+		"there are no decision sites any more; set systemOne.use to bind one route to the consult tool, the judge screen and steering triage",
 	"systemOne.cuts": "no build-keyed cut acts any more",
 	"systemOne.record": "the decision dataset is gone",
 	"systemOne.retentionDays": "the decision dataset is gone",

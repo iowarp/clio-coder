@@ -29,6 +29,10 @@ export interface SystemOneStatus {
 	readonly headline: string;
 }
 
+/** A bound route reaches past the tool, so every surface that says it is on says this too. */
+export const SYSTEM_ONE_REACH =
+	"A route that declares real probabilities also reads web and MCP results when the safety judge reviews a call, and a route answers steering triage when chat.steering.triage is on. On a hosted route, that text and consult's evidence leave the machine";
+
 function costNote(resolution: ChoiceResolution): string | null {
 	if (resolution.kind !== "engine" || resolution.engine.kind !== "llm") return null;
 	const where = `${resolution.engine.target}/${resolution.engine.model ?? "target default"}`;
@@ -70,7 +74,8 @@ export function describeStatus(input: StatusInput): SystemOneStatus {
 			? `unavailable: ${unusable}; nothing is sent`
 			: `active: the consult tool is bound to ${active.join(", then ")}${unusable.length > 0 ? `; unavailable: ${unusable}` : ""}`;
 	const costs = resolutions.flatMap((resolved) => costNote(resolved) ?? []);
-	return { use: shown, scope, headline: [headline, ...costs].join(". ") };
+	const reach = active.length === 0 ? [] : [SYSTEM_ONE_REACH];
+	return { use: shown, scope, headline: [headline, ...reach, ...costs].join(". ") };
 }
 
 /** The lines `/systemone` and `clio-coder systemone status` print. */
