@@ -27,7 +27,7 @@ On a cluster, read [Install on a cluster](/docs/guide/hpc-clusters.html).
 
 ### PowerShell
 
-Native Windows is best effort and needs Clio Coder 0.6.1 or newer; the 0.6.0 installer stops at activation there. Install, repair, rollback and uninstall were checked by hand on one x64 machine with PowerShell 5.1, and the native install is not part of the automated release checks. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.
+Native Windows is best effort, so use the current stable release. Install, repair, rollback and uninstall were checked by hand on an earlier release, on one x64 machine with PowerShell 5.1. An optional release job boots the package on Windows and runs only `--version` and `--help`, and no automated check covers the native install. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.
 
 ```powershell
 irm https://coder.iowarp.ai/install.ps1 | iex
@@ -114,7 +114,7 @@ If an upgrade is refused over a setting the installed version cannot repair, the
 
 `clio-coder uninstall` removes your settings, credentials, sessions and caches, the launcher, the desktop app's background service, and for an installer install the managed Node and every package version. It previews what it will delete and asks first, and it stops with exit 1 while a session is open on this state directory. Add `--keep-binary` to keep the program, `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 
-If coder.iowarp.ai is unreachable, the latest GitHub release carries the same script from 0.6.0 on, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
+If coder.iowarp.ai is unreachable, the latest GitHub release carries the full installer, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 
 ## Give Clio Coder a useful first task
 

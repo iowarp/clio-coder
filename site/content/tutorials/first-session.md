@@ -2,7 +2,7 @@ Clio Coder works in the repository you open. For your first session, give it a s
 
 ## 1. Install Clio Coder
 
-The installer brings its own Node.js and needs no root. Linux, macOS, and WSL are the primary platforms. Native Windows is best effort and needs 0.6.0 or newer. On Linux, the installer offers to add the desktop app when it finishes.
+The installer brings its own Node.js and needs no root. Linux, macOS, and WSL are the primary platforms. Native Windows is best effort, so use the current stable release. On Linux, the installer offers to add the desktop app when it finishes.
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
