@@ -110,3 +110,21 @@ test("doctor removes retired keys in flow and block settings without losing adja
 		ok(readFileSync(file, "utf8").startsWith("# Keep this comment\n"));
 	}
 });
+
+test("doctor removes a section its last retired key emptied, so the repaired home still loads", async (t) => {
+	const home = await isolateClioEnv("clio-retired-emptied-");
+	t.after(() => home.restore());
+	const file = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(
+		file,
+		"# Keep this comment\nversion: 2\nturnControl:\n  orientation:\n    maxSplit: 2\nfleet:\n  speculativeDispatch: true\ntelemetry:\n  research:\n    systemOneDataset: true\nchat:\n  model: kept\n",
+	);
+	const result = repairSettingsCoercions();
+	strictEqual(result.removed?.length, 3);
+	strictEqual(readFileSync(file, "utf8"), "# Keep this comment\nversion: 2\nchat:\n  model: kept\n");
+	const after = validateSettingsFile();
+	strictEqual(after.issues.length, 0);
+	strictEqual(after.retired.length, 0);
+	ok(readSettings());
+});
