@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { isPlanOnlyRequest, stripPlanCloseOptions } from "../../src/core/plan-request.js";
+import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
@@ -221,7 +222,7 @@ describe("turn_end effects inside one chat-loop run", () => {
 		env.restore();
 	});
 
-	function fixture(turnEndEffects: (turnEnd: number) => MiddlewareEffect[]) {
+	function fixture(turnEndEffects: (turnEnd: number) => MiddlewareEffect[], bus?: TelemetryHub) {
 		const requests: Context[] = [];
 		faux.setResponses(
 			Array.from({ length: 4 }, (_, index) => (context: Context) => {
@@ -296,6 +297,7 @@ describe("turn_end effects inside one chat-loop run", () => {
 			getSettings: () => settings,
 			providers,
 			middleware,
+			...(bus ? { bus } : {}),
 			knownTargets: () => new Set([target.id]),
 			createAgent: (options) => createEngineAgent(options),
 			prompts: {
@@ -331,6 +333,39 @@ describe("turn_end effects inside one chat-loop run", () => {
 			strictEqual(f.agentEnds(), 1);
 		} finally {
 			f.loop.dispose();
+		}
+	});
+
+	it("holds a continuation that needs a tool once the loop guard locked tools", async () => {
+		for (const [toolFree, expected] of [
+			[false, 1],
+			[true, 2],
+		] as const) {
+			const listeners = new Map<string, (payload: unknown) => void>();
+			const bus = {
+				subscribe: (channel: string, listener: (payload: unknown) => void) => {
+					listeners.set(channel, listener);
+					return () => {};
+				},
+				emit: () => {},
+			} as unknown as TelemetryHub;
+			const f = fixture((turnEnd) => {
+				if (turnEnd !== 1) return [];
+				listeners.get("safety.loop_blocked")?.({ disposition: "lockout" });
+				return [
+					{
+						kind: "request_continuation",
+						message: 'Close this plan with ask_user "Carry out this plan?".',
+						...(toolFree ? { toolFree } : {}),
+					},
+				];
+			}, bus);
+			try {
+				await f.loop.submit("do the task");
+				strictEqual(f.requests.length, expected);
+			} finally {
+				f.loop.dispose();
+			}
 		}
 	});
 

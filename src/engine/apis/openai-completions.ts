@@ -26,6 +26,7 @@ import {
 } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { CacheReadField } from "../../core/token-split.js";
+import { normalizeModelIdForFamily } from "../../domains/providers/model-family.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
 	reasoningClassForMechanism,
@@ -502,6 +503,27 @@ function harmonyToolTurnsWithOneAnalysis(context: Context, resolved: ResolvedMod
 				],
 			};
 		}),
+	};
+}
+
+/**
+ * Qwopus copies reasoning replayed on its own tool turns and so re-emits the
+ * call that reasoning led to. Replaying captured first-repeat requests through
+ * litellm repeated the prior call 12 of 18 times as sent and 0 of 18 with the
+ * reasoning removed. The tool call and its result carry the loop forward, so
+ * only the thinking goes. Other families stay as they are: Harmony and
+ * providers that require the field depend on this replay. Request only; the
+ * saved transcript never changes.
+ */
+function qwopusToolTurnsWithoutReasoning(context: Context, resolved: ResolvedModelRuntimeCapabilities): Context {
+	if (!normalizeModelIdForFamily(resolved.modelId).includes("qwopus")) return context;
+	return {
+		...context,
+		messages: context.messages.map((message) =>
+			message.role === "assistant" && message.content.some((block) => block.type === "toolCall")
+				? { ...message, content: message.content.filter((block) => block.type !== "thinking") }
+				: message,
+		),
 	};
 }
 
@@ -1123,7 +1145,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 	const resolved = resolvedCapabilitiesForModel(model, level);
 	const effectiveContext = stripsThinking(resolved)
 		? stripThinkingFromContext(context)
-		: harmonyToolTurnsWithOneAnalysis(context, resolved);
+		: qwopusToolTurnsWithoutReasoning(harmonyToolTurnsWithOneAnalysis(context, resolved), resolved);
 	// Pi's credential check reads request headers, while its HTTP client also
 	// reads model headers. Forward both so header-authenticated targets pass both.
 	const transportOptions = model.headers

@@ -458,6 +458,7 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 		case "request_continuation": {
 			const cloned: MiddlewareEffect = { kind: "request_continuation", message: effect.message };
 			if (effect.note !== undefined) cloned.note = effect.note;
+			if (effect.toolFree === true) cloned.toolFree = true;
 			return cloned;
 		}
 		case "require_tool":

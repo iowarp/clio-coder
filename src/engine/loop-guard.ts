@@ -193,7 +193,8 @@ function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: 
 			: "";
 	return (
 		`loop detected: ${tool} was called ${repeatCount} times with identical arguments among this turn's recent ` +
-		`tool calls. Repeating the exact call is blocked. ${evidence}Next: ${loopNextMove(tool)}`
+		// formatModelRejection clips each line at 300 characters; the next move needs its own.
+		`tool calls. Repeating the exact call is blocked. ${evidence.trimEnd()}\nNext: ${loopNextMove(tool)}`
 	);
 }
 
@@ -284,9 +285,10 @@ export function lockedSynthesisRepromptMessages(
  */
 function synthesisLockoutDirective(): string {
 	return (
+		// One line per instruction: formatModelRejection clips each line at 300 characters.
 		"loop guard: this turn reached its tool-call limit after repeated identical calls, so tool calls are now " +
-		"disabled for the rest of this turn. Everything you retrieved is already in the conversation above. Answer " +
-		"now from what you have gathered, preserving the required result format (JSON for a JSON result contract; otherwise prose). Do not write tool-call markup such as " +
+		"disabled for the rest of this turn. Everything you retrieved is already in the conversation above.\nAnswer " +
+		"now from what you have gathered, preserving the required result format (JSON for a JSON result contract; otherwise prose).\nDo not write tool-call markup such as " +
 		"<tool_call> blocks; tool calls are disabled and will not run."
 	);
 }

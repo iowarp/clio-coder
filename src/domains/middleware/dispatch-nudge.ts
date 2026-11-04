@@ -480,6 +480,7 @@ export function createDetachedDispatchNudgeRegistration(
 				{
 					kind: "request_continuation",
 					note: "finished detached batches are waiting",
+					toolFree: true,
 					message: `Clio will collect ${ready.length} finished detached batch(es) before the next model call.`,
 				},
 			];
