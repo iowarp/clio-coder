@@ -20,6 +20,10 @@ import {
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import {
+	SideQuestionOverlayBody,
+	type SideQuestionOverlayPhase,
+} from "../../src/interactive/overlays/side-question.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
 import { renderBashTranscriptExecution } from "../../src/interactive/renderers/tool-execution.js";
 import {
@@ -239,6 +243,20 @@ test("a headless answer hides URL credentials and keeps prose the wider rule wou
 		),
 		human,
 	);
+});
+
+test("a side question hides URL credentials while it streams and when it ends", () => {
+	const shown = (phase: SideQuestionOverlayPhase): string => {
+		const body = new SideQuestionOverlayBody("q", () => 0);
+		body.set(phase);
+		return stripTerminalSequences(body.render(120).join("\n"));
+	};
+	strictEqual(leaked(shown({ kind: "streaming", text: "clone https://u:ZQXJ" }), "").join(""), "");
+	strictEqual(leaked(shown({ kind: "aborted", text: "clone https://u:ZQXJ" }), "").join(""), "");
+	const answered = shown({ kind: "answered", text: "clone postgres://u:ZQXJ@h/db and BASE_TOKENS=100" });
+	strictEqual(leaked(answered, "").join(""), "");
+	ok(answered.includes("postgres://u:[redacted]@h/db") && answered.includes("BASE_TOKENS=100"), answered);
+	ok(shown({ kind: "answered", text: "open http://h:8080" }).includes("http://h:8080"));
 });
 
 function proseFrame(panel: ChatPanel): string {
