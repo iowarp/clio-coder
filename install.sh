@@ -1,6 +1,6 @@
 #!/bin/sh
-# The site delegates to released assets; pre-release users need the rc's installer
-# before the first stable release carries the new channel and upgrade behavior.
+# The site delegates to released assets, so each release owns installer behavior
+# and this script only chooses which release's installer to run.
 main() {
 	set -eu
 	channel=${CLIO_CODER_CHANNEL:-latest}
@@ -36,8 +36,8 @@ main() {
 			;;
 	esac
 	if ! get "$url" "$file"; then get https://github.com/iowarp/clio-coder/releases/latest/download/install.sh "$file"; fi
-	# Older released installers preserve a pin on a plain rerun. A channel spec
-	# explicitly releases it, including the default hosted upgrade to latest.
+	# A rerun without an exact version follows the channel and clears a pin, so the
+	# default hosted upgrade names its channel. An exact version or --package pins.
 	if [ -z "$version" ]; then set -- "$@" --version "$channel"; fi
 	sh "$file" "$@"
 }
