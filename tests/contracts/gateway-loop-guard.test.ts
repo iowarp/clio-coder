@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { formatModelRejection } from "../../src/domains/safety/rejection-feedback.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import type { ToolRegistry } from "../../src/tools/registry.js";
@@ -23,12 +24,15 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function workspace(): { cwd: string; registry: ToolRegistry } {
+function workspace(guardOptions: { turnBlockBudget?: number; turnSynthesisLockout?: boolean } = {}): {
+	cwd: string;
+	registry: ToolRegistry;
+} {
 	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-gateway-loop-guard-")));
 	roots.push(cwd);
 	writeFileSync(join(cwd, "notes.ts"), ["export const alpha = 1;", "export const beta = 2;", ""].join("\n"));
 	const safety = createWorkerSafety({ cwd });
-	const guard = createLoopGuardRegistration({ safety, toolCallCap: 100, turnBlockBudget: 100 });
+	const guard = createLoopGuardRegistration({ safety, toolCallCap: 100, turnBlockBudget: 100, ...guardOptions });
 	const registry = createWorkerToolRegistry(undefined, safety, undefined, [guard]);
 	// Stand in for an operator who approves the write the mutation case makes.
 	registry.onPermissionRequired((_call, decision, meta) => {
@@ -141,6 +145,20 @@ describe("gateway op=call identity", () => {
 			match(results[2]?.reason ?? "", /This exact call already succeeded 2 times this run/u);
 		});
 	}
+
+	it("keeps the guard's own guidance whole in the model-facing text", async () => {
+		const { registry } = workspace({ turnBlockBudget: 2, turnSynthesisLockout: true });
+		const results = [];
+		for (let attempt = 0; attempt < 4; attempt += 1) results.push(await viaName(registry, absent));
+		const blocked = formatModelRejection(results[2]?.reason ?? "");
+		match(
+			blocked,
+			/already in the conversation above; calling it again returns the same text\.\nNext: Change the arguments/u,
+		);
+		const locked = formatModelRejection(results[3]?.reason ?? "");
+		match(locked, /^Do not write tool-call markup .* will not run\.$/mu);
+		ok(!`${blocked}${locked}`.includes("…"));
+	});
 
 	it("keeps different arguments distinct", async () => {
 		const { registry } = workspace();
