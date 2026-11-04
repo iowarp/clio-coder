@@ -54,8 +54,13 @@ export type TurnContinuationCause =
 	| "loop_guard"
 	| "retries_exhausted"
 	| "compaction";
-/** One job or one operator turn gets this many continuations; a turn that dies that often is not a slow turn (#445). */
+/**
+ * One job or one operator turn gets this many continuations after a failure stop; a turn that dies that often is not a
+ * slow turn. A tool budget crossing is a checkpoint and does not count, or a steady poll would run out of them within
+ * hours. The cost ceiling and the loop guard bound it instead (#445).
+ */
 export const TURN_CONTINUATION_CAP = 3;
+export const continuationCountsAgainstCap = (cause: TurnContinuationCause): boolean => cause !== "tool_budget";
 /** Wait before continuing a turn that failed, so a provider outage has time to clear (#445). */
 const TURN_CONTINUATION_FAILURE_DELAYS_MS = [60_000, 300_000, 900_000] as const;
 export function turnContinuationDelayMs(attempt: number, retryAfterMs?: number): number {
@@ -93,6 +98,8 @@ export interface JobDelivery {
 	endedAt: number | null;
 	reason: string | null;
 	evidence: JobEvidence | null;
+	/** Set when this delivery continues a stopped turn at yolo rather than following up on a match (#445). */
+	continuation?: TurnContinuationCause;
 }
 export interface JobRecord {
 	version: 1;
@@ -118,7 +125,7 @@ export interface JobRecord {
 	/** Bounded terminal history; starts/settled are lifetime counters. */
 	history: JobOccurrence[];
 	delivery: JobDelivery | null;
-	/** Times this job continued a stopped turn at yolo, whatever stopped it (#445). Absent on older records and on a job it never hit. */
+	/** Continuations this job spent against the cap at yolo; a tool budget crossing spends none (#445). Absent on older records and on a job it never hit. */
 	clockResumes?: number;
 	/** Null when any executed component has unknown pricing/usage. */
 	costUsd: number | null;

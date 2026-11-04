@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import {
+	continuationCountsAgainstCap,
 	JobClockExpired,
 	TURN_CONTINUATION_CAP,
 	type TurnContinuationCause,
@@ -1700,11 +1701,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/** What a settled turn stopped on, when nobody asked for it and yolo has continuations left (#445). */
 	const yoloContinuationDue = (): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number } | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
-		if (state.yoloContinuations >= TURN_CONTINUATION_CAP) return null;
-		if (state.turnStop !== null) return state.turnStop;
-		if (state.toolBudgetLock) return { cause: "tool_budget", reason: "it reached the per-turn tool budget" };
-		if (state.synthesisToolLock) return { cause: "loop_guard", reason: "the loop guard locked its tools" };
-		return null;
+		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
+		const stop =
+			state.turnStop ??
+			(state.synthesisToolLock
+				? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
+				: state.toolBudgetLock
+					? { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
+					: null);
+		if (stop === null) return null;
+		return continuationCountsAgainstCap(stop.cause) && state.yoloContinuations >= TURN_CONTINUATION_CAP ? null : stop;
 	};
 
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
@@ -1713,7 +1719,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
 	): Promise<void> => {
-		state.yoloContinuations += 1;
+		const counted = continuationCountsAgainstCap(stop.cause);
+		if (counted) state.yoloContinuations += 1;
 		const attempt = state.yoloContinuations;
 		const context = deps.session?.current()?.id;
 		deps.bus?.emit(
@@ -1722,7 +1729,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(context === undefined ? [] : [ownerTelemetryContext({ sessionId: context })]),
 		);
 		emitNotice(
-			`Continuing this turn because autonomy is yolo (${attempt} of ${TURN_CONTINUATION_CAP}): ${stop.reason}.`,
+			`Continuing this turn because autonomy is yolo${counted ? ` (${attempt} of ${TURN_CONTINUATION_CAP})` : ""}: ${stop.reason}.`,
 			"warning",
 			"turn.continued",
 		);
@@ -1738,7 +1745,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (disposed || generation !== submitGeneration || state.activeUserTurnId !== null || state.streaming) return;
 		if (await queues.resubmitStranded()) return;
 		await api.submit(
-			`[Clio Coder] The previous turn stopped: ${stop.reason}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop. This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.`,
+			`[Clio Coder] The previous turn stopped: ${stop.reason}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop.${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}`,
 			{
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
@@ -3295,7 +3302,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const usage = sumRunUsage(messages);
 						// An exhausted ladder prunes its failure, so an earlier round's text must not read as success (#445).
 						const stop = state.turnStop as { reason: string; retryAfterMs?: number } | null;
-						const guardStop = state.toolBudgetLock ? "tool_budget" : state.synthesisToolLock ? "loop_guard" : undefined;
+						// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
+						const guardStop =
+							stop !== null
+								? undefined
+								: state.synthesisToolLock
+									? "loop_guard"
+									: state.toolBudgetLock
+										? "tool_budget"
+										: undefined;
 						options.machineTurn.onSettled({
 							status:
 								!admissionCurrent() || canceled || interviewDismissed

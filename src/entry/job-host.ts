@@ -154,7 +154,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 				if (cause === "clock") deps.bus.emit("job.clock_resumed", { jobId: job.id, boundMs, at: Date.now() }, context);
 				deps.bus.emit(
 					"turn.continued",
-					{ cause, attempt: job.clockResumes ?? 1, cap: TURN_CONTINUATION_CAP, jobId: job.id, at: Date.now() },
+					{ cause, attempt: job.clockResumes ?? 0, cap: TURN_CONTINUATION_CAP, jobId: job.id, at: Date.now() },
 					context,
 				);
 			},

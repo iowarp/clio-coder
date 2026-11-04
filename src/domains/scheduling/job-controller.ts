@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+	continuationCountsAgainstCap,
 	JobClockExpired,
 	TURN_CONTINUATION_CAP,
 	type TurnContinuationCause,
@@ -136,14 +137,14 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		evidence: JobEvidence,
 		result: JobRunResult,
 	): TurnContinuationCause | null {
-		if (evidence.cleanupUnresolved || (job.clockResumes ?? 0) >= TURN_CONTINUATION_CAP) return null;
-		if (job.generation !== execution.generation) return null;
+		if (evidence.cleanupUnresolved || job.generation !== execution.generation) return null;
 		let cause: TurnContinuationCause | null = null;
 		if (execution.clockExpired === true) cause = job.spec.timeoutDefaulted === true ? "clock" : null;
 		else if (execution.forced !== null) cause = null;
 		else if (result.stoppedBy !== undefined) cause = result.stoppedBy;
 		else if (evidence.errorClass === "infrastructure") cause = "failure";
 		if (cause === null) return null;
+		if (continuationCountsAgainstCap(cause) && (job.clockResumes ?? 0) >= TURN_CONTINUATION_CAP) return null;
 		const uncontinued =
 			execution.kind === "delivery"
 				? job.delivery?.kind === "main_turn"
@@ -167,10 +168,11 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		cause: TurnContinuationCause,
 		evidence: JobEvidence,
 	): void {
-		draft.clockResumes = (draft.clockResumes ?? 0) + 1;
+		const counted = continuationCountsAgainstCap(cause);
+		if (counted) draft.clockResumes = (draft.clockResumes ?? 0) + 1;
 		const detail = cause === "failure" && evidence.summary ? `: ${evidence.summary.slice(0, 200)}` : "";
 		draft.delivery = {
-			id: `${draft.id}:clock-resume:${draft.clockResumes}`,
+			id: `${draft.id}:clock-resume:${counted ? draft.clockResumes : randomUUID()}`,
 			occurrenceId,
 			kind: "main_turn",
 			state: "pending",
@@ -179,6 +181,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			endedAt: null,
 			reason: `${CONTINUATION_REASON[cause]}${detail}`,
 			evidence: null,
+			continuation: cause,
 		};
 	}
 	function abortLive(id: string, reason: string, outcome: JobEvidence["outcome"]): void {
@@ -461,7 +464,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			} else draft.consecutiveFailures = 0;
 		});
 		// The commit is the authority: a branch that returned early queued nothing to announce.
-		if (resuming !== null && (current(id).clockResumes ?? 0) > (job.clockResumes ?? 0)) {
+		const queued = current(id).delivery;
+		if (resuming !== null && queued?.continuation !== undefined && queued.id !== job.delivery?.id) {
 			if (resuming === "failure") {
 				const attempt = current(id).clockResumes ?? 1;
 				retryAt.set(id, spanNow() + turnContinuationDelayMs(attempt, result.retryAfterMs));
