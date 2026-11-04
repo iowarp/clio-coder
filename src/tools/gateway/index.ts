@@ -198,15 +198,35 @@ function autonomyNote(actionClass: ActionClass): string {
 	}
 }
 
+/** The capability names this run may reach, or null when nothing restricts it. */
+function allowedSet(options: ToolInvokeOptions | undefined): ReadonlySet<string> | null {
+	const run = options?.allowedTools;
+	const turn = options?.turnConstraints?.allowedTools;
+	if (run === undefined && turn === undefined) return null;
+	return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
+}
+
+/** What `find` would list for this run with each capability's full description, for a caller that filters them. */
+export function gatewayCapabilityItems(
+	registry: ToolRegistry,
+	mcp: McpCapabilitySource | undefined,
+	options: ToolInvokeOptions | undefined,
+): Array<{ name: string; description: string }> {
+	const allowed = allowedSet(options);
+	const admitted = (name: string): boolean => allowed === null || allowed.has(name);
+	const entries = new Map<string, string>();
+	for (const spec of registry.listAll()) {
+		if (surfaceSpecPlacement(spec, allowed) === "gateway" && admitted(spec.name))
+			entries.set(spec.name, spec.description);
+	}
+	for (const entry of mcp?.catalog().entries ?? []) {
+		if (admitted(entry.name)) entries.set(entry.name, entry.description);
+	}
+	return [...entries].map(([name, description]) => ({ name, description }));
+}
+
 export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	const { registry } = deps;
-
-	const allowedSet = (options: ToolInvokeOptions | undefined): ReadonlySet<string> | null => {
-		const run = options?.allowedTools;
-		const turn = options?.turnConstraints?.allowedTools;
-		if (run === undefined && turn === undefined) return null;
-		return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
-	};
 
 	/** Whether this run's tool surface names any capability of MCP server `id`. */
 	const admitsServer = (id: string, allowed: ReadonlySet<string> | null): boolean =>

@@ -214,6 +214,8 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 						profile: engine.profile,
 						target: route.usable.cfg.target,
 						model: route.usable.cfg.model ?? null,
+						windowTokens: engine.capabilities.windowTokens,
+						windowCounts: engine.capabilities.windowCounts,
 					};
 				} catch (err) {
 					return { name, problem: err instanceof Error ? err.message : String(err) };

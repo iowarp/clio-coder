@@ -192,6 +192,9 @@ export interface RouteInfo {
 	readonly profile?: ProfileId;
 	readonly target?: string;
 	readonly model?: string | null;
+	/** What one request to this route may fill, for a caller that must fit an ask before making it. */
+	readonly windowTokens?: number | null;
+	readonly windowCounts?: EngineCapabilities["windowCounts"];
 	/** Why this route cannot answer, for status surfaces. */
 	readonly problem?: string;
 }

@@ -34,7 +34,7 @@ import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
 import { clioDocsToolSurface, clioLibraryToolSurface } from "./gateway/clio-context-surface.js";
 import { dataToolSurface, prepareDataAdmissionArguments } from "./gateway/data-surface.js";
-import { createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
+import { createGatewayTool, gatewayCapabilityItems, type McpCapabilitySource } from "./gateway/index.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
@@ -109,7 +109,7 @@ export interface CoreToolBootstrapDeps {
 	/** A capability the model called through the gateway, so a ranked one can be joined to its ranking as a follow-up. */
 	onCapabilityCalled?: (name: string) => void;
 	/**
-	 * The `consult` decision site, when it is bound at startup. Only the session
+	 * The `consult` tool's bindings, when a route is named at startup. Only the session
 	 * passes it; without it the tool is not registered and the gateway listing,
 	 * the tool signature and the prompt are unchanged.
 	 */
@@ -340,7 +340,15 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		),
 	});
 	if (deps.consult) {
-		registry.register(builtin(createConsultTool(deps.consult), { path: "src/tools/consult.ts", scope: "core" }));
+		registry.register(
+			builtin(
+				createConsultTool({
+					...deps.consult,
+					capabilities: (options) => gatewayCapabilityItems(registry, deps.mcpCapabilities, options),
+				}),
+				{ path: "src/tools/consult.ts", scope: "core" },
+			),
+		);
 	}
 	if (deps.visionSidecar) {
 		registry.register(
@@ -368,14 +376,8 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		},
 	);
 	registry.register(
-		(deps.consult || deps.visionSidecar) && gateway.metadata
-			? {
-					...gateway,
-					metadata: {
-						...gateway.metadata,
-						promptHint: gatewayPromptHint(Boolean(deps.consult), Boolean(deps.visionSidecar)),
-					},
-				}
+		deps.visionSidecar && gateway.metadata
+			? { ...gateway, metadata: { ...gateway.metadata, promptHint: gatewayPromptHint(true) } }
 			: gateway,
 	);
 	// The coordination board exists only inside a dispatch: a worker process
