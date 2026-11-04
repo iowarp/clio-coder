@@ -7,7 +7,7 @@
  */
 
 import { AssistantProseProjection } from "../../core/assistant-prose.js";
-import { redactStreamingUrlCredentials } from "../../domains/safety/redaction.js";
+import { redactStreamingUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { animationStep, clioTheme, GLYPH, rule, spinnerFrame } from "../theme/index.js";
@@ -61,7 +61,8 @@ function formatSideQuestionBody(
 		lines.push(line);
 	lines.push(rule(theme, contentWidth));
 	if (phase.kind === "error") {
-		for (const line of wrapTextWithAnsi(theme.fg("error", phase.reason), contentWidth)) lines.push(line);
+		for (const line of wrapTextWithAnsi(theme.fg("error", redactUrlCredentials(phase.reason)), contentWidth))
+			lines.push(line);
 		return lines;
 	}
 	const body = phase.text.trim();

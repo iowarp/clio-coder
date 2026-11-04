@@ -93,7 +93,7 @@ function candidateRows(state: DraftOverlayState, width: number): string[] {
 		const head = `${cursor} ${index === state.selected ? theme.fg("selectedOption", label) : label}  `;
 		let body: string;
 		if (phase.kind === "failed") {
-			body = theme.fg("error", `${GLYPH.error} ${phase.reason}`);
+			body = theme.fg("error", `${GLYPH.error} ${redactUrlCredentials(phase.reason)}`);
 		} else {
 			body = theme.fg(phase.kind === "streaming" ? "annotation" : "menuDescription", candidateStatus(phase));
 		}
@@ -137,7 +137,7 @@ function selectedText(state: DraftOverlayState, width: number, maxLines: number)
 	const theme = clioTheme();
 	const phase = state.candidates[state.selected];
 	if (!phase) return [];
-	if (phase.kind === "failed") return wrapTextWithAnsi(theme.fg("error", phase.reason), width);
+	if (phase.kind === "failed") return wrapTextWithAnsi(theme.fg("error", redactUrlCredentials(phase.reason)), width);
 	// The trim would hide the whitespace that closes an open URL, so the streaming hold reads the raw text first (#446).
 	const text = (phase.kind === "drafted" ? phase.text : redactStreamingUrlCredentials(phase.text)).trim();
 	if (text.length === 0) return [theme.fg("annotation", "…")];
@@ -162,7 +162,8 @@ export function formatDraftOverlayBody(state: DraftOverlayState, width: number, 
 	}
 	lines.push(rule(theme, contentWidth));
 	if (state.refused !== undefined) {
-		for (const line of wrapTextWithAnsi(theme.fg("error", state.refused), contentWidth)) lines.push(line);
+		for (const line of wrapTextWithAnsi(theme.fg("error", redactUrlCredentials(state.refused)), contentWidth))
+			lines.push(line);
 		return lines;
 	}
 	lines.push(...candidateRows(state, contentWidth));

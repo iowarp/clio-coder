@@ -25,6 +25,9 @@ import { projectAsideAnswer, projectDraftOutcome } from "../../src/engine/acp/as
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
+import { formatDraftOverlayBody } from "../../src/interactive/overlays/draft.js";
+import { SideQuestionOverlayBody } from "../../src/interactive/overlays/side-question.js";
+import { renderNoticeRow } from "../../src/interactive/renderers/notice.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Secrets draw on letters nothing else here uses, so one leaked character is enough to fail.
@@ -1146,5 +1149,27 @@ test("a long run of parameter delimiters stays linear", () => {
 		const started = performance.now();
 		redactUrlCredentials(unit.repeat(Math.ceil(320_000 / unit.length)));
 		ok(performance.now() - started < 1_000, unit);
+	}
+});
+
+const PLAIN = (lines: string[]): string =>
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips the rows' own styling to read their text
+	lines.join(" ").replace(/\u001b\[[0-9;:]*[A-Za-z]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/gu, "");
+
+test("a TUI error shows no password, since Node's own fetch error quotes the whole URL", () => {
+	const reason =
+		"Request cannot be constructed from a URL that includes credentials: https://alice:hunter2@h.example/v1";
+	const shown = "https://alice:[redacted]@h.example/v1";
+	const side = new SideQuestionOverlayBody("q", () => 0);
+	side.set({ kind: "error", reason });
+	const failed = PLAIN(
+		formatDraftOverlayBody({ request: "r", selected: 0, scroll: 0, candidates: [{ kind: "failed", reason }] }, 200, 10),
+	);
+	const refused = PLAIN(
+		formatDraftOverlayBody({ request: "r", selected: 0, scroll: 0, candidates: [], refused: reason }, 200, 10),
+	);
+	for (const text of [PLAIN(side.render(200)), failed, refused, PLAIN(renderNoticeRow(reason, "error", 200))]) {
+		ok(!text.includes("hunter2"), text);
+		ok(text.includes(shown), text);
 	}
 });

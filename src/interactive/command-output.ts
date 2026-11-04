@@ -1,4 +1,5 @@
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { NoticeLevel, NoticeSource } from "../session-control/notice-source.js";
 import type { PromptReferenceCard, RunIo } from "../session-control/slash-commands.js";
@@ -18,7 +19,8 @@ const NOTICE_MARKS = { info: "info", success: "success", warn: "warning", error:
  * width.
  */
 export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutputSink, source?: NoticeSource): void {
-	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trimEnd();
+	// A notice can quote an error, and Node's own fetch error quotes the whole URL (#446).
+	const normalized = redactUrlCredentials(text).replace(/\r/g, "").replace(/\n+/gu, " ").trimEnd();
 	if (normalized.trim().length === 0) return;
 	if (source !== undefined) {
 		sink.appendReplayBlock((width) => renderNoticeRow(normalized, NOTICE_MARKS[level], width, source));
