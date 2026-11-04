@@ -21,6 +21,7 @@ import {
 	type Context,
 	createAssistantMessageEventStream,
 	type Model,
+	parseToolCallArguments,
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { Terminal } from "@earendil-works/pi-tui";
@@ -381,6 +382,72 @@ describe("engine lifecycle: a call to a tool with no attached schema", () => {
 		};
 		strictEqual(result.isError, true);
 		strictEqual(result.content[0]?.text, "Tool grep not found");
+	});
+});
+
+describe("engine lifecycle: a tool call whose arguments are not valid JSON", () => {
+	const refuse = async (attached: string[], raw: string) => {
+		const received: unknown[] = [];
+		const stub = (name: string): AgentTool<ReturnType<typeof Type.Object>, Record<string, never>> => ({
+			name,
+			label: name,
+			description: name,
+			parameters: Type.Object({}, { additionalProperties: true }),
+			async execute(_id, params) {
+				received.push(params);
+				return { content: [{ type: "text", text: "ok" }], details: {} };
+			},
+		});
+		// Pi's Anthropic stream hands the finished arguments text to parseToolCallArguments the same way.
+		const parsed = parseToolCallArguments(raw);
+		const turns = [
+			assistant([{ type: "toolCall", id: "c1", name: "edit", arguments: {}, ...parsed }], "toolUse"),
+			finalTurn(),
+		];
+		const { agent } = createEngineAgent({
+			initialState: { model: MODEL, tools: attached.map(stub) },
+			streamFn: () => {
+				const source = createAssistantMessageEventStream();
+				const message = turns.shift() as AssistantMessage;
+				source.push({ type: "done", reason: message.stopReason === "toolUse" ? "toolUse" : "stop", message });
+				return source;
+			},
+		});
+		await agent.prompt("go");
+		const result = agent.state.messages.find((message) => message.role === "toolResult") as unknown as {
+			isError: boolean;
+			content: Array<{ text: string }>;
+		};
+		strictEqual(result.isError, true);
+		deepStrictEqual(received, [], "a refused call never runs");
+		return result.content[0]?.text ?? "";
+	};
+	const tabLed = '{"path":"a.ts","edits":[{"oldText":"\t\tconst a = "b";","newText":"\t\tconst a = 1;"}]}';
+
+	it("names the fault in the received text and how to resend, for tab-led oldText", async () => {
+		const text = await refuse(["edit"], tabLed);
+		ok(text.startsWith('Invalid arguments for tool "edit": the arguments are not valid JSON'), text);
+		ok(text.includes('const a = "<<<HERE>>>b";'), text);
+		ok(text.includes(`at character ${tabLed.indexOf('b";')} of the arguments`), text);
+		ok(text.includes('A string value ended at the " just before HERE.'), text);
+		ok(text.includes('write a double quote as \\"'), text);
+		ok(text.endsWith(`\n\nReceived arguments:\n${tabLed}`), "the model has no other copy of what it sent");
+	});
+
+	it("explains on a surface that also has a gateway, without routing the call", async () => {
+		const text = await refuse(["edit", "gateway"], tabLed);
+		ok(text.startsWith('Invalid arguments for tool "edit": the arguments are not valid JSON'), text);
+	});
+
+	it("says a string never closed when the arguments end inside one", async () => {
+		const text = await refuse(["edit"], '{"path":"a.ts","edits":[{"oldText":"\tcut');
+		ok(text.includes("A string value never closed"), text);
+	});
+
+	it("keeps Pi's text as the fault when the JSON parsed but is not an object", async () => {
+		const text = await refuse(["edit"], '"{}"');
+		ok(text.includes("What failed: Tool arguments must be a JSON object."), text);
+		ok(!text.includes("<<<HERE>>>"), text);
 	});
 });
 
