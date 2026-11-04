@@ -43,5 +43,20 @@
       "Terminal"
     ],
     "source": "proactive-memory.md"
+  },
+  {
+    "slug": "context-and-retrieval",
+    "title": "What does an agent lose when its context is reduced?",
+    "description": "Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive.",
+    "category": "Context",
+    "time": "8 min",
+    "basis": "Read from source; first experiment not yet run",
+    "status": "Open question. Cost is measured; fidelity is not.",
+    "author": "The Clio Coder team",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ],
+    "source": "context-and-retrieval.md"
   }
 ]
