@@ -122,7 +122,7 @@ Claude setup can offer it on first use.
 From source, build the release tag:
 
 ```bash
-git clone --branch v0.6.7 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.6.8 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
@@ -720,9 +720,10 @@ process; a second tap within 400 ms closes the dock. `/music` needs
 `integrations.music.enabled`; model-controlled music also needs
 `integrations.music.agentControl`.
 
-See [System One](docs/guide/system-one.md) and the
-[experimental articles](https://coder.iowarp.ai/experimental.html) for activation
-requirements and the limits of each feature.
+See [System One](docs/guide/system-one.md) for activation requirements and limits.
+The [Research page](https://coder.iowarp.ai/research.html) holds open questions and
+proposed first experiments on System One and other shipped features, not finished
+results.
 
 </details>
 

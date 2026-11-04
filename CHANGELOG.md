@@ -2,7 +2,7 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.6.8 - 2026-11-04
 
 Clio Coder 0.6.8 reworks the terminal's decision surfaces, makes install and reset behavior predictable, and cuts System One down to what an agent or the safety judge asks for. Permission cards, fleet approvals, pickers, the Library, `/interop` and the expanded footer now share one row and dashboard layout that keeps its keys reachable at any width, and long sessions repaint less. Project configuration is found from any subdirectory, Clio manages what Git sees under `.clio-coder/`, and approvals survive a state reset. System One loses its fixed decision sites, cuts, ranking and dataset. It stays off until `systemOne.use` names a route, and then serves the experimental `consult` tool, a screen on web and MCP results beside the safety judge, and steering triage. Memory off now means off, restricted sessions stop reaching durable memory, and URL passwords and opaque tokens stay hidden on every output surface (#446). At `yolo`, long unattended work continues past a tool budget, a default job clock, repeated provider failures and rate limits (#445).
 
