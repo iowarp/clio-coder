@@ -92,7 +92,12 @@ test("ACP binds the first session cwd before boot and refuses a different later 
 	}
 });
 
-test("ACP CLI boots the workspace named by its first session", { timeout: 90_000 }, async () => {
+// Every request below waits for its answer with no clock of its own. A cold tsx
+// boot answered initialize in 3.3s idle and 49s at a thirteenth of one core, and
+// stdin stays paused until the handlers exist, so a slow answer is never a lost
+// frame. The test timeout bounds a real hang: its abort kills both children, the
+// close rejects whatever is pending, and `finally` still runs.
+test("ACP CLI boots the workspace named by its first session", { timeout: 300_000 }, async (t) => {
 	const scratch = makeScratchHome("acp-deferred-cli-");
 	const launch = join(scratch.dir, "launch");
 	const project = join(scratch.dir, "project");
@@ -111,11 +116,11 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 			),
 		},
 	);
+	t.signal.addEventListener("abort", () => void child.forceTerminate(), { once: true });
 	try {
 		const init = await child.request<{ protocolVersion: number; agentCapabilities: Record<string, unknown> }>(
 			"initialize",
 			{ protocolVersion: 1 },
-			10_000,
 		);
 		strictEqual(init.protocolVersion, 1);
 		const eager = createStdioTransport(
@@ -130,12 +135,11 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 				),
 			},
 		);
+		t.signal.addEventListener("abort", () => void eager.forceTerminate(), { once: true });
 		try {
-			const eagerInit = await eager.request<{ agentCapabilities: Record<string, unknown> }>(
-				"initialize",
-				{ protocolVersion: 1 },
-				30_000,
-			);
+			const eagerInit = await eager.request<{ agentCapabilities: Record<string, unknown> }>("initialize", {
+				protocolVersion: 1,
+			});
 			const normalized = (capabilities: Record<string, unknown>) => {
 				const copy = structuredClone(capabilities);
 				const metadata = copy._meta as Record<string, unknown>;
@@ -145,18 +149,14 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 			};
 			deepStrictEqual(normalized(init.agentCapabilities), normalized(eagerInit.agentCapabilities));
 			for (const params of [{ mcpServers: [] }, { cwd: launch, mcpServers: [] }]) {
-				await rejects(eager.request("session/new", params, 10_000));
+				await rejects(eager.request("session/new", params));
 			}
 		} finally {
 			await eager.forceTerminate();
 		}
-		const created = await child.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] }, 60_000);
+		const created = await child.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] });
 		ok(created.sessionId);
-		const listed = await child.request<{ sessions: Array<{ sessionId: string; cwd: string }> }>(
-			"session/list",
-			{},
-			10_000,
-		);
+		const listed = await child.request<{ sessions: Array<{ sessionId: string; cwd: string }> }>("session/list", {});
 		// A session with no model turn is not offered for resume (293d79610), so the
 		// fresh one is absent. The refusal below is what proves the boot bound `project`.
 		strictEqual(
@@ -164,10 +164,10 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 90_000
 			false,
 		);
 		await rejects(
-			child.request("session/new", { cwd: launch, mcpServers: [] }, 10_000),
+			child.request("session/new", { cwd: launch, mcpServers: [] }),
 			(error: unknown) => error instanceof Error && error.message.includes(project),
 		);
-		await child.request("session/close", { sessionId: created.sessionId }, 10_000);
+		await child.request("session/close", { sessionId: created.sessionId });
 	} finally {
 		await child.forceTerminate();
 		scratch.cleanup();
