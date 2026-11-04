@@ -232,5 +232,19 @@
     "interfaces": [
       "Terminal"
     ]
+  },
+  {
+    "slug": "submit-a-slurm-job",
+    "title": "Submit a Slurm job through Clio Coder",
+    "description": "Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with your approval before it reaches the scheduler.",
+    "category": "Scientific software",
+    "time": "5 min",
+    "source": "submit-a-slurm-job.md",
+    "author": "The Clio Coder team",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ]
   }
 ]
