@@ -679,59 +679,77 @@ test("detailed bounds ownership at 64 pages and splits at max(4000, total/64)", 
 	assert.deepEqual(buildCandidatePlan(index([...crowded].reverse()), "detailed"), big);
 });
 
-test("detailed splits a flat directory into prefix-named groups with full ownership", () => {
+test("detailed splits a flat directory along filename families with full ownership", () => {
 	const files = [
-		...Array.from({ length: 6 }, (_, position) => file(`tests/extended/wiki-part${position}.test.ts`, 1500)),
-		...Array.from({ length: 6 }, (_, position) => file(`tests/extended/agent-part${position}.test.ts`, 1500)),
-		file("tests/extended/zeta.test.ts", 100),
+		...Array.from({ length: 6 }, (_, position) => file(`lib/wiki-part${position}.ts`, 1500)),
+		...Array.from({ length: 6 }, (_, position) => file(`lib/agent-part${position}.ts`, 1500)),
+		file("lib/zeta.ts", 100),
 		file("src/other/main.py", 40_000),
 	];
 	const plan = buildCandidatePlan(index(files), "detailed");
 	const paths = plan.pages.map((page) => page.path);
-	assert.ok(paths.includes("tests/extended/wiki-part0-to-wiki-part1.md"), paths.join(","));
-	assert.ok(paths.includes("tests/extended/wiki-part4-to-wiki-part5.md"), paths.join(","));
-	assert.ok(paths.includes("tests/extended/zeta.md"), paths.join(","));
-	assert.ok(!paths.some((path) => /part-\d/.test(path) || /-test/.test(path) || /-\d\.md$/.test(path)), paths.join(","));
-	assert.ok(paths.includes("tests/extended/agent-part0-to-agent-part1.md"), paths.join(","));
+	assert.deepEqual([...paths].sort(), ["architecture.md", "lib.md", "lib/agent.md", "lib/wiki.md", "other.md"]);
 	assert.equal(ownedFileCount(plan), files.length);
-	const wiki = plan.pages.find((page) => page.path === "tests/extended/wiki-part0-to-wiki-part1.md");
+	const wiki = plan.pages.find((page) => page.path === "lib/wiki.md");
 	assert.ok(wiki);
 	assert.ok(wiki.sources.every((path) => path.includes("wiki-part")));
-	assert.match(wiki.intent, /Assigned areas: tests\/extended \(wiki-part0\.test\.ts to wiki-part1\.test\.ts\)\.$/u);
 	assert.ok(wiki.intent.length <= 600);
+	assert.deepEqual(plan.pages.find((page) => page.path === "lib.md")?.sources, ["lib/zeta.ts"]);
 	assert.deepEqual(buildCandidatePlan(index([...files].reverse()), "detailed"), plan);
 	assert.deepEqual(
 		sanitizeWikiPlan(plan)?.pages.map((page) => page.path),
 		paths,
 	);
-	assert.equal(new Set(paths).size, paths.length);
 });
 
-test("detailed names mixed flat groups by first and last stem and splits an oversized prefix by the next token", () => {
+test("detailed never cuts a directory into alphabetical slices", () => {
 	const mixed = ["aa", "bb", "cc", "dd", "ee", "ff"].map((stem) => file(`lib/${stem}.py`, 1000));
-	const mixedPlan = buildCandidatePlan(index([...mixed, file("other/main.py", 20_000)]), "detailed");
+	const plan = buildCandidatePlan(index([...mixed, file("other/main.py", 20_000)]), "detailed");
 	assert.deepEqual(
-		mixedPlan.pages.map((page) => page.path),
-		["architecture.md", "other.md", "lib/aa-to-dd.md", "lib/ee-to-ff.md"],
+		plan.pages.map((page) => page.path),
+		["architecture.md", "other.md", "lib.md"],
 	);
+	assert.equal(ownedFileCount(plan), mixed.length + 1);
+	const tests = Array.from({ length: 40 }, (_, position) =>
+		file(`tests/extended/wiki-${position}.test.ts`, 1000, "test"),
+	);
+	assert.deepEqual(
+		buildCandidatePlan(index([...tests, file("other/main.py", 40_000)]), "detailed").pages.map((page) => page.path),
+		["architecture.md", "other.md", "tests/extended.md"],
+	);
+});
+
+test("detailed keeps an oversized filename family on one page", () => {
 	const nested = [
 		...["alpha", "beta", "gamma"].flatMap((token) =>
 			Array.from({ length: 3 }, (_, position) => file(`lib/wiki-${token}-${position}.py`, 1500)),
 		),
+		file("lib/other.py", 100),
 		file("other/main.py", 40_000),
 	];
-	const nestedPlan = buildCandidatePlan(index(nested), "detailed");
-	const names = nestedPlan.pages.map((page) => page.path).filter((path) => path.startsWith("lib/"));
-	assert.deepEqual(names, [
-		"lib/wiki-alpha.md",
-		"lib/wiki-beta.md",
-		"lib/wiki-gamma.md",
-		"lib/wiki-alpha-2.md",
-		"lib/wiki-beta-2.md",
-		"lib/wiki-gamma-2.md",
-	]);
-	assert.equal(ownedFileCount(nestedPlan), nested.length);
-	assert.deepEqual(buildCandidatePlan(index([...nested].reverse()), "detailed"), nestedPlan);
+	const plan = buildCandidatePlan(index(nested), "detailed");
+	assert.deepEqual(
+		plan.pages
+			.map((page) => page.path)
+			.filter((path) => path.startsWith("lib"))
+			.sort(),
+		["lib.md", "lib/wiki.md"],
+	);
+	assert.equal(ownedFileCount(plan), nested.length);
+	assert.deepEqual(buildCandidatePlan(index([...nested].reverse()), "detailed"), plan);
+});
+
+test("detailed folds a small test directory into its parent and measures product areas without tests", () => {
+	const files = [
+		file("src/big/main.py", 2000),
+		file("src/small/main.py", 300),
+		file("tests/smoke/a.test.ts", 3000, "test"),
+		file("tests/contracts/b.test.ts", 200_000, "test"),
+	];
+	const paths = buildCandidatePlan(index(files), "detailed").pages.map((page) => page.path);
+	assert.ok(paths.includes("small.md"), paths.join(","));
+	assert.ok(paths.includes("tests.md"), paths.join(","));
+	assert.ok(!paths.includes("tests/smoke.md"), paths.join(","));
 });
 
 test("medium keeps a flat directory as one owner", () => {
@@ -742,33 +760,18 @@ test("medium keeps a flat directory as one owner", () => {
 	);
 });
 
-test("detailed splits a flat directory behind a single-child chain", () => {
+test("detailed splits filename families behind a single-child chain", () => {
 	const chains = [
-		[...[1, 2, 3, 4].map((n) => file(`src/a/b/c/x${n}.ts`, 3000)), file("src/a/other/o.ts", 200)],
-		[1, 2, 3, 4].map((n) => file(`src/a/b/c/d/x${n}.ts`, 3000)),
-	].flat();
-	for (const files of [chains.slice(0, 5), chains.slice(5)]) {
+		[...[1, 2, 3, 4].map((n) => file(`src/a/b/c/x-${n}.ts`, 3000)), file("src/a/other/o.ts", 200)],
+		[
+			...[1, 2, 3].map((n) => file(`src/a/b/c/d/x-${n}.ts`, 3000)),
+			...[1, 2, 3].map((n) => file(`src/a/b/c/d/y-${n}.ts`, 3000)),
+		],
+	];
+	for (const files of chains) {
 		const plan = buildCandidatePlan(index(files), "detailed");
 		assert.equal(ownedFileCount(plan), files.length);
-		for (const page of plan.pages.slice(1)) assert.ok((scopeCounts(page.intent)[1] ?? 0) <= 4000, page.path);
-		assert.ok(plan.pages.length > 3, plan.pages.map((page) => page.path).join(","));
+		assert.ok(plan.pages.length >= 2, plan.pages.map((page) => page.path).join(","));
 		assert.deepEqual(buildCandidatePlan(index([...files].reverse()), "detailed"), plan);
 	}
-});
-
-test("detailed keeps colliding flat group names distinct without numeric suffixes", () => {
-	const files = [
-		file("lib/foo.ts", 3000),
-		file("lib/foo.test.ts", 3000),
-		file("lib/zzz.ts", 3000),
-		file("index.ts", 3000),
-		file("index.test.ts", 3000),
-		file("other/main.py", 40_000),
-	];
-	const plan = buildCandidatePlan(index(files), "detailed");
-	const paths = plan.pages.map((page) => page.path);
-	for (const expected of ["lib/foo.md", "lib/foo-test.md", "index-area.md", "index-test.md"])
-		assert.ok(paths.includes(expected), paths.join(","));
-	assert.ok(!paths.some((path) => /-to-|-\d\.md$/.test(path) && /foo|index/.test(path)), paths.join(","));
-	assert.equal(ownedFileCount(plan), files.length);
 });
