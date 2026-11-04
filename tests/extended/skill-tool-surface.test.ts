@@ -663,6 +663,54 @@ describe("skill tool surface lifetime", () => {
 		});
 	}
 
+	it("a request this session refuses offers no install", async () => {
+		const root = scratchRoot();
+		let asked = 0;
+		let installs = 0;
+		let submitted = 0;
+		const refused: unknown[] = [];
+		const runtime = createInteractiveSlashRuntime({
+			io: { stdout() {}, stderr() {} },
+			getCwd: () => root,
+			chatPanel: { appendReplayBlock() {}, appendUser() {} },
+			requestRender() {},
+			refreshFooter() {},
+			recordSubmittedTurn() {},
+			chat: {
+				isStreaming: () => false,
+				submit: async () => {
+					submitted += 1;
+				},
+				refuseSkillRequests: (_requests: unknown, inlinedPaths: unknown) => {
+					refused.push(inlinedPaths);
+					return true;
+				},
+			},
+			expandSubmit: async () => ({
+				text: "write the brief",
+				pendingSkillRequests: [
+					{ name: "context-handoff", args: "", source: "marketplace", installed: false, marketplaceRef: root },
+				],
+				images: [],
+				workingContextPaths: ["secrets/notes.txt"],
+			}),
+			openAskUser: async () => {
+				asked += 1;
+				return { cancelled: true, answers: [] };
+			},
+			installSkill: () => {
+				installs += 1;
+				throw new Error("a refused request installs nothing");
+			},
+		} as unknown as InteractiveSlashRuntimeDeps);
+		await runtime.admitCommand("/skill context-handoff write the brief");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		deepStrictEqual(refused, [["secrets/notes.txt"]]);
+		strictEqual(asked, 0);
+		strictEqual(installs, 0);
+		strictEqual(submitted, 0);
+	});
+
 	it("replaces rather than merges when the operator activates a different skill", async () => {
 		const root = scratchRoot();
 		explicitPaths = [
