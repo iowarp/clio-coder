@@ -7,10 +7,12 @@ import {
 	projectDispatchJsonEvent,
 } from "../../src/cli/modes/json-stream.js";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { withRunFailureReporting, writeRunDiagnostic } from "../../src/cli/run-failure.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
+import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	holdUnresolvedUserinfo,
 	redactSecretString,
@@ -359,6 +361,7 @@ async function headlessStdout(
 	jsonEvents: string | undefined,
 	message: object,
 	events: object[] = [],
+	stderr: string[] = [],
 ): Promise<string> {
 	let handler: (event: unknown) => void = () => {};
 	const stub: Record<string, unknown> = {
@@ -387,7 +390,10 @@ async function headlessStdout(
 		for (const argument of rest) if (typeof argument === "function") argument();
 		return true;
 	}) as typeof process.stdout.write;
-	process.stderr.write = (() => true) as typeof process.stderr.write;
+	process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+		stderr.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
 	try {
 		await runHeadlessMainAgent(
 			chat as never,
@@ -612,6 +618,356 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 	} finally {
 		live.transport.close();
 		await served;
+		env.restore();
+	}
+});
+
+const FAILED_FETCH = "fetch failed for https://alice:hunter2@proxy.example/v1, BASE_TOKENS=100 and --token to pass";
+const SAFE_FETCH = "fetch failed for https://alice:[redacted]@proxy.example/v1, BASE_TOKENS=100 and --token to pass";
+
+test("a provider's error reaches no headless surface with its URL password, in any mode", async () => {
+	const env = await isolateClioEnv("url-surfaces-error-");
+	try {
+		const failed = { role: "assistant", stopReason: "error", errorMessage: FAILED_FETCH, content: [] };
+		for (const [mode, jsonEvents] of [
+			["text", undefined],
+			["json", "full"],
+			["json", "terminal"],
+		] as const) {
+			const stderr: string[] = [];
+			const stdout = await headlessStdout(mode, jsonEvents, failed, [], stderr);
+			const where = `${mode}/${jsonEvents}`;
+			ok(!stdout.includes("hunter2"), `${where} stdout: ${stdout}`);
+			ok(!stderr.join("").includes("hunter2"), `${where} stderr: ${stderr.join("")}`);
+			ok(stderr.join("").includes(SAFE_FETCH), `${where} stderr: ${stderr.join("")}`);
+			if (jsonEvents === "terminal") {
+				const end = stdout.trim().split("\n").at(-1) ?? "";
+				strictEqual((JSON.parse(end) as { error?: string }).error, SAFE_FETCH);
+			}
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("a run that fails before its output carries no URL password on stderr or its turn_end frame", async () => {
+	const written: string[] = [];
+	const write = process.stdout.write;
+	const writeError = process.stderr.write;
+	const capture = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		written.push(String(chunk));
+		for (const argument of rest) if (typeof argument === "function") argument();
+		return true;
+	}) as typeof process.stdout.write;
+	process.stdout.write = capture;
+	process.stderr.write = capture;
+	try {
+		strictEqual(
+			await withRunFailureReporting(true, async () => {
+				writeRunDiagnostic(`clio-coder run failed: ${FAILED_FETCH}\n`);
+				return 1;
+			}),
+			1,
+		);
+		await withRunFailureReporting(true, async () => {
+			throw new Error(FAILED_FETCH);
+		}).catch(() => {});
+	} finally {
+		process.stdout.write = write;
+		process.stderr.write = writeError;
+	}
+	const output = written.join("");
+	ok(!output.includes("hunter2"), output);
+	ok(output.includes(SAFE_FETCH), output);
+});
+
+test("a blocked call's reason and a transcript notice carry no URL password on a headless run", async () => {
+	const env = await isolateClioEnv("url-surfaces-blocked-");
+	try {
+		const blocked = {
+			type: "tool_execution_end",
+			toolCallId: "c",
+			toolName: "bash",
+			isError: true,
+			outcome: "blocked",
+			blockReason: `refused ${CREDENTIAL_URL}, BASE_TOKENS=100`,
+			result: { content: [] },
+		};
+		const notice = { type: "notice", surface: "transcript", text: "retry https://alice:hunter2@h.example/r" };
+		const terminal = await headlessStdout("json", "terminal", assistantAnswer("done"), [blocked, notice]);
+		ok(!terminal.includes("hunter2"), terminal);
+		const end = JSON.parse(terminal.trim().split("\n").at(-1) ?? "") as {
+			safety: { blockedAttempts: { reason?: string }[] };
+		};
+		strictEqual(end.safety.blockedAttempts[0]?.reason, `refused ${SAFE_URL}, BASE_TOKENS=100`);
+		const stderr: string[] = [];
+		const text = await headlessStdout("text", undefined, assistantAnswer("done"), [notice], stderr);
+		ok(!`${text}${stderr.join("")}`.includes("hunter2"), stderr.join(""));
+		ok(stderr.join("").includes("retry https://alice:[redacted]@h.example/r"), stderr.join(""));
+	} finally {
+		env.restore();
+	}
+});
+
+test("every ACP client string holds no URL password: notice, locations, tool name and raw record key", async () => {
+	const live = acpFake();
+	let emit: (event: unknown) => void = () => {};
+	const served = serveClioAcpAgent({
+		transport: live.transport,
+		cwd: process.cwd(),
+		chat: {
+			submit: async () => {
+				emit({ type: "notice", surface: "transcript", text: "retry https://alice:hunter2@h.example/r" });
+				emit({
+					type: "tool_execution_start",
+					toolCallId: "c",
+					toolName: "read",
+					args: { path: CREDENTIAL_URL, [CREDENTIAL_URL]: "value" },
+				});
+				emit({
+					type: "tool_execution_start",
+					toolCallId: "d",
+					toolName: `tool ${CREDENTIAL_URL}`,
+					args: {},
+				});
+				emit({
+					type: "tool_execution_end",
+					toolCallId: "e",
+					toolName: `tool ${CREDENTIAL_URL}`,
+					result: {},
+					isError: true,
+				});
+				emit({ type: "message_end", message: assistantAnswer("done") });
+			},
+			cancel: () => {},
+			onEvent: (handler: (event: unknown) => void) => {
+				emit = handler;
+				return () => {};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	} as never);
+	await live.call("initialize", { protocolVersion: 1 });
+	const created = (await live.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	await live.call("session/prompt", { sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
+	live.transport.close();
+	await served;
+	const wire = JSON.stringify(live.updates());
+	ok(!wire.includes("hunter2"), wire);
+	ok(wire.includes("retry https://alice:[redacted]@h.example/r"), wire);
+	const read = live.updates().find((update) => update.sessionUpdate === "tool_call") as {
+		locations?: { path: string }[];
+		rawInput: Record<string, unknown>;
+	};
+	ok(read.locations?.[0]?.path.includes("alice:[redacted]@git.example.com"), JSON.stringify(read.locations));
+	strictEqual(read.rawInput[SAFE_URL], "value");
+});
+
+test("ACP replay holds what a stored message that stopped short left open, and keeps what one that stopped finished", async () => {
+	const env = await isolateClioEnv("url-surfaces-replay-");
+	const live = acpFake();
+	const stamp = "2026-11-04T00:00:00.000Z";
+	const meta = {
+		id: "acp-replay-446",
+		cwd: env.dir,
+		cwdHash: "hash",
+		createdAt: stamp,
+		endedAt: null,
+		model: null,
+		target: null,
+	};
+	const turn = (id: string, stopReason: string, text: string, parent: string | null): object[] => [
+		{ kind: "message", role: "user", turnId: `u-${id}`, parentTurnId: parent, timestamp: stamp, payload: "go" },
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: `a-${id}`,
+			parentTurnId: `u-${id}`,
+			timestamp: stamp,
+			payload: { stopReason, content: [{ type: "text", text }] },
+		},
+	];
+	const session = {
+		current: () => meta,
+		create: () => meta,
+		resume: () => meta,
+		checkpoint: async () => {},
+		flushAppends: () => {},
+		tree: () => ({ leafId: null }),
+		appendEntry: (entry: object) => entry,
+		history: () => [meta],
+		list: () => [meta],
+		close: async () => {},
+	};
+	const served = serveClioAcpAgent({
+		transport: live.transport,
+		session,
+		cwd: env.dir,
+		autonomy: () => "default",
+		chat: {
+			submit: async () => {},
+			whenSettled: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => false,
+			getSessionId: () => meta.id,
+			resetForSession: () => {},
+		},
+		labelOperatorCommand: () => null,
+		readSessionEntries: () => [
+			...turn("1", "length", "see https://u:hunter", null),
+			...turn("2", "length", "clone https://abcdef0123456789abcdef0123456789", "a-1"),
+			...turn("3", "stop", "serve http://localhost:8080", "a-2"),
+		],
+		buildReplayMessages: () => [],
+	} as never);
+	try {
+		await live.call("initialize", { protocolVersion: 1 });
+		await live.call("session/load", { sessionId: meta.id, cwd: env.dir, mcpServers: [] });
+		const wire = JSON.stringify(live.updates());
+		ok(!wire.includes("hunter"), wire);
+		ok(!wire.includes("abcdef0123456789"), wire);
+		ok(wire.includes("see https://u:"), wire);
+		ok(wire.includes("serve http://localhost:8080"), wire);
+	} finally {
+		live.transport.close();
+		await served;
+		env.restore();
+	}
+});
+
+test("a journal hides a short secret query value as the display rule does", async () => {
+	const url = "https://h/?password=hunter2&token=abc1234";
+	const shown = "https://h/?password=[redacted:url-param]&token=[redacted:url-param]";
+	strictEqual(redactSecretsText(url, createRedactionTally()), shown);
+	const tally = createRedactionTally();
+	redactSecretsText(url, tally);
+	strictEqual(tally.count, 2);
+	const segments = redactSecretSegments(["https://h/?password=hun", "ter2&token=abc1234"], createRedactionTally()).join(
+		"",
+	);
+	ok(!segments.includes("hunter2") && !segments.includes("ter2") && !segments.includes("abc1234"), segments);
+	// A variable's name and an earlier pass's marker stay what they are, and a long value keeps its own marker.
+	strictEqual(redactSecretsText("https://h/?token=$TOK", createRedactionTally()), "https://h/?token=$TOK");
+	strictEqual(
+		redactSecretsText("https://h/?token=abcdefghijkl", createRedactionTally()),
+		"https://h/?token=[redacted:assignment]",
+	);
+	strictEqual(
+		redactSecretsText("pass BASE_TOKENS=100 or a&b?c", createRedactionTally()),
+		"pass BASE_TOKENS=100 or a&b?c",
+	);
+	const env = await isolateClioEnv("url-surfaces-journal-");
+	try {
+		const rows = feedText("short-secret", "get https://h/?password=hunter2&x=1 now", MESSAGE_STOP).join("");
+		ok(!rows.includes("hunter2"), rows);
+		ok(rows.includes("password=[redacted:url-param]&x=1 now"), rows);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a run feed's bound loses nothing of a run ending in a colon, whatever that colon ends", async () => {
+	const env = await isolateClioEnv("url-surfaces-colon-");
+	try {
+		const tail = " and then more words follow";
+		for (const name of ["key", "token"]) {
+			const json = `{${Array.from({ length: 4700 }, (_, i) => `"${name}${i}":${i}`).join(",")}}`;
+			const whole = redactSecretsText(json + tail, createRedactionTally());
+			const at = json.indexOf(`"${name}332":`) + `"${name}332":`.length;
+			strictEqual(feedText(`json-${name}`, json.slice(0, at), json.slice(at) + tail, MESSAGE_STOP).join(""), whole);
+			// In deltas every bound falls wherever it falls, on a key, a value or a comma.
+			const deltas = [...(json.match(/.{1,64}/gu) ?? []), tail];
+			strictEqual(feedText(`json-deltas-${name}`, ...deltas, MESSAGE_STOP).join(""), whole);
+		}
+		const minified = `function f(a){return{a:a,b:${"x".repeat(4100)}:`;
+		const code = feedText("minified", minified, "rest();} next word here more", MESSAGE_STOP).join("");
+		strictEqual(code, `${minified}rest();} next word here more`);
+		// A scheme kept back with what completes it still redacts, and a pathless URL is whole on a completed stream.
+		const long = "q".repeat(4100);
+		const scheme = feedText("scheme-split", `${long} https:`, "//alice:hunter2@h/x rest of it", MESSAGE_STOP).join("");
+		strictEqual(scheme, `${long} https://alice:[redacted:url-userinfo]@h/x rest of it`);
+		const assigned = feedText("equals-split", `${long},password=`, "hunter2hunter2,b rest of it", MESSAGE_STOP).join("");
+		ok(!assigned.includes("hunter2"), assigned);
+		const named = feedText("name-split", `${long}"token":`, '"hunter2hunter2","b":1 rest of it', MESSAGE_STOP).join("");
+		ok(!named.includes("hunter2"), named);
+		ok(named.endsWith('"b":1 rest of it'), named);
+		const pathless = feedText("pathless", `${long},"u":"https://x.io`, '","b":2 rest of it', MESSAGE_STOP).join("");
+		strictEqual(pathless, `${long},"u":"https://x.io","b":2 rest of it`);
+	} finally {
+		env.restore();
+	}
+});
+
+const OPAQUE = "clone https://abcdef0123456789abcdef0123456789";
+
+test("a reply cut off inside an opaque token shows none of it at any headless or dispatch exit", async () => {
+	const env = await isolateClioEnv("url-surfaces-opaque-");
+	try {
+		const answer = assistantAnswer(OPAQUE, "length");
+		const text = await headlessStdout("text", undefined, answer);
+		ok(!text.includes("abcdef0123"), text);
+		ok(text.includes("clone https://"), text);
+		const terminal = await headlessStdout("json", "terminal", answer);
+		ok(!terminal.includes("abcdef0123"), terminal);
+		const finished = await headlessStdout("text", undefined, assistantAnswer(OPAQUE));
+		ok(finished.includes(OPAQUE), finished);
+
+		const update = (inner: object): unknown =>
+			projectDispatchJsonEvent({ type: "message_update", assistantMessageEvent: inner } as never);
+		const cut = createJsonCredentialScrub();
+		const held = cut.scrub(update({ type: "text_end", contentIndex: 0, content: OPAQUE }));
+		deepStrictEqual(held, []);
+		const ended = cut.scrub(
+			projectDispatchJsonEvent({
+				type: "message_end",
+				message: { role: "assistant", stopReason: "length", content: [{ type: "text", text: OPAQUE }] },
+			} as never),
+		);
+		ok(!JSON.stringify(ended).includes("abcdef0123"), JSON.stringify(ended));
+		ok(JSON.stringify(ended).includes("clone https://"), JSON.stringify(ended));
+
+		const stopped = createJsonCredentialScrub();
+		stopped.scrub(update({ type: "text_end", contentIndex: 0, content: OPAQUE }));
+		const whole = stopped.scrub(
+			projectDispatchJsonEvent({
+				type: "message_end",
+				message: { role: "assistant", stopReason: "stop", content: [] },
+			} as never),
+		);
+		ok(JSON.stringify(whole).includes(OPAQUE), JSON.stringify(whole));
+
+		const partial = createJsonCredentialScrub().scrub({
+			type: "result",
+			result: { exitCode: 1, output: { state: "partial", text: OPAQUE } },
+		});
+		ok(!JSON.stringify(partial).includes("abcdef0123"), JSON.stringify(partial));
+
+		const unknown = { kind: "unknown", reason: "not-observed" };
+		const human = formatDispatchHumanOutput(OPAQUE, {
+			runId: "r",
+			agentId: "a",
+			exitCode: 1,
+			targetId: "t",
+			wireModelId: "m",
+			startedAt: "2026-01-01T00:00:00Z",
+			endedAt: "2026-01-01T00:00:01Z",
+			spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+			quality: {},
+			output: { state: "partial", text: OPAQUE },
+		} as never);
+		ok(!human.includes("abcdef0123"), human);
+
+		const rows = feedText("opaque-cut", `${OPAQUE} `.trimEnd(), {
+			kind: "event",
+			type: "message_end",
+			stopReason: "length",
+		}).join("");
+		ok(!rows.includes("abcdef0123"), rows);
+		// An open frame still reads it as a host until its `@`, by decision.
+		strictEqual(holdUnresolvedUserinfo(OPAQUE), OPAQUE);
+	} finally {
 		env.restore();
 	}
 });
