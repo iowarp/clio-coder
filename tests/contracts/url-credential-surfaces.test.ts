@@ -46,6 +46,11 @@ test("one-shot redaction hides a credential in compact JSON and the JSON still p
 	}
 });
 
+test("one-shot redaction survives a run of millions of quotes", () => {
+	const quotes = '"a'.repeat(8_000_000);
+	for (const text of [`a://x:${quotes}`, `?token=${quotes}`, `a://${quotes}`]) ok(redactUrlCredentials(text).length > 0);
+});
+
 test("one-shot redaction reads an @ in the name, and a name with an @ has no reach past the path", () => {
 	strictEqual(redactUrlCredentials("https://me@corp.com:hunter2@host/"), "https://me@corp.com:[redacted]@host/");
 	for (const text of [

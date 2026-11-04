@@ -21,7 +21,8 @@ const ENV_KEY_RE = /^env(?:ironment)?$/iu;
 // A `"` ends a JSON or call string when structure follows it, so `{"a":"http://h:80","b":"me@corp.com"}` stays whole. Any other
 // `"` can sit inside a password, as in `https://u:a"b@h`, so it stays in the run (#446).
 const CONTINUING_QUOTE = String.raw`"(?=[^,:;}\])>\\\s])`;
-const stringRun = (chars: string): string => `${chars}*(?:${CONTINUING_QUOTE}${chars}*)*`;
+// The bound on quotes is what keeps the regex stack shallow: an open `*` threw a RangeError on 8 million of them.
+const stringRun = (chars: string): string => `${chars}*(?:${CONTINUING_QUOTE}${chars}*){0,64}`;
 const PASSWORD_RUN = stringRun(String.raw`[^\s/"]`);
 // Any scheme can carry a password, as `postgres://`, `redis://`, `mongodb+srv://` and `ssh://` do, and matching from `://`
 // back one character needs no scan of a long word. The name stops at its first colon and the password runs to the
