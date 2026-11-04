@@ -42,7 +42,7 @@ Clio Coder 0.6.8 reworks the terminal's decision surfaces, makes install and res
 
 ### Library
 
-- `clio-coder library package <directory>` turns a skill directory into a package, and `library import` reviews a bare skill from a directory or GitHub tree URL.
+- `clio-coder library package <directory>` turns a skill directory into a package.
 - `library update --all` updates eligible copies, and `library list`, `/library` and `context(scope="library")` show when a catalog copy has an update.
 - `library validate` and `skills validate` check authoring: a missing linked file is an error, and missing companion paths, unknown skills in routing clauses and over-length bodies are warnings.
 - `library` search requires every query word across names, descriptions, hints and triggers, and says when nothing matches.
