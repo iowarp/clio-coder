@@ -93,18 +93,13 @@ for (const continuation of [false, true])
 				...(continuation
 					? {
 							turnControl: {
-								seedOrientation() {},
-								controllerActed: () => true,
 								async run(input) {
-									strictEqual(input.continuation, true);
 									const block = "[Collected]\nfinished batch results";
 									return {
 										block,
 										record: {
 											version: 1,
 											turnId: input.userTurnId,
-											producer: null,
-											interpretation: null,
 											factsDigest: "fixture",
 											decision: { kind: "collect", batchIds: ["finished"] },
 											decisionHash: "fixture",
@@ -212,7 +207,7 @@ interface CancelledRun {
 	reservedId: string;
 }
 
-/** Cancels a turn during the orientation act, before admission, with the Scout's run settling `sealAfterMs` later. */
+/** Cancels a turn during turn control, before admission, with the Scout's run settling `sealAfterMs` later. */
 async function cancelBeforeAdmission(sealAfterMs: number, check: (run: CancelledRun) => Promise<void>): Promise<void> {
 	const scratch = await isolateClioEnv("clio-coder-turn-outcome-cancel-");
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -247,8 +242,6 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 		readSessionEntries: () => entries,
 		recordOutcome: (outcome) => recorded.push({ ...outcome, facts: outcome.facts as Record<string, unknown> }),
 		turnControl: {
-			seedOrientation() {},
-			controllerActed: () => false,
 			async run(input: { userTurnId: string; signal: AbortSignal }) {
 				reservedId = input.userTurnId;
 				started();
@@ -258,8 +251,6 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 					record: {
 						version: 1,
 						turnId: input.userTurnId,
-						producer: "system-one",
-						interpretation: null,
 						factsDigest: "fixture",
 						decision: { kind: "none" },
 						decisionHash: "fixture",
@@ -320,7 +311,7 @@ const measured = (value: number) => ({
 });
 const SCOUT_TOKENS = { input: measured(40), output: measured(2), cacheRead: measured(0), total: measured(42) };
 
-it("a cancel during the orientation act before admission still yields one cancelled outcome row", async () => {
+it("a cancel during turn control before admission still yields one cancelled outcome row", async () => {
 	await cancelBeforeAdmission(60, async ({ entries, recorded, reservedId }) => {
 		const rows = entries.filter((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		strictEqual(rows.length, 1);

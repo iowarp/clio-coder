@@ -63,8 +63,7 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 		durationMs: 10,
 	};
 	const control = {
-		producer: "system-one" as const,
-		decision: "orientation" as const,
+		decision: "collect" as const,
 		decisionHash: "hash",
 		executed: true,
 	};

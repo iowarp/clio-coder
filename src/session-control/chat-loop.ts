@@ -1722,12 +1722,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			signal?.addEventListener("abort", forward, { once: true });
 			if (signal?.aborted || ownerSignal?.aborted) controllerAbort.abort();
 			try {
-				const result = await deps.turnControl.run({
-					operatorText: "",
-					continuation: true,
-					userTurnId,
-					signal: controllerAbort.signal,
-				});
+				const result = await deps.turnControl.run({ userTurnId, signal: controllerAbort.signal });
 				if (controllerAbort.signal.aborted || ownerSignal?.aborted || identity !== submitGeneration) return null;
 				outcomeCollector.recordControl(result.record);
 				if (deps.session?.current()) {
@@ -2827,7 +2822,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 
-				let orientationBlock: string | null = null;
+				let turnControlBlock: string | null = null;
 				let turnControlRecord: TurnControlRecord | null = null;
 				if (deps.turnControl) {
 					const controllerAbort = owner;
@@ -2835,13 +2830,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					setTurnPreparation("preparing");
 					try {
 						const result = await deps.turnControl.run({
-							operatorText: text,
-							continuation: options.requestContinuation === true,
 							userTurnId: reservedUserTurnId,
 							signal: controllerAbort.signal,
 						});
 						if (generation !== submitGeneration || disposed) return;
-						orientationBlock = result.block;
+						turnControlBlock = result.block;
 						turnControlRecord = result.record;
 					} finally {
 						if (pendingPreTurnRead === controllerAbort) pendingPreTurnRead = null;
@@ -2922,7 +2915,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 				const composeSubmittedText = () =>
-					[reminderProjection(), orientationBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
+					[reminderProjection(), turnControlBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
 						.filter((part) => part.length > 0)
 						.join("\n\n");
 				let submittedText = composeSubmittedText();

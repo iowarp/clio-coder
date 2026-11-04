@@ -1112,9 +1112,6 @@ function targetAddCta(): SettingsCenterItem {
 }
 
 const TURN_PREPARATION_LABELS: Readonly<Record<(typeof TURN_CONTROL_WORKFLOWS)[number], string>> = {
-	orientation: "Explore the project",
-	direction: "Check recent Git activity",
-	"ledger-facts": "Recall earlier work",
 	"detached-collection": "Collect finished background runs",
 };
 

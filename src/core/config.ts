@@ -1029,9 +1029,11 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"systemOne.retentionDays":
 		"System One samples are research content in session journals, which telemetry retention expires",
 	"systemOne.maxMiB": "System One samples are research content in session journals, which telemetry retention bounds",
-	"turnControl.interpretation":
-		"the turn site (systemOne.sites.turn) reads the request and nothing falls back to the main model",
+	"turnControl.interpretation": "no harness workflow reads the request before a turn any more",
+	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
 } as const);
+
+const RETIRED_TURN_CONTROL_WORKFLOWS: ReadonlySet<unknown> = new Set(["orientation", "direction", "ledger-facts"]);
 
 const V1_ONLY_ROOTS = new Set<SettingsFieldName>([
 	"identity",
@@ -1609,7 +1611,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.turnControl)) issues.add("turnControl", `expected a map, got ${describe(raw.turnControl)}`);
 		else {
 			const control = raw.turnControl;
-			// `interpretation` is retired; listed so its tombstone message is the only one reported.
+			// `interpretation` and `orientation` are retired; listed so a tombstone is all they report.
 			issues.unknownKeys("turnControl", control, ["workflows", "interpretation", "orientation"]);
 			if ("workflows" in control) {
 				if (!Array.isArray(control.workflows))
@@ -1617,32 +1619,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				else {
 					const workflows: ClioSettings["turnControl"]["workflows"] = [];
 					for (const [index, value] of control.workflows.entries()) {
+						// `init` wrote these into every home, so a retired value is dropped in silence, like
+						// an empty `systemOne.cuts`. It never blocks loading and it carries no configuration.
+						if (RETIRED_TURN_CONTROL_WORKFLOWS.has(value)) continue;
 						const parsed = expectEnum(issues, `turnControl.workflows[${index}]`, value, TURN_CONTROL_WORKFLOWS);
 						if (parsed !== undefined) workflows.push(parsed);
 					}
 					settings.turnControl.workflows = workflows;
-				}
-			}
-			if ("orientation" in control) {
-				if (!isPlainObject(control.orientation))
-					issues.add("turnControl.orientation", `expected a map, got ${describe(control.orientation)}`);
-				else {
-					const orientation = control.orientation;
-					issues.unknownKeys("turnControl.orientation", orientation, ["maxSplit", "maxCostUsdPerTurn"]);
-					if ("maxSplit" in orientation) {
-						const parsed = expectInteger(issues, "turnControl.orientation.maxSplit", orientation.maxSplit, {
-							min: 1,
-							max: 4,
-						});
-						if (parsed !== undefined) settings.turnControl.orientation.maxSplit = parsed as 1 | 2 | 3 | 4;
-					}
-					if ("maxCostUsdPerTurn" in orientation) {
-						if (orientation.maxCostUsdPerTurn === null) settings.turnControl.orientation.maxCostUsdPerTurn = null;
-						else {
-							const parsed = expectNumber(issues, "turnControl.orientation.maxCostUsdPerTurn", orientation.maxCostUsdPerTurn);
-							if (parsed !== undefined) settings.turnControl.orientation.maxCostUsdPerTurn = parsed;
-						}
-					}
 				}
 			}
 		}

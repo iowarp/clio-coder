@@ -32,7 +32,7 @@ import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/tu
 import { TURN_SITE, WORKER_PREPARE_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE } from "../domains/system-one/sites/turn-end.js";
 import { addGroup, emptyFactSum } from "../domains/telemetry/folds.js";
-import type { TurnInterpretation, TurnTokens } from "../domains/turn-control/index.js";
+import type { TurnTokens } from "../domains/turn-control/index.js";
 import type { ToolCallGateSubject } from "../tools/registry.js";
 
 /** Earlier operator requests the turn-end site reads beside the current one. */
@@ -175,15 +175,6 @@ export interface SystemOneHost {
 	readTurn(input: TurnReadInput): void;
 	/** This turn's hint lines, or null until a fitted reading has landed. */
 	hints(): DecisionHintLines | null;
-	/** What the turn controller may act on, or undefined until a fitted reading has landed. */
-	interpretation(): TurnInterpretation | undefined;
-	/**
-	 * `interpretation()` once this turn's reading has landed, or after
-	 * `maxWaitMs`, or when `signal` aborts, whichever comes first. Returns at
-	 * once when no reading is in flight: the site is unbound or shadowed, or the
-	 * reading already settled.
-	 */
-	awaitInterpretation(maxWaitMs: number, signal: AbortSignal): Promise<TurnInterpretation | undefined>;
 	/** The worker a confident forecast says the agent is about to dispatch, or null. */
 	prewarm(): TurnPrewarmPrediction | null;
 	/** Forget this turn's verdict, so a continuation or the next turn cannot read a stale one. */
@@ -355,18 +346,6 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		}
 	}
 
-	function interpretation(): TurnInterpretation | undefined {
-		const value = turn?.verdict?.value;
-		if (value === undefined) return undefined;
-		return {
-			intent: "unknown",
-			// Automatic scouts stay off: an architecture reading is advice to the main agent.
-			orientation: { wanted: false, breadth: null },
-			direction: { requested: value.acts.direction },
-			dispatch: { expected: value.acts.dispatch, ...(value.dispatch !== null ? { probability: value.dispatch } : {}) },
-		};
-	}
-
 	return {
 		readTurn(input) {
 			const held: HeldTurn = {
@@ -435,29 +414,6 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		},
 
 		hints: () => turn?.verdict?.value.hints ?? null,
-
-		interpretation,
-
-		async awaitInterpretation(maxWaitMs, signal) {
-			const landed = turn?.landed ?? null;
-			if (landed === null || signal.aborted || !(maxWaitMs > 0)) return interpretation();
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			let onAbort: (() => void) | undefined;
-			try {
-				await Promise.race([
-					landed,
-					new Promise<void>((resolve) => {
-						timer = setTimeout(resolve, maxWaitMs);
-						onAbort = () => resolve();
-						signal.addEventListener("abort", onAbort, { once: true });
-					}),
-				]);
-			} finally {
-				clearTimeout(timer);
-				if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
-			}
-			return interpretation();
-		},
 
 		prewarm: () => (turn === null ? null : predictionOf(turn)),
 

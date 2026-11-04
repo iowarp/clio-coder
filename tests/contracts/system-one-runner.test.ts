@@ -11,7 +11,6 @@ import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/l
 import { cutsFor, FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
-import { clearedSiteObject } from "../../src/domains/system-one/scrub.js";
 import {
 	BREAKER_COOLDOWN_MS,
 	BREAKER_THRESHOLD,
@@ -19,6 +18,7 @@ import {
 	noteSystemOneCall,
 } from "../../src/domains/system-one/runner.js";
 import { createSystemOneScopes } from "../../src/domains/system-one/scopes.js";
+import { clearedSiteObject } from "../../src/domains/system-one/scrub.js";
 import { effectiveSystemOne, resolveChoice } from "../../src/domains/system-one/selection.js";
 import { RELEVANCE_CLUSTER_SITE } from "../../src/domains/system-one/sites/relevance.js";
 import { TURN_SITE } from "../../src/domains/system-one/sites/turn.js";

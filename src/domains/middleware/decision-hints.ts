@@ -27,8 +27,6 @@ export interface DecisionHintLines {
 export interface DecisionHintsDeps {
 	/** This turn's hint lines, or null when no site answered. */
 	getHints(): DecisionHintLines | null;
-	/** True when the turn controller already started harness work for this turn. */
-	controllerActed?: () => boolean;
 	/** Explicit host scope for the turn; when present it already says what the turn is. */
 	getTurnConstraints?(): TurnConstraints | undefined;
 }
@@ -53,9 +51,7 @@ export function createDecisionHintsRegistration(deps: DecisionHintsDeps): Middle
 				const hints = deps.getHints();
 				if (hints === null) return NO_EFFECTS;
 				if (hints.scope !== null) lines.push(hints.scope);
-				// A controller that already ran the orientation or collected the batch
-				// has made the plan for the turn; a delegation hint would second-guess it.
-				if (hints.plan !== null && deps.controllerActed?.() !== true) lines.push(hints.plan);
+				if (hints.plan !== null) lines.push(hints.plan);
 				// Worker advice already says how to explore, so this line only reaches a turn without it.
 				if (hints.explore && hints.plan === null) lines.push(hints.explore);
 			} catch {

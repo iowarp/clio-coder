@@ -503,7 +503,7 @@ const STRUCTURED = new Set([
 	"integrations.externalAgents.entries",
 ]);
 const OPTIONAL_NUMBERS = new Set(["safety.review.cadenceToolCalls"]);
-const NULLABLE_NUMBERS = new Set(["turnControl.orientation.maxCostUsdPerTurn"]);
+const NULLABLE_NUMBERS = new Set<string>([]);
 const OPTIONAL_STRINGS = new Set([
 	"fleet.default.node",
 	"safety.review.target",
@@ -693,15 +693,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"turnControl.workflows": [
 		"Before Clio answers",
-		"Choose whether Clio may explore the project, check recent Git activity, recall earlier work, or collect finished background runs before answering. Project exploration and Git checks (orientation and direction) need a fitted System One turn site, which is experimental.",
-	],
-	"turnControl.orientation.maxSplit": [
-		"Scouts per project tour",
-		"Maximum number of read-only Scouts Clio may start to explore a project before answering.",
-	],
-	"turnControl.orientation.maxCostUsdPerTurn": [
-		"Project tour cost limit",
-		"Maximum cost in USD for Scouts started before one answer. Leave blank to use the worker cost limit.",
+		"Choose whether Clio collects finished background runs before answering.",
 	],
 	"fleet.rosters": [
 		"Fleet rosters",

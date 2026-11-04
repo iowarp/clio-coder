@@ -741,8 +741,7 @@ export interface IntegrationsSettings {
 export const DEFAULT_SETTINGS = {
 	version: 2 as const,
 	turnControl: {
-		workflows: ["orientation", "direction", "ledger-facts", "detached-collection"],
-		orientation: { maxSplit: 4, maxCostUsdPerTurn: null },
+		workflows: ["detached-collection"],
 	} as TurnControlSettings,
 	targets: [] as TargetDescriptor[],
 	chat: {
@@ -942,10 +941,7 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 version: 2
 
 turnControl:
-  workflows: [orientation, direction, ledger-facts, detached-collection]
-  orientation:
-    maxSplit: 4
-    maxCostUsdPerTurn: null
+  workflows: [detached-collection]
 
 # Configured inference endpoints. Target descriptor leaves are unchanged in v2.
 targets: []

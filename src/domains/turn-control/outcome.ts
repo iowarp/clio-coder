@@ -22,7 +22,6 @@ export interface TurnOutcomeRecord {
 	/** True for the automatic follow-up a middleware nudge requested, which is not an operator turn. */
 	readonly continuation: boolean;
 	readonly control: {
-		producer: "system-one" | null;
 		decision: WorkflowDecision["kind"];
 		decisionHash: string | null;
 		executed: boolean;

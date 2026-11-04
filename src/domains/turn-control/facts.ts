@@ -1,40 +1,8 @@
 import { canonicalDigest } from "./canonical-json.js";
 
-export interface WorkspaceFingerprint {
-	readonly cwd: string;
-	readonly gitHead: string | null;
-	readonly dirtyTreeHash: string | null;
-	readonly codemapHash: string | null;
-}
-
 export interface TurnFacts {
-	/** Raw operator text, whitespace collapsed and bounded to 300 code points by the runner. */
-	readonly operatorText: string;
-	/** Operator turns before this one, or null when no interpretation could act on it and the ledger was not read. */
-	readonly turnIndex: number | null;
-	readonly continuation: boolean;
 	readonly explicitConstraints: boolean;
-	readonly taskEstablished: boolean;
-	readonly clarificationStreak: number;
-	/** Observed only when an interpretation could act on it; otherwise every field but `cwd` is null. */
-	readonly workspace: WorkspaceFingerprint;
-	readonly capabilities: { dispatch: boolean; scoutRecipeId: string | null; readOnlyGit: boolean; monitor: boolean };
-	readonly priorOrientation: { runId: string; runDigest: string; fingerprint: WorkspaceFingerprint } | null;
 	readonly finishedDetachedBatchIds: ReadonlyArray<string>;
-	readonly autonomy: "default" | "yolo";
-}
-
-export function fingerprintEquals(a: WorkspaceFingerprint, b: WorkspaceFingerprint): boolean {
-	return (
-		a.gitHead !== null &&
-		b.gitHead !== null &&
-		a.dirtyTreeHash !== null &&
-		b.dirtyTreeHash !== null &&
-		a.cwd === b.cwd &&
-		a.gitHead === b.gitHead &&
-		a.dirtyTreeHash === b.dirtyTreeHash &&
-		a.codemapHash === b.codemapHash
-	);
 }
 
 export function factsDigest(facts: TurnFacts): string {

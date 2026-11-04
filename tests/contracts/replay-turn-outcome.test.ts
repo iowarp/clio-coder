@@ -950,7 +950,7 @@ test("settled speculative counts reach the live event stream after persistence",
 	}
 });
 
-test("orientation is persisted before the first model call while operator text stays raw", async () => {
+test("a collected block is persisted before the first model call while operator text stays raw", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	const context = dispatchStubContext({ settings });
@@ -982,7 +982,7 @@ test("orientation is persisted before the first model call while operator text s
 			return row;
 		},
 	} as unknown as SessionContract;
-	const block = "[Orientation] run scout-1\nFindings (cited):\n- Entry point (src/cli/index.ts:1)";
+	const block = "[Collected]\nfinished batch results";
 	let submitted = "";
 	const loop = createChatLoop({
 		getSettings: () => settings,
@@ -991,8 +991,6 @@ test("orientation is persisted before the first model call while operator text s
 		session,
 		readSessionEntries: () => entries,
 		turnControl: {
-			seedOrientation() {},
-			controllerActed: () => true,
 			async run(input) {
 				assert.equal(entries.filter((entry) => entry.kind === "message" && entry.role === "user").length, 0);
 				return {
@@ -1000,16 +998,8 @@ test("orientation is persisted before the first model call while operator text s
 					record: {
 						version: 1,
 						turnId: input.userTurnId,
-						producer: "system-one",
-						interpretation: null,
 						factsDigest: "facts",
-						decision: {
-							kind: "orientation",
-							question: "Tour",
-							breadth: "repository",
-							reuse: null,
-							budget: { maxScouts: 1, toolCallsPerScout: 36 },
-						},
+						decision: { kind: "collect", batchIds: ["finished"] },
 						decisionHash: "decision",
 						executed: { runIds: ["scout-1"], blockChars: block.length, durationMs: 1 },
 					},
@@ -1034,7 +1024,7 @@ test("orientation is persisted before the first model call while operator text s
 		assert.ok(user?.kind === "message");
 		const payload = user.payload as { text: string; operatorText: string };
 		assert.equal(payload.text, submitted);
-		assert.match(payload.text, /\[Orientation\]/);
+		assert.match(payload.text, /\[Collected\]/);
 		assert.equal(payload.operatorText, "explore this repo");
 		const control = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnControl");
 		assert.ok(control?.kind === "custom");
@@ -1042,8 +1032,7 @@ test("orientation is persisted before the first model call while operator text s
 		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		assert.ok(outcome?.kind === "custom");
 		assert.deepEqual((outcome.data as { control: unknown }).control, {
-			producer: "system-one",
-			decision: "orientation",
+			decision: "collect",
 			decisionHash: "decision",
 			executed: true,
 		});

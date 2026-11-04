@@ -316,13 +316,11 @@ import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
 import { createSystemOneScopes } from "../domains/system-one/scopes.js";
 import { effectiveSystemOne } from "../domains/system-one/selection.js";
-import { TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import { READ_MODEL_FOLD, TelemetryDomainModule, workspaceTelemetryCapture } from "../domains/telemetry/index.js";
-import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -4696,8 +4694,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	const explorationNudge = createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot });
-	middleware.registerHook(explorationNudge.registration);
+	middleware.registerHook(
+		createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot }).registration,
+	);
 	middleware.registerHook(createUnbackedWorkerClaimRegistration());
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
@@ -4711,75 +4710,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const turnControl = createTurnControlRunner({
 		getSettings: getCurrentSettings,
-		getAutonomy: resolveEffectiveAutonomy,
 		dispatch,
-		agents,
-		toolRegistry,
 		getInvokeOptions: () => {
 			const sessionId = session?.current()?.id;
 			return sessionId === undefined ? {} : { sessionId };
 		},
 		getTurnConstraints: () => chat.currentTurnConstraints?.(),
-		isContinuation: () => false,
-		// The turn site answered with acts and a breadth under cuts fitted to the
-		// build that produced them, so an unmeasured model never starts harness work.
-		// A wait is bounded by the deadline the turn call itself runs under.
-		readInterpretation: async (wait) => {
-			if (wait === undefined) return systemOneHost.interpretation();
-			const binding = systemOneSettings().systemOne.sites.turn;
-			const bindingTimeoutMs = typeof binding === "object" && binding !== null ? binding.timeoutMs : undefined;
-			return systemOneHost.awaitInterpretation(
-				bindingTimeoutMs ?? systemOne.measuredDeadlineMs("turn") ?? TURN_SITE.deadlineMs,
-				wait.signal,
-			);
-		},
-		facts: {
-			turnIndex: () =>
-				readCurrentSessionEntries().filter(
-					(entry) =>
-						entry.kind === "message" &&
-						entry.role === "user" &&
-						(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
-				).length,
-			taskEstablished,
-			clarificationStreak: () => turnOutcomeCollector.clarificationStreak(),
-			finishedDetachedBatchIds: () => finishedDetachedBatchIds(dispatch),
-		},
-		cwd: process.cwd(),
-		bus,
+		finishedDetachedBatchIds: () => finishedDetachedBatchIds(dispatch),
 		emitNotice: (text) => {
 			if (deferredWatchdogNoticeSink) deferredWatchdogNoticeSink(text);
 			else bootStderr(`${text}\n`);
 		},
-		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
-		rememberOrientation(turnId, runId, succeeded) {
-			dispatchDedup.rememberHarnessOrientation(turnId, runId);
-			if (succeeded) explorationNudge.rememberHarnessScout(turnId);
-		},
 	});
-	const seedOrientationFromSession = (): void => {
-		let snapshot: TurnControlRecord["orientation"];
-		try {
-			const meta = session?.current();
-			const latest = meta
-				? [...readRecentSessionEntriesForContract(meta.id)]
-						.reverse()
-						.find(
-							(entry) =>
-								entry.kind === "custom" &&
-								entry.customType === "turnControl" &&
-								(entry.data as TurnControlRecord | null)?.orientation !== undefined,
-						)
-				: undefined;
-			if (latest?.kind === "custom") snapshot = (latest.data as TurnControlRecord).orientation;
-		} catch {
-			/* S6: an unreadable tail cannot seed reuse. */
-		}
-		turnControl.seedOrientation(snapshot ?? null);
-	};
-	seedOrientationFromSession();
-	const unsubscribeOrientationResume = bus.subscribe("session.reattached", seedOrientationFromSession);
-	termination.onDrain(() => unsubscribeOrientationResume());
 	// The opt-in turn-end watchdog. Headless and ACP runs pass `false` for the
 	// surface: neither has an operator reading a transcript, so a notice they
 	// cannot see would be a worker run spent on nothing whatever the setting says.
@@ -4866,7 +4808,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(
 		createDecisionHintsRegistration({
 			getHints: () => systemOneHost.hints(),
-			controllerActed: () => turnControl.controllerActed(),
 			getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		}),
 	);
@@ -4968,7 +4909,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		readTurn: (input) => {
 			if ((session?.current()?.id ?? null) !== outcomeSessionId) {
 				seedOutcomeFromSession();
-				seedOrientationFromSession();
 			}
 			// A new operator task makes every ranking still in flight answer the old
 			// one; cancelling it here keeps it off the endpoint this turn needs. Turn
