@@ -400,10 +400,7 @@ describe("engine lifecycle: a tool call whose arguments are not valid JSON", () 
 		});
 		// Pi's Anthropic stream hands the finished arguments text to parseToolCallArguments the same way.
 		const parsed = parseToolCallArguments(raw);
-		const turns = [
-			assistant([{ type: "toolCall", id: "c1", name: "edit", arguments: {}, ...parsed }], "toolUse"),
-			finalTurn(),
-		];
+		const turns = [assistant([{ type: "toolCall", id: "c1", name: "edit", ...parsed }], "toolUse"), finalTurn()];
 		const { agent } = createEngineAgent({
 			initialState: { model: MODEL, tools: attached.map(stub) },
 			streamFn: () => {
