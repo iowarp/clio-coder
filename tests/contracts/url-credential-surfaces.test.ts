@@ -4,7 +4,12 @@ import { test } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
-import { holdUnresolvedUserinfo, redactSecretString, redactUrlCredentials } from "../../src/domains/safety/redaction.js";
+import {
+	holdUnresolvedUserinfo,
+	redactSecretString,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
+} from "../../src/domains/safety/redaction.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Secrets draw on letters nothing else here uses, so one leaked character is enough to fail.
@@ -107,4 +112,44 @@ test("a run feed bound never leaves a secret query value without its name", asyn
 	} finally {
 		env.restore();
 	}
+});
+
+test("an append-only stream waits on a long token in linear time and joins to the one-shot output", () => {
+	for (const head of ["https://example.com/", "a&&b", "x:"]) {
+		const filter = new UrlCredentialStreamFilter();
+		const delta = "abcdefgh";
+		let sent = filter.push(head);
+		const count = 400_000 / delta.length;
+		const started = performance.now();
+		for (let index = 0; index < count; index += 1) sent += filter.push(delta);
+		const elapsed = performance.now() - started;
+		// 200 KB took 25.7 s when every delta rescanned the open token, and a linear walk takes a few milliseconds.
+		ok(elapsed < 1500, `${head}: ${elapsed} ms`);
+		sent += filter.push(" tail ");
+		sent += filter.end(true);
+		strictEqual(sent, redactUrlCredentials(`${head}${delta.repeat(count)} tail `));
+	}
+	// A short run ahead of the wait can still resolve, so the wait must not begin before it is certain.
+	const colon = new UrlCredentialStreamFilter();
+	strictEqual(colon.push("see a:"), "see a");
+	strictEqual(colon.push("/"), "");
+	strictEqual(colon.push("b"), ":/b");
+	const open = new UrlCredentialStreamFilter();
+	strictEqual(open.push("a:"), "a");
+	strictEqual(open.push("/"), "");
+	strictEqual(open.push("/u:ZQ"), "");
+	strictEqual(open.push("@h next "), "://u:[redacted]@h next ");
+});
+
+test("a stream cut off inside an opaque username sends none of it", () => {
+	const filter = new UrlCredentialStreamFilter();
+	const pushed = filter.push("clone https://abcdef0123456789abcdef0123456789");
+	strictEqual(pushed + filter.end(false), "clone https://");
+	const host = new UrlCredentialStreamFilter();
+	strictEqual(host.push("see https://example.com") + host.end(false), "see https://example.com");
+	const done = new UrlCredentialStreamFilter();
+	strictEqual(
+		done.push("https://abcdef0123456789abcdef0123456789") + done.end(true),
+		"https://abcdef0123456789abcdef0123456789",
+	);
 });

@@ -421,6 +421,9 @@ export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
 	return out;
 }
 
+// The username token's shape at the very end of a stream that stopped. No `@` will come, and a frame's hold reads it as a host (#446).
+const CUT_OFF_USERNAME_TOKEN_RE = /(?<=:\/\/)(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,}$/iu;
+
 /** Where text that a reader cannot retract becomes unsafe to send: from anything in its last token a later character could make a credential. */
 function appendOnlySafeEnd(text: string): number {
 	let tokenStart = text.length;
@@ -439,6 +442,11 @@ export class UrlCredentialStreamFilter {
 	private pending = "";
 	/** The last character sent, which is all the pattern reads ahead of a `://`. */
 	private context = "";
+	/**
+	 * What waits opens with a `://` or a query, so only whitespace ends the wait and only new text can hold it. Scanning the
+	 * whole token per delta took 25.7 s on a 200 KB token in 8-character deltas, blocking the loop (#446).
+	 */
+	private waiting = false;
 
 	private send(text: string, redact: (value: string) => string): string {
 		const safe = redact(this.context + text).slice(this.context.length);
@@ -448,17 +456,19 @@ export class UrlCredentialStreamFilter {
 
 	push(delta: string): string {
 		this.pending += delta;
+		if (this.waiting && !/\s/u.test(delta)) return "";
 		const end = appendOnlySafeEnd(this.pending);
-		if (end === 0) return "";
-		const safe = this.send(this.pending.slice(0, end), redactUrlCredentials);
+		const safe = end === 0 ? "" : this.send(this.pending.slice(0, end), redactUrlCredentials);
 		this.pending = this.pending.slice(end);
+		this.waiting = /^(?::\/\/|[?&])/u.test(this.pending);
 		return safe;
 	}
 
 	/** Send what is left. Only a stream that completed releases a hold. */
 	end(completed: boolean): string {
-		const rest = this.pending;
+		const rest = completed ? this.pending : this.pending.replace(CUT_OFF_USERNAME_TOKEN_RE, "");
 		this.pending = "";
+		this.waiting = false;
 		return this.send(rest, (value) => redactStreamingUrlCredentials(value, completed));
 	}
 }
