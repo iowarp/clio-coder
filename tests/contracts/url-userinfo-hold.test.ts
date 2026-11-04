@@ -118,6 +118,14 @@ const CORPUS = [
 	"日本語 https://例え.jp:8080/パス 次",
 	"https://例え.jp:8080。次の文",
 	"# heading\n\n- **bold** text ok\n",
+	'{"url":"https://example.com","email":"a@b.com"}',
+	'{"a":"http://h:8080","b":"me@corp.com"}',
+	'{"a":"https://u:ZQXJ@h/x","b":"me@corp.com"}',
+	'{"a":"https://h/?token=ZQXJ","b":"me@corp.com"}',
+	'{\\"a\\":\\"http://h:8080\\",\\"b\\":\\"me@corp.com\\"}',
+	"https://me@corp.com:ZQXJ@host/",
+	"https://me@corp.com:ZQ:XJ@host",
+	"ssh://git@host:2222/path@tag",
 	...BOUNDARIES.map((boundary) => `http://h:8080${boundary}tail`),
 ];
 
@@ -134,7 +142,8 @@ function random(seed: number): () => number {
 
 /**
  * The stated contract, written apart from the code. In the last token, the first URL that can still hold a password shows
- * through its first colon, or its last `@`. A numeric port ahead of `/`, or an `@` that closed an authority, settles a URL.
+ * through its first colon, or its last `@`. A numeric port ahead of `/`, an `@` that closed an authority, or a `"` closing a
+ * string settles a URL.
  */
 function expectedFrame(prefix: string): string {
 	const token = /\S*$/u.exec(prefix)?.[0] ?? "";
@@ -144,9 +153,10 @@ function expectedFrame(prefix: string): string {
 		const rest = token.slice(start);
 		const cut = (end: number) => redactSecretString(prefix.slice(0, base + start + end));
 		const lastAt = rest.lastIndexOf("@");
+		if (/"[,:;}\])>\\]/u.test(rest)) continue;
 		if (/^(?:gh[pousr]_|github_pat_|glpat-)[^/]*$/iu.test(rest)) return cut(lastAt + 1);
-		if (/^[^/@:[]*:[^/]*@[^/]*$/u.test(rest)) return cut(lastAt + 1);
-		if (/^[^/@:[]*:[^/@]*$/u.test(rest)) return cut(rest.indexOf(":") + 1);
+		if (/^[^/:[]*:[^/]*@[^/]*$/u.test(rest)) return cut(lastAt + 1);
+		if (/^[^/:[]*:[^/@]*$/u.test(rest)) return cut(rest.indexOf(":") + 1);
 		if (/^[^/@:[]*:(?!\d*\/)[^/@]*\//u.test(rest)) return cut(lastAt >= 0 ? lastAt + 1 : rest.indexOf(":") + 1);
 	}
 	return redactSecretString(prefix);
@@ -220,6 +230,9 @@ test("one-shot redaction hides the whole password of every userinfo shape", () =
 		["jdbc:mysql://u:ZQ@h:3306/db", "jdbc:mysql://u:[redacted]@h:3306/db"],
 		["https://ZQXJ0ZQXJZQXJZQXJZQXJZ@github.com/r", "https://[redacted]@github.com/r"],
 		["https://glpat-ZQXJZQXJZQXJ:ZQ@gitlab.com/r", "https://[redacted]:[redacted]@gitlab.com/r"],
+		["https://me@corp.com:ZQXJ@host/", "https://me@corp.com:[redacted]@host/"],
+		['https://u:Z)Q,X"J@h', "https://u:[redacted]@h"],
+		['https://u:ZQ"@h', "https://u:[redacted]@h"],
 	] as const) {
 		strictEqual(redactSecretString(text), redacted);
 		strictEqual(redactSecretString(redacted), redacted);

@@ -18,12 +18,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
+// A `"` ends a JSON or call string when structure follows it, so `{"a":"http://h:80","b":"me@corp.com"}` stays whole. Any other
+// `"` can sit inside a password, as in `https://u:a"b@h`, so it stays in the run (#446).
+const CONTINUING_QUOTE = String.raw`"(?=[^,:;}\])>\\\s])`;
+const stringRun = (chars: string): string => `${chars}*(?:${CONTINUING_QUOTE}${chars}*)*`;
+const PASSWORD_RUN = stringRun(String.raw`[^\s/"]`);
 // Any scheme can carry a password, as `postgres://`, `redis://`, `mongodb+srv://` and `ssh://` do, and matching from `://`
 // back one character needs no scan of a long word. The name stops at its first colon and the password runs to the
-// authority's last `@`, so `https://:pw@h`, `u:pa:ss@h` and `u:p@ss@h` hide the whole password. A `[` opens an IPv6 host or
-// an earlier pass's marker, never a name. An authority with no `@` can still hold one past a `/` when what follows its
-// colon cannot be a port, as in `u:p/ss@h`. Only that reach needs a bound, which keeps the scan linear (#446).
-const SECRET_STRING_RE = /(?<=[a-z0-9+.-])(:\/\/[^\s/@:[]*:)((?:[^\s/]*|(?!\d*\/)[^\s/]*\/\S{0,256}))@/giu;
+// authority's last `@`, so `https://:pw@h`, `u:pa:ss@h`, `u:p@ss@h` and `me@corp.com:pw@h` hide the whole password. A `[` opens
+// an IPv6 host or an earlier pass's marker, never a name. An authority with no `@` can still hold one past a `/` when what
+// follows its colon cannot be a port, as in `u:p/ss@h`. Only that reach needs a bound, which keeps the scan linear. A name
+// holding an `@` has no such reach, since `ssh://git@host:org/repo@v1` is a path (#446).
+const SECRET_STRING_RE = new RegExp(
+	String.raw`(?<=[a-z0-9+.-])(:\/\/${stringRun(String.raw`[^\s/:["]`)}:)(${PASSWORD_RUN}|(?!\d*\/)(?<!@[^/:]*:)${PASSWORD_RUN}\/(?:[^\s"]|${CONTINUING_QUOTE}){0,256})@`,
+	"giu",
+);
 // A token can be the whole username, as in `https://<token>@github.com`. `alice` and `first.last` are ordinary names, while
 // a long opaque run holding a digit is not one worth keeping. A known git host token also counts ahead of a colon, where a
 // long opaque name would more often be a host and its port (#446).
@@ -36,7 +45,7 @@ const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
 const SECRET_URL_PARAM_NAME_RE =
 	/[?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)/giu;
 const SECRET_URL_PARAM_STOP_RE = /[=\s]/gu;
-const SECRET_URL_PARAM_VALUE_RE = /[^&#\s]+/uy;
+const SECRET_URL_PARAM_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^&#\s"]`)}`, "uy");
 // A name's run must reach the `=`, so only the run's start can match and the secret word need only be found once. Two
 // stars around the word retried at every occurrence: `api_key_` repeated took 9 s at 320 KB, on a path a frame can wait on.
 const SECRET_ASSIGNMENT_RE =
@@ -133,7 +142,7 @@ function redactSecretUrlParams(value: string): string {
 		}
 		if (value[stop] !== "=") continue;
 		secrets.lastIndex = stop + 1;
-		if (secrets.exec(value) === null) continue;
+		if (!secrets.exec(value)?.[0]) continue;
 		names.lastIndex = secrets.lastIndex;
 		if (ENV_REFERENCE_RE.test(value.slice(stop + 1, secrets.lastIndex))) continue;
 		out.push(value.slice(copied, stop + 1), "[redacted]");
@@ -248,16 +257,25 @@ function shownUserinfoEnd(value: string, start: number, lastAt: number): number 
 	const firstAt = authority.indexOf("@");
 	if (slash < 0 && GIT_TOKEN_NAME_RE.test(authority)) return firstAt >= 0 ? lastAt + 1 : start;
 	const colon = authority.indexOf(":");
-	if (colon < 0 || authority.lastIndexOf("[", colon) >= 0 || (firstAt >= 0 && firstAt < colon)) return null;
-	if (firstAt >= 0) return slash < 0 ? lastAt + 1 : null;
-	if (slash >= 0 && /^\d*$/u.test(authority.slice(colon + 1))) return null;
+	if (colon < 0 || authority.lastIndexOf("[", colon) >= 0) return null;
+	if (authority.indexOf("@", colon) >= 0) return slash < 0 ? lastAt + 1 : null;
+	if (slash >= 0 && (firstAt >= 0 || /^\d*$/u.test(authority.slice(colon + 1)))) return null;
 	return lastAt > end ? lastAt + 1 : start + colon + 1;
+}
+
+/** The last `"` in the token that closed a string. No URL ahead of it can still grow, whatever follows (#446). */
+function lastClosingQuote(value: string, tokenStart: number): number {
+	for (let quote = value.lastIndexOf('"'); quote >= tokenStart && quote >= 0; quote = value.lastIndexOf('"', quote - 1)) {
+		if (quote + 1 < value.length && /[,:;}\])>\\]/u.test(value.charAt(quote + 1))) return quote;
+		if (quote === 0) break;
+	}
+	return -1;
 }
 
 /**
  * The part of text still being written that is safe to show when its last token may hold URL userinfo. A hold ends only at
- * whitespace or end of text, or at the `/` after a numeric port. A friendlier stop such as `)`, `,` or a quote sits inside
- * what the pattern matches, so `https://u:pa)ss@h` would show `pa)` before it could ever match. No length or timeout ever
+ * whitespace or end of text, at the `/` after a numeric port, or at a `"` closing a string. A friendlier stop such as `)` or
+ * `,` sits inside what the pattern matches, so `https://u:pa)ss@h` would show `pa)` before it could ever match. No length or timeout ever
  * shows held text: past the limit the frame only gains a marker, so a run that never ends cannot reveal what it holds.
  */
 export function holdUnresolvedUserinfo(value: string): string {
@@ -265,7 +283,8 @@ export function holdUnresolvedUserinfo(value: string): string {
 	while (tokenStart > 0 && !/\s/u.test(value.charAt(tokenStart - 1))) tokenStart -= 1;
 	// One scan for every URL in the token: a token of 80,000 of them took 9.5 s per frame when each looked for itself.
 	const lastAt = value.lastIndexOf("@");
-	for (let at = value.indexOf("://", tokenStart + 1); at >= 0; at = value.indexOf("://", at + 3)) {
+	const from = Math.max(tokenStart, lastClosingQuote(value, tokenStart)) + 1;
+	for (let at = value.indexOf("://", from); at >= 0; at = value.indexOf("://", at + 3)) {
 		if (!SCHEME_CHAR_RE.test(value.charAt(at - 1))) continue;
 		const keep = shownUserinfoEnd(value, at + 3, lastAt);
 		if (keep === null) continue;
@@ -287,6 +306,9 @@ export interface CutHeadGuard {
 	/** The end of the token being discarded, enough to tell whether it names a secret. */
 	token: string;
 }
+
+/** Whether a cut at the end of this text would leave a piece of a URL's authority on each side (#446). */
+export const OPEN_AUTHORITY_END_RE = new RegExp(String.raw`:\/?$|:\/\/${stringRun(String.raw`[^\s/"]`)}"?$`, "u");
 
 const CUT_TOKENS = 2;
 const NAME_TAIL_CHARS = 64;
