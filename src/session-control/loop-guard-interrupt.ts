@@ -52,7 +52,7 @@ export function loopBlockedStopReason(evt: LoopBlockedPayload): string {
 	const blockWord = evt.blocksThisTurn === 1 ? "block" : "blocks";
 	return (
 		`[Clio Coder] loop guard stopped this turn: ${evt.tool} was called with identical arguments ` +
-		`${evt.repeatCount} times without new results (${evt.blocksThisTurn} loop ${blockWord}). Send a new message ` +
+		`${evt.repeatCount} times (${evt.blocksThisTurn} loop ${blockWord}). Send a new message ` +
 		`to continue with a different approach, or narrow the request.`
 	);
 }
