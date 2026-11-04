@@ -1294,7 +1294,8 @@ function rawStringBytes(key: string | undefined, parentKey: string | undefined):
 }
 
 function boundRawValue(value: unknown, depth: number, key?: string, parentKey?: string): unknown {
-	if (typeof value === "string") return boundString(value, rawStringBytes(key, parentKey));
+	// Redacted ahead of its bound, which could otherwise cut a password into a piece no pattern recognizes (#446).
+	if (typeof value === "string") return boundString(redactUrlCredentials(value), rawStringBytes(key, parentKey));
 	if (Array.isArray(value)) {
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		// A member inherits no path: `details.diff` names one string, not a list
@@ -2220,9 +2221,13 @@ function replayShellLine(entry: BashExecutionEntry): AcpReplayFrame[] {
 	const excludeFromContext = entry.excludeFromContext === true;
 	const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
 	const toolCallId = `shell_${entry.turnId}`;
-	const command = safeStoredString(entry.command, ACP_MAX_SHELL_COMMAND_BYTES);
+	const stored: unknown = entry.command;
+	const command = safeStoredString(
+		typeof stored === "string" ? redactUrlCredentials(stored) : stored,
+		ACP_MAX_SHELL_COMMAND_BYTES,
+	);
 	const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
-	const output = shellOutputTail(redactUrlCredentials(entry.output));
+	const output = shellOutputTail(redactStreamingUrlCredentials(entry.output, !entry.cancelled));
 	return [
 		{
 			update: {
@@ -6655,7 +6660,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// instead of agent attribution, and the same call shape a `bash` row has.
 		const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
 		const toolCallId = `shell_${randomUUID()}`;
-		const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
+		const shownCommand = redactUrlCredentials(command);
+		const title = boundString(shownCommand, ACP_MAX_TOOL_TITLE_BYTES);
 		const notify = (update: Record<string, unknown>): void => {
 			try {
 				options.transport.notify("session/update", { sessionId: session.id, update, _meta: meta });
@@ -6668,7 +6674,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		let lastSentAt = Number.NEGATIVE_INFINITY;
 		let lastText = "";
 		const onUpdate = (progress: BashCommandProgress): void => {
-			const text = shellOutputTail(combineBashOutput(progress));
+			const text = shellOutputTail(redactStreamingUrlCredentials(combineBashOutput(progress)));
 			const sentAt = now();
 			if (
 				text.length === 0 ||
@@ -6692,7 +6698,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				title,
 				kind: "execute" satisfies AcpToolKind,
 				status: "in_progress" satisfies AcpToolCallStatus,
-				rawInput: { command, excludeFromContext },
+				rawInput: { command: shownCommand, excludeFromContext },
 			});
 			let entry: SessionEntry;
 			let run: Awaited<ReturnType<typeof runOperatorShellLine>>;
@@ -6722,8 +6728,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				notify({ sessionUpdate: "tool_call_update", toolCallId, title, kind: "execute", status: "failed" });
 				throw new AcpRequestError(-32603, "the shell line could not be run or recorded", { code: "shell_failed" });
 			}
-			const output = shellOutputTail(entry.kind === "bashExecution" ? entry.output : run.entry.output);
 			const { result } = run;
+			const output = shellOutputTail(
+				redactStreamingUrlCredentials(
+					entry.kind === "bashExecution" ? entry.output : run.entry.output,
+					!result.aborted && !result.timedOut,
+				),
+			);
 			const settledResult = {
 				exitCode: result.exitCode,
 				cancelled: result.aborted,

@@ -392,7 +392,7 @@ test("ACP replay keeps URL credentials out of terminal tool and shell content (#
 			turnId: "call",
 			parentTurnId: "user",
 			timestamp: "2026-09-25T12:00:01.000Z",
-			payload: { name: "bash", toolCallId: "bash-1", args: {} },
+			payload: { name: "bash", toolCallId: "bash-1", args: { command: `git clone ${secret}` } },
 		},
 		{
 			kind: "message",
@@ -407,7 +407,7 @@ test("ACP replay keeps URL credentials out of terminal tool and shell content (#
 			turnId: "shell",
 			parentTurnId: "result",
 			timestamp: "2026-09-25T12:00:03.000Z",
-			command: "git remote -v",
+			command: `git remote add origin ${secret}`,
 			output: secret,
 			exitCode: 0,
 			cancelled: false,
@@ -426,6 +426,8 @@ test("ACP replay keeps URL credentials out of terminal tool and shell content (#
 			terminal.map((update) => update.content?.[0]?.content.text),
 			[redacted, redacted],
 		);
+		// Raw records and the shell line's echo carry what the content field hides (#446).
+		ok(!JSON.stringify(peer.updates).includes("hunter2"), JSON.stringify(peer.updates));
 	} finally {
 		await peer.stop();
 	}

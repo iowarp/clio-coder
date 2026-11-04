@@ -13,6 +13,9 @@ import {
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
+import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Secrets draw on letters nothing else here uses, so one leaked character is enough to fail.
@@ -397,6 +400,188 @@ test("a headless main-agent answer hides URL credentials at both exits", async (
 		const endFrame = await headlessStdout("json", "terminal", assistantAnswer("see https://u:hunter", "length"));
 		ok(!endFrame.includes("hunter"), endFrame);
 	} finally {
+		env.restore();
+	}
+});
+
+interface AcpFake {
+	transport: AcpJsonRpcPeerTransport;
+	updates: () => Record<string, unknown>[];
+	call: (method: string, params: unknown) => Promise<unknown>;
+}
+
+function acpFake(): AcpFake {
+	const handlers = new Map<string, (params: unknown) => unknown>();
+	const updates: Record<string, unknown>[] = [];
+	const closers: (() => void)[] = [];
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: (method, params) => {
+			if (method === "session/update") updates.push((params as { update: Record<string, unknown> }).update);
+		},
+		onRequest: (name, handler) => {
+			handlers.set(name, handler);
+			return () => handlers.delete(name);
+		},
+		onNotification: () => () => {},
+		onClose: (handler) => {
+			closers.push(handler);
+			return () => {};
+		},
+		close: () => {
+			for (const closer of closers) closer();
+		},
+	};
+	return {
+		transport,
+		updates: () => updates,
+		call: async (method, params) => await handlers.get(method)?.(params),
+	};
+}
+
+test("ACP raw records carry no URL password on a live call", async () => {
+	const url = CREDENTIAL_URL;
+	const bashEnd = {
+		content: [{ type: "text", text: `fatal: ${url}` }],
+		details: { stderr: `fatal: ${url}`, nested: [{ deep: url }] },
+	};
+	const live = acpFake();
+	let emit: (event: unknown) => void = () => {};
+	const served = serveClioAcpAgent({
+		transport: live.transport,
+		cwd: process.cwd(),
+		chat: {
+			submit: async () => {
+				emit({ type: "tool_execution_start", toolCallId: "c", toolName: "bash", args: { command: `git clone ${url}` } });
+				emit({ type: "tool_execution_end", toolCallId: "c", toolName: "bash", result: bashEnd, isError: true });
+				emit({ type: "message_end", message: assistantAnswer("done") });
+			},
+			cancel: () => {},
+			onEvent: (handler: (event: unknown) => void) => {
+				emit = handler;
+				return () => {};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	} as never);
+	await live.call("initialize", { protocolVersion: 1 });
+	const created = (await live.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	await live.call("session/prompt", { sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
+	live.transport.close();
+	await served;
+	const wire = JSON.stringify(live.updates());
+	ok(!wire.includes("hunter2"), wire);
+	const start = live.updates().find((update) => update.sessionUpdate === "tool_call");
+	deepStrictEqual(start?.rawInput, { command: `git clone ${SAFE_URL}` });
+	const settled = live.updates().find((update) => update.sessionUpdate === "tool_call_update");
+	ok(JSON.stringify(settled?.rawOutput).includes(`fatal: ${SAFE_URL}`), JSON.stringify(settled?.rawOutput));
+});
+
+test("an ACP raw record redacts ahead of its bound, so a cut cannot strip a password's scheme", async () => {
+	const live = acpFake();
+	let emit: (event: unknown) => void = () => {};
+	const served = serveClioAcpAgent({
+		transport: live.transport,
+		cwd: process.cwd(),
+		chat: {
+			submit: async () => {
+				const long = `${"x".repeat(ACP_MAX_STRING_BYTES - 20)} https://u:hunter2@h/ ${"y".repeat(64)}`;
+				emit({ type: "tool_execution_start", toolCallId: "c", toolName: "bash", args: { command: long } });
+				emit({ type: "message_end", message: assistantAnswer("done") });
+			},
+			cancel: () => {},
+			onEvent: (handler: (event: unknown) => void) => {
+				emit = handler;
+				return () => {};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	} as never);
+	await live.call("initialize", { protocolVersion: 1 });
+	const created = (await live.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	await live.call("session/prompt", { sessionId: created.sessionId, prompt: [{ type: "text", text: "go" }] });
+	live.transport.close();
+	await served;
+	const start = live.updates().find((update) => update.sessionUpdate === "tool_call");
+	ok(!JSON.stringify(start?.rawInput).includes("hunter"), "the raw input holds a piece of the password");
+});
+
+test("an ACP shell line hides URL passwords in its echo, its live output and its settled output", async () => {
+	const env = await isolateClioEnv("url-surfaces-shell-");
+	const live = acpFake();
+	const meta = {
+		id: "acp-shell-446",
+		cwd: env.dir,
+		cwdHash: "hash",
+		createdAt: "2026-11-04T00:00:00.000Z",
+		endedAt: null,
+		model: null,
+		target: null,
+	};
+	const session = {
+		current: () => meta,
+		create: () => meta,
+		resume: () => meta,
+		checkpoint: async () => {},
+		flushAppends: () => {},
+		tree: () => ({ leafId: null }),
+		appendEntry: (entry: object) => ({ ...entry, turnId: "shell" }),
+		history: () => [],
+		list: () => [],
+	};
+	const served = serveClioAcpAgent({
+		transport: live.transport,
+		session,
+		cwd: env.dir,
+		autonomy: () => "default",
+		chat: {
+			submit: async () => {},
+			whenSettled: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => false,
+			getSessionId: () => meta.id,
+			resetForSession: () => {},
+		},
+		labelOperatorCommand: () => null,
+		readSessionEntries: () => [],
+		buildReplayMessages: () => [],
+	} as never);
+	try {
+		await live.call("initialize", {
+			protocolVersion: 1,
+			clientCapabilities: { _meta: { "clio-coder/toolProgress": { version: 1 } } },
+		});
+		await live.call("session/new", { cwd: env.dir, mcpServers: [] });
+		const result = (await live.call("_clio-coder/session/shell", {
+			sessionId: meta.id,
+			command: `echo ${CREDENTIAL_URL}`,
+		})) as { output: string };
+		const wire = JSON.stringify(live.updates());
+		ok(!wire.includes("hunter2"), wire);
+		ok(!result.output.includes("hunter2"), result.output);
+		ok(result.output.includes(SAFE_URL), result.output);
+		const started = live.updates().find((update) => update.sessionUpdate === "tool_call");
+		deepStrictEqual(started?.rawInput, { command: `echo ${SAFE_URL}`, excludeFromContext: false });
+		strictEqual(started?.title, `echo ${SAFE_URL}`);
+		// Written so the command's own echo holds no whole password. Only a held frame can keep this off the wire.
+		const held = (await live.call("_clio-coder/session/shell", {
+			sessionId: meta.id,
+			command: "printf 'https://u:hun'; printf 'ter'; sleep 1; printf '2@h/ done\\n'",
+		})) as { output: string };
+		strictEqual(held.output.trim(), "https://u:[redacted]@h/ done");
+		const frames = live
+			.updates()
+			.filter((update) => update.status === "in_progress" && update.content !== undefined)
+			.map((update) => JSON.stringify(update.content));
+		ok(frames.length > 0, "no live frame reached the client");
+		ok(!frames.some((frame) => frame.includes("hun")), JSON.stringify(frames));
+	} finally {
+		live.transport.close();
+		await served;
 		env.restore();
 	}
 });
