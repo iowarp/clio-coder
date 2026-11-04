@@ -373,7 +373,7 @@ import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
 import { reloadPluginResourcesAndNotify } from "./plugin-reload.js";
 import { createReloadClasses } from "./reload-classes.js";
-import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
+import { createJudgeScreen, createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
 import { createSideRequestAdmission } from "./side-request-admission.js";
 import { createSystemOneControl } from "./system-one-control.js";
 import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
@@ -3220,6 +3220,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 		session: () => session,
 		safety,
+		// `systemOne` and `chat` are built further down; nothing calls the judge before the first tool call.
+		screen: createJudgeScreen({
+			systemOne: () => systemOne,
+			providers,
+			liveWindow: () => chat.screenWindow(),
+			flow: flowLedger,
+		}),
 	});
 	// The git hook drift guard takes its baseline now, at session start: a hook
 	// file added or changed later, however it got there, makes the next git
@@ -4587,6 +4594,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if ((session?.current()?.id ?? null) !== outcomeSessionId) seedOutcomeFromSession();
 		},
 		currentOperatorTask: () => operatorTask,
+		systemOne,
 		// The skill writes a plain file that a later session reads with no label; /handoff carries the labels.
 		refuseHandoffSkill: (inlinedPaths) => {
 			// Read through current(): labels absorbed before a session exists have no session id to ask about.

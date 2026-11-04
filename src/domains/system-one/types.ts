@@ -150,6 +150,8 @@ export interface AskOptions {
 	readonly signal?: AbortSignal;
 	/** The information-flow restrictions the evidence inherited, passed through to the flow check unread. */
 	readonly flow?: unknown;
+	/** A destination this ask must not use, because the caller's own work is waiting on it. Such a route reads as busy. */
+	readonly avoid?: (destination: EngineDestination) => boolean;
 }
 
 export type CallOutcome =
@@ -179,6 +181,8 @@ export interface Verdict<V> {
 	readonly engine: string;
 	readonly kind: EngineKind;
 	readonly profile: ProfileId;
+	/** Whether the answering engine declares its numbers real probabilities, so a caller that acts on one reads this and never a name. */
+	readonly probabilities: boolean;
 	readonly build: string;
 	readonly latencyMs: number;
 	readonly usage?: { readonly input: number; readonly output: number };

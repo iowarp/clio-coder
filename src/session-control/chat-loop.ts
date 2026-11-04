@@ -174,11 +174,15 @@ import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./s
 import type { AgentStatusEvent } from "./status-types.js";
 import {
 	parseTriageAnswer,
+	runTriageRound,
 	TRIAGE_MAX_TOKENS,
 	TRIAGE_RESPONSE_SCHEMA,
 	TRIAGE_SCHEMA_NAME,
 	TRIAGE_SYSTEM_PROMPT,
 	type TriageEntry,
+	type TriageSystemOne,
+	type TriageVerdict,
+	triageFloor,
 	triageKindFor,
 	triageLabelsFor,
 	triageMayInterrupt,
@@ -667,6 +671,12 @@ export interface ChatLoop {
 	 */
 	contextLedger(): ContextLedger;
 	/**
+	 * The live agent messages and when the operator last spoke, epoch milliseconds, for a
+	 * reading of what entered the run since then. Role cannot say: reminders and continuations
+	 * are user messages too. Null with no runtime.
+	 */
+	screenWindow(): { messages: ReadonlyArray<AgentMessage>; since: number } | null;
+	/**
 	 * The published live budget for the next request: one immutable view with
 	 * the effective window, the structural accounting, the real output
 	 * reservation, headroom, pressure, and an opaque revision every consumer
@@ -926,6 +936,8 @@ export interface CreateChatLoopDeps {
 	onOperatorTurn?: (input: { task: string }) => void;
 	/** The operator request the run is working on, for the steering triage round. Absent, triage sends no task. */
 	currentOperatorTask?: () => string;
+	/** Typed steering triage when a route is bound. Absent or unbound, triage is the side-model round. */
+	systemOne?: TriageSystemOne;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => void;
 	getReadySkillCount?: () => number;
@@ -1279,6 +1291,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	// --- module composition -------------------------------------------------
 
+	let operatorSpokeAt = 0;
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
@@ -1295,6 +1308,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// from submit's finally and bypass the admission gate: an interrupt that
 		// holds the gate while awaiting that same run would otherwise deadlock.
 		submit: (text, options) => submitTracked(text, options),
+		onEvent: (event) => {
+			if (event.type === "delivered") operatorSpokeAt = Date.now();
+		},
 	});
 
 	const middleware = createTurnMiddleware({
@@ -2074,8 +2090,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// --- steering triage ----------------------------------------------------
 	//
 	// Off by default (chat.steering.triage). Once the queue has settled for a
-	// moment with enough entries, one detached side-model round reads it and
-	// relabels entries: an unrelated task moves to the end of the turn, a
+	// moment with enough entries, one detached round reads it, typed picks from a
+	// bound route or else the side model, and relabels entries: an unrelated task moves to the end of the turn, a
 	// confident stop may interrupt the run when the operator allowed it. The
 	// round never holds the engine; a verdict that lands after the queue changed
 	// is dropped, and the operator's own toggles pin an entry against it.
@@ -2090,7 +2106,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const scheduleTriage = (): void => {
 		const triage = deps.getSettings().chat.steering.triage;
-		if (!triage.enabled || queues.entries().length < triage.minQueued) return;
+		if (!triage.enabled || queues.entries().length < triageFloor(triage, deps.systemOne)) return;
 		cancelTriage();
 		triageTimer = setTimeout(() => {
 			triageTimer = null;
@@ -2168,8 +2184,30 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (triageInFlight || !state.streaming || !state.runtime) return;
 		const triage = deps.getSettings().chat.steering.triage;
 		const asked: TriageEntry[] = queues.entries().map((entry) => ({ id: entry.id, text: entry.text, kind: entry.kind }));
-		if (asked.length < triage.minQueued) return;
+		if (asked.length < triageFloor(triage, deps.systemOne)) return;
 		triageInFlight = true;
+		try {
+			await runTriageRound({
+				triage,
+				systemOne: deps.systemOne,
+				asked,
+				task: () => deps.currentOperatorTask?.() ?? "",
+				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
+				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
+				apply: (verdicts) => applyTriage(verdicts, triage.autoInterrupt),
+				side: () => runSideTriage(asked),
+			});
+		} catch {
+			// A failed round leaves the queue exactly as the operator left it.
+		} finally {
+			triageInFlight = false;
+		}
+	};
+
+	/** The side-model round. It has its own deadline, so an ask that spent its bound before falling back does not end it. */
+	const runSideTriage = async (asked: ReadonlyArray<TriageEntry>): Promise<void> => {
+		if (!state.runtime) return;
+		const triage = deps.getSettings().chat.steering.triage;
 		const controller = new AbortController();
 		const deadline = setTimeout(() => controller.abort(), triage.timeoutMs);
 		deadline.unref?.();
@@ -2197,7 +2235,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					systemPrompt: TRIAGE_SYSTEM_PROMPT,
 					userText: triageUserText({
 						task: deps.currentOperatorTask?.() ?? "",
-						previous: lastAssistantText(state.runtime.agent.state.messages),
+						previous: state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : "",
 						entries: asked,
 					}),
 					maxTokens: TRIAGE_MAX_TOKENS,
@@ -2221,16 +2259,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			applyTriage(verdicts, triage.autoInterrupt);
-		} catch {
-			// A failed round leaves the queue exactly as the operator left it.
 		} finally {
 			clearTimeout(deadline);
-			triageInFlight = false;
 		}
 	};
 
 	const applyTriage = (
-		verdicts: ReadonlyArray<ReturnType<typeof parseTriageAnswer>[number]>,
+		verdicts: ReadonlyArray<TriageVerdict>,
 		autoInterrupt: boolean,
 	): void => {
 		for (const verdict of verdicts) {
@@ -2582,6 +2617,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// before admission leaves the id unused, which costs nothing.
 				const reservedUserTurnId = randomUUID();
 				if (options.requestContinuation !== true) {
+					operatorSpokeAt = Date.now();
 					try {
 						deps.onOperatorTurn?.({ task: text });
 					} catch {
@@ -3386,6 +3422,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			});
 		},
 		contextLedger: () => context.contextLedger(),
+		screenWindow: () =>
+			state.runtime ? { messages: state.runtime.agent.state.messages, since: operatorSpokeAt } : null,
 		liveBudget: () => context.liveBudget(),
 		inspectLiveBudget: () => context.inspectLiveBudget(),
 		refreshLiveBudget: () => context.refreshLiveBudget(),

@@ -86,8 +86,10 @@ const BLOCK_RULES: ReadonlyArray<readonly [string, string]> = [
 	["remote-code", "run code fetched from the network (such as curl piped to a shell) that the operator did not ask for"],
 ];
 
+const OPERATOR_NAMED_RULE = "operator-named";
+
 const ALLOW_RULES: ReadonlyArray<readonly [string, string]> = [
-	["operator-named", "an action an operator message explicitly names"],
+	[OPERATOR_NAMED_RULE, "an action an operator message explicitly names"],
 	["read", "reads, listings and searches anywhere"],
 	["dependency", "installing dependencies the project already declares"],
 	["scratch", "work inside the scratch roots or temp directories"],
@@ -194,7 +196,7 @@ export type SafetyJudgeOutcome =
 	/** Falls back to today's operator path; `gateReason` is what the card says about why. */
 	| {
 			kind: "park";
-			cause: "escalated" | SafetyJudgeNoVerdictCause;
+			cause: "escalated" | "screened" | SafetyJudgeNoVerdictCause;
 			gateReason: string;
 			build: string;
 			latencyMs: number;
@@ -236,9 +238,23 @@ export interface SafetyJudgeNote {
 	toolCallId?: string;
 }
 
+/**
+ * A reading started alongside one review of a main-session ask, which sees what the judge
+ * must never see. It resolves with the source of a result that reads as directing an agent,
+ * or null. Null, a rejection, a throw or an answer after the verdict change nothing, and
+ * the signal aborts the moment the verdict lands, so the reading adds no wait.
+ */
+export type SafetyJudgeScreen = (request: {
+	targetId: string;
+	model: string | null;
+	toolCallId?: string;
+	signal: AbortSignal;
+}) => Promise<{ source: string } | null> | null;
+
 export interface SafetyJudgeDeps {
 	config: () => SafetyJudgeConfig;
 	complete: SafetyJudgeCompletion;
+	screen?: SafetyJudgeScreen;
 	/**
 	 * The operator's own messages on the session's active branch, oldest first,
 	 * through the turn the call serves when the call names it. Never assistant
@@ -363,6 +379,30 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const onAbort = (): void => controller.abort(subject.signal?.reason);
 				subject.signal?.addEventListener("abort", onAbort, { once: true });
 				if (subject.signal?.aborted === true) onAbort();
+				const screening = new AbortController();
+				const screened: { source: string | null } = { source: null };
+				// Only a main-session ask: a worker's evidence is not in the main agent's messages.
+				if (subject.worker === undefined && deps.screen !== undefined) {
+					try {
+						void deps
+							.screen({
+								targetId,
+								model: config.model,
+								...(subject.toolCallId !== undefined ? { toolCallId: subject.toolCallId } : {}),
+								signal: screening.signal,
+							})
+							?.then(
+								(reading) => {
+									if (!screening.signal.aborted) screened.source = reading?.source ?? null;
+								},
+								() => {
+									// A failed reading is no reading: the judge's verdict stands alone.
+								},
+							);
+					} catch {
+						// The same, for a reading that could not start.
+					}
+				}
 				let text: string;
 				try {
 					// The port may not honor the signal; the race keeps the timeout binding either way.
@@ -390,6 +430,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				} finally {
 					clearTimeout(timer);
 					subject.signal?.removeEventListener("abort", onAbort);
+					screening.abort(new Error("the safety judge has answered"));
 				}
 				const parsed = parseSafetyJudgeAnswer(text);
 				if (parsed === null) return noVerdict("unparsable", boundedLine(text, 120));
@@ -399,7 +440,19 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const after = stateNow();
 				if (parsed.verdict === "allow") {
 					after.consecutive = 0;
-					record({ ...base, ...prompted, verdict: "allow", rule: parsed.rule, latencyMs });
+					// The operator naming this action outranks what a page says: it is the one allow the judge read their words for.
+					const source = parsed.rule === OPERATOR_NAMED_RULE ? null : screened.source;
+					record({
+						...base,
+						...prompted,
+						verdict: "allow",
+						rule: parsed.rule,
+						latencyMs,
+						...(source !== null ? { screened: "parked" as const } : {}),
+					});
+					if (source !== null) {
+						return { kind: "park", cause: "screened", gateReason: screenedReason(source), build, latencyMs };
+					}
 					return { kind: "allow", rule: parsed.rule, reason: parsed.reason, build, latencyMs };
 				}
 				after.consecutive += 1;
@@ -471,6 +524,11 @@ function noVerdictReason(cause: SafetyJudgeNoVerdictCause, detail?: string): str
 						? "its answer could not be read"
 						: `its route failed${detail !== undefined ? ` (${detail})` : ""}`;
 	return `Clio's safety judge gave no verdict because ${why}, so this call needs your decision.`;
+}
+
+function screenedReason(source: string): string {
+	const named = boundedLine(redactSecretString(source), REASON_MAX_CHARS);
+	return `Clio's safety judge would allow this call, but System One reads a result from ${named} as directing an AI agent, so this call needs your decision.`;
 }
 
 /** The refused tool result the model reads for a block. */

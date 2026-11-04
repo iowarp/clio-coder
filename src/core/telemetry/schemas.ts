@@ -1534,6 +1534,7 @@ export const SafetyJudgedSchema = Type.Object(
 		model: Type.Optional(ExistingId),
 		noVerdict: Type.Optional(ExistingId),
 		operatorMessages: Type.Optional(count),
+		screened: Type.Optional(vocabulary(["parked"])),
 	},
 	closed,
 );

@@ -182,6 +182,9 @@ export function createRunner(deps: RunnerDeps): Runner {
 		const { destination } = engine;
 		// A null destination sends no byte anywhere, so nothing here needs a network to judge it.
 		if (destination !== null) {
+			if (options.avoid?.(destination) === true) {
+				return { outcome: "busy", reason: `engine '${route.name}' is on a destination this ask avoids` };
+			}
 			if (point.optional === true && deps.slotsFull?.(destination) === true) {
 				return { outcome: "busy", reason: `engine '${route.name}' has no free slot` };
 			}
@@ -474,6 +477,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 			engine: route.name,
 			kind: route.engine.kind,
 			profile: route.engine.profile,
+			probabilities: route.engine.capabilities.probabilities,
 			build: reply.build,
 			latencyMs,
 			...(reply.usage !== undefined ? { usage: reply.usage } : {}),
