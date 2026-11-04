@@ -417,7 +417,9 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				if (draft.consecutiveFailures >= 3) {
 					draft.state = "paused";
 					draft.nextDueAt = null;
-					draft.pendingReason = "three consecutive infrastructure failures";
+					// The operator reads this after the fact, so it carries the failure and not only the count (#445).
+					const last = evidence.summary.slice(0, 200);
+					draft.pendingReason = `three consecutive infrastructure failures${last ? `; last: ${last}` : ""}`;
 				} else if (draft.state === "active") {
 					const retryAfter =
 						typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs)
