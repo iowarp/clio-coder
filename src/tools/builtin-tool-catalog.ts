@@ -464,18 +464,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Consult]: {
 		objective: "Filter evidence you do not hold through the bound decision model, or ask it typed questions, as advice.",
+		// A session's usage notes read this, not promptHint, and only a registered tool has one.
+		discoveryHint:
+			"Filter with consult before opening many files or a long offload. A miss on a partly read item does not prove it irrelevant, and read.partial counts those, so read before ruling one out. When you write consult questions, state each outcome as something observable in the evidence, describe what a call does rather than severity words (a plain curl GET read as irreversible until the rung was reworded around changing remote state), include the previous reply when a short follow-up is the subject, keep quoted code out of the evidence, and ask one claim per question.",
 		uiLabel: "Consult",
 		// Each call counts against the per-turn limit, so a retry is not free.
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
-			// A filter returns at most 32 matches, but a read count for every scored item.
-			maxBytes: 32_768,
-			followUpHint: "Ask fewer questions, send less state, or filter fewer items.",
+			// At most 32 matches of a 160-byte id and about 40 bytes of fields, plus about 1.5 KB of fixed fields and reasons.
+			maxBytes: 8_192,
+			followUpHint: "Ask fewer questions, send less state, or lower the filter's limit.",
 		},
 		costLatency: "network",
-		promptHint:
-			"Filter with consult before opening many files or a long offload, and read a partly read miss before ruling it out: charsRead says how much the model saw. When you write consult questions, state each outcome as something observable in the evidence, describe what a call does rather than severity words (a plain curl GET read as irreversible until the rung was reworded around changing remote state), include the previous reply when a short follow-up is the subject, keep quoted code out of the evidence, and ask one claim per question.",
 	},
 	[ToolNames.Vision]: {
 		objective: "Ask a separately configured image model a question about a local image.",

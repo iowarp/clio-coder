@@ -9,12 +9,14 @@
  * the fake engines receive is what a real one would.
  */
 
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { ToolNames } from "../../src/core/tool-names.js";
+import { compile } from "../../src/domains/prompts/compiler.js";
+import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type {
 	DecisionEngine,
 	EngineReply,
@@ -25,6 +27,8 @@ import type {
 import { engineCapabilities, PROFILES } from "../../src/domains/system-one/profiles.js";
 import { createRunner, type DecisionFlowCheck, type RunnerRoute } from "../../src/domains/system-one/runner.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { resolveAgentTools } from "../../src/tools/agent-tools.js";
+import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { gatewayPromptHint } from "../../src/tools/builtin-tool-catalog.js";
 import type { ConsultDeps } from "../../src/tools/consult.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
@@ -56,10 +60,10 @@ interface FilterResult {
 	offered: number;
 	scored: number;
 	matchCount: number;
-	matches: Array<{ id: string; score?: number }>;
+	matches: Array<{ id: string; score?: number; charsRead: number }>;
 	unscored: number;
 	skipped: Record<string, number>;
-	charsRead: Record<string, number>;
+	read: { capChars: number; whole: number; partial: number };
 	tokens?: { input: number; output: number };
 	readout?: string;
 	model?: string;
@@ -205,16 +209,54 @@ describe("contracts/consult tool", () => {
 		match(spec.description, /`decide`/);
 		match(spec.description, /45 s at worst/);
 		ok(!spec.description.includes("few hundred milliseconds"));
-		const hint = String(spec.metadata?.promptHint);
+	});
+
+	it("attaches directly on the real session surface with its guidance, and is absent while unbound", () => {
+		const sessionPrompt = (consult?: ConsultDeps): { attached: string[]; prompt: string } => {
+			const registry = createRegistry({ safety: createWorkerSafety({ cwd: workspace }), autonomy: () => "yolo" });
+			registerAllTools(registry, { mcpCapabilities: false, ...(consult ? { consult } : {}) });
+			const attached = resolveAgentTools({ registry }).map((tool) => tool.name);
+			const specs = registry.listAll();
+			const { systemPrompt } = compile(loadFragments(), {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.default",
+				sessionInputs: {
+					provider: "local",
+					model: "stable-model",
+					contextWindow: 32_768,
+					providerSupportsTools: true,
+					toolNames: attached,
+					coordinatorCapabilities: specs.map((spec) => spec.name).sort(),
+					// As `turn-context.ts` builds them.
+					toolDiscoveryHints: specs.flatMap((spec) =>
+						spec.metadata?.discoveryHint ? [{ tool: spec.name, hint: spec.metadata.discoveryHint }] : [],
+					),
+				},
+			});
+			return { attached, prompt: systemPrompt };
+		};
+
+		const unbound = sessionPrompt();
+		ok(!unbound.attached.includes(ToolNames.Consult));
+		doesNotMatch(unbound.prompt, /`consult`|observable in the evidence/);
+
+		const withRoute = sessionPrompt({ systemOne: systemOneOver([typed()]), cwd: () => workspace });
+		deepStrictEqual(
+			withRoute.attached.filter((name) => name !== ToolNames.Consult),
+			unbound.attached,
+		);
+		ok(withRoute.attached.includes(ToolNames.Consult));
+		match(withRoute.prompt, /Direct tools:.*`consult`/);
 		for (const line of [
 			/observable in the evidence/,
 			/severity words/,
 			/previous reply/,
 			/quoted code/,
 			/one claim/,
-			/charsRead/,
+			/read\.partial/,
 		]) {
-			match(hint, line);
+			match(withRoute.prompt, line);
 		}
 	});
 
@@ -279,10 +321,13 @@ describe("contracts/consult tool", () => {
 		strictEqual(payload.offered, 5);
 		strictEqual(payload.scored, 4);
 		strictEqual(payload.matchCount, 2);
-		deepStrictEqual(payload.matches, [{ id: "one", score: 0.9 }]);
+		strictEqual(payload.matches[0]?.id, "one");
+		strictEqual(payload.matches[0]?.score, 0.9);
+		strictEqual(payload.matches.length, 1);
 		strictEqual(payload.unscored, 1);
 		deepStrictEqual(payload.skipped, { "empty or not text": 1 });
-		strictEqual(payload.charsRead.two, 6);
+		deepStrictEqual(payload.read, { capChars: 240, whole: 4, partial: 0 });
+		ok(!result.text.includes('"two"'), "a non-match's id does not cross either");
 		deepStrictEqual(payload.tokens, { input: 40, output: 2 });
 		strictEqual(payload.readout, "server");
 		strictEqual(payload.engine, "typed");
@@ -313,9 +358,8 @@ describe("contracts/consult tool", () => {
 			source: "files",
 			paths: ["src/*.ts", "**/cache.ts", ".env", "../outside/secret.txt", "src/missing.ts"],
 		});
-		deepStrictEqual(payload.matches, [{ id: "src/cache.ts", score: 0.9 }]);
-		strictEqual(payload.charsRead["src/cache.ts"], 512);
-		strictEqual(payload.charsRead["src/view.ts"], 23);
+		deepStrictEqual(payload.matches, [{ id: "src/cache.ts", score: 0.9, charsRead: 512 }]);
+		deepStrictEqual(payload.read, { capChars: 512, whole: 1, partial: 1 });
 		strictEqual(payload.offered, payload.scored + payload.unscored);
 		strictEqual(payload.scored, 2);
 		deepStrictEqual(payload.skipped, {
@@ -349,8 +393,9 @@ describe("contracts/consult tool", () => {
 			{ criterion: "reports a failure", source: "output", path, chunkLines: 16 },
 			{ sessionId: "s1" },
 		);
-		deepStrictEqual(payload.matches, [{ id: "L17-32", score: 0.9 }]);
-		deepStrictEqual(Object.keys(payload.charsRead), ["L1-16", "L17-32", "L33-40"]);
+		strictEqual(payload.matches[0]?.id, "L17-32");
+		strictEqual(payload.scored, 3);
+		deepStrictEqual(payload.read, { capChars: 512, whole: 3, partial: 0 });
 
 		for (const other of [join(workspace, "src", "x.ts"), path]) {
 			const refused = await invoke(
@@ -372,7 +417,8 @@ describe("contracts/consult tool", () => {
 		ok(!sent.includes(ToolNames.Consult));
 		ok(!sent.includes(ToolNames.Read));
 		strictEqual(payload.offered, sent.length);
-		ok(Object.values(payload.charsRead).every((chars) => chars <= 240));
+		strictEqual(payload.read.capChars, 240);
+		ok(payload.matches.every((entry) => entry.charsRead <= 240));
 	});
 
 	it("counts everything past the caps as unscored and never drops it", async () => {
@@ -382,7 +428,7 @@ describe("contracts/consult tool", () => {
 		strictEqual(capped.scored, 256);
 		strictEqual(capped.unscored, 44);
 		deepStrictEqual(capped.skipped, { "over the 256-item limit": 44 });
-		strictEqual(capped.charsRead.i0, 240);
+		deepStrictEqual(capped.read, { capChars: 240, whole: 0, partial: 256 });
 
 		const lines = Array.from({ length: 200 }, () => "z".repeat(600)).join("\n");
 		const path = writeToolOffload(lines, { sessionId: "s1" } as Parameters<typeof writeToolOffload>[1]);
@@ -393,7 +439,25 @@ describe("contracts/consult tool", () => {
 		);
 		strictEqual(total.offered, 200);
 		strictEqual(total.scored, 125);
+		strictEqual(total.read.partial, 125);
 		deepStrictEqual(total.skipped, { "over the 64000-character total": 75 });
+	});
+
+	it("fits a full page of the longest ids inside the declared result size, whatever was scored", async () => {
+		const id = (index: number): string => `${String(index).padStart(3, "0")}${"é".repeat(78)}`;
+		const items = Object.fromEntries(Array.from({ length: 256 }, (_, index) => [id(index), "the cache"]));
+		const registry = bound([typed()]);
+		const result = await invoke(
+			registry,
+			ToolNames.Consult,
+			{ filter: { criterion: "names a component", source: "items", items, limit: 32 } },
+			{ turnId: "t1" },
+		);
+		const payload = JSON.parse(result.text) as FilterResult;
+		strictEqual(payload.scored, 256);
+		strictEqual(payload.matches.length, 32);
+		const maxBytes = registry.get(ToolNames.Consult)?.metadata?.resultSizePolicy?.maxBytes ?? 0;
+		ok(Buffer.byteLength(result.text) <= maxBytes, `${Buffer.byteLength(result.text)} > ${maxBytes}`);
 	});
 
 	it("fits the smallest whole-request window, so a failover route never refuses the ask", async () => {
@@ -431,7 +495,7 @@ describe("contracts/consult tool", () => {
 			items: { one: "the cache", two: "a view" },
 		});
 		strictEqual(payload.readout, "label");
-		deepStrictEqual(payload.matches, [{ id: "one" }]);
+		deepStrictEqual(payload.matches, [{ id: "one", charsRead: 9 }]);
 		strictEqual(payload.scored, 2);
 	});
 

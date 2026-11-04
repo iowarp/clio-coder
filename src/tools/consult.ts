@@ -77,8 +77,8 @@ export const CONSULT_LIMITS = {
 	filterMatchesDefault: 16,
 	outputChunkLines: 16,
 	outputChunkLinesMax: 2000,
-	/** Code points of one item id, which comes back to the agent. */
-	filterIdChars: 160,
+	/** UTF-8 bytes of one item id, which comes back to the agent and so bounds the result. */
+	filterIdBytes: 160,
 } as const;
 
 /** A glob stops here: a pattern this wide is a mistake, and counting it further costs a walk. */
@@ -280,7 +280,9 @@ function isInside(root: string, real: string): boolean {
 	return real === root || real.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
 
-type FileRead = { readonly key: string; readonly real: string; readonly text: string } | { readonly reason: string };
+type FileRead =
+	| { readonly key: string; readonly real: string; readonly text: string; readonly whole: boolean }
+	| { readonly reason: string };
 
 /** The read tool's rules for one named file, so both forms refuse the same things in the same words. */
 async function workspaceReader(
@@ -322,7 +324,9 @@ async function workspaceReader(
 			const decoded = textHead(head, entry.size <= head.length);
 			if (decoded === null) return { reason: "binary or not UTF-8" };
 			// Redacted before the cut, so the cut cannot shorten a secret past what its pattern recognizes.
-			return { key, real, text: headOf(redactSecretsText(decoded, tally), chars) };
+			const redacted = redactSecretsText(decoded, tally);
+			const text = headOf(redacted, chars);
+			return { key, real, text, whole: entry.size <= head.length && text === redacted };
 		} catch (err) {
 			return { reason: err instanceof Error ? err.message : String(err) };
 		}
@@ -490,6 +494,8 @@ function parseFilter(raw: unknown): ParsedFilter | string {
 class FilterGathering {
 	readonly items: Record<string, string> = {};
 	readonly charsRead: Record<string, number> = {};
+	/** Items the engine saw only part of. */
+	readonly partial = new Set<string>();
 	readonly skipped: Record<string, number> = {};
 	readonly realPaths: string[] = [];
 	offered = 0;
@@ -513,7 +519,7 @@ class FilterGathering {
 	}
 
 	/** The id comes back to the agent and the text goes to the engine, so both are checked here. */
-	add(id: string, text: unknown, chars: number): boolean {
+	add(id: string, text: unknown, chars: number, whole = true): boolean {
 		if (this.full) {
 			this.skip(this.overLimit);
 			return false;
@@ -526,10 +532,12 @@ class FilterGathering {
 			this.skip("unusable id");
 			return false;
 		}
-		const shown = headOf(redactSecretsText(text, createRedactionTally()), chars);
+		const redacted = redactSecretsText(text, createRedactionTally());
+		const shown = headOf(redacted, chars);
 		this.offered += 1;
 		this.items[id] = shown;
 		this.charsRead[id] = codePoints(shown);
+		if (!whole || shown !== redacted) this.partial.add(id);
 		return true;
 	}
 }
@@ -539,7 +547,7 @@ function usableItemId(id: string): boolean {
 	return (
 		id.trim().length > 0 &&
 		id !== "__proto__" &&
-		codePoints(id) <= CONSULT_LIMITS.filterIdChars &&
+		Buffer.byteLength(id, "utf8") <= CONSULT_LIMITS.filterIdBytes &&
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
 		!/[\u0000-\u001f\u007f]/u.test(id) &&
 		redactSecretsText(id, createRedactionTally()) === id
@@ -611,7 +619,7 @@ async function gatherFiles(
 				gathering.skip(file.reason);
 				continue;
 			}
-			if (gathering.add(file.key, file.text, CONSULT_LIMITS.filterHeadChars)) {
+			if (gathering.add(file.key, file.text, CONSULT_LIMITS.filterHeadChars, file.whole)) {
 				gathering.realPaths.push(file.real);
 				spent += Buffer.byteLength(file.text, "utf8");
 			}
@@ -668,7 +676,7 @@ function publicReadout(readout: string | undefined): string | undefined {
 }
 
 const FILTER_NOTE =
-	"Advice from a decision model, not a decision. charsRead says how much of each item it saw: a miss on a partly read item does not prove the item is irrelevant.";
+	"Advice from a decision model, not a decision. Each match's charsRead and the read counts say how much it saw: a miss on a partly read item does not prove the item is irrelevant.";
 
 function requestWindow(deps: ConsultDeps): number | null {
 	try {
@@ -690,8 +698,7 @@ async function runFilter(
 	if (filter.source === "items") gatherEntries(Object.entries(filter.items), gathering);
 	if (filter.source === "capabilities") {
 		try {
-			// A coordinator session places consult behind the gateway too, and it is no answer to itself.
-			const capabilities = (deps.capabilities?.(options) ?? []).filter((entry) => entry.name !== ToolNames.Consult);
+			const capabilities = deps.capabilities?.(options) ?? [];
 			gatherEntries(
 				capabilities.map((entry) => [entry.name, `${entry.name}: ${entry.description}`] as const),
 				gathering,
@@ -769,6 +776,11 @@ async function runFilter(
 	}
 	const { matches, scored, unscored, readout } = verdict.value;
 	for (const reason of Object.values(unscored)) gathering.note(reasonKey(reason));
+	const partial = scored.filter((id) => gathering.partial.has(id)).length;
+	const capChars =
+		filter.source === "files" || filter.source === "output"
+			? CONSULT_LIMITS.filterHeadChars
+			: CONSULT_LIMITS.filterItemChars;
 	const unscoredCount = Object.values(gathering.skipped).reduce((sum, count) => sum + count, 0);
 	const output = {
 		answered: true,
@@ -776,10 +788,10 @@ async function runFilter(
 		offered: gathering.offered,
 		scored: scored.length,
 		matchCount: matches.length,
-		matches: matches.slice(0, filter.limit),
+		matches: matches.slice(0, filter.limit).map((entry) => ({ ...entry, charsRead: gathering.charsRead[entry.id] ?? 0 })),
 		unscored: unscoredCount,
 		skipped: gathering.skipped,
-		charsRead: Object.fromEntries(scored.map((id) => [id, gathering.charsRead[id] ?? 0])),
+		read: { capChars, whole: scored.length - partial, partial },
 		...(verdict.usage !== undefined ? { tokens: verdict.usage } : {}),
 		readout: publicReadout(readout),
 		model: verdict.build,
