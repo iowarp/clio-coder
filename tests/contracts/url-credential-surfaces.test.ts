@@ -172,3 +172,83 @@ test("--json tool progress holds an open URL and leaves complete args alone", ()
 	strictEqual(frame?.partialResult.content[0]?.text, "cloning https://u:");
 	strictEqual(frame?.args.url, "postgres://db:5432");
 });
+
+const updateFrame = (inner: object): unknown =>
+	projectDispatchJsonEvent({ type: "message_update", assistantMessageEvent: inner });
+const innerOf = (frames: unknown[]): Record<string, unknown>[] =>
+	frames.map((frame) => (frame as { assistantMessageEvent: Record<string, unknown> }).assistantMessageEvent);
+
+test("--json dispatch tool-call fragments reassemble with the password gone, per call", () => {
+	const scrub = createJsonCredentialScrub();
+	const toolDelta = (contentIndex: number, delta: string): unknown =>
+		updateFrame({ type: "toolcall_delta", contentIndex, delta });
+	const frames = [
+		...scrub.scrub(toolDelta(1, '{"url":"https://u:hun')),
+		...scrub.scrub(toolDelta(2, '{"url":"https://v:ZQ')),
+		...scrub.scrub(toolDelta(1, 'ter2@host/x"}')),
+		...scrub.scrub(toolDelta(2, 'XJ@host/y"}')),
+		...scrub.scrub(updateFrame({ type: "toolcall_end", contentIndex: 1, toolCall: { name: "bash" } })),
+		...scrub.scrub(updateFrame({ type: "toolcall_end", contentIndex: 2, toolCall: { name: "bash" } })),
+	];
+	const deltas = (index: number): string =>
+		innerOf(frames)
+			.filter((inner) => inner.contentIndex === index && inner.type === "toolcall_delta")
+			.map((inner) => inner.delta)
+			.join("");
+	strictEqual(deltas(1), '{"url":"https://u:[redacted]@host/x"}');
+	strictEqual(deltas(2), '{"url":"https://v:[redacted]@host/y"}');
+});
+
+test("a tool call cut off inside a URL sends none of the password", () => {
+	const scrub = createJsonCredentialScrub();
+	const frames = [
+		...scrub.scrub(updateFrame({ type: "toolcall_delta", contentIndex: 0, delta: '{"url":"https://u:hunter' })),
+		...scrub.finish(false),
+	];
+	ok(!JSON.stringify(frames).includes("hunter"), JSON.stringify(frames));
+});
+
+test("completed --json streams keep ports in tool results, user messages and finished blocks", () => {
+	const projector = createHeadlessJsonProjector();
+	const toolResult = {
+		role: "toolResult",
+		toolCallId: "t",
+		toolName: "bash",
+		content: [{ type: "text", text: "Server at http://localhost:8080" }],
+	};
+	const user = { role: "user", content: [{ type: "text", text: "connect to postgres://db.internal:5432" }] };
+	for (const type of ["message_start", "message_end"]) {
+		deepStrictEqual(projector.project({ type, message: toolResult } as never), [{ type, message: toolResult }]);
+		deepStrictEqual(projector.project({ type, message: user } as never), [{ type, message: user }]);
+	}
+	const scrub = createJsonCredentialScrub();
+	const toolCall = { type: "toolCall", id: "c", name: "bash", arguments: { url: "postgres://db:5432" } };
+	strictEqual(
+		JSON.stringify(innerOf(scrub.scrub(updateFrame({ type: "toolcall_end", contentIndex: 1, toolCall })))[0]?.toolCall),
+		JSON.stringify(toolCall),
+	);
+	const text = "see http://localhost:8080";
+	strictEqual(innerOf(scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: text })))[0]?.content, text);
+	strictEqual(
+		innerOf(scrub.scrub(updateFrame({ type: "thinking_end", contentIndex: 0, content: text })))[0]?.content,
+		text,
+	);
+	// A finished block still loses a password, and a cut-off assistant message still holds.
+	const secret = innerOf(
+		scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: "https://u:ZQXJ@h/x" })),
+	)[0];
+	strictEqual(secret?.content, "https://u:[redacted]@h/x");
+	const cut = { role: "assistant", stopReason: "aborted", content: [{ type: "toolCall", arguments: { u: "https://u:ZQXJ" } }] };
+	ok(!SECRET_LETTERS.test(JSON.stringify(scrub.scrub({ type: "message_end", message: cut }))));
+});
+
+test("a finished text block releases what waited in its filter as complete", () => {
+	const scrub = createJsonCredentialScrub();
+	const frames = [
+		...scrub.scrub(updateFrame({ type: "text_delta", contentIndex: 0, delta: "open http://localhost:8080" })),
+		...scrub.scrub(updateFrame({ type: "text_end", contentIndex: 0, content: "open http://localhost:8080" })),
+	];
+	const deltas = innerOf(frames).filter((inner) => inner.type === "text_delta");
+	strictEqual(deltas.map((inner) => inner.delta).join(""), "open http://localhost:8080");
+	strictEqual(innerOf(frames).at(-1)?.type, "text_end");
+});

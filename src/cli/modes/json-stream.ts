@@ -116,6 +116,13 @@ function mapStrings(value: unknown, map: (text: string) => string, depth = 0): u
 }
 
 const isDeltaType = (type: unknown): boolean => type === "text_delta" || type === "thinking_delta";
+const isUpdateDeltaType = (type: unknown): boolean => isDeltaType(type) || type === "toolcall_delta";
+/** The increments each finished block's end event settles. */
+const BLOCK_END_DELTA: ReadonlyMap<string, string> = new Map([
+	["text_end", "text_delta"],
+	["thinking_end", "thinking_delta"],
+	["toolcall_end", "toolcall_delta"],
+]);
 
 const heldText = (text: string): string => redactStreamingUrlCredentials(text);
 
@@ -128,15 +135,14 @@ export function createJsonCredentialScrub(): {
 	finish<T>(completed: boolean): T[];
 } {
 	const open = new Map<string, { filter: UrlCredentialStreamFilter; frame: (delta: string) => unknown }>();
-	const finish = (completed: boolean): unknown[] => {
-		const frames: unknown[] = [];
-		for (const { filter, frame } of open.values()) {
-			const rest = filter.end(completed);
-			if (rest.length > 0) frames.push(frame(rest));
-		}
-		open.clear();
-		return frames;
+	const close = (key: string, completed: boolean): unknown[] => {
+		const entry = open.get(key);
+		if (entry === undefined) return [];
+		open.delete(key);
+		const rest = entry.filter.end(completed);
+		return rest.length > 0 ? [entry.frame(rest)] : [];
 	};
+	const finish = (completed: boolean): unknown[] => [...open.keys()].flatMap((key) => close(key, completed));
 	const through = (key: string, delta: string, frame: (delta: string) => unknown): unknown[] => {
 		const entry = open.get(key) ?? { filter: new UrlCredentialStreamFilter(), frame };
 		open.set(key, { ...entry, frame });
@@ -158,19 +164,37 @@ export function createJsonCredentialScrub(): {
 		const inner = frame.assistantMessageEvent;
 		if (frame.type === "message_update" && isRecord(inner)) {
 			const { partial, ...rest } = inner;
-			const held = mapStrings(partial, (text) => redactStreamingUrlCredentials(text));
+			const { assistantMessageEvent: _inner, ...outer } = frame;
+			const heldOuter = mapStrings(outer, heldText) as object;
+			const heldPartial = partial !== undefined ? { partial: mapStrings(partial, heldText) } : {};
 			const shape = (delta: string): unknown => ({
-				...frame,
-				assistantMessageEvent: { ...rest, delta, ...(partial !== undefined ? { partial: held } : {}) },
+				...heldOuter,
+				assistantMessageEvent: { ...rest, delta, ...heldPartial },
 			});
-			if (isDeltaType(inner.type) && typeof inner.delta === "string") {
-				return through(`update:${String(inner.type)}:${String(inner.contentIndex ?? "")}`, inner.delta, shape);
+			const index = String(inner.contentIndex ?? "");
+			if (isUpdateDeltaType(inner.type) && typeof inner.delta === "string") {
+				return through(`update:${String(inner.type)}:${index}`, inner.delta, shape);
 			}
-			return [mapStrings(frame, (text) => redactStreamingUrlCredentials(text))];
+			const deltaType = BLOCK_END_DELTA.get(String(inner.type));
+			if (deltaType !== undefined) {
+				// The model finished this block, so its own text is complete and what waited for it can go.
+				const finished = mapStrings(rest, redactUrlCredentials) as object;
+				return [
+					...close(`update:${deltaType}:${index}`, true),
+					{ ...heldOuter, assistantMessageEvent: { ...finished, ...heldPartial } },
+				];
+			}
+			return [mapStrings(frame, heldText)];
 		}
 		if (isRecord(frame.message)) {
-			const completed = messageStopCompleted(frame.message.stopReason);
-			return [...finish(completed), mapStrings(frame, (text) => redactStreamingUrlCredentials(text, completed))];
+			// Only the model's message can stop short. A user or tool result message is whole, with no stop reason to read, and a
+			// message naming no role stays under the rule that fails closed.
+			const assistant = frame.message.role === "assistant" || frame.message.role === undefined;
+			const stopped = messageStopCompleted(frame.message.stopReason);
+			const whole = !assistant || (stopped && frame.type !== "message_update");
+			// A message that starts, or one that is not the model's, finds any open URL cut off whatever it says of itself.
+			const released = assistant && stopped && frame.type !== "message_start" && frame.type !== "message_update";
+			return [...finish(released), mapStrings(frame, (text) => redactStreamingUrlCredentials(text, whole))];
 		}
 		const ended = frame.type === "agent_end" ? finish(false) : [];
 		if (frame.type === "tool_execution_update") {
