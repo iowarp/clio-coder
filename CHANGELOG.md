@@ -4,48 +4,108 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+Clio Coder 0.6.8 reworks the terminal's decision surfaces, makes install and reset behavior predictable, and cuts System One down to what an agent or the safety judge asks for. Permission cards, fleet approvals, pickers, the Library, `/interop` and the expanded footer now share one row and dashboard layout that keeps its keys reachable at any width, and long sessions repaint less. Project configuration is found from any subdirectory, Clio manages what Git sees under `.clio-coder/`, and approvals survive a state reset. System One loses its fixed decision sites, cuts, ranking and dataset. It stays off until `systemOne.use` names a route, and then serves the experimental `consult` tool, a screen on web and MCP results beside the safety judge, and steering triage. Memory off now means off, restricted sessions stop reaching durable memory, and URL passwords and opaque tokens stay hidden on every output surface (#446). At `yolo`, long unattended work continues past a tool budget, a default job clock, repeated provider failures and rate limits (#445).
+
+### Upgrade notes
+
+- `clio-coder reset` with no level now exits 2 instead of deleting the state root, which holds every transcript. `reset --config` is now `reset --settings`.
+- `clio-coder uninstall` now removes the launcher and, for an installer install, the managed Node and every package version. `--keep-binary` keeps them and replaces `--remove-binary`.
+- `reset` with `--state`, `--data` or `--all`, and `uninstall`, stop with exit 1 while a session is open on this state root, including one on another host with a fresh heartbeat. `--force` does not override this. Close the session or run `clio-coder session terminate <id>`.
+- `context init --yes` and its prompt are gone, because Clio no longer edits the project's `.gitignore`. A blanket `.clio-coder/` rule already there still wins in Git and hides authored files, and `context init` names it, so remove it to share project settings.
+- A session started in a repository subdirectory now reads the repository's `.clio-coder/` settings, agents, skills, rules, hooks and MCP servers, and approvals key on the directory holding them. Outside a repository nothing changes.
+- Project approvals move to `workspace-trust/` in the config root, the migration manifest moves to `migrations.json` in the config root, and the state root's `install.json` becomes `home.json`. Each moves once on its own. `reset --state` and `uninstall --keep-config` now keep approvals, and `reset --all` and a full uninstall still clear them.
+- System One no longer reads `systemOne.sites`, `systemOne.cuts`, `systemOne.engines.*.mode`, `telemetry.research.systemOneDataset`, `fleet.speculativeDispatch` or `turnControl.orientation`. These keys are ignored, doctor names them and `doctor --fix` removes them. A home that bound a site must set `systemOne.use` to keep the `consult` tool.
+- `consult` becomes a direct tool in a main session, and a `yesNo` question must name both outcomes.
+- The loop guard no longer counts a `bash` call that ran at least 5 seconds or whose result changed as a repeat, at every autonomy level. A slow identical command no longer trips the guard, and the tool budget and cost ceiling still bound it.
+- At `yolo`, a turn that crosses the tool budget now continues with a fresh one until the cost ceiling or the loop guard stops it. `GH_TOKEN` and `GITHUB_TOKEN` now pass to job commands at `yolo`, and only there.
+- The first boot rejects stored lessons that older releases filed from a restricted session with no label. Each record stays on disk, and `clio-coder memory approve <id>` restores it.
+
+### Removed
+
+- System One's fixed decision sites: request and turn hints, card advisories, recorded tool-result, turn-end and steering readings, `/draft` judging and catalog ranking of skills, capabilities and memory. Their calibration and build-keyed cuts go with them.
+- `clio-coder systemone export` and the System One training dataset.
+- The orientation and direction turn-control workflows and the harness Scout they started. Retired `turnControl.workflows` values still load, and the main agent can dispatch Scout itself.
+- `fleet.speculativeDispatch` and its held-worker pool.
+
+### System One
+
+- `systemOne.use` is the one opt-in: `jev`, `memory`, `main`, a declared engine, a target or an ordered list of them. Unset or `off` sends nothing, and a route the operator did not name is never used. Set it with `clio-coder systemone use [--scope user|project]`, or for one run with `run --systemone <engine|off>`.
+- `/systemone` and `clio-coder systemone status` say whether System One is on and why it cannot run. `clio-coder systemone check <engine> --live` sends one content-free decision and reports the build that answered.
+- `consult` gains a filter form that scores items the agent does not hold, such as files, an offloaded result or capabilities. Only ids and scores enter the agent's context, and a file item is its path plus a digest of its leading comment, exports and imports. `consult` ships experimental and unproven: nothing yet shows that agents reach for it or that it speeds anything up, and on the query sets tried so far between a third and more than half of filter matches can be wrong, so read what a filter returns and do not treat a miss as proof.
+- With a safety judge and a route that returns real probabilities, a judge allow is parked when a recent `web_fetch`, `web_read` or MCP result reads as instructing an agent, and the card names the source. It only tightens, and it stands aside for an operator-named call. On a hosted route, that result text leaves the machine at judge time, and `systemone` help, `status`, `/systemone` and `/settings` say so.
+- A headless denial names the result that parked the call.
+- Steering triage asks a bound route two typed questions per queued entry and falls back to the side-model round. A label only marks a message and never interrupts. Triage stays off by default.
+- An ask on `anthropic-max` holds the reply to a schema. The API-key `anthropic` route binds the same schema but is untested, and a rejected schema falls back to the plain request. One-shot asks no longer write to the prompt cache, and `lemonade` turns thinking off.
+- `systemone check` reaches a subscription route. An engine that decides nothing is told apart from a dead route, and a question on a label route returns the label with no number that could pass for a probability.
+
+### Install and project
+
+- Clio writes an allow-list `.clio-coder/.gitignore` the first time it generates a file there, so authored settings, skills and rules can be committed while generated files stay out. `*.local.yaml` stays ignored and an existing copy is never replaced.
+- `clio-coder paths` also prints the installer root, the launcher and where a new project entry goes. Doctor adds config, data and cache sizes, and uninstall finds and removes an installer root the launcher left behind.
+- An empty or relative `XDG_*` variable reads as unset, as the specification requires, instead of making the root relative to the working directory.
+- `reset --state` and `uninstall --keep-config` no longer leave a home reporting migrations pending that `doctor --fix` could not clear.
+- `doctor --fix` no longer strands a home on a settings section it just emptied, and a repair that would newly fail validation writes nothing.
+
+### Library
+
+- `clio-coder library package <directory>` turns a skill directory into a package.
+- `library update --all` updates eligible copies, and `library list`, `/library` and `context(scope="library")` show when a catalog copy has an update.
+- `library validate` and `skills validate` check authoring: a missing linked file is an error, and missing companion paths, unknown skills in routing clauses and over-length bodies are warnings.
+- `library` search requires every query word across names, descriptions, hints and triggers, and says when nothing matches.
+
+### Context
+
+- `clio-coder context wiki --pages <path,path>` writes only the named plan pages and leaves the rest pending. A path the plan does not hold fails before any page dispatch.
+- The wiki planner splits detailed pages by subject, using filename families, instead of alphabetical slices.
+
 ### Terminal
 
-- A permission card leads with the tool, the action class in a risk tone and the rule that fired, shows the target unclipped in a gutter block, and lists allow, deny and stop as rows with their consequences. The rail names those keys only while their rows are off screen, the card says when a draft makes Enter inert (#186), and no key changed.
-- Fleet run approval, handoff review, `/decisions`, sign-in, context reset, the working-directory fallback and `ask_user` read the same way: facts as a table, keys as choice rows. A fleet step's write boundary never drops, at any width.
-- The expanded footer's Activity, Context and Status pages answer their question in their first rows, and Activity lists one table row per worker with at most four finished runs.
-- The Fleet Runs board is a run table that windows around the cursor and drops columns by priority, with the selected run's facts under a rule. A worker row tells `not measured` from `no calls yet`, and keeps its cost column when token coverage is unknown.
-- `/settings` rows name the layer that set each value, with an inspector saying when a change applies and where the value came from. A session-scoped model cycle set reads `session`.
-- The model, session and scope pickers, the queue, tree, fork and rewind views and key detail share one row layout that fits the dock.
-- `/context` draws its meter across the body and scrolls at narrow widths. It also shows the `Last recorded session here` line the prompt carries. `/health` is a table of journal counters, and `/usage` says nothing is recorded yet before a first prompt instead of blaming a missing read model.
-- Library rows lead with a status chip, and every pane opens with its title, chips and the keys the row accepts. `Enter` opens an installed package's members and does nothing on a component, where `Tab` is the detail key.
-- `/interop` lists proposed, detected, connected, declined and not-installed agents as separate groups. `i` clears any filter and lands on the plan's approval row, and connecting or declining acts only on a proposal row.
-- `/extensions`, `/help` and `/rewind` lead with state chips and pin their heads above scrolling facts. A dev extension is pointed at `/extensions mute`, because the `--dev` flag it named does not exist. A rewind snapshot shows `same as now`, `N files differ` or `not counted`.
-- List overlays keep every key reachable at narrow widths and neutralize package and catalog text once at one seam.
-- A worker admitted to its model reads as waiting on the model instead of starting.
-- A token landing on an empty stream queue paints at once, and only a burst's excess is paced. A reply past 20 KiB spaces its Markdown layout to at most 30 percent of the main thread, so keystrokes stay responsive.
-- Long sessions repaint less: finished calls and settled worker cards keep their rows, and fullscreen and regular frames no longer copy or scan the whole document.
-- The footer no longer folds every telemetry journal on each compose, `/skill` completion no longer digests installed plugin trees per keystroke, and the first dispatch no longer parses every retained run journal on the input thread.
+- A permission card leads with the tool, the action class in a risk tone and the rule that fired, shows the target unclipped and lists allow, deny and stop as rows with their consequences. The card says when a draft makes Enter inert (#186). No key changed.
+- Fleet run approval, handoff review, `/decisions`, sign-in, context reset, the working-directory fallback and `ask_user` read the same way, and a fleet step's write boundary never drops at any width.
+- `/settings` rows name the layer that set each value, and an inspector says when a change applies. The expanded footer's pages answer their question in their first rows.
+- The Fleet Runs board is a table that windows around the cursor and drops columns by priority. A worker row tells `not measured` from `no calls yet`, and an admitted worker reads as waiting on the model instead of starting.
+- The model, session and scope pickers, the queue, tree, fork and rewind views, Library, `/interop`, `/extensions`, `/help`, `/context`, `/health` and `/usage` lead with their answer and keep every key reachable at narrow widths. `Enter` in the Library opens an installed package's members and does nothing on a component, where `Tab` is the detail key. The rail offers `Tab` only on a row that has detail.
+- `/interop` groups proposed, detected, connected, declined and not-installed agents, and `/context` shows the `Last recorded session here` line the prompt carries.
+- A token landing on an empty stream queue paints at once and only a burst's excess is paced. A reply past 20 KiB spends at most 30 percent of the main thread on Markdown layout.
+- Long sessions repaint less, and the footer, `/skill` completion and the first dispatch no longer rescan telemetry journals, plugin trees or run journals on the input thread.
+- A `/view` row fits again after its redaction outgrows it, and redaction no longer consumes escape sequences or overflows a styled row.
 
 ### Sessions and memory
 
-- `context.memory.enabled: false` now also removes the `# Memory` section from main and worker prompts, its update reminder, any buffered lesson reminder and the task-memory block of a handoff request. `/memory` lists lessons as `off, recall only`.
-- A session records a `clio_coder_memory_off` marker before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past it, even after memory returns.
-- Every request to a memory route now passes both redactors, including observation, reflection and the live turn log. A command that needed redacting no longer grounds a lesson.
-- The `Last recorded session here` line redacts what it quotes, and a flow-restricted session appears there by id and time only.
-- `/handoff` copies the source session's flow restrictions ahead of its seed. A seed that cannot be written returns to the source session and removes the new one.
+- `context.memory.enabled: false` now also removes the `# Memory` section from main and worker prompts, its reminders and the task-memory block of a handoff request, and `memory_recall` refuses. A session records a `clio_coder_memory_off` marker, and history review, completed-task retention and observation read nothing past it, even after memory returns.
+- Every request to a memory route passes both redactors, and a command that needed redacting no longer grounds a lesson.
+- A flow-restricted session's reads no longer reach durable memory or a seeded session, and it appears in the `Last recorded session here` line by id and time only. That line also redacts what it quotes. `memory propose --from-evidence` refuses a run carrying a flow label, and a closed session's label is read from every branch.
+- `/handoff` copies the source session's flow restrictions ahead of its seed, and a seed that cannot be written returns to the source session. A restricted session refuses an operator's context-handoff request before offering to install the skill, and ACP clients see the refusal.
+- `memory promote --from-handoff` finds its source from any directory and judges it by the rules of the repository it names. A torn ledger line no longer reads as a restriction.
+- An approved lesson the task asks about is offered when the memory section lacks it.
+- A plan's closing card ends the interview in one answer. A revised card still shows after a sent-back plan, and a later `ask_user` still works after Proceed.
+- A turn that took queued input keeps its tool calls in its outcome, and a locked request no longer carries a continuation that needs a tool.
 
 ### Jobs
 
-- A main job with no `timeout_ms` gets an hour per occurrence instead of 10 minutes, and a command job's `main_turn` follow-up gets its own hour instead of the 60-second poll bound. An explicit `timeout_ms` bounds both as before (refs #445).
-- At `yolo`, a default clock that ends a main job's final occurrence or a follow-up queues one continuation per job, with a transcript notice and a `job.clock_resumed` record. An explicit timeout never resumes (refs #445).
-- A job occurrence past its clock names the bound that fired instead of reading as canceled, and journals `turn.aborted` with source `job_clock` (refs #445).
-- An aborted `bash` result names the elapsed time and the turn's stop reason, and a killed command settles when a descendant keeps its pipes open (refs #445).
-- The `yolo` prompt points long external waits at a `job` instead of a sleep or poll loop in `bash` (refs #445).
+All of this addresses #445, whose reporter's cause is unconfirmed. Windows is untested. A model that ends its own turn while waiting is not overridden.
+
+- At `yolo`, a turn continues after a tool budget crossing, a default job clock or repeated provider failures, with the stop's cause in its prompt. Only a failure stop spends the cap of 3 per operator prompt or per job. A failed turn first waits 1, 5, then 15 minutes, or the provider's `Retry-After` if longer. An explicit `timeout_ms` never resumes, and every continuation journals `turn.continued`.
+- At `yolo`, a rate limit or overload waits up to 1 hour, using `Retry-After` when the provider names one. Quota and billing errors stay terminal, and other autonomy levels keep the short retry ladder.
+- A main job with no `timeout_ms` gets an hour per occurrence instead of 10 minutes, and a command job's `main_turn` follow-up gets its own hour instead of the 60-second poll bound. An explicit `timeout_ms` bounds both as before. A job occurrence past its clock names the bound that fired, and journals `turn.aborted` with source `job_clock`.
+- At `yolo`, a poll job with a `main_turn` follow-up wakes the main turn when it runs out of starts, or once after 5 failed polls in a row, and in the second case keeps polling.
+- The footer and `/loop status` show a poll job's failure streak and last exit code at every autonomy level.
+- A job at `yolo` no longer pauses after three infrastructure failures. Below `yolo` the pause reason names the last failure, and a job turn whose retries ran out reads as failed instead of as its earlier text.
+- An aborted `bash` result names the elapsed time and the turn's stop reason, and a killed command settles when a descendant keeps its pipes open.
+- The `yolo` prompt points long external waits at a `job` and says to end the turn once the job exists.
 
 ### Tools and safety
 
-- Surfaces showing text still being written hold back a possible URL password until it resolves, so it no longer appears one character at a time. Past 2048 code units a frame gains a `[held]` marker (refs #446).
-- A stream that was aborted, errored, hit its length limit or ended with a failed run keeps the hold, on replay too, and a killed process's finished last line still shows (refs #446).
-- Journals, run feeds, settled facts, tool summaries, digests, consult files and memory promotion now write `https://u:[redacted:url-userinfo]@h` (refs #446).
-- Worker board rows and council columns, which carried the worker tail unredacted, now redact it. A live cut discards the token it lands in, and a settled cut trims up to 512 characters of it (refs #446).
-- Main assistant prose, side questions, the headless answer, `--json` frames and ACP chunks, tool content, `rawInput`, `rawOutput` and shell lines hide URL passwords too, under a rule that keeps `BASE_TOKENS=100` and `--token to pass` readable and leaves compact JSON valid (fixes #446).
-- A System One site builds its state and questions from a cleared copy, so its own bound cannot leave a partial secret.
+- URL passwords and opaque tokens are hidden on main assistant prose, side questions, `/draft` candidates, the headless answer, `--json` frames, ACP chunks, tool content, raw records, shell lines, journals, the run feed and worker board rows, as `https://u:[redacted:url-userinfo]@h` (#446).
+- Surfaces showing text still being written hold back a possible URL password until it resolves, and a stream that was aborted, errored or cut short keeps the hold on replay. Past 2048 code units a frame gains a `[held]` marker. An unfamiliar opaque name in an open frame reads as a host until its `@` arrives or the stream stops (#446).
+- The rule keeps `BASE_TOKENS=100` and `--token to pass` readable and leaves compact JSON valid (#446).
+- Not covered: secrets passed as `curl -u`, `sshpass -p` or `mysql -p` arguments. `read` and `bash` output still reach the model verbatim (#446).
+- Redaction now covers the payload of every terminal string sequence.
+- A malformed tool call's refusal, such as an edit with broken JSON, marks the fault in the received text, names it and says how to resend. The call stays refused and nothing is guessed at.
+- A direct call to a gateway-placed tool runs as its gateway call instead of failing with `Tool not found`, under the same admission, policy and audit.
+- `verify` guidance leads with running a check instead of requiring a listing first, and an undeclared id still runs nothing.
+- The loop guard's next move and no-markup rule are no longer clipped from its rejection text.
+- Qwopus no longer gets its own reasoning replayed on tool turns, which it copied into repeated calls.
 
 ## 0.6.7 - 2026-11-02
 
