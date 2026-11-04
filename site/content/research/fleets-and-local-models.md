@@ -42,7 +42,7 @@ Running four agents costs roughly four times as much, and it is not obvious what
 ::: steps
 ### Connect a local model
 
-Run `clio-coder configure` and choose **Connect by endpoint** for a local server. LM Studio commonly serves at `http://localhost:1234`, and Ollama at `http://localhost:11434`. Choose a model that supports tool calling.
+Run `clio-coder configure` and choose **Connect by endpoint** for a local server. LM Studio commonly serves at `http://localhost:1234`, and Ollama at `http://localhost:11434`. Choose a model that supports tool calling. The [local model tutorial](/tutorials/run-on-a-local-model.html) walks through it.
 
 ### Run a single worker with a record
 

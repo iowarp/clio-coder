@@ -62,6 +62,8 @@ Install clio-kit on a host where `sbatch` reaches your cluster, declare its serv
 clio-coder library install skill:slurm-jobs --project
 ```
 
+The [pre-registration tutorial](/tutorials/pre-register-a-benchmark.html) and the [Slurm tutorial](/tutorials/submit-a-slurm-job.html) walk through both.
+
 ### Keep the record
 
 Headless runs and dispatched workers are sealed, so a study can cite and share them. [Can an agent run be a scientific record?](/research/sealed-run-records.html) covers what that does and does not show.
