@@ -2,6 +2,7 @@ import { parseJsonObjectPayload, parseVerifierPayload } from "../core/json-paylo
 import { renderFactField } from "../core/telemetry/render.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
 
 function strings(value: unknown): string[] {
@@ -146,7 +147,10 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 		limitations.length > 0
 			? `\nNot verified:\n${limitations.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
 			: "";
-	return `${answer.length > 0 ? `${answer}\n` : ""}${block}${formatResultLine(receipt, limitations.length)}\n`;
+	// The one exit for a headless answer, whichever of the streamed, last or sealed text it came from (#446).
+	return redactUrlCredentials(
+		`${answer.length > 0 ? `${answer}\n` : ""}${block}${formatResultLine(receipt, limitations.length)}\n`,
+	);
 }
 
 function formatResultLine(r: RunResult, notVerified: number): string {

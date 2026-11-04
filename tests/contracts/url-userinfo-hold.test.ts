@@ -1,5 +1,6 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
@@ -202,6 +203,30 @@ test("one-shot redaction hides the whole password of every userinfo shape", () =
 		strictEqual(leaked(evidence, "").join(""), "", text);
 		strictEqual(redactSecretsText(evidence, tally), evidence);
 	}
+});
+
+test("a headless answer hides URL credentials and keeps prose the wider rule would blank", () => {
+	const unknown = { kind: "unknown", reason: "not-observed" };
+	const receipt = {
+		runId: "r",
+		agentId: "a",
+		exitCode: 0,
+		targetId: "t",
+		wireModelId: "m",
+		startedAt: "2026-01-01T00:00:00Z",
+		endedAt: "2026-01-01T00:00:01Z",
+		spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+	} as never;
+	const human = formatDispatchHumanOutput(
+		"clone https://u:ZQXJ@h/r and postgres://u:ZQXJ@h/db\nBASE_TOKENS=100, pass --token to it",
+		receipt,
+	);
+	ok(
+		human.startsWith(
+			"clone https://u:[redacted]@h/r and postgres://u:[redacted]@h/db\nBASE_TOKENS=100, pass --token to it\n",
+		),
+		human,
+	);
 });
 
 test("an ordinary name or host stays readable beside a username token", () => {
