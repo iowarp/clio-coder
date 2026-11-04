@@ -127,6 +127,9 @@ test("a bound route answers two typed picks per entry and the side model never r
 	ok(relation?.instructions.includes("stop, wrong branch"));
 	ok(relation?.instructions.includes("next slot"));
 	strictEqual(triageKindFor({ id: "q", relation: "newTask", urgency: "endOfTurn", confidence: 0.9 }), "follow-up");
+	strictEqual(triageKindFor({ id: "q", relation: "newTask", urgency: "nextSlot", confidence: 0.9 }), "follow-up");
+	strictEqual(triageKindFor({ id: "q", relation: "newTask", urgency: "now", confidence: 0.9 }), undefined);
+	strictEqual(triageKindFor({ id: "q", relation: "addition", urgency: "endOfTurn", confidence: 0.9 }), undefined);
 });
 
 test("a null verdict or a failing route falls back to the side-model round", async () => {

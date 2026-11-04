@@ -170,7 +170,7 @@ export function parseTriageAnswer(text: string, ids: ReadonlyArray<string>): Tri
 
 /** The slot a verdict moves an entry to, or undefined to leave the operator's choice alone. */
 export function triageKindFor(verdict: TriageVerdict): QueuedMessageKind | undefined {
-	if (verdict.relation === "newTask" && verdict.urgency === "endOfTurn") return "follow-up";
+	if (verdict.relation === "newTask" && verdict.urgency !== "now") return "follow-up";
 	return undefined;
 }
 
