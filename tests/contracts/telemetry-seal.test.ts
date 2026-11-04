@@ -9,6 +9,7 @@ import { storeTelemetryObject } from "../../src/domains/telemetry/objects.js";
 import { telemetryObjectsDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { seal } from "../../src/domains/telemetry/read-model.js";
 import { readTelemetryScopeFiles } from "../../src/domains/telemetry/seal.js";
+import { telemetryView } from "../../src/domains/telemetry/telemetry-live.js";
 
 async function flipByte(path: string, offset: number): Promise<Buffer> {
 	const original = await readFile(path);
@@ -67,4 +68,52 @@ test("a sealed session scope verifies from its own files and fails on one flippe
 		status: "failed",
 		mismatch: { kind: "object", name: objectName, detail: "sha256 differs from the seal" },
 	});
+});
+
+test("a run's verified seal is walked once, however many frames ask for it", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-seal-frames-"));
+	const directory = telemetrySessionDirectory(stateDir, "ses_frames");
+	const context: TelemetryContext = { sessionId: "ses_frames", agent: { role: "main", id: "ses_frames" } };
+	const journal = await openCallJournal({
+		directory,
+		context,
+		writer: { clioCoderVersion: "0.0.0-test", piVersion: "test" },
+	});
+	journal.enqueue({
+		kind: "session.opened",
+		data: {},
+		ctx: context,
+		wallMs: Date.now(),
+		mono: performance.now(),
+	} as Parameters<typeof journal.enqueue>[0]);
+	await journal.flush();
+	const unsealed = await readTelemetryScopeFiles(directory);
+	ok(await journal.seal());
+	await journal.close();
+	const sealed = await readTelemetryScopeFiles(directory);
+	const present = { present: true, records: [], modes: ["standard"], skipped: 0, damaged: 0 };
+	const source = {
+		sessionId: "ses_frames",
+		journal: present,
+		runs: new Map([
+			["sealed", present],
+			["running", present],
+		]),
+		parent: null,
+	} as never;
+	const reads = { sealed: 0, running: 0 };
+	const view = telemetryView(
+		source,
+		(runId) => {
+			reads[runId as keyof typeof reads] += 1;
+			return runId === "sealed" ? sealed : unsealed;
+		},
+		new Map(),
+	);
+	for (let frame = 0; frame < 3; frame += 1) {
+		strictEqual(view.run("sealed")?.seal?.status, "verified");
+		strictEqual(view.run("running")?.seal?.status, "unsealed");
+	}
+	deepStrictEqual(reads, { sealed: 1, running: 3 });
+	strictEqual(view.run("absent"), null);
 });

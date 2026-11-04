@@ -1,6 +1,7 @@
 import type {
 	HealthV1,
 	QuotaStateV1,
+	RunTelemetryV1,
 	SessionTelemetryV1,
 	TelemetryTopic,
 	TelemetryUpdateV1,
@@ -102,6 +103,7 @@ type LocalView = TelemetryView & { references(runId: string): boolean };
 export function telemetryView(
 	source: SessionSource,
 	scope: (runId: string) => TelemetryScopeFiles | null = () => null,
+	verifiedRuns: Map<string, RunTelemetryV1> = new Map(),
 ): LocalView {
 	let session: SessionTelemetryV1 | undefined;
 	return {
@@ -115,8 +117,15 @@ export function telemetryView(
 		timeline: (range) => timeline(source, range ?? null),
 		runs: () => runsReport(source),
 		run: (runId) => {
+			// A verified seal closes the journal, so nothing can change this DTO. Verifying rewalks the whole chain, 50 ms at
+			// 578 KB, and every frame asks per row: a finished run on screen held a core while its sibling streamed.
 			const run = source.runs.get(runId);
-			return run ? runTelemetry(runId, run, {}, scope(runId)) : null;
+			if (!run) return null;
+			const verified = verifiedRuns.get(runId);
+			if (verified !== undefined) return verified;
+			const telemetry = runTelemetry(runId, run, {}, scope(runId));
+			if (telemetry.seal?.status === "verified") verifiedRuns.set(runId, telemetry);
+			return telemetry;
 		},
 		runEnqueued: (runId) => runEnqueued(source, runId),
 		references: (runId) => source.runs.has(runId),
@@ -301,6 +310,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	const load = async () => (loaded ??= await importLoader());
 	// Scope files are read only once the cold loader is in; a run DTO before that names no seal rather than guessing.
 	const scope = (runId: string) => loaded?.loadRunScopeFiles?.(options.stateDir(), runId) ?? null;
+	const verifiedRuns = new Map<string, RunTelemetryV1>();
 	/** The session `bind` named; nothing subscribes or reads until a reader first asks (`activate`). */
 	let bound: string | null = null;
 	let current: Binding | null = null;
@@ -347,6 +357,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	const unbind = () => {
 		const binding = current;
 		current = null;
+		verifiedRuns.clear();
 		for (const off of binding?.off ?? []) off();
 		binding?.seeded.resolve();
 	};
@@ -662,13 +673,13 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const binding = current;
 		if (!binding) return null;
 		if (binding.view?.version === binding.version) return binding.view.view;
-		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding), scope);
+		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding), scope, verifiedRuns);
 		binding.view = { version: binding.version, view };
 		return view;
 	};
 	const open = async (sessionId: string): Promise<TelemetryView | null> => {
 		const source = await (await load()).loadSessionTelemetrySourceAsync(options.stateDir(), sessionId);
-		return source ? telemetryView(source, scope) : null;
+		return source ? telemetryView(source, scope, verifiedRuns) : null;
 	};
 
 	return {
