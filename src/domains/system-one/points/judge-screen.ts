@@ -89,21 +89,52 @@ function textOf(content: unknown): string {
 		.join("\n");
 }
 
+/** What one tool call read: the tool that ran, and the target its arguments name. */
+interface ReadCall {
+	readonly tool: string;
+	readonly target?: string;
+}
+
+function readOf(tool: string, args: unknown): ReadCall {
+	const record = args as Record<string, unknown> | null | undefined;
+	const target = TARGET_ARGS.map((key) => record?.[key]).find((value) => typeof value === "string");
+	return { tool, ...(typeof target === "string" ? { target } : {}) };
+}
+
+/**
+ * Web and MCP tools are gateway capabilities, so their results read `gateway` and only the
+ * call's arguments say what ran. A chain's result holds every step's text, so it counts as
+ * a read of its first screened step.
+ */
+function gatewayRead(args: Record<string, unknown> | null | undefined): ReadCall | undefined {
+	if (args?.op === "chain" && Array.isArray(args.steps)) {
+		for (const raw of args.steps) {
+			const step = raw as { capability?: unknown; args?: unknown } | null;
+			if (typeof step?.capability === "string" && screensToolResult(step.capability.trim())) {
+				return readOf(step.capability.trim(), step.args);
+			}
+		}
+		return undefined;
+	}
+	const capability = args?.capability ?? args?.name;
+	return args?.op === "call" && typeof capability === "string" ? readOf(capability.trim(), args.args) : undefined;
+}
+
 /** The call behind each result, which is the only place its target is written down. */
-function targetsByCall(messages: ReadonlyArray<unknown>): Map<string, string> {
-	const targets = new Map<string, string>();
+function readsByCall(messages: ReadonlyArray<unknown>): Map<string, ReadCall> {
+	const reads = new Map<string, ReadCall>();
 	for (const raw of messages) {
 		const message = raw as { role?: unknown; content?: unknown } | null;
 		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
 		for (const block of message.content) {
-			const call = block as { type?: unknown; id?: unknown; arguments?: unknown } | null;
-			if (call?.type !== "toolCall" || typeof call.id !== "string") continue;
+			const call = block as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown } | null;
+			if (call?.type !== "toolCall" || typeof call.id !== "string" || typeof call.name !== "string") continue;
 			const args = call.arguments as Record<string, unknown> | null | undefined;
-			const target = TARGET_ARGS.map((key) => args?.[key]).find((value) => typeof value === "string");
-			if (typeof target === "string") targets.set(call.id, target);
+			const read = call.name === ToolNames.Gateway ? gatewayRead(args) : readOf(call.name, args);
+			if (read !== undefined) reads.set(call.id, read);
 		}
 	}
-	return targets;
+	return reads;
 }
 
 /**
@@ -114,7 +145,7 @@ function targetsByCall(messages: ReadonlyArray<unknown>): Map<string, string> {
  * leave a partial secret no pattern recognizes.
  */
 export function judgeScreenResults(messages: ReadonlyArray<unknown>, since: number): JudgeScreenResult[] {
-	const targets = targetsByCall(messages);
+	const reads = readsByCall(messages);
 	const results: JudgeScreenResult[] = [];
 	for (let index = messages.length - 1; index >= 0 && results.length < JUDGE_SCREEN_MAX_RESULTS; index -= 1) {
 		const message = messages[index] as {
@@ -125,15 +156,16 @@ export function judgeScreenResults(messages: ReadonlyArray<unknown>, since: numb
 			timestamp?: unknown;
 		} | null;
 		if (message?.role !== "toolResult" || typeof message.toolName !== "string") continue;
-		if (!screensToolResult(message.toolName)) continue;
+		const callId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
+		const read = callId === undefined ? undefined : reads.get(callId);
+		const tool = message.toolName === ToolNames.Gateway ? read?.tool : message.toolName;
+		if (tool === undefined || !screensToolResult(tool)) continue;
 		// A result with no clock is kept: reading one too many can only tighten.
 		if (typeof message.timestamp === "number" && message.timestamp < since) continue;
 		const content = textOf(message.content);
 		if (content.trim().length === 0) continue;
-		const callId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
-		const target = callId === undefined ? undefined : targets.get(callId);
 		results.push({
-			source: target === undefined ? message.toolName : `${message.toolName} ${target}`,
+			source: read?.target === undefined ? tool : `${tool} ${read.target}`,
 			content,
 			...(callId !== undefined ? { callId } : {}),
 		});

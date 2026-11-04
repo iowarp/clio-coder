@@ -342,6 +342,38 @@ test("evidence is the newest four third-party results since the operator spoke, 
 	strictEqual(JUDGE_SCREEN_POINT.state({ source: "s", content: quoted })?.content, quoted);
 });
 
+test("a screened tool reached through the gateway is read under its capability, and a local one is not", () => {
+	const assistant = (id: string, args: Record<string, unknown>) => ({
+		role: "assistant",
+		content: [{ type: "toolCall", id, name: "gateway", arguments: args }],
+	});
+	const results = judgeScreenResults(
+		[
+			assistant("web", { op: "call", capability: "web_fetch", args: { url: "https://x.test/a" } }),
+			result("gateway", "web", "a page"),
+			assistant("mcp", { op: "call", capability: "mcp_srv__get", args: {} }),
+			result("gateway", "mcp", "a reply"),
+			assistant("chain", {
+				op: "chain",
+				steps: [
+					{ id: "a", capability: "context", args: {} },
+					{ id: "b", capability: "web_read", args: { url: "https://x.test/b" } },
+				],
+			}),
+			result("gateway", "chain", "steps"),
+			assistant("local", { op: "call", capability: "context", args: { scope: "skills" } }),
+			result("gateway", "local", "skills"),
+			assistant("find", { op: "find", query: "web" }),
+			result("gateway", "find", "capabilities"),
+		],
+		NOW,
+	);
+	deepStrictEqual(
+		results.map((entry) => entry.source),
+		["web_read https://x.test/b", "mcp_srv__get", "web_fetch https://x.test/a"],
+	);
+});
+
 test("a finished reading is remembered by call id until the operator speaks, and an unfinished one is not", async () => {
 	const directing = engine("typed", AWAY, 0.9);
 	let since = NOW;
