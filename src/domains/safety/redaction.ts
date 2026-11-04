@@ -261,7 +261,7 @@ function redactPlainSecretString(value: string): string {
 	);
 }
 
-const SCHEME_CHAR_RE = /[a-z0-9+.-]/iu;
+export const SCHEME_CHAR_RE = /[a-z0-9+.-]/iu;
 const USERINFO_HOLD_LIMIT = 2048;
 const USERINFO_HOLD_MARKER = "[held]";
 

@@ -46,6 +46,7 @@ import {
 	messageStopCompleted,
 	namesSecret,
 	openNameStart,
+	SCHEME_CHAR_RE,
 } from "../safety/redaction.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 
@@ -254,7 +255,8 @@ function carryBoundCut(carry: string): number {
 		// A URL with a password on the way is the discard below's to settle, as any tail of its authority could be password.
 		return holdUnresolvedUserinfo(carry) === carry ? url - 1 : carry.length;
 	}
-	return openNameStart(carry) ?? carry.length;
+	// One character is all the pattern reads ahead of a `://`, and any word can turn out to be a scheme.
+	return openNameStart(carry) ?? (SCHEME_CHAR_RE.test(carry.charAt(carry.length - 1)) ? carry.length - 1 : carry.length);
 }
 
 /**

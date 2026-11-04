@@ -974,6 +974,21 @@ test("a reply cut off inside an opaque token shows none of it at any headless or
 	}
 });
 
+test("a feed bound keeps a scheme's last character with the :// that follows it", async () => {
+	const env = await isolateClioEnv("url-surfaces-bound-");
+	try {
+		const stop: RunEventJournalBody = { kind: "event", type: "message_end", stopReason: "stop" };
+		for (const scheme of ["https", "postgres"]) {
+			const head = `${"x".repeat(4100)}${scheme}`;
+			const rows = feedText(`bound-scheme-${scheme}`, head, "://alice:hunter2XY@h/ next words", stop);
+			ok(!rows.join("\n").includes("hunter2"), rows.join("\n").slice(-80));
+			strictEqual(rows.join(""), `${head}://alice:[redacted:url-userinfo]@h/ next words`);
+		}
+	} finally {
+		env.restore();
+	}
+});
+
 const PARAM_SECRET = "hunter2XY";
 
 test("the URL rule hides a value by what its whole parameter name means", () => {
