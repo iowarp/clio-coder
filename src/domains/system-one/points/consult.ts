@@ -53,6 +53,8 @@ export type ConsultReading =
 			readonly distribution: Readonly<Record<string, number>>;
 			readonly certainty: number;
 	  }
+	/** What a label route said. It has no scale, so it carries no number to mistake for a probability. */
+	| { readonly kind: "yesNo" | "pick" | "rate"; readonly label: string }
 	| { readonly kind: "yesNo" | "pick" | "rate"; readonly abstained: true; readonly reason?: string };
 
 export interface ConsultValue {
@@ -78,12 +80,23 @@ function kindOf(question: Question): "yesNo" | "pick" | "rate" {
 	return question.type === "noul" ? "yesNo" : question.type === "choice" ? "pick" : "rate";
 }
 
-/** The distribution only. A pick's winning key is left out on purpose: the agent picks. */
+/** The one label a label route answered with, as the question names it: yes or no, an option, or a rung. */
+function labelOf(question: Question, answer: Answer): string | undefined {
+	if (question.type === "noul") return answer.noul === undefined ? undefined : isTrue(answer) === true ? "yes" : "no";
+	if (question.type === "choice") return answer.choice;
+	return answer.score === undefined ? undefined : question.criteria[answer.score];
+}
+
+/** The distribution only. A pick's winning key is left out on purpose: the agent picks. A label route has no distribution to give. */
 function reading(question: Question, given: Answer | Abstention | undefined): ConsultReading {
 	const kind = kindOf(question);
 	if (given !== undefined && "abstained" in given) return { kind, abstained: true, reason: given.abstained };
 	const answer = isAnswered(given) ? given : undefined;
 	if (answer === undefined || answer.type !== question.type) return { kind, abstained: true };
+	if (answer.readout === "categorical") {
+		const label = labelOf(question, answer);
+		return label === undefined ? { kind, abstained: true } : { kind, label };
+	}
 	const certainty = rounded(answer.certainty);
 	if (question.type === "noul") {
 		return answer.noul === undefined

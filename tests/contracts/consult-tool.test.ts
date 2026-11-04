@@ -563,6 +563,53 @@ describe("contracts/consult tool", () => {
 		strictEqual(payload.scored, 2);
 	});
 
+	it("answers a question on an LLM route with its label and no number to read as a probability", async () => {
+		const reply = async (): Promise<EngineReply> => ({
+			build: "chat-1",
+			answers: {
+				risky: { type: "noul", noul: 1 },
+				which: { type: "choice", choice: "b", probabilities: { a: 0, b: 1 } },
+				size: { type: "score", score: 2, probabilities: { 0: 0, 1: 0, 2: 1 } },
+			},
+		});
+		const result = await invoke(
+			bound([fakeEngine("chat", "llm-structured", undefined, reply)]),
+			ToolNames.Consult,
+			{
+				questions: [
+					...QUESTIONS,
+					{ id: "size", kind: "rate", question: "How large?", ladder: ["small", "medium", "huge"] },
+				],
+				state: { diff: "adds a column" },
+			},
+			{ turnId: "t1" },
+		);
+		strictEqual(result.kind, "ok", result.text);
+		const payload = JSON.parse(result.text) as { answers: Record<string, unknown>; readout: string };
+		strictEqual(payload.readout, "label");
+		deepStrictEqual(payload.answers, {
+			risky: { kind: "yesNo", label: "yes" },
+			which: { kind: "pick", label: "b" },
+			size: { kind: "rate", label: "huge" },
+		});
+	});
+
+	it("marks a label route's unusable answer as abstained, not as a label", async () => {
+		const reply = async (): Promise<EngineReply> => ({
+			build: "chat-1",
+			answers: { risky: { type: "noul", noul: 0 } },
+		});
+		const result = await invoke(
+			bound([fakeEngine("chat", "llm-structured", undefined, reply)]),
+			ToolNames.Consult,
+			{ questions: QUESTIONS, state: { diff: "adds a column" } },
+			{ turnId: "t1" },
+		);
+		const payload = JSON.parse(result.text) as { answers: Record<string, { label?: string; abstained?: boolean }> };
+		deepStrictEqual(payload.answers.risky, { kind: "yesNo", label: "no" });
+		strictEqual(payload.answers.which?.abstained, true);
+	});
+
 	it("drops questions' files to fit the smallest window, and reports each", async () => {
 		writeFileSync(join(workspace, "a.ts"), "a".repeat(900));
 		writeFileSync(join(workspace, "b.ts"), "b".repeat(5000));

@@ -63,7 +63,7 @@ const GATE_REASON_MAX_CHARS = 200;
  * The reason came from an engine build, so it takes the sanitizer a call target
  * takes, is quoted as data and is cut on a code point boundary.
  */
-function gateReasonText(reason: string | undefined): string {
+export function gateReasonText(reason: string | undefined): string {
 	if (reason === undefined) return "";
 	const line = sanitizeCallTargetText(reason).replaceAll('"', "'");
 	const points = Array.from(line);
