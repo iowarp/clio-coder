@@ -113,6 +113,19 @@ describe("/draft overlay", () => {
 		ok(!text.includes("judge"), "/draft reads unjudged");
 	});
 
+	it("holds an open URL while a draft forms and hides a complete password once it settles (#446)", () => {
+		const body = (phase: DraftOverlayState["candidates"][number]): string => {
+			const state = base();
+			state.candidates[0] = phase;
+			return plain(formatDraftOverlayBody(state, 90, 10).join("\n"));
+		};
+		ok(!body({ kind: "streaming", text: "clone https://user:hunter2" }).includes("hunter2"));
+		ok(!body({ kind: "streaming", text: "clone https://user:hunter2@host/x now" }).includes("hunter2"));
+		ok(!body({ kind: "drafted", text: "clone https://user:hunter2@host/x now" }).includes("hunter2"));
+		ok(body({ kind: "streaming", text: "see http://h:8080/health soon" }).includes("http://h:8080/health"));
+		ok(body({ kind: "drafted", text: "see http://h:8080 soon" }).includes("http://h:8080"));
+	});
+
 	it("windows a long draft and counts what is below", () => {
 		const state = base();
 		state.candidates[0] = { kind: "drafted", text: Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n") };

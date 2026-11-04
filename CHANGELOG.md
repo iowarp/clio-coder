@@ -44,6 +44,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 - A stream that was aborted, errored, hit its length limit or ended with a failed run keeps the hold, on replay too, and a killed process's finished last line still shows (refs #446).
 - Journals, run feeds, settled facts, tool summaries, digests, consult files and memory promotion now write `https://u:[redacted:url-userinfo]@h` (refs #446).
 - Worker board rows and council columns, which carried the worker tail unredacted, now redact it. A live cut discards the token it lands in, and a settled cut trims up to 512 characters of it (refs #446).
+- Main assistant prose, side questions, the headless answer, `--json` frames and ACP chunks, tool content, `rawInput`, `rawOutput` and shell lines hide URL passwords too, under a rule that keeps `BASE_TOKENS=100` and `--token to pass` readable and leaves compact JSON valid (fixes #446).
 - A System One site builds its state and questions from a cleared copy, so its own bound cannot leave a partial secret.
 
 ## 0.6.7 - 2026-11-02

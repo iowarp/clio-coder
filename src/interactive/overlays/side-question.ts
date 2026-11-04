@@ -7,6 +7,7 @@
  */
 
 import { AssistantProseProjection } from "../../core/assistant-prose.js";
+import { redactStreamingUrlCredentials } from "../../domains/safety/redaction.js";
 import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { animationStep, clioTheme, GLYPH, rule, spinnerFrame } from "../theme/index.js";
@@ -98,8 +99,13 @@ export class SideQuestionOverlayBody implements Component {
 	) {}
 
 	set(phase: SideQuestionOverlayPhase): void {
-		this.phase =
-			phase.kind === "error" ? phase : { ...phase, text: this.prose.project(phase.text, phase.kind !== "streaming") };
+		if (phase.kind === "error") {
+			this.phase = phase;
+			return;
+		}
+		// Only an answered round releases a hold. After an abort no later text can resolve it (#446).
+		const prose = this.prose.project(phase.text, phase.kind !== "streaming");
+		this.phase = { ...phase, text: redactStreamingUrlCredentials(prose, phase.kind === "answered") };
 	}
 
 	render(width: number): string[] {

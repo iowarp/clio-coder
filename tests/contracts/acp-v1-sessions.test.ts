@@ -374,6 +374,65 @@ test("ACP load streams the complete active history beyond the former 64 turn lim
 	}
 });
 
+test("ACP replay keeps URL credentials out of terminal tool and shell content (#446)", async () => {
+	const secret = "cloned https://user:hunter2@host/x; BASE_TOKENS=100";
+	const redacted = "cloned https://user:[redacted]@host/x; BASE_TOKENS=100";
+	const peer = fixture([
+		{
+			kind: "message",
+			role: "user",
+			turnId: "user",
+			parentTurnId: null,
+			timestamp: "2026-09-25T12:00:00.000Z",
+			payload: { text: "clone it" },
+		},
+		{
+			kind: "message",
+			role: "tool_call",
+			turnId: "call",
+			parentTurnId: "user",
+			timestamp: "2026-09-25T12:00:01.000Z",
+			payload: { name: "bash", toolCallId: "bash-1", args: { command: `git clone ${secret}` } },
+		},
+		{
+			kind: "message",
+			role: "tool_result",
+			turnId: "result",
+			parentTurnId: "call",
+			timestamp: "2026-09-25T12:00:02.000Z",
+			payload: { toolCallId: "bash-1", toolName: "bash", result: secret, isError: false },
+		},
+		{
+			kind: "bashExecution",
+			turnId: "shell",
+			parentTurnId: "result",
+			timestamp: "2026-09-25T12:00:03.000Z",
+			command: `git remote add origin ${secret}`,
+			output: secret,
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const terminal = peer.updates
+			.map(
+				(entry) => entry.update as { sessionUpdate?: string; status?: string; content?: { content: { text: string } }[] },
+			)
+			.filter((update) => update.sessionUpdate === "tool_call_update" && update.status === "completed");
+		deepStrictEqual(
+			terminal.map((update) => update.content?.[0]?.content.text),
+			[redacted, redacted],
+		);
+		// Raw records and the shell line's echo carry what the content field hides (#446).
+		ok(!JSON.stringify(peer.updates).includes("hunter2"), JSON.stringify(peer.updates));
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP replay marks a persisted request without a terminal outcome as an error", async () => {
 	const peer = fixture([
 		{

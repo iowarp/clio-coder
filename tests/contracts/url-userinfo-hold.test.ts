@@ -1,6 +1,13 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { createJsonCredentialScrub } from "../../src/cli/modes/json-stream.js";
+import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
+import { combineLiveBashOutput } from "../../src/core/bash-exec.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
+import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	cutHeadGuard,
@@ -9,6 +16,8 @@ import {
 	RedactedStringProjection,
 	redactSecretString,
 	redactStreamingSecretString,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
 import {
 	createWorkerProgressFold,
@@ -19,6 +28,10 @@ import {
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import {
+	SideQuestionOverlayBody,
+	type SideQuestionOverlayPhase,
+} from "../../src/interactive/overlays/side-question.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
 import { renderBashTranscriptExecution } from "../../src/interactive/renderers/tool-execution.js";
 import {
@@ -37,6 +50,7 @@ import {
 } from "../../src/tools/bash.js";
 import { deterministicDiagnosticSummary } from "../../src/tools/result-disposition.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const SEED = 0x5eed;
 const DOCUMENTS = 60;
@@ -69,8 +83,16 @@ const CORPUS = [
 	"https://u:$TOKEN@h",
 	"https://ghp_x@github.com/r",
 	"https://ghp_x:ZQXJ@github.com/r",
+	"https://ghp_ZQXJZQXJZQXJZQXJZQXJZQXJ@github.com/r",
+	"https://glpat-ZQXJZQXJZQXJ:x-oauth@gitlab.com/r",
 	"https://:ZQXJ@h",
 	"https://u:ZQ/XJ@h",
+	"ssh://u:ZQ/XJ@h/p",
+	"postgres://u:ZQXJ@h/db",
+	"redis://:ZQXJ@h:6379",
+	"mongodb+srv://u:ZQXJ@c.example.net/db",
+	"http://$HOST:$PORT/api tail",
+	"redis://localhost:6379/0",
 	"--token ZQXJ next",
 	"--token=ZQXJ",
 	"API_KEY=ZQXJ;x",
@@ -96,6 +118,14 @@ const CORPUS = [
 	"日本語 https://例え.jp:8080/パス 次",
 	"https://例え.jp:8080。次の文",
 	"# heading\n\n- **bold** text ok\n",
+	'{"url":"https://example.com","email":"a@b.com"}',
+	'{"a":"http://h:8080","b":"me@corp.com"}',
+	'{"a":"https://u:ZQXJ@h/x","b":"me@corp.com"}',
+	'{"a":"https://h/?token=ZQXJ","b":"me@corp.com"}',
+	'{\\"a\\":\\"http://h:8080\\",\\"b\\":\\"me@corp.com\\"}',
+	"https://me@corp.com:ZQXJ@host/",
+	"https://me@corp.com:ZQ:XJ@host",
+	"ssh://git@host:2222/path@tag",
 	...BOUNDARIES.map((boundary) => `http://h:8080${boundary}tail`),
 ];
 
@@ -110,13 +140,26 @@ function random(seed: number): () => number {
 	};
 }
 
-/** The stated contract, written apart from the code: the last run after a scheme shows through its first colon. */
+/**
+ * The stated contract, written apart from the code. In the last token, the first URL that can still hold a password shows
+ * through its first colon, or its last `@`. A numeric port ahead of `/`, an `@` that closed an authority, or a `"` closing a
+ * string settles a URL.
+ */
 function expectedFrame(prefix: string): string {
-	const open = /https?:\/\/([^\s/@]*)$/iu.exec(prefix);
-	if (open === null) return redactSecretString(prefix);
-	const runStart = open.index + open[0].length - (open[1]?.length ?? 0);
-	const colon = prefix.indexOf(":", runStart);
-	return redactSecretString(colon < 0 ? prefix : prefix.slice(0, colon + 1));
+	const token = /\S*$/u.exec(prefix)?.[0] ?? "";
+	const base = prefix.length - token.length;
+	for (const match of token.matchAll(/(?<=[a-z0-9+.-]):\/\//giu)) {
+		const start = match.index + 3;
+		const rest = token.slice(start);
+		const cut = (end: number) => redactSecretString(prefix.slice(0, base + start + end));
+		const lastAt = rest.lastIndexOf("@");
+		if (/"[,:;}\])>\\]/u.test(rest)) continue;
+		if (/^(?:gh[pousr]_|github_pat_|glpat-)[^/]*$/iu.test(rest)) return cut(lastAt + 1);
+		if (/^[^/:[]*:[^/]*@[^/]*$/u.test(rest)) return cut(lastAt + 1);
+		if (/^[^/:[]*:[^/@]*$/u.test(rest)) return cut(rest.indexOf(":") + 1);
+		if (/^[^/@:[]*:(?!\d*\/)[^/@]*\//u.test(rest)) return cut(lastAt >= 0 ? lastAt + 1 : rest.indexOf(":") + 1);
+	}
+	return redactSecretString(prefix);
 }
 
 function leaked(frame: string, oneShot: string): string[] {
@@ -171,10 +214,196 @@ test("every chunking of the corpus streams to the one-shot output without showin
 	}
 });
 
+test("one-shot redaction hides the whole password of every userinfo shape", () => {
+	for (const [text, redacted] of [
+		["https://:ZQXJ@h", "https://:[redacted]@h"],
+		["https://u:ZQ:XJ@h", "https://u:[redacted]@h"],
+		["https://u:ZQ@XJ@h", "https://u:[redacted]@h"],
+		["https://u:ZQ@XJ@h:8443/p", "https://u:[redacted]@h:8443/p"],
+		["https://u:ZQ@h/a@b", "https://u:[redacted]@h/a@b"],
+		["https://a:ZQ@h,https://b:XJ@h", "https://a:[redacted]@h,https://b:[redacted]@h"],
+		["https://u:ZQ/XJ@h", "https://u:[redacted]@h"],
+		["postgres://u:ZQ@h/db", "postgres://u:[redacted]@h/db"],
+		["redis://:ZQ@h:6379", "redis://:[redacted]@h:6379"],
+		["mongodb+srv://u:ZQ@c.example.net", "mongodb+srv://u:[redacted]@c.example.net"],
+		["ssh://u:ZQ@h", "ssh://u:[redacted]@h"],
+		["jdbc:mysql://u:ZQ@h:3306/db", "jdbc:mysql://u:[redacted]@h:3306/db"],
+		["https://ZQXJ0ZQXJZQXJZQXJZQXJZ@github.com/r", "https://[redacted]@github.com/r"],
+		["https://glpat-ZQXJZQXJZQXJ:ZQ@gitlab.com/r", "https://[redacted]:[redacted]@gitlab.com/r"],
+		["https://me@corp.com:ZQXJ@host/", "https://me@corp.com:[redacted]@host/"],
+		['https://u:Z)Q,X"J@h', "https://u:[redacted]@h"],
+		['https://u:ZQ"@h', "https://u:[redacted]@h"],
+	] as const) {
+		strictEqual(redactSecretString(text), redacted);
+		strictEqual(redactSecretString(redacted), redacted);
+		const tally = createRedactionTally();
+		const evidence = redactSecretsText(text, tally);
+		strictEqual(leaked(evidence, "").join(""), "", text);
+		strictEqual(redactSecretsText(evidence, tally), evidence);
+	}
+});
+
+test("a headless answer hides URL credentials and keeps prose the wider rule would blank", () => {
+	const unknown = { kind: "unknown", reason: "not-observed" };
+	const receipt = {
+		runId: "r",
+		agentId: "a",
+		exitCode: 0,
+		targetId: "t",
+		wireModelId: "m",
+		startedAt: "2026-01-01T00:00:00Z",
+		endedAt: "2026-01-01T00:00:01Z",
+		spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+	} as never;
+	const human = formatDispatchHumanOutput(
+		"clone https://u:ZQXJ@h/r and postgres://u:ZQXJ@h/db\nBASE_TOKENS=100, pass --token to it",
+		receipt,
+	);
+	ok(
+		human.startsWith(
+			"clone https://u:[redacted]@h/r and postgres://u:[redacted]@h/db\nBASE_TOKENS=100, pass --token to it\n",
+		),
+		human,
+	);
+});
+
+test("a side question hides URL credentials while it streams and when it ends", () => {
+	const shown = (phase: SideQuestionOverlayPhase): string => {
+		const body = new SideQuestionOverlayBody("q", () => 0);
+		body.set(phase);
+		return stripTerminalSequences(body.render(120).join("\n"));
+	};
+	strictEqual(leaked(shown({ kind: "streaming", text: "clone https://u:ZQXJ" }), "").join(""), "");
+	strictEqual(leaked(shown({ kind: "aborted", text: "clone https://u:ZQXJ" }), "").join(""), "");
+	const answered = shown({ kind: "answered", text: "clone postgres://u:ZQXJ@h/db and BASE_TOKENS=100" });
+	strictEqual(leaked(answered, "").join(""), "");
+	ok(answered.includes("postgres://u:[redacted]@h/db") && answered.includes("BASE_TOKENS=100"), answered);
+	ok(shown({ kind: "answered", text: "open http://h:8080" }).includes("http://h:8080"));
+});
+
+test("what an append-only stream sends joins to the one-shot output and never shows a secret early", () => {
+	const next = random(SEED);
+	const inputs = [
+		...CORPUS,
+		"日本語の文章は空白がないまま続く",
+		...Array.from({ length: DOCUMENTS }, () => document(next)),
+	];
+	for (const text of inputs) {
+		const oneShot = redactUrlCredentials(text);
+		for (let chunking = 0; chunking <= CHUNKINGS; chunking += 1) {
+			const points =
+				chunking === 0 ? Array.from({ length: text.length }, (_, index) => index + 1) : cuts(next, text.length);
+			const filter = new UrlCredentialStreamFilter();
+			const cutOff = new UrlCredentialStreamFilter();
+			let sent = "";
+			let at = 0;
+			for (const point of points) {
+				const piece = filter.push(text.slice(at, point));
+				cutOff.push(text.slice(at, point));
+				sent += piece;
+				at = point;
+				strictEqual(leaked(sent, oneShot).join(""), "", `at ${point} of ${JSON.stringify(text)}`);
+			}
+			strictEqual(sent + filter.end(true), oneShot, JSON.stringify(text));
+			strictEqual(leaked(sent + cutOff.end(false), oneShot).join(""), "", JSON.stringify(text));
+		}
+	}
+	const prose = new UrlCredentialStreamFilter();
+	strictEqual(prose.push("日本語の文章"), "日本語の文章");
+	strictEqual(prose.push("https"), "https");
+	strictEqual(prose.push("://u:ZQ"), "");
+	strictEqual(prose.push("XJ@h "), "://u:[redacted]@h ");
+});
+
+test("a JSON stream sends no URL credential in a delta, a message or a result", () => {
+	const scrub = createJsonCredentialScrub();
+	const frames = [
+		{ type: "text_delta", contentIndex: 0, delta: "clone https://u:ZQ" },
+		{ type: "text_delta", contentIndex: 0, delta: "XJ@h/r and http://h" },
+		{
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "ok ", partial: { text: "https://u:ZQ" } },
+		},
+		{ type: "message_end", message: { stopReason: "stop", content: [{ type: "text", text: "https://u:ZQXJ@h" }] } },
+		{ type: "text_delta", contentIndex: 0, delta: "cut https://u:ZQ" },
+		{ type: "message_end", message: { stopReason: "aborted", content: [{ type: "text", text: "cut https://u:ZQ" }] } },
+		{ type: "result", result: { output: { text: "postgres://u:ZQXJ@h/db" } } },
+	].flatMap((frame) => scrub.scrub<unknown>(frame));
+	const wire = JSON.stringify(frames);
+	strictEqual(leaked(wire, "").join(""), "", wire);
+	const deltas = frames.flatMap((frame) => {
+		const row = frame as { type?: string; delta?: string };
+		return row.type === "text_delta" ? [row.delta ?? ""] : [];
+	});
+	strictEqual(deltas.join(""), "clone https://u:[redacted]@h/r and http://hcut https://u:");
+	ok(wire.includes("postgres://u:[redacted]@h/db"), wire);
+});
+
+function proseFrame(panel: ChatPanel): string {
+	return JSON.stringify(panel.renderRegions(200)).replace(/\\u001b\[[0-9;:]*m/gu, "");
+}
+
+test("main prose hides URL credentials while it streams and keeps other text whole", () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	const text = "clone https://u:ZQXJ@h/r and postgres://u:ZQ/XJ@h/db\nBASE_TOKENS=100 and --token to pass it";
+	for (let at = 0; at < text.length; at += 3) {
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: text.slice(at, at + 3), partialText: "" });
+		strictEqual(leaked(proseFrame(panel), "").join(""), "", `after ${at}`);
+	}
+	const message = { role: "assistant", stopReason: "stop", content: [{ type: "text", text }] };
+	panel.applyEvent({ type: "message_end", message } as never);
+	const done = proseFrame(panel);
+	strictEqual(leaked(done, "").join(""), "");
+	ok(
+		done.includes("https://u:[redacted]@h/r") && done.includes("BASE_TOKENS=100") && done.includes("--token to pass"),
+		done,
+	);
+});
+
+test("main prose cut off inside a URL keeps what it held", () => {
+	for (const stopReason of ["length", "error", "aborted"]) {
+		const panel = createChatPanel({ now: () => 1_000 });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "clone https://u:ZQXJ", partialText: "" });
+		const message = { role: "assistant", stopReason, content: [{ type: "text", text: "clone https://u:ZQXJ" }] };
+		panel.applyEvent({ type: "message_end", message } as never);
+		strictEqual(leaked(proseFrame(panel), "").join(""), "", stopReason);
+	}
+});
+
+test("an ordinary name or host stays readable beside a username token", () => {
+	for (const text of [
+		"https://alice@github.com/r",
+		"https://first.last@corp.example.com/r",
+		"ssh://git@github.com/o/r.git",
+		"http://my-service-12345-abcdefghij:8080/health",
+		"http://localhost:4873/@scope/pkg",
+		"http://[::1]:8080/a@b",
+		"https://abcdefghijklmnopqrstuvwxyz.example.com/",
+		"redis://localhost:6379/0",
+		"sqlite:///a:b/c@d",
+		"file:///C:/x@y",
+		"ssh://git@github.com:22/o/r.git",
+	]) {
+		strictEqual(redactSecretString(text), text);
+		strictEqual(redactStreamingSecretString(text), text);
+	}
+});
+
+test("the hold and the pattern stay linear on a token full of URLs", () => {
+	for (const text of ["x://".repeat(80_000), "a://b:c/".repeat(40_000), `https://${"a:".repeat(160_000)}`]) {
+		const started = performance.now();
+		redactStreamingSecretString(text);
+		ok(performance.now() - started < 1_000, text.slice(0, 16));
+	}
+});
+
 test("a run that never ends gains a marker past the limit and never shows what it holds", () => {
 	const run = `https://u:${"Z".repeat(5000)}`;
 	strictEqual(redactStreamingSecretString(run), "https://u:[held]");
-	strictEqual(redactStreamingSecretString(`${run}@h`), "https://u:[redacted]@h");
+	strictEqual(redactStreamingSecretString(`${run}@h`), "https://u:[redacted]@");
+	strictEqual(redactStreamingSecretString(`${run}@h/`), "https://u:[redacted]@h/");
 	strictEqual(redactStreamingSecretString(run, true), run);
 });
 
@@ -986,9 +1215,9 @@ test("userinfo redaction counts once, survives a second pass and spans display f
 	strictEqual(redactSecretsText(redactSecretString("https://u:ZQXJ@h"), tally), "https://u:[redacted]@h");
 	strictEqual(redactSecretString(once), once);
 	const deeper = redactSecretsText("https://a:b:ZQ@h", tally);
-	strictEqual(deeper, "https://a:b:[redacted:url-userinfo]@h");
+	strictEqual(deeper, "https://a:[redacted:url-userinfo]@h");
 	strictEqual(redactSecretsText(deeper, tally), deeper);
-	strictEqual(redactSecretString("https://u:ZQ[redacted:abc]@h"), "https://u:ZQ[redacted:[redacted]@h");
+	strictEqual(redactSecretString("https://u:ZQ[redacted:abc]@h"), "https://u:[redacted]@h");
 	strictEqual(tally.count, 2);
 	deepStrictEqual(redactSecretSegments(["clone https://u:ZQ", "XJ@h/r"], createRedactionTally()), [
 		"clone https://u:[redacted:url-userinfo]",
@@ -1086,5 +1315,242 @@ test("a /view row whose redaction outgrows it is fitted to its width again", asy
 		for (let width = 20; width <= 120 && render !== undefined; width += 1) {
 			for (const row of render(width)) strictEqual(visibleWidth(row) <= width, true, `${width}: ${JSON.stringify(row)}`);
 		}
+	}
+});
+
+const WARNING: RunEventJournalBody = { kind: "event", type: "route_warning", detail: "late" };
+const MESSAGE_STOP: RunEventJournalBody = { kind: "event", type: "message_end", stopReason: "stop" };
+
+/** Feed a run through the writer and read back its rows' text in order, an event row showing as its type in brackets. */
+function feedRows(runId: string, ...items: (string | RunEventJournalBody)[]): string {
+	for (const item of items) {
+		appendRunFeed(runId, typeof item === "string" ? { kind: "event", type: "text", detail: item } : item);
+	}
+	return readFileSync(runFeedPath(runId, clioStateDir()), "utf8")
+		.trim()
+		.split("\n")
+		.map((raw) => {
+			const row = JSON.parse(raw) as { kind: string; type?: string; detail?: string };
+			return row.type === "text" ? (row.detail ?? "") : `[${row.type ?? row.kind}]`;
+		})
+		.join("");
+}
+
+test("a run feed releases held text only at a message that stopped on purpose", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const open = "clone https://user:ZQXJ";
+		for (const stopReason of ["stop", "toolUse"]) {
+			const end: RunEventJournalBody = { kind: "event", type: "message_end", stopReason };
+			strictEqual(feedRows(`done-${stopReason}`, "well ", open, end), `well ${open}[message_end]`);
+		}
+		strictEqual(
+			feedRows("dev-server", "see http://localhost:8080", MESSAGE_STOP, "next message "),
+			"see http://localhost:8080[message_end]",
+		);
+		for (const stopReason of ["length", "error", "aborted", "unknown"]) {
+			const end: RunEventJournalBody = { kind: "event", type: "message_end", stopReason };
+			strictEqual(
+				feedRows(`cut-${stopReason}`, open, end, "the next message is whole ", MESSAGE_STOP),
+				"clone https://user:[message_end]the next message is whole [message_end]",
+			);
+		}
+		const attempt: RunEventJournalBody = { kind: "event", type: "attempt_start", detail: "retry" };
+		strictEqual(
+			feedRows("retried", open, attempt, "second try ", MESSAGE_STOP),
+			"clone https://user:[attempt_start]second try [message_end]",
+		);
+		strictEqual(
+			feedRows("died", open, { kind: "result", outcome: "failed", exitCode: 1 }, { kind: "terminal", outcome: "failed" }),
+			"clone https://user:[result][terminal]",
+		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a row arriving mid-text splits nothing and loses nothing on a completed run", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const cases = [
+			"https://user:ZQXJZQXJ@host/repo",
+			"password: ZQXJZQXJ",
+			"password = ZQXJZQXJ",
+			"password=ZQXJZQXJ",
+			"Authorization: Bearer ZQXJZQXJ",
+		];
+		let run = 0;
+		for (const secret of cases) {
+			const text = `before words ${secret} after words here now`;
+			for (let offset = 1; offset < text.length; offset += 1) {
+				run += 1;
+				const rows = feedRows(`mid-${run}`, text.slice(0, offset), WARNING, text.slice(offset), MESSAGE_STOP);
+				const where = `offset ${offset} of ${text}`;
+				strictEqual(rows.match(SECRET_LETTERS), null, where);
+				const shown = rows.replace("[route_warning]", "").replace("[message_end]", "");
+				strictEqual(shown, redactSecretsText(text, createRedactionTally()), where);
+			}
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("the end of a text block releases the carry in order, for a runtime whose tools run inside one message", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const tool: RunEventJournalBody = { kind: "event", type: "clio_coder_tool_start", tool: "bash" };
+		strictEqual(
+			feedRows("in-order", "let me check the file", tool, "it looks fine", MESSAGE_STOP),
+			"let me check the file[clio_coder_tool_start]it looks fine[message_end]",
+		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("the run feed's bound never splits a password across rows and keeps what a long harmless token cannot hide", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const long = "q".repeat(4100);
+		const rest = " words here now ";
+		const bound = feedRows("bound", `${long}https://user:ZQXJ`, "ZQXJ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(bound, `${long}https://user:words here now [message_end]`);
+		const oversized = feedRows("over", `https://user:${"Z".repeat(5000)}`, "ZQ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(oversized.match(SECRET_LETTERS), null);
+		strictEqual(oversized.endsWith(`words here now [message_end]`), true);
+		const name = feedRows("name", `${long} https://user`, ":ZQXJ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(name.match(SECRET_LETTERS), null);
+		const scheme = feedRows("scheme", `${long} https:/`, "/user:ZQXJ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(scheme.match(SECRET_LETTERS), null);
+		const key = feedRows("key", `${long}password:`, " ZQXJ next", rest, MESSAGE_STOP);
+		strictEqual(key.match(SECRET_LETTERS), null);
+		const url = `https://example.com/${"q".repeat(5000)}`;
+		strictEqual(feedRows("plain", url, "/rest next", rest, MESSAGE_STOP), `${url}/rest next${rest}[message_end]`);
+		const cut = feedRows("message", `${long}https://user:ZQXJ`, MESSAGE_STOP, "whole next message ", MESSAGE_STOP);
+		strictEqual(cut, `${long}https://user:[message_end]whole next message [message_end]`);
+	} finally {
+		env.restore();
+	}
+});
+
+test("writer eviction keeps a run's held text and its discard", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		appendRunFeed("held", { kind: "event", type: "text", detail: "see https://user:ZQ" });
+		appendRunFeed("guarded", { kind: "event", type: "text", detail: `${"q".repeat(4100)}https://user:ZQ` });
+		for (let index = 0; index < 300; index += 1) feedRows(`other-${index}`, "some words", MESSAGE_STOP);
+		const held = feedRows("held", "XJ@host/x next words", MESSAGE_STOP);
+		strictEqual(held.match(SECRET_LETTERS), null);
+		strictEqual(held, "see https://user:[redacted:url-userinfo]@host/x next words[message_end]");
+		const guarded = feedRows("guarded", "XJ@host/x next words here now ", MESSAGE_STOP);
+		strictEqual(guarded.match(SECRET_LETTERS), null);
+		strictEqual(guarded.endsWith("words here now [message_end]"), true);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a cut-off message's text on its message_end row keeps its open URL back", () => {
+	const handlers = new Map<string, (payload: unknown) => void>();
+	const bus = {
+		subscribe(name: string, handler: (payload: unknown) => void) {
+			handlers.set(name, handler);
+			return () => {};
+		},
+		emit() {},
+	};
+	const rows: { type: string; detail?: string; stopReason?: string }[] = [];
+	const journal = {
+		open() {},
+		append(_runId: string, entry: { type: string; detail?: string; stopReason?: string }) {
+			rows.push(entry);
+		},
+		result() {},
+		terminal() {},
+	};
+	const bridge = attachRunEventJournalBridge(bus as never, { journal: journal as never, nowMs: () => 0 });
+	const send = (runId: string, stopReason: string | undefined) =>
+		handlers.get("run.progressed")?.({
+			runId,
+			agentId: "a",
+			event: {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "clone https://user:ZQXJ" }],
+					usage: { input: 1, output: 1, totalTokens: 2 },
+					...(stopReason === undefined ? {} : { stopReason }),
+				},
+			},
+		});
+	for (const stopReason of ["length", "aborted", "error", undefined]) send(`cut-${stopReason}`, stopReason);
+	send("done", "stop");
+	bridge.stop();
+	deepStrictEqual(
+		rows.map((row) => [row.detail, row.stopReason]),
+		[
+			["clone https://user:", "length"],
+			// An aborted or failed message projects no text of its own.
+			[undefined, "aborted"],
+			[undefined, "error"],
+			["clone https://user:", "unknown"],
+			["clone https://user:ZQXJ", "stop"],
+		],
+	);
+});
+
+test("live command output keeps stdout's open URL back past stderr, and a finished line still releases", () => {
+	const shown = (stdout: string, stderr: string) => {
+		const raw = combineLiveBashOutput({ stdout, stderr });
+		return new LiveToolView()
+			.outputRows((shapeBashProgress(raw, raw.length, "bounded") as { output: string }).output, 5, 400, {
+				rail: "",
+				railWidth: 0,
+			})
+			.join("\n");
+	};
+	strictEqual(shown("curl https://user:ZQXJ", "retrying\n"), "curl https://user:\nretrying");
+	strictEqual(shown("curl https://user:ZQXJ", "retrying"), "curl https://user:\nretrying");
+	strictEqual(shown("curl https://user:ZQXJ@host/x\n", "retrying\n"), "curl https://user:[redacted]@host/x\nretrying");
+	strictEqual(shown("listening on http://h:8080\n", "retrying\n"), "listening on http://h:8080\nretrying");
+	strictEqual(shown("listening on http://h:8080/x", "retrying\n"), "listening on http://h:8080/x\nretrying");
+	strictEqual(shown("", "curl https://user:ZQXJ"), "curl https://user:");
+	strictEqual(shown("curl https://user:ZQXJ", ""), "curl https://user:");
+});
+
+test("a worker's stream reaches the feed file held when it dies and whole when it stops", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const handlers = new Map<string, (payload: unknown) => void>();
+		const bus = {
+			subscribe(name: string, handler: (payload: unknown) => void) {
+				handlers.set(name, handler);
+				return () => {};
+			},
+			emit() {},
+		};
+		const bridge = attachRunEventJournalBridge(bus as never, { nowMs: () => 0 });
+		const progress = (runId: string, event: unknown) => handlers.get("run.progressed")?.({ runId, agentId: "a", event });
+		const end = (stopReason: string) => ({
+			type: "message_end",
+			message: { role: "assistant", content: [], usage: { input: 1, output: 1, totalTokens: 2 }, stopReason },
+		});
+		const open = "clone https://user:ZQXJ";
+		progress("stopped", { type: "text_delta", delta: open });
+		progress("stopped", end("stop"));
+		handlers.get("run.completed")?.({ runId: "stopped", agentId: "a", outcome: "completed", outcomeDetail: null });
+		progress("aborted", { type: "text_delta", delta: open });
+		progress("aborted", end("aborted"));
+		handlers.get("run.failed")?.({ runId: "aborted", agentId: "a", outcome: "failed", outcomeDetail: null });
+		progress("killed", { type: "text_delta", delta: open });
+		handlers.get("run.failed")?.({ runId: "killed", agentId: "a", outcome: "failed", outcomeDetail: null });
+		bridge.stop();
+		const text = (runId: string) => feedRows(runId).replace(/^\[open\]/u, "");
+		strictEqual(text("stopped"), `${open}[message_end][result][terminal]`);
+		strictEqual(text("aborted"), "clone https://user:[message_end][result][terminal]");
+		strictEqual(text("killed"), "clone https://user:[result][terminal]");
+	} finally {
+		env.restore();
 	}
 });

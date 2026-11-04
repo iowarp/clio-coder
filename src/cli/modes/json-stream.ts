@@ -1,4 +1,11 @@
 import { factKnownValue } from "../../core/telemetry/known.js";
+import {
+	messageStopCompleted,
+	redactFinalUrlCredentials,
+	redactStreamingUrlCredentials,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
+} from "../../domains/safety/redaction.js";
 /**
  * Projection from chat-loop events to the headless `--json` wire stream.
  *
@@ -96,6 +103,138 @@ export interface HeadlessJsonProjector {
 	project(event: ChatLoopEvent): RunJsonChatLoopFrame[];
 }
 
+/** Rewrite every string in a value. A value with nothing to rewrite comes back as itself. */
+function mapStrings(value: unknown, map: (text: string) => string, depth = 0): unknown {
+	if (typeof value === "string") return map(value);
+	if (depth > 32) return value;
+	if (Array.isArray(value)) {
+		const items = value.map((item) => mapStrings(item, map, depth + 1));
+		return items.every((item, index) => item === value[index]) ? value : items;
+	}
+	if (!isRecord(value)) return value;
+	const entries = Object.entries(value).map(([key, item]) => [key, mapStrings(item, map, depth + 1)] as const);
+	return entries.every(([key, item]) => item === value[key]) ? value : Object.fromEntries(entries);
+}
+
+const isDeltaType = (type: unknown): boolean => type === "text_delta" || type === "thinking_delta";
+const isUpdateDeltaType = (type: unknown): boolean => isDeltaType(type) || type === "toolcall_delta";
+const BLOCK_END_TYPES: ReadonlySet<string> = new Set(["text_end", "thinking_end", "toolcall_end"]);
+
+const heldText = (text: string): string => redactStreamingUrlCredentials(text);
+const cutOffText = (text: string): string => redactFinalUrlCredentials(text, false);
+
+/** Whether a value reads differently for a stream that completed and one that stopped short, so its message's stop reason decides. */
+function holdsOpenUrl(value: unknown): boolean {
+	let open = false;
+	mapStrings(value, (text) => {
+		open ||= cutOffText(text) !== redactUrlCredentials(text);
+		return text;
+	});
+	return open;
+}
+
+/**
+ * URL credentials off a JSON stream, whose reader appends deltas and cannot take one back, so a delta waits in a filter
+ * and every other string is redacted whole. A frame whose delta is held stays unwritten until it has text (#446).
+ */
+export function createJsonCredentialScrub(): {
+	scrub<T>(frame: T): T[];
+	finish<T>(completed: boolean): T[];
+} {
+	const open = new Map<string, { filter: UrlCredentialStreamFilter; frame: (delta: string) => unknown }>();
+	const waitingBlockEnds: ((completed: boolean) => unknown)[] = [];
+	const finish = (completed: boolean): unknown[] => {
+		const frames: unknown[] = [];
+		for (const { filter, frame } of open.values()) {
+			const rest = filter.end(completed);
+			if (rest.length > 0) frames.push(frame(rest));
+		}
+		open.clear();
+		for (const frame of waitingBlockEnds.splice(0)) frames.push(frame(completed));
+		return frames;
+	};
+	const through = (key: string, delta: string, frame: (delta: string) => unknown): unknown[] => {
+		const entry = open.get(key) ?? { filter: new UrlCredentialStreamFilter(), frame };
+		open.set(key, { ...entry, frame });
+		const safe = entry.filter.push(delta);
+		return safe.length > 0 ? [frame(safe)] : [];
+	};
+	const scrub = (frame: unknown): unknown[] => {
+		if (!isRecord(frame)) return [mapStrings(frame, redactUrlCredentials)];
+		if (isDeltaType(frame.type)) {
+			const field = typeof frame.delta === "string" ? "delta" : "text";
+			const delta = frame[field];
+			if (typeof delta === "string") {
+				return through(`${String(frame.type)}:${String(frame.contentIndex ?? "")}`, delta, (safe) => ({
+					...frame,
+					[field]: safe,
+				}));
+			}
+		}
+		const inner = frame.assistantMessageEvent;
+		if (frame.type === "message_update" && isRecord(inner)) {
+			const { partial, ...rest } = inner;
+			const { assistantMessageEvent: _inner, ...outer } = frame;
+			const heldOuter = mapStrings(outer, heldText) as object;
+			const heldPartial = partial !== undefined ? { partial: mapStrings(partial, heldText) } : {};
+			const cutOffPartial = partial !== undefined ? { partial: mapStrings(partial, cutOffText) } : {};
+			const shape = (delta: string): unknown => ({
+				...heldOuter,
+				assistantMessageEvent: { ...rest, delta, ...heldPartial },
+			});
+			const index = String(inner.contentIndex ?? "");
+			if (isUpdateDeltaType(inner.type) && typeof inner.delta === "string") {
+				return through(`update:${String(inner.type)}:${index}`, inner.delta, shape);
+			}
+			if (BLOCK_END_TYPES.has(String(inner.type))) {
+				// Providers end the open block ahead of a message the token limit stopped, so a block's end cannot release what
+				// it holds. A block with no open URL has nothing to decide, and any other waits for its message's stop reason.
+				const settled = (completed: boolean): unknown => ({
+					...heldOuter,
+					assistantMessageEvent: {
+						...(mapStrings(rest, (text) => redactFinalUrlCredentials(text, completed)) as object),
+						...(completed ? heldPartial : cutOffPartial),
+					},
+				});
+				if (!holdsOpenUrl(rest)) return [settled(true)];
+				waitingBlockEnds.push(settled);
+				return [];
+			}
+			return [mapStrings(frame, heldText)];
+		}
+		if (isRecord(frame.message)) {
+			// Only the model's message can stop short. A user or tool result message is whole, with no stop reason to read, and a
+			// message naming no role stays under the rule that fails closed.
+			const assistant = frame.message.role === "assistant" || frame.message.role === undefined;
+			const stopped = messageStopCompleted(frame.message.stopReason);
+			const whole = !assistant || (stopped && frame.type !== "message_update");
+			// A message that starts, or one that is not the model's, finds any open URL cut off whatever it says of itself.
+			const released = assistant && stopped && frame.type !== "message_start" && frame.type !== "message_update";
+			// A frame still open reads as any frame does, and any other that did not stop on purpose is the last this text gets.
+			const open = frame.type === "message_start" || frame.type === "message_update";
+			const held = open ? heldText : cutOffText;
+			return [...finish(released), mapStrings(frame, (text) => (whole ? redactUrlCredentials(text) : held(text)))];
+		}
+		// A failover can start mid-URL, and nothing of the next attempt continues what waits (#446).
+		const ended = frame.type === "agent_end" || frame.type === "attempt_start" ? finish(false) : [];
+		if (frame.type === "tool_execution_update") {
+			// Progress can stop inside a URL, unlike the arguments it repeats, and its end frame carries the settled text (#446).
+			const { partialResult, ...rest } = frame;
+			return [
+				...ended,
+				{ ...(mapStrings(rest, redactUrlCredentials) as object), partialResult: mapStrings(partialResult, heldText) },
+			];
+		}
+		if (isRecord(frame.result) && isRecord(frame.result.output) && frame.result.output.state === "partial") {
+			// Mid-stream text from a message that never completed, as the receipt says, so it can stop inside a URL (#446).
+			const output = mapStrings(frame.result.output, cutOffText);
+			return [...ended, mapStrings({ ...frame, result: { ...frame.result, output } }, redactUrlCredentials)];
+		}
+		return [...ended, mapStrings(frame, redactUrlCredentials)];
+	};
+	return { scrub: scrub as <T>(frame: T) => T[], finish: finish as <T>(completed: boolean) => T[] };
+}
+
 /**
  * The stateful half of the headless projection. A gateway call's end frame
  * carries no arguments, and a refused capability's result carries no
@@ -105,23 +244,23 @@ export interface HeadlessJsonProjector {
  */
 export function createHeadlessJsonProjector(): HeadlessJsonProjector {
 	const capabilities = new Map<string, string>();
-	return {
-		project(event) {
-			let projected = projectHeadlessJsonEvent(event);
-			if (projected === null) return [];
-			if (projected.type === "tool_execution_start" && projected.via === VIA_GATEWAY) {
-				capabilities.set(projected.toolCallId, projected.toolName);
-			}
-			if (event.type !== "tool_execution_end" || projected.type !== "tool_execution_end") return [projected];
-			const started = capabilities.get(event.toolCallId);
-			capabilities.delete(event.toolCallId);
-			if (started !== undefined && projected.via !== VIA_GATEWAY) {
-				projected = { ...projected, toolName: started, via: VIA_GATEWAY };
-			}
-			const steps = gatewayChainSteps(event.toolName, event.result);
-			return [projected, ...steps.flatMap((step) => chainStepFrames(event.toolCallId, step))];
-		},
+	const credentials = createJsonCredentialScrub();
+	const project = (event: ChatLoopEvent): ReturnType<HeadlessJsonProjector["project"]> => {
+		let projected = projectHeadlessJsonEvent(event);
+		if (projected === null) return [];
+		if (projected.type === "tool_execution_start" && projected.via === VIA_GATEWAY) {
+			capabilities.set(projected.toolCallId, projected.toolName);
+		}
+		if (event.type !== "tool_execution_end" || projected.type !== "tool_execution_end") return [projected];
+		const started = capabilities.get(event.toolCallId);
+		capabilities.delete(event.toolCallId);
+		if (started !== undefined && projected.via !== VIA_GATEWAY) {
+			projected = { ...projected, toolName: started, via: VIA_GATEWAY };
+		}
+		const steps = gatewayChainSteps(event.toolName, event.result);
+		return [projected, ...steps.flatMap((step) => chainStepFrames(event.toolCallId, step))];
 	};
+	return { project: (event) => project(event).flatMap((frame) => credentials.scrub(frame)) };
 }
 
 /** One settled chain step as the start/end pair a direct call of its capability would have produced. */

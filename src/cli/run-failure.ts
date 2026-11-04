@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { writeSync } from "node:fs";
+import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonTerminalTurnEndFrame } from "./modes/run-json-schema.js";
 import { flushRawStdout } from "./output-guard.js";
@@ -12,9 +13,11 @@ interface RunFailureState {
 const runFailureState = new AsyncLocalStorage<RunFailureState>();
 
 export function writeRunDiagnostic(text: string): void {
+	// A diagnostic can quote a failure's message, and it reaches stderr and a turn_end frame's error alike (#446).
+	const shown = redactUrlCredentials(text);
 	const state = runFailureState.getStore();
-	if (state?.pending) state.diagnostic = text.trim();
-	process.stderr.write(text);
+	if (state?.pending) state.diagnostic = shown.trim();
+	process.stderr.write(shown);
 }
 
 export function startRunOutput(): void {
@@ -54,7 +57,7 @@ export async function withRunFailureReporting(json: boolean, run: () => Promise<
 		} catch (error) {
 			if (state.pending) {
 				state.pending = false;
-				state.diagnostic = error instanceof Error ? error.message : String(error);
+				state.diagnostic = redactUrlCredentials(error instanceof Error ? error.message : String(error));
 				writeFrame(failureFrame(1));
 				await flushRawStdout();
 			}

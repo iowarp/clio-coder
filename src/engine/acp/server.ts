@@ -90,7 +90,14 @@ import {
 	decisionActionClass,
 	decisionFactsForPermission,
 } from "../../domains/safety/decision-presentation.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
+import {
+	messageStopCompleted,
+	redactFinalUrlCredentials,
+	redactSecretString,
+	redactStreamingUrlCredentials,
+	redactUrlCredentials,
+	UrlCredentialStreamFilter,
+} from "../../domains/safety/redaction.js";
 import { jobIsComplete } from "../../domains/scheduling/index.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
@@ -659,6 +666,9 @@ interface ActivePrompt {
 	admissionReason?: string;
 	sentAssistantChars: number;
 	sentThinkingChars: number;
+	/** Chunks only append, so URL credentials are settled before they are sent (#446). */
+	textCredentials: UrlCredentialStreamFilter;
+	thinkingCredentials: UrlCredentialStreamFilter;
 	/** `session/update` notifications emitted for this turn. */
 	updatesSent: number;
 	/** True once the engine reported a turn end (`message_end` or `agent_end`). */
@@ -1285,7 +1295,8 @@ function rawStringBytes(key: string | undefined, parentKey: string | undefined):
 }
 
 function boundRawValue(value: unknown, depth: number, key?: string, parentKey?: string): unknown {
-	if (typeof value === "string") return boundString(value, rawStringBytes(key, parentKey));
+	// Redacted ahead of its bound, which could otherwise cut a password into a piece no pattern recognizes (#446).
+	if (typeof value === "string") return boundString(redactUrlCredentials(value), rawStringBytes(key, parentKey));
 	if (Array.isArray(value)) {
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		// A member inherits no path: `details.diff` names one string, not a list
@@ -1297,7 +1308,7 @@ function boundRawValue(value: unknown, depth: number, key?: string, parentKey?: 
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		const bounded: Record<string, unknown> = {};
 		for (const [entryKey, entry] of Object.entries(value)) {
-			bounded[entryKey] = boundRawValue(entry, depth + 1, entryKey, key);
+			bounded[redactUrlCredentials(entryKey)] = boundRawValue(entry, depth + 1, entryKey, key);
 		}
 		return bounded;
 	}
@@ -1358,7 +1369,8 @@ function toolLocations(toolName: string | undefined, args: unknown, cwd: string)
 	if (!isRecord(args)) return null;
 	const path = args.path;
 	if (typeof path !== "string" || path.length === 0) return null;
-	return [{ path: boundString(resolvePath(cwd, path), ACP_MAX_LOCATION_PATH_BYTES) }];
+	// Ahead of resolving, which folds the `//` of a URL the pattern reads (#446).
+	return [{ path: boundString(resolvePath(cwd, redactUrlCredentials(path)), ACP_MAX_LOCATION_PATH_BYTES) }];
 }
 
 function utf8Bytes(value: string): number {
@@ -1373,6 +1385,8 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 		errored: false,
 		sentAssistantChars: 0,
 		sentThinkingChars: 0,
+		textCredentials: new UrlCredentialStreamFilter(),
+		thinkingCredentials: new UrlCredentialStreamFilter(),
 		updatesSent: 0,
 		sawTurnEnd: false,
 		stopReason: "end_turn",
@@ -1635,6 +1649,27 @@ function sendTextChunks(
 	}
 }
 
+function sendSafeChunks(
+	transport: AcpJsonRpcPeerTransport,
+	sessionId: string,
+	active: ActivePrompt,
+	sessionUpdate: "agent_message_chunk" | "agent_thought_chunk",
+	text: string,
+): void {
+	if (text.length > 0) sendTextChunks(transport, sessionId, active, sessionUpdate, text);
+}
+
+/** Send what the filters still hold. A message that did not complete keeps its open URL back. */
+function flushChunkCredentials(
+	transport: AcpJsonRpcPeerTransport,
+	sessionId: string,
+	active: ActivePrompt,
+	completed: boolean,
+): void {
+	sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.end(completed));
+	sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.end(completed));
+}
+
 /**
  * Closes out every tool call that never received a terminal update. A client
  * that renders a running spinner per `tool_call` otherwise keeps spinning after
@@ -1690,7 +1725,8 @@ function sendToolProgress(
 	const engineId = eventString(event, "toolCallId");
 	const toolCallId = engineId === undefined ? null : openWireIdFor(active, engineId);
 	if (toolCallId === null) return;
-	const text = boundString(outputText(event.partialResult), ACP_MAX_CHUNK_BYTES);
+	// Each frame replaces the last, so the hold can release later, and the bound runs after it could cut a password (#446).
+	const text = boundString(redactStreamingUrlCredentials(outputText(event.partialResult)), ACP_MAX_CHUNK_BYTES);
 	if (text.length === 0) return;
 	const sent = progress.calls.get(toolCallId);
 	const sentAt = progress.now();
@@ -1745,14 +1781,14 @@ function handleChatEvent(
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
 		active.sentAssistantChars += text.length;
-		sendTextChunks(transport, sessionId, active, "agent_message_chunk", text);
+		sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(text));
 		return;
 	}
 	if (event.type === "thinking_delta") {
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
 		active.sentThinkingChars += text.length;
-		sendTextChunks(transport, sessionId, active, "agent_thought_chunk", text);
+		sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(text));
 		return;
 	}
 	if (event.type === "notice") {
@@ -1810,14 +1846,14 @@ function handleChatEvent(
 		const snapshot: AcpToolCallSnapshot = {
 			rawInput: boundRawRecord(event.args),
 			...(locations !== null ? { locations } : {}),
-			title: boundString(capability ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+			title: boundString(redactUrlCredentials(capability ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
 			kind: toolKind(chainSteps.length > 0 ? toolName : capability),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
 		sendUpdate(transport, sessionId, active, {
 			sessionUpdate: "tool_call",
 			toolCallId,
-			name: toolName ?? "tool",
+			name: redactUrlCredentials(toolName ?? "tool"),
 			title: snapshot.title,
 			kind: snapshot.kind,
 			status: "in_progress" satisfies AcpToolCallStatus,
@@ -1848,7 +1884,8 @@ function handleChatEvent(
 		}
 		active.openToolCalls.delete(toolCallId);
 		active.terminalToolCalls.add(toolCallId);
-		const output = boundString(outputText(event.result), ACP_MAX_CHUNK_BYTES);
+		// Redacted before the bound, which could otherwise cut a password into a piece nothing recognizes (#446).
+		const output = boundString(redactUrlCredentials(outputText(event.result)), ACP_MAX_CHUNK_BYTES);
 		const started = active.toolCallSnapshots.get(toolCallId);
 		sendUpdate(
 			transport,
@@ -1857,7 +1894,7 @@ function handleChatEvent(
 			{
 				sessionUpdate: "tool_call_update",
 				toolCallId,
-				title: started?.title ?? boundString(toolName ?? "tool", ACP_MAX_TOOL_TITLE_BYTES),
+				title: started?.title ?? boundString(redactUrlCredentials(toolName ?? "tool"), ACP_MAX_TOOL_TITLE_BYTES),
 				kind: started?.kind ?? toolKind(toolName),
 				status: toolStatus(event),
 				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
@@ -1896,14 +1933,20 @@ function handleChatEvent(
 		if (thinking.length > active.sentThinkingChars) {
 			const tail = thinking.slice(active.sentThinkingChars);
 			active.sentThinkingChars = thinking.length;
-			sendTextChunks(transport, sessionId, active, "agent_thought_chunk", tail);
+			sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(tail));
 		}
 		const text = assistantText(message);
 		if (text.length > active.sentAssistantChars) {
 			const tail = text.slice(active.sentAssistantChars);
 			active.sentAssistantChars = text.length;
-			sendTextChunks(transport, sessionId, active, "agent_message_chunk", tail);
+			sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(tail));
 		}
+		flushChunkCredentials(
+			transport,
+			sessionId,
+			active,
+			messageStopCompleted((message as { stopReason?: unknown })?.stopReason),
+		);
 		return;
 	}
 	if (event.type === "agent_start" || event.type === "agent_end") {
@@ -1998,7 +2041,8 @@ function safeStoredString(value: unknown, maxBytes: number, fallback = ""): stri
 		const codePoint = character.codePointAt(0);
 		safe += codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f) ? " " : character;
 	}
-	return boundString(safe, maxBytes);
+	// Everything stored that reaches a client passes here, and redacted ahead of its bound, which could cut a password's scheme off (#446).
+	return boundString(redactUrlCredentials(safe), maxBytes);
 }
 
 function safeStoredIdentifier(value: unknown, maxBytes: number): string | null {
@@ -2138,9 +2182,11 @@ function replayMessageChunks(
 	frames: AcpReplayFrame[],
 	sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk",
 	texts: ReadonlyArray<string>,
+	completed = true,
 ): void {
 	for (const text of texts) {
-		for (const chunk of chunkText(text, ACP_MAX_CHUNK_BYTES)) {
+		const shown = sessionUpdate === "user_message_chunk" ? text : redactFinalUrlCredentials(text, completed);
+		for (const chunk of chunkText(shown, ACP_MAX_CHUNK_BYTES)) {
 			if (chunk.length === 0) continue;
 			frames.push({ update: { sessionUpdate, content: textContent(chunk) } });
 		}
@@ -2179,9 +2225,10 @@ function replayShellLine(entry: BashExecutionEntry): AcpReplayFrame[] {
 	const excludeFromContext = entry.excludeFromContext === true;
 	const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
 	const toolCallId = `shell_${entry.turnId}`;
-	const command = safeStoredString(entry.command, ACP_MAX_SHELL_COMMAND_BYTES);
+	const stored: unknown = entry.command;
+	const command = safeStoredString(stored, ACP_MAX_SHELL_COMMAND_BYTES);
 	const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
-	const output = shellOutputTail(entry.output);
+	const output = shellOutputTail(redactFinalUrlCredentials(entry.output, !entry.cancelled));
 	return [
 		{
 			update: {
@@ -2243,7 +2290,10 @@ function prepareAcpReplay(
 				entry.tokensAfter === undefined
 					? `${entry.tokensBefore} tokens before`
 					: `${entry.tokensBefore} → ${entry.tokensAfter} tokens`;
-			for (const chunk of chunkText(`[context engine] compacted ${reduction}\n${entry.summary}`, ACP_MAX_CHUNK_BYTES)) {
+			for (const chunk of chunkText(
+				`[context engine] compacted ${reduction}\n${redactUrlCredentials(entry.summary)}`,
+				ACP_MAX_CHUNK_BYTES,
+			)) {
 				current.frames.push({
 					update: { sessionUpdate: "agent_message_chunk", content: textContent(chunk) },
 					meta: { [ACP_NOTICE_META_KEY]: { level: "info" } },
@@ -2307,8 +2357,10 @@ function prepareAcpReplay(
 		if (entry.role === "assistant") {
 			current.stopReason = payload?.stopReason === "toolUse" ? "error" : mapAcpStopReason(payload?.stopReason);
 			const blocks = replayTextBlocks(entry);
-			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking);
-			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text);
+			// Stored text ends where the live stream did, and a message that stopped short can end inside a URL (#446).
+			const completed = messageStopCompleted(payload?.stopReason);
+			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking, completed);
+			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text, completed);
 			continue;
 		}
 		if (entry.role === "tool_call") {
@@ -2336,7 +2388,7 @@ function prepareAcpReplay(
 			ids.openToolCalls.delete(toolCallId);
 			ids.terminalToolCalls.add(toolCallId);
 			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
-			const output = boundString(outputText(payload?.result), ACP_MAX_CHUNK_BYTES);
+			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
 			current.frames.push({
 				update: {
@@ -2955,7 +3007,7 @@ function installPermissionBridge(input: {
 		// re-derive the tier and the consequence from a tool name it cannot
 		// classify.
 		const facts = decisionFactsForPermission({
-			tool: call.tool,
+			tool: redactUrlCredentials(call.tool),
 			actionClass: decision.classification.actionClass,
 			axis: meta.axis.startsWith("net:")
 				? { kind: "safety-net", ruleId: meta.axis.slice("net:".length) || "unknown" }
@@ -3078,9 +3130,11 @@ function installPermissionBridge(input: {
 								toolCall: {
 									toolCallId,
 									title: boundString(
-										decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
-											? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
-											: call.tool,
+										redactUrlCredentials(
+											decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
+												? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
+												: call.tool,
+										),
 										ACP_MAX_TOOL_TITLE_BYTES,
 									),
 									kind: toolKind(call.tool),
@@ -6611,7 +6665,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// instead of agent attribution, and the same call shape a `bash` row has.
 		const meta = { [ACP_SHELL_META_KEY]: { version: 1, excludeFromContext } };
 		const toolCallId = `shell_${randomUUID()}`;
-		const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
+		const shownCommand = redactUrlCredentials(command);
+		const title = boundString(shownCommand, ACP_MAX_TOOL_TITLE_BYTES);
 		const notify = (update: Record<string, unknown>): void => {
 			try {
 				options.transport.notify("session/update", { sessionId: session.id, update, _meta: meta });
@@ -6624,7 +6679,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		let lastSentAt = Number.NEGATIVE_INFINITY;
 		let lastText = "";
 		const onUpdate = (progress: BashCommandProgress): void => {
-			const text = shellOutputTail(combineBashOutput(progress));
+			const text = shellOutputTail(redactStreamingUrlCredentials(combineBashOutput(progress)));
 			const sentAt = now();
 			if (
 				text.length === 0 ||
@@ -6648,7 +6703,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				title,
 				kind: "execute" satisfies AcpToolKind,
 				status: "in_progress" satisfies AcpToolCallStatus,
-				rawInput: { command, excludeFromContext },
+				rawInput: { command: shownCommand, excludeFromContext },
 			});
 			let entry: SessionEntry;
 			let run: Awaited<ReturnType<typeof runOperatorShellLine>>;
@@ -6678,8 +6733,13 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				notify({ sessionUpdate: "tool_call_update", toolCallId, title, kind: "execute", status: "failed" });
 				throw new AcpRequestError(-32603, "the shell line could not be run or recorded", { code: "shell_failed" });
 			}
-			const output = shellOutputTail(entry.kind === "bashExecution" ? entry.output : run.entry.output);
 			const { result } = run;
+			const output = shellOutputTail(
+				redactFinalUrlCredentials(
+					entry.kind === "bashExecution" ? entry.output : run.entry.output,
+					!result.aborted && !result.timedOut,
+				),
+			);
 			const settledResult = {
 				exitCode: result.exitCode,
 				cancelled: result.aborted,
@@ -6905,6 +6965,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				active.acceptsContinuation = false;
 				detach();
 				if (request.signal.aborted) active.cancelled = true;
+				flushChunkCredentials(options.transport, session.id, active, false);
 				settleOpenToolCalls(
 					options.transport,
 					session.id,
