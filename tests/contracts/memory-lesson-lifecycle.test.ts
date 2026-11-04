@@ -17,6 +17,7 @@ import { renderTaskMemoryHandoffSource } from "../../src/domains/memory/task-mem
 import { runTaskMemoryPolicy, TaskMemoryEndpointPreemptedError } from "../../src/domains/memory/task-memory-policy.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { cwdHash } from "../../src/engine/session.js";
+import { closedSessionLessonSource } from "../../src/entry/flow-ledger.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
@@ -78,6 +79,41 @@ test("promote --from-handoff finds the source from any directory and refuses onl
 		process.chdir(previousCwd);
 		env.restore();
 	}
+});
+
+test("a closed session's flow label restricts it from any branch, not only the active path", () => {
+	const at = "2026-11-03T10:00:00.000Z";
+	const message = (turnId: string, parentTurnId: string | null, role: string, payload: unknown) => ({
+		kind: "message",
+		turnId,
+		parentTurnId,
+		timestamp: at,
+		role,
+		payload,
+	});
+	const abandoned = [message("u0", null, "user", { text: "first" }), message("a0", "u0", "assistant", { text: "read" })];
+	const label = {
+		kind: "custom",
+		turnId: "label",
+		parentTurnId: "a0",
+		timestamp: at,
+		customType: "clio_coder_flow_restriction",
+		data: {},
+	};
+	const active = [
+		message("u1", "u0", "user", { text: "second" }),
+		message("c1", "u1", "tool_call", { toolCallId: "c1", name: "bash", args: { command: "node scripts/check.mjs" } }),
+		message("r1", "c1", "tool_result", {
+			toolCallId: "c1",
+			outcome: "ok",
+			result: { content: [{ type: "text", text: "done" }], details: { kind: "ok", outcome: "success", exitCode: 0 } },
+		}),
+		message("a1", "r1", "assistant", { text: "done", stopReason: "stop" }),
+	];
+	const review = (entries: unknown[]) =>
+		closedSessionLessonSource(entries.map((entry) => JSON.stringify(entry)).join("\n"), "ledger", "closed", "/repo");
+	ok(review([...abandoned, ...active]), "the same ledger with no label stays reviewable");
+	strictEqual(review([...abandoned, label, ...active]), null);
 });
 
 test("a flow-restricted session files no lesson at scope end, and a clean one still does", async () => {

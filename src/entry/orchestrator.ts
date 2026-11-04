@@ -283,12 +283,7 @@ import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import {
-	observationCheckpoint,
-	observationSourceUnits,
-	parseSessionEntries,
-	SessionDomainModule,
-} from "../domains/session/index.js";
+import { observationCheckpoint, observationSourceUnits, SessionDomainModule } from "../domains/session/index.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -367,7 +362,12 @@ import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
-import { admitHandoffSeedFlow, createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
+import {
+	admitHandoffSeedFlow,
+	closedSessionLessonSource,
+	createFlowLedger,
+	FLOW_RESTRICTION_ENTRY_TYPE,
+} from "./flow-ledger.js";
 import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
@@ -2926,16 +2926,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				(candidate) => candidate.sessionId === sessionId,
 			);
 			if (!ledger) return null;
-			const read = parseSessionEntries(readFileSync(ledger.path, "utf8"), ledger.path);
-			const active = filterEntriesToActivePath(read.entries, undefined);
-			// A restricted ledger is never reviewed; see lessonSource.
-			if (
-				read.errors.length > 0 ||
-				active.some((entry) => entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE)
-			)
-				return null;
-			const source = completedLessonSource(active, ledger.root);
-			return source ? { scope: { sessionId, branchAnchorTurnId: active.at(-1)?.turnId ?? null }, source } : null;
+			return closedSessionLessonSource(readFileSync(ledger.path, "utf8"), ledger.path, sessionId, ledger.root);
 		},
 
 		settings: () => effectiveSettingsForDispatch?.().context.memory ?? memorySettings,
