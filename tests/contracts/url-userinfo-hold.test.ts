@@ -69,6 +69,8 @@ const CORPUS = [
 	"https://u:$TOKEN@h",
 	"https://ghp_x@github.com/r",
 	"https://ghp_x:ZQXJ@github.com/r",
+	"https://ghp_ZQXJZQXJZQXJZQXJZQXJZQXJ@github.com/r",
+	"https://glpat-ZQXJZQXJZQXJ:x-oauth@gitlab.com/r",
 	"https://:ZQXJ@h",
 	"https://u:ZQ/XJ@h",
 	"--token ZQXJ next",
@@ -117,6 +119,9 @@ function expectedFrame(prefix: string): string {
 	const name = open[1] ?? "";
 	const colon = name.indexOf(":");
 	const at = name.indexOf("@");
+	if (/^(?:gh[pousr]_|github_pat_|glpat-)/iu.test(name)) {
+		return redactSecretString(prefix.slice(0, prefix.length - name.length + name.lastIndexOf("@") + 1));
+	}
 	if (colon < 0 || (at >= 0 && at < colon)) return redactSecretString(prefix);
 	const end = prefix.length - name.length + (at >= 0 ? name.lastIndexOf("@") + 1 : colon + 1);
 	return redactSecretString(prefix.slice(0, end));
@@ -182,6 +187,8 @@ test("one-shot redaction hides the whole password of every userinfo shape", () =
 		["https://u:ZQ@XJ@h:8443/p", "https://u:[redacted]@h:8443/p"],
 		["https://u:ZQ@h/a@b", "https://u:[redacted]@h/a@b"],
 		["https://a:ZQ@h,https://b:XJ@h", "https://a:[redacted]@h,https://b:[redacted]@h"],
+		["https://ZQXJ0ZQXJZQXJZQXJZQXJZ@github.com/r", "https://[redacted]@github.com/r"],
+		["https://glpat-ZQXJZQXJZQXJ:ZQ@gitlab.com/r", "https://[redacted]:[redacted]@gitlab.com/r"],
 	] as const) {
 		strictEqual(redactSecretString(text), redacted);
 		strictEqual(redactSecretString(redacted), redacted);
@@ -189,6 +196,19 @@ test("one-shot redaction hides the whole password of every userinfo shape", () =
 		const evidence = redactSecretsText(text, tally);
 		strictEqual(leaked(evidence, "").join(""), "", text);
 		strictEqual(redactSecretsText(evidence, tally), evidence);
+	}
+});
+
+test("an ordinary name or host stays readable beside a username token", () => {
+	for (const text of [
+		"https://alice@github.com/r",
+		"https://first.last@corp.example.com/r",
+		"ssh://git@github.com/o/r.git",
+		"http://my-service-12345-abcdefghij:8080/health",
+		"https://abcdefghijklmnopqrstuvwxyz.example.com/",
+	]) {
+		strictEqual(redactSecretString(text), text);
+		strictEqual(redactStreamingSecretString(text), text);
 	}
 });
 

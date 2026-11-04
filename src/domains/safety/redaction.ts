@@ -19,8 +19,18 @@ const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
 // The name stops at its first colon and the password runs to the authority's last `@`, so `https://:pw@h`, `u:pa:ss@h` and
-// `u:p@ss@h` hide the whole password. Each attempt starts at a scheme and ends at the next `/`, so the scan is linear (#446).
-const SECRET_STRING_RE = /(https?:\/\/[^\s/@:]*:)([^\s/]*)@/giu;
+// `u:p@ss@h` hide the whole password. A `[` opens an IPv6 host or an earlier pass's marker, never a name. Each attempt starts at a scheme and ends at the next `/`, so the scan is linear (#446).
+const SECRET_STRING_RE = /(https?:\/\/[^\s/@:[]*:)([^\s/]*)@/giu;
+// A token can be the whole username, as in `https://<token>@github.com`. `alice` and `first.last` are ordinary names, while
+// a long opaque run holding a digit is not one worth keeping. A known git host token also counts ahead of a colon, where a
+// long opaque name would more often be a host and its port (#446).
+const GIT_TOKEN_PREFIX = "(?:gh[pousr]_|github_pat_|glpat-)";
+export const URL_USERNAME_TOKEN_RE = new RegExp(
+	`(?<=:\\/\\/)(?:(?=[a-z0-9_-]*\\d)[a-z0-9_-]{20,}(?=@)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=:[^\\s/@]*@))`,
+	"giu",
+);
+const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
+const LONGEST_GIT_TOKEN_PREFIX = "github_pat_".length;
 const SECRET_URL_PARAM_NAME_RE =
 	/[?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)/giu;
 const SECRET_URL_PARAM_STOP_RE = /[=\s]/gu;
@@ -46,14 +56,10 @@ export const URL_USERINFO_RE = SECRET_STRING_RE;
 // Text passes both redactors, and again on a re-export, where promotion and handoff mask earlier markers as private-use
 // tokens. Only a password that is entirely one marker is exempt, so `https://u:REAL[redacted:abc]@h` is still rewritten.
 const REDACTED_USERINFO_RE = /^(?:\[redacted(?::[a-z-]+)?\]|\uE000[\uE100-\uF8FF])$/u;
-const REDACTED_KIND_RE = /^[a-z-]+\]$/u;
-// A marker that replaced a username token holds the first colon itself: `https://[redacted:github-token]@h`.
-const REDACTED_PREFIX_RE = /\/\/\[redacted:$/u;
 
 /** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
-export function urlUserinfoHoldsSecret(prefix: string, secret: string): boolean {
-	if (ENV_REFERENCE_RE.test(secret) || REDACTED_USERINFO_RE.test(secret)) return false;
-	return !(REDACTED_PREFIX_RE.test(prefix) && REDACTED_KIND_RE.test(secret));
+export function urlUserinfoHoldsSecret(secret: string): boolean {
+	return !ENV_REFERENCE_RE.test(secret) && !REDACTED_USERINFO_RE.test(secret);
 }
 
 function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
@@ -203,9 +209,11 @@ export function redactSecretString(value: string): string {
 function redactPlainSecretString(value: string): string {
 	return redactSecretFlags(
 		redactSecretUrlParams(
-			value.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
-				urlUserinfoHoldsSecret(prefix, secret) ? `${prefix}[redacted]@` : match,
-			),
+			value
+				.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
+					urlUserinfoHoldsSecret(secret) ? `${prefix}[redacted]@` : match,
+				)
+				.replace(URL_USERNAME_TOKEN_RE, "[redacted]"),
 		).replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
 			redactUnlessEnvReference(match, prefix, secret),
 		),
@@ -230,16 +238,21 @@ const USERINFO_HOLD_MARKER = "[held]";
  * The part of text still being written that is safe to show when its last run may become URL userinfo. Everything
  * through the run's first colon appears in every completion, because the pattern's prefix always ends there, and so does
  * everything through a later `@`, which the pattern replaces. What follows that `@` stays back, since `https://u:p@ss@h`
- * makes it password. A name that already reached an `@` before any colon holds no password. No length or timeout ever
+ * makes it password. A name that already reached an `@` before any colon holds no password, and a known git host token
+ * stays back whole, while any other opaque name cannot, since it looks like a host until its `@`. No length or timeout ever
  * shows held text: past the limit the frame only gains a marker, so a run that never ends cannot reveal what it holds.
  */
 export function holdUnresolvedUserinfo(value: string): string {
 	let runStart = value.length;
 	while (runStart > 0 && !endsUserinfoRun(value.charCodeAt(runStart - 1))) runStart -= 1;
 	if (!URL_SCHEME_END_RE.test(value.slice(Math.max(0, runStart - LONGEST_URL_SCHEME), runStart))) return value;
+	const firstAt = value.indexOf("@", runStart);
+	if (GIT_TOKEN_NAME_RE.test(value.slice(runStart, runStart + LONGEST_GIT_TOKEN_PREFIX))) {
+		const keep = firstAt >= 0 ? value.lastIndexOf("@") + 1 : runStart;
+		return keep === value.length ? value : value.slice(0, keep);
+	}
 	const colon = value.indexOf(":", runStart);
 	if (colon < 0 || colon === value.length - 1) return value;
-	const firstAt = value.indexOf("@", runStart);
 	if (firstAt >= 0 && firstAt < colon) return value;
 	const keep = firstAt >= 0 ? value.lastIndexOf("@") + 1 : colon + 1;
 	if (keep === value.length) return value;
