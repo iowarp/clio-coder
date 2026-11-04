@@ -439,6 +439,13 @@ describe("engine lifecycle: a tool call whose arguments are not valid JSON", () 
 		ok(text.startsWith('Invalid arguments for tool "edit": the arguments are not valid JSON'), text);
 	});
 
+	it("names the missing colon on the shape Haiku sends for tab-led oldText", async () => {
+		const text = await refuse(["edit"], '{"path": "a.ts", "edits": [{"oldText">\t\tmode: "dev",\n\t\tretries: 2,}');
+		ok(text.includes('{"oldText"<<<HERE>>>>'), text);
+		ok(text.includes('needs a colon and then a quoted value, as in "name":"value"'), text);
+		ok(!text.includes("A string value ended"), text);
+	});
+
 	it("says a string never closed when the arguments end inside one", async () => {
 		const text = await refuse(["edit"], '{"path":"a.ts","edits":[{"oldText":"\tcut');
 		ok(text.includes("A string value never closed"), text);

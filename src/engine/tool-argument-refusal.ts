@@ -25,9 +25,16 @@ function faultLines(parseError: string, received: string): string[] {
 	const start = Math.max(0, offset - EXCERPT_CHARS);
 	const excerpt = `${received.slice(start, offset)}<<<HERE>>>${received.slice(offset, offset + EXCERPT_CHARS)}`;
 	const lines = [`What failed: ${position[1]}, at character ${offset} of the arguments:`, excerpt];
-	if (position[1]?.startsWith("Unterminated string")) {
+	const fault = position[1] ?? "";
+	if (fault.startsWith("Unterminated string")) {
 		lines.push("A string value never closed, so the arguments ended inside it.");
-	} else if (received.slice(0, offset).trimEnd().endsWith('"')) {
+	} else if (fault.includes("after property name")) {
+		// Haiku's own tab-led shape: `{"oldText">` then the raw text, in 5 of 10 runs measured.
+		lines.push('The name just before HERE needs a colon and then a quoted value, as in "name":"value".');
+	} else if (
+		/after (?:property value|array element)/u.test(fault) &&
+		received.slice(0, offset).trimEnd().endsWith('"')
+	) {
 		lines.push('A string value ended at the " just before HERE. If that quote belongs to the text, write it as \\".');
 	}
 	return lines;
