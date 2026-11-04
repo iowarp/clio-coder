@@ -8,7 +8,7 @@ site_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(dirname -- "$site_dir")
 branch=gh-pages
 
-if ! git -C "$repo_dir" diff --quiet HEAD -- site scripts/install.sh scripts/install.ps1; then
+if ! git -C "$repo_dir" diff --quiet HEAD -- site scripts/install.cmd scripts/installer-bootstrap; then
   printf '%s\n' 'Commit all site and installer changes before publishing.' >&2
   exit 1
 fi
