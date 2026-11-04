@@ -325,7 +325,7 @@ function printTimeline(dto: TimelineV1): string {
 			case "context":
 				return `${entry.at}  context  ${entry.source} · window ${entry.window.effective} (${entry.window.source})${entry.estimated ? ` · estimated ${entry.estimated.display}` : ""}${entry.reconciled ? ` · provider ${entry.reconciled.display}` : ""}`;
 			case "system-one":
-				return `${entry.at}  s1       ${entry.site} ${entry.outcome} · ${entry.latency.display} of ${entry.deadline.display}${entry.routes.some((route) => route.breaker) ? ` · breaker ${entry.routes.flatMap((route) => (route.breaker ? [`${route.engine} ${route.breaker}`] : [])).join(", ")}` : ""}`;
+				return `${entry.at}  s1       ${entry.point} ${entry.outcome} · ${entry.latency.display} of ${entry.deadline.display}${entry.routes.some((route) => route.breaker) ? ` · breaker ${entry.routes.flatMap((route) => (route.breaker ? [`${route.engine} ${route.breaker}`] : [])).join(", ")}` : ""}`;
 			case "worker-channel":
 				return `${entry.at}  channel  ${entry.runId} ${entry.lane} ${entry.failure}${entry.frameType ? ` on ${entry.frameType}` : ""}${entry.errno ? ` (${entry.errno})` : ""}${entry.afterExit ? " after exit" : ""}`;
 			default:

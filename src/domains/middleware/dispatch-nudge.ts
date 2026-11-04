@@ -110,7 +110,6 @@ function markScoutSuccess(state: ExplorationTurnState): void {
  */
 export function createReadOnlyExplorationNudgeRegistration(deps: { workspaceRoot?: () => string } = {}): {
 	registration: MiddlewareHookRegistration;
-	rememberHarnessScout(turnId: string): void;
 } {
 	let pending: { at: number; sessionId: string | undefined } | null = null;
 	const byTurn = new Map<string, ExplorationTurnState>();
@@ -146,9 +145,6 @@ export function createReadOnlyExplorationNudgeRegistration(deps: { workspaceRoot
 		if (carried) carried.advised = true;
 	};
 	return {
-		rememberHarnessScout(turnId) {
-			markScoutSuccess(stateForTool(turnId));
-		},
 		registration: {
 			id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
 			description: "advise Scout delegation after prolonged read-only repository exploration",

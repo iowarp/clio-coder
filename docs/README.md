@@ -35,7 +35,7 @@ current source for implementation decisions.
 | Understand what Clio Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 | Run the read-only install check: core install, targets, HPC toolchain, task worktrees, Slurm MCP and System One rows, and the deep checks | [Doctor](guide/doctor.md) |
-| Place a decision engine at System One sites (turn hints, the tool-call gate, relevance ranking, consult, drafts), then calibrate it and run it in shadow mode | [System One](guide/system-one.md) |
+| Bring a decision model in one setting: the `consult` tool, the judge screen, steering triage and their limits | [System One](guide/system-one.md) |
 | Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
 
 A minimal first run needs a model to talk to: a local app such as Ollama or LM
@@ -94,7 +94,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | --- | --- |
 | Autonomy levels, shell containment, the safety judge, workspace snapshots and `/rewind`, the yolo floor, project policy, and damage-control rules | [Safety Model](architecture/safety-model.md) |
 | Source labels, approved destinations, worker admission, and refusal recovery | [Information Flow](guide/information-flow.md) |
-| System One decision sites, record-only safety observations, calibration, shadow mode, and the opt-in dataset | [System One](guide/system-one.md) |
+| What System One sends, where it can only tighten, and what it cannot tell you | [System One](guide/system-one.md) |
 | Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |
 | The `/view` artifact viewer | [Observability](architecture/observability.md#view) |
 | Run evidence assessments, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
@@ -128,7 +128,7 @@ reference data, and review define the acceptance criteria for a change.
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
 | Delegate to installed coding agents through their supported ACP, headless CLI, or pane modes; inspect and adopt their resources | [Coding Agent Interoperability](guide/interop.md) |
 | Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](architecture/middleware-and-components.md) |
-| Decision-layer contract: sites, engines, runner, cuts per build, records, and how a build is validated | [System One Architecture](architecture/system-one.md) |
+| Decision-layer contract: decision points, engines, formation, the runner and capability profiles | [System One Architecture](architecture/system-one.md) |
 | Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](guide/exit-codes-and-output.md) |
 | Environment overrides, directory controls, and debug toggles | [Environment Variables](guide/environment-variables.md) |
 

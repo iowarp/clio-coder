@@ -170,9 +170,9 @@ function baseClassify(tool: string): ActionClass | null {
 		// decide appends the model's own design decision to the session
 		// decision board. One ledger append, no workspace effect, never gated.
 		case ToolNames.Decide:
-		// consult sends at most 2 KB the model wrote, plus redacted heads of
-		// workspace files the read tool could already return, to the System One
-		// engine the operator bound, and changes nothing anywhere.
+		// consult sends text the model wrote, plus redacted heads of workspace
+		// files and offloaded output the read tool could already return, to the
+		// System One engine the operator bound, and changes nothing anywhere.
 		case ToolNames.Consult:
 		case ToolNames.Vision:
 			return "read";

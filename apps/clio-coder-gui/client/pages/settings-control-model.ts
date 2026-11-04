@@ -56,7 +56,7 @@ export function matchesControl(control: SettingControl, query: string): boolean 
  */
 export function groupNote(controls: ReadonlyArray<Pick<SettingControl, "path">>): string | null {
 	if (!controls.some((control) => control.path.startsWith("systemOne."))) return null;
-	return "Experimental. Engines and the sites they answer are declared under systemOne in the settings file, and the terminal's /settings (Advanced, Experimental) binds a site to a declared engine. This page sets only the decision dataset.";
+	return "Experimental. Engines are declared under systemOne in the settings file, and systemOne.use names the routes that answer the consult tool, in order. It applies on the next start.";
 }
 
 /** Groups in first-seen order, which is the engine's registry order. */

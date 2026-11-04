@@ -118,9 +118,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `version` | `2` | restart |
-| `turnControl.workflows` | `["orientation", "direction", "ledger-facts", "detached-collection"]` | next turn |
-| `turnControl.orientation.maxSplit` | `4` | next turn |
-| `turnControl.orientation.maxCostUsdPerTurn` | `null` | next turn |
+| `turnControl.workflows` | `["detached-collection"]` | next turn |
 | `targets` | `[]` | next turn for the catalog; next session for saved routing defaults |
 
 ### Chat
@@ -170,7 +168,6 @@ explains worker route selection.
 | `fleet.profiles` | `{}` | next dispatch |
 | `fleet.rosters` | `{}` | next dispatch |
 | `fleet.agentProfiles` | `{}` | next dispatch |
-| `fleet.speculativeDispatch` | `false` | next turn |
 | `fleet.defaultNode` | `null` | next dispatch |
 | `fleet.default.node` | unset | next dispatch |
 | `fleet.nodes` | `[]` | next dispatch |
@@ -235,13 +232,12 @@ Configure `context.memory.target` and `context.memory.model` to give memory a de
 
 ### System One
 
-System One is experimental and off by default; its keys and sites may change between releases, and automatic sites do not wait on a decision engine's answer. Explicit consult and draft judging can wait up to their deadlines. `systemOne.engines` maps a name you choose to `{ kind, target, model?, mode?, profile? }`, where `kind` is `systemone` or `llm`, `target` is a `targets[].id`, `mode` applies only to `llm` and `profile` (the served model's capability profile, such as `julia-1`) only to `systemone`. `systemOne.sites` binds a site (`turn`, `toolCall`, `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts`, `steer`) to an engine name, or to `{ engine, timeoutMs?, tasks? }`, where `tasks` routes one of the site's decision tasks to another declared engine. A site with no entry is off. `systemOne.cuts` holds per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. The [System One guide](system-one.md) explains each key and which tier of engine suits which site, and `systemOne.sites.consult` needs a restart because the `consult` tool is registered at startup. `fleet.speculativeDispatch` is experimental too: it holds the worker a fitted `turn` reading predicts.
+System One is experimental and off by default, and its keys may change between releases. `systemOne.use` names one route or an ordered list of them: `jev`, `memory`, `main`, a declared engine or a target. A named route answers the `consult` tool, the judge screen and steering triage, so on a hosted route web and MCP result text leaves the machine at judge time. `systemOne.engines` maps a name you choose to `{ kind, target, model?, profile? }`, where `kind` is `systemone` or `llm`, `target` is a `targets[].id` and `profile` (the served model's capability profile, such as `julia-1`) applies only to `systemone`. The [System One guide](system-one.md) explains each key.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `systemOne.use` | `null` | next turn |
+| `systemOne.use` | `null` | restart |
 | `systemOne.engines` | `{}` | next turn |
-| `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
 
 ### Safety
 
@@ -321,7 +317,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 
 ### Telemetry
 
-`telemetry.mode` sets what each scope's telemetry journal admits. `standard`, the default, keeps accountability and operational records, all of them content-free or structural. `research` also admits the research-tier records that the `telemetry.research` flags turn on, and `content` additionally needs the operator's consent for the workspace. In this build `content` keeps the text of each distinct compiled system prompt, each main-loop and side call's provider request body (only its first 1 MiB when larger), and the prompts, replies and facts of background memory and compaction steps as `memory.traced` and `memory.observed` records, with the text in the session's telemetry `objects/` directory; `systemOneDataset` keeps the [System One dataset](system-one.md#the-training-dataset), which also needs `content` and consent because it holds redacted prompts; `busTrace` journals a `bus.traced` record naming each live event the telemetry hub delivers; `deltas` keeps each provider call's streaming timing as one record: its delta count, a histogram of the gaps between deltas, the longest gap and the first-to-last span, with no streamed text; `providerHeaders` keeps a call's response status and its allow-listed rate-limit, quota, request-id and server-timing response headers, each value cut to 256 characters, and never cookies, auth echoes or any other header. Content capture runs only in a workspace the operator consented for with `clio-coder telemetry consent`, which records the consent in Clio's state directory and never in the workspace; `--revoke` ends it from the session's next call. A session's research capture stops at 256 MiB, and a `journal.gap` record marks what was refused. Every journal segment header records the mode and the effective flags, and a change starts a new segment at the journal's next write. A project or local layer can lower capture but never raise it above user settings.
+`telemetry.mode` sets what each scope's telemetry journal admits. `standard`, the default, keeps accountability and operational records, all of them content-free or structural. `research` also admits the research-tier records that the `telemetry.research` flags turn on, and `content` additionally needs the operator's consent for the workspace. In this build `content` keeps the text of each distinct compiled system prompt, each main-loop and side call's provider request body (only its first 1 MiB when larger), and the prompts, replies and facts of background memory and compaction steps as `memory.traced` and `memory.observed` records, with the text in the session's telemetry `objects/` directory; `busTrace` journals a `bus.traced` record naming each live event the telemetry hub delivers; `deltas` keeps each provider call's streaming timing as one record: its delta count, a histogram of the gaps between deltas, the longest gap and the first-to-last span, with no streamed text; `providerHeaders` keeps a call's response status and its allow-listed rate-limit, quota, request-id and server-timing response headers, each value cut to 256 characters, and never cookies, auth echoes or any other header. Content capture runs only in a workspace the operator consented for with `clio-coder telemetry consent`, which records the consent in Clio's state directory and never in the workspace; `--revoke` ends it from the session's next call. A session's research capture stops at 256 MiB, and a `journal.gap` record marks what was refused. Every journal segment header records the mode and the effective flags, and a change starts a new segment at the journal's next write. A project or local layer can lower capture but never raise it above user settings.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
@@ -329,10 +325,9 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `telemetry.research.content` | `false` | next turn, in research mode with workspace consent |
 | `telemetry.research.deltas` | `true` | next turn, in research mode |
 | `telemetry.research.providerHeaders` | `true` | next turn, in research mode |
-| `telemetry.research.systemOneDataset` | `true` | next turn, in research mode |
 | `telemetry.research.busTrace` | `false` | next turn, in research mode |
 
-Renamed version-1 paths and retired keys, including the version-2 keys `fleet.decisionProfiles`, `turnControl.interpretation` and the per-agent `permissionTimeoutMs` and `labels`, are listed in the [version 1 to version 2 key map](configuration-reference.md#version-1-to-version-2-key-map) and [retired keys and values](configuration-reference.md#retired-keys-and-values). A user `settings.yaml` that names one is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. The decision-layer replacement is described in the [System One guide](system-one.md).
+Renamed version-1 paths and retired keys, including the version-2 keys `fleet.decisionProfiles`, `turnControl.interpretation` and the per-agent `permissionTimeoutMs` and `labels`, are listed in the [version 1 to version 2 key map](configuration-reference.md#version-1-to-version-2-key-map) and [retired keys and values](configuration-reference.md#retired-keys-and-values). A user `settings.yaml` that names one is refused with a targeted removal message, and a project or local layer drops the leaf with the same diagnostic. Retired System One, speculative dispatch and orientation keys never block loading: they are ignored, doctor reports them and `clio-coder doctor --fix` removes them, as the [System One guide](system-one.md#retired-settings) lists.
 
 ---
 

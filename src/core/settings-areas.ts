@@ -191,8 +191,6 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "fleet.retry.routeCooldownMs":
 		case "fleet.retry.breakerThreshold":
 			return place("advanced", "Fleet timing");
-		case "fleet.speculativeDispatch":
-			return place("advanced", "Experimental");
 		case "fleet.adaptiveRouting.roles":
 		case "fleet.adaptiveRouting.postures":
 			return place("agents", "Automatic routing");

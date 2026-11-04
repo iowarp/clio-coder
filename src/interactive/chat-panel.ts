@@ -28,7 +28,7 @@ import {
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "../session-control/chat-loop.js";
+import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "../session-control/chat-loop-messages.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
@@ -150,8 +150,6 @@ export interface ChatPanelTurnUsage {
 	spend?: TurnSpend;
 	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
 	coldReasons?: ReadonlyArray<string>;
-	/** Settled speculative workers, shown only on the Detailed receipt. */
-	prewarm?: SpeculativeDispatchCounts;
 }
 
 /**
@@ -1123,14 +1121,6 @@ function renderTurnUsageLine(
 	if (spend?.cost != null) facts.push(spend.cost);
 	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
-	}
-	if (usage.prewarm !== undefined) {
-		const prewarm = [
-			...(usage.prewarm.adopted > 0 ? [`${usage.prewarm.adopted} adopted`] : []),
-			...(usage.prewarm.discarded > 0 ? [`${usage.prewarm.discarded} unused`] : []),
-		];
-		if (prewarm.length === 0 && usage.prewarm.held > 0) prewarm.push(`${usage.prewarm.held} held`);
-		if (prewarm.length > 0) facts.push(`prewarm ${prewarm.join(", ")}`);
 	}
 	return hangProseLines(
 		wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(
@@ -2941,14 +2931,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					transcript.push({ role: "retryStatus", status: event.status, at: stamp() });
 				}
 				markDirty();
-				return;
-			}
-			if (event.type === "speculative_dispatch") {
-				if (lastSettledReceipt?.turnUsage !== undefined) {
-					invalidateEntryCache(lastSettledReceipt);
-					lastSettledReceipt.turnUsage = { ...lastSettledReceipt.turnUsage, prewarm: event.counts };
-					markDirty();
-				}
 				return;
 			}
 			if (event.type === "agent_end") {

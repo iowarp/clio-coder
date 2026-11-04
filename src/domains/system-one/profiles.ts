@@ -2,27 +2,24 @@
  * Capability profiles for served decision models, and the renderers that ask
  * them.
  *
- * A profile is a declared contract, not a measurement: which tasks and answer
- * semantics the model family may be asked, the limits its publisher declares,
- * and how its numbers are read. Every request passes through `render`, so a
+ * A profile is a declared contract, not a measurement: which answer semantics the
+ * model family may be asked, the limits its publisher declares, and how its numbers
+ * are read. Every request passes through `render`, so a
  * question a profile cannot carry is abstained on before any byte leaves, and
- * an oversized option is refused rather than cut. Every profile still speaks
- * the existing `POST /v1/systemone` wire; a model without a server for it is
- * the operator's to serve (for example the Julia adapter), and nothing here
- * installs a runtime or weights.
+ * an oversized option is refused rather than cut. Every typed family still speaks
+ * the existing `POST /v1/systemone` wire; a model without a server for it is the
+ * operator's to serve (for example the Julia adapter), and nothing here installs a
+ * runtime or weights.
  *
  * Wire compatibility: the legacy request is `{state, model?, questions}` and no
- * known server is documented to ignore extra members, so the semantic question
- * id, task and renderer revision stay in Clio's record and are not sent. A
- * server that wants them needs an agreed optional request member (proposed
- * name `contract: {renderer, questions: {id: {task, kind}}}`) before Clio may
- * send it.
+ * known server is documented to ignore extra members, so the semantic kind and
+ * renderer revision stay in Clio and are not sent.
  */
 
-import type { DecisionTask, ReadoutKind, RendererId, SemanticKind } from "./contract.js";
-import { DECISION_TASKS, semanticKind } from "./contract.js";
+import { existsSync } from "node:fs";
+import type { ReadoutKind, SemanticKind } from "./contract.js";
 import { MAX_CHOICE_OPTIONS } from "./questions.js";
-import type { Question } from "./types.js";
+import type { EngineCapabilities, Question } from "./types.js";
 
 export const PROFILE_IDS = [
 	"generic",
@@ -34,26 +31,22 @@ export const PROFILE_IDS = [
 	"gliner2.5-decide",
 	"strands-decider",
 ] as const;
-export type ProfileId = (typeof PROFILE_IDS)[number];
+/** Selectable on a typed-wire engine. `llm-structured` is what any chat target declares and is not chosen by hand. */
+export type ProfileId = (typeof PROFILE_IDS)[number] | "llm-structured";
 
-export interface CapabilityProfile {
+/** What a family declares; `engineCapabilities` adds the window of the target it runs on. */
+export interface CapabilityProfile extends Omit<EngineCapabilities, "windowTokens"> {
 	readonly id: ProfileId;
-	readonly renderer: RendererId;
-	readonly tasks: ReadonlySet<DecisionTask>;
-	readonly kinds: ReadonlySet<SemanticKind>;
-	/** Options of one choice or levels of one score, inclusive. A noul is two. */
-	readonly minOptions: number;
-	readonly maxOptions: number;
-	/** Declared tokens of one option's text, or null for no declared bound. */
-	readonly optionTokens: number | null;
-	/** Declared tokens of the question with all its options, or null. */
-	readonly headTokens: number | null;
 	/** Declared ceiling of one request's window; the target's own window applies under it. */
 	readonly windowCeiling: number | null;
-	readonly readout: Readonly<Record<SemanticKind, ReadoutKind>>;
+	/** A model tokenizer that replaces the byte proof once it is cached. Absent means the byte proof is all there is. */
+	readonly tokenizer?: {
+		readonly label: string;
+		load(): Promise<unknown>;
+		cached(): Promise<boolean>;
+	};
 }
 
-const ALL_TASKS: ReadonlySet<DecisionTask> = new Set(DECISION_TASKS);
 const ALL_KINDS: ReadonlySet<SemanticKind> = new Set(["boolean", "exclusive", "ordinal", "independent"]);
 const SERVER_READOUT: Readonly<Record<SemanticKind, ReadoutKind>> = {
 	boolean: "server",
@@ -64,14 +57,15 @@ const SERVER_READOUT: Readonly<Record<SemanticKind, ReadoutKind>> = {
 
 const LEGACY = {
 	renderer: "systemone-v1",
-	tasks: ALL_TASKS,
-	kinds: ALL_KINDS,
+	semantics: ALL_KINDS,
 	minOptions: 1,
 	maxOptions: MAX_CHOICE_OPTIONS,
 	optionTokens: null,
 	headTokens: null,
 	windowCeiling: null,
 	readout: SERVER_READOUT,
+	probabilities: true,
+	windowCounts: "per-question",
 } as const;
 
 /**
@@ -88,9 +82,9 @@ const LEGACY = {
  *
  * GLiNER2.5 classification reads a label set as an exclusive softmax or as
  * independent sigmoids (multi-label), which are different semantics. The small
- * classification model is narrowed to label-picking and relevance; the
- * dedicated English Decide model is a different, larger model that its card
- * also offers for yes/no and ordinal scales. Neither declares an option bound
+ * classification model is narrowed to those two; the dedicated English Decide
+ * model is a different, larger model that its card also offers for yes/no and
+ * ordinal scales. Neither declares an option bound
  * in its card, so none is invented here.
  *
  * The Strands Decider 2B speaks the legacy wire unchanged and reads every task.
@@ -107,32 +101,40 @@ const LEGACY = {
  * a score is the expectation over its levels.
  */
 export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
-	generic: { id: "generic", ...LEGACY },
-	jev: { id: "jev", ...LEGACY },
+	// Nothing declares what an unnamed server's numbers are, so they do not count as real probabilities.
+	generic: { id: "generic", ...LEGACY, probabilities: false },
+	// The server refuses a request as a whole with HTTP 400 max_tokens_exceeded: on jev-1.14.0, 57,013
+	// input tokens at 220,391 characters answered and 262,048 characters did not, each row far under the window.
+	jev: { id: "jev", ...LEGACY, windowCounts: "whole-request" },
 	laya: { id: "laya", ...LEGACY, windowCeiling: 512 },
 	"laya-multilingual": { id: "laya-multilingual", ...LEGACY, windowCeiling: 1024 },
 	"julia-1": {
 		id: "julia-1",
 		renderer: "julia-compact-v1",
-		tasks: ALL_TASKS,
-		kinds: ALL_KINDS,
+		semantics: ALL_KINDS,
 		minOptions: 2,
 		maxOptions: 20,
 		optionTokens: 48,
 		headTokens: 512,
 		windowCeiling: 8192,
+		tokenizer: {
+			label: "Julia-1's tokenizer",
+			load: () => import("./julia-tokenizer.js").then((module) => module.loadJuliaTokenizer()),
+			cached: () => import("./julia-tokenizer.js").then((module) => existsSync(module.juliaTokenizerPath())),
+		},
 		readout: {
 			boolean: "softmax-binary",
 			exclusive: "softmax-exclusive",
 			ordinal: "ordinal-expectation",
 			independent: "softmax-binary",
 		},
+		probabilities: true,
+		windowCounts: "per-question",
 	},
 	"gliner2.5-small": {
 		id: "gliner2.5-small",
 		renderer: "gliner-label-v1",
-		tasks: new Set<DecisionTask>(["intent", "recipe", "relevance", "clusterSelect"]),
-		kinds: new Set<SemanticKind>(["exclusive", "independent"]),
+		semantics: new Set<SemanticKind>(["exclusive", "independent"]),
 		minOptions: 2,
 		maxOptions: MAX_CHOICE_OPTIONS,
 		optionTokens: null,
@@ -144,12 +146,13 @@ export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 			ordinal: "ordinal-expectation",
 			independent: "sigmoid-independent",
 		},
+		probabilities: true,
+		windowCounts: "per-question",
 	},
 	"gliner2.5-decide": {
 		id: "gliner2.5-decide",
 		renderer: "gliner-label-v1",
-		tasks: new Set<DecisionTask>(["intent", "recipe", "relevance", "clusterSelect", "turnEnd"]),
-		kinds: ALL_KINDS,
+		semantics: ALL_KINDS,
 		minOptions: 2,
 		maxOptions: MAX_CHOICE_OPTIONS,
 		optionTokens: null,
@@ -161,12 +164,13 @@ export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 			ordinal: "ordinal-expectation",
 			independent: "sigmoid-independent",
 		},
+		probabilities: true,
+		windowCounts: "per-question",
 	},
 	"strands-decider": {
 		id: "strands-decider",
 		renderer: "systemone-v1",
-		tasks: ALL_TASKS,
-		kinds: ALL_KINDS,
+		semantics: ALL_KINDS,
 		minOptions: 1,
 		maxOptions: MAX_CHOICE_OPTIONS,
 		optionTokens: null,
@@ -178,6 +182,23 @@ export const PROFILES: Readonly<Record<ProfileId, CapabilityProfile>> = {
 			ordinal: "ordinal-expectation",
 			independent: "softmax-binary",
 		},
+		probabilities: true,
+		windowCounts: "per-question",
+	},
+	// One schema-bound request answered with labels (`engines/llm-batch.ts`). A label has no
+	// probability scale, and the prompt holds every question, so the window counts all of them.
+	"llm-structured": {
+		id: "llm-structured",
+		renderer: "llm-prompt",
+		semantics: ALL_KINDS,
+		minOptions: 1,
+		maxOptions: MAX_CHOICE_OPTIONS,
+		optionTokens: null,
+		headTokens: null,
+		windowCeiling: null,
+		readout: { boolean: "categorical", exclusive: "categorical", ordinal: "categorical", independent: "categorical" },
+		probabilities: false,
+		windowCounts: "whole-request",
 	},
 };
 
@@ -185,12 +206,18 @@ export function profileFor(id: ProfileId | undefined): CapabilityProfile {
 	return PROFILES[id ?? "generic"];
 }
 
+/** What an engine on this profile declares, on a target of this window. */
+export function engineCapabilities(profile: CapabilityProfile, declaredWindow: unknown): EngineCapabilities {
+	const { id: _id, windowCeiling: _ceiling, tokenizer: _tokenizer, ...declared } = profile;
+	return { ...declared, windowTokens: engineWindow(profile, declaredWindow) };
+}
+
 /**
  * The window one request may fill: what the target declares, bounded by the
  * profile's ceiling. Neither raises the other, and a target that declares no
  * usable window takes the ceiling. Null means no bound is known.
  */
-export function engineWindow(profile: CapabilityProfile, declared: unknown): number | null {
+export function engineWindow(profile: Pick<CapabilityProfile, "windowCeiling">, declared: unknown): number | null {
 	const window = typeof declared === "number" && Number.isFinite(declared) && declared > 0 ? declared : null;
 	if (profile.windowCeiling === null) return window;
 	return window === null ? profile.windowCeiling : Math.min(window, profile.windowCeiling);
@@ -216,7 +243,7 @@ function fitsByteBound(text: string, tokens: number): boolean {
 }
 
 /** A counted bound: the abstain reason, null when it fits, undefined when the counter cannot decide. */
-type ExactBound = (question: Question, options: ReadonlyArray<string>) => string | null | undefined;
+export type ExactBound = (question: Question, options: ReadonlyArray<string>) => string | null | undefined;
 const exactBounds = new Map<ProfileId, ExactBound>();
 
 /** A profile's own tokenizer, once loaded, replaces the byte proof with the model's real count. */
@@ -251,14 +278,18 @@ export type Rendered =
 			readonly question: Question;
 			/** `exact`: no declared bound applies. `byte-bound`: proven by UTF-8 bytes. `token-count`: counted by the model's tokenizer. */
 			readonly preflight: "exact" | "byte-bound" | "token-count";
-			/** True when the site's compact wording was used. */
+			/** True when the point's compact wording was used. */
 			readonly compact: boolean;
 	  }
 	| { readonly abstain: string };
 
-function bounded(profile: CapabilityProfile, question: Question): { problem: string | null; counted: boolean } {
+function bounded(
+	profile: EngineCapabilities,
+	question: Question,
+	exactBound?: ExactBound,
+): { problem: string | null; counted: boolean } {
 	const texts = optionTexts(question);
-	const counted = exactBounds.get(profile.id)?.(question, texts);
+	const counted = exactBound?.(question, texts);
 	if (counted !== undefined) return { problem: counted, counted: true };
 	if (profile.optionTokens !== null) {
 		const long = texts.findIndex((text) => !fitsByteBound(text, profile.optionTokens as number));
@@ -291,36 +322,41 @@ function compacted(question: Question): Question {
 }
 
 /**
- * One question as this profile's model reads it, or the reason it must not be
- * asked. The legacy renderer is the identity, so Jev and every existing server
- * receive exactly what they did. A bounded renderer prefers the site's compact
- * wording when one is given, keeps option keys and order, and abstains when
- * neither wording provably fits; it never cuts text to make it fit.
+ * One question as this family's model reads it, or the reason it must not be asked.
+ * The legacy renderer and the LLM prompt are the identity. A bounded renderer prefers
+ * the point's compact wording when one is given, keeps option keys and order, and
+ * abstains when neither wording provably fits; it never cuts text to make it fit.
  */
 export function render(
-	profile: CapabilityProfile,
-	task: DecisionTask,
+	capabilities: EngineCapabilities,
+	semantic: SemanticKind,
 	question: Question,
 	compact?: Question,
+	exactBound?: ExactBound,
 ): Rendered {
-	if (!profile.tasks.has(task)) return { abstain: `profile ${profile.id} does not answer task ${task}` };
-	const kind = semanticKind(task, question.type);
-	if (!profile.kinds.has(kind)) return { abstain: `profile ${profile.id} does not answer ${kind} questions` };
+	if (!capabilities.semantics.has(semantic)) return { abstain: `this engine does not answer ${semantic} questions` };
 	const count = optionTexts(question).length;
-	if (count < profile.minOptions || count > profile.maxOptions) {
-		return { abstain: `${count} options; profile ${profile.id} reads ${profile.minOptions} to ${profile.maxOptions}` };
+	if (count < capabilities.minOptions || count > capabilities.maxOptions) {
+		return { abstain: `${count} options; this engine reads ${capabilities.minOptions} to ${capabilities.maxOptions}` };
 	}
-	if (profile.renderer === "systemone-v1") return { question, preflight: "exact", compact: false };
-	const declared = profile.optionTokens !== null || profile.headTokens !== null;
+	if (capabilities.renderer === "systemone-v1" || capabilities.renderer === "llm-prompt") {
+		return { question, preflight: "exact", compact: false };
+	}
+	const declared = capabilities.optionTokens !== null || capabilities.headTokens !== null;
 	const preflightOf = (counted: boolean) => (!declared ? "exact" : counted ? "token-count" : "byte-bound");
 	if (compact !== undefined && sameShape(question, compact)) {
 		const short = compacted(compact);
-		const check = bounded(profile, short);
+		const check = bounded(capabilities, short, exactBound);
 		if (check.problem === null) return { question: short, preflight: preflightOf(check.counted), compact: true };
 	}
 	const full = compacted(question);
-	const check = bounded(profile, full);
+	const check = bounded(capabilities, full, exactBound);
 	return check.problem === null
 		? { question: full, preflight: preflightOf(check.counted), compact: false }
 		: { abstain: `${check.problem}; not truncated` };
+}
+
+/** The counted bound a family's tokenizer registered, if any. */
+export function exactBoundFor(id: ProfileId): ExactBound | undefined {
+	return exactBounds.get(id);
 }

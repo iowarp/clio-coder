@@ -16,14 +16,12 @@ function settings(url: string, contextWindow?: number): string {
 		`    url: ${url}/v1`,
 		...(contextWindow === undefined ? [] : ["    capabilities:", `      contextWindow: ${contextWindow}`]),
 		"systemOne:",
+		"  use: npu",
 		"  engines:",
 		"    npu:",
 		"      kind: systemone",
 		"      target: decider-npu",
 		"      profile: strands-decider",
-		"  sites:",
-		"    consult: npu",
-		"    turnEnd: npu",
 		"",
 	].join("\n");
 }
@@ -52,7 +50,7 @@ test("doctor shows each bound System One engine's profile, window and passive ro
 
 	const findings = await runDoctorModelChecks();
 	const rows = findings.filter((finding) => finding.name === "system one (experimental) engine npu");
-	assert.equal(rows.length, 1, "one row per engine, however many sites it serves");
+	assert.equal(rows.length, 1, "one row for the engine");
 	const row = rows[0];
 	assert.equal(row?.ok, true);
 	assert.equal(row?.level, "info");
@@ -68,7 +66,7 @@ test("doctor shows each bound System One engine's profile, window and passive ro
 	assert.deepEqual(decisions, [], "doctor never posts a decision");
 });
 
-test("doctor warns that an unreachable System One engine leaves its sites as if unbound", async (t) => {
+test("doctor warns that an unreachable System One engine leaves consult with no answer", async (t) => {
 	const home = await isolateClioEnv("clio-doctor-system-one-engine-down-");
 	t.after(() => home.restore());
 	const server = createServer();
@@ -83,5 +81,5 @@ test("doctor warns that an unreachable System One engine leaves its sites as if 
 	assert.equal(row?.ok, true);
 	assert.equal(row?.level, "warn");
 	assert.match(row?.detail ?? "", /window 480 tokens \(the systemone runtime default; set capabilities\.contextWindow/u);
-	assert.match(row?.detail ?? "", /did not answer: .*every site it serves behaves as if unbound/u);
+	assert.match(row?.detail ?? "", /did not answer: .*consult gets no answer from it/u);
 });

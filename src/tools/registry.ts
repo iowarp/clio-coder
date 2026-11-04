@@ -25,7 +25,7 @@ import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { toolSurfaceSources, turnAllowsTool } from "../core/turn-constraints.js";
-import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
+import { containsInstructionMarkers, INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type {
 	MiddlewareEffect,
@@ -44,7 +44,6 @@ import {
 } from "../domains/safety/admission.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
-import { describeCallTarget } from "../domains/safety/call-target.js";
 import { GIT_CONTROL_FILE_RULE_ID } from "../domains/safety/containment.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
@@ -66,7 +65,6 @@ import type { SessionCodeConsent } from "../domains/safety/session-code-consent.
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
 import { YOLO_FLOOR_REASON_PREFIX } from "../domains/safety/yolo-floor.js";
-import { screensToolResult } from "../domains/system-one/sites/tool-result.js";
 import type { WorkspaceSnapshotOutcome, WorkspaceSnapshotRequest } from "../domains/workspace-snapshots/store.js";
 import { type WorkspaceSnapshotTrigger, workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
 import type { ImageContent } from "../engine/types.js";
@@ -312,13 +310,6 @@ export type ToolResult =
 	  }
 	| { kind: "error"; message: string; details?: ToolResultDetails; modelContext?: string };
 
-/** What the yolo gate is told about a call: the card's own allowlisted, redacted one-line description. */
-export interface ToolCallGateSubject {
-	readonly tool: string;
-	readonly actionClass: string;
-	readonly target: string;
-}
-
 export interface RegistryDeps {
 	safety: SafetyContract;
 	/**
@@ -400,19 +391,6 @@ export interface RegistryDeps {
 	 */
 	git?: AdmissionGitContext;
 	/**
-	 * Told about external content (a fetched page, an MCP result) as its result
-	 * is delivered, so an experimental System One classifier can read it for
-	 * instructions aimed at an agent, detached, and record what it read. The
-	 * result reaches the model unchanged and at once; the deterministic marker
-	 * scan is what labels it. Absent in workers.
-	 */
-	screenToolResult?: (
-		source: string,
-		content: string,
-		ref: string | undefined,
-		restrictions: FlowRestrictionSet | null,
-	) => void;
-	/**
 	 * The session's information-flow ledger. `carried` is what the context
 	 * already holds, judged before a mediated outbound call (web_fetch,
 	 * web_read, an MCP tool) runs; `absorb` records what a restricted read
@@ -427,15 +405,6 @@ export interface RegistryDeps {
 		mcpTransport?(tool: string): string | null;
 		absorb(set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void;
 	};
-	/**
-	 * Told when autonomy is yolo and an execute-class call was admitted as
-	 * unrecognized, as it starts running. The System One gate is experimental:
-	 * it is evaluated detached and recorded under `ref`, the tool call id, and it
-	 * never waits for an answer or changes how the call is admitted. Only the
-	 * interactive TUI registry passes it; headless and ACP have nobody to label
-	 * the record. Absent in workers.
-	 */
-	observeToolCallGate?: (subject: ToolCallGateSubject, ref: string | undefined) => void;
 	/**
 	 * The attended session's test-runner consent (#377 follow-up). Read on every
 	 * main admission, and granted when the operator approves the consent ask.
@@ -775,13 +744,10 @@ export interface PermissionRequiredMeta {
 	 */
 	dispatchPlan?: DispatchPlanView;
 	/**
-	 * Set when a System One gate raised this park, to the reason it gave. That
-	 * reason is the card's whole advisory and the card asks no second site. The
-	 * registry raises no gate park while the gate only records; the card and
-	 * the transcript keep rendering one.
+	 * Set when the safety judge handed this call to the operator, to the reason it gave.
 	 */
 	gateReason?: string;
-	/** The build that gave `gateReason`, so the card and the transcript rows can say whose judgment it was. */
+	/** The build that gave `gateReason`, which the card drops from a reason that repeats it. */
 	gateBuild?: string;
 }
 
@@ -1274,9 +1240,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// refusal quotes the server's own text, which the source rule labels
 				// exactly as it would label a result.
 				if (nestedBlocked !== null) return nestedBlocked;
-				const carriedForScreen = mergeFlowRestrictions(deps.flow?.carried() ?? null, sourceRestrictions);
 				const labeled = withFlowRestrictions(result, sourceRestrictions);
-				observeExternalResult(spec, call, labeled, options, carriedForScreen);
 				const digest = toolResultDigestFor(spec, labeled, resultDisposition, options);
 				const syncAfter = runToolHook("after_tool", spec, call, decision, options, labeled, digest);
 				const afterEffects = deps.middleware?.hasAwaitedHook?.("after_tool", spec.name)
@@ -1557,33 +1521,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						},
 					]
 				: effects;
-		}
-	};
-
-	/**
-	 * Hand a result that carries someone else's text to System One's classifier,
-	 * which only records. Nothing is awaited and the result is never changed, so
-	 * a late reading cannot put a banner in front of content the model already read.
-	 */
-	const observeExternalResult = (
-		spec: ToolSpec,
-		call: ClassifierCall,
-		result: ToolResult,
-		options: ToolInvokeOptions | undefined,
-		restrictions: FlowRestrictionSet | null,
-	): void => {
-		const screen = deps.screenToolResult;
-		if (screen === undefined || result.kind !== "ok" || !screensToolResult(spec.name)) return;
-		if (result.output.trim().length === 0) return;
-		try {
-			screen(
-				`${spec.name} ${describeCallTarget(spec.name, call.args)}`.trim(),
-				result.output,
-				options?.toolCallId,
-				restrictions,
-			);
-		} catch {
-			// The classifier only records; a failure to start it changes no tool call.
 		}
 	};
 
@@ -2066,42 +2003,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 
 	const nextApprovalRequestId = (): string => `apr-${approvalRequestToken}-${++approvalRequestCounter}`;
 
-	/**
-	 * The yolo gate. Yolo runs an unrecognized command without asking, which is
-	 * the one place where nothing has read the command at all. A bound System One
-	 * site reads it alongside, detached, and its reading is only recorded: the
-	 * call is admitted exactly as yolo admits it and never waits for the engine.
-	 * A call the classifier already parks, blocks or recognizes does not reach it.
-	 */
-	const observeUnrecognizedExecute = (
-		call: ClassifierCall,
-		decision: SafetyDecision,
-		options: ToolInvokeOptions | undefined,
-	): void => {
-		const observe = deps.observeToolCallGate;
-		if (observe === undefined) return;
-		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
-		if (
-			level !== "yolo" ||
-			decision.classification.actionClass !== "execute" ||
-			decision.policy?.execRecognition !== "unrecognized"
-		) {
-			return;
-		}
-		try {
-			observe(
-				{
-					tool: call.tool,
-					actionClass: decision.classification.actionClass,
-					target: describeCallTarget(call.tool, call.args),
-				},
-				options?.toolCallId,
-			);
-		} catch {
-			// The gate only records; a failure to start it leaves the call as yolo admitted it.
-		}
-	};
-
 	const notifyPermissionRequired = (
 		call: ClassifierCall,
 		decision: SafetyDecision,
@@ -2203,7 +2104,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 		}
 		if (outcome.kind === "execute") {
-			observeUnrecognizedExecute(admissionCall, outcome.decision, options);
 			return runSpec(outcome.spec, admissionCall, outcome.decision, options);
 		}
 		// The safety judge reviews the ask before anyone is asked. An allow runs
@@ -3348,7 +3248,7 @@ function applyToolResultEffects(
 	const inherited = inheritedHostNotes(result, nested);
 	const annotations = annotationMessages(effects);
 	if (annotations.length === 0) return withHostNotes(result, inherited);
-	const warning = `[middleware:warn] ${INSTRUCTION_SHAPED_WARNING}`;
+	const warning = INSTRUCTION_SHAPED_NOTE;
 	const prefix = !bannered && annotations.includes(warning) ? `${warning}\n\n` : "";
 	const remaining = annotations.filter((annotation) => annotation !== warning);
 	const suffix = remaining.length > 0 ? `${TOOL_RESULT_NOTES_SEPARATOR}${remaining.join("\n")}` : "";

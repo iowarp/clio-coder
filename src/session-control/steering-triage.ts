@@ -1,5 +1,6 @@
 /**
- * Triage: one side-model round over the queued steering messages.
+ * Triage: one round over the queued steering messages, typed picks from a bound
+ * System One route or else one side-model round.
  *
  * The queue delivers every pending message at the next slot in the order the
  * operator typed them. Triage reads the whole queue once it has settled and
@@ -11,13 +12,20 @@
  * a verdict that lands after the queue changed is dropped, and a failed round
  * leaves the queue exactly as the operator left it.
  *
- * The relation and urgency vocabularies are the steer site's, so the dataset
- * rows this writes and the rows the site writes read the same labels.
+ * The relation and urgency vocabularies live in `core/steering-vocabulary.ts`,
+ * so the typed picks and the side-model round read the same labels.
  */
 
-import type { SteerRelation, SteerUrgency } from "../domains/system-one/sites/steer.js";
-import { STEER_RELATIONS, STEER_URGENCIES } from "../domains/system-one/sites/steer.js";
+import type { SteeringTriageSettings } from "../core/defaults.js";
+import type { SteerRelation, SteerUrgency } from "../core/steering-vocabulary.js";
+import { STEER_RELATIONS, STEER_URGENCIES } from "../core/steering-vocabulary.js";
+import type { SystemOne } from "../domains/system-one/index.js";
+import type { TriagePick } from "../domains/system-one/points/index.js";
+import { triagePoint } from "../domains/system-one/points/index.js";
 import type { QueuedChatMessage, QueuedMessageKind } from "./turn-queues.js";
+
+/** What a round reads of System One. */
+export type TriageSystemOne = Pick<SystemOne, "bound" | "ask">;
 
 export const TRIAGE_SCHEMA_NAME = "clio_coder_steering_triage";
 export const TRIAGE_MAX_TOKENS = 600;
@@ -49,8 +57,12 @@ export interface TriageVerdict {
 	readonly id: string;
 	readonly relation: SteerRelation;
 	readonly urgency: SteerUrgency;
-	/** 0 to 1, the model's own word; never a calibrated probability. */
-	readonly confidence: number;
+	/**
+	 * 0 to 1. From a side model this is its own word and never a calibrated probability. From
+	 * a typed route it is the mass on the relation. Absent when the engine declares no real
+	 * probabilities: that verdict is a label, which has no confidence and can only mark.
+	 */
+	readonly confidence?: number;
 }
 
 const RELATION_KEYS = Object.keys(STEER_RELATIONS) as ReadonlyArray<SteerRelation>;
@@ -158,7 +170,7 @@ export function parseTriageAnswer(text: string, ids: ReadonlyArray<string>): Tri
 
 /** The slot a verdict moves an entry to, or undefined to leave the operator's choice alone. */
 export function triageKindFor(verdict: TriageVerdict): QueuedMessageKind | undefined {
-	if (verdict.relation === "newTask" && verdict.urgency === "endOfTurn") return "follow-up";
+	if (verdict.relation === "newTask" && verdict.urgency !== "now") return "follow-up";
 	return undefined;
 }
 
@@ -168,7 +180,7 @@ export function triageLabelsFor(verdict: TriageVerdict): Readonly<Record<string,
 		producer: "triage",
 		relation: verdict.relation,
 		urgency: verdict.urgency === "now" ? "now" : verdict.urgency === "endOfTurn" ? "end-of-turn" : "next-slot",
-		confidence: verdict.confidence.toFixed(2),
+		...(verdict.confidence === undefined ? { readout: "label" } : { confidence: verdict.confidence.toFixed(2) }),
 	};
 }
 
@@ -183,10 +195,72 @@ export function triageMayInterrupt(
 ): boolean {
 	return (
 		verdict.relation === "stop" &&
+		verdict.confidence !== undefined &&
 		verdict.confidence >= TRIAGE_STOP_MIN_CONFIDENCE &&
 		entry.pinned !== true &&
 		now - entry.enqueuedAt <= TRIAGE_STOP_MAX_AGE_MS
 	);
+}
+
+/** Typed picks as verdicts. Without real probabilities the mass is one-hot and would always clear the stop bar, so a verdict carries none. */
+export function typedTriageVerdicts(picks: ReadonlyArray<TriagePick>, probabilities: boolean): TriageVerdict[] {
+	return picks.map(({ id, relation, urgency, mass }) => ({
+		id,
+		relation,
+		urgency,
+		...(probabilities ? { confidence: mass } : {}),
+	}));
+}
+
+/** A bound route takes the round unless the operator named a triage target, which keeps the side model. */
+function typedTriageRoute(
+	triage: Pick<SteeringTriageSettings, "target">,
+	systemOne: TriageSystemOne | undefined,
+): TriageSystemOne | null {
+	return !triage.target && systemOne?.bound() === true ? systemOne : null;
+}
+
+/** Queue length that starts a round: one when a route answers, so a lone "stop" is read; the side model keeps its setting. */
+export function triageFloor(
+	triage: Pick<SteeringTriageSettings, "target" | "minQueued">,
+	systemOne: TriageSystemOne | undefined,
+): number {
+	return typedTriageRoute(triage, systemOne) === null ? triage.minQueued : 1;
+}
+
+/**
+ * One round over a settled queue: the typed picks when a route is bound, the side-model
+ * round when none is or when the ask comes back null. A queue that moved while the ask
+ * ran is left alone, because the verdict no longer describes it and a fallback would
+ * only reach the same end. The side round's own floor still holds, so a lone entry the
+ * route failed on stays where the operator left it.
+ */
+export async function runTriageRound(input: {
+	readonly triage: Pick<SteeringTriageSettings, "target" | "minQueued" | "timeoutMs">;
+	readonly systemOne: TriageSystemOne | undefined;
+	readonly asked: ReadonlyArray<TriageEntry>;
+	readonly task: () => string;
+	readonly previous: () => string;
+	/** Whether the run is still going and the queue still holds what was asked. */
+	readonly current: () => boolean;
+	readonly apply: (verdicts: ReadonlyArray<TriageVerdict>) => void;
+	readonly side: () => Promise<void>;
+}): Promise<void> {
+	const { triage, asked } = input;
+	const route = typedTriageRoute(triage, input.systemOne);
+	if (route !== null) {
+		const verdict = await route.ask(triagePoint(triage.timeoutMs), {
+			task: input.task(),
+			previous: input.previous(),
+			entries: asked,
+		});
+		if (!input.current()) return;
+		if (verdict !== null) {
+			input.apply(typedTriageVerdicts(verdict.value.picks, verdict.probabilities));
+			return;
+		}
+	}
+	if (asked.length >= triage.minQueued) await input.side();
 }
 
 /** True when the queue still holds exactly the entries the round was asked about, in the same order and text. */

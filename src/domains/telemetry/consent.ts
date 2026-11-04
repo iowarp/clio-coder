@@ -5,8 +5,7 @@ import { isAbsolute, join, sep } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
-import { effectiveTelemetryCapture, systemOneDatasetRecording } from "../../core/telemetry/capture.js";
-import { clioStateDir } from "../../core/xdg.js";
+import { effectiveTelemetryCapture } from "../../core/telemetry/capture.js";
 import { telemetryConsentPath } from "./paths.js";
 
 /**
@@ -193,10 +192,4 @@ export function workspaceTelemetryCapture(
 		// An unresolvable directory has no consent.
 	}
 	return { capture: effectiveTelemetryCapture(telemetry, covering !== null), covering, consent };
-}
-
-/** Whether research capture keeps the System One dataset for a session in `cwd` (#434). */
-export function systemOneRecordingLabel(settings: { telemetry: TelemetrySettings }, cwd: string): string {
-	const { capture } = workspaceTelemetryCapture(settings.telemetry, clioStateDir(), cwd);
-	return systemOneDatasetRecording(capture) ? "record on (research capture)" : "record off";
 }

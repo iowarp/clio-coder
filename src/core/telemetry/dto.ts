@@ -847,20 +847,23 @@ export const TimelineEntrySchema = Type.Union([
 		{
 			kind: Type.Literal("system-one"),
 			...at,
-			site: ExistingId,
-			moment: Type.Union([ExistingId, Type.Null()]),
+			point: ExistingId,
+			set: ExistingId,
 			outcome: SYSTEM_ONE_OUTCOME,
+			build: Type.Union([ExistingId, Type.Null()]),
 			latency: shown,
 			deadline: shown,
-			fitted: Type.Union([Type.Boolean(), Type.Null()]),
+			asked: Type.Integer({ minimum: 0 }),
+			abstained: Type.Integer({ minimum: 0 }),
 			routes: Type.Array(
 				Type.Object(
 					{
 						engine: ExistingId,
 						kind: ExistingId,
+						profile: ExistingId,
 						outcome: SYSTEM_ONE_OUTCOME,
 						roundTrip: Type.Union([shown, Type.Null()]),
-						breaker: Type.Union([vocabulary(["opened", "probe", "closed", "disabled"]), Type.Null()]),
+						breaker: Type.Union([vocabulary(["opened", "probe", "closed"]), Type.Null()]),
 					},
 					closed,
 				),

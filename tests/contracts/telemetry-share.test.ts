@@ -299,7 +299,7 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			const seal = rows.at(-1);
 			ok(closing?.kind === "header" && seal?.kind === "record");
 			const lines = rows.slice(0, -2).map((row) => {
-				ok(row.kind !== "skipped");
+				ok(row.kind === "header" || row.kind === "record");
 				return edit(row.kind === "header" ? row.header : row.record);
 			});
 			const carried = objectsOf(scope.objects);

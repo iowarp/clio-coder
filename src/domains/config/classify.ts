@@ -76,8 +76,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 const NEXT_TURN_FIELDS = new Set<string>([
 	"context.memory.observations.enabled",
 	"turnControl",
-	// Every site resolves its binding per call; consult alone is registered at
-	// startup and is listed as restart-required.
+	// An engine resolves per call; the use that registers consult at startup is restart-required.
 	"systemOne",
 	"targets",
 	"chat",
@@ -86,7 +85,6 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"fleet.rosters",
 	"fleet.agentProfiles",
 	"fleet.adaptiveRouting",
-	"fleet.speculativeDispatch",
 	"fleet.nodes",
 	"fleet.defaultNode",
 	"fleet.permissions",
@@ -113,7 +111,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([
 	"fleet.concurrency",
-	"systemOne.sites.consult",
+	"systemOne.use",
 	"interface.mode",
 	"interface.fullscreenScrollbar",
 	"interface.panes.enabled",

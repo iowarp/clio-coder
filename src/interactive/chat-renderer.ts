@@ -43,7 +43,7 @@ import { stripInjectedPreamble } from "../domains/session/history.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "../session-control/chat-loop.js";
+import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-loop.js";
 import { hasStructuredToolCall, toolResultSummary } from "../session-control/chat-loop-messages.js";
 import { isNoticeSource, type NoticeSource } from "../session-control/notice-source.js";
 import type { RehydrateChatPanelOptions, ReplayToolResult } from "../session-control/session-replay-messages.js";
@@ -734,17 +734,6 @@ export function rehydrateChatPanelFromTurns(
 	}
 }
 
-function speculativeDispatchCounts(data: unknown): SpeculativeDispatchCounts | null {
-	if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
-	const { held, adopted, discarded } = data as Record<string, unknown>;
-	if (
-		![held, adopted, discarded].every((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
-	) {
-		return null;
-	}
-	return { held: held as number, adopted: adopted as number, discarded: discarded as number };
-}
-
 function replayEntries(
 	chatPanel: ChatPanel,
 	turns: ReadonlyArray<SessionEntry>,
@@ -972,13 +961,6 @@ function replayEntries(
 				break;
 			}
 			case "custom":
-				if (entry.customType === "speculativeDispatch") {
-					// Written after its turn settled, and it annotates that receipt.
-					settleReplayedRun();
-					const counts = speculativeDispatchCounts(entry.data);
-					if (counts !== null) chatPanel.applyEvent({ type: "speculative_dispatch", counts });
-					break;
-				}
 				if (rendersCustomEntry(entry))
 					chatPanel.appendReplayBlock((width, detail, unbounded, terminalRows = 40) =>
 						renderCustomEntry(entry, width, detail, unbounded === true || options.unboundedToolBodies === true, terminalRows),
