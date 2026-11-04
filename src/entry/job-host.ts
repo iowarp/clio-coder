@@ -166,6 +166,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		owner,
 		constraints: runtimeDeps.constraints,
 		hostRefusal,
+		autonomy: deps.autonomy,
 		admissionRefusal: (runner, creator, constraints) => jobAuthorityRefusal(runtimeDeps, creator, runner, constraints),
 	});
 	const subscriptions = [

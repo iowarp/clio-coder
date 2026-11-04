@@ -5,6 +5,7 @@ import type { JobRunner } from "../core/job-types.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { ToolNames } from "../core/tool-names.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { JobExecutionContext, JobRunResult } from "../domains/scheduling/job-types.js";
 import type { HostEffectCall } from "./registry.js";
 
@@ -103,7 +104,18 @@ export function jobCommandEffect(runner: JobRunner, cwd: string): readonly HostE
 	];
 }
 
-export async function executeJobCommand(context: JobExecutionContext): Promise<JobRunResult> {
+/** At yolo nobody is there to log a CLI in, so the code host tokens pass, and nothing else does (#445). */
+function jobCommandEnv(autonomy: AutonomyLevel | undefined): Record<string, string> {
+	const env: Record<string, string> = {};
+	if (autonomy !== "yolo") return env;
+	for (const name of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+		const value = process.env[name];
+		if (value !== undefined) env[name] = value;
+	}
+	return env;
+}
+
+export async function executeJobCommand(context: JobExecutionContext, autonomy?: AutonomyLevel): Promise<JobRunResult> {
 	const runner = context.job.spec.runner;
 	if (runner.kind !== "command") throw new Error("Command job runner received a main occurrence.");
 	attestJobCommand(runner);
@@ -112,6 +124,7 @@ export async function executeJobCommand(context: JobExecutionContext): Promise<J
 		cwd: context.job.owner.cwd,
 		workspaceRoot: context.job.owner.cwd,
 		timeoutMs: context.job.spec.timeoutMs,
+		env: jobCommandEnv(autonomy),
 		maxOutputBytes: JOB_COMMAND_CAPTURE_BYTES,
 		signal: context.signal,
 	});
