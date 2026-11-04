@@ -548,7 +548,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					report(settleError);
 				}
 				live.delete(id);
-				retryAt.set(id, spanNow() + POLL_MS);
+				// Settlement may have queued a longer wait for a failed continuation; the poll must not shorten it (#445).
+				retryAt.set(id, Math.max(retryAt.get(id) ?? 0, spanNow() + POLL_MS));
 				schedule();
 			}
 		})();
