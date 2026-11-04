@@ -6,6 +6,7 @@ import {
 	type BashCommandResult,
 	bashSecretValues,
 	combineBashOutput,
+	combineLiveBashOutput,
 	runBashCommand,
 } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
@@ -366,7 +367,8 @@ export const bashTool: ToolSpec = {
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
-					options.onUpdate?.(shapeBashProgress(mask(combineBashOutput(progress)), progress.outputBytes, outputPolicy));
+					const output = combineLiveBashOutput({ stdout: mask(progress.stdout), stderr: mask(progress.stderr) });
+					options.onUpdate?.(shapeBashProgress(output, progress.outputBytes, outputPolicy));
 				};
 			}
 			const startedAt = performance.now();

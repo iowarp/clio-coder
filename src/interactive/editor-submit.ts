@@ -1,5 +1,5 @@
 import type { runBashCommand } from "../core/bash-exec.js";
-import { combineBashOutput } from "../core/bash-exec.js";
+import { combineBashOutput, combineLiveBashOutput } from "../core/bash-exec.js";
 import { type ExternalEditResult, editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
@@ -237,7 +237,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					parentTurnId,
 					signal: abort.signal,
 					onUpdate: (progress) => {
-						execution.output = combineBashOutput(progress);
+						execution.output = combineLiveBashOutput(progress);
 						execution.totalBytes = progress.outputBytes;
 						deps.ui.requestRender();
 					},

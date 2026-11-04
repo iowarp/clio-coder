@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createJsonCredentialScrub } from "../../src/cli/modes/json-stream.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
+import { combineLiveBashOutput } from "../../src/core/bash-exec.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
@@ -1484,6 +1485,25 @@ test("a cut-off message's text on its message_end row keeps its open URL back", 
 			["clone https://user:ZQXJ", "stop"],
 		],
 	);
+});
+
+test("live command output keeps stdout's open URL back past stderr, and a finished line still releases", () => {
+	const shown = (stdout: string, stderr: string) => {
+		const raw = combineLiveBashOutput({ stdout, stderr });
+		return new LiveToolView()
+			.outputRows((shapeBashProgress(raw, raw.length, "bounded") as { output: string }).output, 5, 400, {
+				rail: "",
+				railWidth: 0,
+			})
+			.join("\n");
+	};
+	strictEqual(shown("curl https://user:ZQXJ", "retrying\n"), "curl https://user:\nretrying");
+	strictEqual(shown("curl https://user:ZQXJ", "retrying"), "curl https://user:\nretrying");
+	strictEqual(shown("curl https://user:ZQXJ@host/x\n", "retrying\n"), "curl https://user:[redacted]@host/x\nretrying");
+	strictEqual(shown("listening on http://h:8080\n", "retrying\n"), "listening on http://h:8080\nretrying");
+	strictEqual(shown("listening on http://h:8080/x", "retrying\n"), "listening on http://h:8080/x\nretrying");
+	strictEqual(shown("", "curl https://user:ZQXJ"), "curl https://user:");
+	strictEqual(shown("curl https://user:ZQXJ", ""), "curl https://user:");
 });
 
 test("a worker's stream reaches the feed file held when it dies and whole when it stops", async () => {

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { isSecretArgKey } from "../domains/safety/redaction.js";
+import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import { bashShellPath } from "./bash-shell.js";
 import {
@@ -333,6 +333,16 @@ export async function bashSecretValues(secretNames?: Iterable<string>): Promise<
 export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "stderr">): string {
 	const { stdout, stderr } = result;
 	return stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
+}
+
+/**
+ * The merged output of a command still running. The merge writes the newline that keeps stderr off stdout's last line, and
+ * stdout can still grow there, so `https://u:pw` followed by stderr must stay held while `http://h:8080\n` followed by the
+ * same stderr has really ended. The two read the same once merged, which is why the hold comes first (#446).
+ */
+export function combineLiveBashOutput(progress: Pick<BashCommandResult, "stdout" | "stderr">): string {
+	const { stdout, stderr } = progress;
+	return combineBashOutput({ stdout: stderr.length > 0 ? holdUnresolvedUserinfo(stdout) : stdout, stderr });
 }
 
 /** A `required` sandbox with no backend, or a host with no bash: the command never spawned. */
