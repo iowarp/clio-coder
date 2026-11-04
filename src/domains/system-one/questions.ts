@@ -35,6 +35,9 @@ export function pointQuestion(question: Question): PointQuestion {
 	return { question, semantic };
 }
 
+/** Between a filter's rule and one item's text. {@link filterItemOf} reads it back. */
+const ITEM_MARKER = "\nItem: ";
+
 /**
  * One independent yes/no per item, keyed by the item's id, each asked under the same
  * rule. The numbers do not compete with each other's, which is what makes this a filter
@@ -48,10 +51,22 @@ export function filterQuestions(
 	for (const [id, item] of Object.entries(items)) {
 		questions[id] = {
 			semantic: "independent",
-			question: yesNo(`${rule.instructions}\nItem: ${item}`, rule.whenTrue, rule.whenFalse),
+			question: yesNo(`${rule.instructions}${ITEM_MARKER}${item}`, rule.whenTrue, rule.whenFalse),
 		};
 	}
 	return questions;
+}
+
+/**
+ * A filter question's rule and item, or null for any other question. This reads the
+ * instructions rather than a new field because they are what a `/v1/systemone` server
+ * receives and what the spec hash covers, so that request stays as it was measured.
+ */
+export function filterItemOf(question: Question): { readonly rule: string; readonly item: string } | null {
+	if (question.type !== "noul") return null;
+	const at = question.instructions.indexOf(ITEM_MARKER);
+	if (at < 0) return null;
+	return { rule: question.instructions.slice(0, at), item: question.instructions.slice(at + ITEM_MARKER.length) };
 }
 
 function blank(text: unknown): boolean {

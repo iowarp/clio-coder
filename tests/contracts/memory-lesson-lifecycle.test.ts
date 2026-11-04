@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,14 +10,17 @@ import type { CompletedLessonSource } from "../../src/domains/memory/history-rev
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
-import { loadMemoryRecordsSync } from "../../src/domains/memory/store.js";
+import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { proposeInjectedTaskMemory } from "../../src/domains/memory/task-bank-promotion.js";
 import { renderTaskMemoryHandoffSource } from "../../src/domains/memory/task-memory-handoff.js";
 import { runTaskMemoryPolicy, TaskMemoryEndpointPreemptedError } from "../../src/domains/memory/task-memory-policy.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { cwdHash } from "../../src/engine/session.js";
+import { closedSessionLessonSource } from "../../src/entry/flow-ledger.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
 
@@ -78,6 +81,90 @@ test("promote --from-handoff finds the source from any directory and refuses onl
 		process.chdir(previousCwd);
 		env.restore();
 	}
+});
+
+test("propose --from-evidence refuses a run or dispatching session that carries a flow label", async () => {
+	const env = await isolateClioEnv("memory-evidence-flow-");
+	const previousCwd = process.cwd();
+	try {
+		const project = realpathSync(mkdtempSync(join(env.dir, "project-")));
+		process.chdir(project);
+		const label = {
+			version: 1,
+			restrictions: [{ ruleId: "secrets", policyHash: "hash", sourceRef: "secrets/notes.txt", recipients: [] }],
+		};
+		const settle = async (id: string, sessionId: string | null, labeled: boolean) => {
+			const envelope = { ...fixtureEnvelope(id), sessionId, cwd: project };
+			const draft = fixtureReceiptDraft(envelope);
+			await writeSettledRun(clioStateDir(), {
+				...draft,
+				...(labeled ? { safety: { ...draft.safety, flowRestrictions: label } } : {}),
+			} as typeof draft);
+		};
+		const records = () => (existsSync(memoryStorePath(clioDataDir())) ? loadMemoryRecordsSync(clioDataDir()).length : 0);
+		const propose = (id: string) => runMemoryCommand(["propose", "--from-evidence", id]);
+		const at = "2026-11-03T10:00:00.000Z";
+		const sessionDir = join(clioStateDir(), "sessions", cwdHash(project), "labeled-session");
+		mkdirSync(sessionDir, { recursive: true });
+		writeFileSync(
+			join(sessionDir, "meta.json"),
+			JSON.stringify({ id: "labeled-session", cwd: project, createdAt: at, endedAt: at, clioCoderVersion: "0.6.8" }),
+		);
+		writeFileSync(
+			join(sessionDir, "current.jsonl"),
+			`${JSON.stringify({ kind: "custom", turnId: "label", parentTurnId: null, timestamp: at, customType: "clio_coder_flow_restriction", data: {} })}\n`,
+		);
+
+		await settle("run-labeled", null, true);
+		strictEqual(await propose("run-labeled"), 1, "the run's own result carries a label");
+		strictEqual(records(), 0);
+
+		await settle("run-from-labeled-session", "labeled-session", false);
+		strictEqual(await propose("run-from-labeled-session"), 1, "the dispatching session carries a label");
+		strictEqual(records(), 0);
+
+		await settle("run-clean", null, false);
+		strictEqual(await propose("run-clean"), 0, "a clean run with no session still proposes");
+		strictEqual(records(), 1);
+	} finally {
+		process.chdir(previousCwd);
+		env.restore();
+	}
+});
+
+test("a closed session's flow label restricts it from any branch, not only the active path", () => {
+	const at = "2026-11-03T10:00:00.000Z";
+	const message = (turnId: string, parentTurnId: string | null, role: string, payload: unknown) => ({
+		kind: "message",
+		turnId,
+		parentTurnId,
+		timestamp: at,
+		role,
+		payload,
+	});
+	const abandoned = [message("u0", null, "user", { text: "first" }), message("a0", "u0", "assistant", { text: "read" })];
+	const label = {
+		kind: "custom",
+		turnId: "label",
+		parentTurnId: "a0",
+		timestamp: at,
+		customType: "clio_coder_flow_restriction",
+		data: {},
+	};
+	const active = [
+		message("u1", "u0", "user", { text: "second" }),
+		message("c1", "u1", "tool_call", { toolCallId: "c1", name: "bash", args: { command: "node scripts/check.mjs" } }),
+		message("r1", "c1", "tool_result", {
+			toolCallId: "c1",
+			outcome: "ok",
+			result: { content: [{ type: "text", text: "done" }], details: { kind: "ok", outcome: "success", exitCode: 0 } },
+		}),
+		message("a1", "r1", "assistant", { text: "done", stopReason: "stop" }),
+	];
+	const review = (entries: unknown[]) =>
+		closedSessionLessonSource(entries.map((entry) => JSON.stringify(entry)).join("\n"), "ledger", "closed", "/repo");
+	ok(review([...abandoned, ...active]), "the same ledger with no label stays reviewable");
+	strictEqual(review([...abandoned, label, ...active]), null);
 });
 
 test("a flow-restricted session files no lesson at scope end, and a clean one still does", async () => {

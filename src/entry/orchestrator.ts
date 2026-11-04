@@ -126,11 +126,13 @@ import {
 	loadMemoryRecordsSync,
 	MemoryRuntime,
 	markMemoryOffRecording,
+	memoryFlowSweepNotice,
 	memoryStatus,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
+	sweepRestrictedMemory,
 	type TaskMemoryHandoffSnapshot,
 	type TaskMemoryModelClient,
 	type TaskMemoryStepUsage,
@@ -214,7 +216,12 @@ import {
 } from "../domains/providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
-import type { LlmRequestAdmission, OneShotPort } from "../domains/providers/one-shot.js";
+import {
+	type LlmRequestAdmission,
+	type OneShotPort,
+	oneShotRoundOptions,
+	oneShotTokens,
+} from "../domains/providers/one-shot.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -240,6 +247,7 @@ import { expandSubmitText } from "../domains/resources/submit-expansion.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
+import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } from "../domains/safety/hook-drift.js";
 import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domains/safety/index.js";
 import {
@@ -283,12 +291,7 @@ import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import {
-	observationCheckpoint,
-	observationSourceUnits,
-	parseSessionEntries,
-	SessionDomainModule,
-} from "../domains/session/index.js";
+import { observationCheckpoint, observationSourceUnits, SessionDomainModule } from "../domains/session/index.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -367,7 +370,12 @@ import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
-import { admitHandoffSeedFlow, createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
+import {
+	admitHandoffSeedFlow,
+	closedSessionLessonSource,
+	createFlowLedger,
+	FLOW_RESTRICTION_ENTRY_TYPE,
+} from "./flow-ledger.js";
 import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
@@ -821,14 +829,12 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			},
 			onUsage: (usage, observation) => recordUsage?.(usage, observation),
 			...sideAuth,
-			...(request.schema !== undefined
-				? { responseSchema: { name: "system_one_vote", schema: request.schema as Record<string, unknown> } }
-				: {}),
+			...oneShotRoundOptions(request),
 		});
 		if (result.aborted) throw new Error("the one-shot round was aborted");
 		return {
 			text: result.text,
-			...(result.usage !== null ? { usage: { input: result.usage.input, output: result.usage.output } } : {}),
+			...(result.usage !== null ? { usage: oneShotTokens(result.usage) } : {}),
 			...(result.reportedModel !== undefined ? { model: result.reportedModel } : {}),
 		};
 	};
@@ -2705,6 +2711,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		else writeDiagnostic(`[clio-coder:memory] ${line}\n`);
 	};
 	const memoryDiagnostic = (line: string): void => writeDiagnostic(`[clio-coder:memory] ${line}\n`);
+	// Held for the interactive shell, whose notices do not exist yet at this point in boot.
+	let memorySweepNotice: string | null = null;
+	// Before the first prompt compiles, with memory on or off: a record withdrawn only while memory is on would come back
+	// when it is turned on mid-session. A failure costs this boot nothing and the next boot tries again.
+	try {
+		const swept = await sweepRestrictedMemory(clioDataDir(), clioStateDir(), {
+			sessionFirstLabelAt: (sessionId) =>
+				readFlowSessionEntries(sessionId).reduce<string | null>((first, entry) => {
+					const at = (entry as { timestamp?: unknown }).timestamp;
+					const stamp = typeof at === "string" ? at : new Date(0).toISOString();
+					return first === null || stamp < first ? stamp : first;
+				}, null),
+			repositoryDeclaresFlowRules: projectDeclaresFlowRules,
+		});
+		if (swept !== null && swept.length > 0) {
+			const message = memoryFlowSweepNotice(swept.length);
+			if (interactive) memorySweepNotice = message;
+			else memoryDiagnostic(message);
+		}
+	} catch (error) {
+		memoryDiagnostic(
+			`restricted lesson sweep did not finish and will run again next boot: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	const memoryFlowNoticedSessions = new Set<string | null>();
 	const admitMemoryFlow: AdmitBackgroundModelFlow = (destination) => {
 		const refusal = admitModelFlow(destination);
@@ -2926,16 +2956,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				(candidate) => candidate.sessionId === sessionId,
 			);
 			if (!ledger) return null;
-			const read = parseSessionEntries(readFileSync(ledger.path, "utf8"), ledger.path);
-			const active = filterEntriesToActivePath(read.entries, undefined);
-			// A restricted ledger is never reviewed; see lessonSource.
-			if (
-				read.errors.length > 0 ||
-				active.some((entry) => entry.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE)
-			)
-				return null;
-			const source = completedLessonSource(active, ledger.root);
-			return source ? { scope: { sessionId, branchAnchorTurnId: active.at(-1)?.turnId ?? null }, source } : null;
+			return closedSessionLessonSource(readFileSync(ledger.path, "utf8"), ledger.path, sessionId, ledger.root);
 		},
 
 		settings: () => effectiveSettingsForDispatch?.().context.memory ?? memorySettings,
@@ -5867,6 +5888,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		getTaskMemorySeedOffer,
+		takeMemorySweepNotice: () => {
+			const notice = memorySweepNotice;
+			memorySweepNotice = null;
+			return notice;
+		},
 		seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
 		stateDir: clioStateDir(),
 		dataDir: clioDataDir(),

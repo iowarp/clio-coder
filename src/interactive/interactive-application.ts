@@ -243,6 +243,8 @@ export interface InteractiveDeps {
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	/** Newest structured handoff available for an opt-in seed, when enabled. */
 	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
+	/** What boot's restricted-lesson sweep has to say, handed over once. */
+	takeMemorySweepNotice?: () => string | null;
 	/** Merge the newest structured handoff into the current task bank. */
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	/** XDG state dir (clioStateDir()). `/view verify` reads the run's sealed scope under it. */
@@ -1003,6 +1005,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const loopJobs = deps.jobs
 		? reportLoopChanges(deps.jobs, ({ level, text }) => appendNotice(level, text, busNoticeSink))
 		: undefined;
+	const memorySweepNotice = deps.takeMemorySweepNotice?.() ?? null;
+	if (memorySweepNotice !== null) notify("warning", memorySweepNotice, "memory:flow-sweep");
 	const eventProjection = createInteractiveEventProjection({
 		isReloadReporting: () => deps.reloadClasses?.active === true,
 		bus: deps.bus,

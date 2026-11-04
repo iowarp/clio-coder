@@ -99,3 +99,28 @@ test("memory history warnings survive 96-column rendering and cache changes with
 	doesNotMatch(recovered.map(stripTerminalSequences).join("\n"), /partial|unreadable/u);
 	for (const row of [...unavailable, ...partial, ...recovered]) ok(visibleWidth(row) <= 96);
 });
+
+test("a list mixing rows offers the detail key only on a row that has detail", () => {
+	const view = new ListOverlayView(
+		{
+			title: "Mixed",
+			items: [
+				{ id: "plain", label: "plain" },
+				{ id: "full", label: "full", detail: () => ["facts"] },
+			],
+			onSelect() {},
+			onClose() {},
+		},
+		() => {},
+	);
+	view.setViewportRows(20);
+	const shown = (): string => stripTerminalSequences(`${view.render(80).join("\n")}\n${view.getHint(80)}`);
+	doesNotMatch(shown(), /\[Tab\]/u);
+	const before = shown();
+	view.handleInput("\t");
+	deepStrictEqual(shown(), before, "Tab on a row without detail changes nothing");
+	view.handleInput("\x1b[B");
+	match(shown(), /\[Tab\] detail/u);
+	view.handleInput("\t");
+	match(shown(), /facts/u);
+});

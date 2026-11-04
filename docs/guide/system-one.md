@@ -49,7 +49,7 @@ Off is the default, and off is byte-identical to a build that has no System One.
 - **A filter answers what a file is for.** A file reaches the model as its path and a digest, so a filter misses behavior inside a body. Use `grep` for that.
 - **Matches are often wrong.** On the query sets tried so far, between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. Do not treat a miss as proof either, especially when `carried.partial` is above zero.
 - **`consult` is unproven.** `consult` ships as experimental. Nothing yet measures whether agents reach for it or whether it speeds anything up.
-- **LLM routes return labels, not probabilities.** `memory`, `main` and any chat target answer one label per question, so a filter match from them has no score and a `yesNo` is 0 or 1.
+- **LLM routes return labels, not probabilities.** `memory`, `main` and any chat target answer one label per question, so a filter match from them has no score and a question comes back as `label` (`yes` or `no`, an option, or a rung) with no `pTrue`, mass or `certainty`.
 - **Generic routes never screen.** A route without declared real probabilities (any `kind: llm` engine, and a `kind: systemone` engine on the `generic` profile) is skipped by the judge screen before any byte leaves.
 - **It is not a safety net.** The deterministic safety rules and the safety judge decide. The screen can only park a call the judge would have allowed.
 - **Nothing measures your engine for you.** There are no fitted thresholds. A profile declares what a model family reads and how its numbers are read, and it makes no accuracy claim.
@@ -101,6 +101,8 @@ The screen skips any route without declared real probabilities, a route on the j
 
 A new task moves to the follow-up slot unless it reads as now. A stop can interrupt only with real mass of at least 0.8 on an unpinned entry under 30 seconds old and with `chat.steering.triage.autoInterrupt` on, so a label route marks and moves entries and never interrupts.
 
+A typed triage ask on `anthropic-max` is a System One round: it holds its reply like any other ask, and its labels still cannot interrupt.
+
 ## Declared engines
 
 Declare an engine when a route needs a model, a served window or a profile that a bare name cannot say. The engine does nothing until `systemOne.use` names it.
@@ -140,6 +142,8 @@ Clio Coder ships a client for these wires, not an inference server or an acceler
 ### `kind: llm`
 
 Any chat target Clio Coder can call can act as an engine. One ask costs one schema-bound request at temperature 0, whatever the number of questions, and the model answers with labels or abstains. A response that names no model fails the call. Every request passes the same paid-request admission as the main session, counts toward the session's cost ceiling and token totals, and is recorded under `system-one`, which `/usage` and `clio-coder usage report` show as System One calls without counting them as turns. Admission never waits for a ceiling raise, so a refused request ends that route and the ask moves on.
+
+On an `anthropic-max` target an ask holds its reply through the Messages API's `output_config.format`, so the reply is always one small JSON list, and a filter reads up to its 256 items on any model that takes the field. An API-key `anthropic` target takes the same path, and that route is untested. Only System One asks do this. `/handoff`, the safety judge and triage's side model keep their plain request on those targets.
 
 ## Status and scope
 

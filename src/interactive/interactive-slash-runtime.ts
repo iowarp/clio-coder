@@ -89,7 +89,14 @@ export interface InteractiveSlashSubmitExpansion {
 
 type SlashChat = Pick<
 	ChatLoop,
-	"discoverOperatorEgg" | "eggsCommand" | "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit" | "toolLimits"
+	| "discoverOperatorEgg"
+	| "eggsCommand"
+	| "clearSkillSurface"
+	| "getSessionId"
+	| "isStreaming"
+	| "refuseSkillRequests"
+	| "submit"
+	| "toolLimits"
 >;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
@@ -486,6 +493,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const submitted = typedSkillLine(expanded, text);
 			signal?.throwIfAborted();
 			const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
+			// A request this session refuses after the install would have changed the operator's library for nothing.
+			if (uninstalled && deps.chat.refuseSkillRequests?.(submitted.pendingSkillRequests, submitted.workingContextPaths))
+				return;
 			if (uninstalled && !uninstalled.marketplaceRef) {
 				deps.io.stderr(`Skill "${uninstalled.name}" is not installed and no local marketplace entry is available.\n`);
 				return;
