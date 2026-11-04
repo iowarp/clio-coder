@@ -70,5 +70,5 @@ The model cannot touch the player unless you also set `integrations.music.agentC
 ::: next
 - [Files and terminal panes guide](/docs/guide/panes-and-files.html)
 - [Coordinate the coding agents you already use](/tutorials/coordinate-your-coding-agents.html)
-- [Remote workers and clusters](/research/remote-workers-and-clusters.html)
+- [Work from a laptop with remote workers](/tutorials/work-from-a-laptop-with-remote-workers.html)
 :::

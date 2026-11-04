@@ -9,9 +9,9 @@
 	"/docs/guide/installation-and-lifecycle.html": "/docs.html",
 	"/experimental.html": "/research.html",
 	"/experimental/system-one-decisions.html": "/research/system-one-decisions.html",
-	"/experimental/diffusion-models.html": "/research/diffusion-models.html",
-	"/experimental/panes-and-docks.html": "/research/panes-and-docks.html",
-	"/experimental/remote-workers-and-clusters.html": "/research/remote-workers-and-clusters.html",
-	"/experimental/information-flow-rules.html": "/research/information-flow-rules.html",
-	"/experimental/semantic-context-and-recordings.html": "/research/semantic-context-and-recordings.html"
+	"/experimental/diffusion-models.html": "/tutorials/diffusion-models.html",
+	"/experimental/panes-and-docks.html": "/tutorials/panes-and-docks.html",
+	"/experimental/remote-workers-and-clusters.html": "/tutorials/work-from-a-laptop-with-remote-workers.html#on-a-cluster",
+	"/experimental/information-flow-rules.html": "/tutorials/information-flow-rules.html",
+	"/experimental/semantic-context-and-recordings.html": "/tutorials/semantic-context-and-recordings.html"
 }

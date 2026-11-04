@@ -88,6 +88,6 @@ Off is the default, and it sends no request and adds nothing to the prompt or th
 
 ::: next
 - [The full System One guide](https://github.com/iowarp/clio-coder/blob/main/docs/guide/system-one.md)
-- [Diffusion models in the terminal](/research/diffusion-models.html)
+- [Diffusion models in the terminal](/tutorials/diffusion-models.html)
 - [Let Clio Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
 :::

@@ -138,19 +138,36 @@ Transfer, verification and application failures preserve the node branch for rec
 
 ## Follow the result
 
-Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/research/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
+Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/tutorials/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
 
 SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio Coder has verified.
+
+## On a cluster
+
+```sh
+curl -fsSL https://coder.iowarp.ai/install.sh | sh
+```
+
+The installer needs no root, refuses to run under sudo, and brings a private Node.js 24. On x64 login nodes with glibc from 2.17 to 2.27 it selects a compatible Node.js build. Behind a proxy, export `https_proxy` first; the cluster guide lists the variables for mirrored and offline installs.
+
+That private Node.js is not added to `PATH`. A node installed this way already has Clio Coder, so skip `fleet nodes install` there and keep its version equal to your client's.
+
+Clio Coder does not submit jobs for its own workers. Scheduler work goes through the clio-kit Slurm tools, which the agent calls to submit, list, describe, and cancel jobs, each with your approval.
 
 ::: limits
 - SSH access, exact Clio Coder version and the same absolute project path remain prerequisites.
 - Project dependencies and datasets need your own staging; there is no arbitrary repository sync or path mapping.
 - Independent-checkout edits require isolated task worktrees and the existing verification and application gates.
 - Institutional access rules and schedulers still govern where work may run.
+- Worker slots limit concurrency. They are not an allocation, and a login node is not a compute node.
+- A remote worker sandboxes its commands only when bubblewrap is present on that node.
+- A worker that uses a cloud model sends its input to that provider from the node.
 :::
 
 ::: next
 - [Your first session with Clio Coder](/tutorials/first-session.html)
 - [Fleet guide](/docs/guide/fleet-dispatch.html)
+- [Install on a cluster](/docs/guide/hpc-clusters.html)
+- [Slurm workflows](/docs/guide/slurm.html)
 - [Install Clio Coder](/#start)
 :::

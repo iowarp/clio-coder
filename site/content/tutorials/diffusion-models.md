@@ -1,7 +1,7 @@
 Most language models write an answer one token at a time. A diffusion language model starts from a rough version of the whole answer and refines it in a few passes. Clio Coder can use Inception's Mercury models this way, for chat and for workers, with tool calling.
 
 ::: note Version scope
-The `inception` runtime has shipped since v0.5.3 and this article describes v0.6.8. It is listed under Experimental because the frame-by-frame display exists only in the terminal, and because diffusion models are less tested on long agentic work than the models most people use.
+The `inception` runtime has shipped since v0.5.3 and this article describes v0.6.8. The frame-by-frame display exists only in the terminal, and diffusion models are less tested on long agentic work than the models most people use.
 :::
 
 ::: needs
