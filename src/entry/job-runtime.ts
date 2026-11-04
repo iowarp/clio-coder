@@ -49,6 +49,8 @@ function jobContinuationPreamble(job: JobRecord): string {
 	if (job.delivery?.continuation === undefined) return "";
 	if (job.delivery.continuation === "job_exhausted")
 		return `[Clio Coder] Job ${job.id} ran out of its ${job.spec.count} starts and its condition never matched. The follow-up below was written for a match and does not apply yet. Read the last poll in the observation. If the polls were failing, fix why first. If the wait is still worth continuing, create another job or poll again, and otherwise say so and stop.\n\n`;
+	if (job.delivery.continuation === "polls_failing")
+		return `[Clio Coder] Job ${job.id} has failed ${job.failedPolls ?? 0} polls in a row and is still polling. The follow-up below was written for a match and does not apply yet. Read the last poll in the observation and fix why it fails, because the job's next polls pick up the fix. If this job cannot succeed, end it with action stop and create what replaces it. Do not use action cancel, because that also ends this turn. If nothing needs doing, say so and stop.\n\n`;
 	const count = jobContinuationCount(job);
 	return `[Clio Coder] The previous turn of this job stopped: ${job.delivery.reason ?? "it was interrupted"}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop.${count === "" ? "" : ` This is continuation ${count}.`}\n\n`;
 }
@@ -181,7 +183,9 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 		const continuing = phase === "delivery" && context.job.delivery?.continuation !== undefined;
 		const continuationCount = jobContinuationCount(context.job);
 		const continuationAction =
-			context.job.delivery?.continuation === "job_exhausted" ? "Waking the main turn" : "Continuing that turn";
+			context.job.delivery?.continuation === "job_exhausted" || context.job.delivery?.continuation === "polls_failing"
+				? "Waking the main turn"
+				: "Continuing that turn";
 		const chat = deps.chat();
 		if (!chat?.submitMachineTurn)
 			return { outcome: "deferred", summary: "This host has no fresh machine-turn admission seam." };

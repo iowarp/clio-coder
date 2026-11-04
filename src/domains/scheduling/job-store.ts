@@ -61,6 +61,11 @@ function validateRecord(value: unknown, owner: JobOwner): asserts value is JobRe
 			value.clockResumes === undefined ||
 			(Number.isSafeInteger(value.clockResumes) && (value.clockResumes as number) >= 0)
 		) ||
+		!(
+			value.failedPolls === undefined ||
+			(Number.isSafeInteger(value.failedPolls) && (value.failedPolls as number) >= 0)
+		) ||
+		!(value.pollFailureWoken === undefined || value.pollFailureWoken === true) ||
 		!Array.isArray(value.history) ||
 		value.history.length > JOB_HISTORY_LIMIT
 	)

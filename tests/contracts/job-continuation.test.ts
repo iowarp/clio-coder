@@ -12,8 +12,11 @@ import type {
 } from "../../src/domains/scheduling/job-types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createJobRuntime } from "../../src/entry/job-runtime.js";
+import { loopSegment } from "../../src/interactive/footer-panel.js";
 import type { ChatLoop } from "../../src/session-control/chat-loop.js";
 import type { MachineTurnRequest } from "../../src/session-control/job-turn-types.js";
+import { loopJobDetail } from "../../src/session-control/loop-command.js";
+import { executeJobCommand, prepareJobCommand } from "../../src/tools/job-command.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -385,6 +388,234 @@ describe("job continuation at yolo (#445)", () => {
 		match(wake?.text ?? "", /KeyError: FAKE_CI_ARM/u);
 		ok(!wake?.text.includes("The previous turn of this job stopped"));
 		match(wake?.notice ?? "", /Waking the main turn because autonomy is yolo; no new run is starting/u);
+	});
+
+	const failingJob = { ...pollJob, count: 20 };
+
+	it("wakes the main turn once after 5 failed polls and keeps polling", async () => {
+		const delivered: string[] = [];
+		const host = make(polls([null], delivered));
+		const job = await host.create(failingJob, owner);
+		for (let i = 0; i < 4; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, []);
+		strictEqual(host.get(job.id, owner)?.failedPolls, 4);
+		await advance(host, 1000);
+		deepStrictEqual(resumed, [{ cause: "polls_failing", attempt: 0 }]);
+		for (let i = 0; i < 12; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["polls_failing"], "only one wake");
+		const final = host.get(job.id, owner);
+		strictEqual(final?.state, "active");
+		ok((final?.settled ?? 0) >= 10, "polling went on after the wake");
+		strictEqual(final?.clockResumes, undefined);
+	});
+
+	it("never runs a poll beside the follow-up, and coalesces what came due during it", async () => {
+		let running = 0;
+		let peak = 0;
+		let pollCount = 0;
+		let release: () => void = () => {};
+		const track = async <T>(work: () => Promise<T>): Promise<T> => {
+			running++;
+			peak = Math.max(peak, running);
+			try {
+				return await work();
+			} finally {
+				running--;
+			}
+		};
+		const host = make({
+			run: (context) =>
+				track(async () => {
+					context.start();
+					pollCount++;
+					return { outcome: "failed", summary: "exit 1", errorClass: "execution" };
+				}),
+			deliver: (context) =>
+				track(async () => {
+					context.start();
+					await new Promise<void>((resolve) => {
+						release = resolve;
+						releases.push(resolve);
+					});
+					return DONE;
+				}),
+		});
+		const job = await host.create(failingJob, owner);
+		for (let i = 0; i < 5; i++) await advance(host, 1000);
+		await advance(host, 1000);
+		strictEqual(host.get(job.id, owner)?.delivery?.state, "running");
+		const atWake = pollCount;
+		for (let i = 0; i < 8; i++) await advance(host, 1000);
+		strictEqual(pollCount, atWake, "no poll starts while the follow-up runs");
+		release();
+		await advance(host, 1000);
+		await advance(host, 1000);
+		strictEqual(pollCount, atWake + 1, "the polls that came due collapse into one");
+		strictEqual(peak, 1);
+		strictEqual(host.get(job.id, owner)?.delivery?.state, "delivered");
+	});
+
+	it("resets the streak on a poll that works", async () => {
+		const delivered: string[] = [];
+		const ok1 = { state: "pending" };
+		const host = make(polls([null, null, null, null, ok1, null, null, null, null, ok1], delivered));
+		const job = await host.create(failingJob, owner);
+		for (let i = 0; i < 10; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, []);
+		strictEqual(host.get(job.id, owner)?.failedPolls, 0);
+	});
+
+	it("delivers the ordinary follow-up when a match comes after the wake", async () => {
+		const delivered: string[] = [];
+		const host = make(polls([null, null, null, null, null, { state: "success" }], delivered));
+		const job = await host.create(failingJob, owner);
+		for (let i = 0; i < 9; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["polls_failing", "match"]);
+		strictEqual(host.get(job.id, owner)?.reason, "condition");
+	});
+
+	it("gives one wake when the fifth failure is also the last start, and two when it is not", async () => {
+		const last: string[] = [];
+		const host = make(polls([null], last));
+		await host.create({ ...pollJob, count: 5 }, owner);
+		for (let i = 0; i < 8; i++) await advance(host, 1000);
+		deepStrictEqual(last, ["job_exhausted"]);
+		await controller?.close();
+		const later: string[] = [];
+		const other = make(polls([null], later));
+		await other.create({ ...pollJob, count: 7 }, owner);
+		for (let i = 0; i < 11; i++) await advance(other, 1000);
+		deepStrictEqual(later, ["polls_failing", "job_exhausted"]);
+	});
+
+	it("does not wake below yolo or without a follow-up, and still counts the streak", async () => {
+		yolo = false;
+		const delivered: string[] = [];
+		const attended = make(polls([null], delivered));
+		const job = await attended.create(failingJob, owner);
+		for (let i = 0; i < 7; i++) await advance(attended, 1000);
+		deepStrictEqual(delivered, []);
+		strictEqual(attended.get(job.id, owner)?.failedPolls, 7);
+		await controller?.close();
+		yolo = true;
+		const bare = make(polls([null], delivered));
+		const { onMatch: _onMatch, ...withoutFollowUp } = failingJob;
+		await bare.create(withoutFollowUp, owner);
+		for (let i = 0; i < 7; i++) await advance(bare, 1000);
+		deepStrictEqual(delivered, []);
+	});
+
+	it("drops the wake and stops polling when the job is canceled during it", async () => {
+		let pollCount = 0;
+		let wakes = 0;
+		const host = make({
+			run: async (context) => {
+				context.start();
+				pollCount++;
+				return { outcome: "failed", summary: "exit 1", errorClass: "execution" };
+			},
+			deliver: async (context) => {
+				context.start();
+				wakes++;
+				await new Promise<void>((resolve) => {
+					releases.push(resolve);
+					context.signal.addEventListener("abort", () => resolve(), { once: true });
+				});
+				return DONE;
+			},
+		});
+		const job = await host.create(failingJob, owner);
+		for (let i = 0; i < 6; i++) await advance(host, 1000);
+		strictEqual(wakes, 1);
+		const atCancel = pollCount;
+		await host.control(job.id, "cancel", owner);
+		for (let i = 0; i < 5; i++) await advance(host, 1000);
+		strictEqual(pollCount, atCancel);
+		strictEqual(wakes, 1);
+		strictEqual(host.get(job.id, owner)?.state, "terminal");
+	});
+
+	it("tells the woken model the job is still polling and how to end it", async () => {
+		const { ports, requests } = runtimePorts([{}]);
+		const host = make({
+			...ports,
+			admit: async () => ({ status: "ready" }),
+			run: async (context) => {
+				context.start();
+				return { outcome: "failed", summary: "KeyError: FAKE_CI_ARM", errorClass: "execution" };
+			},
+		});
+		await host.create(failingJob, owner);
+		for (let i = 0; i < 6; i++) await advance(host, 1000);
+		strictEqual(requests.length, 1);
+		match(requests[0]?.text ?? "", /failed 5 polls in a row and is still polling/u);
+		match(requests[0]?.text ?? "", /KeyError: FAKE_CI_ARM/u);
+		match(requests[0]?.text ?? "", /action stop/u);
+		match(requests[0]?.notice ?? "", /Waking the main turn because autonomy is yolo/u);
+	});
+
+	it("shows a failing job in /loop status and the footer at every autonomy level", async () => {
+		yolo = false;
+		const host = make({
+			run: async (context) => {
+				context.start();
+				return {
+					outcome: "failed",
+					summary: JSON.stringify({ exitCode: 3, stderr: "boom" }),
+					errorClass: "execution",
+				};
+			},
+		});
+		const job = await host.create(failingJob, owner);
+		for (let i = 0; i < 2; i++) await advance(host, 1000);
+		const record = host.get(job.id, owner);
+		ok(record);
+		ok(
+			loopJobDetail(record, clock).some((line) => line.includes("2 polls failed in a row · last poll exit 3")),
+			loopJobDetail(record, clock).join("\n"),
+		);
+		const footer = loopSegment([record], 200, clock) ?? "";
+		match(footer, /Loop failing/u);
+		match(footer, /last poll exit 3/u);
+	});
+
+	it("passes only GH_TOKEN and GITHUB_TOKEN to a job command, and only at yolo", async () => {
+		const saved = { ...process.env };
+		Object.assign(process.env, { GH_TOKEN: "gh-fixture", GITHUB_TOKEN: "github-fixture", SOME_OTHER_SECRET: "no" });
+		try {
+			const run = async (autonomy: "yolo" | "default"): Promise<Record<string, string>> => {
+				const runner = prepareJobCommand(
+					[process.execPath, "-e", "process.stdout.write(JSON.stringify(process.env))"],
+					scratch.dir,
+				);
+				const result = await executeJobCommand(
+					{
+						job: {
+							spec: { runner, timeoutMs: 30_000 },
+							owner,
+						} as unknown as JobRecord,
+						executionId: "fixture",
+						signal: new AbortController().signal,
+						start: () => true,
+					},
+					autonomy,
+				);
+				return result.json as Record<string, string>;
+			};
+			const atYolo = await run("yolo");
+			strictEqual(atYolo.GH_TOKEN, "gh-fixture");
+			strictEqual(atYolo.GITHUB_TOKEN, "github-fixture");
+			strictEqual(atYolo.SOME_OTHER_SECRET, undefined);
+			const below = await run("default");
+			strictEqual(below.GH_TOKEN, undefined);
+			strictEqual(below.GITHUB_TOKEN, undefined);
+			strictEqual(below.SOME_OTHER_SECRET, undefined);
+		} finally {
+			for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "SOME_OTHER_SECRET"]) {
+				if (saved[key] === undefined) delete process.env[key];
+				else process.env[key] = saved[key];
+			}
+		}
 	});
 
 	function runtimePorts(results: readonly Partial<ReturnType<typeof machineResult>>[]) {

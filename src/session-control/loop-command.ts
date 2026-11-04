@@ -1,4 +1,5 @@
 import type { JobPredicate, JobRecord } from "../core/job-types.js";
+import { jobPollFailure } from "../core/job-types.js";
 import { jobExecutionTimeoutMs, jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolResult } from "../tools/registry.js";
@@ -512,6 +513,11 @@ export function loopJobDetail(job: JobRecord, now: number, spend: string | null 
 	lines.push(
 		`every ${formatLoopDuration(job.spec.intervalMs)} · ${runsText(job)} · ${job.settled} settled · ${dueText(job, now)}`,
 	);
+	const pollFailure = jobPollFailure(job);
+	if (pollFailure !== null)
+		lines.push(
+			`${pollFailure.count} poll${pollFailure.count === 1 ? "" : "s"} failed in a row · last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}`,
+		);
 	lines.push(
 		`timeout ${formatLoopDuration(job.spec.timeoutMs)}${
 			job.spec.onMatch.kind === "main_turn"

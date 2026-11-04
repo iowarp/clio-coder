@@ -54,16 +54,19 @@ export type TurnContinuationCause =
 	| "loop_guard"
 	| "retries_exhausted"
 	| "compaction"
-	| "job_exhausted";
+	| "job_exhausted"
+	| "polls_failing";
 /**
  * One job or one operator turn gets this many continuations after a failure stop; a turn that dies that often is not a
  * slow turn. A tool budget crossing is a checkpoint and does not count, or a steady poll would run out of them within
  * hours. The cost ceiling and the loop guard bound it instead (#445).
  */
 export const TURN_CONTINUATION_CAP = 3;
-/** A job runs out of starts once, so that wake has nothing to cap. */
+/** A job runs out of starts once and wakes on failing polls once, so those wakes have nothing to cap. */
 export const continuationCountsAgainstCap = (cause: TurnContinuationCause): boolean =>
-	cause !== "tool_budget" && cause !== "job_exhausted";
+	cause !== "tool_budget" && cause !== "job_exhausted" && cause !== "polls_failing";
+/** A command job that fails this many polls in a row wakes the turn waiting on it at yolo (#445). */
+export const JOB_FAILED_POLL_WAKE = 5;
 /** Wait before continuing a turn that failed, so a provider outage has time to clear (#445). */
 const TURN_CONTINUATION_FAILURE_DELAYS_MS = [60_000, 300_000, 900_000] as const;
 export function turnContinuationDelayMs(attempt: number, retryAfterMs?: number): number {
@@ -130,6 +133,10 @@ export interface JobRecord {
 	delivery: JobDelivery | null;
 	/** Continuations this job spent against the cap at yolo; a tool budget crossing spends none (#445). Absent on older records and on a job it never hit. */
 	clockResumes?: number;
+	/** Command polls failed in a row. Absent on older records and on main jobs (#445). */
+	failedPolls?: number;
+	/** The one wake for failing polls was queued (#445). */
+	pollFailureWoken?: true;
 	/** Null when any executed component has unknown pricing/usage. */
 	costUsd: number | null;
 	persistenceError: string | null;
@@ -139,4 +146,12 @@ export interface JobChangedPayload {
 	job: JobRecord;
 	/** Recurrence may be terminal while analysis delivery still owns live work. */
 	complete: boolean;
+}
+
+/** What a job's failing polls look like to a person: the streak and the last exit code when the record has one (#445). */
+export function jobPollFailure(job: JobRecord): { count: number; exitCode: string | null } | null {
+	const count = job.failedPolls ?? 0;
+	if (count === 0) return null;
+	const exitCode = /"exitCode":(\d+)/u.exec(job.history.at(-1)?.evidence?.summary ?? "")?.[1] ?? null;
+	return { count, exitCode };
 }
