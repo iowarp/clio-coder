@@ -24,10 +24,7 @@ function memoryFlowSweepMarkerPath(stateDir: string): string {
 }
 
 /** The live records the sweep withdraws: filed at or after their source's label, or unvouched under source rules. */
-export function restrictedMemoryRecordIds(
-	records: ReadonlyArray<MemoryRecord>,
-	ports: MemoryFlowSweepPorts,
-): Set<string> {
+function restrictedMemoryRecordIds(records: ReadonlyArray<MemoryRecord>, ports: MemoryFlowSweepPorts): Set<string> {
 	const sessions = new Map<string, { labelAt: string | null } | "unreadable">();
 	const repositories = new Map<string, boolean>();
 	const underRules = (record: MemoryRecord): boolean => {
