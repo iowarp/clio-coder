@@ -6,7 +6,7 @@
 import type { ClioSettings } from "../../core/config.js";
 import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
 import type { ChoiceResolution } from "./selection.js";
-import { effectiveSystemOne, resolveChoice } from "./selection.js";
+import { effectiveSystemOne, resolveChoice, routeNames } from "./selection.js";
 
 export interface RuntimeLookup {
 	get(id: string): { readonly id: string; readonly decide?: unknown } | null;
@@ -23,6 +23,7 @@ export interface StatusInput {
 }
 
 export interface SystemOneStatus {
+	/** The named routes as the operator wrote them, or null when none is chosen. */
 	readonly use: string | null;
 	readonly scope: string;
 	readonly headline: string;
@@ -34,27 +35,42 @@ function costNote(resolution: ChoiceResolution): string | null {
 	return `${resolution.name} adds separate completions on ${where}. Requests pass paid-request admission and count against the session's cost ceiling.`;
 }
 
+/** The destination one route reaches, or why it cannot be used. */
+function routeReading(input: StatusInput, resolved: ChoiceResolution): { active: string } | { problem: string } {
+	if (resolved.kind === "unavailable") return { problem: resolved.problem };
+	if (resolved.kind !== "engine") return { problem: "it is not a route" };
+	const refusal = input.refusedEngines?.get(resolved.name);
+	if (refusal !== undefined) return { problem: refusal };
+	const effective = effectiveSystemOne(input.settings, [resolved.name]);
+	const target = effective.targets.find((entry) => entry.id === resolved.engine.target);
+	const runtimeId = target?.runtime ?? "";
+	const required = findBuiltinRuntimeBootMetadata(runtimeId)?.credentialsEnvVar;
+	if (required !== undefined && input.hasCredential?.(runtimeId, required) === false) {
+		return { problem: `${required} is not set` };
+	}
+	const destination = `${resolved.engine.target}/${resolved.engine.model ?? target?.defaultModel ?? "target default"}`;
+	return { active: `${resolved.name} → ${destination}` };
+}
+
 export function describeStatus(input: StatusInput): SystemOneStatus {
 	const { use } = input.settings.systemOne;
 	const scope = input.settingsOrigin ?? "settings";
-	const resolved = resolveChoice(input.settings, use);
-	const headline = ((): string => {
-		if (resolved.kind === "off") return "off";
-		if (resolved.kind === "none") return "off: no engine is chosen";
-		if (resolved.kind === "unavailable") return `unavailable: ${resolved.problem}; nothing is sent`;
-		const refusal = input.refusedEngines?.get(resolved.name);
-		if (refusal !== undefined) return `unavailable: ${refusal}; nothing more is sent`;
-		const effective = effectiveSystemOne(input.settings);
-		const target = effective.targets.find((entry) => entry.id === resolved.engine.target);
-		const required = findBuiltinRuntimeBootMetadata(target?.runtime ?? "")?.credentialsEnvVar;
-		if (required !== undefined && input.hasCredential?.(target?.runtime ?? "", required) === false) {
-			return `unavailable: ${required} is not set; nothing is sent`;
-		}
-		const destination = `${resolved.engine.target}/${resolved.engine.model ?? target?.defaultModel ?? "target default"}`;
-		return `active: the consult tool is bound to ${resolved.name} → ${destination}`;
-	})();
-	const cost = costNote(resolved);
-	return { use, scope, headline: cost === null ? headline : `${headline}. ${cost}` };
+	const shown = use === null || use === undefined ? null : typeof use === "string" ? use : use.join(", ");
+	const names = routeNames(use);
+	if (names.length === 0) return { use: shown, scope, headline: shown === null ? "off: no engine is chosen" : "off" };
+	const resolutions = names.map((name) => resolveChoice(input.settings, name));
+	const readings = resolutions.map((resolved) => routeReading(input, resolved));
+	const active = readings.flatMap((reading) => ("active" in reading ? [reading.active] : []));
+	const problems = readings.flatMap((reading, index) =>
+		"problem" in reading ? [names.length > 1 ? `${names[index]}: ${reading.problem}` : reading.problem] : [],
+	);
+	const unusable = problems.join("; ");
+	const headline =
+		active.length === 0
+			? `unavailable: ${unusable}; nothing is sent`
+			: `active: the consult tool is bound to ${active.join(", then ")}${unusable.length > 0 ? `; unavailable: ${unusable}` : ""}`;
+	const costs = resolutions.flatMap((resolved) => costNote(resolved) ?? []);
+	return { use: shown, scope, headline: [headline, ...costs].join(". ") };
 }
 
 /** The lines `/systemone` and `clio-coder systemone status` print. */

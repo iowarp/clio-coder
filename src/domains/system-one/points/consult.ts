@@ -4,14 +4,23 @@
  * The questions come from the agent, per call, so this is a factory rather than
  * a fixed definition. The value is the distribution the engine returned and
  * never a chosen option: a `pick` comes back as mass per option, not as a
- * winner, because the agent decides. There is no cut and no policy, so a build
- * nobody fitted answers exactly as a fitted one does.
+ * winner, because the agent decides. There is no cut and no policy.
  */
 
-import type { Answer, Question, SiteDefinition } from "../types.js";
+import type { Abstention, Answer, DecisionPoint, PointQuestion, Question } from "../types.js";
+import { isAnswered } from "../types.js";
 
 /**
- * Files carried as evidence, and code points of one file's head. The site's
+ * The total across every route. The agent's turn waits on this, and it has to outlast
+ * a hung route so the next one is still usable: two hung typed routes (5 s each) still
+ * leave an LLM route its full 30 s, and a hung LLM route leaves another 15 s to answer.
+ * Unmeasured: this is a bound from the kind timeouts in `engine-kinds.ts`, not a fit to
+ * any latency anyone recorded.
+ */
+export const CONSULT_DEADLINE_MS = 45_000;
+
+/**
+ * Files carried as evidence, and code points of one file's head. The point's
  * bound governs, because a smaller state keeps engine latency and contamination
  * between questions down; the tool reads no more than this per file.
  */
@@ -36,7 +45,7 @@ export type ConsultReading =
 			readonly distribution: Readonly<Record<string, number>>;
 			readonly certainty: number;
 	  }
-	| { readonly kind: "yesNo" | "pick" | "rate"; readonly abstained: true };
+	| { readonly kind: "yesNo" | "pick" | "rate"; readonly abstained: true; readonly reason?: string };
 
 export interface ConsultValue {
 	/** A reading per asked question. An abstention is marked, never dropped. */
@@ -60,8 +69,10 @@ function kindOf(question: Question): "yesNo" | "pick" | "rate" {
 }
 
 /** The distribution only. A pick's winning key is left out on purpose: the agent picks. */
-function reading(question: Question, answer: Answer | undefined): ConsultReading {
+function reading(question: Question, given: Answer | Abstention | undefined): ConsultReading {
 	const kind = kindOf(question);
+	if (given !== undefined && "abstained" in given) return { kind, abstained: true, reason: given.abstained };
+	const answer = isAnswered(given) ? given : undefined;
 	if (answer === undefined || answer.type !== question.type) return { kind, abstained: true };
 	const certainty = rounded(answer.certainty);
 	if (question.type === "noul") {
@@ -95,13 +106,13 @@ function boundedFiles(files: Readonly<Record<string, string>>): Record<string, s
 	return out;
 }
 
-export function consultSite(
-	questions: Readonly<Record<string, Question>>,
-): SiteDefinition<ConsultObject, ConsultValue> {
+export function consultPoint(
+	questions: Readonly<Record<string, PointQuestion>>,
+): DecisionPoint<ConsultObject, ConsultValue> {
 	return {
 		id: "consult",
 		version: "consult-v1",
-		deadlineMs: 3000,
+		deadlineMs: CONSULT_DEADLINE_MS,
 		state(object) {
 			const files = boundedFiles(object.files);
 			if (Object.keys(object.state).length === 0 && Object.keys(files).length === 0) return null;
@@ -111,10 +122,10 @@ export function consultSite(
 		read(answers) {
 			const readings: Record<string, ConsultReading> = {};
 			let answered = 0;
-			for (const [id, question] of Object.entries(questions)) {
-				const item = reading(question, answers[id]);
-				if (!("abstained" in item)) answered += 1;
-				readings[id] = item;
+			for (const [id, item] of Object.entries(questions)) {
+				const value = reading(item.question, answers[id]);
+				if (!("abstained" in value)) answered += 1;
+				readings[id] = value;
 			}
 			return answered > 0 ? { answers: readings } : null;
 		},

@@ -1,35 +1,22 @@
 /**
- * The System One contract: typed questions about one object, answered by a
- * pluggable decision engine, read by a site's policy.
+ * The System One contract: typed questions about one state, answered by a pluggable
+ * decision engine, read by a decision point. An engine is anything that declares
+ * what it can carry: a `/v1/systemone` server, a chat target asked in one
+ * schema-bound request, or later a model Clio ships.
  *
- * A site names the object it judges (the operator's request, a proposed tool
- * call, a tool result, a finished turn, a catalog entry, evidence the agent
- * supplies, draft candidates), so every call carries one state and fans out
- * every question about that state at once. An engine is anything that can
- * answer: a `/v1/systemone` server (TypeSafe Jev, Laya, OpenJev, Kev) or an
- * ordinary LLM target read through its logprobs or asked for a vote. A
- * probability means something only for the build that produced it, so every
- * cut is keyed by the answering build, and a build nobody fitted is recorded
- * but never hints, gates or acts.
- *
- * Every entry point here returns null rather than throwing, and null always
- * means the caller behaves exactly as it would with System One absent.
+ * `ask` returns null rather than throwing, and null always means the caller behaves
+ * exactly as it would with System One absent.
  */
 
-/** Decision sites, named by the object each one judges. */
-import type { DecisionTask, ReadoutKind, RendererId } from "./contract.js";
+import type { ReadoutKind, RendererId, SemanticKind } from "./contract.js";
 import type { ProfileId } from "./profiles.js";
-
-export const SITE_IDS = ["consult"] as const;
-export type SiteId = (typeof SITE_IDS)[number];
 
 export type QuestionType = "noul" | "choice" | "score";
 
 /**
- * One snap judgment. Criteria describe situations, not degrees: a noul names
- * what true and false look like, a choice maps each option key to when it
- * applies (1 to 255 options, give open lists an `other` exit), and a score
- * lists 2 to 10 levels from lowest to highest.
+ * One snap judgment. Criteria describe situations, not degrees: a noul names what
+ * true and false look like, a choice maps each option key to when it applies, and a
+ * score lists 2 to 10 levels from lowest to highest.
  */
 export type Question =
 	| {
@@ -50,156 +37,119 @@ export interface Answer {
 	readonly score?: number;
 	/** choice: option key to mass; score: level index ("0".."n-1") to mass. Sums to 1 within rounding. */
 	readonly probabilities?: Readonly<Record<string, number>>;
-	/**
-	 * Engine-neutral peakedness in [0, 1]: |2p - 1| for a noul, (n·max - 1)/(n - 1)
-	 * over the distribution for a choice or score. Engines disagree on their own
-	 * confidence scales, so this is recomputed from the mass, never copied.
-	 */
+	/** Engine-neutral peakedness in [0, 1], recomputed from the mass whatever the engine said about itself. */
 	readonly certainty: number;
-	/** False when the mass is not a calibrated probability: vote counts, a tournament readout, or a single option order. */
-	readonly calibrated: boolean;
-	/**
-	 * `flip`: the two option orders disagreed on the winner. `approximate`: a >26-option tournament.
-	 * `partial`: an option order came back unreadable, so the mass has no position-bias averaging.
-	 */
-	readonly flags?: ReadonlyArray<"flip" | "approximate" | "partial">;
-	/** What the number is, as the engine's profile declares it. Absent on rows written before profiles. Not a calibration claim. */
-	readonly readout?: ReadoutKind;
+	/** What the number is, as the engine declares it. Not a calibration claim. */
+	readonly readout: ReadoutKind;
+}
+
+/** A question a route could not or did not answer, and why. Never dropped, never read as a low score. */
+export interface Abstention {
+	readonly abstained: string;
+}
+
+export type AskAnswers = Readonly<Record<string, Answer | Abstention>>;
+
+export function isAnswered(answer: Answer | Abstention | undefined): answer is Answer {
+	return answer !== undefined && !("abstained" in answer);
 }
 
 export interface EngineRequest {
 	readonly state: Readonly<Record<string, unknown>>;
+	/** Exactly what this engine reads: formation has already rendered them. */
 	readonly questions: Readonly<Record<string, Question>>;
-	/** The task each question serves, so a profile renders and reads it under the right semantics. */
-	readonly tasks?: Readonly<Record<string, DecisionTask>>;
-	/** Site-owned compact wordings by question id, read only by a bounded renderer. Never sent on the legacy wire. */
-	readonly compact?: Readonly<Record<string, Question>>;
 	readonly signal: AbortSignal;
 }
 
 export interface EngineReply {
-	/**
-	 * What answered, and the key every cut is fitted against: the model a
-	 * System One server reports (`jev-1.14.0`), or the LLM engine's composite
-	 * build (runtime, host, wire model, readout mode, prompt version).
-	 */
+	/** What answered: the model a server reports, or the name a chat response reported. */
 	readonly build: string;
-	/** Answers per question id. A missing id is an abstention on that question alone. */
-	readonly answers: Readonly<Record<string, Answer>>;
+	/** Answers per question id. A missing id is an abstention on that question alone. Formation adds readout and certainty. */
+	readonly answers: Readonly<Record<string, Omit<Answer, "readout" | "certainty">>>;
 	readonly usage?: { readonly input: number; readonly output: number };
-	/** The engine's request alone, send to reply; `latencyMs` also counts Clio's preparation. */
+	/** The engine's request alone, send to reply. */
 	readonly roundTripMs?: number;
-	/**
-	 * Why the readout is not the one the operator configured, for the ledger and
-	 * the dataset: `downgraded: no-logprobs`, `downgraded: partial-logprobs`, or
-	 * `partial: 1 of 2 logprob orders unread`. Absent for a readout as configured.
-	 */
-	readonly note?: string;
-	/** Question id to why it was not asked: a task or semantics the profile does not answer, or a declared limit. */
-	readonly abstained?: Readonly<Record<string, string>>;
-	/** The questions exactly as a non-legacy renderer sent them; absent when what was sent is what the site wrote. */
-	readonly rendered?: Readonly<Record<string, Question>>;
 }
 
 export type EngineKind = "systemone" | "llm";
 
+/** Where a request leaves for. Null on an engine means no byte leaves the process. */
+export interface EngineDestination {
+	readonly targetId: string;
+	readonly runtimeId: string;
+	/** Null only for a typed server asked to answer with whatever it serves. */
+	readonly wireModelId: string | null;
+	readonly url?: string;
+}
+
+/** Everything formation and routing read. No decision is ever driven by a vendor's name. */
+export interface EngineCapabilities {
+	readonly semantics: ReadonlySet<SemanticKind>;
+	readonly readout: Readonly<Record<SemanticKind, ReadoutKind>>;
+	/** Whether a yes/no or filter reading is a real probability, rather than a label or an undeclared number. */
+	readonly probabilities: boolean;
+	readonly renderer: RendererId;
+	/** Options of one choice or levels of one score, inclusive. A noul is two. */
+	readonly minOptions: number;
+	readonly maxOptions: number;
+	/** Declared tokens of one option's text, or null for no declared bound. */
+	readonly optionTokens: number | null;
+	/** Declared tokens of the question with all its options, or null. */
+	readonly headTokens: number | null;
+	/** Tokens one request may fill, or null when no bound is known. */
+	readonly windowTokens: number | null;
+	/** Whether the window holds the state and its longest question, or the state and every question. */
+	readonly windowCounts: "per-question" | "whole-request";
+}
+
 export interface DecisionEngine {
-	/** The `systemOne.engines` key it was built from. */
+	/** The route name it was built from. */
 	readonly name: string;
 	readonly kind: EngineKind;
-	readonly target: string;
-	readonly model: string | null;
-	/** Tokens one state plus its longest question may use, or null when the engine declares no bound. */
-	readonly windowTokens: number | null;
-	/** The runtime and resolved endpoint a request leaves for, for the information-flow check. */
-	readonly runtime: string;
-	readonly url: string | null;
-	/** The capability profile, or null for an LLM engine, which renders its own prompt. */
-	readonly profile: ProfileId | null;
-	readonly renderer: RendererId;
-	/** The builds it would answer as, for checking a measurement before any request. Empty when none can be named. Pure. */
-	expectedBuilds(): ReadonlyArray<string>;
-	/** Why this engine must not be asked `question` for `task`, or null when it may. Pure. */
-	unsupported(task: DecisionTask, question: Question, compact?: Question): string | null;
+	readonly profile: ProfileId;
+	readonly capabilities: EngineCapabilities;
+	readonly destination: EngineDestination | null;
 	/** Rejects on transport failure, an unusable reply, or abort. The runner owns deadlines and fallback. */
 	decide(request: EngineRequest): Promise<EngineReply>;
 }
 
-export interface SiteDefinition<O, V> {
-	readonly id: SiteId;
-	/** Bumped whenever wording, state shape or policy changes; recorded with every call. */
+/** One question of a point, with what it means. `compact` is a short wording for a bounded renderer. */
+export interface PointQuestion {
+	readonly question: Question;
+	readonly semantic: SemanticKind;
+	readonly compact?: Question;
+}
+
+/**
+ * A versioned question set, a state builder and a reader. Adding a decision is one of
+ * these, one entry in `points/index.ts` and one `ask` at a place that already waits.
+ * `id` and `version` are what telemetry groups by and what a later training set joins on.
+ */
+export interface DecisionPoint<O, V> {
+	readonly id: string;
+	/** Bumped whenever wording or state shape changes. */
 	readonly version: string;
-	/** Hard deadline for one call. A binding may override it. */
+	/** The total across every route. An engine kind's own timeout bounds each route inside it. */
 	readonly deadlineMs: number;
-	/** The bounded state for this object, or null to ask nothing. Pure: no I/O beyond what the object carries. */
+	/** What an engine must declare to be asked at all. A route without it is skipped before any byte leaves. */
+	readonly requires?: { readonly probabilities?: true };
+	/** A use nobody waits on directly. It skips a route whose endpoint has no free slot rather than queueing behind work. */
+	readonly optional?: true;
+	/** The bounded state, or null to ask nothing. */
 	state(object: O): Readonly<Record<string, unknown>> | null;
-	/** Every question about this object, fanned out in one call. */
-	questions(object: O): Readonly<Record<string, Question>>;
-	/** The typed verdict, or null when the answers carry no usable opinion. */
-	read(answers: Readonly<Record<string, Answer>>, object: O): V | null;
+	questions(object: O): Readonly<Record<string, PointQuestion>>;
+	/** The typed value, or null when the answers carry no usable opinion. */
+	read(answers: AskAnswers, object: O): V | null;
 }
 
-export interface Verdict<V> {
-	readonly value: V;
-	readonly callId: string;
-	readonly engine: string;
-	readonly build: string;
-	readonly latencyMs: number;
-}
-
-export interface RunOptions {
+export interface AskOptions {
 	/** Per-call failure diagnostics for callers that need to explain a null fallback. */
 	readonly onFailure?: (reason: string) => void;
-	/** Join key for outcome rows: the user turn id, a permission request id, a tool call id. */
+	/** Join key for a later outcome: a tool call id, a request id, a queue entry id. */
 	readonly ref?: string;
 	readonly signal?: AbortSignal;
-	/**
-	 * The information-flow restrictions the evidence inherited from where it came
-	 * from, passed through to the flow check unread. System One never classifies
-	 * content to decide where it may go.
-	 */
+	/** The information-flow restrictions the evidence inherited, passed through to the flow check unread. */
 	readonly flow?: unknown;
-}
-
-export interface SiteBindingInfo {
-	readonly site: SiteId;
-	/** The bound engine name, or null when the site is unbound. */
-	readonly engine: string | null;
-	readonly kind?: EngineKind;
-	readonly target?: string;
-	readonly model?: string | null;
-	readonly deadlineMs?: number;
-	/** Why a configured binding cannot answer, for doctor and the settings overlay. */
-	readonly problem?: string;
-}
-
-/** One engine's timeout breaker at one site and moment, as `/health` shows it (#434 §11.3). */
-export interface SystemOneBreakerView {
-	readonly engine: string;
-	readonly site: SiteId;
-	readonly moment: string | null;
-	/**
-	 * `closed` while it counts timeouts below the threshold, `open` while it cools down, `probing` while the one call
-	 * past the cooldown runs, and `half-open` once the next call may probe.
-	 */
-	readonly state: "closed" | "open" | "probing" | "half-open";
-	/** Consecutive timeouts. */
-	readonly failures: number;
-	/** Cooldown left while open or probing, else 0. */
-	readonly remainingMs: number;
-}
-
-export interface SystemOne {
-	/** Whether the site has a usable binding. Cheap: constructs no engine and reads no credential. */
-	bound(site: SiteId): boolean;
-	/** Ask one site about one object. Never throws. Null means behave as if System One did not exist. */
-	run<O, V>(site: SiteDefinition<O, V>, object: O, options?: RunOptions): Promise<Verdict<V> | null>;
-	/** One row per site, bound or not. */
-	describe(): ReadonlyArray<SiteBindingInfo>;
-	/** Every engine breaker that counts a failure or is tripped, in this process and the current session. */
-	breakers?(): ReadonlyArray<SystemOneBreakerView>;
-	/** Why each engine's server refused its current model by name; it is not asked again. */
-	refusedEngines?(): ReadonlyMap<string, string>;
 }
 
 export type CallOutcome =
@@ -210,4 +160,60 @@ export type CallOutcome =
 	| "overflow"
 	| "breaker-open"
 	| "unsupported"
-	| "flow-denied";
+	| "flow-denied"
+	| "busy";
+
+/** One route's part in an ask. */
+export interface RouteAttempt {
+	readonly engine: string;
+	readonly kind: EngineKind;
+	readonly profile: ProfileId;
+	readonly outcome: CallOutcome;
+	readonly roundTripMs?: number;
+	readonly breaker?: "opened" | "probe" | "closed";
+}
+
+export interface Verdict<V> {
+	readonly value: V;
+	readonly askId: string;
+	readonly engine: string;
+	readonly kind: EngineKind;
+	readonly profile: ProfileId;
+	readonly build: string;
+	readonly latencyMs: number;
+	readonly usage?: { readonly input: number; readonly output: number };
+	readonly routes: ReadonlyArray<RouteAttempt>;
+}
+
+export interface RouteInfo {
+	/** The route name as `systemOne.use` names it. */
+	readonly name: string;
+	readonly kind?: EngineKind;
+	readonly profile?: ProfileId;
+	readonly target?: string;
+	readonly model?: string | null;
+	/** Why this route cannot answer, for status surfaces. */
+	readonly problem?: string;
+}
+
+/** One engine's timeout breaker, as `/health` shows it (#434 §11.3). */
+export interface SystemOneBreakerView {
+	readonly engine: string;
+	/** `closed` while it counts timeouts, `open` while it cools down, `probing` during the one call past the cooldown, `half-open` once the next call may probe. */
+	readonly state: "closed" | "open" | "probing" | "half-open";
+	readonly failures: number;
+	readonly remainingMs: number;
+}
+
+export interface SystemOne {
+	/** Whether at least one named route can answer. Cheap: constructs no engine and reads no credential. */
+	bound(): boolean;
+	/** Ask one decision point about one object. Never throws. */
+	ask<O, V>(point: DecisionPoint<O, V>, object: O, options?: AskOptions): Promise<Verdict<V> | null>;
+	/** One row per named route, in order. */
+	routes(): ReadonlyArray<RouteInfo>;
+	/** Every engine breaker that counts a failure or is tripped. */
+	breakers?(): ReadonlyArray<SystemOneBreakerView>;
+	/** Why each engine's server refused its current model by name; it is not asked again. */
+	refusedEngines?(): ReadonlyMap<string, string>;
+}

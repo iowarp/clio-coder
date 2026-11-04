@@ -5,10 +5,12 @@
  * readout. Another readout would be another declared capability, not a mode.
  */
 
+import { modelEndpointKey, registerForegroundStream } from "../../providers/endpoint-capacity.js";
 import type { OneShotPort } from "../../providers/one-shot.js";
 import type { RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
-import type { Answer, DecisionEngine, EngineReply, EngineRequest } from "../types.js";
+import { engineCapabilities, PROFILES } from "../profiles.js";
+import type { DecisionEngine, EngineDestination, EngineReply, EngineRequest } from "../types.js";
 import {
 	BATCH_PROMPT_VERSION,
 	batchMaxTokens,
@@ -82,7 +84,7 @@ async function decideBatch(
 	request: EngineRequest,
 ): Promise<EngineReply> {
 	const asked: Record<string, EngineRequest["questions"][string]> = {};
-	const answers: Record<string, Answer> = {};
+	const answers: Record<string, EngineReply["answers"][string]> = {};
 	for (const [id, question] of Object.entries(request.questions)) {
 		if (!isDecided(question)) {
 			asked[id] = question;
@@ -108,30 +110,32 @@ async function decideBatch(
 	};
 }
 
+function promptWindow(declared: unknown): number | null {
+	if (typeof declared !== "number" || !Number.isFinite(declared) || declared <= 0) return null;
+	return declared > PROMPT_RESERVE_TOKENS * 4 ? declared - PROMPT_RESERVE_TOKENS : declared;
+}
+
 export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 	const { name, target, runtime, model, host } = input;
-	const window = target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow;
+	const profile = PROFILES["llm-structured"];
+	const destination: EngineDestination = {
+		targetId: target.id,
+		runtimeId: runtime.id,
+		wireModelId: model ?? target.defaultModel ?? null,
+		...(target.url !== undefined ? { url: target.url } : {}),
+	};
 	return {
 		name,
 		kind: "llm",
-		target: target.id,
-		model,
-		runtime: runtime.id,
-		url: target.url ?? null,
-		profile: null,
-		renderer: "llm-prompt",
-		// The prompt carries any task and shape the wire validates.
-		unsupported: () => null,
-		expectedBuilds: () => [],
-		windowTokens:
-			typeof window === "number" && Number.isFinite(window) && window > 0
-				? window > PROMPT_RESERVE_TOKENS * 4
-					? window - PROMPT_RESERVE_TOKENS
-					: window
-				: null,
+		profile: profile.id,
+		destination,
+		capabilities: engineCapabilities(
+			profile,
+			promptWindow(target.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow),
+		),
 		async decide(request: EngineRequest): Promise<EngineReply> {
-			const wireModel = model ?? target.defaultModel;
-			if (wireModel === undefined) throw new Error(`llm engine '${name}' has no model`);
+			const wireModel = destination.wireModelId;
+			if (wireModel === null) throw new Error(`llm engine '${name}' has no model`);
 			const baseUrl = hasChatWire(runtime.id) ? chatBaseUrl(runtime.id, target) : null;
 			if (baseUrl === null && input.oneShot === undefined) {
 				throw new Error(`llm engine '${name}' has no chat wire and no one-shot port`);
@@ -141,12 +145,20 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 					? createHttpChannel({ engine: name, target, runtime, model: wireModel, baseUrl, host, signal: request.signal })
 					: createOneShotChannel({
 							engine: name,
-							targetId: target.id,
+							targetId: destination.targetId,
 							model: wireModel,
 							port: input.oneShot as OneShotPort,
 							signal: request.signal,
 						});
-			return decideBatch(channel, target, runtime.id, name, request);
+			// An ask is something a caller waits on, so on a one-slot server it preempts
+			// background memory rather than queueing behind optional work.
+			const endpointKey = modelEndpointKey(target, wireModel);
+			const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+			try {
+				return await decideBatch(channel, target, runtime.id, name, request);
+			} finally {
+				release();
+			}
 		},
 	};
 }

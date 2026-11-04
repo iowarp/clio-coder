@@ -1,4 +1,5 @@
 import type { Api, Model } from "../../../engine/types.js";
+import type { ProfileId } from "../../system-one/profiles.js";
 import type { CapabilityFlags } from "./capability-flags.js";
 import type { ContextWindowSlots } from "./context-window-slots.js";
 import type {
@@ -169,6 +170,13 @@ export interface RuntimeEnforcement {
 	cancellation: boolean;
 }
 
+/** A short `systemOne.use` route name a decision runtime answers to, which brings its own target. */
+export interface DecisionAlias {
+	readonly name: string;
+	readonly defaultModel: string;
+	readonly profile: ProfileId;
+}
+
 export interface RuntimeDescriptor {
 	id: string;
 	/** Deprecated or compatibility ids that resolve to this descriptor object. */
@@ -290,4 +298,5 @@ export interface RuntimeDescriptor {
 	 * prose. Every question is independent, so a batch costs one round trip.
 	 */
 	decide?(target: TargetDescriptor, opts: DecideOptions, ctx: ProbeContext): Promise<DecideResult>;
+	decisionAlias?: DecisionAlias;
 }

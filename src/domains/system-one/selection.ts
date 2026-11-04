@@ -1,22 +1,21 @@
 /**
  * The one setting that opts in to System One.
  *
- * `systemOne.use` names what answers: `jev`, `memory`, `main`, a declared engine
- * or a target. Unset and `off` both send nothing. `clio-coder run --systemone`
- * sets the same choice for one run, so no second way of opting in exists.
- * Nothing here constructs an engine, reads a credential or sends a request.
+ * `systemOne.use` is an ordered route list, written as one name or a list: `jev`,
+ * `memory`, `main`, a declared engine or a target. Unset and `off` send nothing, and
+ * a route the operator did not name is never used. `clio-coder run --systemone` sets
+ * the same list for one run. Nothing here constructs an engine, reads a credential
+ * or sends a request.
  */
 
 import type { ClioSettings } from "../../core/config.js";
+import type { SystemOneUse } from "../../core/defaults.js";
 import { getRuntimeRegistry } from "../providers/registry.js";
-import { findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
-import { TYPESAFE_DEFAULT_MODEL } from "../providers/runtimes/typesafe-model.js";
+import { BUILTIN_RUNTIME_BOOT_MANIFEST, findBuiltinRuntimeBootMetadata } from "../providers/runtimes/boot-manifest.js";
 
 export const SYSTEM_ONE_OFF = "off";
 
 type EngineSettings = ClioSettings["systemOne"]["engines"][string];
-
-const DECISION_RUNTIMES: ReadonlySet<string> = new Set(["typesafe-jev", "systemone", "inception"]);
 
 export type ChoiceResolution =
 	| { readonly kind: "off" }
@@ -25,10 +24,42 @@ export type ChoiceResolution =
 			readonly kind: "engine";
 			readonly name: string;
 			readonly engine: EngineSettings;
-			/** A target the choice brings with it: Jev needs only its key, not a `targets` entry. */
+			/** A target the choice brings with it: a hosted decision service needs only its key, not a `targets` entry. */
 			readonly impliedTarget?: ClioSettings["targets"][number];
 	  }
 	| { readonly kind: "unavailable"; readonly name: string; readonly problem: string };
+
+/** The named routes in order. `off` anywhere in the list turns everything off. */
+export function routeNames(use: SystemOneUse | undefined): ReadonlyArray<string> {
+	if (use === null || use === undefined) return [];
+	const names = typeof use === "string" ? [use] : use;
+	return names.includes(SYSTEM_ONE_OFF) ? [] : [...new Set(names)];
+}
+
+/** A list as a flag or a CLI argument writes it: `jev,main`. One name stays one name. */
+export function parseRouteList(text: string): string | string[] {
+	const names = text
+		.split(",")
+		.map((name) => name.trim())
+		.filter((name) => name.length > 0);
+	return names.length === 1 ? (names[0] as string) : names;
+}
+
+/**
+ * The runtime that claims `name` as its route. Read from the registered descriptors and the boot manifest
+ * (a process with no hydrated providers still has to resolve it), which a test keeps equal to the descriptors.
+ */
+function aliasedRuntime(name: string) {
+	const claims = (runtime: { readonly decisionAlias?: { readonly name: string } }): boolean =>
+		runtime.decisionAlias?.name === name;
+	return getRuntimeRegistry().list().find(claims) ?? BUILTIN_RUNTIME_BOOT_MANIFEST.find(claims) ?? null;
+}
+
+/** Whether a runtime answers typed decisions. A boot entry says what its descriptor implements. */
+function runtimeDecides(id: string): boolean {
+	const registered = getRuntimeRegistry().get(id);
+	return registered !== null ? registered.decide !== undefined : findBuiltinRuntimeBootMetadata(id)?.decides === true;
+}
 
 /** What `name` means under these settings. A choice that cannot run says why, and nothing borrows another route. */
 export function resolveChoice(settings: Readonly<ClioSettings>, name: string | null | undefined): ChoiceResolution {
@@ -36,18 +67,24 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 	if (name === SYSTEM_ONE_OFF) return { kind: "off" };
 	const declared = Object.hasOwn(settings.systemOne.engines, name) ? settings.systemOne.engines[name] : undefined;
 	if (declared !== undefined) return { kind: "engine", name, engine: declared };
-	if (name === "jev") {
-		const target = settings.targets.find((entry) => entry.runtime === "typesafe-jev");
-		const model = target?.defaultModel ?? TYPESAFE_DEFAULT_MODEL;
-		const engine: EngineSettings = { kind: "systemone", target: target?.id ?? "jev", model, profile: "jev" };
+	const aliased = aliasedRuntime(name);
+	if (aliased?.decisionAlias !== undefined) {
+		const { defaultModel, profile } = aliased.decisionAlias;
+		const target = settings.targets.find((entry) => entry.runtime === aliased.id);
+		const engine: EngineSettings = {
+			kind: "systemone",
+			target: target?.id ?? name,
+			model: target?.defaultModel ?? defaultModel,
+			profile,
+		};
 		return target !== undefined
 			? { kind: "engine", name, engine }
-			: { kind: "engine", name, engine, impliedTarget: { id: "jev", runtime: "typesafe-jev" } };
+			: { kind: "engine", name, engine, impliedTarget: { id: name, runtime: aliased.id } };
 	}
 	if (name === "main") {
 		const { target, model } = settings.chat;
 		if (!target) return { kind: "unavailable", name, problem: "no chat route is configured" };
-		return { kind: "engine", name, engine: { kind: "llm", target, mode: "batch", ...(model ? { model } : {}) } };
+		return { kind: "engine", name, engine: { kind: "llm", target, ...(model ? { model } : {}) } };
 	}
 	if (name === "memory") {
 		const { target, model } = settings.context.memory;
@@ -58,34 +95,31 @@ export function resolveChoice(settings: Readonly<ClioSettings>, name: string | n
 				problem: "context.memory names no target and model, and memory never falls back to the chat route",
 			};
 		}
-		return { kind: "engine", name, engine: { kind: "llm", target, model, mode: "batch" } };
+		return { kind: "engine", name, engine: { kind: "llm", target, model } };
 	}
 	const target = settings.targets.find((entry) => entry.id === name);
 	if (target === undefined) {
-		return { kind: "unavailable", name, problem: `'${name}' is not jev, memory, main, an engine or a target` };
+		return { kind: "unavailable", name, problem: `'${name}' is not a known route, engine or target` };
 	}
-	const runtime = getRuntimeRegistry().get(target.runtime) ?? findBuiltinRuntimeBootMetadata(target.runtime);
-	const decides = DECISION_RUNTIMES.has(runtime?.id ?? target.runtime);
 	return {
 		kind: "engine",
 		name,
-		engine: decides ? { kind: "systemone", target: name } : { kind: "llm", target: name, mode: "batch" },
+		engine: runtimeDecides(target.runtime) ? { kind: "systemone", target: name } : { kind: "llm", target: name },
 	};
 }
 
-/** The settings System One resolves its engine from: the choice expanded into a declared engine and any target it brings. */
+/** The settings System One resolves from: each named route expanded into an engine and any target it brings. */
 export function effectiveSystemOne(
 	settings: Readonly<ClioSettings>,
-	choice: string | null | undefined = settings.systemOne.use,
+	use: SystemOneUse | undefined = settings.systemOne.use,
 ): Readonly<ClioSettings> {
-	const resolved = resolveChoice(settings, choice);
-	if (resolved.kind !== "engine") return settings;
-	return {
-		...settings,
-		targets: resolved.impliedTarget !== undefined ? [...settings.targets, resolved.impliedTarget] : settings.targets,
-		systemOne: {
-			...settings.systemOne,
-			engines: { ...settings.systemOne.engines, [resolved.name]: resolved.engine },
-		},
-	};
+	const engines = { ...settings.systemOne.engines };
+	const targets = [...settings.targets];
+	for (const name of routeNames(use)) {
+		const resolved = resolveChoice(settings, name);
+		if (resolved.kind !== "engine") continue;
+		engines[resolved.name] = resolved.engine;
+		if (resolved.impliedTarget !== undefined) targets.push(resolved.impliedTarget);
+	}
+	return { ...settings, targets, systemOne: { ...settings.systemOne, engines } };
 }

@@ -55,7 +55,7 @@ import * as S from "./schemas.js";
  */
 export interface JournalDefinition<S extends TSchema = TSchema> {
 	readonly durability: "journal";
-	readonly version: 1;
+	readonly version: number;
 	readonly schema: S;
 	readonly tier: Tier;
 	readonly cc: ContentClass;
@@ -89,8 +89,10 @@ function journal<
 		scope?: "process" | "session";
 		// biome-ignore lint/suspicious/noExplicitAny: the projection's own annotation names the live payload type.
 		project?: (payload: any) => Static<S>;
+		/** Bumped only with the old version retired in `envelope.ts`, so a reader counts it rather than skipping it. */
+		version?: number;
 	},
->(schema: S, options: O): { durability: "journal"; version: 1; schema: S } & O {
+>(schema: S, options: O): { durability: "journal"; version: number; schema: S } & O {
 	return { durability: "journal", version: 1, schema, ...options };
 }
 
@@ -381,7 +383,7 @@ export const EVENTS = {
 	"prompt.prefix_captured": journal(S.PromptPrefixCapturedSchema, { tier: "research", cc: "structural" }),
 	"auth.refreshed": journal(S.AuthRefreshedSchema, { tier: "operational", cc: "content-free" }),
 	"middleware.fired": journal(S.MiddlewareFiredSchema, { tier: "operational", cc: "content-free" }),
-	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free" }),
+	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free", version: 2 }),
 	"worker.channel_failed": journal(S.WorkerChannelFailedSchema, { tier: "operational", cc: "content-free" }),
 	"request.captured": journal(S.RequestCapturedSchema, { tier: "research", cc: "content-bearing", capture: "content" }),
 	"provider.headers_captured": journal(S.ProviderHeadersCapturedSchema, {

@@ -207,11 +207,13 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 			};
 		case "system-one":
 			return {
-				title: `System One at ${words(entry.site)}: ${words(entry.outcome)}`,
+				title: `System One at ${words(entry.point)}: ${words(entry.outcome)}`,
 				tone: entry.outcome === "failed" || entry.outcome === "timeout" ? "warn" : "neutral",
 				details: [
 					...shown("Latency", entry.latency),
 					...shown("Deadline", entry.deadline),
+					...said("Answered as", entry.build),
+					...said("Abstained", entry.abstained > 0 ? `${entry.abstained} of ${entry.asked}` : null),
 					...entry.routes.map((route) => ({
 						label: `${route.engine} (${words(route.kind)})`,
 						value: `${words(route.outcome)}${route.roundTrip ? ` in ${route.roundTrip.display}` : ""}${route.breaker ? `, breaker ${route.breaker}` : ""}`,

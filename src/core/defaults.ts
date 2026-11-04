@@ -68,12 +68,12 @@ export type FleetAgentProfiles = Record<string, string>;
 
 /**
  * What answers a System One question. `systemone` is any `POST /v1/systemone`
- * server (TypeSafe Jev, Laya, OpenJev, Kev). `llm` reads an ordinary chat
- * target through its logprobs, or asks it for a vote when the runtime has none.
- * `mode` only matters for `llm`: `auto` probes the target once and picks.
+ * server (TypeSafe Jev, Laya, OpenJev, Kev). `llm` asks an ordinary chat target
+ * every question of an ask in one schema-bound request.
  */
 export type SystemOneEngineKind = "systemone" | "llm";
-export type SystemOneMode = "auto" | "logprobs" | "answer" | "batch";
+/** One route name, an ordered list, `off` or null. A later settings layer's list replaces the earlier one. */
+export type SystemOneUse = string | string[] | null;
 
 export interface SystemOneEngineSettings {
 	kind: SystemOneEngineKind;
@@ -81,7 +81,6 @@ export interface SystemOneEngineSettings {
 	target: string;
 	/** Wire model id; absent means the target's default model. */
 	model?: string;
-	mode?: SystemOneMode;
 	/**
 	 * The capability profile of the served model (`contract.ts`), which picks its
 	 * renderer, the questions it may be asked and how its numbers are read.
@@ -92,9 +91,10 @@ export interface SystemOneEngineSettings {
 
 export interface SystemOneSettings {
 	/**
-	 * The opt-in: `jev`, `memory`, `main`, a declared engine or a target picks what answers. Unset and `off` send nothing.
+	 * The opt-in: an ordered list of routes, each `jev`, `memory`, `main`, a declared engine or a target.
+	 * Unset and `off` send nothing, and a route nobody named is never used. Applies on the next start.
 	 */
-	use: string | null;
+	use: SystemOneUse;
 	engines: Record<string, SystemOneEngineSettings>;
 }
 
@@ -1031,8 +1031,8 @@ context:
     background: false
     inboxes: []
 
-# Experimental. System One stays off until you choose an engine with use: jev,
-# memory, main, a declared engine or a target. Keys may change between releases.
+# Experimental. System One stays off until use names a route or an ordered list of
+# them: jev, memory, main, a declared engine or a target. Keys may change between releases.
 systemOne:
   use: null
   engines: {}

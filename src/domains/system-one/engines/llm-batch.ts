@@ -1,13 +1,14 @@
 /**
- * The economical LLM readout: every question of one site call in one
- * schema-bound request, answered with labels.
+ * The LLM readout: every question of one ask in one schema-bound request, answered
+ * with labels.
  *
- * A label has no probability scale, so an answer is not a confidence. Its mass
- * is one-hot and its readout says so, so nothing may read it as a probability.
+ * A label has no probability scale, so an answer is not a confidence. Its mass is
+ * one-hot and the profile's readout says so, so nothing may read it as a probability.
  */
 
-import { certaintyFromMass } from "../answers.js";
-import type { Answer, Question } from "../types.js";
+import type { EngineReply, Question } from "../types.js";
+
+type RawAnswer = EngineReply["answers"][string];
 
 /** Part of every batch build key. Bump it with any wording or schema change below. */
 export const BATCH_PROMPT_VERSION = "b1";
@@ -75,20 +76,15 @@ export function batchMaxTokens(questions: Readonly<Record<string, Question>>): n
 	return TOKENS_RESERVE + Object.keys(questions).length * TOKENS_PER_ANSWER + Math.ceil(chars / 2);
 }
 
-function answerFrom(question: Question, label: unknown): Answer | null {
+function answerFrom(question: Question, label: unknown): RawAnswer | null {
 	if (typeof label !== "string" || label === ABSTAIN) return null;
 	const labels = labelsOf(question).map(([name]) => name);
 	if (!labels.includes(label)) return null;
-	const base = { calibrated: false, readout: "categorical" } as const;
-	if (question.type === "noul") {
-		const noul = label === "yes" ? 1 : 0;
-		return { type: "noul", noul, certainty: certaintyFromMass("noul", { noul }), ...base };
-	}
+	if (question.type === "noul") return { type: "noul", noul: label === "yes" ? 1 : 0 };
 	const probabilities = Object.fromEntries(labels.map((name) => [name, name === label ? 1 : 0]));
-	const certainty = certaintyFromMass(question.type, { probabilities });
 	return question.type === "choice"
-		? { type: "choice", choice: label, probabilities, certainty, ...base }
-		: { type: "score", score: Number(label), probabilities, certainty, ...base };
+		? { type: "choice", choice: label, probabilities }
+		: { type: "score", score: Number(label), probabilities };
 }
 
 /** The first JSON object in a reply, which a server that ignored the schema may fence or introduce. */
@@ -114,10 +110,10 @@ function parseObject(text: string): Record<string, unknown> | null {
 export function readBatchReply(
 	text: string,
 	questions: Readonly<Record<string, Question>>,
-): Record<string, Answer> | null {
+): Record<string, RawAnswer> | null {
 	const parsed = parseObject(text);
 	if (parsed === null) return null;
-	const answers: Record<string, Answer> = {};
+	const answers: Record<string, RawAnswer> = {};
 	for (const [id, question] of Object.entries(questions)) {
 		const answer = Object.hasOwn(parsed, id) ? answerFrom(question, parsed[id]) : null;
 		if (answer !== null) answers[id] = answer;
@@ -126,7 +122,7 @@ export function readBatchReply(
 }
 
 /** The answer to a question with one option, which needs no request. */
-export function decidedAnswer(question: Question): Answer | null {
+export function decidedAnswer(question: Question): RawAnswer | null {
 	const only = labelsOf(question)[0]?.[0];
 	return only === undefined ? null : answerFrom(question, only);
 }

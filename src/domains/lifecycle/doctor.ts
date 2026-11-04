@@ -1349,30 +1349,34 @@ async function systemOneFindings(
 	// A session binds from the layered settings, so a choice a trusted project file makes is live there and must not
 	// read as off here. An untrusted project layer contributes nothing, exactly as in a session.
 	const layered = readLayeredSettings(process.cwd()).settings;
-	const { effectiveSystemOne, resolveChoice } = await import("../system-one/selection.js");
+	const { effectiveSystemOne, resolveChoice, routeNames } = await import("../system-one/selection.js");
 	const settings = effectiveSystemOne(layered);
 	const profiles = await import("../system-one/profiles.js");
-	const juliaCounted = existsSync((await import("../system-one/julia-tokenizer.js")).juliaTokenizerPath());
 	const name = "system one (experimental)";
-	const resolved = resolveChoice(layered, layered.systemOne.use);
-	if (resolved.kind === "off" || resolved.kind === "none") return [{ ok: true, level: "info", name, detail: "off" }];
-	if (resolved.kind === "unavailable") {
-		return [{ ok: true, level: "warn", name, detail: `${resolved.problem}; consult stays unavailable` }];
-	}
-	const { engine } = resolved;
-	const connection = connections.find((finding) => finding.name === `connection ${engine.target}`);
-	const unverified = connection === undefined || !connection.ok || connection.level === "warn";
-	return [
-		{
+	const routes = routeNames(layered.systemOne.use);
+	if (routes.length === 0) return [{ ok: true, level: "info", name, detail: "off" }];
+	const findings: DoctorFinding[] = [];
+	for (const route of routes) {
+		const resolved = resolveChoice(layered, route);
+		if (resolved.kind !== "engine") {
+			const problem = resolved.kind === "unavailable" ? resolved.problem : `'${route}' is not a route`;
+			findings.push({ ok: true, level: "warn", name, detail: `${problem}; consult cannot use ${route}` });
+			continue;
+		}
+		const { engine } = resolved;
+		const connection = connections.find((finding) => finding.name === `connection ${engine.target}`);
+		const unverified = connection === undefined || !connection.ok || connection.level === "warn";
+		findings.push({
 			ok: true,
 			...(unverified ? { level: "warn" as const } : {}),
 			name,
 			detail:
 				`${resolved.name} (${engine.kind}) → ${engine.target}/${engine.model ?? "target default"}` +
 				(unverified ? `; connection ${engine.target} is not verified, so consult may give no answer` : ""),
-		},
-		...systemOneEngineFindings(settings, [resolved.name], runtimes, observations, profiles, juliaCounted),
-	];
+		});
+		findings.push(...(await systemOneEngineFindings(settings, [resolved.name], runtimes, observations, profiles)));
+	}
+	return findings;
 }
 
 /**
@@ -1382,14 +1386,13 @@ async function systemOneFindings(
  * decision, so doctor puts no work on the accelerator the engine runs on. An
  * engine that does not answer leaves consult with no answer.
  */
-function systemOneEngineFindings(
+async function systemOneEngineFindings(
 	settings: Readonly<ReturnType<typeof readSettings>>,
 	names: ReadonlyArray<string>,
 	runtimes: { get(id: string): RuntimeDescriptor | null },
 	observations: ReadonlyMap<string, DoctorProbeObservation | null>,
 	profiles: typeof import("../system-one/profiles.js"),
-	juliaCounted: boolean,
-): DoctorFinding[] {
+): Promise<DoctorFinding[]> {
 	const { engineWindow, profileFor } = profiles;
 	const rows: DoctorFinding[] = [];
 	for (const name of names) {
@@ -1408,11 +1411,11 @@ function systemOneEngineFindings(
 					? `target ${target.id} declares ${declared}, profile ceiling ${profile.windowCeiling}`
 					: `declared on target ${target.id}`;
 		const counting =
-			profile.id !== "julia-1"
+			profile.tokenizer === undefined
 				? ""
-				: juliaCounted
-					? "; options counted with Julia-1's tokenizer"
-					: "; options byte-bounded until Julia-1's tokenizer is cached on first use";
+				: (await profile.tokenizer.cached())
+					? `; options counted with ${profile.tokenizer.label}`
+					: `; options byte-bounded until ${profile.tokenizer.label} is cached on first use`;
 		const head = `profile ${profile.id}; window ${window === null ? "unbounded" : `${window} tokens`} (${source})${counting}`;
 		const where = target.url ?? `${runtime.displayName} endpoint`;
 		const observation = observations.get(target.id);

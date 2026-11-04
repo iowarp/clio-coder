@@ -713,7 +713,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"systemOne.use": [
 		"Decision engine",
-		"Experimental opt-in. Off until chosen. Names what answers the consult tool: jev, memory, main, a declared engine or a target. Registers on the next start.",
+		"Experimental opt-in. Off until chosen. Names what answers the consult tool, one route or an ordered list: jev, memory, main, a declared engine or a target. Registers on the next start.",
 	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",

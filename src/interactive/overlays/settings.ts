@@ -1937,9 +1937,9 @@ function systemOneRows(settings: Readonly<ClioSettings>, live: () => Readonly<Cl
 	const engineNames = Object.keys(live().systemOne.engines);
 	const targetNames = settings.targets.map((target) => target.id);
 	const useChoices = [...new Set(["jev", "memory", "main", ...engineNames, ...targetNames])];
-	const use = settings.systemOne.use;
+	const { use } = settings.systemOne;
 	return [
-		settingItem("systemOne.use", use ?? SITE_OFF_CHOICE, {
+		settingItem("systemOne.use", Array.isArray(use) ? use.join(", ") : (use ?? SITE_OFF_CHOICE), {
 			label: "Decision engine",
 			description:
 				"Experimental opt-in. Off until chosen. It registers the consult tool on the next start, which sends the evidence the agent supplies, including the heads of files it names. main and memory add separate completions to that route; jev sends redacted state to TypeSafe.",

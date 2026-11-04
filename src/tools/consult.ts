@@ -2,7 +2,7 @@
  * `consult`: the main agent asks the bound System One engine a typed question.
  *
  * It sits behind the gateway and is registered only on the session registry,
- * only when the `consult` site is bound at startup. Unbound, the registry, the
+ * only when a `systemOne.use` route is named at startup. Unnamed, the registry, the
  * gateway listing, the tool signature and the prompt are exactly what they were
  * before the tool existed. Workers never get it: a worker runs one assigned
  * task under a result contract, and the main agent is the one responsible for
@@ -25,8 +25,8 @@ import { relative, sep } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { createRedactionTally, redactSecretsText } from "../domains/evidence/redact.js";
-import { pick, rate, yesNo } from "../domains/system-one/questions.js";
-import { CONSULT_MAX_FILE_CHARS, consultSite } from "../domains/system-one/sites/consult.js";
+import { CONSULT_MAX_FILE_CHARS, consultPoint } from "../domains/system-one/points/index.js";
+import { pick, pointQuestion, rate, yesNo } from "../domains/system-one/questions.js";
 import type { Question, SystemOne } from "../domains/system-one/types.js";
 import { StringEnum } from "../engine/ai.js";
 import {
@@ -60,8 +60,8 @@ export const CONSULT_LIMITS = {
 const FILE_READ_BYTES = CONSULT_LIMITS.fileChars * 4;
 
 export interface ConsultDeps {
-	/** The session's System One instance; the `consult` site is read through it. */
-	systemOne: Pick<SystemOne, "run">;
+	/** The session's System One instance; the `consult` point is asked through it. */
+	systemOne: Pick<SystemOne, "ask">;
 	/** The workspace file paths are resolved against and contained in. */
 	cwd?: () => string;
 	/**
@@ -372,10 +372,10 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 			}
 			turn.calls += 1;
 			const remaining = CONSULT_LIMITS.callsPerTurn - turn.calls;
-			const questions = Object.fromEntries(parsed.map((entry) => [entry.id, entry.question]));
+			const questions = Object.fromEntries(parsed.map((entry) => [entry.id, pointQuestion(entry.question)]));
 			let failure: string | undefined;
-			const verdict = await deps.systemOne.run(
-				consultSite(questions),
+			const verdict = await deps.systemOne.ask(
+				consultPoint(questions),
 				{ state, files: evidence.files },
 				{
 					onFailure: (reason) => {

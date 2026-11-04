@@ -106,6 +106,8 @@ export type RecordRead =
  */
 const RETIRED_RECORD_KINDS: Readonly<Record<string, number | undefined>> = {
 	"system_one.sample_captured": undefined,
+	// Version 1 described decision sites, which are gone. Keyed on the version, so a later reader still reads version 2.
+	"system_one.decided": 1,
 };
 
 function isRetiredRecord(raw: Record<string, unknown>): raw is Record<string, unknown> & { k: string } {

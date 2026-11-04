@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
+import { foregroundStreamUsage } from "../../src/domains/providers/endpoint-capacity.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
@@ -181,11 +182,13 @@ describe("System One paid requests: admission and accounting", () => {
 	it("admits each HTTP request, the schema retry included, and charges the usage of a decision that failed", async () => {
 		const target = paidTarget("llamacpp", "http://accounting.test");
 		const { admit, charges: journaled, admitted, calls } = ledger(target);
-		const bodies = fakeFetch(async (body) =>
-			body.response_format !== undefined
+		const slotsHeld: number[] = [];
+		const bodies = fakeFetch(async (body) => {
+			slotsHeld.push(Object.keys(foregroundStreamUsage()).length);
+			return body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
-				: json(200, { choices: [{ message: { content: "I cannot say" } }], usage: REPORTED }),
-		);
+				: json(200, { choices: [{ message: { content: "I cannot say" } }], usage: REPORTED });
+		});
 		const engine = createLlmEngine({
 			name: "paid",
 			target,
@@ -197,13 +200,16 @@ describe("System One paid requests: admission and accounting", () => {
 			engine.decide({ state: { task: "t" }, questions: urgent, signal: new AbortController().signal }),
 			/names no model/u,
 		);
-		// Five votes; the first went out once with the schema and once without it.
-		strictEqual(bodies.length, 6);
+		// One batch request, which went out once with the schema and once without it.
+		strictEqual(bodies.length, 2);
+		// Each went out holding a foreground slot, which is what preempts background memory, and none outlives the ask.
+		ok(slotsHeld.every((held) => held === 1));
+		strictEqual(Object.keys(foregroundStreamUsage()).length, 0);
 		ok(bodies[0]?.response_format !== undefined);
 		strictEqual(admitted(), bodies.length, "every request was admitted, the retry included");
 		// The rejected request reported no usage and is recorded as unmetered; every answered one is charged.
 		const charges = await journaled();
-		strictEqual(charges.length, 6);
+		strictEqual(charges.length, 2);
 		const unmetered = charges.filter((charge) => charge.pricedBy === "none");
 		strictEqual(unmetered.length, 1);
 		assertUnmetered(unmetered[0]);
@@ -211,7 +217,7 @@ describe("System One paid requests: admission and accounting", () => {
 		const settled = await calls();
 		strictEqual(settled.length, bodies.length);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
-		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 5);
+		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 1);
 		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.ctx.agent.role === "system-one"));
 	});
 

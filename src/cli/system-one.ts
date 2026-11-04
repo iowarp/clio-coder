@@ -3,17 +3,17 @@ import { readLayeredSettings, settingsSourceFor } from "../core/settings-layers.
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder systemone status
-clio-coder systemone use <engine> [--scope user|project]
+clio-coder systemone use <route>[,<route>...] [--scope user|project]
 clio-coder systemone off [--scope user|project]
 clio-coder systemone check <engine> --live
 
-System One is experimental and off until you choose an engine: jev, memory, main,
-a declared engine or a target. Choosing one registers the consult tool on the
-next start. A decision engine answers typed questions; keys may change between
-releases.
+System One is experimental and off until you name a route or an ordered list of
+them: jev, memory, main, a declared engine or a target. Naming one registers the
+consult tool on the next start. A decision engine answers typed questions; keys may
+change between releases.
 
 status   whether System One is on, and why not when it cannot run
-use      choose the engine; the default scope is user, and a project write goes to
+use      name the routes; the default scope is user, and a project write goes to
          .clio-coder/settings.local.yaml. run --systemone sets one run
 off      turn System One off
 check    send one content-free decision to an engine and report the build that answered
@@ -90,10 +90,12 @@ async function runStatus(): Promise<number> {
 	return 0;
 }
 
-async function runUse(use: string, scope: "user" | "project"): Promise<number> {
+async function runUse(text: string, scope: "user" | "project"): Promise<number> {
 	const { writeSystemOneUse } = await import("../entry/system-one-settings.js");
+	const { parseRouteList } = await import("../domains/system-one/selection.js");
+	const use = parseRouteList(text);
 	writeSystemOneUse(process.cwd(), scope, use);
-	process.stdout.write(`System One ${use === "off" ? "off" : use} at ${scope} scope\n`);
+	process.stdout.write(`System One ${Array.isArray(use) ? use.join(", then ") : use} at ${scope} scope\n`);
 	return runStatus();
 }
 
@@ -140,12 +142,12 @@ async function runCheck(name: string): Promise<number> {
 		return 1;
 	}
 	const live = { ...settings, systemOne: { ...settings.systemOne, use: name } };
-	const { createSystemOne, yesNo } = await import("../domains/system-one/index.js");
-	const { consultSite } = await import("../domains/system-one/sites/consult.js");
+	const { createSystemOne, pointQuestion, yesNo } = await import("../domains/system-one/index.js");
+	const { consultPoint } = await import("../domains/system-one/points/index.js");
 	const systemOne = createSystemOne(await offlineSystemOneDeps(live));
 	let failure = "the engine gave no answer";
-	const verdict = await systemOne.run(
-		consultSite({ check: yesNo("Is 2 greater than 1?", "It is greater", "It is not greater") }),
+	const verdict = await systemOne.ask(
+		consultPoint({ check: pointQuestion(yesNo("Is 2 greater than 1?", "It is greater", "It is not greater")) }),
 		{ state: { check: "build identity" }, files: {} },
 		{ onFailure: (reason) => (failure = reason) },
 	);

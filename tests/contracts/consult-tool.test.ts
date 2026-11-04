@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { Answer, Question, SiteDefinition, SystemOne, Verdict } from "../../src/domains/system-one/index.js";
+import type { Answer, DecisionPoint, Question, SystemOne, Verdict } from "../../src/domains/system-one/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { gatewayPromptHint } from "../../src/tools/builtin-tool-catalog.js";
 import type { ConsultDeps } from "../../src/tools/consult.js";
@@ -41,25 +41,35 @@ interface Asked {
 
 /**
  * A SystemOne whose engine answers every question with the same fixed mass. The
- * site under test is the real consult site, so what comes back is what the tool
+ * point under test is the real consult point, so what comes back is what the tool
  * would hand the model.
  */
-function fakeSystemOne(): { asked: Asked[]; systemOne: Pick<SystemOne, "run"> } {
+function fakeSystemOne(): { asked: Asked[]; systemOne: Pick<SystemOne, "ask"> } {
 	const asked: Asked[] = [];
 	const answer = (question: Question): Answer =>
 		question.type === "noul"
-			? { type: "noul", noul: 0.9, certainty: 0.8, calibrated: true }
-			: { type: "choice", choice: "a", probabilities: { a: 0.7, b: 0.3 }, certainty: 0.4, calibrated: true };
+			? { type: "noul", noul: 0.9, certainty: 0.8, readout: "server" }
+			: { type: "choice", choice: "a", probabilities: { a: 0.7, b: 0.3 }, certainty: 0.4, readout: "server" };
 	return {
 		asked,
 		systemOne: {
-			async run<O, V>(site: SiteDefinition<O, V>, object: O, options?: { ref?: string }): Promise<Verdict<V> | null> {
-				const questions = site.questions(object);
-				asked.push({ state: site.state(object), questions, ref: options?.ref });
+			async ask<O, V>(point: DecisionPoint<O, V>, object: O, options?: { ref?: string }): Promise<Verdict<V> | null> {
+				const items = point.questions(object);
+				const questions = Object.fromEntries(Object.entries(items).map(([id, item]) => [id, item.question]));
+				asked.push({ state: point.state(object), questions, ref: options?.ref });
 				const answers = Object.fromEntries(Object.entries(questions).map(([id, question]) => [id, answer(question)]));
-				const value = site.read(answers, object);
+				const value = point.read(answers, object);
 				if (value === null) return null;
-				return { value, callId: "call-1", engine: "jev", build: "jev-1.13.0", latencyMs: 212 };
+				return {
+					value,
+					askId: "dc_1",
+					engine: "jev",
+					kind: "systemone",
+					profile: "jev",
+					build: "jev-1.13.0",
+					latencyMs: 212,
+					routes: [],
+				};
 			},
 		},
 	};

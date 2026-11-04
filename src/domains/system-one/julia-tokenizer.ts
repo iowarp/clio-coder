@@ -8,7 +8,7 @@ import type { Question } from "./types.js";
 
 /**
  * Julia-1's own tokenizer, so its 48-token option contract is checked by count.
- * The byte proof refused nearly every site option (46 bytes stands for 48
+ * The byte proof refused nearly every real option (46 bytes stands for 48
  * tokens), so `toolCall` and `turnEnd` never reached Julia. The file is 34 MB,
  * too large to ship, so a bound `julia-1` engine fetches it once from the
  * published repository, pinned by revision and content hash, and caches it.

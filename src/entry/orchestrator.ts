@@ -308,7 +308,7 @@ import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import type { SystemOneInstance } from "../domains/system-one/index.js";
-import { createSystemOne } from "../domains/system-one/index.js";
+import { createSystemOne, parseRouteList } from "../domains/system-one/index.js";
 import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
@@ -783,7 +783,7 @@ function memoryObservationCapacity(providers: ProvidersContract, settings: Reado
  * without ever becoming a turn. The answer is text, so an engine behind this
  * port can vote but cannot read logprobs.
  */
-export function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
+function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmRequestAdmission): OneShotPort {
 	return async (request) => {
 		const target = providers.getTarget(request.targetId);
 		const wireModelId = request.model ?? target?.defaultModel ?? null;
@@ -3471,7 +3471,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: null;
 
 	// The effective view has to exist before anything below composes against it.
-	// `systemOne.bound("consult")` reads it while the tool registry is assembled,
+	// `systemOne.bound()` reads it while the tool registry is assembled,
 	// and a `const` declared after that call is still in its temporal dead zone:
 	// bound() swallows the ReferenceError, so every start read as an unbound site
 	// and the consult tool never registered.
@@ -3741,7 +3741,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const systemOneSettings = (): Readonly<ClioSettings> => {
 		const settings = getCurrentSettings();
 		const use = options.headless?.systemOne;
-		return use === undefined ? settings : { ...settings, systemOne: { ...settings.systemOne, use } };
+		return use === undefined ? settings : { ...settings, systemOne: { ...settings.systemOne, use: parseRouteList(use) } };
 	};
 	const systemOneCore = createSystemOne({
 		settings: () => systemOneSettings(),
@@ -3757,9 +3757,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				mergeFlowRestrictions(inherited, flowLedger.current()),
 				resolveModelDestination({
 					targetId: request.destination.targetId,
-					runtimeId: request.destination.runtime,
-					url: request.destination.url,
-					model: request.destination.model,
+					runtimeId: request.destination.runtimeId,
+					url: request.destination.url ?? null,
+					model: request.destination.wireModelId,
 				}),
 			);
 			return reason === null ? { allowed: true } : { allowed: false, reason };
@@ -3777,12 +3777,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// set, so the flow check above sees them whoever asked.
 	const systemOne: SystemOneInstance = {
 		...systemOneCore,
-		run: (site, object, options) => {
-			const carried = flowLedger.current();
-			const given = options as { flow?: unknown } | undefined;
-			const flow = given?.flow !== undefined ? given.flow : carried;
+		ask: (point, object, options) => {
+			const flow = options?.flow !== undefined ? options.flow : flowLedger.current();
 			const merged = { ...(options ?? {}), ...(flow !== null && flow !== undefined ? { flow } : {}) };
-			return systemOneCore.run(site, object, merged);
+			return systemOneCore.ask(point, object, merged);
 		},
 	};
 	const systemOneControl = createSystemOneControl({
@@ -3860,11 +3858,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		rankCapabilities: catalogRanker("capabilities"),
 		onSkillLoaded: (name) => capabilityGate.used("skills", name),
 		onCapabilityCalled: (name) => capabilityGate.used("capabilities", name),
-		// consult exists only when its site is bound at startup, so an operator who
-		// never bound it keeps the registry, tool signature and prompt they had. A
-		// binding removed mid-session answers "no usable answer". bound() reads the
+		// consult exists only when a route is named at startup, so an operator who
+		// never named one keeps the registry, tool signature and prompt they had. A
+		// route removed mid-session answers "no usable answer". bound() reads the
 		// effective settings view built above, which is why that block precedes this call.
-		...(systemOne.bound("consult")
+		...(systemOne.bound()
 			? {
 					consult: {
 						systemOne,

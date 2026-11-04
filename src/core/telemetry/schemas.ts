@@ -404,6 +404,7 @@ export const SYSTEM_ONE_OUTCOME = vocabulary([
 	"breaker-open",
 	"unsupported",
 	"flow-denied",
+	"busy",
 ]);
 const lagPercentiles = Type.Array(Type.Object({ p: Type.Number({ minimum: 0, maximum: 100 }), ms: duration }, closed), {
 	maxItems: 64,
@@ -1679,24 +1680,32 @@ export const MiddlewareFiredSchema = Type.Object(
 /** One System One decision: what each engine answered, against which deadline, and its breaker (#429). */
 export const SystemOneDecidedSchema = Type.Object(
 	{
-		site: ExistingId,
-		moment: Type.Optional(ExistingId),
+		/** The decision point and its question-set version, which is what a later outcome groups by. */
+		point: ExistingId,
+		set: ExistingId,
+		/** Join key for a later outcome, such as a tool call id. */
+		ref: Type.Optional(ExistingId),
+		askId: ExistingId,
 		outcome: SYSTEM_ONE_OUTCOME,
+		engineKind: Type.Optional(ExistingId),
+		profile: Type.Optional(ExistingId),
+		build: Type.Optional(ExistingId),
+		readout: Type.Optional(ExistingId),
 		latencyMs: duration,
 		deadlineMs: duration,
-		fitted: Type.Optional(Type.Boolean()),
+		tokens: Type.Optional(Type.Object({ input: count, output: count }, closed)),
+		asked: count,
+		abstained: count,
 		routes: Type.Array(
 			Type.Object(
 				{
 					engine: ExistingId,
 					kind: ExistingId,
+					profile: ExistingId,
 					outcome: SYSTEM_ONE_OUTCOME,
 					roundTripMs: Type.Optional(duration),
-					/**
-					 * opened: this timeout opened the cooldown. probe: the half-open probe went out. closed: an answer
-					 * reset a counting breaker. disabled: a derived engine was disabled for the session.
-					 */
-					breaker: Type.Optional(vocabulary(["opened", "probe", "closed", "disabled"])),
+					/** opened: this timeout opened the cooldown. probe: the half-open probe went out. closed: an answer reset a counting breaker. */
+					breaker: Type.Optional(vocabulary(["opened", "probe", "closed"])),
 				},
 				closed,
 			),

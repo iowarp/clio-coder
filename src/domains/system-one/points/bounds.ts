@@ -1,7 +1,7 @@
 /**
- * Bounding helpers shared by the sites. Every state a site sends is capped by
- * code points so a fitted cut was measured on evidence of a known size, and so
- * an engine with a small window never truncates the part that matters.
+ * Bounding helpers shared by the points. Every state a point sends is capped by
+ * code points so evidence has a known size, and so an engine with a small window
+ * never truncates the part that matters.
  */
 
 import type { Answer } from "../types.js";
@@ -55,7 +55,7 @@ export function boundedTailLines(value: string, maxCodePoints: number): string {
 
 /**
  * The text with fenced code removed. A fenced block is file content or command
- * output an assistant quoted, which is repository text a site must not read as
+ * output an assistant quoted, which is repository text a point must not read as
  * the operator's intent or the assistant's own claim. Backtick and tilde fences
  * of any length that open a line are cut through the matching closing line, and
  * a fence left open runs to the end.
@@ -65,16 +65,12 @@ export function withoutQuotedCode(text: string): string {
 }
 
 /**
- * A noul's probability, or null for another type, an abstention, malformed mass,
- * or mass that is not a calibrated probability. Every hint, gate and act reads a
- * noul through here, so a vote fraction or a one-order readout never crosses a
- * fitted cut. A categorical label is read too, because no cut exists for it
- * unless a measurement validated that label's action on this exact build. The
- * dataset still keeps the raw answer.
+ * A noul's number, or null for another type, an abstention or malformed mass. What
+ * the number is stays on `answer.readout`; a point that needs a real probability
+ * says so in `requires` and is never routed to an engine that lacks it.
  */
 export function probability(answer: Answer | undefined): number | null {
 	if (answer === undefined || answer.type !== "noul" || answer.noul === undefined) return null;
-	if (!answer.calibrated && answer.readout !== "categorical") return null;
 	return Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1 ? answer.noul : null;
 }
 

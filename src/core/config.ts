@@ -1380,7 +1380,6 @@ function validateKeybindings(issues: Issues, path: string, value: unknown): Reco
 }
 
 const SYSTEM_ONE_ENGINE_KINDS = ["systemone", "llm"] as const;
-const SYSTEM_ONE_MODES = ["auto", "logprobs", "answer", "batch"] as const;
 
 /**
  * `systemOne` is a map keyed by operator-chosen names, and assigning a key
@@ -1409,10 +1408,15 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 	const next = settings.systemOne;
 	if ("use" in raw) {
 		if (raw.use === null) next.use = null;
-		else {
+		else if (Array.isArray(raw.use)) {
+			const names = raw.use.filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+			if (names.length !== raw.use.length) {
+				issues.add("systemOne.use", "expected a list of route names, each an engine, a target, jev, memory or main");
+			} else next.use = names;
+		} else {
 			const use = expectString(issues, "systemOne.use", raw.use);
 			if (use !== undefined) {
-				if (use.trim().length === 0) issues.add("systemOne.use", "expected an engine or target name, or off");
+				if (use.trim().length === 0) issues.add("systemOne.use", "expected a route name, a list of them, or off");
 				else next.use = use;
 			}
 		}
@@ -1443,12 +1447,8 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 					const model = expectString(issues, `${path}.model`, value.model);
 					if (model !== undefined) engine.model = model;
 				}
-				if ("mode" in value) {
-					const mode = expectEnum(issues, `${path}.mode`, value.mode, SYSTEM_ONE_MODES);
-					if (mode !== undefined) engine.mode = mode;
-				}
-				if (engine.mode !== undefined && kind !== "llm")
-					issues.add(`${path}.mode`, "only an llm engine has a readout mode");
+				// Whatever an old file says, every llm engine now reads as one batch request.
+				if ("mode" in value) issues.retire(`${path}.mode`, "every llm engine reads as one batch request");
 				if ("profile" in value) {
 					// An unknown profile is refused rather than read as generic: it would ask
 					// the model questions its contract was never checked against.
