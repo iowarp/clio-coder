@@ -513,8 +513,12 @@ has no distinct fallback either.
 
 An information-flow refusal means restricted context cannot reach the selected
 background model. The step records `information_flow_blocked`, the telemetry row
-carries the admission diagnostic as `refusalReason`, and the session shows one
-`Memory skipped target <id>: <reason>` notice per session. The chat fallback is
+carries the admission diagnostic as `refusalReason`, and an interactive session
+raises one `Memory skipped target <id>: <reason>` notice per session. When the chat
+fallback is admitted, its own `Memory: configured route client error: <reason>`
+notice takes the footer's compact row at once, and **Alt+U** opens the page listing
+both. A headless run starts no background step, because no later turn would carry
+its reminder, so it shows neither. The chat fallback is
 admitted against the same policy, so a restricted session can end with no model
 step at all. From its first label on, a restricted session also files no new lesson, starts no
 completed-task retention for a task after the label and promotes no entry, because a durable record carries no
