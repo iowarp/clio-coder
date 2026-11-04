@@ -92,6 +92,7 @@ import {
 } from "../../domains/safety/decision-presentation.js";
 import {
 	messageStopCompleted,
+	redactFinalUrlCredentials,
 	redactSecretString,
 	redactStreamingUrlCredentials,
 	redactUrlCredentials,
@@ -2227,7 +2228,7 @@ function replayShellLine(entry: BashExecutionEntry): AcpReplayFrame[] {
 		ACP_MAX_SHELL_COMMAND_BYTES,
 	);
 	const title = boundString(command, ACP_MAX_TOOL_TITLE_BYTES);
-	const output = shellOutputTail(redactStreamingUrlCredentials(entry.output, !entry.cancelled));
+	const output = shellOutputTail(redactFinalUrlCredentials(entry.output, !entry.cancelled));
 	return [
 		{
 			update: {
@@ -6730,7 +6731,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}
 			const { result } = run;
 			const output = shellOutputTail(
-				redactStreamingUrlCredentials(
+				redactFinalUrlCredentials(
 					entry.kind === "bashExecution" ? entry.output : run.entry.output,
 					!result.aborted && !result.timedOut,
 				),

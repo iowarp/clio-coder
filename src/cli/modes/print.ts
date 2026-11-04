@@ -39,7 +39,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
-import { redactStreamingUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
+import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
@@ -1066,7 +1066,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const endedAt = new Date().toISOString();
 	// Every exit of the answer. A reply the token limit stopped can end inside a URL, which a terminating tool's result cannot (#446).
 	const settledAnswer = (answer: string): string =>
-		redactStreamingUrlCredentials(answer, result.sawTerminatingToolResult || !result.outputExhausted);
+		redactFinalUrlCredentials(answer, result.sawTerminatingToolResult || !result.outputExhausted);
 	let terminal: HeadlessTerminalOutcome = {
 		exitCode: 0,
 		outcome: "succeeded",

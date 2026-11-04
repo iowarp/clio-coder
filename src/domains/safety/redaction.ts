@@ -448,7 +448,20 @@ export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
 }
 
 // The username token's shape at the very end of a stream that stopped. No `@` will come, and a frame's hold reads it as a host (#446).
-const CUT_OFF_USERNAME_TOKEN_RE = /(?<=:\/\/)(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,}$/iu;
+const CUT_OFF_USERNAME_TOKEN_RE = /(?<=:\/\/)(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,}(?=:?$)/iu;
+
+/**
+ * What a text that stopped short may still show. An open frame keeps an opaque name, which reads as a host until an `@` comes,
+ * but at the last frame no `@` will come and a name of a token's shape stays hidden (#446).
+ */
+export function holdCutOffText(value: string): string {
+	return holdUnresolvedUserinfo(value).replace(CUT_OFF_USERNAME_TOKEN_RE, "");
+}
+
+/** URL credentials for the last text of a stream, which is whole only when the stream completed. */
+export function redactFinalUrlCredentials(value: string, completed: boolean): string {
+	return redactUrlCredentials(completed ? value : holdCutOffText(value));
+}
 
 /** Where text that a reader cannot retract becomes unsafe to send: from anything in its last token a later character could make a credential. */
 function appendOnlySafeEnd(text: string): number {
@@ -492,10 +505,10 @@ export class UrlCredentialStreamFilter {
 
 	/** Send what is left. Only a stream that completed releases a hold. */
 	end(completed: boolean): string {
-		const rest = completed ? this.pending : this.pending.replace(CUT_OFF_USERNAME_TOKEN_RE, "");
+		const rest = this.pending;
 		this.pending = "";
 		this.waiting = false;
-		return this.send(rest, (value) => redactStreamingUrlCredentials(value, completed));
+		return this.send(rest, (value) => redactFinalUrlCredentials(value, completed));
 	}
 }
 

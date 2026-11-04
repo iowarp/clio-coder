@@ -54,7 +54,7 @@ import { runTailEntryFromEvent } from "../../tools/dispatch-run-events.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
-import { holdUnresolvedUserinfo, messageStopCompleted, redactSecretString } from "../safety/redaction.js";
+import { holdCutOffText, messageStopCompleted, redactSecretString } from "../safety/redaction.js";
 import { isThinkingEvent, workerTextDelta } from "../telemetry/worker-progress.js";
 import { defaultRunEventJournal, type RunEventJournalEntry, type RunEventJournalSink } from "./run-event-journal.js";
 import { parseToolCallFacts } from "./run-feed.js";
@@ -214,7 +214,7 @@ function runFeedEntryFromEvent(
 		const stopReason = assistant ? (boundedText(message.stopReason) ?? "unknown") : undefined;
 		// This row carries the text of a message no delta wrote, and a cut-off one can stop inside a URL (#446).
 		const cutOff = assistant && !messageStopCompleted(stopReason);
-		const detail = cutOff && tail?.detail !== undefined ? holdUnresolvedUserinfo(tail.detail) : tail?.detail;
+		const detail = cutOff && tail?.detail !== undefined ? holdCutOffText(tail.detail) : tail?.detail;
 		return {
 			at,
 			type,

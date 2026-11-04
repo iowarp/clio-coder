@@ -8,6 +8,7 @@ import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import {
+	holdCutOffText,
 	holdUnresolvedStrings,
 	holdUnresolvedUserinfo,
 	messageStopCompleted,
@@ -1925,7 +1926,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (open === null) return;
 		open.finalized = true;
 		// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
-		if (!completed) open.text = holdUnresolvedUserinfo(open.text);
+		if (!completed) open.text = holdCutOffText(open.text);
 		invalidateEntryCache(entry);
 	};
 
@@ -2915,7 +2916,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						assistant.segments.splice(messageStart, 0, {
 							kind: "thinking",
 							// A replay reaches here too, so an aborted message hides what its live view hid (#446).
-							text: messageCompleted ? thinking : holdUnresolvedUserinfo(thinking),
+							text: messageCompleted ? thinking : holdCutOffText(thinking),
 							at: stamp(),
 							finalized: true,
 						});
@@ -2931,7 +2932,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
 					for (const segment of assistant.segments.slice(messageStart))
-						if (segment.kind === "text") segment.text = holdUnresolvedUserinfo(segment.text);
+						if (segment.kind === "text") segment.text = holdCutOffText(segment.text);
 					invalidateEntryCache(assistant);
 				}
 				if (terminalError.length > 0) appendErrorSegment(assistant, terminalError);

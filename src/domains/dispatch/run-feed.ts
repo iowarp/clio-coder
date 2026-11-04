@@ -41,6 +41,7 @@ import {
 	dropCutHead,
 	endsInOpenCredential,
 	headGuardAfter,
+	holdCutOffText,
 	holdUnresolvedUserinfo,
 	messageStopCompleted,
 	namesSecret,
@@ -318,7 +319,7 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 		}
 		const carry = carryAfter(body);
 		if (carry !== "keep") {
-			const detail = carry === "hold" ? holdUnresolvedUserinfo(state.carry) : state.carry;
+			const detail = carry === "hold" ? holdCutOffText(state.carry) : state.carry;
 			if (detail.length > 0) writeBounded(path, state, { kind: "event", type: "text", detail }, state.carryAt);
 			state.carry = "";
 			// The next text starts a new block, so nothing of it continues what the guard covers.

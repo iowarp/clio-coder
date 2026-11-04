@@ -2,7 +2,7 @@ import { parseJsonObjectPayload, parseVerifierPayload } from "../core/json-paylo
 import { renderFactField } from "../core/telemetry/render.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { holdUnresolvedUserinfo, redactUrlCredentials } from "../domains/safety/redaction.js";
+import { holdCutOffText, redactUrlCredentials } from "../domains/safety/redaction.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
 
 function strings(value: unknown): string[] {
@@ -144,7 +144,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const whole = streamedAnswer.length > 0 ? streamedAnswer : sealedResultAnswer(receipt);
 	// A run that never settled a final message can have stopped inside a URL, so what it holds stays hidden (#446).
 	const cutOff = receipt.output === undefined ? receipt.exitCode !== 0 : receipt.output.state === "partial";
-	const answer = cutOff ? holdUnresolvedUserinfo(whole) : whole;
+	const answer = cutOff ? holdCutOffText(whole) : whole;
 	const limitations = sealedResultLimitations(receipt);
 	const block =
 		limitations.length > 0

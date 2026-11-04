@@ -1,7 +1,7 @@
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
-	holdUnresolvedUserinfo,
 	messageStopCompleted,
+	redactFinalUrlCredentials,
 	redactStreamingUrlCredentials,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
@@ -121,11 +121,13 @@ const isUpdateDeltaType = (type: unknown): boolean => isDeltaType(type) || type 
 const BLOCK_END_TYPES: ReadonlySet<string> = new Set(["text_end", "thinking_end", "toolcall_end"]);
 
 const heldText = (text: string): string => redactStreamingUrlCredentials(text);
+const cutOffText = (text: string): string => redactFinalUrlCredentials(text, false);
 
+/** Whether a value reads differently for a stream that completed and one that stopped short, so its message's stop reason decides. */
 function holdsOpenUrl(value: unknown): boolean {
 	let open = false;
 	mapStrings(value, (text) => {
-		open ||= holdUnresolvedUserinfo(text) !== text;
+		open ||= cutOffText(text) !== redactUrlCredentials(text);
 		return text;
 	});
 	return open;
@@ -175,6 +177,7 @@ export function createJsonCredentialScrub(): {
 			const { assistantMessageEvent: _inner, ...outer } = frame;
 			const heldOuter = mapStrings(outer, heldText) as object;
 			const heldPartial = partial !== undefined ? { partial: mapStrings(partial, heldText) } : {};
+			const cutOffPartial = partial !== undefined ? { partial: mapStrings(partial, cutOffText) } : {};
 			const shape = (delta: string): unknown => ({
 				...heldOuter,
 				assistantMessageEvent: { ...rest, delta, ...heldPartial },
@@ -189,8 +192,8 @@ export function createJsonCredentialScrub(): {
 				const settled = (completed: boolean): unknown => ({
 					...heldOuter,
 					assistantMessageEvent: {
-						...(mapStrings(rest, (text) => redactStreamingUrlCredentials(text, completed)) as object),
-						...heldPartial,
+						...(mapStrings(rest, (text) => redactFinalUrlCredentials(text, completed)) as object),
+						...(completed ? heldPartial : cutOffPartial),
 					},
 				});
 				if (!holdsOpenUrl(rest)) return [settled(true)];
@@ -207,7 +210,10 @@ export function createJsonCredentialScrub(): {
 			const whole = !assistant || (stopped && frame.type !== "message_update");
 			// A message that starts, or one that is not the model's, finds any open URL cut off whatever it says of itself.
 			const released = assistant && stopped && frame.type !== "message_start" && frame.type !== "message_update";
-			return [...finish(released), mapStrings(frame, (text) => redactStreamingUrlCredentials(text, whole))];
+			// A frame still open reads as any frame does, and any other that did not stop on purpose is the last this text gets.
+			const open = frame.type === "message_start" || frame.type === "message_update";
+			const held = open ? heldText : cutOffText;
+			return [...finish(released), mapStrings(frame, (text) => (whole ? redactUrlCredentials(text) : held(text)))];
 		}
 		// A failover can start mid-URL, and nothing of the next attempt continues what waits (#446).
 		const ended = frame.type === "agent_end" || frame.type === "attempt_start" ? finish(false) : [];
@@ -221,7 +227,7 @@ export function createJsonCredentialScrub(): {
 		}
 		if (isRecord(frame.result) && isRecord(frame.result.output) && frame.result.output.state === "partial") {
 			// Mid-stream text from a message that never completed, as the receipt says, so it can stop inside a URL (#446).
-			const output = mapStrings(frame.result.output, heldText);
+			const output = mapStrings(frame.result.output, cutOffText);
 			return [...ended, mapStrings({ ...frame, result: { ...frame.result, output } }, redactUrlCredentials)];
 		}
 		return [...ended, mapStrings(frame, redactUrlCredentials)];
