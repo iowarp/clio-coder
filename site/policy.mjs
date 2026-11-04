@@ -9,7 +9,7 @@ export async function checkPolicy() {
 	const errors = [];
 	const articleFiles = (
 		await Promise.all(
-			["tutorials", "experimental"].map(async (collection) =>
+			["tutorials", "research"].map(async (collection) =>
 				(
 					await readdir(join(root, `content/${collection}`))
 				)
@@ -39,7 +39,7 @@ export async function checkPolicy() {
 	for (const file of [
 		"index.html",
 		"learn.html",
-		"experimental.html",
+		"research.html",
 		"partials.html",
 		"docs.html",
 		"tutorial.html",
@@ -85,10 +85,10 @@ export async function checkPolicy() {
 				["/", "Overview"],
 				["/docs.html", "Docs"],
 				["/learn.html", "Tutorials"],
-				["/experimental.html", "Experimental"],
+				["/research.html", "Research"],
 			])
 		)
-			errors.push(`${label} navigation must start with Overview, Docs, Tutorials, Experimental`);
+			errors.push(`${label} navigation must start with Overview, Docs, Tutorials, Research`);
 	}
 
 	if (!partials.includes(rules.copyright)) errors.push("Footer must use the sanctioned public copyright wording");
@@ -96,7 +96,7 @@ export async function checkPolicy() {
 	for (const [id, item] of Object.entries(captures))
 		for (const key of ["alt", "caption", "interface", "version", "capturedAt", "source"])
 			if (!item[key]) errors.push(`Capture ${id}: missing ${key}`);
-	for (const collection of ["tutorials", "experimental"]) {
+	for (const collection of ["tutorials", "research"]) {
 		const tutorials = JSON.parse(await readFile(join(root, `content/${collection}.json`), "utf8"));
 		const slugs = new Set();
 		for (const item of tutorials) {
