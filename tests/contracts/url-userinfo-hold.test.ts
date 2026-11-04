@@ -1,8 +1,12 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createJsonCredentialScrub } from "../../src/cli/modes/json-stream.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
+import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	cutHeadGuard,
@@ -45,6 +49,7 @@ import {
 } from "../../src/tools/bash.js";
 import { deterministicDiagnosticSummary } from "../../src/tools/result-disposition.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const SEED = 0x5eed;
 const DOCUMENTS = 60;
@@ -1296,5 +1301,223 @@ test("a /view row whose redaction outgrows it is fitted to its width again", asy
 		for (let width = 20; width <= 120 && render !== undefined; width += 1) {
 			for (const row of render(width)) strictEqual(visibleWidth(row) <= width, true, `${width}: ${JSON.stringify(row)}`);
 		}
+	}
+});
+
+const WARNING: RunEventJournalBody = { kind: "event", type: "route_warning", detail: "late" };
+const MESSAGE_STOP: RunEventJournalBody = { kind: "event", type: "message_end", stopReason: "stop" };
+
+/** Feed a run through the writer and read back its rows' text in order, an event row showing as its type in brackets. */
+function feedRows(runId: string, ...items: (string | RunEventJournalBody)[]): string {
+	for (const item of items) {
+		appendRunFeed(runId, typeof item === "string" ? { kind: "event", type: "text", detail: item } : item);
+	}
+	return readFileSync(runFeedPath(runId, clioStateDir()), "utf8")
+		.trim()
+		.split("\n")
+		.map((raw) => {
+			const row = JSON.parse(raw) as { kind: string; type?: string; detail?: string };
+			return row.type === "text" ? (row.detail ?? "") : `[${row.type ?? row.kind}]`;
+		})
+		.join("");
+}
+
+test("a run feed releases held text only at a message that stopped on purpose", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const open = "clone https://user:ZQXJ";
+		for (const stopReason of ["stop", "toolUse"]) {
+			const end: RunEventJournalBody = { kind: "event", type: "message_end", stopReason };
+			strictEqual(feedRows(`done-${stopReason}`, "well ", open, end), `well ${open}[message_end]`);
+		}
+		strictEqual(
+			feedRows("dev-server", "see http://localhost:8080", MESSAGE_STOP, "next message "),
+			"see http://localhost:8080[message_end]",
+		);
+		for (const stopReason of ["length", "error", "aborted", "unknown"]) {
+			const end: RunEventJournalBody = { kind: "event", type: "message_end", stopReason };
+			strictEqual(
+				feedRows(`cut-${stopReason}`, open, end, "the next message is whole ", MESSAGE_STOP),
+				"clone https://user:[message_end]the next message is whole [message_end]",
+			);
+		}
+		const attempt: RunEventJournalBody = { kind: "event", type: "attempt_start", detail: "retry" };
+		strictEqual(
+			feedRows("retried", open, attempt, "second try ", MESSAGE_STOP),
+			"clone https://user:[attempt_start]second try [message_end]",
+		);
+		strictEqual(
+			feedRows("died", open, { kind: "result", outcome: "failed", exitCode: 1 }, { kind: "terminal", outcome: "failed" }),
+			"clone https://user:[result][terminal]",
+		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a row arriving mid-text splits nothing and loses nothing on a completed run", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const cases = [
+			"https://user:ZQXJZQXJ@host/repo",
+			"password: ZQXJZQXJ",
+			"password = ZQXJZQXJ",
+			"password=ZQXJZQXJ",
+			"Authorization: Bearer ZQXJZQXJ",
+		];
+		let run = 0;
+		for (const secret of cases) {
+			const text = `before words ${secret} after words here now`;
+			for (let offset = 1; offset < text.length; offset += 1) {
+				run += 1;
+				const rows = feedRows(`mid-${run}`, text.slice(0, offset), WARNING, text.slice(offset), MESSAGE_STOP);
+				const where = `offset ${offset} of ${text}`;
+				strictEqual(rows.match(SECRET_LETTERS), null, where);
+				const shown = rows.replace("[route_warning]", "").replace("[message_end]", "");
+				strictEqual(shown, redactSecretsText(text, createRedactionTally()), where);
+			}
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("the end of a text block releases the carry in order, for a runtime whose tools run inside one message", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const tool: RunEventJournalBody = { kind: "event", type: "clio_coder_tool_start", tool: "bash" };
+		strictEqual(
+			feedRows("in-order", "let me check the file", tool, "it looks fine", MESSAGE_STOP),
+			"let me check the file[clio_coder_tool_start]it looks fine[message_end]",
+		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("the run feed's bound never splits a password across rows and keeps what a long harmless token cannot hide", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const long = "q".repeat(4100);
+		const rest = " words here now ";
+		const bound = feedRows("bound", `${long}https://user:ZQXJ`, "ZQXJ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(bound, `${long}https://user:words here now [message_end]`);
+		const oversized = feedRows("over", `https://user:${"Z".repeat(5000)}`, "ZQ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(oversized.match(SECRET_LETTERS), null);
+		strictEqual(oversized.endsWith(`words here now [message_end]`), true);
+		const name = feedRows("name", `${long} https://user`, ":ZQXJ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(name.match(SECRET_LETTERS), null);
+		const scheme = feedRows("scheme", `${long} https:/`, "/user:ZQXJ@host/x next", rest, MESSAGE_STOP);
+		strictEqual(scheme.match(SECRET_LETTERS), null);
+		const key = feedRows("key", `${long}password:`, " ZQXJ next", rest, MESSAGE_STOP);
+		strictEqual(key.match(SECRET_LETTERS), null);
+		const url = `https://example.com/${"q".repeat(5000)}`;
+		strictEqual(feedRows("plain", url, "/rest next", rest, MESSAGE_STOP), `${url}/rest next${rest}[message_end]`);
+		const cut = feedRows("message", `${long}https://user:ZQXJ`, MESSAGE_STOP, "whole next message ", MESSAGE_STOP);
+		strictEqual(cut, `${long}https://user:[message_end]whole next message [message_end]`);
+	} finally {
+		env.restore();
+	}
+});
+
+test("writer eviction keeps a run's held text and its discard", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		appendRunFeed("held", { kind: "event", type: "text", detail: "see https://user:ZQ" });
+		appendRunFeed("guarded", { kind: "event", type: "text", detail: `${"q".repeat(4100)}https://user:ZQ` });
+		for (let index = 0; index < 300; index += 1) feedRows(`other-${index}`, "some words", MESSAGE_STOP);
+		const held = feedRows("held", "XJ@host/x next words", MESSAGE_STOP);
+		strictEqual(held.match(SECRET_LETTERS), null);
+		strictEqual(held, "see https://user:[redacted:url-userinfo]@host/x next words[message_end]");
+		const guarded = feedRows("guarded", "XJ@host/x next words here now ", MESSAGE_STOP);
+		strictEqual(guarded.match(SECRET_LETTERS), null);
+		strictEqual(guarded.endsWith("words here now [message_end]"), true);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a cut-off message's text on its message_end row keeps its open URL back", () => {
+	const handlers = new Map<string, (payload: unknown) => void>();
+	const bus = {
+		subscribe(name: string, handler: (payload: unknown) => void) {
+			handlers.set(name, handler);
+			return () => {};
+		},
+		emit() {},
+	};
+	const rows: { type: string; detail?: string; stopReason?: string }[] = [];
+	const journal = {
+		open() {},
+		append(_runId: string, entry: { type: string; detail?: string; stopReason?: string }) {
+			rows.push(entry);
+		},
+		result() {},
+		terminal() {},
+	};
+	const bridge = attachRunEventJournalBridge(bus as never, { journal: journal as never, nowMs: () => 0 });
+	const send = (runId: string, stopReason: string | undefined) =>
+		handlers.get("run.progressed")?.({
+			runId,
+			agentId: "a",
+			event: {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "clone https://user:ZQXJ" }],
+					usage: { input: 1, output: 1, totalTokens: 2 },
+					...(stopReason === undefined ? {} : { stopReason }),
+				},
+			},
+		});
+	for (const stopReason of ["length", "aborted", "error", undefined]) send(`cut-${stopReason}`, stopReason);
+	send("done", "stop");
+	bridge.stop();
+	deepStrictEqual(
+		rows.map((row) => [row.detail, row.stopReason]),
+		[
+			["clone https://user:", "length"],
+			// An aborted or failed message projects no text of its own.
+			[undefined, "aborted"],
+			[undefined, "error"],
+			["clone https://user:", "unknown"],
+			["clone https://user:ZQXJ", "stop"],
+		],
+	);
+});
+
+test("a worker's stream reaches the feed file held when it dies and whole when it stops", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const handlers = new Map<string, (payload: unknown) => void>();
+		const bus = {
+			subscribe(name: string, handler: (payload: unknown) => void) {
+				handlers.set(name, handler);
+				return () => {};
+			},
+			emit() {},
+		};
+		const bridge = attachRunEventJournalBridge(bus as never, { nowMs: () => 0 });
+		const progress = (runId: string, event: unknown) => handlers.get("run.progressed")?.({ runId, agentId: "a", event });
+		const end = (stopReason: string) => ({
+			type: "message_end",
+			message: { role: "assistant", content: [], usage: { input: 1, output: 1, totalTokens: 2 }, stopReason },
+		});
+		const open = "clone https://user:ZQXJ";
+		progress("stopped", { type: "text_delta", delta: open });
+		progress("stopped", end("stop"));
+		handlers.get("run.completed")?.({ runId: "stopped", agentId: "a", outcome: "completed", outcomeDetail: null });
+		progress("aborted", { type: "text_delta", delta: open });
+		progress("aborted", end("aborted"));
+		handlers.get("run.failed")?.({ runId: "aborted", agentId: "a", outcome: "failed", outcomeDetail: null });
+		progress("killed", { type: "text_delta", delta: open });
+		handlers.get("run.failed")?.({ runId: "killed", agentId: "a", outcome: "failed", outcomeDetail: null });
+		bridge.stop();
+		const text = (runId: string) => feedRows(runId).replace(/^\[open\]/u, "");
+		strictEqual(text("stopped"), `${open}[message_end][result][terminal]`);
+		strictEqual(text("aborted"), "clone https://user:[message_end][result][terminal]");
+		strictEqual(text("killed"), "clone https://user:[result][terminal]");
+	} finally {
+		env.restore();
 	}
 });
