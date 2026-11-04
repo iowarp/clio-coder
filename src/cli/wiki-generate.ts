@@ -978,7 +978,14 @@ async function generateWikiWithDocumenter(
 	signal?.throwIfAborted();
 	writeWikiPlanFile(input.outputDir, plan);
 
-	const queue = pendingPages(plan, input.retryPending);
+	const onlyPages = input.onlyPages ? new Set(input.onlyPages) : null;
+	if (onlyPages) {
+		const unknown = [...onlyPages].filter((path) => !plan.pages.some((page) => page.path === path));
+		if (unknown.length > 0) {
+			throw new Error(`wiki --pages names paths the plan does not hold: ${unknown.join(", ")}`);
+		}
+	}
+	const queue = pendingPages(plan, input.retryPending).filter((page) => !onlyPages || onlyPages.has(page.path));
 	if (queue.length === 0) {
 		const pending = plan.pages.filter((page) => page.status !== "written").length;
 		input.progress?.({

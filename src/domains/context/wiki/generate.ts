@@ -82,6 +82,8 @@ export interface WikiGenerateInput {
 	retryPending?: boolean;
 	/** Explicitly reconsider page structure even when all source evidence is current. */
 	replan?: boolean;
+	/** Write only these plan pages this run. Every other owed page stays pending. */
+	onlyPages?: ReadonlyArray<string>;
 	/** Indexed areas no existing page covers, offered to a planning pass. */
 	unclaimedAreas: ReadonlyArray<WikiPlanPage>;
 	gitHead?: string | null;
@@ -100,6 +102,8 @@ export interface RunWikiGenerateInput {
 	/** Resume the existing plan, allowing exhausted pending writers one more attempt. */
 	retryPending?: boolean;
 	replan?: boolean;
+	/** Write only these plan pages this run. Every other owed page stays pending. */
+	onlyPages?: ReadonlyArray<string>;
 	model: string;
 	generate?: WikiGenerate;
 	onProgress?: BootstrapProgressSink;
@@ -647,6 +651,7 @@ export async function runWikiGenerate(
 					(resolved.resumed || continuing || (savedPlan !== undefined && resolved.unclaimedAreas.length === 0)),
 				...(input.retryPending ? { retryPending: true } : {}),
 				...(input.replan ? { replan: true } : {}),
+				...(input.onlyPages ? { onlyPages: input.onlyPages } : {}),
 				unclaimedAreas: resolved.unclaimedAreas,
 				...(input.decisions ? { decisions: input.decisions } : {}),
 				gitHead: existingMeta?.gitHead ?? null,
