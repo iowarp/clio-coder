@@ -248,13 +248,20 @@ function holdBack(text: string): { head: string; tail: string } {
  * loses nothing, where a row ending in it would leave a piece on each side that no later row could recognize (#446).
  */
 function carryBoundCut(carry: string): number {
+	const split = carryTailCut(carry);
+	const bounded = carry.slice(0, split);
+	if (holdUnresolvedUserinfo(bounded) === bounded && !endsInOpenCredential(bounded)) return split;
+	// A row ending inside a URL would make the discard take the text after it, though `http://localhost:8` holds no secret. The
+	// kept URLs go to the next row whole instead, with the one scheme character the pattern reads, starting from the first since
+	// `http://a,http://b` leaves the first open. Only a URL that outgrows the keep is left to the discard, as nothing tells a
+	// password that long from a host (#446).
+	const url = carry.indexOf("://", carry.length - OPEN_TAIL_KEEP_CHARS);
+	return url > 0 && url < split ? url - 1 : split;
+}
+
+function carryTailCut(carry: string): number {
 	const param = Math.max(carry.lastIndexOf("&"), carry.lastIndexOf("?"));
 	if (param > 0 && carry.length - param <= OPEN_TAIL_KEEP_CHARS && !/\s/u.test(carry.slice(param))) return param;
-	const url = carry.lastIndexOf("://");
-	if (url > 0 && carry.length - url <= OPEN_TAIL_KEEP_CHARS && endsInOpenCredential(carry.slice(url))) {
-		// A URL with a password on the way is the discard below's to settle, as any tail of its authority could be password.
-		return holdUnresolvedUserinfo(carry) === carry ? url - 1 : carry.length;
-	}
 	// One character is all the pattern reads ahead of a `://`, and any word can turn out to be a scheme.
 	return openNameStart(carry) ?? (SCHEME_CHAR_RE.test(carry.charAt(carry.length - 1)) ? carry.length - 1 : carry.length);
 }

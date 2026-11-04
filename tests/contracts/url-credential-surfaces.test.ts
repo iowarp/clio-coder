@@ -1081,6 +1081,65 @@ test("a feed bound keeps a scheme's last character with the :// that follows it"
 
 const PARAM_SECRET = "hunter2XY";
 
+test("a feed bound inside a URL with no credential loses nothing of a completed stream", async () => {
+	const env = await isolateClioEnv("url-surfaces-bound-free-");
+	try {
+		const shapes = [
+			"http://localhost:8080/x next words",
+			"http://localhost:8080?a=1&b=2 next words",
+			"http://localhost:PORT/x next words",
+			'{"http://localhost:8080":1} next words',
+			"see-http://a.example,http://localhost:8080 next words",
+		];
+		for (const [index, shape] of shapes.entries()) {
+			for (let cut = 0; cut <= shape.length; cut += 1) {
+				const lead = "x".repeat(4090);
+				const rows = feedText(`bound-free-${index}-${cut}`, lead + shape.slice(0, cut), shape.slice(cut), MESSAGE_STOP);
+				strictEqual(rows.join(""), lead + shape, `${shape} cut at ${cut}`);
+			}
+		}
+		const json = JSON.stringify(
+			Array.from({ length: 150 }, (_, i) => ({ name: `svc${i}`, url: `http://localhost:${8000 + i}/x`, ok: true })),
+		);
+		for (let shift = 0; shift < 8; shift += 1) {
+			const text = "x".repeat(shift) + json;
+			const deltas = text.match(/.{1,8}/gu) ?? [];
+			strictEqual(feedText(`bound-free-json-${shift}`, ...deltas, MESSAGE_STOP).join(""), text);
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("a feed bound holds a password back whatever the URL around it, in every split", async () => {
+	const env = await isolateClioEnv("url-surfaces-bound-secret-");
+	try {
+		for (const [index, shape] of [
+			`https://alice:${PARAM_SECRET}@h/ next words`,
+			`https://alice:${PARAM_SECRET}?x@h/ next words`,
+			`https://h?token=${PARAM_SECRET}&x=1 next words`,
+			`jdbc:sqlserver://db:1433;user=sa;password=${PARAM_SECRET}; next words`,
+		].entries()) {
+			for (let cut = 0; cut <= shape.length; cut += 1) {
+				const rows = feedText(
+					`bound-secret-${index}-${cut}`,
+					"x".repeat(4090) + shape.slice(0, cut),
+					shape.slice(cut),
+					MESSAGE_STOP,
+				);
+				ok(!rows.join("").includes("hunter"), `${shape} cut at ${cut}: ${rows.join("").slice(-60)}`);
+			}
+		}
+		// Past the keep nothing tells a password from a host, so the run's tail goes and none of the password shows.
+		const long = `https://alice:${"p".repeat(5000)}${PARAM_SECRET}@h/ next words`;
+		const rows = feedText("bound-secret-long", "x".repeat(4090) + long.slice(0, 3000), long.slice(3000), MESSAGE_STOP);
+		ok(!rows.join("").includes("pp"), rows.join("").slice(-60));
+		ok(!rows.join("").includes("hunter"), rows.join("").slice(-60));
+	} finally {
+		env.restore();
+	}
+});
+
 test("the URL rule hides a value by what its whole parameter name means", () => {
 	for (const name of [
 		"password",

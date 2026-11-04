@@ -1415,7 +1415,7 @@ test("the run feed's bound never splits a password across rows and keeps what a 
 		const long = "q".repeat(4100);
 		const rest = " words here now ";
 		const bound = feedRows("bound", `${long}https://user:ZQXJ`, "ZQXJ@host/x next", rest, MESSAGE_STOP);
-		strictEqual(bound, `${long}https://user:words here now [message_end]`);
+		strictEqual(bound, `${long}https://user:[redacted:url-userinfo]@host/x next words here now [message_end]`);
 		const oversized = feedRows("over", `https://user:${"Z".repeat(5000)}`, "ZQ@host/x next", rest, MESSAGE_STOP);
 		strictEqual(oversized.match(SECRET_LETTERS), null);
 		strictEqual(oversized.endsWith(`words here now [message_end]`), true);
@@ -1428,7 +1428,8 @@ test("the run feed's bound never splits a password across rows and keeps what a 
 		const url = `https://example.com/${"q".repeat(5000)}`;
 		strictEqual(feedRows("plain", url, "/rest next", rest, MESSAGE_STOP), `${url}/rest next${rest}[message_end]`);
 		const cut = feedRows("message", `${long}https://user:ZQXJ`, MESSAGE_STOP, "whole next message ", MESSAGE_STOP);
-		strictEqual(cut, `${long}https://user:[message_end]whole next message [message_end]`);
+		// A message that stopped on purpose settled the URL with no `@`, with or without a bound in it, so it reads whole.
+		strictEqual(cut, `${long}https://user:ZQXJ[message_end]whole next message [message_end]`);
 	} finally {
 		env.restore();
 	}
