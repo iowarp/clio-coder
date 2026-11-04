@@ -1036,3 +1036,29 @@ test("redacting a styled worker row keeps its escapes whole and its width on bud
 		}
 	}
 });
+
+test("no secret survives redaction wherever a styled line holds it, and every SGR sequence stays whole", () => {
+	const secret = "ZQXJSECRET";
+	const sgr = "\u001b[38;2;137;128;113m";
+	const reset = "\u001b[0m";
+	const end = "\u001b\\";
+	const cases = {
+		plain: `--token ${secret} next`,
+		"styled on both sides": `${sgr}--token ${reset}${sgr}${secret}${reset} next`,
+		"split by SGR": `--token ZQXJ${sgr}SECRET${reset} next`,
+		"OSC payload": `\u001b]8;;https://h/a?token=${secret}\u0007site\u001b]8;;\u0007 ${sgr}x${reset}`,
+		"DCS payload": `\u001bPq;token=${secret}${end} ${sgr}x${reset}`,
+		"SOS payload": `\u001bXtoken=${secret}${end} ${sgr}x${reset}`,
+		"PM payload": `\u001b^token=${secret}${end} ${sgr}x${reset}`,
+		"APC payload": `\u001b_token=${secret}${end} ${sgr}x${reset}`,
+		"named outside an APC payload": `--token \u001b_${secret}${end} ${sgr}x${reset}`,
+		"twice in one line": `--token ${secret} ${sgr}mid${reset} API_KEY=${secret}`,
+	};
+	const sgrOf = (text: string) => text.match(new RegExp("\\u001b\\[[0-9;]*m", "gu")) ?? [];
+	for (const [name, line] of Object.entries(cases)) {
+		const out = redactSecretString(line);
+		strictEqual(/ZQXJ|SECRET/u.test(out), false, `${name}: ${JSON.stringify(out)}`);
+		strictEqual(/ZQXJ|SECRET/u.test(stripTerminalSequences(out)), false, `${name}: stripped`);
+		deepStrictEqual(sgrOf(out), sgrOf(line), name);
+	}
+});

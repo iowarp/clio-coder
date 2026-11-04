@@ -136,10 +136,11 @@ function redactSecretUrlParams(value: string): string {
 	return out.join("");
 }
 
-// Group 1 is an OSC payload, which can carry a link's URL. An escape a row cut short still ends the string it opened.
+// Groups 1 and 2 are a string sequence's introducer and payload (OSC, DCS, SOS, PM, APC), which can carry any text. An
+// escape a row cut short still ends the string it opened.
 const ESCAPE_SEQUENCE_RE =
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: this pattern exists to match terminal escapes
-	/\u001b(?:\[[0-?]*[ -/]*(?:[@-~]|$)|\]([^\u0007\u001b]*)(?:\u0007|\u001b\\|$)|[P^_X][^\u0007\u001b]*(?:\u0007|\u001b\\|$)|[ -/]*[0-~]?)/gu;
+	/\u001b(?:\[[0-?]*[ -/]*(?:[@-~]|$)|([\]P^_X])([^\u0007\u001b]*)(?:\u0007|\u001b\\|$)|[ -/]*[0-~]?)/gu;
 
 /**
  * Patterns read escapes as secret text: `--token ESC[0mESC[38;2;1;2;3m` loses the sequence's head and shows `;2;1;2;3m`,
@@ -154,9 +155,14 @@ function redactStyledString(value: string): string {
 	for (const match of value.matchAll(ESCAPE_SEQUENCE_RE)) {
 		plain += value.slice(copied, match.index);
 		copied = match.index + match[0].length;
-		const payload = match[1];
-		const sequence =
-			payload === undefined ? match[0] : `\u001b]${redactPlainSecretString(payload)}${match[0].slice(payload.length + 2)}`;
+		const introducer = match[1];
+		const payload = match[2];
+		let sequence = match[0];
+		if (introducer !== undefined && payload !== undefined) {
+			// A visible name can lead into a value held here, and the patterns reading the visible text never see it.
+			const shown = headGuardAfter(plain) === null ? redactPlainSecretString(payload) : "[redacted]";
+			sequence = `\u001b${introducer}${shown}${match[0].slice(payload.length + 2)}`;
+		}
 		escapes.push({ at: plain.length, sequence });
 	}
 	plain += value.slice(copied);
