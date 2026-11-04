@@ -367,6 +367,11 @@ export function redactStreamingSecretString(value: string, completed = false): s
 	return redactSecretString(completed ? value : holdUnresolvedUserinfo(value));
 }
 
+/** {@link redactStreamingSecretString} under the URL rule alone, for model prose an operator reads (#446). */
+export function redactStreamingUrlCredentials(value: string, completed = false): string {
+	return redactUrlCredentials(completed ? value : holdUnresolvedUserinfo(value));
+}
+
 /**
  * Whether a model message's stop reason means its text ended where the model meant it to. `length`, `error`, `aborted` and
  * anything unrecognized or absent, as a legacy ledger row can be, may have stopped inside a URL (#446).
@@ -394,6 +399,8 @@ export class RedactedStringProjection {
 	private prefix = "";
 	private text = "";
 
+	constructor(private readonly redact: (value: string) => string = redactSecretString) {}
+
 	project(source: string, completed = false): string {
 		if (source === this.source && completed === this.completed) return this.text;
 		if (!source.startsWith(this.source)) {
@@ -410,11 +417,12 @@ export class RedactedStringProjection {
 			if (!match[0].includes("-")) through = match.index + match[0].length;
 		}
 		if (through > 0) {
-			this.prefix += redactSecretString(tail.slice(0, through));
+			this.prefix += this.redact(tail.slice(0, through));
 			this.committed += through;
 		}
 		// A committed token ends in whitespace, so the open run a hold reads is always in this uncommitted tail (#446).
-		this.text = this.prefix + redactStreamingSecretString(tail.slice(through), completed);
+		const open = tail.slice(through);
+		this.text = this.prefix + this.redact(completed ? open : holdUnresolvedUserinfo(open));
 		this.source = source;
 		this.completed = completed;
 		return this.text;

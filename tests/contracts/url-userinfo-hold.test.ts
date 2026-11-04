@@ -241,6 +241,39 @@ test("a headless answer hides URL credentials and keeps prose the wider rule wou
 	);
 });
 
+function proseFrame(panel: ChatPanel): string {
+	return JSON.stringify(panel.renderRegions(200)).replace(/\\u001b\[[0-9;:]*m/gu, "");
+}
+
+test("main prose hides URL credentials while it streams and keeps other text whole", () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	const text = "clone https://u:ZQXJ@h/r and postgres://u:ZQ/XJ@h/db\nBASE_TOKENS=100 and --token to pass it";
+	for (let at = 0; at < text.length; at += 3) {
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: text.slice(at, at + 3), partialText: "" });
+		strictEqual(leaked(proseFrame(panel), "").join(""), "", `after ${at}`);
+	}
+	const message = { role: "assistant", stopReason: "stop", content: [{ type: "text", text }] };
+	panel.applyEvent({ type: "message_end", message } as never);
+	const done = proseFrame(panel);
+	strictEqual(leaked(done, "").join(""), "");
+	ok(
+		done.includes("https://u:[redacted]@h/r") && done.includes("BASE_TOKENS=100") && done.includes("--token to pass"),
+		done,
+	);
+});
+
+test("main prose cut off inside a URL keeps what it held", () => {
+	for (const stopReason of ["length", "error", "aborted"]) {
+		const panel = createChatPanel({ now: () => 1_000 });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "clone https://u:ZQXJ", partialText: "" });
+		const message = { role: "assistant", stopReason, content: [{ type: "text", text: "clone https://u:ZQXJ" }] };
+		panel.applyEvent({ type: "message_end", message } as never);
+		strictEqual(leaked(proseFrame(panel), "").join(""), "", stopReason);
+	}
+});
+
 test("an ordinary name or host stays readable beside a username token", () => {
 	for (const text of [
 		"https://alice@github.com/r",
