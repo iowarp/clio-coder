@@ -23,7 +23,11 @@ const { invokeRegisteredTool } = await import("../../src/tools/agent-tools.js");
  * raises these and fails here. Each call runs on a fresh scratch root after
  * one warmup call, so caches a first call fills are not counted. The one
  * existsSync is the dev-root registry presence check every mutation admission
- * makes for a folder another live session holds.
+ * makes for a folder another live session holds. The guard walks the approvals
+ * directory, which is absent on this home, up to its first resolved parent. That
+ * parent is the config root the settings.yaml guard already resolved in this
+ * call, so the walk costs one realpath. It cost two while approvals sat in the
+ * state root, a component nothing else in the call resolves (14b48ce59).
  */
 const ANCHOR = "<<E0:admission>>";
 const LINE = "the quick brown fox jumps over the lazy dog, ";
@@ -33,7 +37,7 @@ const CASES = [
 	{
 		id: "edit of a 1 KB file near its head",
 		tool: ToolNames.Edit,
-		expected: 41,
+		expected: 40,
 		seed: (root: string) => writeFileSync(join(root, "data", "target.txt"), `${ANCHOR}${KB_TEXT}`),
 		args: { path: "data/target.txt", edits: [{ oldText: ANCHOR, newText: "<<R0:admission>>" }] },
 		check: (root: string) => readFileSync(join(root, "data", "target.txt"), "utf8").startsWith("<<R0:admission>>"),
@@ -41,7 +45,7 @@ const CASES = [
 	{
 		id: "write creating a 1 KB file in an existing directory",
 		tool: ToolNames.Write,
-		expected: 49,
+		expected: 48,
 		seed: () => {},
 		args: { path: "data/new.txt", content: KB_TEXT },
 		check: (root: string) => readFileSync(join(root, "data", "new.txt"), "utf8") === KB_TEXT,
