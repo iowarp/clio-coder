@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { JobClockExpired } from "../../core/job-types.js";
+import {
+	JobClockExpired,
+	TURN_CONTINUATION_CAP,
+	type TurnContinuationCause,
+	turnContinuationDelayMs,
+} from "../../core/job-types.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import {
 	clipJobText,
@@ -40,8 +45,6 @@ interface LiveExecution {
 	promise: Promise<void>;
 }
 const POLL_MS = 250;
-/** One job, one cause, one continuation: a turn that dies on the clock twice is not a slow turn (#445). */
-const JOB_CLOCK_RESUME_CAP = 1;
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -122,14 +125,25 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		return `execution timeout after ${bound}ms (${job.spec.timeoutDefaulted === true ? "the job's default" : "the job's timeout_ms"})`;
 	}
 	/**
-	 * A later occurrence already continues a timed-out run, so this answers only
+	 * A later occurrence already continues a stopped run, so this answers only
 	 * for the turn nothing would pick up: a main job's final occurrence or a
-	 * follow-up. An explicit timeout is a bound someone chose and never resumes.
+	 * follow-up. An explicit timeout is a bound someone chose and never resumes,
+	 * and a person's cancel is forced without a clock, so it never does either.
 	 */
-	function clockResumeDue(job: JobRecord, execution: LiveExecution, evidence: JobEvidence): boolean {
-		if (execution.clockExpired !== true || evidence.cleanupUnresolved) return false;
-		if (job.spec.timeoutDefaulted !== true || (job.clockResumes ?? 0) >= JOB_CLOCK_RESUME_CAP) return false;
-		if (job.generation !== execution.generation) return false;
+	function continuationCause(
+		job: JobRecord,
+		execution: LiveExecution,
+		evidence: JobEvidence,
+		result: JobRunResult,
+	): TurnContinuationCause | null {
+		if (evidence.cleanupUnresolved || (job.clockResumes ?? 0) >= TURN_CONTINUATION_CAP) return null;
+		if (job.generation !== execution.generation) return null;
+		let cause: TurnContinuationCause | null = null;
+		if (execution.clockExpired === true) cause = job.spec.timeoutDefaulted === true ? "clock" : null;
+		else if (execution.forced !== null) cause = null;
+		else if (result.stoppedBy !== undefined) cause = result.stoppedBy;
+		else if (evidence.errorClass === "infrastructure") cause = "failure";
+		if (cause === null) return null;
 		const uncontinued =
 			execution.kind === "delivery"
 				? job.delivery?.kind === "main_turn"
@@ -137,10 +151,24 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					job.spec.runner.kind === "main" &&
 					job.spec.count !== null &&
 					job.starts >= job.spec.count;
-		return uncontinued && options.clockResume?.allowed(job) === true;
+		return uncontinued && options.continuation?.allowed(job) === true ? cause : null;
 	}
-	function queueClockResume(draft: JobRecord, occurrenceId: string): void {
+	const CONTINUATION_REASON: Record<TurnContinuationCause, string> = {
+		clock: "the job's default timeout ended it",
+		failure: "it failed",
+		tool_budget: "it reached the per-turn tool budget",
+		loop_guard: "the loop guard locked its tools",
+		retries_exhausted: "provider retries ran out",
+		compaction: "context compaction failed",
+	};
+	function queueContinuation(
+		draft: JobRecord,
+		occurrenceId: string,
+		cause: TurnContinuationCause,
+		evidence: JobEvidence,
+	): void {
 		draft.clockResumes = (draft.clockResumes ?? 0) + 1;
+		const detail = cause === "failure" && evidence.summary ? `: ${evidence.summary.slice(0, 200)}` : "";
 		draft.delivery = {
 			id: `${draft.id}:clock-resume:${draft.clockResumes}`,
 			occurrenceId,
@@ -149,7 +177,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			createdAt: now(),
 			startedAt: null,
 			endedAt: null,
-			reason: null,
+			reason: `${CONTINUATION_REASON[cause]}${detail}`,
 			evidence: null,
 		};
 	}
@@ -342,7 +370,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			JSON.stringify(previous.json) === JSON.stringify(evidence.json)
 		)
 			evidence.outcome = "noop";
-		const resuming = clockResumeDue(job, execution, evidence);
+		const resuming = continuationCause(job, execution, evidence, result);
 		commit(job, (draft) => {
 			if (!evidence.cleanupUnresolved) draft.cancelRequested = false;
 			draft.costUsd = draft.costUsd === null || evidence.costUsd === null ? null : draft.costUsd + evidence.costUsd;
@@ -361,7 +389,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				if (draft.reason === "condition") draft.state = "terminal";
 				draft.pendingReason = null;
 				if (evidence.cleanupUnresolved) blockUnresolvedCleanup(draft);
-				else if (resuming) queueClockResume(draft, draft.delivery.occurrenceId);
+				else if (resuming !== null) queueContinuation(draft, draft.delivery.occurrenceId, resuming, evidence);
 				return;
 			}
 			if (!draft.active || draft.active.id !== execution.id) throw new Error("job: mismatched occurrence settlement");
@@ -403,7 +431,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				draft.reason = "count";
 				draft.pending = null;
 				draft.nextDueAt = null;
-				if (resuming) queueClockResume(draft, occurrence.id);
+				if (resuming !== null) queueContinuation(draft, occurrence.id, resuming, evidence);
 			} else if (draft.generation !== execution.generation) {
 				return;
 			} else if (evidence.errorClass === "permission") {
@@ -414,7 +442,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			} else if (evidence.errorClass === "infrastructure" || evidence.outcome === "timed_out") {
 				draft.consecutiveFailures += 1;
 				draft.pending = null;
-				if (draft.consecutiveFailures >= 3) {
+				// At yolo nobody is there to resume it, so it backs off until its count or deadline ends it (#445).
+				if (draft.consecutiveFailures >= 3 && options.continuation?.allowed(draft) !== true) {
 					draft.state = "paused";
 					draft.nextDueAt = null;
 					// The operator reads this after the fact, so it carries the failure and not only the count (#445).
@@ -432,9 +461,14 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			} else draft.consecutiveFailures = 0;
 		});
 		// The commit is the authority: a branch that returned early queued nothing to announce.
-		if (resuming && (current(id).clockResumes ?? 0) > (job.clockResumes ?? 0)) {
+		if (resuming !== null && (current(id).clockResumes ?? 0) > (job.clockResumes ?? 0)) {
+			if (resuming === "failure") {
+				const attempt = current(id).clockResumes ?? 1;
+				retryAt.set(id, spanNow() + turnContinuationDelayMs(attempt, result.retryAfterMs));
+				schedule();
+			}
 			try {
-				options.clockResume?.resumed(current(id), jobExecutionTimeoutMs(job.spec, execution.kind));
+				options.continuation?.resumed(current(id), jobExecutionTimeoutMs(job.spec, execution.kind), resuming);
 			} catch (error) {
 				report(error);
 			}

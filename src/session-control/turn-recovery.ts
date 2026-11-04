@@ -79,6 +79,13 @@ export interface TurnRecovery {
 	): Promise<boolean>;
 	ensureFailureVisibleAndPersisted(failure: TerminalAssistantFailure): void;
 	cancelRetryCountdown(): void;
+	/** Sit out a failed turn's delay before its yolo continuation, in the countdown Esc already cancels (#445). */
+	waitBeforeContinuation(
+		delayMs: number,
+		attempt: number,
+		maxAttempts: number,
+		reason: string,
+	): Promise<"done" | "cancelled">;
 }
 
 /**
@@ -549,6 +556,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		ensureFailureVisibleAndPersisted,
 		cancelRetryCountdown(): void {
 			retryCountdown?.cancel();
+		},
+		waitBeforeContinuation(delayMs, attempt, maxAttempts, reason) {
+			const status: RetryStatusPayload = { phase: "scheduled", attempt, maxAttempts, delayMs, errorMessage: reason };
+			recordRetryStatus(status);
+			return waitForRetryCountdown(status);
 		},
 	};
 }

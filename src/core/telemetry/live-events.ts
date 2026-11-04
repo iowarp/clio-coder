@@ -14,6 +14,7 @@ import type { MiddlewareHook } from "../../domains/middleware/types.js";
 import type { TargetStatus } from "../../domains/providers/contract.js";
 import type { ClioSettings } from "../config.js";
 import type { ContextOperation } from "../context-operation.js";
+import type { TurnContinuationCause } from "../job-types.js";
 import type { SkillActivation } from "../skill-activation.js";
 import type {
 	ContextPrunedSchema,
@@ -327,7 +328,16 @@ export interface RunAbortedPayload {
  * Payload published on `turn.aborted`: the chat loop's stream_cancel for an operator Esc/Ctrl+C, loop_guard
  * when the loop guard stops a runaway turn, or job_clock when a scheduled occurrence's bound expires.
  */
-/** Published on `job.clock_resumed` when a job continues once past its default clock (#445). */
+/** Published on `turn.continued` when a stopped turn gets another one at yolo, from a job or from the chat loop (#445). */
+export interface TurnContinuedPayload {
+	cause: TurnContinuationCause;
+	attempt: number;
+	cap: number;
+	jobId?: string;
+	at: number;
+}
+
+/** Published on `job.clock_resumed` when a job continues past its default clock (#445). */
 export interface JobClockResumedPayload {
 	jobId: string;
 	boundMs: number;

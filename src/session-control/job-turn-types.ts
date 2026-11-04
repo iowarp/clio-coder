@@ -36,6 +36,10 @@ export interface MachineTurnResult {
 	turnId: string | null;
 	reason?: string;
 	text?: string;
+	/** The loop guard ended the turn; a job can continue it at yolo (#445). */
+	stoppedBy?: "tool_budget" | "loop_guard";
+	/** How long the provider asked to wait, when the turn failed on it (#445). */
+	retryAfterMs?: number;
 	/** The turn's tokens and cost over its calls, each a fact sum (#434). */
 	usage?: { tokens: FactSum; cost: PricingSum };
 }

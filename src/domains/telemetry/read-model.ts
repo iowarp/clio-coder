@@ -2763,6 +2763,7 @@ export const ACCOUNTABILITY_EVENTS = [
 	"run.aborted",
 	"turn.aborted",
 	"job.clock_resumed",
+	"turn.continued",
 	"agent.status_changed",
 	"completion.evaluated",
 	"safety.judged",

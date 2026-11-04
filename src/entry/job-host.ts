@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import type { JobOwner, JobRecord } from "../core/job-types.js";
+import { type JobOwner, type JobRecord, TURN_CONTINUATION_CAP } from "../core/job-types.js";
 import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { captureProjectSurface } from "../core/workspace-trust.js";
@@ -147,13 +147,15 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 			}
 		},
 		onError: (error) => deps.notice(`job: ${error.message}`),
-		clockResume: {
+		continuation: {
 			allowed: () => deps.autonomy() === "yolo",
-			resumed(job, boundMs) {
+			resumed(job, boundMs, cause) {
+				const context = ownerTelemetryContext({ sessionId: job.owner.sessionId });
+				if (cause === "clock") deps.bus.emit("job.clock_resumed", { jobId: job.id, boundMs, at: Date.now() }, context);
 				deps.bus.emit(
-					"job.clock_resumed",
-					{ jobId: job.id, boundMs, at: Date.now() },
-					ownerTelemetryContext({ sessionId: job.owner.sessionId }),
+					"turn.continued",
+					{ cause, attempt: job.clockResumes ?? 1, cap: TURN_CONTINUATION_CAP, jobId: job.id, at: Date.now() },
+					context,
 				);
 			},
 		},

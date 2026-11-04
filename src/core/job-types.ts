@@ -46,6 +46,22 @@ export interface JobSpec {
 export class JobClockExpired extends Error {
 	override readonly name = "JobClockExpired";
 }
+/** Why an unattended turn gets another one at yolo (#445). */
+export type TurnContinuationCause =
+	| "clock"
+	| "failure"
+	| "tool_budget"
+	| "loop_guard"
+	| "retries_exhausted"
+	| "compaction";
+/** One job or one operator turn gets this many continuations; a turn that dies that often is not a slow turn (#445). */
+export const TURN_CONTINUATION_CAP = 3;
+/** Wait before continuing a turn that failed, so a provider outage has time to clear (#445). */
+const TURN_CONTINUATION_FAILURE_DELAYS_MS = [60_000, 300_000, 900_000] as const;
+export function turnContinuationDelayMs(attempt: number, retryAfterMs?: number): number {
+	const index = Math.min(Math.max(1, attempt), TURN_CONTINUATION_FAILURE_DELAYS_MS.length) - 1;
+	return Math.max(TURN_CONTINUATION_FAILURE_DELAYS_MS[index] ?? 0, Math.min(retryAfterMs ?? 0, 3_600_000));
+}
 export type JobEndReason = "count" | "condition" | "stopped" | "canceled" | "deadline" | "failure";
 export interface JobEvidence {
 	outcome: "succeeded" | "failed" | "noop" | "canceled" | "timed_out" | "interrupted";
@@ -102,7 +118,7 @@ export interface JobRecord {
 	/** Bounded terminal history; starts/settled are lifetime counters. */
 	history: JobOccurrence[];
 	delivery: JobDelivery | null;
-	/** Times a job's default clock was continued past (#445). Absent on older records and on a job it never hit. */
+	/** Times this job continued a stopped turn at yolo, whatever stopped it (#445). Absent on older records and on a job it never hit. */
 	clockResumes?: number;
 	/** Null when any executed component has unknown pricing/usage. */
 	costUsd: number | null;

@@ -61,6 +61,8 @@ function decisionOutcome(record: AccountabilityRecord): string | null {
 			return record.data.source;
 		case "job.clock_resumed":
 			return "resumed";
+		case "turn.continued":
+			return record.data.cause;
 		case "agent.status_changed":
 			return record.data.phase;
 		case "session.closed":

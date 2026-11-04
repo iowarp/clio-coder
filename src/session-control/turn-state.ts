@@ -129,6 +129,8 @@ export interface ChatTurnState {
 	 * Cleared with `synthesisToolLock`.
 	 */
 	toolBudgetLock: boolean;
+	/** Continuations spent since the operator's last prompt (#445). */
+	yoloContinuations: number;
 	/** A way this turn ended that nobody asked for and another turn could get past; a yolo continuation reads it (#445). */
 	turnStop: TurnStop | null;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
@@ -184,6 +186,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		synthesisToolLock: false,
 		toolBudgetLock: false,
 		turnStop: null,
+		yoloContinuations: 0,
 		toolProseAbortReason: null,
 		streamStallReason: null,
 		streamStallStage: null,
