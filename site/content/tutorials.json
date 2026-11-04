@@ -218,5 +218,19 @@
     "interfaces": [
       "Terminal"
     ]
+  },
+  {
+    "slug": "run-on-a-local-model",
+    "title": "Run Clio Coder on a local model",
+    "description": "Connect a local server with no account or key, check what Clio Coder learned about it, and see what else to check if code must stay on your machine.",
+    "category": "Model choice",
+    "time": "5 min",
+    "source": "run-on-a-local-model.md",
+    "author": "The Clio Coder team",
+    "basis": "Documented workflow",
+    "versionScope": "0.6.8",
+    "interfaces": [
+      "Terminal"
+    ]
   }
 ]
