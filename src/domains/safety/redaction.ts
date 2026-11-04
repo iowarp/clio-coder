@@ -43,11 +43,13 @@ export const URL_USERNAME_TOKEN_RE = new RegExp(
 	"giu",
 );
 const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
-// The whole name decides, so `author`, `tokens`, `authenticated` and `credentials` keep their values while `db_password` and
-// `oauth_token` lose theirs. A qualifier ahead of the word has to end at a separator or be a known glued one. `auth` alone can
-// be qualified into a setting, as `no_auth=1` is, so it stands only by itself (#446).
+// A secret word has to be a whole word of the name, so `author`, `tokens`, `authenticated` and `credentials` keep their values
+// while `db_password`, `password_confirmation`, `token[]` and `pageToken` lose theirs. A glued qualifier counts only when it is a
+// known one. `auth` alone can be qualified into a setting, as `no_auth=1` is, so it stands only by itself (#446).
 const SECRET_URL_PARAM_NAME_RE =
-	/(?:^|[-_.])(?:authorization|credential|pass(?:word|wd|phrase)?|pwd|secret|token|(?:access|api|auth|private|secret)[-_]?key|(?:access|auth|oauth|refresh|id|session)token|clientsecret|dbpassword)$|^o?auth$/u;
+	/(?:^|_)(?:authorization|credential|pass(?:word|wd|phrase)?|pwd|secret|token|(?:access|api|auth|private|secret)_?key|(?:access|auth|oauth|refresh|id|session)token|clientsecret|(?:db|ssl)pass(?:word)?)(?:_|$)|^o?auth$/u;
+const URL_PARAM_WORD_BREAK_RE = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/gu;
+const URL_PARAM_WORD_SEPARATOR_RE = /[-_.[\]\d]+/u;
 // A delimiter opens a name, `://` opens a URL, and whitespace or a `"` closes one. `;` divides parameters only inside a URL, as
 // in `jdbc:sqlserver://db:1433;user=sa;password=x;`, since code such as `a=1;token=next()` is full of them. Names stop at every
 // delimiter, so runs are disjoint and each name is read once: `&token` repeated took 8 s at 320 KB when each walked to the `=`.
@@ -133,7 +135,8 @@ function redactSecretFlags(value: string): string {
 }
 
 function isSecretUrlParamName(name: string): boolean {
-	return SECRET_URL_PARAM_NAME_RE.test(name.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toLowerCase());
+	const words = name.replace(URL_PARAM_WORD_BREAK_RE, "_").toLowerCase().split(URL_PARAM_WORD_SEPARATOR_RE);
+	return SECRET_URL_PARAM_NAME_RE.test(words.filter((word) => word.length > 0).join("_"));
 }
 
 /** The value spans of `?token=value` and of `;password=value` inside a URL. */

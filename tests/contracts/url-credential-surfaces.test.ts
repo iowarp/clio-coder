@@ -1118,13 +1118,48 @@ test("the URL rule hides a value by what its whole parameter name means", () => 
 	strictEqual(redactUrlCredentials("https://h?token=$TOKEN"), "https://h?token=$TOKEN");
 });
 
+test("a secret word hides a value from anywhere in its parameter name, as a whole word", () => {
+	for (const name of [
+		"password_confirmation",
+		"passwordConfirmation",
+		"password1",
+		"token2",
+		"secret_value",
+		"auth[password]",
+		"token[]",
+		"sslpassword",
+		"dbpass",
+		"pass_word",
+		"page_token",
+		"pageToken",
+		"max_token",
+		"token_type",
+		"APIToken",
+	]) {
+		strictEqual(
+			redactUrlCredentials(`https://h.example/p?${name}=${PARAM_SECRET}&next=1 words`),
+			`https://h.example/p?${name}=[redacted]&next=1 words`,
+		);
+	}
+	for (const text of [
+		"https://h/?author=alice",
+		"https://h/?tokens=100",
+		"https://h/?authenticated=true",
+		"https://h/?credentials=include",
+		"https://h/?no_auth=1&authorId=7&compass=n",
+		"BASE_TOKENS=100 and --token in prose",
+	]) {
+		strictEqual(redactUrlCredentials(text), text);
+	}
+});
+
 test("a name that only starts with a secret word keeps its value, so a completed stream loses nothing", () => {
 	for (const text of [
 		"see https://github.com/o/r/commits?author=alice for it",
 		"https://h/usage?tokens=100&max_tokens=200",
 		"https://h/?authenticated=true",
 		"fetch('https://h/', ?credentials=include)",
-		"https://h/?authority=x&secrets=y&passwords=z&bypass=w&token_type=bearer",
+		"https://h/?authority=x&secrets=y&passwords=z&bypass=w",
 		"https://h/?token&x=1",
 		// Semicolons divide parameters only inside a URL, so code keeps its statements.
 		"let a=1;token=next();password=b",
