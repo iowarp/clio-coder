@@ -206,6 +206,11 @@ export function createJsonCredentialScrub(): {
 				{ ...(mapStrings(rest, redactUrlCredentials) as object), partialResult: mapStrings(partialResult, heldText) },
 			];
 		}
+		if (isRecord(frame.result) && isRecord(frame.result.output) && frame.result.output.state === "partial") {
+			// Mid-stream text from a message that never completed, as the receipt says, so it can stop inside a URL (#446).
+			const output = mapStrings(frame.result.output, heldText);
+			return [...ended, mapStrings({ ...frame, result: { ...frame.result, output } }, redactUrlCredentials)];
+		}
 		return [...ended, mapStrings(frame, redactUrlCredentials)];
 	};
 	return { scrub: scrub as <T>(frame: T) => T[], finish: finish as <T>(completed: boolean) => T[] };

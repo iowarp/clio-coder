@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createHeadlessJsonProjector, createJsonCredentialScrub, projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
+import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
@@ -279,4 +280,37 @@ test("a new attempt, or any message start, closes an open URL as cut off", () =>
 		];
 		strictEqual(textOf(frames), "see https://u:");
 	}
+});
+
+test("a --json result frame holds partial output and keeps final output whole", () => {
+	const scrub = createJsonCredentialScrub();
+	const output = (state: string, text: string): unknown => {
+		const [frame] = scrub.scrub({ type: "result", result: { exitCode: 1, output: { state, text } } });
+		return (frame as { result: { output: { text: string } } }).result.output.text;
+	};
+	strictEqual(output("partial", "see https://u:hunter"), "see https://u:");
+	strictEqual(output("final", "see http://localhost:8080"), "see http://localhost:8080");
+	strictEqual(output("final", "see https://u:ZQ@h/"), "see https://u:[redacted]@h/");
+});
+
+test("the human answer of a run that was cut off holds an open URL", () => {
+	const unknown = { kind: "unknown", reason: "not-observed" };
+	const receipt = (fields: object): never =>
+		({
+			runId: "r",
+			agentId: "a",
+			exitCode: 1,
+			targetId: "t",
+			wireModelId: "m",
+			startedAt: "2026-01-01T00:00:00Z",
+			endedAt: "2026-01-01T00:00:01Z",
+			spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+			...fields,
+		}) as never;
+	const first = (answer: string, fields: object): string =>
+		formatDispatchHumanOutput(answer, receipt(fields)).split("\n")[0] ?? "";
+	strictEqual(first("see https://u:hunter", { output: { state: "partial", text: "x" } }), "see https://u:");
+	strictEqual(first("see https://u:hunter", {}), "see https://u:");
+	strictEqual(first("see http://h:8080", { exitCode: 0 }), "see http://h:8080");
+	strictEqual(first("see http://h:8080", { output: { state: "final", text: "x" } }), "see http://h:8080");
 });
