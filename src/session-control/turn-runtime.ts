@@ -1380,7 +1380,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			middleware.fireTurnStart(localRuntime, "", 0, true);
 			// The reminder block leads: only a block opening the message is host
 			// framing, and the orientation block quotes scout findings.
-			const content = [middleware.flushPendingReminders(), block]
+			// Buffered reminders wait for the next unlocked request: they may ask for a tool.
+			const locked = state.synthesisToolLock || state.toolBudgetLock;
+			const content = [locked ? "" : middleware.flushPendingReminders(), block]
 				.filter((part): part is string => part !== null && part.length > 0)
 				.join("\n\n");
 			if (content.length === 0) return false;

@@ -66,8 +66,10 @@ export type MiddlewareEffect =
 	 * `note` is what the nudge asked, in plain words, for the footer line that
 	 * says the turn was continued. An empty note marks the host's own card (the
 	 * plan close), which is already on screen and needs no announcement.
+	 * `toolFree` marks a continuation the host carries out itself, the only kind
+	 * a tool-locked request can honor.
 	 */
-	| { kind: "request_continuation"; message: string; note?: string }
+	| { kind: "request_continuation"; message: string; note?: string; toolFree?: true }
 	| { kind: "require_tool"; toolName: string }
 	| { kind: "lock_tools" }
 	/**

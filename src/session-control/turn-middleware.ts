@@ -457,7 +457,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					continue;
 				}
 				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
-					applyRequestContinuation(effect.message, effect.note);
+					// A locked request cannot call the tool a nudge asks for: a plan close
+					// here reasoned over that conflict for 131k tokens until max_tokens.
+					if (effect.toolFree === true || !(state.synthesisToolLock || state.toolBudgetLock))
+						applyRequestContinuation(effect.message, effect.note);
 					continue;
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);
