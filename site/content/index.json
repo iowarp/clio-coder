@@ -89,6 +89,19 @@
     ]
   },
   {
+    "path": "guide/proactive-memory.md",
+    "source": "docs/guide/proactive-memory.md",
+    "title": "Memory and lessons",
+    "group": "Everyday use",
+    "excerpt": "See what Clio Coder remembers, approve lessons, or turn memory off.",
+    "summary": "memory.md",
+    "headings": [
+      "What memory does",
+      "See and approve lessons",
+      "Turn it off or route it elsewhere"
+    ]
+  },
+  {
     "path": "guide/panes-and-files.md",
     "source": "docs/guide/panes-and-files.md",
     "title": "Files and terminal panes",
@@ -154,6 +167,20 @@
       "Install a bundle of resources",
       "Keep the installed copy under control",
       "Choose the right kind of extension"
+    ]
+  },
+  {
+    "path": "guide/harness-extensions.md",
+    "source": "docs/guide/harness-extensions.md",
+    "title": "Extensions",
+    "group": "Extend Clio Coder",
+    "excerpt": "Install and write extensions that declare what they may do.",
+    "summary": "extensions.md",
+    "headings": [
+      "Plugin or extension",
+      "Manage extensions",
+      "What an extension can add",
+      "Write one"
     ]
   },
   {

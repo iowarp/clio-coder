@@ -46,6 +46,12 @@
       "sourceSha256": "7c6344de6ab7e49c8f1a53f6f280f6919a7ad4344f9aaa1d429609bc11cb95a1"
     },
     {
+      "path": "guide/proactive-memory.md",
+      "source": "docs/guide/proactive-memory.md",
+      "sha256": "d2d6600b5942e004bf33b18938f77b587c0d8fec30d7b4c5b81a035936de8563",
+      "sourceSha256": "a2de2267468d811caecb45cbbd7b04ec035c7cb63f860361c755e6720d598938"
+    },
+    {
       "path": "guide/panes-and-files.md",
       "source": "docs/guide/panes-and-files.md",
       "sha256": "d9b77f0cb11ec5978aa933911867f30b04edf318e3fe1950e687f290f7441e31",
@@ -74,6 +80,12 @@
       "source": "docs/guide/plugins.md",
       "sha256": "d964e17b3fae47e204f2edb0a76beaf9e7b9a56e5f1e4399162ee516449097e9",
       "sourceSha256": "95571e8f5dd1673515956745fec82c5410c8a32b88c908e268f92932518c3603"
+    },
+    {
+      "path": "guide/harness-extensions.md",
+      "source": "docs/guide/harness-extensions.md",
+      "sha256": "90ad0edcd636444ecca86923913a1342c301e852e5aca72bcabf8371d3ccce7b",
+      "sourceSha256": "dbb7d057ad7ca633c8238cec677adf8897689f5319f260589a3ef7bf5dccad61"
     },
     {
       "path": "guide/interop.md",
