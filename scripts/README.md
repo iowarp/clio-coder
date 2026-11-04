@@ -32,8 +32,8 @@ before creating the GitHub tag/release and promoting stable public surfaces.
 Npm publication and dist-tag writes remain in the owner's interactive command
 while trusted publishing is unavailable. Dev snapshots remain disabled.
 
-Keep disposable output in a uniquely owned directory under
-`/home/akougkas/clio-gym/tmp/`, `scratch/`, or `install-tests/`, and set `TMPDIR`
-before running commands that create temporary files. Never use system `/tmp`
+Keep disposable output in a uniquely owned scratch directory outside the checkout,
+and set `TMPDIR` to it before running commands that create temporary files. Never
+use system `/tmp`
 or commit run output under `scripts/`. Retired local benchmark and smoke scripts
 remain recoverable from Git history.

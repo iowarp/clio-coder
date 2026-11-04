@@ -77,7 +77,7 @@ it("refuses a page path the plan does not hold before any dispatch", async () =>
 				throw new Error("must not dispatch");
 			},
 		} as unknown as DispatchContract;
-		await assert.rejects(modelWikiGenerate({ dispatch })(input), /missing\.md/);
+		await assert.rejects(async () => modelWikiGenerate({ dispatch })(input), /missing\.md/);
 		assert.equal(dispatched, 0);
 	} finally {
 		isolated.restore();
