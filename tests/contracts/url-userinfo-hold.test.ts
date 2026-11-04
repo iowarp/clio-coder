@@ -74,6 +74,12 @@ const CORPUS = [
 	"https://glpat-ZQXJZQXJZQXJ:x-oauth@gitlab.com/r",
 	"https://:ZQXJ@h",
 	"https://u:ZQ/XJ@h",
+	"ssh://u:ZQ/XJ@h/p",
+	"postgres://u:ZQXJ@h/db",
+	"redis://:ZQXJ@h:6379",
+	"mongodb+srv://u:ZQXJ@c.example.net/db",
+	"http://$HOST:$PORT/api tail",
+	"redis://localhost:6379/0",
 	"--token ZQXJ next",
 	"--token=ZQXJ",
 	"API_KEY=ZQXJ;x",
@@ -113,19 +119,24 @@ function random(seed: number): () => number {
 	};
 }
 
-/** The stated contract, written apart from the code: the last run after a scheme shows through its first colon, or its last `@`. */
+/**
+ * The stated contract, written apart from the code. In the last token, the first URL that can still hold a password shows
+ * through its first colon, or its last `@`. A numeric port ahead of `/`, or an `@` that closed an authority, settles a URL.
+ */
 function expectedFrame(prefix: string): string {
-	const open = /https?:\/\/([^\s/]*)$/iu.exec(prefix);
-	if (open === null) return redactSecretString(prefix);
-	const name = open[1] ?? "";
-	const colon = name.indexOf(":");
-	const at = name.indexOf("@");
-	if (/^(?:gh[pousr]_|github_pat_|glpat-)/iu.test(name)) {
-		return redactSecretString(prefix.slice(0, prefix.length - name.length + name.lastIndexOf("@") + 1));
+	const token = /\S*$/u.exec(prefix)?.[0] ?? "";
+	const base = prefix.length - token.length;
+	for (const match of token.matchAll(/(?<=[a-z0-9+.-]):\/\//giu)) {
+		const start = match.index + 3;
+		const rest = token.slice(start);
+		const cut = (end: number) => redactSecretString(prefix.slice(0, base + start + end));
+		const lastAt = rest.lastIndexOf("@");
+		if (/^(?:gh[pousr]_|github_pat_|glpat-)[^/]*$/iu.test(rest)) return cut(lastAt + 1);
+		if (/^[^/@:[]*:[^/]*@[^/]*$/u.test(rest)) return cut(lastAt + 1);
+		if (/^[^/@:[]*:[^/@]*$/u.test(rest)) return cut(rest.indexOf(":") + 1);
+		if (/^[^/@:[]*:(?!\d*\/)[^/@]*\//u.test(rest)) return cut(lastAt >= 0 ? lastAt + 1 : rest.indexOf(":") + 1);
 	}
-	if (colon < 0 || (at >= 0 && at < colon)) return redactSecretString(prefix);
-	const end = prefix.length - name.length + (at >= 0 ? name.lastIndexOf("@") + 1 : colon + 1);
-	return redactSecretString(prefix.slice(0, end));
+	return redactSecretString(prefix);
 }
 
 function leaked(frame: string, oneShot: string): string[] {
@@ -188,6 +199,7 @@ test("one-shot redaction hides the whole password of every userinfo shape", () =
 		["https://u:ZQ@XJ@h:8443/p", "https://u:[redacted]@h:8443/p"],
 		["https://u:ZQ@h/a@b", "https://u:[redacted]@h/a@b"],
 		["https://a:ZQ@h,https://b:XJ@h", "https://a:[redacted]@h,https://b:[redacted]@h"],
+		["https://u:ZQ/XJ@h", "https://u:[redacted]@h"],
 		["postgres://u:ZQ@h/db", "postgres://u:[redacted]@h/db"],
 		["redis://:ZQ@h:6379", "redis://:[redacted]@h:6379"],
 		["mongodb+srv://u:ZQ@c.example.net", "mongodb+srv://u:[redacted]@c.example.net"],
@@ -235,6 +247,8 @@ test("an ordinary name or host stays readable beside a username token", () => {
 		"https://first.last@corp.example.com/r",
 		"ssh://git@github.com/o/r.git",
 		"http://my-service-12345-abcdefghij:8080/health",
+		"http://localhost:4873/@scope/pkg",
+		"http://[::1]:8080/a@b",
 		"https://abcdefghijklmnopqrstuvwxyz.example.com/",
 		"redis://localhost:6379/0",
 		"sqlite:///a:b/c@d",
@@ -243,6 +257,14 @@ test("an ordinary name or host stays readable beside a username token", () => {
 	]) {
 		strictEqual(redactSecretString(text), text);
 		strictEqual(redactStreamingSecretString(text), text);
+	}
+});
+
+test("the hold and the pattern stay linear on a token full of URLs", () => {
+	for (const text of ["x://".repeat(80_000), "a://b:c/".repeat(40_000), `https://${"a:".repeat(160_000)}`]) {
+		const started = performance.now();
+		redactStreamingSecretString(text);
+		ok(performance.now() - started < 1_000, text.slice(0, 16));
 	}
 });
 
