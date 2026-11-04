@@ -38,7 +38,7 @@ systemOne:
 
 Routes are tried in order, each under its own timeout, and one engine answers one ask. `off` anywhere in the list turns System One off. A route you did not name is never used, and a route that cannot run says why at `clio-coder systemone status` and sends nothing.
 
-Choosing a route needs a restart because the choice decides whether the tool registers at all. Editing what a declared engine means applies to the next question, and that engine is rebuilt only when its own configuration changes.
+A named route does more than answer the tool. It also drives the judge screen and, when triage is on, typed steering triage, so with a hosted engine web and MCP result text leaves the machine at judge time. Choosing a route needs a restart because the choice decides whether the tool registers at all. Editing what a declared engine means applies to the next question, and that engine is rebuilt only when its own configuration changes.
 
 ## Off
 
@@ -149,13 +149,13 @@ clio-coder systemone off
 clio-coder systemone check <engine> --live
 ```
 
-`status` says whether System One is on, what each route reaches and why a route cannot run. `/systemone` in a session shows the same lines and changes nothing. `use` and `off` write to user settings by default, and a project write goes to `.clio-coder/settings.local.yaml` under the usual trust rules. `run --systemone <route>[,<route>...]` sets one run, and `run --systemone off` turns it off for that run. `check --live` sends one content-free decision and reports the build that answered. `clio-coder systemone --help` prints the usage and exits 0.
+`status` says whether System One is on, what each route reaches, what a bound route sends and why a route cannot run. `/systemone` in a session shows the same lines and changes nothing. `use` and `off` write to user settings by default, and a project write goes to `.clio-coder/settings.local.yaml` under the usual trust rules. `run --systemone <route>[,<route>...]` sets one run, and `run --systemone off` turns it off for that run. `check --live` sends one content-free decision and reports the build that answered. `clio-coder systemone --help` prints the usage and exits 0.
 
 `clio-coder doctor` never asks a decision. Its rows are listed in [Doctor](doctor.md). `/health` shows engine breakers.
 
 ## Privacy
 
-State is redacted in the process before a request exists, so a hosted engine or LLM API receives redacted text. Redaction is best effort. A hosted engine still receives what you send it: file digests, chunks of a result, queued operator messages and web content, so name a hosted route only if you would send that text there. A local server keeps everything on the machine.
+State is redacted in the process before a request exists, so a hosted engine or LLM API receives redacted text. Redaction is best effort. A hosted engine still receives what these uses send it: file digests and heads, chunks of a result, queued operator messages when triage is on, and web and MCP result text at judge time. Name a hosted route only if you would send that text there. A local server keeps everything on the machine.
 
 Every request is also checked against the information-flow restrictions its evidence carries, and files `consult` reads add theirs. A rule whose recipients do not include the engine's target ends that route as `flow-denied`, and nothing is sent. See [Information flow](information-flow.md).
 

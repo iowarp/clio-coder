@@ -207,27 +207,27 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
-- **Definition**: An optional fast decision model that answers calibrated, typed questions (`noul`, `choice`, `score`) about one bounded, redacted state at a fixed decision site. Clio Coder's policy reads the probabilities to add hints, rankings, advice or worker prewarm. Safety-oriented readings only record in this release. It never answers the operator and never removes friction. The shipped fitted cuts are built for one hosted engine build, and Laya is a supported local decision-model profile on the same System One wire. System One is experimental. Configured under `systemOne`; see [System One](system-one.md).
+- **Definition**: An optional, experimental fast decision model, off until `systemOne.use` names a route. It answers typed questions (`noul`, `choice`, `score`) about one bounded, redacted state. Its callers are the `consult` tool, the judge screen and typed steering triage. It never answers the operator and never removes friction. See [System One](system-one.md).
 - **Owning Type**: `SystemOne` in [types.ts](../../src/domains/system-one/types.ts); built by `createSystemOne` in [factory.ts](../../src/domains/system-one/factory.ts).
 
-### 52. Decision Site
-- **Definition**: A place where System One is asked, named by the object it judges: `turn` (the operator's request), `toolCall` (a proposed call, at the `card` and `gate` moments), `toolResult`, `turnEnd`, `relevance`, `consult`, `drafts` and `steer` (queued steering messages). A site owns its state, its questions, its policy and its default deadline. Bound to an engine by `systemOne.sites`; a site with no binding is off.
-- **Owning Type**: `SiteDefinition` and `SiteId` in [types.ts](../../src/domains/system-one/types.ts).
+### 52. Decision Point
+- **Definition**: One place System One is asked, named by what it judges: `consult`, `judgeScreen` or `triage`. A point owns its state, its questions, its reader and its deadline.
+- **Owning Type**: `DecisionPoint` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 53. Build
-- **Definition**: The identity of what answered a System One question, and the key every cut is fitted against. For a `systemone` engine it is the model the server reports, such as `jev-1.14.0`. For an `llm` engine it is a composite of runtime, host, wire model, readout mode and prompt version. A probability means something only for the build that produced it.
+- **Definition**: The identity of what answered a System One question, named by what the server reported. For a `systemone` engine it is the model the server reports, such as `jev-1.14.0`. For an `llm` engine it is a composite of runtime, host, reported model, fingerprint and prompt version.
 - **Owning Type**: `EngineReply.build` in [types.ts](../../src/domains/system-one/types.ts).
 
-### 54. Cut
-- **Definition**: A probability threshold at which a site hints, gates or acts, written `<site>.<key>` and fitted for one build from a labeled run. Fitted cuts live in `FITTED_CUTS`, and `systemOne.cuts` overlays operator values between 0.01 and 0.99 on top. A build with no cut for a site is unfitted.
-- **Owning Type**: `SiteCuts` in [types.ts](../../src/domains/system-one/types.ts); `FITTED_CUTS` and `cutsFor` in [calibration.ts](../../src/domains/system-one/calibration.ts).
+### 54. Readout
+- **Definition**: What an answer's number is, as the answering engine declares it. `categorical` is a label with no probability scale, which every LLM route returns. A readout is not an accuracy claim.
+- **Owning Type**: `ReadoutKind` in [contract.ts](../../src/domains/system-one/contract.ts).
 
-### 55. Shadow Mode
-- **Definition**: What a site does under an unfitted build. The engine is still asked and the call is recorded in the session ledger, and in the System One dataset while research capture keeps it (`telemetry.research.systemOneDataset` with content capture on), but the site produces no hint, no gate, no act and no ranking. With recording off, a site whose build is known to be unfitted makes no call at all. No automatic site waits on a call, shadowed or not.
-- **Owning Type**: `SystemOne.shadowed` and `SiteCuts.fitted` in [types.ts](../../src/domains/system-one/types.ts).
+### 55. Route
+- **Definition**: One name in `systemOne.use`: `jev`, `memory`, `main`, a declared engine or a target. Routes are tried in order, and one engine answers one ask.
+- **Owning Type**: `routeNames` and `resolveChoice` in [selection.ts](../../src/domains/system-one/selection.ts).
 
 ### 56. Laya
-- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as the hosted engine, through `laya-serve` and the `systemone` runtime. Not yet fitted: a Laya build runs in shadow until cuts are fitted on that exact build with `scripts/decision-probe.ts`. See [System One Architecture](../architecture/system-one.md).
+- **Definition**: The diffusion-model System One engine that serves the same `POST /v1/systemone` wire as the hosted engine, through `laya-serve` and the `systemone` runtime, under the `laya` capability profile. See [System One Architecture](../architecture/system-one.md).
 - **Owning Type**: `createSystemOneEngine` in [systemone.ts](../../src/domains/system-one/engines/systemone.ts).
 
 ### 57. Runtime

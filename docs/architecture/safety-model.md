@@ -215,7 +215,7 @@ The judge never sees these: a harness call; `ask_user` and `configure_clio`, the
 
 ### Route and settings
 
-`safety.judge` (`enabled`, `target`, `model`, `environment`, `allow`, `deny`) is read only from the operator's user settings and at every review. A null `target` asks the session's chat route; a null `model` asks the chat model, or the judge target's default model when a target is set. The round goes through System One's one-shot port, holds a foreground slot on its endpoint, and is refused like any model request when the session's information-flow labels do not admit the judge's destination. With `enabled: false` every ask parks as it would without a judge. Every review journals a `safety.judged` record. Its context names the session, turn and tool call, and its payload holds the tool, action class, worker run id, asking rule, verdict (`allow`, `block`, `none` or `escalated`), rule, latency, route target and model, the cause of a missing verdict (`noVerdict`), and `operatorMessages`, the number of operator messages the judge's prompt carried. The judge's reason prose stays out of the journal. `operatorMessages` is absent when no prompt was built, such as an escalated call or one with no route, and a `0` shows the judge saw no operator request at all.
+`safety.judge` (`enabled`, `target`, `model`, `environment`, `allow`, `deny`) is read only from the operator's user settings and at every review. A null `target` asks the session's chat route; a null `model` asks the chat model, or the judge target's default model when a target is set. The round goes through the providers' one-shot port, holds a foreground slot on its endpoint, and is refused like any model request when the session's information-flow labels do not admit the judge's destination. With `enabled: false` every ask parks as it would without a judge. Every review journals a `safety.judged` record. Its context names the session, turn and tool call, and its payload holds the tool, action class, worker run id, asking rule, verdict (`allow`, `block`, `none` or `escalated`), rule, latency, route target and model, the cause of a missing verdict (`noVerdict`), and `operatorMessages`, the number of operator messages the judge's prompt carried. The judge's reason prose stays out of the journal. `operatorMessages` is absent when no prompt was built, such as an escalated call or one with no route, and a `0` shows the judge saw no operator request at all.
 
 ## Unattended resolution
 
@@ -480,13 +480,12 @@ Policy ([worker-policy.ts](../../src/core/sandbox/worker-policy.ts)): the filesy
 
 ## System One and the safety net
 
-System One is an optional experimental decision model. Its sites record detached readings without delaying calls or results, and they are silent when no engine is bound, when the engine is slow or fails, and when the answering build has no fitted cut. At the safety sites a reading adds no confirmation, banner or delay.
+System One is an optional experimental decision model, off until `systemOne.use` names a route. It adds no confirmation, banner or delay to a call or result, with one exception that can only tighten.
 
-- **The yolo gate.** At `yolo`, in an interactive session, an `execute` call that the classifier did not recognize starts a detached System One reading that is recorded for training. It never parks, denies or delays the call. A call the classifier already blocks or recognizes does not reach it, and headless runs and ACP sessions have no gate.
-- **Tool-result screening.** Results of `web_fetch`, `web_read` and MCP tools start a detached reading for text that directs an AI agent. The deterministic marker scan still applies.
-- **Card advisory.** An ordinary approval card can show one advisory sentence about the call's blast radius when a `toolCall` engine is bound. It says it is advisory, cannot delay the card and does not change what allow, deny or stop do.
+- **The judge screen.** With a route bound, while the safety judge reviews a main-session call, System One reads the newest `web_fetch`, `web_read` and MCP results since the operator last spoke, whether they came directly or through the gateway. A reading at or above 0.5 that the content directs an AI agent turns a judge allow into a park, and the approval card names the source. An allow under the operator-named rule stands. A block stays a block, and a reading still running when the verdict lands is aborted. On a hosted route, that result text leaves the machine at judge time, under the same information-flow check as any model request.
+- **What it skips.** A route that does not declare real probabilities never screens, which covers every LLM route and any `generic` engine, and neither does a route on the judge's own destination or a busy endpoint. With no screening route, the judge behaves as it does unbound.
 
-The safety judge is not a System One site. It shares only the one-shot port and the reach ladder's wording. The settings, sites and records are in the [System One guide](../guide/system-one.md) and [System One architecture](system-one.md).
+The screen admits nothing and never replaces the deterministic rules or the judge's verdict. The settings and limits are in the [System One guide](../guide/system-one.md) and [System One architecture](system-one.md).
 
 ## Workers
 
@@ -595,5 +594,5 @@ Defaults come from `DEFAULT_SETTINGS` in [defaults.ts](../../src/core/defaults.t
 | Worker sandbox | [worker-process.ts](../../src/core/sandbox/worker-process.ts) | `planSandboxedSpawn` |
 | Accountability records | [decision-events.ts](../../src/domains/safety/decision-events.ts) | `toolDecidedPayload`, `completionEvaluatedPayload`, `safetyJudgedPayload` |
 | Decision presentation | [decision-presentation.ts](../../src/domains/safety/decision-presentation.ts) | `classifyDecisionPresentation`, `DECISION_TIERS` |
-| System One sites | [factory.ts](../../src/domains/system-one/factory.ts) | see [System One Architecture](system-one.md) |
+| System One judge screen | [judge-screen.ts](../../src/domains/system-one/points/judge-screen.ts) | see [System One Architecture](system-one.md) |
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts), [rigor.ts](../../src/domains/safety/rigor.ts) | `assessFinishContract`, `resolveRigor` |
