@@ -942,7 +942,7 @@ class AskUserOverlayView implements Component {
 	private renderKeyLegend(width: number, maxRows: number): string[] {
 		if (this.railRoom <= 0) return [];
 		const entries = this.railEntries();
-		const kept = this.railKept(this.railRoom);
+		const kept = this.railKept(entries, this.railRoom);
 		const dropped = entries.filter((entry) => !kept.includes(entry));
 		if (dropped.length === 0) return [];
 		const text = fitHintEntries(dropped, Math.max(1, width * maxRows - (maxRows - 1) * 8));
@@ -1039,8 +1039,7 @@ class AskUserOverlayView implements Component {
 	}
 
 	/** The shared rule lets the way out stand last, but a rail with room for one key here keeps the key that records. */
-	private railKept(cells: number): HintEntry[] {
-		const entries = this.railEntries();
+	private railKept(entries: ReadonlyArray<HintEntry>, cells: number): HintEntry[] {
 		const { kept } = fitHintEntryList(entries, cells);
 		const primary = entries[0];
 		return primary === undefined || kept.includes(primary) ? kept : [primary];
@@ -1048,7 +1047,7 @@ class AskUserOverlayView implements Component {
 
 	/** The rail hint for a rail of `cells`; the legend in the body draws what this drops. */
 	railHint(cells: number): string {
-		const fitted = fitHintEntries(this.railKept(cells), cells);
+		const fitted = fitHintEntries(this.railKept(this.railEntries(), cells), cells);
 		const withDrag = `${fitted} · drag to select/copy`;
 		return visibleWidth(withDrag) <= cells ? withDrag : fitted;
 	}
