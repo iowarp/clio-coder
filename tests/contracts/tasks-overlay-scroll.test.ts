@@ -123,18 +123,18 @@ test("the selection walks into operator tasks and the window follows it (BT-015)
 	let screen = board.render();
 	match(selectedRow(screen) ?? "", /t4 {3}Review/u);
 	const visited: string[] = [];
-	for (let step = 0; step < 9; step++) {
+	for (let step = 0; step < 5; step++) {
 		screen = board.press(DOWN);
 		const selected = selectedRow(screen);
 		ok(selected !== undefined, `the selected row stays on screen after ↓ ${step + 1}`);
 		visited.push(selected);
 	}
-	match(visited.at(-1) ?? "", /u2 {3}Document the rounding mode/u, "↓ reaches the last operator task");
+	match(visited.at(-1) ?? "", /u2 {3}Document the rounding mode/u, "↓ reaches the operator tasks right after the agent board");
 	match(screen.join("\n"), /Operator tasks/u, "the section heading shows with its rows");
 	board.press("d");
 	deepStrictEqual(board.done, ["u2"], "[d] done acts on the operator task the operator selected");
 
-	for (let step = 0; step < 9; step++) {
+	for (let step = 0; step < 5; step++) {
 		screen = board.press(UP);
 		ok(selectedRow(screen) !== undefined, `the selected row stays on screen after ↑ ${step + 1}`);
 	}
@@ -145,14 +145,14 @@ test("the selection walks into operator tasks and the window follows it (BT-015)
 test("Tab moves the selection to the next section and the window follows (BT-015)", () => {
 	const board = mount();
 	let screen = board.press(TAB);
-	match(selectedRow(screen) ?? "", /lib\/math\.js/u, "Tab jumps from the agent board to the artifacts");
-	screen = board.press(TAB);
-	match(selectedRow(screen) ?? "", /u1 {3}Review/u, "Tab again reaches the operator tasks");
+	match(selectedRow(screen) ?? "", /u1 {3}Review/u, "Tab jumps from the agent board to the operator tasks");
 	match(screen.join("\n"), /Operator tasks/u);
+	screen = board.press(TAB);
+	match(selectedRow(screen) ?? "", /lib\/math\.js/u, "Tab again reaches the artifacts");
 	screen = board.press(TAB);
 	match(selectedRow(screen) ?? "", /t4 {3}Review/u, "Tab wraps to the first section");
 	screen = board.press("\x1b[Z");
-	match(selectedRow(screen) ?? "", /u1 {3}Review/u, "Shift+Tab goes back a section");
+	match(selectedRow(screen) ?? "", /lib\/math\.js/u, "Shift+Tab goes back a section");
 });
 
 test("a board that fits renders whole, with no position row and no page hint (BT-015)", () => {
