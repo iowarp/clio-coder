@@ -25,7 +25,7 @@ import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 import { createDemoHints } from "./demo-hints.js";
-import type { ComposerKeyContext } from "./key-hints.js";
+import type { ComposerKeyContext, KeyHintFacts } from "./key-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
 import type { DashboardPage } from "./pages.js";
@@ -100,6 +100,7 @@ export interface FooterDashboardDeps {
 	getBackgroundCalls?: () => ReadonlyArray<BackgroundCall>;
 	/** Who answers the keyboard right now; the hint row follows it. Absent reads as the idle composer. */
 	getKeyContext?: () => ComposerKeyContext;
+	getKeyHintFacts?: () => KeyHintFacts;
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
@@ -121,6 +122,7 @@ export interface FooterDashboardRenderState {
 	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
 	demo?: boolean;
 	keyContext?: ComposerKeyContext;
+	keyHintFacts?: KeyHintFacts;
 	background?: ReadonlyArray<BackgroundCall>;
 	welcomeVisible?: boolean;
 	resources?: LocalMachineMetrics | null;
@@ -353,6 +355,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			},
 			demo: settings?.interface.demo !== false,
 			...(keyContext ? { keyContext } : {}),
+			...(deps.getKeyHintFacts ? { keyHintFacts: deps.getKeyHintFacts() } : {}),
 			background: deps.getBackgroundCalls?.() ?? [],
 			welcomeVisible: deps.getWelcomeVisible?.() === true,
 			demoHint: demoHints({
@@ -361,7 +364,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				now,
 				quiet:
 					dashboardMode !== "compact" ||
-					keyContext === "surface" ||
+					(keyContext !== undefined && keyContext !== "idle") ||
 					compactionActive ||
 					["tool_blocked", "retrying", "stuck"].includes(status?.phase ?? "") ||
 					(status?.activeTools ?? []).some((tool) => tool.toolName === "ask_user") ||

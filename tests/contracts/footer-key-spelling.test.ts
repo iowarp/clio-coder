@@ -27,7 +27,7 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 	try {
 		match(manager.actionLabel("clio-coder.notifications.dismiss"), /Ctrl\+N/u);
 		match(manager.actionLabel("clio-coder.model.select"), /Alt\+G M/u);
-		match(Array.from({ length: 40 }, (_, index) => footerKeyHint(index * 12000)).join("\n"), /Ctrl\+M Model picker/u);
+		match(footerKeyHint(0, false, Number.POSITIVE_INFINITY, "idle") ?? "", /Ctrl\+M Model picker/u);
 		const state = footerState();
 		state.demo = false;
 		state.session.leaderArmed = true;
