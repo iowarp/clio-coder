@@ -164,6 +164,20 @@ function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	return [];
 }
 
+/** An operator's call on a linked task that the agent's row has not caught up with: done or dropped while the row is still open. */
+function operatorOverride(task: TaskBoardTask, userTasks: ReadonlyArray<UserTask>): UserTask | null {
+	if (task.status !== "active" && task.status !== "pending" && task.status !== "blocked") return null;
+	const linked = userTasks.find((item) => item.id === task.userTaskId);
+	return linked?.status === "done" || linked?.status === "dropped" ? linked : null;
+}
+
+function overrideRows(task: TaskBoardTask, userTasks: ReadonlyArray<UserTask>, width: number): string[] {
+	const override = operatorOverride(task, userTasks);
+	if (override === null) return [];
+	const words = `you marked ${override.id} ${override.status === "done" ? "done" : "dropped"}; this row is the agent's and stays open until it acts`;
+	return wrapTaskProse(`       ${clioTheme().fg("warning", "overridden")} `, clioTheme().fg("warning", words), width);
+}
+
 /**
  * Where one selectable row sits in the body. `line` is the row itself;
  * `[start, end)` is what has to be on screen with it: its receipt rows, the
@@ -186,6 +200,7 @@ function formatTasksOverlayBodyLines(
 	board: TaskBoardSnapshot | null,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 	selectedTaskId?: string | null,
+	userTasks: ReadonlyArray<UserTask> = [],
 ): TasksOverlayLayout {
 	const theme = clioTheme();
 	const width = Math.max(1, Math.floor(contentWidth));
@@ -235,7 +250,7 @@ function formatTasksOverlayBodyLines(
 	for (const task of tasksInReadingOrder(board.tasks)) {
 		const line = lines.length;
 		lines.push(taskRow(task, width, selectedTaskId === undefined ? undefined : selectedTaskId === task.id));
-		lines.push(...taskReceiptRows(task, width));
+		lines.push(...overrideRows(task, userTasks, width), ...taskReceiptRows(task, width));
 		// The first task carries the board's title, counts and proof above it.
 		spans.push({ line, start: spans.length === 0 ? 0 : line, end: lines.length });
 	}
@@ -348,7 +363,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	const currentSelected = selected?.kind === "current" ? selected.task.id : null;
 	// The frame title already says Tasks; a second heading under it was the one
 	// title the overlay repeated.
-	const current = formatTasksOverlayBodyLines(state.board, width, currentSelected);
+	const current = formatTasksOverlayBodyLines(state.board, width, currentSelected, state.userTasks);
 	const boardEmpty = current.spans.length === 0;
 	const lines = boardEmpty ? [] : [...current.lines];
 	const spans = [...current.spans];
@@ -609,9 +624,9 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 			{ key: "Tab", verb: "section" },
 			...(selected?.kind === "artifact" && this.options.onOpenArtifact ? [{ key: "Enter", verb: "view" }] : []),
 			{ key: "a", verb: "add" },
-			...(selected?.kind === "user"
+			...(selected?.kind === "user" && selected.task.status === "open" ? [{ key: "h", verb: "hand" }] : []),
+			...(selected?.kind === "user" && selected.task.status !== "done" && selected.task.status !== "dropped"
 				? [
-						{ key: "h", verb: "hand" },
 						{ key: "d", verb: "done" },
 						{ key: "x", verb: "drop" },
 					]
@@ -729,7 +744,9 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 		try {
 			mutation(id);
 			this.refreshUserTasks();
-			this.status = `Operator task ${id} ${status}.`;
+			const linked = status === "handed" ? undefined : this.readBoard()?.tasks.find((task) => task.userTaskId === id);
+			const stillOpen = linked !== undefined && operatorOverride(linked, this.userTasks) !== null;
+			this.status = `Operator task ${id} ${status}.${stillOpen ? ` ${linked.id} stays open on the agent's board, so steer the turn if it should stop.` : ""}`;
 		} catch (error) {
 			this.status = error instanceof Error ? error.message : String(error);
 		}
