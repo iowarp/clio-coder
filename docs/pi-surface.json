@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"packages": {
 		"@earendil-works/pi-agent-core": {
-			"version": "1.4.0",
+			"version": "1.5.0",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -22,9 +22,10 @@
 						"AgentOptions": "f644eab424a2e72cb53c58f060e07186523fedcddd23287ad6c60ba1b9beb2b7",
 						"AgentRequestUpdate": "90b1420f158d6d766ffb55981dfe22f272cb4569cd477878f8c19a7389d4eace",
 						"AgentState": "0aa36b9761a9920de6ce1eb469fabc7c2c93c1d87acf23e310ebc745cbd2e7a4",
-						"AgentTool": "0643b04aa46a1963562a71932f0436f8663ac2cd0f6912c0b3ce94f250b7ef98",
+						"AgentTool": "cdf600109b87618dd7ae3c42993b5089fdb34535a60811446e577c63326e333f",
 						"AgentToolCall": "c90db9d5424071494c4d9b3dcef0c532565fa6f6730c92ee6c9412e0dde34c72",
 						"AgentToolCallOutcome": "cd0e872bedc5cb4b01cf84ff8f0a6a9c270fb0b7a06eb81934c658a792cf756a",
+						"AgentToolParams": "b82d172a392aae326008ba18a8cc9786f3acbe07818545158506b232c47d0d5a",
 						"AgentToolResult": "87d59fc91222120165142bf0592271d85a1a8f80f1eda5ed0e707437556bb2ba",
 						"AgentToolUpdateCallback": "c51851ad37d053ecf8df8c79a0e3daac83c4bf03f78a7fe333b8871436bdd540",
 						"AgentTurnContext": "6b8d444d4c22fc7bb37a901c4685b284944a0485983c66e922f35e6b0484b679",
@@ -55,7 +56,7 @@
 			}
 		},
 		"@earendil-works/pi-ai": {
-			"version": "1.4.0",
+			"version": "1.5.0",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -80,7 +81,7 @@
 						"AssistantMessageEventStream": "e9f5d4fa6a2cd9639d17bb6f5d5f114e5f87ff56d818b138a5996e3fcad8c943",
 						"AuthCheck": "747c5687a023dddb86ff9aff75f1454432953abb097723fd56e4acb81f9de464",
 						"AuthContext": "cf710b4c1b7506835548c628b9adbe0cfd1585ca0d15f1300c8133ba1231c1d3",
-						"AuthEvent": "93b05c2dae4724798ee42daf2b5244ff06ccfd98e1ddc8d3b36f6af785a15165",
+						"AuthEvent": "aa20aa8bb5eda8f7424765eb7767cdcce165a730001162583b80878c0164b8f0",
 						"AuthInfoLink": "ed8227fe1a0abc206a087c9ceb753f11d259b8913e655c86a4ee1defe8157056",
 						"AuthInteraction": "65cfe68195f69223fc2745687337ac70bc280476d14a1f2001475a6d376697e3",
 						"AuthOperationOptions": "243503433814cbedcfc680c5820d9e82f1bb9f473f5c9231272dbb4c7bcac7b7",
@@ -192,7 +193,9 @@
 						"isModelType": "508e9a673f3c3352423b613c3e400ff50b04fa8814a9202e588df64a2983a610",
 						"isRecoverableLength": "7c3164e506c6ed92efc6003541f1387c8e7d3f696a10c7aa7e7bafddefaee8a1",
 						"isRetryableAssistantError": "6fd73e30cadea91ebf025347cdd2a1fd50879c275a403df8098a106ad4a04337",
+						"JsonChange": "feeffb1e97d8b2a0b6c91dd56cc2240b700cf91fb30cba464950f7701af3c8f9",
 						"JsonObject": "4f8e1ee9697f91fa6f890c84aae25d3eebbc770d77f939f194b66729dc93b462",
+						"JsonPath": "80bf621d193a347c4c41ea02421ed597a1936c2a6ff6dbc6eec09eb5df4a0c5b",
 						"JsonRepresentation": "e4220ee32669730efb843a7bc7361baddf4c558c0eb5c080e9b55736f2a8b0c2",
 						"JsonValue": "edd31d4e820d892166015342103ccb9f17e8b8c1c84b3409c7216f637b11e6f0",
 						"KnownApi": "ff1355bad6f962dc6428a68258e20069e89530f718d449bc44eae47645914c05",
@@ -247,7 +250,7 @@
 						"OAuthAuthInfo": "a09f8b5d2ef74fdb98246af3e2a8fd963ff3d49985f84d8a8b13f510ed864a14",
 						"OAuthCredential": "199a28816894719eef2d3cfa1909cd57a4f3940275ca24e724833ff16e288deb",
 						"OAuthCredentials": "a298587cb191e2c788cce8787e21f6d7b2aedb60da35dc8df339c4e8e45c2677",
-						"OAuthDeviceCodeInfo": "eb362bf9e5d3dc03617b6f83e9279f3d0a7e1471027d740ff4db451d68a0bbf2",
+						"OAuthDeviceCodeInfo": "d7f1b95754a50a88d667d400c1e57c5aca251802cc7f4c47091f4bf98c6b58f1",
 						"OAuthLoginCallbacks": "7c02bdc92e4061ec49a936c372c8337b1bcbec344f71d51b7cd3a47e6f210613",
 						"OAuthPrompt": "61b2c36f64438f27f45357b61571040ab618f6d952829d8c63eb1701289bcd7d",
 						"OAuthSelectOption": "a2b55703b20ab890833c7debe5eb1ba7d0e6b0690e52f33b2798297b517221b3",
@@ -262,9 +265,9 @@
 						"parseJsonWithRepair": "3859ef41e7d411212d89bafefb5ad040ae63cf24c5396538b1245eb298d202d4",
 						"parseStreamingJson": "5cd6b04d1f39ef3630dd666b2c72da49cb9e547a98e320249fdc3161563fb038",
 						"parseToolCallArguments": "b6add41c8d4c8aa8cdfb6550a3ff50e72b7e182822aa7f9d9292c8d91bcbd90b",
-						"PI_AI_VERSION": "5f75fdb89e222c8ea256fe187100f4d253b95e2e5f8625ba76951d09e1abf51d",
+						"PI_AI_VERSION": "55c125e41eac4252bde17e9799c444b8851381667366609f2eac337890fff7c4",
 						"PI_ATTRIBUTION": "97b684f2145f8abe3ca9c8776bd8d5c379ed91e7e1f2aa439c0b9187678c04ab",
-						"PiMessagesEvent": "a13c16e86df2db65d2efa1960ae44311a640f4c11f55798b586c15a1a943db38",
+						"PiMessagesEvent": "7d20f13f4000438b681f14615bdf7923cbf73d101d77da4df129ddf35893d332",
 						"PiMessagesOptions": "a13078e7a6f4a4e804e950671ff8c393a1ec0cebea0ed575778a6e3087741ad4",
 						"PiMessagesRewriteImpact": "cb9a023a243623a013354e0409a61f64be950d09cd5a22f6fcdba7a0caafc50b",
 						"Provider": "0ad1bb204ccd06b025ac7605611220fbc06a45781338173b8b93b91b6d6bb03a",
@@ -297,11 +300,11 @@
 						"SessionAffinityFormat": "6daedbd02aed3facf3871554ac0b66c408de8aefae94c89a8c055909f12ad7fb",
 						"SessionResourceCleanup": "7c194276e3e3f765210d29c5808a5e4eebc963561e8a1097e588a37dcc0798fb",
 						"SimpleStreamOptions": "b87b46880ea8aa6cd0a5020e69a318f59d7235f839cb859f7cff6a696c09b14a",
-						"Static": "a0c18dd043fc7a37b514d7a75944691f8ef8378c46a5a4620ec2bb4172a1ccfc",
 						"StopReason": "0800bd6825524e418d0eadfe677b1cc7e4dca50e98752795cd9f3babdaa37a30",
 						"StreamFunction": "9123cbfbc733daa4e7af33656b57e74bd714e82bcace8f351db3b69b742c6585",
+						"StreamingJsonParser": "5dd8a0f9bf0820ec69ceb92b494ae11cdb8685a2092dbf595fd4ba5789ac3ffa",
 						"StreamOptions": "6a08bfc54d6d241724ecf12224f32d7b769c28b306ec91ddd1a1b3b43e6257b4",
-						"StringEnum": "4e76182f5a0e2a72162c0339ba4a9555a9ac37959ee1d334c0eccd02805d466c",
+						"StringEnum": "0a95facb0382a8eee70e7ddc09283e4ebf43853ba01710bfcb723aae1fb758fb",
 						"SystemMessage": "71eef2d77a64dffb138cb3d90331856c7013600eddd4350495f2f327d0972965",
 						"SystemOneCompat": "6d05fd8261de4fa709b8c3c8ba4def5a82ec2b746bebf39f3edefef21082496b",
 						"TextContent": "724ae77b031be9437e9161a099a9dc49fa5b974ae92272a1da9fda39598544cb",
@@ -311,8 +314,9 @@
 						"ThinkingLevel": "a2eefe6e3375c677967c4b6ff5b2b727f566197ffc2d85f04f150cfac1969c64",
 						"ThinkingLevelMap": "dd1c7d819ea02bde49118c5e95164d95abb94310b3c027549169739b6c5cc941",
 						"ThinkingTokenBudgetField": "15fda2e7e5fffebb03f54883045eb2d41176034cb4eacee9f1d46983b7a6bf5c",
-						"Tool": "b9d3ba3332c200261d3af3f183dc362c325b661072fa7cede5d4021e2f8eefaa",
+						"Tool": "dfbd713b24d131e9517a028708d8cab964f916e325a79b97c87622f3513ea2d2",
 						"ToolCall": "7174403534fb9be16e0bd31bb593d5654cd7e2473947d0dde54d8563402d08b9",
+						"ToolCallArgumentsStream": "3ed5408b230fe550be72147925e75e1756f062dfc546aca049efb81cc986f0f4",
 						"ToolChoice": "ef5f78d68c80899981916a349d5cce1aaf71bdffca5949bef1a96d550035cbb2",
 						"ToolReference": "7337a1732632a6c61690534875b4976190e255cac02501f90a977f833c6ed7a6",
 						"ToolResultMessage": "2bbe56e0a6b472afe43638d3299e92864483a361099377761c44765c9af13816",
@@ -323,9 +327,7 @@
 						"TranscriptTools": "400c3d4a751d221e10d180a238c2a0ab4795df1cb0dd5a1a50c64b061de473ce",
 						"TranscriptToolSupport": "971d93405699d8cc29ed4867420eb2ce7539aa0ddca72944d2ba11b496333b78",
 						"Transport": "cf231ad8dba81fee8f95f5354aa43761db7d6ada6ea2a3215e92953d56876036",
-						"TSchema": "3d715bc1abf0b0a93e93bc4fb7aa8d36478e0ff5230a27807f9617eb1cecc17a",
-						"Type": "7c0d88cf6c3c966cfe76c33d9401e3d61cde470db7089fff51c377e08232cb4b",
-						"Usage": "2cc248ef3667a5d7fa04b51a26f1fc69d8ee789190373e4bcd4187eb354fde82",
+						"Usage": "ff4cc9df86a38ab547143a31fc0032bd04735cac578eba916f99c8a7054e3133",
 						"UserAgentMode": "60fb53e2558b48f586df35af7525df08dbabe06c1e635e0633f72b18e4aecb5e",
 						"UserMessage": "daf4ff8105b1d37de9db656cace6243233a9a42c1b6ec4b549d78507e1b2ef03",
 						"uuidv7": "5108e049d5539547070f8145fc5a8366e40a541724da6f6935b8aaa3163e3b36",
@@ -340,12 +342,6 @@
 					"declaration": "dist/api/anthropic-messages.lazy.d.ts",
 					"exports": {
 						"anthropicMessagesApi": "51765470700beda17681cd8a7003a9c83afbb8a6596fb7674efbd31fcd2180d4"
-					}
-				},
-				"./api/azure-openai-responses.lazy": {
-					"declaration": "dist/api/azure-openai-responses.lazy.d.ts",
-					"exports": {
-						"azureOpenAIResponsesApi": "0290efe60d2a11a1af6b61b483fe1356898448a54187e1c0132f61af399b5ffc"
 					}
 				},
 				"./api/bedrock-converse-stream.lazy": {
@@ -545,7 +541,7 @@
 			}
 		},
 		"@earendil-works/pi-tui": {
-			"version": "1.4.0",
+			"version": "1.5.0",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -566,7 +562,7 @@
 						"colorToOklch": "3a0c75bd7e40424e98b1514915a98b77d962aaea856be538a1c0fd6e1b520c4d",
 						"colorToRgb": "4ab03dda5ec70e91f719fd3057d3c1765ecc9d8a45a1f27fefd725315d70efe3",
 						"CombinedAutocompleteProvider": "268b4a4a69ed828dd766c4e6aefb013a9b79b8a2aeecf317633ce7adf933710f",
-						"Component": "d61b52bc1c5a68c980811fb7c5858235ac6a20384b143854a16b1dde10bcebb3",
+						"Component": "f1ae716605592264a9a6aefd445a4f60c1cd52ac9cd07fe180e50641662b6fa0",
 						"compositeTuiLine": "43f2ae5910ec99c52e18597eefcb34cceb1b0812ed3a644510d801cfaba86cf9",
 						"Container": "3922f8f6ef5fc0ab607d4d62afc538199278485ff0004fafdd18190eb0dce655",
 						"CURSOR_MARKER": "4b8222ae24f4056e7095ecb36cdd4b85f204bb67d5b55ad7236bbcb5f2101ac5",
@@ -575,7 +571,7 @@
 						"deleteAllKittyImages": "d58dc7ab39348bbf80c7bcdc19d967e722cc9db744e09e7437fa320b414034a8",
 						"deleteKittyImage": "d4f70e1e33e919b88b2c91a8668811217758e8f0d0b340e5ebda802b465c854e",
 						"detectCapabilities": "39c9f9eb4ebf3a60d74d49aac64483859d2ce2452ccf77cff77acc8889548593",
-						"Editor": "ef1de49e9b1b295a80e0a4457ff90c5332f13d388b1b15d14bd2fc970ec9f736",
+						"Editor": "29b780e5428dc6d0995bfc81fdc98a113b4515287212f4df8081dc0bcfe497fb",
 						"EditorComponent": "496bf1c2ccb1ffc01c1e9113071ce90452dc1a3797df23ac9c39c5a0159e371a",
 						"EditorOptions": "49018820036fa3ba4d1b645f66590a56963c081b7361b51acdcea6effdf4f520",
 						"EditorTheme": "df051254961cc9719766eee7bcb77884db983def7a433ff87fae147b210e2aaa",
@@ -596,6 +592,7 @@
 						"getNativeClipboard": "2c0a3ba90ce614e2c0935eec65e79145db3db0d1742d885ad99936bd3a40e1ee",
 						"getOsc8LinkAtColumn": "1e59a25697ed681355d6893e478f48e67575f9627ce21065d939350891693375",
 						"getPngDimensions": "0d41c932b00f68883c41bf30c790d99835cb4daed7a3b13fbb7ca557a4f13bd7",
+						"getSelectPageIndex": "910893f655d6d7af717b9ab1885ed3a475c1c8432437f0597a96c8b004be0023",
 						"getTerminalColorMode": "620c79a7c7066a01cdd29eb62f4dc096aa7e6c7707c8d5c7edfc42f49ddeb46b",
 						"getWebpDimensions": "17d82c54ea733478a6548828061439eab84fc888ee50eb35a4f55bdb2bfa4bff",
 						"HStack": "cda64f9a34926f12d888a7d2623a9f16fef485e782c4d56738bd44f1e94a4801",
@@ -629,7 +626,7 @@
 						"KeyId": "725884d65f4852ccf2e0279b076cbfa2edcf2658619cab0472a5ac2b82e90127",
 						"Loader": "c625acf06d8c41c894af0273eb0cedec2b8b990c7c02baef8e11efe51dfe8b6a",
 						"LoaderIndicatorOptions": "021adcfb5906d3d194a1a2c2d2ab2200bf1f0765a9fa54809e4b4e60b50847d2",
-						"Markdown": "c52aee2f06ce102c3d22a0def0ebbfc2dd9369d490b3373118939bbc0a27a0a0",
+						"Markdown": "8c5b5d3afe5cfd92f35a15f70e5db5f9eb55dae7921b69eb76e65c5732df6ce0",
 						"MarkdownOptions": "02b117266a934d42aa5291911c0d42b09e1fd5f7ed07e2bdfd433b9c6156d157",
 						"MarkdownTheme": "b8ad2935f1f349d655c52d3b5466dd9b009685851337d430094a25c527d9163a",
 						"Marked": "04dc30c6b356d60def8fa32f08e78d43ddcc3fa9b7c3dabef98be16f46aa3354",
@@ -659,6 +656,7 @@
 						"renderImage": "7de9ab9b097acffb24ede4d165176fceb2658e0b4c4e13e99d9f1eaba17355d4",
 						"renderLatex": "767d68d90fd25a5cc729a2f1c469956cfda73f70fdd89c38438cd0989b8991b4",
 						"RenderLatexOptions": "99d7028ffaa8fe06e5afebe32c9d5124808afd92e2085e5ffd50670befc7d07c",
+						"replaceControlCharacters": "1ea431140185c0f037c031a392b14e246b9c46aa2c33925a9a9f283f35a6992c",
 						"resetCapabilitiesCache": "4b1837a1eb05fd928fbd46df4fdcc22dab584520a07c192c6f700f9b5cdbc4f8",
 						"rgbColor": "79993b66a3eb113dfbd269a5c81d0dbd0c12ba6c5f6f27a3172e725a6a87bff3",
 						"RgbColor": "3a0ce9c35fff796c9c72aa9b2a2e283f998abeece0942c0a3ee16c9f18bb5ed6",
@@ -668,7 +666,7 @@
 						"ScrollViewScrollbar": "dae837ee56b1be82e7d03b2fb1c3e54dd3b720eb33601c4c9780d90310e579c2",
 						"ScrollViewScrollToOptions": "745063fadbeaf792790ea7fcfd334d1e339f64a34c6470f8ad1944a83fadad27",
 						"SelectItem": "cc25721a18c04a843c7503d3ba45ac9c95ba830c1c46cfe2d6b0212efc426c7c",
-						"SelectList": "dc29c4f3a83d31ad1b2ba7214215b405a3bf813eee004a44d145369990ee1054",
+						"SelectList": "46ea90d739772bc68fc50cf5fc407cf4679720b4ed0afdfe119c951dfa0a2c15",
 						"SelectListLayoutOptions": "2a07457d9f4d45b2b7a959a2d81981877adb5c7a6e4929c846adf6f7a8087ad6",
 						"SelectListTheme": "5c3e4093e0bf8a7a31911af407f141f63e098649ce9149d3ecc616fb33f06c36",
 						"SelectListTruncatePrimaryContext": "acbb735458c135f94709f602c4ea591328611fa2fc5f62c9f3d64afbe4099605",
@@ -679,7 +677,7 @@
 						"setKeybindings": "649a2a45c88ec5e7a0abe2755e20dfb297e5f945155e2467265d35eceefb804c",
 						"setKittyProtocolActive": "af6bc4a3ed7e6ba8dfa5a197f341390316b333210d89a96ea03c09fd93b94ec1",
 						"SettingItem": "7992ec79b6710e621ad3d0f73952c3afffb98ad604d6c77244e7d47e03cdf272",
-						"SettingsList": "25b38082d56e5328fa51dc443b3d8aea425dc2242462072f3f294b7c30107c7a",
+						"SettingsList": "ec2650626ea9c334e973efe310c00b0dfc93918d6ba78c383a57249cf8a45469",
 						"SettingsListTheme": "df04d1dcad4ac95b1d6ce7ed6340b5c1099cfcfa7aa52616f1e6814f9cea036f",
 						"SizeValue": "8d4424f8d67491a5b964ee851c49b2d81144c7a234df6550076963a98651d7eb",
 						"SlashCommand": "95aa4c6777b921031ae1e10a94722e48965bf5525faddfd85ee6f47133b78f25",
@@ -709,7 +707,7 @@
 						"truncateToWidth": "6f3d41ce186e453a785b02a66f4305a013c8f9bc4e0d58d7f8a29001998352f4",
 						"TUI": "3903117a7523c4402c0341285f893f3af5f3e31bcc487d8bf9bdc5c4c291d07e",
 						"TUI_KEYBINDINGS": "4568b71432f3324ca239b4f107ce2289db968579de43586cad686b73c020c2a4",
-						"TuiAltScreen": "248f33dbfc9c28f1c22c551ea13555f7bb7a74a8becef398bbeec0cc9efbf127",
+						"TuiAltScreen": "3ccffd5327235120191c1b74682cf423a3b4711e344d399ec637f643c3443116",
 						"TuiAltScreenOptions": "6715783523d00c7ed08bdc77c2420e800440974ce71a78448b4bdaa90a7d6455",
 						"TuiInputListener": "efc182cee2cc5dd33fc13abd27a297fad6f7220e53663c18e467a330d6450d9a",
 						"TuiInputListenerResult": "0a0dc1ac87f31d852110d5682d827f04dba2b4e56c146fd4462d21ae975e5f9f",
@@ -764,6 +762,7 @@
 						"isWhitespaceChar": "ebc5e907985c9f87187352371e759f8b56814c8d467b2f31cd8f8f3316de4b4d",
 						"normalizeTerminalOutput": "64eebc0182ffd54e76fccb834067ebcda0636e0fae87d0974815e802b497d26c",
 						"PUNCTUATION_REGEX": "028b70742a7ffd175b5538ccbd75e9f58e7da9c8724c102935c03559763cdd39",
+						"replaceControlCharacters": "1ea431140185c0f037c031a392b14e246b9c46aa2c33925a9a9f283f35a6992c",
 						"sliceByColumn": "b6f1db873fcc08dda3d8a712b5ce2e6140eceb52c39cd10d54541041e275afc0",
 						"sliceWithWidth": "f31038b52456639aec6eeb54ddb34d6b188a196178313dfe7e0e9a80d9b399d7",
 						"stripTerminalSequences": "b2d36a3fe9a907b2a78dab13ff70d5674ac36241d8386b43fb6af28baf7d1a9b",

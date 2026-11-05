@@ -1,25 +1,24 @@
 # Dependency patches
 
-## Pi TUI 1.4.0: why the patch remains
+## Pi TUI 1.5.0: why the patch remains
 
-`@earendil-works__pi-tui@1.4.0.patch` is the sole Pi dependency patch, applied
+`@earendil-works__pi-tui@1.5.0.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
-unpatched.** The patch has fifteen hunks in ten `dist/` files and applies to the
-published, unmodified 1.4.0 package. It carries the semantic edit and search
-operations that stock 1.4.0 keeps private, a wrapping fix for styled
-whitespace and the regular-screen render memo. Everything else earlier
+unpatched.** The patch has thirteen hunks in nine `dist/` files and applies to the
+published, unmodified 1.5.0 package. It carries the semantic edit and search
+operations that stock 1.5.0 keeps private and the regular-screen render memo.
+Everything else earlier
 revisions patched is now stock Pi or an engine module, as
 [recorded below](#what-was-removed). The table lists every
-hunk; `grep -c '^@@' patches/@earendil-works__pi-tui@1.4.0.patch` must equal the
+hunk; `grep -c '^@@' patches/@earendil-works__pi-tui@1.5.0.patch` must equal the
 hunk total.
 
-| Hunks | Patched API | Required behavior | Why stock 1.4.0 is insufficient |
+| Hunks | Patched API | Required behavior | Why stock 1.5.0 is insufficient |
 | --- | --- | --- | --- |
 | 2: `components/editor.d.ts`, `components/editor.js` | `Editor.applyEdit` | Invoke undo and the six delete operations (character and word deletion in both directions, and deletion to line start and end) directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. | The edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` alone does not express the same undo, cursor and kill-ring semantics. |
 | 2: `components/input.d.ts`, `components/input.js` | `Input.applyEdit` | The same operations plus `clear`, which keeps undo and kill-ring behavior. | The same private operations on `Input`. |
 | 2: `alt-screen-search.d.ts`, `alt-screen-search.js` | `AltScreenSearchComponent.applyEdit("undo")` | Undo the whole search query and notify the query listener. | The overlay's `Input` is private, and so is the `undo` it would need, so a router cannot undo a query. |
 | 2: `tui-alt-screen.d.ts`, `tui-alt-screen.js` | `TuiAltScreen.isSearchFocused` and `undoSearchQuery`; `scrollToPrompt`, `toggleSearch`, `closeSearch` and `navigateSearch` made public | Clio's input router sends Escape, undo, prompt navigation and match navigation to the current owner, including the native search overlay. | Search focus and these methods are private. The public viewport scroll methods cannot query or manipulate search ownership or its undo history, and `getScreenLines()` exposes painted rows, not search state. |
-| 2: `utils.js` | `wrapTextWithAnsi` whitespace tokens | A whitespace token that carries the closing codes of the styled word before it is judged by its visible text, its codes apply before it is dropped at a wrap, and no style-only row is flushed. | A styled word that exactly fills a row stranded the following space on a row of its own: `wrapTextWithAnsi("\x1b[1mhello\x1b[22m world", 5)` yields `hello`, an empty row and `world` on stock, and `hello` and `world` patched. Foreground color codes behave the same. Stock Markdown and Text wrap through this function and have no option. |
 | 5: `tui-main-screen.js` | `TuiMainScreen` reset memo and Kitty image-row scans | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place and recording which rows are image rows, and the Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. `resetRenderState` drops the memo. | Stock 1.0.0 normalizes every transcript row and scans all rows for image headers on every regular-screen frame, so the cost grows with the transcript. Measured [below](#measured-cost-of-the-render-memo): a 22.9k-row transcript costs 5.90 ms per keystroke frame stock against 0.62 ms patched. The scans are private methods, so no subclass can replace them. |
 
 The semantic operations call Pi's existing editing and search implementation;
@@ -34,10 +33,11 @@ auth boundary is Clio application code and adds no dependency patch.
 ## What was removed
 
 The patch carried 26 hunks before the Pi 1.0 adoption series and carries
-fifteen now. The eleven removed hunks fall into four groups.
+thirteen now. The thirteen removed hunks fall into five groups.
 
 | Removed | Replaced by | Cost and evidence |
 | --- | --- | --- |
+| `wrapTextWithAnsi` whitespace tokens (2 hunks in `dist/utils.js`) | Stock Pi 1.5.0 | None. `wrapTextWithAnsi("\x1b[1mhello\x1b[22m world", 5)` yields `hello` and `world` on the unmodified 1.5.0 package, and so does the foreground color form. |
 | `setApplicationInputPolicy` and its dispatch block (5 hunks in `dist/tui.d.ts` and `dist/tui.js`) | `src/engine/application-input-tui.ts`, a subclass pair that registers one gate through the public `addInputListener` | No operator-visible change. A policy returning `{ data: "" }` no longer drops the input before every listener, and stock `TuiAltScreen` instances (the fleet watch and follow views) no longer drop key releases before their listeners, which compare exact bytes releases never equal. |
 | `lexMarkdownBlocks` export (4 hunks in the Markdown and index files) | One stock `Markdown` per assistant text segment in `src/interactive/chat-panel.ts`, with Clio's theme, a `highlightCode` hook and a `transform` hook for table fit and Mermaid | The visible changes are listed in [the Pi boundary table](../docs/architecture/pi-boundary.md). |
 | `Container.render` exact-size copy (1 hunk) | Stock Pi | A smaller regular-screen cost, measured below. |
@@ -81,6 +81,13 @@ memoized and grows with the transcript: a copy of the 1.4.0 function over
 synthetic 138-character styled rows cost 0.07 ms per frame at 2.2k rows,
 0.80 ms at 22.9k and 1.37 ms at 40k (Node 24, load average 0.5). The patch
 leaves it stock for the 1.4.0 upgrade; memoizing it is a separate decision.
+
+Stock 1.5.0 `doRender` also passes every row through an OSC 133 strip (a regex
+replace and a new array) before compositing. A frame probe over 22.9k synthetic
+styled rows with one row changing per frame, patched on both versions, took a
+median of 1.0 to 1.1 ms on 1.4.0 and 1.6 to 1.7 ms on 1.5.0 (Node 24, two runs
+each). That new step is the likely cause, though it was not profiled, and the
+memo stays in effect. The patch leaves that step stock.
 
 ## Alternatives considered
 
@@ -142,10 +149,8 @@ overrides, search ownership and navigation, editor undo, and policy-first
 ordering through the gate), `tests/contracts/tui-view-ergonomics.test.ts`
 (whole-query undo and the Unicode kill ring on `Input.applyEdit`), and the
 installed-package test, which drives the bundled executable. These cover the
-semantic edit and search hunks and the gate. No Clio test pins the wrapping
-hunks, so reproduce the `wrapTextWithAnsi` case in the table against the
-unmodified package before rebasing or removing them. No Clio test pins the
-render memo either; to check a rebase or a removal, rerun a probe that drives
+semantic edit and search hunks and the gate. No Clio test pins the render memo;
+to check a rebase or a removal, rerun a probe that drives
 Clio's chat panel over a fake terminal on a transcript of about 22.9k rows and
 compare frame time and garbage per frame with the figures above. Patch applicability or a
 successful installation alone is not behavioral verification.

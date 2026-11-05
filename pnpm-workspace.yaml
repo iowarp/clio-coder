@@ -15,27 +15,27 @@ onlyBuiltDependencies:
 
 # Keep dependency overrides effective across every workspace importer.
 overrides:
-  marked: "18.0.11"
-  esbuild: "0.28.1"
-  # GHSA-p98j-92pf-mc4p, GHSA-cg2g-xh64-v4q7 and GHSA-mrv2-3pqr-j5jr: also fixes Mermaid's bundled sanitizer.
-  dompurify: "3.4.17"
-  # GHSA-w74x-v6f9-j3xg, GHSA-xhq7-xmqj-769h, GHSA-wjr9-j795-jxcr and GHSA-333x-w4r6-6crp: MCP SDK's URI parser.
-  fast-uri@<3.1.9: "3.1.9"
-  # GHSA-rxp7-6hxx-x8q5 (moderate): reached through the MCP SDK's proxy support.
-  ip-address@<10.7.4: "10.7.4"
   # GHSA-rmxm-3fg6-px4f (moderate): fits the MCP SDK's ^1.19.9 || ^2.0.5 range.
   "@hono/node-server@<2.1.3": "2.1.3"
   # GHSA-6qxp-vccf-f47h (high): the peer that @google/genai and the Claude Agent SDK resolve.
   "@modelcontextprotocol/sdk@<1.31.0": "1.32.1"
-  # GHSA-68fv-2mgg-jv7q (high): development tree only, through tsup and Vite.
-  "source-map-js@<1.2.2": "1.2.2"
-  # GHSA-jqcg-44mw-7w3h (critical): reached through the MCP SDK's express.
-  proxy-addr@<2.0.8: "2.0.8"
-  # GHSA-238p-pmpm-9mq7: force 0.18.2 outside Mermaid 11.17.2's declared ^0.16.47.
-  "katex@<0.18.2": "0.18.2"
-  # GHSA-mrhx-c7xc-m3w5 (high): the zod the Anthropic, OpenAI and MCP SDKs resolve.
-  "zod@<4.6.6": "4.6.6"
   # GHSA-27r3-jxmh-p828 (high): reached through the MCP SDK's express.
   "body-parser@<2.4.0": "2.4.0"
+  # GHSA-p98j-92pf-mc4p, GHSA-cg2g-xh64-v4q7 and GHSA-mrv2-3pqr-j5jr: also fixes Mermaid's bundled sanitizer.
+  dompurify: "3.4.17"
+  esbuild: "0.28.1"
+  # GHSA-w74x-v6f9-j3xg, GHSA-xhq7-xmqj-769h, GHSA-wjr9-j795-jxcr and GHSA-333x-w4r6-6crp: MCP SDK's URI parser.
+  fast-uri@<3.1.9: "3.1.9"
+  # GHSA-rxp7-6hxx-x8q5 (moderate): reached through the MCP SDK's proxy support.
+  ip-address@<10.7.4: "10.7.4"
+  # GHSA-238p-pmpm-9mq7: force 0.18.2 outside Mermaid 11.17.2's declared ^0.16.47.
+  "katex@<0.18.2": "0.18.2"
+  marked: "18.0.11"
+  # GHSA-jqcg-44mw-7w3h (critical): reached through the MCP SDK's express.
+  proxy-addr@<2.0.8: "2.0.8"
+  # GHSA-68fv-2mgg-jv7q (high): development tree only, through tsup and Vite.
+  "source-map-js@<1.2.2": "1.2.2"
+  # GHSA-mrhx-c7xc-m3w5 (high): the zod the Anthropic, OpenAI and MCP SDKs resolve.
+  "zod@<4.6.6": "4.6.6"
 patchedDependencies:
-  '@earendil-works/pi-tui@1.4.0': patches/@earendil-works__pi-tui@1.4.0.patch
+  '@earendil-works/pi-tui@1.5.0': patches/@earendil-works__pi-tui@1.5.0.patch
