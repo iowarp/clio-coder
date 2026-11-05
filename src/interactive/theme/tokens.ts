@@ -58,8 +58,13 @@ const XTERM_CUBE_LEVELS = [0, 95, 135, 175, 215, 255] as const;
 function rgbXterm(rgb: readonly number[]): number {
 	const cube = (channel: number): number => {
 		let nearest = 0;
+		let best = Number.POSITIVE_INFINITY;
 		for (const [index, level] of XTERM_CUBE_LEVELS.entries()) {
-			if (Math.abs(level - channel) < Math.abs(XTERM_CUBE_LEVELS[nearest] - channel)) nearest = index;
+			const away = Math.abs(level - channel);
+			if (away < best) {
+				best = away;
+				nearest = index;
+			}
 		}
 		return nearest;
 	};
