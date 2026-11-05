@@ -383,7 +383,11 @@ function attemptLines(entry: WorkerEntryState, width: number): string[] {
 	return entry.attempts.flatMap((attempt, index) =>
 		index === 0
 			? []
-			: railLines(`${ATTEMPT}failed over → attempt ${index + 1} on ${attempt.targetLabel}`, "warning", width),
+			: railLines(
+					`${ATTEMPT}failed over → attempt ${index + 1} on ${attempt.targetLabel}${attempt.moveReason ? `: ${sanitizeCallTargetText(attempt.moveReason)}` : ""}`,
+					"warning",
+					width,
+				),
 	);
 }
 

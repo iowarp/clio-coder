@@ -1,6 +1,6 @@
 import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
-import { writeDiagnostic } from "../../core/diagnostics.js";
+import { writeDiagnostic, writeHeadlessDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
@@ -4892,8 +4892,9 @@ export function createDispatchBundle(
 			const message = err instanceof Error ? err.message : String(err);
 			const routesRefused = err instanceof RetryRoutesRefusedError;
 			const denial = routesRefused ? message : `retry attempt ${attempt} rejected: ${message}`;
-			// Keep the denial visible on headless surfaces and assignment state.
-			reportDispatchDiagnostic(`run ${run.runId}`, new Error(denial));
+			// Keep the denial visible on headless surfaces and assignment state; a
+			// terminal owner states it from the run.failed below in its own words.
+			writeHeadlessDiagnostic(`[clio-coder:dispatch] run ${run.runId}: ${denial}\n`);
 			// The last completed attempt remains the immutable terminal evidence.
 			try {
 				const previousReceipt = await run.finalPromise;
