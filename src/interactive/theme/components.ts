@@ -11,7 +11,8 @@ export function markdownTheme(theme: ClioTheme, highlightCode?: MarkdownTheme["h
 		linkUrl: (text) => theme.fg("citation", text),
 		code: (text) => theme.fg("inlineCode", text),
 		codeBlock: (text) => text,
-		codeBlockBorder: (text) => theme.fg("border", text),
+		// The fence carries the language name, so it is quiet text at 4.5:1, never a 2:1 hairline.
+		codeBlockBorder: (text) => theme.fg("annotation", text),
 		quote: (text) => theme.fg("quotation", text),
 		quoteBorder: (text) => theme.fg("quoteRail", text),
 		hr: (text) => theme.fg("transcriptRule", text),
