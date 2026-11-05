@@ -84,6 +84,14 @@ export interface TargetIdentity {
 	modelId: string | null | undefined;
 }
 
+/** The effective route in the spelling the header and dashboards use, or null while either half is unknown. */
+export function exactRouteLabel(route: TargetIdentity | string): string | null {
+	if (typeof route === "string") return sanitizeCallTargetText(route) || null;
+	const target = sanitizeCallTargetText(route.targetId ?? "");
+	if (!target || !route.modelId) return null;
+	return `${fitIdentityLabel(target, MODEL_ID_LABEL_WIDTH)} · ${abbreviateModelId(route.modelId)}`;
+}
+
 /** The activity rail names the model family/version; inspection retains the wire id. */
 export function modelNickname(modelId: string | null | undefined): string {
 	const raw = sanitizeCallTargetText(modelId ?? "");

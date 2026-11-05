@@ -457,6 +457,8 @@ export interface ChatPanel extends Component {
 	 */
 	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void;
 	applyEvent(event: ChatLoopEvent): void;
+	/** The target a replay's next messages ran on, from the ledger's own route changes. */
+	replayRoute?(targetId: string | null): void;
 	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
 	markToolReplayed?(toolCallId: string): void;
 	/**
@@ -490,6 +492,8 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
+	/** The target the running turn was sent to, which the wire protocol on its messages does not say. */
+	getRunTarget?: () => string | null;
 	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
 	getHumanWaitMs?: () => number;
 	/** The telemetry read model's live view, whose turn quantities each turn's receipt reads (#434 §11.3). */
@@ -1857,6 +1861,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * not of the resume.
 	 */
 	let replayStampMs: number | undefined;
+	let replayTarget: string | null = null;
+	const messageTarget = (): string | null =>
+		replayStampMs !== undefined ? replayTarget : (options.getRunTarget?.() ?? null);
 	const stamp = (): number => replayStampMs ?? now();
 	const currentDetail = (): TranscriptDetailPolicy => transcriptDetail(options.getOutputStyle?.());
 
@@ -2774,7 +2781,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			clearRenderCaches();
 			markDirty();
 		},
+		replayRoute(targetId: string | null): void {
+			replayTarget = targetId;
+		},
 		replayAt(timestampMs: number | undefined): void {
+			if (timestampMs === undefined) replayTarget = null;
 			replayStampMs =
 				timestampMs !== undefined && Number.isFinite(timestampMs) && timestampMs > 0 ? timestampMs : undefined;
 		},
@@ -2937,7 +2948,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const respondedModel = (event.message as { model?: unknown }).model;
 				if (typeof respondedModel === "string" && respondedModel.length > 0)
 					requestingModel = modelNickname(respondedModel);
-				const model = assistantModelLabel(event.message);
+				const model = assistantModelLabel(event.message, messageTarget());
 				if (model !== null && !assistant.models?.includes(model)) {
 					assistant.models ??= [];
 					assistant.models.push(model);
@@ -3129,7 +3140,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				// message_end rewrites exactly one entry: the assistant it lands on.
 				invalidateEntryCache(assistant);
-				const model = assistantModelLabel(event.message);
+				const model = assistantModelLabel(event.message, messageTarget());
 				if (model !== null && !assistant.models?.includes(model)) {
 					assistant.models ??= [];
 					assistant.models.push(model);

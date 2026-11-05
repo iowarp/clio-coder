@@ -345,6 +345,8 @@ type HarnessPhasePresentation = {
 	live: boolean;
 	/** Who is acting, when that is not the model the rail names by default. */
 	subject?: string;
+	/** The moment a person checks where the turn is going: idle, and before the model has answered. */
+	namesRoute?: boolean;
 };
 
 function shortToolLabel(status: AgentStatus, width: number): string {
@@ -449,8 +451,9 @@ const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 };
 
 /** Room for the activity phrase on the composer rail, after its stretch, lead glyph and a short model name. */
-function railActivityRoom(width: number): number {
-	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - (width < 60 ? 9 : 14));
+/** `identityCells` is what the rail spends naming who acts, the short nickname unless a caller knows better. */
+function railActivityRoom(width: number, identityCells: number = width < 60 ? 9 : 14): number {
+	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - identityCells);
 }
 
 /** Facts in reading order, each with its priority. The lowest priorities leave first and the order never changes. */
@@ -608,9 +611,10 @@ export function composerPhasePresentation(
 	modelName?: string,
 	/** Room for the words alone, for a surface that draws them without the rail's identity beside them. */
 	labelRoom?: number,
+	identityCells?: number,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = labelRoom ?? railActivityRoom(width);
+	const room = labelRoom ?? railActivityRoom(width, identityCells);
 	// A tool's actor is a short word rather than a model name, and the room it leaves belongs to the command and its time.
 	const actorWidth = visibleWidth(status.tool?.operatorShell === true ? "your shell" : "Clio");
 	const toolRoom = Math.max(room, width - actorWidth - 4 - (width < 60 ? 9 : 14));
@@ -623,7 +627,7 @@ export function composerPhasePresentation(
 		const from = status.waitingSince ?? status.since;
 		return fitRailFacts(
 			[
-				{ text: room >= 50 ? "is waiting for a response" : room >= 24 ? "is waiting" : "waiting", keep: 9 },
+				{ text: room >= 50 ? "is waiting for a response" : "is waiting", keep: 9 },
 				{ text: elapsedFrom(from), keep: 8 },
 				...modelWaitFacts(status, room, now, from),
 			],
@@ -738,7 +742,12 @@ export function composerPhasePresentation(
 			break;
 		}
 	}
-	return { ...phase, label };
+	// A blocker or a silent wait has its own facts to state, and those outrank where the turn was going.
+	const namesRoute =
+		status.phase === "preparing" ||
+		(status.phase === "waiting_model" && computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) < 1) ||
+		(status.phase === "ended" && status.summary?.stopReason !== "error");
+	return { ...phase, label, namesRoute };
 }
 
 /** What the route on screen is known to be able to do right now, in the terms the model picker already uses. */
@@ -755,9 +764,13 @@ export interface RouteReadinessFacts {
  * Idle states readiness or the real blocker. A target that answers a model listing is reachable, nothing more: only a
  * request this session saw answered says the model is ready, and until then the claim stays that small.
  */
-export function idleReadinessPresentation(facts: RouteReadinessFacts, width: number): HarnessPhasePresentation {
-	const room = railActivityRoom(width);
-	const quiet = { token: "counter" as const, live: false };
+export function idleReadinessPresentation(
+	facts: RouteReadinessFacts,
+	width: number,
+	identityCells?: number,
+): HarnessPhasePresentation {
+	const room = railActivityRoom(width, identityCells);
+	const quiet = { token: "counter" as const, live: false, namesRoute: true };
 	if (!facts.available) {
 		const why = facts.reason.trim();
 		return {

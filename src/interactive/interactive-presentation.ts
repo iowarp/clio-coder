@@ -366,6 +366,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	if (deps.startsResumed === true) banner.collapseToSessionHeader();
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
+		getRunTarget: () => deps.chat.lastRunSnapshot?.()?.targetId ?? null,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
@@ -603,18 +604,21 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getModelLabel: () => {
-			const current = deps.getSettings?.();
+			const route = deps.getSettings?.().chat;
+			// A route with no model of its own runs on its target's default, which the rail has to name.
+			const modelId =
+				route?.model ?? deps.providers.list().find((entry) => entry.target.id === route?.target)?.target.defaultModel;
 			// Keep raw fields separate through the terminal-lease proxy until render knows its width.
-			return { targetId: current?.chat?.target, modelId: current?.chat?.model };
+			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width) => {
+		getHarnessStatus: (width, identityCells) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
 				return {
-					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model)),
+					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), undefined, identityCells),
 					...(detail ? { detail } : {}),
 				};
 			}
@@ -633,6 +637,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					lastStop: onRoute ? last.stopReason : null,
 				},
 				width,
+				identityCells,
 			);
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
