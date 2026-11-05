@@ -832,9 +832,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
 				...(note !== null ? { note } : {}),
-				// A route with no thinking control has no setting to read: the rail speaks up only
-				// while a level it cannot honor is news, which ends once a turn has run under it.
-				...(thinking?.mechanism === "none" && (note === null || thinkingNotesDelivered.has(thinkingNoteKey()))
+				// A route with no thinking control has no setting to read. The rail speaks up only while a level
+				// the operator chose is news: the default is nobody's request, and a turn under it ends the news.
+				...(thinking?.mechanism === "none" &&
+				(note === null || asked === DEFAULT_SETTINGS.chat.thinkingLevel || thinkingNotesDelivered.has(thinkingNoteKey()))
 					? { quiet: true }
 					: {}),
 			};
