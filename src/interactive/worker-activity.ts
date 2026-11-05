@@ -42,7 +42,7 @@ export function workerQuietWords(
  * wait forever. Null while the worker shows evidence, runs a tool, waits on a person, or has gone quiet as a process,
  * which `workerQuietWords` says instead.
  */
-export function workerSilenceForms(
+function workerSilenceForms(
 	progress: Pick<
 		WorkerProgressSnapshot,
 		"phase" | "currentAction" | "awaitingApproval" | "quietSinceMs" | "evidenceAtMs" | "settled"
