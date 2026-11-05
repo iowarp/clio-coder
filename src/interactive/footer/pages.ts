@@ -847,6 +847,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];
 }
 
+const DASHBOARD_ROOMY_ROWS = 30;
+
 /**
  * The expanded footer: tab row, rule, a bounded content viewport, rule, hint.
  * Height is a function of the terminal alone, so a page never changes height
@@ -870,7 +872,8 @@ export function dashboardPageViewport(
 			"fieldValue",
 			padAnsi(`${pad}${truncateToWidth(line, innerWidth, GLYPH.ellipsis, true)}${pad}`, safeWidth),
 		);
-	const budget = Math.max(6, Math.min(12, terminalRows - 6));
+	// A terminal with room shows a whole page rather than a scroll: the Context page alone runs to twelve rows.
+	const budget = Math.max(6, Math.min(terminalRows >= DASHBOARD_ROOMY_ROWS ? 16 : 12, terminalRows - 6));
 	const tabs = DASHBOARD_PAGES.map((name, index) =>
 		name === page
 			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })

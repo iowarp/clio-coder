@@ -244,7 +244,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			deps.requestRender();
 		});
 		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.telemetry, {
-			sessionId: deps.getSessionId?.() ?? null,
 			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
 			getChanges: () => changes,
 			sessionStartedAt: deps.getSessionMeta()?.createdAt ?? null,

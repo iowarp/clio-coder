@@ -204,7 +204,6 @@ interface UsageData {
 
 export interface OpenUsageOverlayOptions {
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
-	sessionId?: string | null;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
 	getSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Sessions of this workspace, for the activity graph. Read once on open. */
@@ -426,7 +425,6 @@ export function openUsageOverlay(
 	telemetry: TelemetryContract,
 	options?: OpenUsageOverlayOptions,
 ): OverlayHandle {
-	const sessionId = options?.sessionId ?? null;
 	const readModel = telemetry.read;
 	const quotaFeed = createQuotaSummaryFeed({ onUpdate: () => tui.requestRender() });
 	const readRecall = () => (options?.getSessionEntries ? foldRecallTelemetry(options.getSessionEntries()) : null);
@@ -455,9 +453,8 @@ export function openUsageOverlay(
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: USAGE_OVERLAY_WIDTH,
-		// Not derived from the title: that one carries the session id.
 		markerId: "usage",
-		title: sessionId && sessionId.length > 0 ? `Usage (${sessionId})` : "Usage",
+		title: "Usage",
 		// The scroll keys are named only while the open view has more than it shows.
 		footerHint: (innerWidth) =>
 			buildResponsiveHint([

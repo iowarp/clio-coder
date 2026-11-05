@@ -66,6 +66,10 @@ export interface RetryOverlay {
 	cause?: RetryWaitCause | undefined;
 	/** Epoch ms this cause first answered, which stays put across the attempts it keeps answering. */
 	causeSince?: number | undefined;
+	/** Of `attempt`, how many sat out a provider's wait and so spent no retry. */
+	providerWaits?: number | undefined;
+	/** This attempt is one of those, so `maxAttempts` says nothing about it. */
+	onProviderWait?: boolean | undefined;
 }
 
 export interface ToolOverlay {

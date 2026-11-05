@@ -797,6 +797,73 @@ test("a long countdown reads in minutes on the rail and says the provider asked 
 	doesNotMatch(status(111), /3412s/u);
 });
 
+test("a provider's waits count up against no limit, and Clio's own retries still read against theirs", async (c) => {
+	const chain = await statedWaitChain(c, [1, 1, 1, 1, 1]);
+	strictEqual(chain.last?.phase, "recovered");
+	strictEqual(chain.last?.providerWaits, 5);
+	strictEqual(formatRetryStatus(chain.last as RetryStatusPayload), "recovered after 5 provider waits");
+
+	const now = 1_000_000;
+	const rail = (retry: Record<string, unknown>, width: number) =>
+		composerPhasePresentation(
+			{
+				phase: "retrying",
+				since: now - 1000,
+				lastMeaningfulAt: now - 1000,
+				watchdogTier: 0,
+				watchdogPeak: 0,
+				localRuntime: false,
+				retry: { waitMs: 8000, ...retry },
+			} as never,
+			width,
+			now,
+			"Qwopus3.8",
+		).label;
+	const third = { attempt: 3, maxAttempts: 3, providerWaits: 3, onProviderWait: true };
+	for (const width of [40, 80, 111]) {
+		const waiting = rail({ ...third, stage: "backoff", dueAt: now + 8000, retryAfterMs: 8000 }, width);
+		match(waiting, /3rd wait/u);
+		doesNotMatch(waiting, /\d\/\d/u);
+	}
+	match(rail({ ...third, stage: "attempt", attemptStartedAt: now }, 111), /retrying \(3rd wait\)/u);
+
+	const row = (status: Partial<RetryStatusPayload>) =>
+		formatRetryStatus({ ...third, phase: "scheduled", delayMs: 8000, ...status } as RetryStatusPayload);
+	match(row({ retryAfterMs: 8000 }), /^3rd provider wait, next attempt in 8s \(provider asked for 8s\)/u);
+	match(row({ phase: "retrying" }), /^retrying after 3rd provider wait/u);
+	match(row({ phase: "cancelled" }), /^cancelled during 3rd provider wait/u);
+
+	// Two waits and one retry of Clio's own: the limit counts only what it limits.
+	const mixed = { attempt: 3, maxAttempts: 3, providerWaits: 2 };
+	match(formatRetryStatus({ ...mixed, phase: "retrying" }), /^provider retry 1\/3 running/u);
+	match(rail({ ...mixed, stage: "attempt", attemptStartedAt: now }, 111), /retrying 1\/3/u);
+	strictEqual(formatRetryStatus({ ...mixed, phase: "recovered" }), "recovered after 2 provider waits and 1 retry");
+});
+
+test("the receipt keeps a provider's waits apart from retries", () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.appendUser("hello");
+	panel.applyEvent({ type: "agent_start" } as never);
+	for (const event of failedAttempt(1)) panel.applyEvent(event as never);
+	const answer = {
+		role: "assistant",
+		content: [{ type: "text", text: "Recovered answer." }],
+		stopReason: "stop",
+		usage: { input: 1, output: 1, totalTokens: 2 },
+	};
+	panel.applyEvent({
+		type: "retry_status",
+		status: { phase: "retrying", attempt: 3, maxAttempts: 3, providerWaits: 2 },
+	} as never);
+	panel.applyEvent({ type: "agent_start" } as never);
+	panel.applyEvent({ type: "message_start", message: answer } as never);
+	panel.applyEvent({ type: "message_end", message: answer } as never);
+	panel.applyEvent({ type: "agent_end", messages: [answer] } as never);
+	const output = screen(panel);
+	match(output, /2 provider waits, 1 retry/u);
+	doesNotMatch(output, /3 retries/u);
+});
+
 test("formatStatedWait uses the units a person plans by", () => {
 	deepStrictEqual([48_000, 60_000, 3_412_000, 3_600_000, 5_400_000, 7_200_000].map(formatStatedWait), [
 		"48s",

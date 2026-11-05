@@ -150,7 +150,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		const origin = originOfRun.get(identity.lineage?.rootRunId ?? identity.runId) ?? identity.requestOrigin;
 		if (deps.notice === undefined || origin === "user" || retrying.delete(identity.runId)) return;
 		const why = workerFailureHeadline(rawDetail);
-		const text = `${identity.agentId} ${plainOutcomeLabel(outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${identity.runId}`;
+		const text = `${identity.agentId} ${plainOutcomeLabel(outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${identity.agentId}`;
 		const hold = setTimeoutFn(() => {
 			heldFailures.delete(identity.runId);
 			if (!disposed) deps.notice?.("error", text);
