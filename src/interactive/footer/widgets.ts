@@ -925,6 +925,20 @@ export function composerPhasePresentation(
 		);
 		return { ...phase, ...stage, namesRoute: stage.subject === undefined };
 	}
+	if (
+		status.toolMarkupRepromptSince !== undefined &&
+		(status.phase === "waiting_model" || status.phase === "thinking" || status.phase === "writing")
+	) {
+		const label = fitRailFacts(
+			[
+				{ text: room >= 60 ? "wrote its call as text, asked once to make it" : "asked to redo its call", keep: 9 },
+				{ text: elapsedFrom(status.toolMarkupRepromptSince), keep: 8 },
+				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
+			],
+			room,
+		);
+		return { ...phase, label, namesRoute: false };
+	}
 	let label: string;
 	switch (status.phase) {
 		case "idle":

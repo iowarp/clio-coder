@@ -285,6 +285,13 @@ export type TurnEnding =
 	| { kind: "no_answer"; cause: TurnNoAnswerCause; toolsRan: number }
 	| { kind: "quiet"; toolsRan: number };
 
+/** The notice key the status surface reads as the one re-prompt for a written-out tool call starting. */
+export const TOOL_MARKUP_REPROMPT_NOTICE_KEY = "turn.tool-markup-reprompt";
+export const TOOL_MARKUP_REPROMPT_NOTICE =
+	"[Clio Coder] The model wrote its tool call as text, so it did not run. Clio asked it once to make the call properly.";
+export const TOOL_MARKUP_REPROMPT =
+	"<system-reminder>Your last reply wrote a tool call as text, so it did not run and nothing happened. Calls written as text never run. If the work still needs a tool, make the call through the tool interface now. Otherwise answer in plain prose and say plainly what was not done.</system-reminder>";
+
 /** A call that succeeded and was not a question to the operator, so it did work toward the request. */
 function ranRealTool(message: AgentMessage): boolean {
 	const result = message as { role?: unknown; isError?: unknown; toolName?: unknown };

@@ -130,6 +130,8 @@ export interface ChatTurnState {
 	 * Cleared with `synthesisToolLock`.
 	 */
 	toolBudgetLock: boolean;
+	/** The operator turn that already spent its one re-prompt for a tool call the model only wrote out. */
+	toolMarkupRepromptTurnId: string | null;
 	/** Continuations spent since the operator's last prompt (#445). */
 	yoloContinuations: number;
 	/** A way this turn ended that nobody asked for and another turn could get past; a yolo continuation reads it (#445). */
@@ -190,6 +192,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		interruptedCall: null,
 		synthesisToolLock: false,
 		toolBudgetLock: false,
+		toolMarkupRepromptTurnId: null,
 		turnStop: null,
 		yoloContinuations: 0,
 		toolProseAbortReason: null,

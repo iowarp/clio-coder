@@ -2,6 +2,7 @@ import type { RunAbortSource, TurnAbortSource } from "../../core/telemetry/live-
 import { ToolNames } from "../../core/tool-names.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../../session-control/chat-loop.js";
+import { TOOL_MARKUP_REPROMPT_NOTICE_KEY } from "../../session-control/chat-loop-messages.js";
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
@@ -494,11 +495,21 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 		}
 		case "tool_execution_update":
 			return refreshMeaningful(prev, ctx);
+		case "notice":
+			// The re-prompt opens a model round of its own, timed from here and named on the rail until its reply settles.
+			if (event.key !== TOOL_MARKUP_REPROMPT_NOTICE_KEY || !isActive(prev.phase)) return prev;
+			return {
+				...refreshMeaningful(prev, ctx),
+				phase: "waiting_model",
+				waitingSince: ctx.now,
+				toolMarkupRepromptSince: ctx.now,
+			};
 		case "message_end":
 			// Fold every settled message as it lands. This is the only record of
 			// the run's usage that survives a cancel.
 			return {
 				...refreshMeaningful(prev, ctx),
+				toolMarkupRepromptSince: event.message.role === "assistant" ? undefined : prev.toolMarkupRepromptSince,
 				runTally: foldMessageIntoRunTally(prev.runTally ?? emptyRunTally(), event.message),
 			};
 		case "tool_execution_end": {
