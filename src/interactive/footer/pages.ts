@@ -660,10 +660,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const settled = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
 	const rate = state.throughput ? state.throughput.tokensPerSecond : settled?.tokensPerSecond;
 	const estimated = state.throughput ? state.throughput.estimated === true : settled?.estimated === true;
-	// A settled call's rate is history: only tokens arriving now may read as a bare rate (HF03).
+	// A rate is live only while tokens are arriving; during a tool the turn's figure is as historical as a settled call's (HF03).
+	const flowing = state.throughput !== null && (state.status.phase === "writing" || state.status.phase === "thinking");
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? `${settled ? theme.fg("annotation", "last ") : ""}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")}`
+			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")}`
 			: "";
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
 	const statsCap = Math.floor(w * 0.4);
