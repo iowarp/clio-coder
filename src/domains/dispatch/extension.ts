@@ -1064,7 +1064,12 @@ function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknow
 	const outcome = event.payload.outcome;
 	log.calls.push({
 		check,
-		outcome: outcome === "ok" || outcome === "error" || outcome === "blocked" ? outcome : null,
+		outcome:
+			outcome === "error" && event.payload.unresolved === true
+				? "unresolved"
+				: outcome === "ok" || outcome === "error" || outcome === "blocked"
+					? outcome
+					: null,
 	});
 }
 

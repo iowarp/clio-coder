@@ -20,6 +20,8 @@ import { integrityClause, trustStateWord, validationClause } from "../evidence/t
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readRunRecord } from "../telemetry/index.js";
+import { readRunFeed } from "./run-feed.js";
+import { OBSERVED_COMMAND_PREFIX } from "./run-findings.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
@@ -68,6 +70,11 @@ export interface RunResultSummary {
 	stillRunning?: boolean;
 	/** Replay only: the run never settled because the ledger closed its row early; the row's own explanation, verbatim. */
 	abandonedDetail?: string;
+	/**
+	 * Why validation failed, in one line naming the validator and its evidence, so a failed headline above passing
+	 * checks is never left unexplained (J2-F01). Present only when the trust status says validation failed.
+	 */
+	validationFailure?: string;
 }
 
 /** A run's projection: the summary plus the answer it delivered. */
@@ -161,10 +168,100 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 	};
 }
 
+/** The headline of a tool error: its first sentence, before any output it quotes, which `/view` keeps whole. */
+const firstSentence = (text: string): string => {
+	const stripped = text.replace(/^verify:\s*/u, "").trim();
+	const end = stripped.search(/\.(\s|$)|:\s|\n/u);
+	return clip(end > 0 ? stripped.slice(0, end) : stripped, 120);
+};
+
+/**
+ * The verify checks whose latest executed call errored, read from the run's own feed: the start line names the check
+ * and the finish line carries the error. A blocked call never ran its check, so it decides nothing, which matches
+ * how the sealed typed validation treats it.
+ */
+function failingVerifyChecks(runId: string, stateDir: string): Array<{ check: string; reason: string | null }> {
+	const feed = readRunFeed(runId, { stateDir });
+	const started = new Map<string, string>();
+	const latest = new Map<string, { outcome: string; reason: string | null }>();
+	for (const line of feed.lines) {
+		if (line.kind !== "event" || line.tool !== "verify" || line.callId === undefined) continue;
+		if (line.type === "clio_coder_tool_start") {
+			started.set(line.callId, line.detail ?? "a check");
+			continue;
+		}
+		if (line.type !== "clio_coder_tool_finish" || line.outcome === undefined || line.outcome === "blocked") continue;
+		const check = started.get(line.callId) ?? "a check";
+		latest.set(check, { outcome: line.outcome, reason: line.reason ?? null });
+	}
+	return [...latest]
+		.filter(([, last]) => last.outcome === "error")
+		.map(([check, last]) => ({ check, reason: last.reason === null ? null : firstSentence(last.reason) }));
+}
+
+/**
+ * One line saying which validator failed and on what evidence, read from the same record the trust status was
+ * derived from. Null when validation did not fail or nothing more specific than the headline is known.
+ */
+function validationFailureOf(
+	runId: string,
+	record: RunTelemetryV1 | null,
+	facts: RunResultFacts,
+	stateDir: string,
+): string | null {
+	const entry = facts.trust?.validationGrounding;
+	if (entry === undefined || entry.state !== "failed" || record?.settled === null || record === null) return null;
+	const settled = record.settled;
+	const result = record.result?.state === "resolved" ? record.result.value : null;
+	if (entry.authority.id === "host-verification") {
+		const failed = (result?.hostVerification?.checks ?? []).filter((check) => check.exitCode !== 0);
+		if (failed.length > 0)
+			return `Clio's own check failed: ${failed.map((check) => `${check.check} exited ${check.exitCode ?? "without a code"}`).join(", ")}`;
+		const reason = result?.hostVerification?.reason;
+		return reason ? `Clio's own check failed: ${firstSentence(reason)}` : "Clio's own check failed";
+	}
+	const typed = settled.quality?.typedValidations ?? [];
+	const commands = typed
+		.filter((fact) => !fact.passed && fact.sourceId.startsWith(OBSERVED_COMMAND_PREFIX))
+		.map((fact) => fact.sourceId.slice(OBSERVED_COMMAND_PREFIX.length));
+	if (commands.length > 0) return `${commands.join(", ")} ran and exited non-zero`;
+	if (entry.authority.id !== "result-quality") return null;
+	const verifyFailed = typed.filter((fact) => fact.sourceId === "tool:verify" && !fact.passed).length;
+	if (verifyFailed > 0) {
+		const passed = typed.filter((fact) => fact.sourceId === "tool:verify" && fact.passed).length;
+		const others = passed > 0 ? `; the other ${passed === 1 ? "verify check" : `${passed} verify checks`} passed` : "";
+		const checks = failingVerifyChecks(runId, stateDir);
+		if (checks.length === 0)
+			return `${verifyFailed === 1 ? "a verify check" : `${verifyFailed} verify checks`} did not pass${others}`;
+		// A name verify could not resolve never ran anything; saying so keeps it apart from a check that ran and failed.
+		const undeclared = checks.filter((check) => check.reason !== null && /is not a declared check/u.test(check.reason));
+		const ran = checks.filter((check) => !undeclared.includes(check));
+		const quoted = (list: typeof checks) => list.map((check) => `'${check.check}'`).join(" and ");
+		const parts = [
+			...(undeclared.length > 0
+				? [
+						`verify ${quoted(undeclared)} never ran: ${undeclared.length === 1 ? "not a declared check" : "not declared checks"}`,
+					]
+				: []),
+			...ran.map((check) => `verify '${check.check}' failed${check.reason ? `: ${check.reason}` : ""}`),
+		];
+		return `${parts.join("; ")}${others}`;
+	}
+	const contract = settled.quality?.resultContract;
+	const kind = contractKindOf(contract?.sourceId) ?? "result";
+	if (contract?.conformance === "fail") return `the answer did not match the ${kind} shape`;
+	if (contract?.quality === "fail") return "the answer itself reports a failing check";
+	return null;
+}
+
 /** The run's facts from its run scope; null when it has not settled or cannot be read. */
 export function readRunResultFacts(runId: string, stateDir = clioStateDir()): RunResultFacts | null {
 	try {
-		return runResultFactsOf(readRunRecord(stateDir, runId), readRunGateIndex(stateDir)(runId));
+		const record = readRunRecord(stateDir, runId);
+		const facts = runResultFactsOf(record, readRunGateIndex(stateDir)(runId));
+		if (facts === null) return null;
+		const validationFailure = validationFailureOf(runId, record, facts, stateDir);
+		return validationFailure === null ? facts : { ...facts, validationFailure };
 	} catch {
 		// An unreadable run scope is an unavailable result, never a failed render.
 		return null;

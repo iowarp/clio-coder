@@ -47,6 +47,8 @@ import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFleetDock } from "./fleet-dock.js";
 import { readDurableFleetPlans } from "./fleet-plan-history.js";
+import type { FleetPlanRunView } from "./fleet-plan-runs.js";
+import { readDurableWorkerRuns } from "./fleet-run-history.js";
 import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
@@ -459,8 +461,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		dispatchSnapshot: () => deps.dispatch.snapshot(),
 		readRunResult: (runId) => readWorkerRunResultFacts(runId),
 	});
-	const dispatchBoardStore = factories.createDispatchBoardStore(deps.telemetry, () =>
-		readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+	const dispatchBoardStore = factories.createDispatchBoardStore(
+		deps.telemetry,
+		() => readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+		() => readDurableWorkerRuns(getCwd(), deps.getSettings?.().fleet.worktrees.root),
 	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
@@ -702,18 +706,29 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	unsubscribeTelemetry.push(deps.telemetry.read?.subscribe("health", checkDrops) ?? (() => {}));
 
+	/** What a running plan is doing in rail words: the step it runs now, or that it is stopping. */
+	const planRailWords = (plan: FleetPlanRunView): string => {
+		const running = plan.steps.filter((step) => step.state === "running").map((step) => step.stepId);
+		const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
+		const count = `${done}/${plan.requiredStepCount} steps`;
+		if (plan.state === "cancelling") return `stopping ${running.join(", ") || "its steps"}`;
+		return running.length > 0 ? `running ${running.join(", ")} · ${count}` : count;
+	};
 	const currentLiveWork = (): LiveWorkFacts => ({
 		actor: modelNickname(deps.getSettings?.().chat?.model),
 		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
-		workers: dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row)),
+		// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
+		workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
 		background: backgroundCalls.active(),
 		workerActivity: (row, room) =>
-			// A queued run's progress reads `starting`, which it is not until it has a slot.
-			row.status === "enqueued"
-				? "waiting for a slot"
-				: row.progress
-					? workerActivityWords(row.progress, { room })
-					: dispatchStatusPresentation(row.status).label,
+			row.plan !== undefined
+				? planRailWords(row.plan)
+				: // A queued run's progress reads `starting`, which it is not until it has a slot.
+					row.status === "enqueued"
+					? "waiting for a slot"
+					: row.progress
+						? workerActivityWords(row.progress, { room })
+						: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});
 	const runningCompaction = (): CompactionRailFacts | null => {

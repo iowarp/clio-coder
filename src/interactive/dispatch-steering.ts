@@ -11,6 +11,8 @@ export interface DispatchSteeringDeps {
 	getSelectedRow: () => DispatchBoardRow | null | undefined;
 	notify: (level: DispatchSteeringNoticeLevel, text: string, key: string) => void;
 	abortDispatch: (runId: string) => void;
+	/** Stop a fleet plan this session runs; the answer says whether a stop was sent and, when not, why. */
+	cancelPlan?: (rootId: string) => "stopping" | "already-stopping" | "settled" | "not-owned" | "unknown";
 	editor: {
 		getText(): string;
 		setText(text: string): void;
@@ -71,6 +73,10 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 			deps.notify("warning", "no fleet run is selected", "dispatch-board:cancel");
 			return;
 		}
+		if (row.plan !== undefined) {
+			cancelPlan(row);
+			return;
+		}
 		if (row.status === "cancelling") {
 			deps.notify("info", `cancellation is already in progress for ${row.runId}`, `dispatch-board:cancel:${row.runId}`);
 			return;
@@ -94,6 +100,40 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.notify("error", `could not cancel ${row.runId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
 		}
+	};
+
+	const cancelPlan = (row: DispatchBoardRow): void => {
+		const plan = row.plan;
+		if (plan === undefined) return;
+		const key = `dispatch-board:cancel:${plan.rootId}`;
+		const answer = deps.cancelPlan?.(plan.rootId) ?? "not-owned";
+		const running = plan.steps.filter((step) => step.state === "running").map((step) => step.stepId);
+		switch (answer) {
+			case "stopping":
+				deps.notify(
+					"info",
+					`cancelling plan ${plan.name}: ${running.length > 0 ? `stopping ${running.join(", ")}` : "no step starts after this"}`,
+					key,
+				);
+				break;
+			case "already-stopping":
+				deps.notify("info", `plan ${plan.name} is already stopping`, key);
+				break;
+			case "settled":
+				deps.notify("info", `plan ${plan.name} already finished (${dispatchStatusPresentation(row.status).label})`, key);
+				break;
+			default:
+				// A durable plan with no recorded end may still run in another Clio, or its process is gone; neither is
+				// this session's to stop, and saying it settled would be false.
+				deps.notify(
+					"warning",
+					plan.state === "unsettled"
+						? `plan ${plan.name} has no recorded end and was not started in this session, so this session cannot stop it · clio-coder fleet events ${plan.rootId}`
+						: `plan ${plan.name} cannot be stopped from this session`,
+					key,
+				);
+		}
+		deps.requestRender();
 	};
 
 	return { steerSelectedDispatch, cancelSelectedDispatch };

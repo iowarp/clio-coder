@@ -67,11 +67,12 @@ function typedValidationFactsFromToolStats(
  * One finished `verify` call, in the order the run finished them. `check` is
  * the call's {@link verifyCheckIdentity}, or null when the finish could not be
  * tied to the arguments of its start. `outcome` is null when the finish named
- * no outcome this build recognizes.
+ * no outcome this build recognizes. `unresolved` is a call whose check name
+ * resolved to nothing, so like `blocked` it ran no check.
  */
 export interface VerifyCallOutcome {
 	check: string | null;
-	outcome: "ok" | "error" | "blocked" | null;
+	outcome: "ok" | "error" | "blocked" | "unresolved" | null;
 }
 
 /**
@@ -140,7 +141,8 @@ function typedVerifyFact(
  * latest executed outcome decides it: an earlier failure the run fixed and
  * re-ran clean seals as passed, and a pass the run later broke seals as failed
  *. A blocked attempt never ran the check, so it supersedes nothing,
- * and a check with only blocked calls seals no validation fact.
+ * and a check with only blocked calls seals no validation fact. A call naming a
+ * check that does not exist ran nothing either, and is treated the same way.
  *
  * Calls that cannot be tied to a check share one fact that passes only when
  * every such call passed. When no call can be tied to a check, the result is
@@ -156,7 +158,7 @@ export function typedValidationFactsFromVerifyCalls(
 	const byCheck = new Map<string, Array<"ok" | "error">>();
 	const unattributed: Array<string | null> = [];
 	for (const call of calls) {
-		if (call.outcome === "blocked") continue;
+		if (call.outcome === "blocked" || call.outcome === "unresolved") continue;
 		if (call.check === null || call.outcome === null) {
 			unattributed.push(call.outcome);
 			continue;

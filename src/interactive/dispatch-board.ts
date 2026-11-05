@@ -114,6 +114,10 @@ export interface DispatchBoardRow {
 	 * implies a verdict the terminal bus event cannot carry.
 	 */
 	trust?: TrustSummaryProjection;
+	/** Which validator failed and on what evidence, beside a validation-failed verdict. */
+	validationFailure?: string;
+	/** Read back from the run ledger because it settled before this Clio process started (J2-F16). */
+	earlier?: true;
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
 	/** Assignment retry attempts observed on the assignment event stream. */
@@ -243,7 +247,8 @@ export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 
 /** Dispatch abort owns active workers and retry timers, but never terminal history. */
 export function isDispatchBoardRowCancellable(row: DispatchBoardRow): boolean {
-	if (row.plan !== undefined) return false;
+	// A plan stops through the stop its runner holds, which only the process that started it has.
+	if (row.plan !== undefined) return row.plan.state === "running" && row.plan.stoppable === true;
 	return row.status === "running" || row.status === "stale" || row.status === "enqueued" || row.status === "retrying";
 }
 
@@ -640,14 +645,32 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 	const detail = compact
 		? []
 		: wrapTextWithAnsi(theme.fg("annotation", row.trust.text), valueWidth).map((line) => `${" ".repeat(gutter)}${line}`);
-	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...detail];
+	// A failed validation names its validator and evidence right under the verdict, so a passing answer above it
+	// never reads as a contradiction.
+	const why =
+		row.validationFailure === undefined
+			? []
+			: cardWrappedValueLines(
+					theme,
+					"why",
+					`${theme.fg("body", row.validationFailure)}${theme.fg("annotation", ` · /view dispatch:${row.runId}`)}`,
+					contentWidth,
+				);
+	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...why, ...detail];
 }
 
 /** `2/2 steps`, then the first step that failed. Unsettled steps are not counted as anything yet. */
-function planProgressText(plan: FleetPlanRunView): string {
+function planProgressText(plan: FleetPlanRunView, statusShown = false): string {
 	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
-	const failed = plan.steps.find((step) => step.state === "failed");
-	const count = `${plan.state === "running" ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps`;
+	const failed = plan.steps.find((step) => step.state === "failed" && !planStepStopped(plan, step.stepId));
+	const live = plan.state === "running" || plan.state === "cancelling";
+	const count = `${live ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps`;
+	if (plan.state === "cancelling") {
+		const stopping = plan.stoppedStepIds ?? [];
+		return `${count} · ${stopping.length > 0 ? `stopping ${stopping.join(", ")}` : "stopping before the next step"}`;
+	}
+	// Where a status cell already reads cancelled, repeating it on the count only doubles the word.
+	if (plan.state === "cancelled") return statusShown ? count : `${count} · cancelled`;
 	if (plan.failure !== undefined) return `${count} · ${plan.failure}`;
 	return failed === undefined ? count : `${count} · ${failed.stepId} failed`;
 }
@@ -663,21 +686,33 @@ const PLAN_STEP_MARKS: Record<
 	replayed: { glyph: GLYPH.ok, token: "annotation", word: "kept from the earlier run" },
 };
 
+/** A step the operator's stop cut short: whatever exit it reported, the stop is why it ended. */
+function planStepStopped(plan: FleetPlanRunView, stepId: string): boolean {
+	return (plan.state === "cancelling" || plan.state === "cancelled") && (plan.stoppedStepIds ?? []).includes(stepId);
+}
+
 /** One row per step: state first, because the step's name and command are what a narrow row can lose. */
 function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number): string[] {
 	const nameWidth = Math.max(...plan.steps.map((step) => visibleWidth(step.stepId)));
 	return plan.steps.map((step) => {
-		const mark = PLAN_STEP_MARKS[step.state];
+		const stopped = planStepStopped(plan, step.stepId) && step.state !== "passed";
+		const mark = stopped
+			? plan.state === "cancelling" && step.state === "running"
+				? { glyph: GLYPH.cancelled, token: "warning" as const, word: "stopping" }
+				: { glyph: GLYPH.cancelled, token: "annotation" as const, word: "stopped" }
+			: PLAN_STEP_MARKS[step.state];
 		// A step still pending at the end was never reached; while the plan runs it is only waiting.
 		const word =
-			step.state !== "pending"
+			stopped || step.state !== "pending"
 				? mark.word
-				: plan.state === "running"
+				: plan.state === "running" || plan.state === "cancelling"
 					? "waiting"
 					: plan.state === "unsettled"
 						? "no result"
 						: mark.word;
-		const facts = [word, ...(step.detail !== undefined ? [step.detail] : []), step.label];
+		// A stopped step's exit code is the signal the stop sent, not a result; its duration still says how far it got.
+		const detail = stopped ? step.detail?.replace(/^exit -?\d+ · /u, "") : step.detail;
+		const facts = [word, ...(detail !== undefined ? [detail] : []), step.label];
 		const lead = `${theme.fg(mark.token, mark.glyph)} ${theme.fg("body", step.stepId.padEnd(nameWidth))}  `;
 		return truncateToWidth(
 			`${lead}${theme.fg(mark.token, facts[0] ?? "")}${theme.fg("annotation", facts.length > 1 ? ` · ${facts.slice(1).join(" · ")}` : "")}`,
@@ -692,7 +727,7 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 	const presentation = dispatchStatusPresentation(row.status);
 	const units = [
 		`${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`,
-		theme.fg("body", planProgressText(plan)),
+		theme.fg("body", planProgressText(plan, true)),
 		...(plan.finishedAtMs === null
 			? []
 			: [`${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText ?? "no model calls")}`]),
@@ -716,7 +751,8 @@ const PLAN_LIVE_STEP_ROWS = 4;
 
 /** A running plan on the fleet card: its progress and clock, then the steps around the one running now. */
 function planIslandLines(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, width: number): string[] {
-	const head = `${theme.fg("activity", GLYPH.running)} ${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg("body", planProgressText(plan))}${dotSep(theme)}${theme.fg("annotation", formatCompactMs(row.elapsedMs))}`;
+	const lead = plan.state === "cancelling" ? theme.fg("warning", GLYPH.cancelled) : theme.fg("activity", GLYPH.running);
+	const head = `${lead} ${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg("body", planProgressText(plan))}${dotSep(theme)}${theme.fg("annotation", formatCompactMs(row.elapsedMs))}`;
 	const steps = planStepLines(theme, plan, Math.max(1, width - 2));
 	const running = plan.steps.findIndex((step) => step.state === "running");
 	const start = Math.max(0, Math.min(Math.max(0, running - 1), steps.length - PLAN_LIVE_STEP_ROWS));
@@ -733,8 +769,11 @@ function planIslandLines(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPla
 export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): string[] {
 	const theme = clioTheme();
 	const passed = plan.state === "passed";
+	const cancelled = plan.state === "cancelled";
 	const rail = theme.fg("gutter", "  │ ");
-	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(passed ? "success" : "error", `${passed ? GLYPH.ok : GLYPH.error} ${planProgressText(plan)}`)}`;
+	const tone = passed ? "success" : cancelled ? "toolMetadata" : "error";
+	const glyph = passed ? GLYPH.ok : cancelled ? GLYPH.cancelled : GLYPH.error;
+	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(tone, `${glyph} ${planProgressText(plan)}`)}`;
 	const room = Math.max(1, width - 4);
 	return [
 		truncateToWidth(head, width, GLYPH.ellipsis, false),
@@ -842,7 +881,19 @@ function dispatchCardBody(
 	const started = runOriginWords(row);
 	const bodyLines = [
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
-		...(started === null ? [] : [cardUnitsLine(theme, "started", [theme.fg("body", started)], contentWidth)]),
+		...(started === null && row.earlier !== true
+			? []
+			: [
+					cardUnitsLine(
+						theme,
+						"started",
+						[
+							...(started === null ? [] : [theme.fg("body", started)]),
+							...(row.earlier === true ? [theme.fg("annotation", "recorded before this Clio started")] : []),
+						],
+						contentWidth,
+					),
+				]),
 	];
 	// One current-operation row is useful at a glance; prose and policy expand on demand.
 	if (row.progress) {
@@ -1315,7 +1366,7 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 /** What a run is doing, or how it ended, in one clause the row may clip. */
 function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): TableCell {
 	if (row.plan !== undefined) {
-		return { text: planProgressText(row.plan), ...(row.plan.state === "failed" ? { tone: "error" as const } : {}) };
+		return { text: planProgressText(row.plan, true), ...(row.plan.state === "failed" ? { tone: "error" as const } : {}) };
 	}
 	const task = row.taskSummary ? sanitizeCallTargetText(row.taskSummary) : null;
 	switch (row.status) {
@@ -1642,9 +1693,10 @@ export interface DispatchBoardView extends Component, RowBudgetedBody {
 	toggleDetail(): void;
 	detailExpanded(): boolean;
 	/** Whether Enter on the selected row opens the watch pane instead of its detail. */
-	enterWatches(): boolean;
+	/** Whether `w` can open the watch pane on the selected run. */
+	canWatch(): boolean;
 	/** Say which rows Enter takes to the watch pane; only a session with a pane host has any. */
-	setEnterWatches(predicate: (row: DispatchBoardRow) => boolean): void;
+	setWatchable(predicate: (row: DispatchBoardRow) => boolean): void;
 }
 
 export function createDispatchBoardView(
@@ -1655,7 +1707,7 @@ export function createDispatchBoardView(
 	// Detail is a property of the operator's attention, not of a run, so it
 	// follows the cursor rather than pinning to the row it was opened on.
 	let expanded = false;
-	let enterWatches: (row: DispatchBoardRow) => boolean = () => false;
+	let watchable: (row: DispatchBoardRow) => boolean = () => false;
 	let bodyRows = 0;
 	let memo: { key: string; lines: string[] } | null = null;
 
@@ -1706,12 +1758,9 @@ export function createDispatchBoardView(
 					.filter((run) => run.evidence)
 					.map((run) => run.runId)
 					.join(",") ?? "";
-			const selectedRow = currentRows.find((row) => row.runId === selectedRunId);
-			// Where Enter goes to the watch pane, the words on the card name the key that still opens detail.
-			const detailKey = selectedRow !== undefined && enterWatches(selectedRow) ? "d" : "Enter";
-			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${detailKey}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
+			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
-			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded, detailKey);
+			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded);
 			memo = { key, lines };
 			return lines;
 		},
@@ -1738,12 +1787,12 @@ export function createDispatchBoardView(
 		detailExpanded(): boolean {
 			return expanded;
 		},
-		enterWatches(): boolean {
+		canWatch(): boolean {
 			const row = normalizeSelection(rows());
-			return row !== null && enterWatches(row);
+			return row !== null && watchable(row);
 		},
-		setEnterWatches(predicate: (row: DispatchBoardRow) => boolean): void {
-			enterWatches = predicate;
+		setWatchable(predicate: (row: DispatchBoardRow) => boolean): void {
+			watchable = predicate;
 			memo = null;
 		},
 		invalidate(): void {
@@ -1891,6 +1940,7 @@ function toRow(
 		...(entry.council !== undefined ? { council: { ...entry.council } } : {}),
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
 		...(entry.trust !== undefined ? { trust: entry.trust } : {}),
+		...(entry.validationFailure !== undefined ? { validationFailure: entry.validationFailure } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
@@ -1958,6 +2008,8 @@ export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: 
 
 const FLEET_PLAN_ROW_STATUS: Record<FleetPlanRunView["state"], DispatchBoardStatus> = {
 	running: "running",
+	cancelling: "cancelling",
+	cancelled: "aborted",
 	passed: "completed",
 	failed: "failed",
 	unsettled: "stale",
@@ -1986,6 +2038,7 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
 	readDurablePlans?: () => ReadonlyArray<FleetPlanRunView>,
+	readDurableRuns?: () => ReadonlyArray<DispatchBoardRow>,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
@@ -2004,6 +2057,28 @@ export function createDispatchBoardStore(
 	const unsubscribe = projection.subscribe((snapshot) => {
 		current = snapshot;
 	});
+	// Settled workers from before this process, read once like the durable plans; a run this process folds outranks it.
+	let earlierRuns: ReadonlyArray<DispatchBoardRow> | null = null;
+	const historyRows = (): ReadonlyArray<DispatchBoardRow> => {
+		if (earlierRuns === null) {
+			try {
+				earlierRuns = readDurableRuns?.() ?? [];
+			} catch {
+				// An unreadable ledger costs the history, never the board.
+				earlierRuns = [];
+			}
+		}
+		const live = new Set(current.runs.map((run) => run.runId));
+		const view = projection.read?.live() ?? null;
+		return earlierRuns
+			.filter((row) => !live.has(row.runId))
+			.map((row) => {
+				const telemetry = view?.run(row.runId) ?? null;
+				return telemetry === null
+					? row
+					: { ...row, usage: dispatchRunUsage(view, row.runId), ttft: dispatchRunTtft(view, row.runId), telemetry };
+			});
+	};
 	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
 		const view = projection.read?.live() ?? null;
 		return [...current.runs]
@@ -2023,12 +2098,15 @@ export function createDispatchBoardStore(
 		plans,
 		rows() {
 			const planRows = plans.runs().map((plan) => fleetPlanRow(plan, Date.now()));
-			if (planRows.length === 0) return projectRows(false);
+			const earlier = historyRows();
+			if (planRows.length === 0 && earlier.length === 0) return projectRows(false);
 			const finishedAt = (row: DispatchBoardRow): number =>
 				row.plan !== undefined ? (row.plan.finishedAtMs ?? Date.now()) : Date.now() - row.elapsedMs;
-			return [...projectRows(false), ...planRows].sort(
+			// Earlier rows follow this process's own, newest first as the ledger read sorted them.
+			const current = [...projectRows(false), ...planRows].sort(
 				(a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || finishedAt(b) - finishedAt(a),
 			);
+			return [...current, ...earlier];
 		},
 		activeRows: () => projectRows(true),
 		liveRows: () => [...plans.live().map((plan) => fleetPlanRow(plan, Date.now())), ...projectRows(true)],

@@ -177,6 +177,11 @@ export interface ToolFinishEvent {
 	deniedPark?: true;
 	/** The guard withheld a duplicate of a call that already succeeded (`RegistryVerdict.redundantRepeat`). */
 	redundantRepeat?: true;
+	/**
+	 * The call errored before doing any work because its arguments named nothing the tool could resolve, such as a
+	 * `verify` check that is not declared. A validation it never ran is not a failed validation (J2-F01).
+	 */
+	unresolved?: true;
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
@@ -323,6 +328,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 				...withResultFacts,
 				reason: verdict.result.message,
 				decision: verdict.decision,
+				...(verdict.result.details?.unresolved === true ? { unresolved: true as const } : {}),
 			},
 			verdict.result,
 		);
@@ -423,6 +429,7 @@ function emitFinish(
 		decision?: SafetyDecision;
 		deniedPark?: true;
 		redundantRepeat?: true;
+		unresolved?: true;
 		denial?: ToolDenial;
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
@@ -441,6 +448,7 @@ function emitFinish(
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.deniedPark === true) event.deniedPark = true;
 	if (extra?.redundantRepeat === true) event.redundantRepeat = true;
+	if (extra?.unresolved === true) event.unresolved = true;
 	if (extra?.denial !== undefined) event.denial = extra.denial;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;

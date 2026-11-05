@@ -341,6 +341,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 
 	function settleFromRunResult(summary: RunEntry): void {
 		delete summary.resultContract;
+		delete summary.validationFailure;
 		try {
 			const facts = runReaders.readRunResult?.(summary.runId);
 			// A failed or retired seal cannot supply the board's terminal answer.
@@ -358,6 +359,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 				summary.resultContract = { kind: facts.contractKind, conformance: facts.contract };
 			}
 			if (facts?.trust !== undefined) summary.trust = summarizeTrustStatus(facts.trust);
+			if (facts?.validationFailure !== undefined) summary.validationFailure = facts.validationFailure;
 		} catch {
 			summary.progressFold.settle(undefined, false);
 		}

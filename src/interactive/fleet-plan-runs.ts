@@ -19,8 +19,15 @@ export interface FleetPlanRunView {
 	name: string;
 	startedAtMs: number;
 	finishedAtMs: number | null;
-	/** Unsettled is a durable root with no recorded end: its process may be gone or may still be running elsewhere. */
-	state: "running" | "passed" | "failed" | "unsettled";
+	/**
+	 * Unsettled is a durable root with no recorded end: its process may be gone or may still be running elsewhere.
+	 * Cancelling is a stop the operator asked for that the running step has not answered yet.
+	 */
+	state: "running" | "cancelling" | "cancelled" | "passed" | "failed" | "unsettled";
+	/** This process started the plan and holds its stop, so the board can offer cancel. */
+	stoppable?: true;
+	/** Steps that were running when the operator asked the plan to stop, so they read as stopped rather than failed. */
+	stoppedStepIds?: ReadonlyArray<string>;
 	steps: ReadonlyArray<FleetPlanStepView>;
 	requiredStepCount: number;
 	succeededStepCount: number;
@@ -39,6 +46,13 @@ export interface FleetPlanRuns {
 	runs(): ReadonlyArray<FleetPlanRunView>;
 	/** The plans this session has running now, read without touching the disk because a repaint asks. */
 	live(): ReadonlyArray<FleetPlanRunView>;
+	/** Hold the stop for a plan this process runs, so the board can cancel it. */
+	bindStop(rootId: string, stop: () => void): void;
+	/**
+	 * Ask a running plan to stop. `stopping` means the stop was sent now; every other answer says why nothing was sent:
+	 * already stopping, already settled, not this process's to stop, or no such plan.
+	 */
+	cancel(rootId: string): "stopping" | "already-stopping" | "settled" | "not-owned" | "unknown";
 }
 
 function settledDetail(outcome: FleetRunStepOutcome): string | undefined {
@@ -61,7 +75,11 @@ export function createFleetPlanRuns(
 	readDurable: () => ReadonlyArray<FleetPlanRunView> = () => [],
 ): FleetPlanRuns {
 	const plans = new Map<string, FleetPlanRunView>();
+	const stops = new Map<string, () => void>();
 	let hydrated = false;
+	// A plan the operator stopped ends as cancelled, whatever the runner's own verdict on the steps it cut short.
+	const endState = (plan: FleetPlanRunView, verdict: "passed" | "failed"): FleetPlanRunView["state"] =>
+		plan.state === "cancelling" ? "cancelled" : verdict;
 	const update = (rootId: string, change: (plan: FleetPlanRunView) => FleetPlanRunView): FleetPlanRunView | null => {
 		const plan = plans.get(rootId);
 		if (plan === undefined) return null;
@@ -111,17 +129,23 @@ export function createFleetPlanRuns(
 			}));
 		},
 		settle(rootId, outcome) {
-			return update(rootId, (plan) => ({
+			stops.delete(rootId);
+			return update(rootId, ({ stoppable: _stoppable, ...plan }) => ({
 				...plan,
 				finishedAtMs: now(),
-				state: outcome.cleanRun ? "passed" : "failed",
+				state: endState(plan, outcome.cleanRun ? "passed" : "failed"),
 				requiredStepCount: outcome.requiredStepCount,
 				succeededStepCount: outcome.succeededStepCount,
 				costText: plan.steps.some((step) => step.kind === "agent") ? renderPricingSum(outcome.totalCost) : null,
 			}));
 		},
 		fail(rootId, message) {
-			return update(rootId, (plan) => ({ ...plan, finishedAtMs: now(), state: "failed", failure: message }));
+			stops.delete(rootId);
+			return update(rootId, ({ stoppable: _stoppable, ...plan }) => {
+				const state = endState(plan, "failed");
+				// The runner's abort error restates the stop; a cancelled plan's own state already says it.
+				return { ...plan, finishedAtMs: now(), state, ...(state === "cancelled" ? {} : { failure: message }) };
+			});
 		},
 		runs() {
 			// Read once, on first use: the record of a plan this session starts comes
@@ -133,7 +157,27 @@ export function createFleetPlanRuns(
 			return [...plans.values()];
 		},
 		live() {
-			return [...plans.values()].filter((plan) => plan.state === "running");
+			return [...plans.values()].filter((plan) => plan.state === "running" || plan.state === "cancelling");
+		},
+		bindStop(rootId, stop) {
+			if (!plans.has(rootId)) return;
+			stops.set(rootId, stop);
+			update(rootId, (plan) => ({ ...plan, stoppable: true }));
+		},
+		cancel(rootId) {
+			const plan = plans.get(rootId);
+			if (plan === undefined) return "unknown";
+			if (plan.state === "cancelling") return "already-stopping";
+			if (plan.state !== "running" && plan.state !== "unsettled") return "settled";
+			const stop = stops.get(rootId);
+			if (stop === undefined) return "not-owned";
+			update(rootId, (current) => ({
+				...current,
+				state: "cancelling",
+				stoppedStepIds: current.steps.filter((step) => step.state === "running").map((step) => step.stepId),
+			}));
+			stop();
+			return "stopping";
 		},
 	};
 }

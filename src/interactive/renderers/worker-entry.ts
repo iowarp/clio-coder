@@ -21,7 +21,6 @@ import {
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
-import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -47,6 +46,7 @@ import {
 	workerActionParts,
 	workerPhaseActivity,
 	workerQuietWords,
+	workerSilenceWords,
 } from "../worker-activity.js";
 
 const theme = clioTheme();
@@ -614,7 +614,8 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 				: last !== undefined
 					? clean(finishedAction(last))
 					: isPending(entry)
-						? workerPhaseActivity(entry.progress?.phase)[1]
+						? ((entry.progress === undefined ? null : workerSilenceWords(entry.progress, { room: 48 })) ??
+							workerPhaseActivity(entry.progress?.phase)[1])
 						: "";
 	const facts = [
 		target,
@@ -658,11 +659,22 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	// A worker whose heartbeat stopped is doing nothing it can be seen doing, so its last call or phase would read as current.
 	const quiet = workerQuietWords(entry.progress, nowMs);
 	const action = quiet !== null ? null : describedAction(entry, waitRoom);
-	const [glyph, idle] = quiet !== null ? [GLYPH.warnInline, quiet] : workerPhaseActivity(entry.progress?.phase);
+	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too.
+	const silence =
+		quiet !== null || action !== null || entry.progress === undefined
+			? null
+			: workerSilenceWords(entry.progress, { now: nowMs, room: Math.max(16, waitRoom - 2) });
+	const [glyph, idle] =
+		quiet !== null
+			? [GLYPH.warnInline, quiet]
+			: silence !== null
+				? [GLYPH.warnInline, silence]
+				: workerPhaseActivity(entry.progress?.phase);
 	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
 	const answer =
 		entry.helper ||
 		quiet !== null ||
+		silence !== null ||
 		action !== null ||
 		(entry.progress?.phase !== undefined && entry.progress.phase !== "writing")
 			? ""
@@ -746,13 +758,22 @@ function helperRow(
 	].map((row) => redactedRow(row, width));
 }
 
-/** A failure the run's own record holds reads as a failure on the card; where the verdict came from stays with the detail view. */
-function qualityRow(trust: Pick<CanonicalTrustStatus, "validationGrounding"> | undefined, inspect: boolean): string {
+/**
+ * A failure the run's own record holds reads as a failure on the card; where the verdict came from stays with the
+ * detail view. A failed validation also names its validator and evidence, because a headline that says failed above
+ * checks that read as passed is otherwise a contradiction the operator cannot resolve without opening the run.
+ */
+function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, inspect: boolean): string {
+	const trust = result?.trust;
 	if (!trust) return "quality validation unknown";
 	const entry = trust.validationGrounding;
+	const why =
+		entry.state === "failed" && result?.validationFailure !== undefined
+			? `: ${result.validationFailure} · /view dispatch:${runId}`
+			: "";
 	if (!inspect && entry.state === "failed" && entry.authority.id === "result-quality")
-		return trustStateWord("validationGrounding", entry.state);
-	return `quality ${validationClause(trust)}`;
+		return `${trustStateWord("validationGrounding", entry.state)}${why}`;
+	return `quality ${validationClause(trust)}${why}`;
 }
 
 export function renderWorkerEntryLines(
@@ -803,7 +824,7 @@ export function renderWorkerEntryLines(
 					"warning",
 					safeWidth,
 				);
-	const quality = isPending(entry) ? [] : railLines(qualityRow(entry.result?.trust, inspect), "body", safeWidth);
+	const quality = isPending(entry) ? [] : railLines(qualityRow(entry.result, entry.runId, inspect), "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
 	// its rows whatever the transcript preset hides of an ordinary answer, and

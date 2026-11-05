@@ -240,11 +240,15 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 		deps.toggleSelectedDispatchDetail();
 		return true;
 	}
-	// Enter on a live run enters it: the watch pane opens (or retargets) and
-	// renders the run's stream beside the board. Where panes are off, absent,
-	// or the run is terminal, Enter keeps its inline worker-progress detail.
+	// Enter opens the detail in place everywhere. The watch pane is a separate,
+	// named choice on `w`, because opening it splits the terminal and an operator
+	// who pressed Enter to read a row did not ask for the layout to change (LA06).
 	if (matchesKey(data, "enter")) {
-		if (!deps.watchSelectedDispatch()) deps.toggleSelectedDispatchDetail();
+		deps.toggleSelectedDispatchDetail();
+		return true;
+	}
+	if (matchesKey(data, "w")) {
+		deps.watchSelectedDispatch();
 		return true;
 	}
 	return false;

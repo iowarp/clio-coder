@@ -96,6 +96,7 @@ async function runResolvedVerify(
 		case "unavailable":
 			return unavailableCheck(resolution.check);
 		case "unresolved":
-			return { kind: "error", message: `verify: ${resolution.message}` };
+			// The name resolved to no check, so nothing ran; the marker keeps this apart from a check that ran and failed.
+			return { kind: "error", message: `verify: ${resolution.message}`, details: { unresolved: true } };
 	}
 }

@@ -83,6 +83,7 @@ function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 	const seal = journal?.broken === null && lastLine?.type === "fleet_sealed" ? lastLine : null;
 	const succeededStepCount = steps.filter((step) => step.state === "passed").length;
 	const ended = seal !== null || record.endedAt !== null;
+	const cancelled = seal?.outcome === "aborted";
 	const passed = seal !== null ? seal.outcome === "succeeded" : succeededStepCount === steps.length;
 	const lastAt = Date.parse(record.endedAt ?? lastLine?.at ?? record.startedAt);
 	return {
@@ -90,12 +91,19 @@ function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 		name: record.fleet,
 		startedAtMs: Date.parse(record.startedAt),
 		finishedAtMs: Number.isFinite(lastAt) ? lastAt : Date.parse(record.startedAt),
-		state: !ended ? "unsettled" : passed ? "passed" : "failed",
+		state: cancelled ? "cancelled" : !ended ? "unsettled" : passed ? "passed" : "failed",
+		// A step the stop cut short records a failure whose reason is the cancel; it reads as stopped, as it did live.
+		...(cancelled
+			? {
+					stoppedStepIds: steps
+						.filter((step) => step.state === "failed" && /cancel/iu.test(step.detail ?? ""))
+						.map((step) => step.stepId),
+				}
+			: {}),
 		steps,
 		requiredStepCount: steps.length,
 		succeededStepCount,
 		costText: recordedCost(record, steps),
-		...(seal?.outcome === "aborted" ? { failure: "cancelled" } : {}),
 		...(!ended ? { failure: "no end recorded" } : {}),
 	};
 }

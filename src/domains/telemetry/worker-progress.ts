@@ -131,7 +131,31 @@ export interface WorkerProgressSnapshot {
 	 * quiet, not what it is doing now. Absent while the worker answers.
 	 */
 	quietSinceMs?: number;
+	/**
+	 * Epoch milliseconds of the last model or tool event the worker sent, to within a second: a delta, a reasoning
+	 * event, a message boundary, a call starting or finishing. A surface reads a long gap from it as silence and
+	 * says how old the evidence is. Absent until the first such event.
+	 */
+	evidenceAtMs?: number;
 }
+
+/** Events that prove a worker's model or tools are moving, as opposed to its process merely being alive. */
+const EVIDENCE_EVENT_TYPES: ReadonlySet<string> = new Set([
+	"agent_start",
+	"attempt_start",
+	"message_start",
+	"message_update",
+	"message_end",
+	"text_delta",
+	"thinking_delta",
+	"clio_coder_tool_start",
+	"clio_coder_tool_finish",
+	"clio_coder_permission_escalated",
+	"clio_coder_permission_resolved",
+]);
+
+/** Evidence moves the snapshot at most once a second, so a reasoning stream does not rebuild it per delta. */
+const EVIDENCE_RESOLUTION_MS = 1000;
 
 export type WorkerApprovalDecider = "operator" | "main" | "judge";
 
@@ -329,6 +353,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let awaitingApproval = false;
 	let approvalWindow: WorkerApprovalWindowFacts | null = null;
 	let quietSinceMs: number | null = null;
+	let evidenceAtMs: number | null = null;
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
@@ -481,6 +506,14 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				changed = touch();
 			}
 			if (
+				typeof event.type === "string" &&
+				EVIDENCE_EVENT_TYPES.has(event.type) &&
+				(evidenceAtMs === null || nowMs - evidenceAtMs >= EVIDENCE_RESOLUTION_MS)
+			) {
+				evidenceAtMs = nowMs;
+				changed = touch();
+			}
+			if (
 				event.type === "message_end" &&
 				isRecord(event.message) &&
 				event.message.role === "assistant" &&
@@ -615,6 +648,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			awaitingApproval = false;
 			approvalWindow = null;
 			quietSinceMs = null;
+			evidenceAtMs = null;
 			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
@@ -654,6 +688,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				...(awaitingApproval && !settled && approvalWindow !== null ? { approvalWindow: { ...approvalWindow } } : {}),
 				completed,
 				...(quietSinceMs !== null && !settled ? { quietSinceMs } : {}),
+				...(evidenceAtMs !== null && !settled ? { evidenceAtMs } : {}),
 			};
 			return cached;
 		},
