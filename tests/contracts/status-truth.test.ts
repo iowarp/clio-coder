@@ -869,6 +869,7 @@ test("a cancelled interview ends the turn as cancelled, not as a success", () =>
 				{ role: "assistant", stopReason: "toolUse", content: [], usage: {} },
 				{ role: "toolResult", toolName: "ask_user", details: { cancelled: true }, content: [] },
 			] as never,
+			watchdogPeak: null,
 			cancelled: false,
 		}).stopReason,
 		"cancelled",
