@@ -134,7 +134,7 @@ export function jobAuthorityRefusal(
 	});
 	return admission.kind === "allow"
 		? null
-		: `${admission.reason}. Job approval does not approve future effects; run the command directly or use a standing policy that admits this exact effect.`;
+		: `${admission.reason}. A recurring command would run with nobody to approve it. Run the command yourself, or loop a task with /loop <every> <task> so each command it runs meets the session's approval rules.`;
 }
 
 export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
