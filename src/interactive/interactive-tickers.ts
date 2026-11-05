@@ -1,16 +1,10 @@
-import type { TaskBoardSnapshot, TaskBoardStore } from "../domains/session/task-board.js";
-import { taskBoardCounts, unverifiedTaskChecks } from "../domains/session/task-board.js";
+import type { TaskBoardStore } from "../domains/session/task-board.js";
+import { taskBoardCounts } from "../domains/session/task-board.js";
 import type { TUI } from "../engine/tui.js";
-import { Text, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { ContextActivitySnapshot } from "./context-activity.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
-import { formatTaskIslandLines, TASK_ISLAND_WIDTH } from "./dispatch-board.js";
-import { clioTheme, frame, GLYPH } from "./theme/index.js";
-import { skinEpoch } from "./theme/tokens.js";
 
-const TASK_ISLAND_MIN_COLUMNS = 80;
-const TASK_ISLAND_MIN_ROWS = 18;
 export interface InteractiveTickerHandle {
 	unref?(): void;
 }
@@ -33,46 +27,10 @@ export interface InteractiveTickersDeps {
 	contextActivityStore: InteractiveContextActivityStore;
 	getOverlayState: () => string;
 	isFooterExpanded: () => boolean;
-	/** True while an extension workspace's islands hold the top-right corner. */
-	isTaskIslandYielded?: () => boolean;
 	/** Bound to TaskBoardStore.cachedSnapshot; repaint must never fold the session ledger. */
 	getTaskBoard?: TaskBoardStore["cachedSnapshot"];
 	scheduleInterval?: (callback: () => void, intervalMs: number) => InteractiveTickerHandle;
 	clearScheduledInterval?: (handle: InteractiveTickerHandle) => void;
-}
-
-function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
-	const theme = clioTheme();
-	const counts = taskBoardCounts(board);
-	const active = board.tasks.find((task) => task.status === "active");
-	const next = active ?? board.tasks.find((task) => task.status === "pending");
-	const blocker = board.tasks.find((task) => task.status === "blocked");
-	const unverified = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
-	const chips = [
-		`${counts.completed}/${counts.total} done`,
-		...(unverified > 0 ? [`${unverified} unverified`] : []),
-		...(counts.active > 0 ? [`${counts.active} active`] : []),
-		...(counts.blocked > 0 ? [`${counts.blocked} blocked`] : []),
-	].join(" · ");
-	const body = [theme.fg("sectionHeading", board.title), theme.fg("annotation", chips)];
-	if (next) {
-		const glyph = active ? theme.fg("activity", GLYPH.running) : theme.fg("annotation", GLYPH.queued);
-		body.push(`${glyph} ${theme.fg("annotation", next.id)} ${theme.fg("body", next.title)}`);
-	}
-	if (blocker) {
-		body.push(
-			`${theme.fg("warning", GLYPH.phaseBlocked)} ${theme.fg("annotation", blocker.id)} ${theme.fg("body", blocker.title)}`,
-		);
-	}
-	return frame(
-		theme,
-		"Tasks",
-		[
-			...body.flatMap((line) => wrapTextWithAnsi(line, TASK_ISLAND_WIDTH)).slice(0, 7),
-			theme.fg("commandHint", "/tasks · full task board"),
-		],
-		TASK_ISLAND_WIDTH + 4,
-	);
 }
 
 export interface InteractiveTickers {
@@ -90,54 +48,25 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	const clearScheduledInterval =
 		deps.clearScheduledInterval ??
 		((handle: InteractiveTickerHandle) => clearInterval(handle as ReturnType<typeof setInterval>));
-	const taskIsland = new (class extends Text {
-		private renderedSkinEpoch = skinEpoch();
-		override render(width: number): string[] {
-			if (this.renderedSkinEpoch !== skinEpoch()) {
-				this.renderedSkinEpoch = skinEpoch();
-				const board = deps.getTaskBoard?.();
-				this.setText(board ? formatTaskBoardIslandLines(board).join("\n") : "");
-			}
-			return super.render(width);
-		}
-	})("", 0, 0);
-	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-	const taskIslandHandle = deps.tui.showOverlay(taskIsland, {
-		anchor: "top-right",
-		width: taskIslandWidth,
-		margin: { top: 1, right: 1 },
-		nonCapturing: true,
-		visible: (width, height) => width >= TASK_ISLAND_MIN_COLUMNS && height >= TASK_ISLAND_MIN_ROWS,
-	});
-	taskIslandHandle.setHidden(true);
-
 	let dispatchBoardTicker: InteractiveTickerHandle | null = null;
 	let contextIslandTicker: InteractiveTickerHandle | null = null;
 	let contextIslandVisible = false;
 
-	let taskIslandHidden = true;
+	let taskRowShown = false;
 
+	/**
+	 * The board's summary is a dock row above the composer (fleet-dock.ts), never
+	 * an overlay, because a top-right island painted over transcript words. This
+	 * reports whether that row needs a repaint: while it shows, or the frame it
+	 * stops showing.
+	 */
 	const renderTaskIsland = (): boolean => {
 		const rows = deps.dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row));
 		const board = rows.length === 0 ? (deps.getTaskBoard?.() ?? null) : null;
-		const boardHasOpenTasks = board !== null && taskBoardCounts(board).open > 0;
-		const hidden =
-			deps.getOverlayState() !== "closed" ||
-			deps.isFooterExpanded() ||
-			deps.isTaskIslandYielded?.() === true ||
-			rows.length > 0 ||
-			(rows.length === 0 && !boardHasOpenTasks);
-		const visibilityChanged = taskIslandHidden !== hidden;
-		taskIslandHandle.setHidden(hidden);
-		// A hidden island with nothing to show still ran the frame builder and two
-		// truncateToWidth calls four times a second, forever, to produce lines no
-		// one could see. Formatting the empty case is pure waste; staying hidden
-		// leaves the last text in place, which is unreachable while hidden.
-		if (hidden && taskIslandHidden && rows.length === 0 && !boardHasOpenTasks) return visibilityChanged;
-		taskIslandHidden = hidden;
-		if (!hidden && board) taskIsland.setText(formatTaskBoardIslandLines(board).join("\n"));
-		taskIsland.invalidate();
-		return visibilityChanged || !hidden;
+		const shown = board !== null && !deps.isFooterExpanded() && taskBoardCounts(board).open > 0;
+		const changed = shown !== taskRowShown;
+		taskRowShown = shown;
+		return changed || shown;
 	};
 
 	const renderContextIsland = (): void => {
@@ -194,7 +123,6 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		dispose: () => {
 			stopDispatchBoardTicker();
 			stopContextIslandTicker();
-			taskIslandHandle.hide();
 		},
 	};
 	startContextIslandTicker();

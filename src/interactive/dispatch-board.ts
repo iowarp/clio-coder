@@ -250,7 +250,7 @@ export function isDispatchBoardRowCancellable(row: DispatchBoardRow): boolean {
 /** Rows of worker prose an expanded card shows before it defers to `/view`. */
 const WORKER_PROGRESS_CARD_ROWS = 6;
 
-export const TASK_ISLAND_WIDTH = 44;
+const TASK_ISLAND_WIDTH = 44;
 
 const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	running: 0,
