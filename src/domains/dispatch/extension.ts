@@ -312,6 +312,7 @@ import {
 	classifyFailure,
 	decideRetry,
 	type FailureClass,
+	failureClassWords,
 	honestWorkerSpecSkewText,
 	isContextOverflowFailure,
 	isInfrastructureFailure,
@@ -818,6 +819,17 @@ function conservativeRouteAdmissionEstimateUsd(
 
 function requestOriginFor(req: DispatchRequest): DispatchRequestOrigin {
 	return req.requestOrigin ?? "agent";
+}
+
+/** The move a start event names: only one that actually left the route it came from. */
+function routeMoveFields(
+	req: DispatchRequest,
+	targetId: string,
+	wireModelId: string,
+): { routeMove?: NonNullable<DispatchRequest["routeMove"]> } {
+	const move = req.routeMove;
+	if (move === undefined || (move.fromTargetId === targetId && move.fromModelId === wireModelId)) return {};
+	return { routeMove: move };
 }
 
 function sha256(input: string): string {
@@ -4544,7 +4556,10 @@ export function createDispatchBundle(
 			retryQueue.delete(run.runId);
 			// Ownership starts at scheduling, covering admission before a handle
 			// exists and terminal receipt work after the handle arrives.
-			executeRetry(run, attempt, reason, decision, overflowRoute).then(settleCanceled, rejectContinuation);
+			executeRetry(run, attempt, reason, decision, overflowRoute, failureClassWords(failureClass)).then(
+				settleCanceled,
+				rejectContinuation,
+			);
 		}, delayMs);
 		retryQueue.set(run.runId, {
 			runId: run.runId,
@@ -4641,6 +4656,7 @@ export function createDispatchBundle(
 		reason = "retry",
 		decision: RetryDecision = decideRetry("internal", memberRetryAttempt(run), assignmentPolicyFor(run.req).maxRetries),
 		overflowRoute: DispatchFailoverCandidate | null = null,
+		moveReason = reason,
 	): Promise<void> {
 		if (draining || !retryChainIsLive(run)) return;
 		const excludesNode = decision.excludedRouteParts.includes("node");
@@ -4656,6 +4672,7 @@ export function createDispatchBundle(
 			// as an operator pin and freeze every later retry in the chain.
 			failover: failoverModeFor(run.req),
 			requestOrigin: "internal",
+			routeMove: { fromTargetId: run.targetId, fromModelId: run.wireModelId, reason: moveReason },
 			// A retry starts with no grants and runs no wider than this attempt.
 			...(run.permit !== undefined ? { inheritedPermitAllowance: { ...run.permit.allowance } } : {}),
 			lineage: {
@@ -5089,7 +5106,8 @@ export function createDispatchBundle(
 		const mode = failoverModeFor(req);
 		if (mode === "none") return null;
 		const resolved = resolveTargetIdentity(req, settings);
-		if (targetCooldownReason(resolved.targetId, resolved.runtimeId, resolved.wireModelId) === null) return null;
+		const cooling = targetBreaker.blocked(cooldownKey(resolved.targetId, resolved.runtimeId, resolved.wireModelId));
+		if (cooling === null) return null;
 		const candidates = (mode === "approved" ? (req.allowedCandidates ?? []) : routeCandidates(req)).filter(
 			(candidate) => candidate.agentId === req.agentId,
 		);
@@ -5114,6 +5132,14 @@ export function createDispatchBundle(
 			model: next.model,
 			failover: mode,
 			...(mode === "approved" ? { node: next.node } : {}),
+			routeMove: {
+				fromTargetId: resolved.targetId,
+				fromModelId: resolved.wireModelId,
+				reason:
+					cooling.kind === "open"
+						? `${resolved.targetId} is cooling down for ${Math.ceil(cooling.remainingMs / 1000)}s after ${failureClassWords(cooling.reason)}`
+						: `one probe run is testing ${resolved.targetId} after ${failureClassWords(cooling.reason)}`,
+			},
 		};
 		if (rerouted.plannedNode !== undefined && rerouted.plannedNode.id !== next.node) delete rerouted.plannedNode;
 		return rerouted;
@@ -6185,6 +6211,7 @@ export function createDispatchBundle(
 					agentId: req.agentId,
 					task: req.task,
 					requestOrigin: lifecycle.requestOrigin,
+					...routeMoveFields(req, targetId, wireModelId),
 					targetId,
 					wireModelId,
 					runtimeId,
@@ -7987,6 +8014,7 @@ export function createDispatchBundle(
 					pid,
 					...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
 					...fleetIdentity,
+					...routeMoveFields(req, lifecycle.target.target.id, lifecycle.target.wireModelId),
 					assignmentId: lineage.rootRunId,
 					attempt: lineage.attempt,
 					...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
