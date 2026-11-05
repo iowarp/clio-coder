@@ -18,6 +18,7 @@ import {
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import {
 	type ApprovalRequestView,
@@ -839,5 +840,37 @@ test("a no-answer receipt says why, with or without usage, and never wears the g
 			cancelled: false,
 		}).stopReason,
 		"no_answer",
+	);
+});
+
+test("the hint row says what Enter does with the draft and never offers exit or a key with no target", () => {
+	const hint = (context: Parameters<typeof footerKeyHint>[3], now = 0): string =>
+		footerKeyHint(now, false, Number.POSITIVE_INFINITY, context, { queued: 0, workers: 0, thinkingCycles: false }) ?? "";
+	match(hint("run-command:/rewind"), /Enter runs \/rewind · Esc stops the run$/u);
+	doesNotMatch(hint("run-command:/rewind"), /steers/u);
+	match(hint("shell-refused"), /Esc stops what is running, then Enter runs this/u);
+	match(hint("steer-empty"), /^Type to steer · Esc stops the run/u);
+	const learned = Array.from({ length: 12 }, (_, slot) => hint("idle", slot * 60_000)).join("\n");
+	doesNotMatch(learned, /Exit|Suspend|Music|Files pane|Thinking effort/u);
+	strictEqual(hint("idle", 0), hint("idle", 59_999), "a learning hint holds for its minute");
+	strictEqual(hint("send", 0), hint("send", 600_000), "a draft silences the learning");
+	const running = Array.from({ length: 12 }, (_, slot) => hint("steer-empty", slot * 60_000)).join("\n");
+	doesNotMatch(running, /Workers dock|Queue navigator|Send now/u);
+});
+
+test("a cancelled interview ends the turn as cancelled, not as a success", () => {
+	strictEqual(
+		buildSummary({
+			startedAt: 0,
+			endedAt: 1,
+			modelId: "m",
+			targetId: "t",
+			messages: [
+				{ role: "assistant", stopReason: "toolUse", content: [], usage: {} },
+				{ role: "toolResult", toolName: "ask_user", details: { cancelled: true }, content: [] },
+			] as never,
+			cancelled: false,
+		}).stopReason,
+		"cancelled",
 	);
 });
