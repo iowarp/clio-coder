@@ -1431,7 +1431,7 @@ function cancel(
 	// choice and not a failure, so the rail says it once and nothing follows on
 	// stderr; the closing line used to be chased by `error: configuration cancelled`.
 	if (answers.mode === "first" && options.advise !== false)
-		presenter.commandAdvice("Set up later:", "clio-coder configure");
+		presenter.commandAdvice("Clio cannot start without a model. Set one up when you are ready:", "clio-coder configure");
 	presenter.done("Cancelled; target settings not saved");
 	return answers.mode === "first" || options.quit === true ? 130 : 0;
 }
