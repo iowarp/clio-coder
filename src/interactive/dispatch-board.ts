@@ -60,8 +60,10 @@ import { skinEpoch } from "./theme/tokens.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
+	unknownCallsClause,
 	workerActionParts,
 	workerActivityWords,
+	workerPhaseActivity,
 	workerSilenceWords,
 } from "./worker-activity.js";
 
@@ -506,20 +508,10 @@ function actionPhrase(action: WorkerAction, tense: "running" | "finished"): stri
 
 /** The phase word an expanded card names, or null for a phase that says nothing new. */
 function progressPhaseUnit(theme: ClioTheme, progress: WorkerProgressSnapshot): string | null {
-	switch (progress.phase) {
-		case "thinking":
-			// The phase only. Reasoning content never reaches an operator surface.
-			return theme.fg("dispatchAction", `${GLYPH.phaseThinking} thinking`);
-		case "writing":
-			return theme.fg("dispatchAction", `${GLYPH.phaseWriting} writing`);
-		case "tool":
-			return theme.fg("dispatchAction", `${GLYPH.phaseTool} tool`);
-		case "waiting":
-			return theme.fg("dispatchAction", `${GLYPH.phaseWaiting} waiting`);
-		case "settled":
-		case "starting":
-			return null;
-	}
+	// The phase only, in the words the dock and the inline card use. Reasoning content never reaches an operator surface.
+	if (progress.phase === "settled" || progress.phase === "starting") return null;
+	const [glyph, words] = workerPhaseActivity(progress.phase);
+	return theme.fg("dispatchAction", `${glyph} ${words}`);
 }
 
 /**
@@ -536,8 +528,9 @@ function progressActionLine(
 	const current = progress.currentAction;
 	const recent = progress.recentActions[0];
 	const units: string[] = [];
-	if (phase !== null && current === null) units.push(phase);
 	const silence = workerSilenceWords(progress, { history, room: contentWidth - 22 });
+	// A silence already says what the worker waits on and for how long, so the bare phase would only repeat it.
+	if (phase !== null && current === null && silence === null) units.push(phase);
 	if (silence !== null) units.push(theme.fg("warning", silence));
 	if (progress.awaitingApproval === true && current !== null) {
 		const wanted = workerActionParts(current, "running");
@@ -559,17 +552,13 @@ export function renderDispatchActivity(row: DispatchBoardRow, width: number): st
 	const progress = row.progress;
 	if (!progress) return [];
 	const lines: string[] = [];
-	const phase = {
-		starting: "Starting worker",
-		thinking: "Thinking",
-		writing: "Streaming response",
-		tool: "Executing tool",
-		waiting: "Between tool calls · awaiting next worker event",
-		settled: "Worker output finished",
-	}[progress.phase];
-	lines.push(...wrapTextWithAnsi(`${theme.fg("harnessHeading", "Now")}  ${phase}`, width));
-	if (progress.currentAction)
-		lines.push(...wrapTextWithAnsi(`  → ${actionPhrase(progress.currentAction, "running")}`, width));
+	// The inline card's and the dock's words for the same phase, so the three surfaces never disagree.
+	// A running call is what the worker is doing now; without one, the phase says it.
+	const phase = workerPhaseActivity(progress.phase)[1];
+	const words = progress.currentAction
+		? actionPhrase(progress.currentAction, "running")
+		: `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;
+	lines.push(...wrapTextWithAnsi(`${theme.fg("harnessHeading", "Now")}  ${words}`, width));
 	for (const action of progress.recentActions.slice(0, 3))
 		lines.push(...wrapTextWithAnsi(`${theme.fg("annotation", "Recent")}  ${actionPhrase(action, "finished")}`, width));
 	if (progress.tailText.trim()) {
@@ -824,9 +813,8 @@ function dispatchCardBody(
 	if (row.plan !== undefined) return planCardBody(theme, row, row.plan, contentWidth);
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
-	const rawDetail = terminalDetail(row);
-	// Enter opens the receipt's own words; the folded card leads with the reason.
-	const detail = options.expanded === true ? rawDetail : workerFailureHeadline(rawDetail);
+	// The card says what went wrong in plain words, folded or open; the receipt's own words are the record's, in /view.
+	const detail = workerFailureHeadline(terminalDetail(row));
 
 	const presentation = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
@@ -838,29 +826,50 @@ function dispatchCardBody(
 			? theme.fg("error", `${GLYPH.error} ${presentation.label} · ${failure}`)
 			: `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
-	const ttft = row.ttft ?? (row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a");
+	// How long the model took to its first output, in words: a run that has not answered yet says so, and one that
+	// never reached its model says nothing rather than `n/a`.
+	const firstOutput =
+		row.ttft !== undefined && row.ttft !== null
+			? `first output after ${row.ttft}`
+			: row.status === "running"
+				? "no output yet"
+				: null;
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	// The fold leads with the figures; Enter adds the coverage clause each one was hedged with.
-	const figure = (display: string): string => (options.expanded === true ? display : (compactQuantity(display) ?? "?"));
-	const up = theme.fg("body", `${GLYPH.up} ${figure(usage.prompt)}`);
-	const down = theme.fg(
-		"body",
-		`${GLYPH.down} ${figure(usage.output)}${rate !== null ? (options.expanded === true ? ` (${rate}/s wall avg)` : ` ${rate}/s`) : ""}`,
-	);
-	const total = theme.fg("body", `total ${figure(usage.total)}`);
+	// Figures keep their lower-bound mark and the line states its coverage once, as its last unit, rather than a
+	// `(N calls unknown)` after every figure. A figure nothing measured reads `not measured`, never `?`.
+	const figure = (display: string): string => compactQuantity(display) ?? USAGE_NOT_MEASURED;
+	const tokenDisplays = [usage.prompt, usage.output, usage.total];
+	const nothingMeasured = tokenDisplays.every((display) => compactQuantity(display) === null);
+	const coverage = unknownCallsClause(tokenDisplays);
+	const tokenUnits = nothingMeasured
+		? [theme.fg("body", row.status === "running" || row.status === "enqueued" ? "not measured yet" : USAGE_NOT_MEASURED)]
+		: [
+				theme.fg("body", `${GLYPH.up} ${figure(usage.prompt)}`),
+				theme.fg(
+					"body",
+					`${GLYPH.down} ${figure(usage.output)}${rate !== null ? (options.expanded === true ? ` (${rate}/s wall avg)` : ` ${rate}/s`) : ""}`,
+				),
+				theme.fg("body", `total ${figure(usage.total)}`),
+			];
 
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
 	const targetKey = cardKvKey(theme, "target");
-	const route = `${sanitizeCallTargetText(String(row.runtimeKind))}${dotSep(theme)}${formatTargetLabel(row.targetId, row.wireModelId, { abbreviate: false })}`;
+	// The route is the target and model; the transport family is a record detail Enter adds.
+	const routeLabel = formatTargetLabel(row.targetId, row.wireModelId, { abbreviate: false });
+	const route =
+		options.expanded === true
+			? `${routeLabel}${dotSep(theme)}${sanitizeCallTargetText(String(row.runtimeKind))} runtime`
+			: routeLabel;
 	const targetLine = `${targetKey}${theme.fg("footerIdentity", fitIdentityLabel(route, Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
 	// Fleet facts: node placement (absent means local), gate role badge, and
 	// reroute lineage. Whole units so overflow drops a fact, never clips one.
 	const statusUnits = [
 		statusStr,
-		theme.fg("body", `node ${row.node ?? "local"}`),
+		// A run on this machine is the default and says nothing; one placed on another node names it.
+		...(row.node === undefined || row.node === "local" ? [] : [theme.fg("body", `on node ${row.node}`)]),
 		...(row.endpoint !== undefined
 			? [
 					theme.fg(
@@ -876,8 +885,8 @@ function dispatchCardBody(
 		...(row.failoverHops !== undefined && row.failoverHops > 0
 			? [theme.fg("warning", `failed over x${row.failoverHops}`)]
 			: []),
-		`${theme.fg("annotation", "ttft")} ${theme.fg("body", ttft)}`,
-		`${theme.fg("annotation", "cost")} ${theme.fg("body", cost)}`,
+		...(firstOutput === null ? [] : [theme.fg("body", firstOutput)]),
+		theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`),
 	];
 	const context = row.telemetry?.activity.contextTokens;
 	const contextFigure = context
@@ -989,7 +998,16 @@ function dispatchCardBody(
 		...(options.expanded === true
 			? cardWrappedValueLines(theme, "target", theme.fg("body", route), contentWidth)
 			: [targetLine]),
-		cardUnitsLine(theme, "telemetry", [up, down, total, ...(contextUnit !== null ? [contextUnit] : [])], contentWidth),
+		cardUnitsLine(
+			theme,
+			"tokens",
+			[
+				...tokenUnits,
+				...(contextUnit !== null ? [contextUnit] : []),
+				...(coverage !== null && !nothingMeasured ? [theme.fg("annotation", coverage)] : []),
+			],
+			contentWidth,
+		),
 		...trustCardLines(theme, row, contentWidth, options.expanded === true),
 	);
 	if (row.steerAcknowledgement) {
@@ -1044,9 +1062,9 @@ function dispatchCardBody(
 	return bodyLines;
 }
 
-/** The route as `target/model`, the shape the inline card's header already uses. */
+/** The route as the run's detail card words it, so the dock and the board never name one route two ways. */
 function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">): string {
-	return sanitizeCallTargetText(`${row.targetId}/${row.wireModelId}`);
+	return sanitizeCallTargetText(formatTargetLabel(row.targetId, row.wireModelId, { abbreviate: false }));
 }
 
 /** The most of a worker's name an approval's words give way to on the island, so a long name clips first. */
@@ -1141,14 +1159,19 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	const up = theme.fg("body", `${GLYPH.up} ${compactQuantity(usage.prompt) ?? "?"}`);
-	const down = theme.fg(
-		"body",
-		`${GLYPH.down} ${compactQuantity(usage.output) ?? "?"}${rate !== null ? ` (${rate}/s)` : ""}`,
-	);
+	const upFigure = compactQuantity(usage.prompt);
+	const downFigure = compactQuantity(usage.output);
+	// Nothing counted yet reads as that, once, rather than as two question marks.
+	const tokens =
+		upFigure === null && downFigure === null
+			? theme.fg("body", isTerminalStatus(row.status) ? "tokens not measured" : "tokens not measured yet")
+			: `${theme.fg("body", `${GLYPH.up} ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
+					"body",
+					`${GLYPH.down} ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
+				)}`;
 	const telemetry = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
-		: `  ${up}${dot}${down}${dot}${theme.fg("body", `cost ${cost}`)}`;
+		: `  ${tokens}${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
 	const task = row.taskSummary
 		? wrapTextWithAnsi(row.taskSummary, Math.max(1, width - 2))
 				.slice(0, 3)
@@ -1178,7 +1201,18 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 					),
 				]
 			: []),
-		...wrapTextWithAnsi(theme.fg("annotation", `  /view dispatch:${row.runId}`), width),
+		// A live run's next step is a control, which /fleet holds; a settled one's is its record.
+		...wrapTextWithAnsi(
+			theme.fg(
+				"annotation",
+				isTerminalStatus(row.status)
+					? `  /view dispatch:${row.runId}`
+					: isDispatchBoardRowSteerable(row)
+						? "  /fleet to steer or stop it"
+						: "  /fleet to stop it",
+			),
+			width,
+		),
 	];
 }
 
@@ -1333,7 +1367,7 @@ export interface RunTableOptions {
  */
 function tableFigure(display: string): string {
 	const figure = display.replace(/ \(.*\)$/u, "");
-	return figure === "unknown" ? "?" : figure;
+	return figure === "unknown" ? "—" : figure;
 }
 
 const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
@@ -1920,7 +1954,7 @@ export function formatTaskIslandLines(
 	// Body rows are already ANSI-padded to TASK_ISLAND_WIDTH by the row renderer
 	// (or are fixed-width dividers/empty-state lines). The canonical frame re-pads
 	// each row ANSI-aware, so passing the styled lines through is safe.
-	return frame(clioTheme(), "Fleet runs", body, contentWidth + 4);
+	return frame(clioTheme(), "Fleet Runs", body, contentWidth + 4);
 }
 
 function parseOptionalDetail(value: unknown): string | null {
