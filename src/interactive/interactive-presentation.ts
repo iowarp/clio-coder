@@ -132,6 +132,7 @@ export interface InteractivePresentationDeps {
 	resources?: Pick<ResourcesContract, "skillsForDisplay" | "promptsForDisplay">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
+	recordTurnHumanWait?: (fields: { turnId: string; humanWaitMs: number }) => void;
 	jobs?: Pick<JobOperations, "list" | "subscribe">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
@@ -371,6 +372,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
+		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.
@@ -613,13 +615,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width, identityCells) => {
+		getHarnessStatus: (width, reserved = 0, identityCells) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
+				// Once a request is out the rail names the model it went to, whatever route was picked since.
+				const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
+				const name = modelNickname(out ?? route?.model);
+				const presented = composerPhasePresentation(status, width, Date.now(), name, undefined, reserved, identityCells);
 				return {
-					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), undefined, identityCells),
+					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
+					...presented,
 					...(detail ? { detail } : {}),
 				};
 			}
@@ -638,6 +645,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					lastStop: onRoute ? last.stopReason : null,
 				},
 				width,
+				reserved,
 				identityCells,
 			);
 			if (!detail) return readiness;

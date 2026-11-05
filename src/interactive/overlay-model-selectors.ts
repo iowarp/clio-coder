@@ -33,6 +33,8 @@ export interface OverlayModelSelectorsDeps {
 	/** Settings shows which layer set each value when the host can say. */
 	settingOrigin?: (path: string) => SettingValueOrigin;
 	onSelectModel?: (ref: { target: string; model: string }, scope: ModelScopeChoice) => void;
+	/** A pick made during a turn takes effect on the next one, which the confirmation has to say. */
+	isTurnInFlight?: () => boolean;
 	/** Applied with the chosen scope when the swap named a thinking level. */
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: ModelScopeChoice) => void;
 	/** Settings → Fleet shows live node placement health when the scheduler exposes it. */
@@ -124,13 +126,14 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					deps.refreshFooter();
 					return;
 				}
+				const timing = deps.isTurnInFlight?.() === true ? " · from the next turn" : "";
 				deps.notify(
 					"success",
 					scope === "global"
-						? `active and saved globally: ${swap}`
+						? `active and saved globally: ${swap}${timing}`
 						: scope === "project"
-							? `active and saved for this project: ${swap}`
-							: `active this session: ${swap}`,
+							? `active and saved for this project: ${swap}${timing}`
+							: `active this session: ${swap}${timing}`,
 				);
 				deps.refreshFooter();
 			},

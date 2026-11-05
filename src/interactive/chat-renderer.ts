@@ -67,7 +67,7 @@ import { readWorkerRunResultFactsForReplay } from "../session-control/worker-run
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import { budgetAlertNotice } from "./bus-notices.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
-import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows } from "./command-output.js";
+import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
 import { showsContextResult } from "./context-operation-view.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
@@ -794,6 +794,13 @@ function replayEntries(
 		settledRuns,
 	);
 	const placedAssignments = new Set<string>();
+	// What a settled run spent waiting on the operator, which only the live status clock could measure.
+	const turnHumanWaits = new Map<string, number>();
+	for (const entry of selected) {
+		if (entry.kind !== "custom" || entry.customType !== TURN_HUMAN_WAIT_ENTRY) continue;
+		const { turnId, humanWaitMs } = (entry.data ?? {}) as { turnId?: unknown; humanWaitMs?: unknown };
+		if (typeof turnId === "string" && typeof humanWaitMs === "number") turnHumanWaits.set(turnId, humanWaitMs);
+	}
 	// A run's settle waits for the next operator row or the end of the replay.
 	let pendingSettle: (() => void) | null = null;
 	// An attempt the ledger shows being retried reads as it did live: a turn still underway, not a failed one.
@@ -887,6 +894,8 @@ function replayEntries(
 								...(elapsedMs === undefined ? {} : { elapsedMs }),
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
+							const humanWaitMs = runTurnId === undefined ? undefined : turnHumanWaits.get(runTurnId);
+							if (humanWaitMs !== undefined) replayed.humanWaitMs = humanWaitMs;
 							const messages = runAssistantMessages;
 							const turnId = runTurnId;
 							pendingSettle = () => {

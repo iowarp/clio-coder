@@ -21,6 +21,7 @@ import {
 	GLYPH,
 	joinChips,
 	padAnsi,
+	statusRailLabelRoom,
 	toolFunction,
 } from "../theme/index.js";
 import { type ContextOccupancyFacts, contextUsagePercent } from "./context-rail.js";
@@ -450,23 +451,61 @@ const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 	[ToolNames.AskUser]: "needs input",
 };
 
-/** Room for the activity phrase on the composer rail, after its stretch, lead glyph and a short model name. */
-/** `identityCells` is what the rail spends naming who acts, the short nickname unless a caller knows better. */
-function railActivityRoom(width: number, identityCells: number = width < 60 ? 9 : 14): number {
-	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - identityCells);
+/**
+ * Room for the activity phrase after the lead glyph and an identity. Identity yields first: a narrow rail reserves
+ * nothing for it and shows it only in what the state leaves over, and a wide one holds a short name.
+ */
+function railActivityRoom(width: number, reserved: number, identityCols = width < 60 ? 0 : 7): number {
+	return Math.max(10, statusRailLabelRoom(width) - 2 - identityCols - reserved);
 }
 
-/** Facts in reading order, each with its priority. The lowest priorities leave first and the order never changes. */
-function fitRailFacts(facts: ReadonlyArray<{ text: string | null; keep: number }>, room: number): string {
-	const present = facts.filter((fact): fact is { text: string; keep: number } => fact.text !== null);
-	const join = (rows: ReadonlyArray<{ text: string }>): string => rows.map((row) => row.text).join(" · ");
-	const kept = [...present];
-	while (kept.length > 1 && visibleWidth(join(kept)) > room) {
-		const lowest = kept.slice(1).reduce((worst, fact) => (fact.keep < worst.keep ? fact : worst));
-		kept.splice(kept.indexOf(lowest), 1);
-	}
-	return join(kept);
+/** The name's own cells within what a caller says the rail spends on the lead glyph, the name and their spaces. */
+function identityCols(identityCells: number | undefined): number | undefined {
+	return identityCells === undefined ? undefined : identityCells - 2;
 }
+
+interface RailFact {
+	text: string | null;
+	keep: number;
+	/** What the fact shrinks to before it has to leave. */
+	short?: string;
+}
+
+/** At this priority a fact is the way out, and nothing above it may take its full form at the cost of leaving it out. */
+const RAIL_ACTION_KEEP = 7;
+
+/**
+ * Facts in reading order, each with its priority. The first always stays, the rest claim room from the highest priority
+ * down in their fullest form that fits, and the order never changes.
+ */
+function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number): string {
+	const [head, ...rest] = facts.filter((fact): fact is RailFact & { text: string } => fact.text !== null);
+	if (head === undefined) return "";
+	const cost = (text: string): number => 3 + visibleWidth(text);
+	const ranked = [...rest].sort((a, b) => b.keep - a.keep);
+	const chosen = new Map<RailFact, string>([[head, head.text]]);
+	let used = visibleWidth(head.text);
+	for (const [index, fact] of ranked.entries()) {
+		const owed = ranked
+			.slice(index + 1)
+			.filter((later) => later.keep >= RAIL_ACTION_KEEP)
+			.reduce((sum, later) => sum + cost(later.short ?? later.text), 0);
+		const form = [fact.text, fact.short].find(
+			(text): text is string => text !== undefined && used + cost(text) + owed <= room,
+		);
+		const fallback = fact.short ?? fact.text;
+		const taken = form ?? (used + cost(fallback) <= room ? fallback : undefined);
+		if (taken === undefined) continue;
+		chosen.set(fact, taken);
+		used += cost(taken);
+	}
+	return [head, ...rest].flatMap((fact) => chosen.get(fact) ?? []).join(" · ");
+}
+
+const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc cancels", short: "Esc" };
+const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model switches", short: "/model" };
+/** A route change never reaches a request already out, so during a turn the way to another model runs through Esc. */
+const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model switches", short: "then /model" };
 
 /** Whole seconds, the way a countdown reads: a wait never shows as over before it is. */
 function remainingSeconds(dueAt: number, now: number): number {
@@ -483,11 +522,15 @@ function retryRailLabel(
 	const attempts = `${room >= 22 ? "retrying" : "retry"} ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
 	if (retry?.stage === "attempt") {
 		const from = retry.attemptStartedAt;
+		const tier = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt));
 		return fitRailFacts(
 			[
 				{ text: attempts, keep: 9 },
-				{ text: room >= 44 ? "waiting for a response" : null, keep: 3 },
+				{ text: "waiting for a response", keep: 3 },
 				{ text: from !== undefined ? modelWait(from) : null, keep: 8 },
+				{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
+				{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
+				{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 			],
 			room,
 		);
@@ -496,11 +539,16 @@ function retryRailLabel(
 	return fitRailFacts(
 		[
 			{ text: attempts, keep: 9 },
-			{ text: left === null ? null : room >= 32 ? `next attempt in ${left}s` : `in ${left}s`, keep: 8 },
+			{
+				text: left === null ? null : `next attempt in ${left}s`,
+				...(left === null ? {} : { short: `in ${left}s` }),
+				keep: 8,
+			},
 			{
 				text: retry?.retryAfterMs !== undefined ? `provider asked for ${Math.ceil(retry.retryAfterMs / 1000)}s` : null,
 				keep: 2,
 			},
+			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 		],
 		room,
 	);
@@ -514,12 +562,7 @@ function clockTime(at: number): string {
  * What a silent model wait can truthfully say, escalating with the age of the last evidence. None of it is a cause:
  * no bytes means none arrived, and a target that may be loading or stuck is stated as exactly that much.
  */
-function modelWaitFacts(
-	status: AgentStatus,
-	room: number,
-	now: number,
-	from: number,
-): ReadonlyArray<{ text: string | null; keep: number }> {
+function modelWaitFacts(status: AgentStatus, now: number, from: number): ReadonlyArray<RailFact> {
 	const tier = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt));
 	const request = status.modelRequest;
 	const sent = request && request.sentAt >= from ? request : null;
@@ -532,23 +575,24 @@ function modelWaitFacts(
 					? "no bytes yet"
 					: "no output yet";
 	return [
-		{ text: sent ? `request sent ${clockTime(sent.sentAt)}` : null, keep: 3 },
-		{ text: evidence, keep: 5 },
-		{ text: tier >= 3 ? (room >= 60 ? "target may be loading or stuck" : "may be stuck") : null, keep: 7 },
-		{ text: tier >= 3 ? (room >= 50 ? "/model switches" : "/model") : null, keep: 6 },
-		{ text: tier === 2 ? "Esc cancels" : null, keep: 6 },
+		{ text: sent ? `request sent ${clockTime(sent.sentAt)}` : null, keep: 1 },
+		{ text: evidence, keep: 4 },
+		{ text: tier >= 3 ? "target may be loading or stuck" : null, short: "may be stuck", keep: 5 },
+		{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
+		{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 	];
 }
 
 /** Silence after output has started: the phase is still the last thing observed, and the age of that is the fact. */
-function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<{ text: string | null; keep: number }> {
+function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<RailFact> {
 	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 	const tier = computeWatchdogTier(silentMs);
+	const age = formatCompactMs(Math.floor(silentMs / 1000) * 1000);
 	return [
-		{ text: tier >= 1 ? `no new output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}` : null, keep: 8 },
-		{ text: tier === 2 ? "Esc cancels" : null, keep: 6 },
-		{ text: tier >= 3 ? "may be stuck" : null, keep: 7 },
-		{ text: tier >= 3 ? "/model switches" : null, keep: 6 },
+		{ text: tier >= 1 ? `no new output for ${age}` : null, short: `silent ${age}`, keep: 8 },
+		{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
+		{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
+		{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 	];
 }
 
@@ -575,8 +619,10 @@ function toolActivity(
 	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 	const tier = computeWatchdogTier(silentMs);
 	const full = verb ?? activity?.verb ?? "is running";
-	const lead = room >= 24 ? full : full.replace(/^is /u, "");
-	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9));
+	// Past the first silence the way out is owed its cells, and the name of what is running gives them up.
+	const wayOut = verb === null && tier >= 2 ? 6 : 0;
+	const lead = room - wayOut >= 24 ? full : full.replace(/^is /u, "");
+	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9 - wayOut));
 	const phrase =
 		object === null || span === null
 			? verb !== null
@@ -587,14 +633,14 @@ function toolActivity(
 		[
 			{ text: phrase, keep: 9 },
 			{ text: elapsed === undefined ? null : elapsedFrom(elapsed), keep: 8 },
-			{ text: verb === null && tier >= 2 ? "Esc cancels" : null, keep: 5 },
+			{ ...ESC_CANCELS, text: verb === null && tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
 			// The harness sees a tool's output; a direct shell line's goes straight to its card, so its silence is unknown here.
 			{
 				text:
 					verb === null && tier >= 3 && tool?.operatorShell !== true
 						? `no output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}`
 						: null,
-				keep: 6,
+				keep: 5,
 			},
 			{ text: tool?.operatorShell !== true && modelName ? `requested by ${modelName}` : null, keep: 3 },
 		],
@@ -611,25 +657,27 @@ export function composerPhasePresentation(
 	modelName?: string,
 	/** Room for the words alone, for a surface that draws them without the rail's identity beside them. */
 	labelRoom?: number,
+	reserved = 0,
+	/** What the rail will spend on the lead glyph and a name wider than a nickname, when it knows. */
 	identityCells?: number,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = labelRoom ?? railActivityRoom(width, identityCells);
-	// A tool's actor is a short word rather than a model name, and the room it leaves belongs to the command and its time.
-	const actorWidth = visibleWidth(status.tool?.operatorShell === true ? "your shell" : "Clio");
-	const toolRoom = Math.max(room, width - actorWidth - 4 - (width < 60 ? 9 : 14));
+	const room = labelRoom ?? railActivityRoom(width, reserved, identityCols(identityCells));
+	// A tool's actor is part of the claim, so its rail holds room for the name instead of letting it yield.
+	const toolRoom = labelRoom ?? railActivityRoom(width, reserved, (status.tool?.operatorShell === true ? 10 : 4) + 1);
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
 		return elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsed * 1000);
 	};
-	const waitLabel = (): string => {
+	const quiet = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) >= 3;
+	const waitLabel = (head: string, tight: string): string => {
 		const from = status.waitingSince ?? status.since;
 		return fitRailFacts(
 			[
-				{ text: room >= 50 ? "is waiting for a response" : "is waiting", keep: 9 },
+				{ text: room >= 40 ? head : tight, keep: 9 },
 				{ text: elapsedFrom(from), keep: 8 },
-				...modelWaitFacts(status, room, now, from),
+				...modelWaitFacts(status, now, from),
 			],
 			room,
 		);
@@ -643,7 +691,9 @@ export function composerPhasePresentation(
 			label = "is preparing";
 			break;
 		case "waiting_model":
-			label = waitLabel();
+			// A long wait spends its room on the way out before it spends it on repeating what is awaited.
+			label =
+				room >= (quiet ? 110 : 50) ? waitLabel("is waiting for a response", "waiting") : waitLabel("is waiting", "waiting");
 			break;
 		case "thinking":
 			label = fitRailFacts([{ text: "is thinking", keep: 9 }, ...silentStreamFacts(status, now)], room);
@@ -678,15 +728,28 @@ export function composerPhasePresentation(
 				// Its own process has gone quiet, which is not the model having no output.
 				return { ...phase, ...toolActivity(status, toolRoom, now, null, elapsedFrom, modelName) };
 			}
-			label = fitRailFacts(
-				[
-					{ text: `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`, keep: 9 },
-					{ text: "may be loading or stuck", keep: 3 },
-					{ text: "Esc cancels", keep: 7 },
-					{ text: "/model switches", keep: 8 },
-				],
-				room,
-			);
+			if (status.resumePhase === "retrying" && status.retry) {
+				label = retryRailLabel(status, room, now, elapsedFrom);
+				break;
+			}
+			// The clock keeps counting from where the wait began, so crossing the threshold changes the claim and not the time.
+			if (status.resumePhase === "waiting_model") {
+				label = waitLabel("has no output", "no output");
+				break;
+			}
+			{
+				const silentMs = Math.max(0, now - status.lastMeaningfulAt);
+				label = fitRailFacts(
+					[
+						{ text: room >= 40 ? "has no new output" : "no new output", keep: 9 },
+						{ text: formatCompactMs(Math.floor(silentMs / 1000) * 1000), keep: 8 },
+						{ text: "may be stuck", keep: 4 },
+						{ ...ESC_CANCELS, keep: 7 },
+						{ ...MODEL_AFTER_ESC, keep: 6 },
+					],
+					room,
+				);
+			}
 			break;
 		case "cancelling": {
 			if (status.tool) {
@@ -723,9 +786,13 @@ export function composerPhasePresentation(
 			const short = room < 24;
 			label =
 				stop === "error"
-					? room >= 40
-						? "failed · /model switches"
-						: "failed"
+					? fitRailFacts(
+							[
+								{ text: "failed", keep: 9 },
+								{ ...MODEL_SWITCHES, keep: 8 },
+							],
+							room,
+						)
 					: stop === "generation_guard"
 						? short
 							? "stopped"
@@ -767,10 +834,13 @@ export interface RouteReadinessFacts {
 export function idleReadinessPresentation(
 	facts: RouteReadinessFacts,
 	width: number,
+	reserved = 0,
 	identityCells?: number,
 ): HarnessPhasePresentation {
-	const room = railActivityRoom(width, identityCells);
+	const room = railActivityRoom(width, reserved, identityCols(identityCells));
 	const quiet = { token: "counter" as const, live: false, namesRoute: true };
+	// Nothing here is urgent, so a narrow rail keeps saying which model the next prompt goes to.
+	const calmRoom = railActivityRoom(width, reserved, identityCols(identityCells) ?? 7);
 	if (!facts.available) {
 		const why = facts.reason.trim();
 		return {
@@ -781,7 +851,7 @@ export function idleReadinessPresentation(
 				[
 					{ text: "is unavailable", keep: 9 },
 					{ text: why.length > 0 ? truncateToWidth(why, 36, GLYPH.ellipsis, false) : null, keep: 3 },
-					{ text: "/model switches", keep: 8 },
+					{ ...MODEL_SWITCHES, keep: 8 },
 				],
 				room,
 			),
@@ -795,7 +865,7 @@ export function idleReadinessPresentation(
 			label: fitRailFacts(
 				[
 					{ text: `target ${facts.targetId} is down`, keep: 9 },
-					{ text: "/model switches", keep: 8 },
+					{ ...MODEL_SWITCHES, keep: 8 },
 					{ text: `clio-coder configure --id ${facts.targetId}`, keep: 2 },
 				],
 				room,
@@ -810,7 +880,7 @@ export function idleReadinessPresentation(
 			label: fitRailFacts(
 				[
 					{ text: "last request failed", keep: 9 },
-					{ text: "/model switches", keep: 8 },
+					{ ...MODEL_SWITCHES, keep: 8 },
 				],
 				room,
 			),
@@ -833,7 +903,7 @@ export function idleReadinessPresentation(
 				{ text: known, keep: 9 },
 				{ text: facts.lastStop === null ? "no request yet" : "last request cancelled", keep: 5 },
 			],
-			room,
+			calmRoom,
 		),
 	};
 }

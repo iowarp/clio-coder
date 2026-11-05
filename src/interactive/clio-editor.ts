@@ -30,7 +30,7 @@ import {
 	rule,
 	withThemeContext,
 } from "./theme/index.js";
-import { exactRouteLabel, modelNickname, type TargetIdentity } from "./theme/labels.js";
+import { exactRouteLabel, modelNickname, statusRailLabelRoom, type TargetIdentity } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 
@@ -84,6 +84,8 @@ export interface EditorChrome {
 	/** `identityCells` is what the rail will spend naming the exact route instead of the short nickname. */
 	getHarnessStatus?: (
 		width: number,
+		/** Cells the rail has already given to what sits beside the state. */
+		reserved?: number,
 		identityCells?: number,
 	) => {
 		label: string;
@@ -507,32 +509,6 @@ export class ClioEditor extends Editor {
 		const text = this.getText();
 		const mode = composerMode(this.chrome, text);
 		const rail = this.railState(mode);
-		const status = this.chrome.getHarnessStatus?.(width);
-		const spinner = GLYPH.running;
-		let lead = "";
-		let activity = "";
-		// The state when no name stands in front of it to read `is writing` with.
-		let stateAlone = "";
-		let detail = "";
-		if (mode === "CONFIRM") {
-			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
-			activity = theme.style("decisionCue", "needs approval", { bold: true });
-			stateAlone = activity;
-		} else if (mode === "PREPARING" || mode === "COMPACTING") {
-			lead = theme.fg("harnessAction", spinner);
-			activity = theme.fg("harnessAction", mode === "PREPARING" ? "is preparing" : "is compacting context");
-			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? "preparing" : "compacting context");
-		} else if (status) {
-			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
-			activity = theme.fg(status.token, status.label);
-			stateAlone = theme.fg(status.token, status.label.replace(/^is /u, ""));
-			detail = status.detail ? theme.fg("annotation", status.detail) : "";
-		} else if (mode !== "MESSAGE") {
-			lead = theme.fg("harnessAction", spinner);
-			activity = theme.fg("harnessAction", "is working");
-			stateAlone = theme.fg("harnessAction", "working");
-		}
-		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const steer = this.steerTarget(text);
 		const draftLabel = steer
 			? theme.style(
@@ -547,8 +523,35 @@ export class ClioEditor extends Editor {
 				: "";
 		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
 		const note = this.draftNote(width);
+		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		let suffix = join([position, draftLabel, note ? theme.fg("draftState", note) : ""]);
-		const labelRoom = this.railLabelRoom(width) - (rail.yolo ? 7 : 0) - (suffix ? visibleWidth(suffix) + 3 : 0);
+		const yoloCols = rail.yolo ? 7 : 0;
+		const suffixCols = visibleWidth(suffix) + (suffix ? 3 : 0);
+		const reserved = yoloCols + suffixCols;
+		const status = this.chrome.getHarnessStatus?.(width, reserved);
+		const spinner = GLYPH.running;
+		let lead = "";
+		let activity = "";
+		// The state when no name stands in front of it to read `is writing` with.
+		let stateAlone = "";
+		if (mode === "CONFIRM") {
+			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
+			activity = theme.style("decisionCue", "needs approval", { bold: true });
+			stateAlone = activity;
+		} else if (mode === "PREPARING" || mode === "COMPACTING") {
+			lead = theme.fg("harnessAction", spinner);
+			activity = theme.fg("harnessAction", mode === "PREPARING" ? "is preparing" : "is compacting context");
+			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? "preparing" : "compacting context");
+		} else if (status) {
+			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
+			activity = theme.fg(status.token, status.label);
+			stateAlone = theme.fg(status.token, status.label.replace(/^(?:is|has|was) /u, ""));
+		} else if (mode !== "MESSAGE") {
+			lead = theme.fg("harnessAction", spinner);
+			activity = theme.fg("harnessAction", "is working");
+			stateAlone = theme.fg("harnessAction", "working");
+		}
+		const statusRail = mode !== "CONFIRM" && mode !== "PREPARING" && mode !== "COMPACTING" && status != null;
 		const route = this.chrome.getModelLabel();
 		const nickname = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
 		// The approval cue keeps the rail; a workspace replaces only the identity segment.
@@ -556,46 +559,56 @@ export class ClioEditor extends Editor {
 			mode === "CONFIRM" ? null : (this.chrome.getWorkspaceRail?.(Math.max(4, Math.floor(width / 2))) ?? null);
 		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
 		const actor = mode === "CONFIRM" ? undefined : status?.subject;
+		const nameCap = Math.max(4, Math.min(24, Math.floor(width / 3)));
+		const labelRoom = statusRail ? statusRailLabelRoom(width) : this.railLabelRoom(width);
+		const netRoom = labelRoom - reserved;
 		const separator = theme.fg("border", " · ");
-		const phrased = (state: string): string => [state, detail].filter(Boolean).join(separator);
+		const facts = statusRail ? (status.detail?.split(" · ") ?? []).map((fact) => theme.fg("annotation", fact)) : [];
+		const quietState = status?.live === false && status.glyph === GLYPH.queued;
+		const phrased = (state: string): string => [state, ...facts].filter(Boolean).join(separator);
 		const named = (who: string, state = activity): string =>
-			[lead, theme.fg("activeModelIdentity", who), phrased(state)].filter(Boolean).join(" ");
+			[lead, who && theme.fg("activeModelIdentity", who), phrased(state)].filter(Boolean).join(" ");
 		const pickLabel = (): string => {
 			// Idle and the start of a turn say where the prompt goes, whole. Once the
 			// model answers, what it is doing needs the room and the transcript has the route.
 			const exact = exactRouteLabel(route);
 			const atRouteMoment =
 				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
-			if (actor === undefined && workspace === null && exact !== null && atRouteMoment) {
-				const routed = status ? this.chrome.getHarnessStatus?.(width, visibleWidth(lead) + visibleWidth(exact) + 2) : null;
+			// A narrow rail would pay for the full route with the wait's elapsed, which outranks any name.
+			const routeAffordable = width >= 60 || status?.live !== true;
+			if (actor === undefined && workspace === null && exact !== null && atRouteMoment && routeAffordable) {
+				const routed = status
+					? this.chrome.getHarnessStatus?.(width, reserved, visibleWidth(lead) + visibleWidth(exact) + 2)
+					: null;
 				const candidate = named(exact, routed && mode !== "PREPARING" ? theme.fg(routed.token, routed.label) : activity);
-				if (visibleWidth(candidate) <= labelRoom) return candidate;
+				if (visibleWidth(candidate) <= netRoom) return candidate;
 			}
-			const whole =
-				actor !== undefined
-					? named(
-							truncateToWidth(
-								actor,
-								width < 60 ? 10 : Math.max(4, Math.min(24, Math.floor(width / 3))),
-								GLYPH.ellipsis,
-								false,
-							),
-						)
-					: workspace !== null
-						? [lead, workspace, phrased(activity)].filter(Boolean).join(" ")
-						: named(nickname);
-			if (!activity || visibleWidth(whole) <= labelRoom) return whole;
-			// A name cut to `Judge…` beside a state cut to `target reachab…` says neither, so the name
-			// leaves whole. Facts beside the state then leave from their end, and a quiet state yields
-			// to the work it would otherwise crowd off the rail rather than either being cut mid-word.
-			const facts = status?.detail?.split(" · ").map((fact) => theme.fg("annotation", fact)) ?? [];
-			const quietState = status?.live === false && status.glyph === GLYPH.queued;
+			if (!statusRail) {
+				const whole =
+					actor === undefined && workspace !== null
+						? [lead, workspace, activity].filter(Boolean).join(" ")
+						: named(truncateToWidth(actor ?? nickname, nameCap, GLYPH.ellipsis, false));
+				return !activity || visibleWidth(whole) <= netRoom ? whole : `${lead} ${stateAlone}`;
+			}
+			// Identity is the first thing a state-bearing rail gives up: it takes only what the state and the way out leave over.
+			const spare = netRoom - visibleWidth(lead) - 1 - visibleWidth(phrased(activity)) - 1;
+			if (actor === undefined && workspace !== null && visibleWidth(workspace) <= spare) {
+				return [lead, workspace, phrased(activity)].join(" ");
+			}
+			const who = actor ?? nickname;
+			const nameRoom = Math.min(nameCap, spare);
+			if (visibleWidth(who) <= nameRoom || nameRoom >= 6) {
+				return named(truncateToWidth(who, nameRoom, GLYPH.ellipsis, false));
+			}
+			// With no name in front of it the state reads on its own: `waiting`, not `is waiting`. Facts beside the
+			// state leave whole from their end, and a quiet state yields to the work it would crowd off the rail.
+			const shorter = facts.map((_, index) => facts.slice(0, facts.length - index));
 			const candidates = [
-				...facts.map((_, index) => [stateAlone, ...facts.slice(0, facts.length - index)]),
-				...(quietState ? facts.map((_, index) => facts.slice(0, facts.length - index)) : []),
+				...shorter.map((parts) => [stateAlone, ...parts]),
+				...(quietState ? shorter : []),
 				[stateAlone],
-			].map((parts) => [lead, parts.join(separator)].join(" "));
-			return candidates.find((candidate) => visibleWidth(candidate) <= labelRoom) ?? candidates.at(-1) ?? whole;
+			].map((parts) => `${lead} ${parts.join(separator)}`);
+			return candidates.find((candidate) => visibleWidth(candidate) <= netRoom) ?? `${lead} ${stateAlone}`;
 		};
 		const label = pickLabel();
 		// A draft typed while Clio holds a consumed prompt is accepted and sent in
@@ -606,7 +619,7 @@ export class ClioEditor extends Editor {
 			const room = this.railLabelRoom(width) - (rail.yolo ? 7 : 0);
 			if (visibleWidth(label) + visibleWidth(held) + 3 <= room) suffix = held;
 		}
-		return this.topRail(width, theme, rail, label, suffix);
+		return this.topRail(width, theme, rail, label, suffix, labelRoom);
 	}
 
 	/** The top rail holds harness activity or the active menu's title. */

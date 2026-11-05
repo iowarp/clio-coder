@@ -409,7 +409,13 @@ function stripThinkingFromMessage(message: AssistantMessage): AssistantMessage {
 	delete usage.reasoning;
 	delete usage.reasoningTokens;
 	delete usage.reasoning_tokens;
-	return { ...message, content, usage };
+	// The text leaves but the fact stays: a resumed transcript can then say reasoning happened and was not kept.
+	return {
+		...message,
+		content,
+		usage,
+		...(content.length < message.content.length ? { clioCoderReasoningNotRetained: true } : {}),
+	};
 }
 
 function stripThinkingFromContext(context: Context): Context {

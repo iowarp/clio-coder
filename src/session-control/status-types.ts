@@ -10,6 +10,8 @@ export type { AgentStatusChangedPayload, StatusPhase, WatchdogTier } from "../co
 /** What is known about the outstanding model request, measured at the handoff to the provider. */
 export interface ModelRequestFacts {
 	sentAt: number;
+	/** The model this request went to, which a route change made while it is out does not alter. */
+	modelId?: string | undefined;
 	/** Null until the provider opened a response. */
 	firstByteAt: number | null;
 	/** False on a transport that never reports a response, where "no bytes yet" would claim more than is known. */

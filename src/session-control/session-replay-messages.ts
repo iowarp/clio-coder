@@ -268,6 +268,7 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 			"gatewayRouting",
 			"diagnostics",
 			"contextUsageInvalidated",
+			"clioCoderReasoningNotRetained",
 		]) {
 			if (obj?.[key] !== undefined) message[key] = obj[key];
 		}
