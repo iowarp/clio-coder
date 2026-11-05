@@ -165,6 +165,7 @@ import {
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { coldReasonText } from "./cold-reasons.js";
+import { footerTokens } from "./compaction-lines.js";
 import {
 	DRAFT_MAX_TOKENS,
 	DRAFT_TEMPERATURES,
@@ -4212,6 +4213,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				await paintCompaction();
 				compacted = await context.runAutoCompact(agentRuntime, true, instructions, "force");
 			} catch (err) {
+				if (err instanceof Error && err.name === "AbortError") {
+					// A forced compaction skips every cheaper stage, so a stop before the summary saved left the context as it was.
+					const tokens = context.contextUsage().tokens;
+					emitNotice(
+						`[/context compact] cancelled; context unchanged${tokens !== null ? ` at ${footerTokens(tokens)} tokens` : ""}`,
+					);
+					return;
+				}
 				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
 			} finally {
