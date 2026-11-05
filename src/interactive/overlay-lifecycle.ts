@@ -94,6 +94,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
 	/** Record a dispatched fleet step's plan position for the board's phase column. */
 	setFleetRunPhase?: (runId: string, phase: { wave: number; stepId: string }) => void;
+	fleetPlans?: import("./fleet-plan-runs.js").FleetPlanRuns;
 	chatPanel: import("./chat-panel.js").ChatPanel;
 	/** Clears the transcript and every view folded alongside it; the session overlays call it before a replay. */
 	resetTranscript: () => void;
@@ -563,6 +564,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		isTurnInFlight: () => deps.app.chat.isStreaming(),
 		standingTurnConstraints: () => deps.app.chat.toolLimits?.(),
 		...(deps.setFleetRunPhase ? { setFleetRunPhase: deps.setFleetRunPhase } : {}),
+		...(deps.fleetPlans ? { fleetPlans: deps.fleetPlans } : {}),
 	});
 
 	const openResumeOverlayState = overlaySessions.openResume;

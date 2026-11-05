@@ -27,6 +27,7 @@ import { isHelperRun } from "../session-control/worker-stream.js";
 import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { DOCK_BODY_ROWS_MAX } from "./dock.js";
+import { createFleetPlanRuns, type FleetPlanRuns, type FleetPlanRunView } from "./fleet-plan-runs.js";
 import { centeredWindow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
@@ -154,6 +155,8 @@ export interface DispatchBoardRow {
 	 * board's phase column empty rather than claiming a position it has none of.
 	 */
 	phase?: DispatchBoardPhase;
+	/** Set on the row standing for a whole fleet plan rather than one worker. */
+	plan?: FleetPlanRunView;
 }
 
 /**
@@ -231,6 +234,7 @@ const PHASE_COLUMN_MIN_LABEL_WIDTH = 8;
 /** Live HTTP/SDK rows are the only rows whose runtime can consume operator guidance. */
 export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 	return (
+		row.plan === undefined &&
 		runKindSupportsLiveSteering(row.runtimeKind) &&
 		(row.status === "running" || row.status === "stale" || row.status === "enqueued")
 	);
@@ -238,6 +242,7 @@ export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 
 /** Dispatch abort owns active workers and retry timers, but never terminal history. */
 export function isDispatchBoardRowCancellable(row: DispatchBoardRow): boolean {
+	if (row.plan !== undefined) return false;
 	return row.status === "running" || row.status === "stale" || row.status === "enqueued" || row.status === "retrying";
 }
 
@@ -624,6 +629,81 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...detail];
 }
 
+/** `2/2 steps`, then the first step that failed. Unsettled steps are not counted as anything yet. */
+export function planProgressText(plan: FleetPlanRunView): string {
+	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
+	const failed = plan.steps.find((step) => step.state === "failed");
+	const count = `${plan.state === "running" ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps`;
+	if (plan.failure !== undefined) return `${count} · ${plan.failure}`;
+	return failed === undefined ? count : `${count} · ${failed.stepId} failed`;
+}
+
+const PLAN_STEP_MARKS: Record<
+	FleetPlanRunView["steps"][number]["state"],
+	{ glyph: string; token: ClioToken; word: string }
+> = {
+	pending: { glyph: GLYPH.queued, token: "annotation", word: "not run" },
+	running: { glyph: GLYPH.running, token: "activity", word: "running" },
+	passed: { glyph: GLYPH.ok, token: "success", word: "passed" },
+	failed: { glyph: GLYPH.error, token: "error", word: "failed" },
+	replayed: { glyph: GLYPH.ok, token: "annotation", word: "kept from the earlier run" },
+};
+
+/** One row per step: state first, because the step's name and command are what a narrow row can lose. */
+export function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number): string[] {
+	const nameWidth = Math.max(...plan.steps.map((step) => visibleWidth(step.stepId)));
+	return plan.steps.map((step) => {
+		const mark = PLAN_STEP_MARKS[step.state];
+		// A step still pending at the end was never reached; while the plan runs it is only waiting.
+		const word = step.state === "pending" && plan.state === "running" ? "waiting" : mark.word;
+		const facts = [word, ...(step.detail !== undefined ? [step.detail] : []), step.label];
+		const lead = `${theme.fg(mark.token, mark.glyph)} ${theme.fg("body", step.stepId.padEnd(nameWidth))}  `;
+		return truncateToWidth(
+			`${lead}${theme.fg(mark.token, facts[0] ?? "")}${theme.fg("annotation", facts.length > 1 ? ` · ${facts.slice(1).join(" · ")}` : "")}`,
+			width,
+			GLYPH.ellipsis,
+			false,
+		);
+	});
+}
+
+function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, contentWidth: number): string[] {
+	const presentation = dispatchStatusPresentation(row.status);
+	const units = [
+		`${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`,
+		theme.fg("body", planProgressText(plan)),
+		...(plan.finishedAtMs === null
+			? []
+			: [`${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText ?? "no model calls")}`]),
+	];
+	const gutter = " ".repeat(CARD_KV_KEY_WIDTH + 1);
+	const steps = planStepLines(theme, plan, Math.max(1, contentWidth - gutter.length));
+	return [
+		cardUnitsLine(theme, "status", units, contentWidth),
+		...steps.map((line, index) => `${index === 0 ? cardKvKey(theme, "steps") : gutter}${line}`),
+		...cardWrappedValueLines(
+			theme,
+			"inspect",
+			theme.fg("annotation", `clio-coder fleet events ${plan.rootId}`),
+			contentWidth,
+		),
+	];
+}
+
+/** The transcript's settled record of a plan, in the worker card's gutter grammar. */
+export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): string[] {
+	const theme = clioTheme();
+	const passed = plan.state === "passed";
+	const rail = theme.fg("gutter", "  │ ");
+	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(passed ? "success" : "error", `${passed ? GLYPH.ok : GLYPH.error} ${planProgressText(plan)}`)}`;
+	const room = Math.max(1, width - 4);
+	return [
+		truncateToWidth(head, width, GLYPH.ellipsis, false),
+		...planStepLines(theme, plan, room).map((line) => `${rail}${line}`),
+		`${rail}${theme.fg("annotation", truncateToWidth(`/fleet for detail · cost ${plan.costText ?? "none, no model calls"}`, room, GLYPH.ellipsis, false))}`,
+	];
+}
+
 /**
  * The selected run's facts under the board's table, most useful first: what it
  * is doing, then the task, the route, its telemetry and its provenance. The
@@ -642,6 +722,7 @@ function dispatchCardBody(
 	} = {},
 ): string[] {
 	const theme = options.theme ?? clioTheme();
+	if (row.plan !== undefined) return planCardBody(theme, row, row.plan, contentWidth);
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
 	const rawDetail = terminalDetail(row);
@@ -1059,6 +1140,9 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 
 /** What a run is doing, or how it ended, in one clause the row may clip. */
 function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): TableCell {
+	if (row.plan !== undefined) {
+		return { text: planProgressText(row.plan), ...(row.plan.state === "failed" ? { tone: "error" as const } : {}) };
+	}
 	const task = row.taskSummary ? sanitizeCallTargetText(row.taskSummary) : null;
 	switch (row.status) {
 		case "running":
@@ -1119,7 +1203,7 @@ export function runTableRows(
 	const fixed: TableColumn[] = [
 		...(cursor ? [{ label: "", min: 1, max: 1, priority: 10 }] : []),
 		{ label: "status", priority: 10 },
-		{ label: "agent", priority: 9, max: 22 },
+		{ label: "agent", priority: 9, max: 24 },
 		...(anyPhase ? [{ label: "phase", priority: 2, max: 14, tone: "info" as const }] : []),
 		...(anyNode ? [{ label: "node", priority: 2, max: 12 }] : []),
 		{ label: "elapsed", align: "right" as const, priority: 6, tone: "muted" as const },
@@ -1158,6 +1242,21 @@ export function runTableRows(
 		const elapsed =
 			row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatCompactMs(row.elapsedMs));
 		const pending = row.usage.kind !== "ready";
+		if (row.plan !== undefined) {
+			const cells: Array<string | TableCell> = [];
+			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
+			cells.push(
+				runStatusCell(theme, row, options.tick),
+				`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
+			);
+			if (anyPhase) cells.push("");
+			if (anyNode) cells.push("");
+			// A plan's workers have their own rows, so its row sums nothing a reader could mistake for measured.
+			cells.push(elapsed, "", "", { text: row.plan.costText ?? "no model calls", tone: "muted" });
+			if (anyAccount) cells.push("");
+			cells.push(runActivityCell(theme, row, now));
+			return cells;
+		}
 		const figure = (glyph: string, text: string): TableCell =>
 			pending
 				? { text: USAGE_SHORT[text] ?? text, tone: "muted" }
@@ -1234,6 +1333,7 @@ function rowSignature(row: DispatchBoardRow): string {
 		row.phase ? `${row.phase.wave}/${row.phase.stepId}` : "",
 		row.node ?? "",
 		row.taskSummary?.length ?? 0,
+		row.plan ? row.plan.steps.map((step) => step.state).join(",") : "",
 	].join("|");
 }
 
@@ -1620,6 +1720,25 @@ export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: 
 	return view ? (runUsagesOf(view).get(runId) ?? PENDING) : UNAVAILABLE;
 }
 
+function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
+	return {
+		runId: plan.rootId,
+		agentId: `plan ${plan.name}`,
+		requestOrigin: "user",
+		runtimeKind: "http",
+		runtimeId: "fleet",
+		targetId: "",
+		wireModelId: "",
+		taskSummary: planProgressText(plan),
+		status: plan.state === "running" ? "running" : plan.state === "passed" ? "completed" : "failed",
+		elapsedMs: (plan.finishedAtMs ?? now) - plan.startedAtMs,
+		usage: UNAVAILABLE,
+		ttft: null,
+		lastContextTokens: null,
+		plan,
+	};
+}
+
 /** The board keeps display order and reads every run fact from telemetry; tokens and cost from its read model. */
 export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
@@ -1628,9 +1747,12 @@ export function createDispatchBoardStore(
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
+	/** Plans the session started; their rows join `rows()` but never the worker count in `activeRows()`. */
+	plans: FleetPlanRuns;
 	unsubscribe(): void;
 } {
 	let current = projection.snapshot();
+	const plans = createFleetPlanRuns();
 	const unsubscribe = projection.subscribe((snapshot) => {
 		current = snapshot;
 	});
@@ -1650,7 +1772,16 @@ export function createDispatchBoardStore(
 			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
 	return {
-		rows: () => projectRows(false),
+		plans,
+		rows() {
+			const planRows = plans.runs().map((plan) => fleetPlanRow(plan, Date.now()));
+			if (planRows.length === 0) return projectRows(false);
+			const finishedAt = (row: DispatchBoardRow): number =>
+				row.plan !== undefined ? (row.plan.finishedAtMs ?? Date.now()) : Date.now() - row.elapsedMs;
+			return [...projectRows(false), ...planRows].sort(
+				(a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || finishedAt(b) - finishedAt(a),
+			);
+		},
 		activeRows: () => projectRows(true),
 		reconcile() {
 			projection.reconcileRuns();

@@ -1471,6 +1471,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		terminal,
 		dispatchBoard,
 		setFleetRunPhase: (runId, phase) => dispatchBoardStore.setFleetPhase(runId, phase),
+		fleetPlans: dispatchBoardStore.plans,
 		chatPanel,
 		resetTranscript: adoptExistingConversation,
 		io,

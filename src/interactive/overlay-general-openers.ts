@@ -43,8 +43,13 @@ import type { DraftOutcome } from "../session-control/chat-loop.js";
 import type { ContextClearCommandOptions, FleetRunStartOptions } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
-import type { createDispatchBoardView } from "./dispatch-board.js";
-import { isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
+import {
+	type createDispatchBoardView,
+	isDispatchBoardRowCancellable,
+	isDispatchBoardRowSteerable,
+	renderFleetPlanCard,
+} from "./dispatch-board.js";
+import type { FleetPlanRuns } from "./fleet-plan-runs.js";
 import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
@@ -150,6 +155,7 @@ export interface OverlayGeneralOpenersDeps {
 	standingTurnConstraints?: () => TurnConstraints | undefined;
 	/** Record which wave and step a dispatched run belongs to, for the board's phase column. */
 	setFleetRunPhase?: (runId: string, phase: { wave: number; stepId: string }) => void;
+	fleetPlans?: FleetPlanRuns;
 	/** The shared fleet-run path; overridable so a test can observe one call. */
 	runFleet?: typeof executeFleetRun;
 	/** Contract and command-registry loader; overridable so a test projects a fixture. */
@@ -745,28 +751,36 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			...(turnConstraints !== undefined ? { turnConstraints } : {}),
 			onStepDispatched: (event) => {
 				deps.setFleetRunPhase?.(event.assignmentId, { wave: event.waveIndex, stepId: event.stepId });
+				deps.fleetPlans?.stepDispatched(fleetRootId, event);
 			},
-			onStarted: () =>
+			// Supplying this also stops the runner printing each step as a raw log line.
+			onStepSettled: (outcome) => deps.fleetPlans?.stepSettled(fleetRootId, outcome),
+			onStarted: () => {
+				deps.fleetPlans?.start(fleetRootId, preview);
 				deps.notify(
 					"info",
-					`fleet ${preview.name}: root=${fleetRootId} plan=${preview.plan.hash.slice(0, 12)} steps=${preview.plan.steps.length}; running in the background, a settled notice follows`,
+					`fleet ${preview.name}: ${preview.plan.steps.length} steps running in the background · plan ${preview.plan.hash.slice(0, 12)} · /fleet shows progress`,
 					"fleet-run:started",
-				),
-			onNotice: (text) => deps.stderr(`[fleet ${preview.name}] ${text}\n`),
+				);
+			},
+			onNotice: (text) => deps.stderr(`fleet ${preview.name}: ${text}\n`),
 		};
 		fleetInFlight = { name: preview.name, fleetRootId };
 		void run(args)
 			.then((outcome) => {
 				fleetInFlight = null;
+				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
+				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
 				deps.notify(
 					outcome.cleanRun ? "success" : "warning",
 					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on.
-					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, cost ${renderPricingSum(outcome.totalCost)}`,
+					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
 					"fleet-run:settled",
 				);
 			})
 			.catch((error: unknown) => {
 				fleetInFlight = null;
+				deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
 				if (error instanceof FleetWorkspaceBusyError) {
 					deps.notify("warning", `fleet ${preview.name}: ${error.message}`, "fleet-run:refused");
 					return;

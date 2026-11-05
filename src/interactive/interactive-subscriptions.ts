@@ -85,13 +85,13 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	 */
 	const assignmentOfRun = new Map<string, string>();
 	const helperNotice = (
-		payload: DispatchRunIdentity & { assignmentId?: string; lineage?: { attempt: number } },
+		payload: DispatchRunIdentity & { assignmentId?: string; attempt?: number; lineage?: { attempt: number } },
 		status: "working" | "completed" | "failed",
 	): void => {
 		if (isContextOperationRun(payload)) return;
 		// A failover attempt is stamped internal, but the run it continues may be the operator's own and reports there.
 		if (
-			(payload.lineage?.attempt ?? 0) > 0 &&
+			(payload.lineage?.attempt ?? payload.attempt ?? 0) > 0 &&
 			payload.agentAudience !== "shadow" &&
 			payload.agentAudience !== "internal"
 		) {
