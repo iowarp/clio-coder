@@ -236,7 +236,8 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 			: "Your response records an answer for this interview. It grants no tool authority.";
 	}
 	const tool = facts.tool ?? "the presented tool";
-	const actionClass = facts.actionClass ?? "unknown";
+	// The class reads as words (`system modify`), the way the card's identity row says it.
+	const actionClass = (facts.actionClass ?? "unknown").replace(/_/gu, " ");
 	if (facts.origin.kind === "worker") {
 		return `Approval authorizes this one ${actionClass} call to ${tool}. An identical call in this worker run asks again. Each call still passes the safety net. The autonomy level does not change.`;
 	}
