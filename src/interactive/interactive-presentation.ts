@@ -953,8 +953,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	composerEditor = editor;
+	// The setting the operator chose, not the rail's reading of it: a capability probe landing after launch moved the
+	// label and announced `Think Off` as if someone had changed it (F5).
 	const readSettingState = () => ({
-		thinking: editorChrome.getThinkingLabel(),
+		thinking: deps.getSettings?.()?.chat?.thinkingLevel ?? "off",
 		output: editorChrome.getOutputStyle?.() ?? "standard",
 		autonomy: editorChrome.getAutonomy?.() ?? "default",
 	});
@@ -964,12 +966,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const previous = lastSettingState;
 		lastSettingState = next;
 		const changes: string[] = [];
-		const title = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-		if (next.thinking !== previous.thinking) changes.push(`Think ${title(next.thinking)}`);
+		if (next.thinking !== previous.thinking) changes.push(`Thinking set to ${next.thinking}`);
 		if (next.output !== previous.output)
-			changes.push(`Verbose ${{ compact: "Minimal", standard: "Default", detailed: "Detailed" }[next.output]}`);
+			changes.push(
+				`Transcript detail set to ${{ compact: "minimal", standard: "default", detailed: "detailed" }[next.output]}`,
+			);
 		if (next.autonomy !== previous.autonomy)
-			changes.push(`Autonomy ${next.autonomy === "yolo" ? "YOLO" : title(next.autonomy)}`);
+			changes.push(`Autonomy set to ${next.autonomy === "yolo" ? "YOLO" : next.autonomy}`);
 		if (changes.length)
 			notifications.add({
 				level: "info",
