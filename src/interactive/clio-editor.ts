@@ -548,7 +548,7 @@ export class ClioEditor extends Editor {
 			const atRouteMoment =
 				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
 			if (exact !== null && atRouteMoment) {
-				const routed = status ? this.chrome.getHarnessStatus?.(width, visibleWidth(exact) + 2) : null;
+				const routed = status ? this.chrome.getHarnessStatus?.(width, visibleWidth(lead) + visibleWidth(exact) + 2) : null;
 				const candidate = named(exact, routed && mode !== "PREPARING" ? theme.fg(routed.token, routed.label) : activity);
 				if (visibleWidth(candidate) <= labelRoom) return candidate;
 			}

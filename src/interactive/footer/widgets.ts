@@ -737,7 +737,12 @@ export function composerPhasePresentation(
 			break;
 		}
 	}
-	return { ...phase, label };
+	// A blocker or a silent wait has its own facts to state, and those outrank where the turn was going.
+	const namesRoute =
+		status.phase === "preparing" ||
+		(status.phase === "waiting_model" && computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) < 1) ||
+		(status.phase === "ended" && status.summary?.stopReason !== "error");
+	return { ...phase, label, namesRoute };
 }
 
 /** What the route on screen is known to be able to do right now, in the terms the model picker already uses. */
@@ -760,7 +765,7 @@ export function idleReadinessPresentation(
 	identityCells?: number,
 ): HarnessPhasePresentation {
 	const room = railActivityRoom(width, identityCells);
-	const quiet = { token: "counter" as const, live: false };
+	const quiet = { token: "counter" as const, live: false, namesRoute: true };
 	if (!facts.available) {
 		const why = facts.reason.trim();
 		return {

@@ -585,29 +585,23 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
-				return {
-					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), identityCells),
-					namesRoute: status.phase === "preparing" || status.phase === "waiting_model" || status.phase === "ended",
-				};
+				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), identityCells);
 			}
 			const target = deps.providers.list().find((candidate) => candidate.target.id === route?.target);
 			if (!target || !route?.target) return null;
 			const last = lastTurnSummary;
 			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
-			return {
-				...idleReadinessPresentation(
-					{
-						targetId: route.target,
-						available: target.available,
-						reason: target.reason,
-						health: target.health.status,
-						lastStop: onRoute ? last.stopReason : null,
-					},
-					width,
-					identityCells,
-				),
-				namesRoute: true,
-			};
+			return idleReadinessPresentation(
+				{
+					targetId: route.target,
+					available: target.available,
+					reason: target.reason,
+					health: target.health.status,
+					lastStop: onRoute ? last.stopReason : null,
+				},
+				width,
+				identityCells,
+			);
 		},
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
