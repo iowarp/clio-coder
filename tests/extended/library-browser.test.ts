@@ -121,7 +121,7 @@ function plain(value: string): string {
 
 describe("library browser projection", () => {
 	it("keeps origin, format, trust and availability as separate facts", () => {
-		equal(libraryOriginLabel({ kind: "bundled", catalog: "/x" }), "Bundled with Clio-Coder");
+		equal(libraryOriginLabel({ kind: "bundled", catalog: "/x" }), "Bundled with Clio");
 		equal(libraryOriginLabel({ kind: "remote", url: "https://example/x" }), "Remote");
 		equal(libraryOriginLabel({ kind: "local", path: "/x" }), "Local");
 		equal(libraryOriginLabel({ kind: "imported", agent: "claude-code", path: "/x" }), "Imported from claude-code");
@@ -175,7 +175,7 @@ describe("library browser projection", () => {
 			{ install: false, remove: false, update: false, enable: false },
 		);
 		equal(core.use, true);
-		match(core.reasons.join(" "), /Core components ship with Clio-Coder/);
+		match(core.reasons.join(" "), /Core components ship with Clio/);
 
 		const loose = libraryRowActions(
 			{

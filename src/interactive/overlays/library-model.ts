@@ -100,7 +100,7 @@ interface DetailRows {
 export function libraryOriginLabel(origin: LibraryOrigin): string {
 	switch (origin.kind) {
 		case "bundled":
-			return "Bundled with Clio-Coder";
+			return "Bundled with Clio";
 		case "remote":
 			return "Remote";
 		case "local":
@@ -336,7 +336,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 	if (!owner)
 		reasons.push(
 			resource.source.class === "core"
-				? "Core components ship with Clio-Coder and have no package to install, update or remove."
+				? "Core components ship with Clio and have no package to install, update or remove."
 				: "This file was found directly in a resource root, not installed as a package, so package lifecycle does not apply.",
 		);
 	const selected = owner?.scope === view.scope;
