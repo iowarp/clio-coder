@@ -292,13 +292,14 @@ function selectableRows(state: CompositeTasksOverlayState): TasksOverlaySelectio
 			boardId: state.board?.boardId ?? "",
 			task,
 		})),
+		// Current work first, the agent's and then the operator's own, then what earlier boards and runs left.
+		...state.userTasks.map((task) => ({ kind: "user" as const, task })),
 		...terminalHistoryRows(state.board, state.history).map(({ board, task }) => ({
 			kind: "history" as const,
 			board,
 			task,
 		})),
 		...state.artifacts.map((artifact) => ({ kind: "artifact" as const, artifact })),
-		...state.userTasks.map((task) => ({ kind: "user" as const, task })),
 	];
 }
 
@@ -382,15 +383,36 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		spans.push({ line, start: opensSection ? heading : line, end: lines.length });
 	};
 
+	if (state.userTasks.length === 0)
+		empties.push(collapsedSection("Operator tasks", "none in this project, [a] adds one", width));
+	else openSection("Operator tasks");
+	for (const task of state.userTasks) {
+		const rowSelection: TasksOverlaySelection = { kind: "user", task };
+		const presentation = USER_TASK_PRESENTATION[task.status];
+		pushRow([
+			fitRow(
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
+				width,
+			),
+			...(task.note ? wrapTaskProse(`       ${dim("note")} `, muted(task.note), width) : []),
+		]);
+	}
+
 	const historyRows = terminalHistoryRows(state.board, state.history);
 	if (historyRows.length === 0) empties.push(collapsedSection("Task history", "nothing from earlier boards", width));
 	else openSection("Task history");
+	// Each earlier board's tasks sit under that board's title once, rather than repeating it on every row.
+	let lastBoard: SessionTaskHistoryBoard | null = null;
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
 		const presentation = taskPresentation(row.task);
+		const boardTitle =
+			row.board === lastBoard ? [] : [fitRow(`${SECTION_GUTTER}${theme.fg("menuDescription", row.board.title)}`, width)];
+		lastBoard = row.board;
 		pushRow([
+			...boardTitle,
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`· ${taskStateClause(row.task)} · ${row.board.title}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`· ${taskStateClause(row.task)}`)}`,
 				width,
 			),
 			...taskReceiptRows(row.task, width),
@@ -411,20 +433,6 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		]);
 	}
 
-	if (state.userTasks.length === 0)
-		empties.push(collapsedSection("Operator tasks", "none in this project, [a] adds one", width));
-	else openSection("Operator tasks");
-	for (const task of state.userTasks) {
-		const rowSelection: TasksOverlaySelection = { kind: "user", task };
-		const presentation = USER_TASK_PRESENTATION[task.status];
-		pushRow([
-			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
-				width,
-			),
-			...(task.note ? wrapTaskProse(`       ${dim("note")} `, muted(task.note), width) : []),
-		]);
-	}
 	if (empties.length > 0) {
 		if (lines.length > 0) lines.push("");
 		lines.push(...empties);

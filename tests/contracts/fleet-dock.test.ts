@@ -68,7 +68,7 @@ test("live Fleet runs reserve normal-flow rows and leave transcript words intact
 				stripTerminalSequences(line).trimEnd(),
 			);
 			ok(rows.includes(transcript), `${mode} preserves the transcript sentence: ${JSON.stringify(rows)}`);
-			const start = rows.findIndex((row) => row.includes("Fleet runs"));
+			const start = rows.findIndex((row) => row.includes("Fleet Runs"));
 			ok(start > rows.indexOf(transcript));
 			ok(start < rows.indexOf("composer"));
 			for (const row of rows) ok(visibleWidth(row) <= width, row);
@@ -83,7 +83,7 @@ test("live Fleet runs reserve normal-flow rows and leave transcript words intact
 			live = true;
 		}
 	}
-	match(fleet.render(80).map(stripTerminalSequences).join("\n"), /Fleet runs/);
+	match(fleet.render(80).map(stripTerminalSequences).join("\n"), /Fleet Runs/);
 });
 
 test("a live run is never drawn by a transcript-covering ticker overlay (BT-007)", () => {
@@ -109,7 +109,7 @@ test("a live run is never drawn by a transcript-covering ticker overlay (BT-007)
 	try {
 		ticker.renderTaskIsland();
 		for (const overlay of overlays)
-			ok(!overlay.render(144).some((line) => stripTerminalSequences(line).includes("Fleet runs")));
+			ok(!overlay.render(144).some((line) => stripTerminalSequences(line).includes("Fleet Runs")));
 	} finally {
 		ticker.dispose();
 	}

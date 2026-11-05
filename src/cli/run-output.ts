@@ -1,5 +1,6 @@
 import { parseJsonObjectPayload, parseVerifierPayload } from "../core/json-payload.js";
 import { renderFactField } from "../core/telemetry/render.js";
+import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { holdCutOffText, redactUrlCredentials } from "../domains/safety/redaction.js";
@@ -151,8 +152,11 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 			? `\nNot verified:\n${limitations.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
 			: "";
 	// The one exit for a headless answer, whichever of the streamed, last or sealed text it came from (#446).
+	// A person reading the run learns what went wrong in words before the machine line repeats the record's own detail.
+	const headline = receipt.exitCode !== 0 ? workerFailureHeadline(receipt.failureMessage) : null;
+	const failed = headline === null ? "" : `\nFailed: ${headline}\n`;
 	return redactUrlCredentials(
-		`${answer.length > 0 ? `${answer}\n` : ""}${block}${formatResultLine(receipt, limitations.length)}\n`,
+		`${answer.length > 0 ? `${answer}\n` : ""}${block}${failed}${formatResultLine(receipt, limitations.length)}\n`,
 	);
 }
 

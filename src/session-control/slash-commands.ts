@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mcpCommandOutput } from "../cli/mcp.js";
 import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
@@ -447,9 +448,13 @@ async function runAttributed(
 			// A cancel removes an idle worktree but keeps one holding work, which nothing else on screen says.
 			const changed = receipt.worktree?.changedPaths?.length ?? 0;
 			const kept =
-				changed > 0 && receipt.worktree !== undefined
-					? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} in its worktree on branch ${receipt.worktree.branch}`
-					: "";
+				receipt.worktree === undefined
+					? ""
+					: changed > 0
+						? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} in its worktree on branch ${receipt.worktree.branch}`
+						: existsSync(receipt.worktree.path)
+							? ` · its worktree stays on branch ${receipt.worktree.branch}`
+							: " · its worktree held no changes and was removed";
 			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${kept} · ${view}`);
 		} else if (receipt.outcome === "stalled") {
 			notice("error", `${request.agentId} ${STALLED_RUN_HEADLINE} · ${view}`);
