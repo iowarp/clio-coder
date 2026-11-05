@@ -40,6 +40,7 @@ export const TIMELINE_KINDS: Readonly<Record<TimelineEntry["kind"], string>> = {
 	context: "Context",
 	"system-one": "System One",
 	"worker-channel": "Worker channel",
+	message: "Message",
 };
 
 const words = (value: string) => value.replaceAll("_", " ").replaceAll("-", " ");
@@ -219,6 +220,19 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 						value: `${words(route.outcome)}${route.roundTrip ? ` in ${route.roundTrip.display}` : ""}${route.breaker ? `, breaker ${route.breaker}` : ""}`,
 						factRef: null,
 					})),
+				],
+			};
+		case "message":
+			return {
+				title: `Message ${words(entry.step)}${entry.lane ? ` as ${words(entry.lane)}` : ""}`,
+				tone: entry.step === "removed" && entry.reason === "cancelled" ? "warn" : "neutral",
+				details: [
+					...said("Message", entry.messageId),
+					...shown("Since submit", entry.sinceSubmit),
+					...said("Slot", entry.slot && words(entry.slot)),
+					...said("Why", entry.why && words(entry.why)),
+					...said("Reason", entry.reason && words(entry.reason)),
+					...said("Call", entry.callId),
 				],
 			};
 		case "worker-channel":

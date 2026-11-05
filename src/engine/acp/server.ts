@@ -6594,6 +6594,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				// text at the head of the steering queue instead, with a notice.
 				const run = options.chat.submit(taken.text, {
 					steering: "interrupt",
+					continuesMessage: { id: taken.id, enqueuedAt: taken.enqueuedAt },
 					...(taken.display !== undefined ? { display: taken.display } : {}),
 					...(taken.referencedPaths !== undefined && taken.referencedPaths.length > 0
 						? { workingContextPaths: [...taken.referencedPaths] }

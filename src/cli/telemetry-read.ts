@@ -291,6 +291,55 @@ function printCache(dto: CacheReportV1): string {
 	return `${lines.join("\n")}\n`;
 }
 
+const MESSAGE_SLOT_WORDS = {
+	"finish-turn": "at the end of a turn",
+	"prepare-next-turn": "after the next turn was prepared",
+	prompt: "with a new prompt",
+} as const;
+const MESSAGE_WAIT_WORDS = {
+	"operator-stop": "an operator stop",
+	interrupt: "an interrupt",
+	"prompt-not-started": "a prompt that never started",
+	"session-move": "a session move",
+	"run-cancelled": "a cancelled run",
+} as const;
+const MESSAGE_REMOVAL_WORDS = {
+	removed: "removed by the operator",
+	"sent-now": "taken off the queue to send now",
+	"to-editor": "moved back to the composer",
+	restored: "restored to the composer",
+	cancelled: "dropped unsent",
+	resubmitted: "taken off the queue to send as a fresh prompt",
+	"not-started": "dropped because its prompt never started",
+} as const;
+
+function messageStepWords(entry: Extract<TimelineV1["entries"][number], { kind: "message" }>): string {
+	const since = entry.sinceSubmit.display;
+	const lane = entry.lane === "follow-up" ? "a follow-up" : entry.lane === "steer" ? "a steer" : "a prompt";
+	const byMachine = entry.by === "machine" ? " from a peer" : "";
+	switch (entry.step) {
+		case "submitted":
+		case "queued":
+			return `${entry.step === "queued" ? "queued" : "submitted"} as ${lane}${byMachine} · ${entry.chars?.display ?? "?"} chars`;
+		case "lane-changed":
+			return `changed to ${lane} by ${entry.changedBy ?? "unknown"} · ${since} after submit`;
+		case "held":
+			return `held by ${entry.why ? MESSAGE_WAIT_WORDS[entry.why] : "unknown"} · ${since} after submit`;
+		case "released":
+			return `released by a new prompt · ${since} after submit`;
+		case "handed-over":
+			return entry.lane === "prompt"
+				? `handed to the engine as a prompt · ${since} after submit`
+				: `handed over as ${lane} ${entry.slot ? MESSAGE_SLOT_WORDS[entry.slot] : ""} · ${since} after submit`;
+		case "returned":
+			return `returned to the queue by ${entry.why ? MESSAGE_WAIT_WORDS[entry.why] : "unknown"} · ${since} after submit`;
+		case "carried":
+			return `carried by ${entry.callId} attempt ${entry.attempt} (${entry.callDisposition}${entry.callFailure ? `, ${entry.callFailure}` : ""}) · ${since} after submit`;
+		default:
+			return `${entry.reason ? MESSAGE_REMOVAL_WORDS[entry.reason] : "removed"} · ${since} after submit`;
+	}
+}
+
 function printTimeline(dto: TimelineV1): string {
 	const lines = dto.entries.map((entry) => {
 		switch (entry.kind) {
@@ -326,6 +375,8 @@ function printTimeline(dto: TimelineV1): string {
 				return `${entry.at}  context  ${entry.source} · window ${entry.window.effective} (${entry.window.source})${entry.estimated ? ` · estimated ${entry.estimated.display}` : ""}${entry.reconciled ? ` · provider ${entry.reconciled.display}` : ""}`;
 			case "system-one":
 				return `${entry.at}  s1       ${entry.point} ${entry.outcome} · ${entry.latency.display} of ${entry.deadline.display}${entry.routes.some((route) => route.breaker) ? ` · breaker ${entry.routes.flatMap((route) => (route.breaker ? [`${route.engine} ${route.breaker}`] : [])).join(", ")}` : ""}`;
+			case "message":
+				return `${entry.at}  message  ${entry.messageId} ${messageStepWords(entry)}`;
 			case "worker-channel":
 				return `${entry.at}  channel  ${entry.runId} ${entry.lane} ${entry.failure}${entry.frameType ? ` on ${entry.frameType}` : ""}${entry.errno ? ` (${entry.errno})` : ""}${entry.afterExit ? " after exit" : ""}`;
 			default:

@@ -173,6 +173,7 @@ import {
 	runDraftWithSamplerFallback,
 } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
+import { createMessagePath } from "./message-path.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
@@ -506,6 +507,8 @@ export interface ChatSubmitOptions {
 	steering?: SteeringMode;
 	/** This prompt is an entry taken off the queue: it returns to the head if the prompt never starts (#447). */
 	queued?: QueuedChatMessage;
+	/** This prompt is a message taken off the queue by a path that does not return it; its recorded path continues. */
+	continuesMessage?: Pick<QueuedChatMessage, "id" | "enqueuedAt">;
 	/** Carry the rest of the queue with this prompt's first model call, instead of at its first slot. */
 	flushQueue?: boolean;
 	/**
@@ -1345,6 +1348,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let operatorSpokeAt = 0;
 	// The session whose run the queue was typed behind; a reset within it keeps the operator's entries (#447).
 	let queueSessionId: string | null = null;
+	const messagePath = createMessagePath({
+		sessionId: () => deps.session?.current()?.id ?? null,
+		turnId: () => state.activeUserTurnId ?? state.lastTurnId ?? null,
+	});
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
@@ -1373,6 +1380,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		submit: (text, options) => submitTracked(text, options),
 		onEvent: (event) => {
 			if (event.type === "delivered") operatorSpokeAt = Date.now();
+			messagePath.queueEvent(event);
 		},
 	});
 
@@ -1669,6 +1677,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		retrySettings,
 		sessionId: () => deps.session?.current()?.id,
 		sessionOrigin: () => deps.session?.current() ?? null,
+		onModelRequestSent: (call) => messagePath.requestSent(call),
+		onModelCallSettled: (facts) => messagePath.callSettled(facts),
 		...(deps.admitFlow !== undefined ? { admitFlow: deps.admitFlow } : {}),
 		emit: emitRuntimeEvent,
 		emitNotice,
@@ -2413,6 +2423,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(`[Clio Coder] triage read "${preview}" as a stop; interrupting the run to deliver it now.`, "warning");
 				void submitTracked(taken.text, {
 					steering: "interrupt",
+					continuesMessage: { id: taken.id, enqueuedAt: taken.enqueuedAt },
 					...(taken.display ? { display: taken.display } : {}),
 					...(taken.referencedPaths && taken.referencedPaths.length > 0
 						? { workingContextPaths: taken.referencedPaths }
@@ -2466,6 +2477,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			const submittedAt = performance.now();
+			const submittedWallAt = Date.now();
+			const continuedMessage = options.queued ?? options.continuesMessage;
 			let interrupted = false;
 			if (state.streaming) {
 				if (options.machineTurn !== undefined) return;
@@ -2548,8 +2561,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								? queues.queueFollowUp(text, options.display, {
 										referencedPaths,
 										...(options.origin !== undefined ? { origin: options.origin } : {}),
+										...(continuedMessage ? { continues: continuedMessage } : {}),
 									})
-								: queues.steer(text, options.display, { front, referencedPaths });
+								: queues.steer(text, options.display, {
+										front,
+										referencedPaths,
+										...(continuedMessage ? { continues: continuedMessage } : {}),
+									});
 						if (entry !== null) scheduleTriage();
 						return;
 					}
@@ -2562,6 +2580,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			submitOwner?.abort();
 			submitOwner = owner;
 			if (options.flushQueue === true) queues.flushOnNextPrompt();
+			// A continuation or a machine turn is Clio's own and no message anyone sent.
+			const pathMessage =
+				options.requestContinuation === true || options.yoloContinuation === true || options.machineTurn !== undefined
+					? null
+					: {
+							id: continuedMessage?.id ?? `prompt_${randomUUID().slice(0, 8)}`,
+							submittedAt: continuedMessage?.enqueuedAt ?? submittedWallAt,
+						};
+			if (pathMessage && !continuedMessage)
+				messagePath.submitted(pathMessage, {
+					chars: text.length,
+					by: options.origin === undefined ? "operator" : "machine",
+					wallMs: submittedWallAt,
+					mono: submittedAt,
+				});
 			let turnLease: TelemetrySessionLease | undefined;
 			try {
 				await sessionResetSettlement;
@@ -3130,6 +3163,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// prompt's first model call; a held queue waits for the first slot.
 						promptStarted = true;
 						queueSessionId = api.getSessionId();
+						if (pathMessage) messagePath.prompted(pathMessage);
 						queues.handOverBeforePrompt(agentRuntime.agent, {
 							keepOperatorHold:
 								options.machineTurn !== undefined || options.origin !== undefined || options.requestContinuation === true,
@@ -3423,6 +3457,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} finally {
 				void turnLease?.release();
 				returnUnstarted();
+				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
 					submitOwner = null;
 					// Template bounds end with their turn; prewarm and jobs see only

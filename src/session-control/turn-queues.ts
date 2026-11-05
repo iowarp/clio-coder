@@ -74,15 +74,29 @@ export type QueueDeliveryPoint = "finish-turn" | "prepare-next-turn" | "prompt";
  * site's reading by the entry id. `waitedMs` is the time it spent queued.
  */
 export type QueueEvent =
+	| { type: "queued"; entry: QueuedChatMessage }
 	| { type: "delivered"; entry: QueuedChatMessage; point: QueueDeliveryPoint; waitedMs: number }
 	| { type: "removed"; entry: QueuedChatMessage; reason: QueueRemovalReason; waitedMs: number }
-	| { type: "relabeled"; entry: QueuedChatMessage; by: "operator" | "producer" };
+	| { type: "relabeled"; entry: QueuedChatMessage; by: "operator" | "producer" }
+	| { type: "held"; entry: QueuedChatMessage; why: QueueHoldReason }
+	| { type: "released"; entry: QueuedChatMessage }
+	/** Handed to the engine and never injected: it is back in Clio's queue. */
+	| { type: "returned"; entry: QueuedChatMessage; why: QueueReturnReason }
+	/** The engine put it in the run's messages, so the next request carries it. */
+	| { type: "injected"; entry: QueuedChatMessage };
+
+/** What put a queue on hold. */
+export type QueueHoldReason = "operator-stop" | "interrupt" | "prompt-not-started" | "session-move";
+/** What brought an entry back after a hand-over. */
+export type QueueReturnReason = "run-cancelled" | "prompt-not-started" | "session-move";
 
 export interface QueueEnqueueOptions {
 	front?: boolean;
 	/** Machine provenance; see {@link QueuedChatMessage.origin}. */
 	origin?: string;
 	referencedPaths?: ReadonlyArray<string>;
+	/** This entry is a message already taken off the queue, such as a send-now the run refused: it keeps its identity. */
+	continues?: Pick<QueuedChatMessage, "id" | "enqueuedAt">;
 }
 
 export interface QueuedMessagesSnapshot {
@@ -220,6 +234,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	// Typed after the operator stop, while the run was still dying. It answers the
 	// stop instead of preceding it, so the settle sends it (#447).
 	let typedAfterStop = new WeakSet<QueuedChatMessage>();
+	// Entries a hold was already reported for, so a second Esc reports nothing new and a release knows what it frees.
+	let reportedHeld = new WeakSet<QueuedChatMessage>();
 	let announcedHeld = 0;
 	let flushNext = false;
 
@@ -250,10 +266,10 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		// Unique across sessions: the id is the join key between the steer site's
 		// reading of this entry and the outcome rows written when it leaves.
 		const entry: QueuedChatMessage = {
-			id: `steer_${randomUUID().slice(0, 8)}_${sequence}`,
+			id: options?.continues?.id ?? `steer_${randomUUID().slice(0, 8)}_${sequence}`,
 			text,
 			kind,
-			enqueuedAt: now(),
+			enqueuedAt: options?.continues?.enqueuedAt ?? now(),
 			...(display ? { display } : {}),
 			...(paths.length > 0 ? { referencedPaths: [...paths] } : {}),
 			...(options?.origin !== undefined ? { origin: options.origin, pinned: true } : {}),
@@ -263,6 +279,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		if (options?.front === true) queue.unshift(entry);
 		else queue.push(entry);
 		emitQueueUpdate();
+		report({ type: "queued", entry: { ...entry } });
 		return { ...entry };
 	};
 
@@ -299,6 +316,21 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		const texts = entries.map((entry) => entry.text);
 		if (deps.emitQueueDropped) deps.emitQueueDropped(texts);
 		else deps.emitNotice(`[Clio Coder] the session changed; not sent: ${texts.join(" | ")}`);
+	};
+
+	const reportHeld = (why: QueueHoldReason): void => {
+		for (const entry of queue) {
+			if (reportedHeld.has(entry)) continue;
+			reportedHeld.add(entry);
+			report({ type: "held", entry: { ...entry }, why });
+		}
+	};
+	const reportReleased = (): void => {
+		for (const entry of queue) if (reportedHeld.has(entry)) report({ type: "released", entry: { ...entry } });
+		reportedHeld = new WeakSet();
+	};
+	const reportReturned = (entries: ReadonlyArray<QueuedChatMessage>, why: QueueReturnReason): void => {
+		for (const entry of entries) report({ type: "returned", entry: { ...entry }, why });
 	};
 
 	const find = (id: string): number => queue.findIndex((entry) => entry.id === id);
@@ -399,6 +431,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		handOverBeforePrompt(agent, options) {
 			if (heldFor !== "operator" || options?.keepOperatorHold !== true) {
+				if (heldFor !== null) reportReleased();
 				heldFor = null;
 				announcedHeld = 0;
 			}
@@ -412,6 +445,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		onRunCancelled({ hold, preserve = false, settle = false }) {
 			const changed = inFlight.length > 0 || queue.length > 0;
+			reportReturned(inFlight, "run-cancelled");
 			queue.unshift(...inFlight.splice(0, inFlight.length));
 			if (!hold && !preserve) {
 				const machine = queue.filter(fromMachine);
@@ -419,12 +453,15 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				retire(machine, "the run was cancelled");
 			}
 			// Preservation must not clear an interrupt or a stop that already owns the queue (#411).
-			if (hold) heldFor = queue.length > 0 ? "interrupt" : null;
-			else if (!preserve && !settle) {
+			if (hold) {
+				heldFor = queue.length > 0 ? "interrupt" : null;
+				reportHeld("interrupt");
+			} else if (!preserve && !settle) {
 				// Armed even with an empty queue: what arrives while the run dies must not
 				// reach a hand-over, and the settle clears an arm that caught nothing.
 				heldFor = queue.length > 0 || state.streaming ? "operator" : null;
 				typedAfterStop = new WeakSet();
+				reportHeld("operator-stop");
 			}
 			state.runtime?.agent.clearAllQueues();
 			if (changed) emitQueueUpdate();
@@ -433,6 +470,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			queue.unshift(entry);
 			flushNext = false;
 			emitQueueUpdate();
+			reportReturned([entry], "prompt-not-started");
 		},
 		reportDropped,
 		settleSubmit(promptStarted) {
@@ -440,12 +478,15 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				heldFor = "operator";
 				// Whatever was said before, this attempt failed: say where the queue stands again.
 				announcedHeld = 0;
+				reportHeld("prompt-not-started");
 			}
 			if (queue.length === 0) {
 				if (heldFor === "operator") heldFor = null;
 				announcedHeld = 0;
 				return;
 			}
+			// A message typed behind a stop that stayed held was not in the queue when the stop was reported.
+			if (heldFor === "operator") reportHeld("operator-stop");
 			// A count already announced stays quiet: a second Esc or a job's settle adds nothing.
 			if (heldFor !== "operator" || announcedHeld === queue.length) return;
 			announcedHeld = queue.length;
@@ -482,7 +523,10 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			}
 			// The engine just injected this message into the run: this is the
 			// moment it moves from the queue panel into the transcript.
-			if (entry) deps.emitQueuedUserTurn({ ...entry });
+			if (entry) {
+				deps.emitQueuedUserTurn({ ...entry });
+				report({ type: "injected", entry: { ...entry } });
+			}
 			return entry ?? null;
 		},
 		/**
@@ -536,6 +580,11 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			retire(unsent.filter(fromMachine), "the session was reset");
 			const operator = unsent.filter((entry) => !fromMachine(entry));
 			if (options?.keepOperator !== true) reportDropped(operator);
+			else
+				reportReturned(
+					inFlight.filter((entry) => !fromMachine(entry)),
+					"session-move",
+				);
 			queue.length = 0;
 			inFlight.length = 0;
 			persistedUserEchoes.length = 0;
@@ -544,6 +593,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 				queue.push(...operator);
 				heldFor = "operator";
 				typedAfterStop = new WeakSet();
+				reportHeld("session-move");
 			} else announcedHeld = 0;
 			flushNext = false;
 			emitQueueUpdate();

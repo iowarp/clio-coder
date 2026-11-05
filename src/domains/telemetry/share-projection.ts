@@ -454,6 +454,12 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		...keep("trigger", "attempted", "outcome", "writerPid", "updatedAtBefore", "updatedAtAfter", "durationMs"),
 		provider: "runtime",
 	},
+	"message.stepped": {
+		...keep("step", "submittedAt", "by", "chars", "lane", "changedBy", "why", "slot", "reason", "attempt"),
+		messageId: "id",
+		callId: "id",
+		attemptId: "id",
+	},
 	"middleware.fired": { ...keep("hook", "phase", "effects", "severity", "evidence"), ruleId: "name", tool: "tool" },
 	"system_one.decided": {
 		...keep("outcome", "latencyMs", "deadlineMs", "asked", "abstained", "callIds"),

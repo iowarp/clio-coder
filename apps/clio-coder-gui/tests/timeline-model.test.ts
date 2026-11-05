@@ -152,5 +152,5 @@ test("the timeline pages newest first, says how many earlier rows a page left ou
 	assert.equal(gaps.rows.length, 2);
 	assert.equal(gaps.earlier, 0);
 	assert.deepEqual(timelineKinds(rows), ["Model call", "Turn", "Session", "Journal gap", "Context"]);
-	assert.equal(Object.keys(TIMELINE_KINDS).length, 16);
+	assert.equal(Object.keys(TIMELINE_KINDS).length, 17);
 });
