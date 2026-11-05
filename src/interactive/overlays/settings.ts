@@ -76,7 +76,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
-import { backOutOneLayer, type EscapeLayers, innermostEscapeLayer } from "../escape-layers.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry, innermostEscapeLayer } from "../escape-layers.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import {
@@ -3043,8 +3043,11 @@ function sectionCount(section: SettingsCenterSection, whole: SettingsCenterSecti
 	const filtered = whole !== section;
 	if (section.id === "targets") {
 		const count = whole.items.filter((item) => item.targetConsole !== undefined).length;
-		const size = `${count} ${count === 1 ? "connection" : "connections"}`;
-		return filtered ? `${size} · ${matches} ${matches === 1 ? "match" : "matches"}` : size;
+		const noun = count === 1 ? "connection" : "connections";
+		// An action row such as Add a target is not a connection, so a filter that
+		// finds only the action reads `0 of 2 connections` above it.
+		const shown = section.items.filter((item) => item.targetConsole !== undefined).length;
+		return filtered ? `${shown} of ${count} ${noun}` : `${count} ${noun}`;
 	}
 	const count = whole.items.filter((item) => item.presentationKind !== "group-header").length;
 	const noun = count === 1 ? "setting" : "settings";
@@ -3258,6 +3261,7 @@ export class SettingsCenter implements Component {
 		return [
 			this.filterDraft !== null && {
 				verb: "cancel filter",
+				short: "cancel",
 				back: () => {
 					this.filterDraft = null;
 					this.options.requestRender?.();
@@ -3265,6 +3269,7 @@ export class SettingsCenter implements Component {
 			},
 			submenu !== null && {
 				verb: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "back to list",
+				short: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "to list",
 				back: () => {
 					// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
 					if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
@@ -3274,6 +3279,7 @@ export class SettingsCenter implements Component {
 			},
 			this.filterQuery.length > 0 && {
 				verb: "clear filter",
+				short: "clear filter",
 				back: () => {
 					this.filterQuery = "";
 					this.normalizeSelection();
@@ -3283,12 +3289,13 @@ export class SettingsCenter implements Component {
 			this.level === "rows" &&
 				this.sections().length > 0 && {
 					verb: "back to sections",
+					short: "to sections",
 					back: () => {
 						this.level = "sections";
 						done();
 					},
 				},
-			{ verb: "close settings", back: () => this.options.onCancel() },
+			{ verb: "close settings", short: "close", back: () => this.options.onCancel() },
 		];
 	}
 
@@ -3318,9 +3325,9 @@ export class SettingsCenter implements Component {
 	 * nothing, and lose Tab first at 108 columns, the one key that changes lanes.
 	 */
 	railHint(innerWidth: number): string {
-		const verb = this.escapeVerb();
-		// The destination keeps its words on a narrow rail; `back` alone would not say which level.
-		const esc: HintEntry = { key: "Esc", verb };
+		// The destination keeps its words on a narrow rail (`to sections`, never a bare `back`), and the
+		// short spelling leaves a 40-column rail room for the key that opens the row.
+		const esc: HintEntry = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: this.escapeVerb() };
 		const owner = this.keyOwner();
 		if (owner === "submenu") return buildResponsiveHint([], esc)(innerWidth);
 		if (owner === "filter") {
@@ -3752,7 +3759,7 @@ export class SettingsCenter implements Component {
 		return {
 			sectionLabel: section.label,
 			sectionDescription: SETTINGS_SECTION_DESCRIPTIONS[section.id],
-			position: `${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
+			position: `section ${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
 			counts: { label: this.sectionCount(section), changed: selectable.filter((entry) => isModified(entry)).length },
 			item,
 			...(fullValue === null ? {} : { fullValue }),
@@ -4025,9 +4032,27 @@ export class SettingsCenter implements Component {
 		const visible = Math.max(1, height - 1);
 		const [start] = centeredWindow(lines.length, starts[selected] ?? 0, visible);
 		const window = lines.slice(start, start + visible);
+		// The count is of the rows a cursor can land on, the same thing the section's
+		// title counts: lines would add the group headings, so a title of 12 settings
+		// sat over `1–10 of 13 rows`.
+		const ordinals = section.items.flatMap((item, index) =>
+			this.isSelectableRow(item) && item.id !== "targets" ? [starts[index] ?? 0] : [],
+		);
+		const shown = ordinals.flatMap((line, ordinal) =>
+			line >= start && line < start + window.length ? [ordinal + 1] : [],
+		);
 		return [
 			...window,
-			renderRowsPosition(theme, { start: start + 1, end: start + window.length, total: lines.length }, width),
+			renderRowsPosition(
+				theme,
+				{
+					start: shown[0] ?? 0,
+					end: shown.at(-1) ?? 0,
+					total: ordinals.length,
+					unit: section.id === "targets" ? "rows" : "settings",
+				},
+				width,
+			),
 		];
 	}
 
@@ -4066,12 +4091,16 @@ export class SettingsCenter implements Component {
 			if (item) trail.push(item.label);
 		}
 		const query = this.filterQuery.trim();
+		// The page's own size, in the words its position row uses. A bare `1/12` here
+		// was the section's index and read as a count of the settings below it.
 		const meta =
 			query.length > 0
 				? `/${query}`
-				: section
-					? `${sections.findIndex((entry) => entry.id === section.id) + 1}/${sections.length}`
-					: "";
+				: this.level === "sections" && !this.submenuComponent
+					? `${sections.length} sections`
+					: section && !this.submenuComponent
+						? this.sectionCount(section)
+						: "";
 		return titleRow(theme, trail.join(" › "), width, meta.length > 0 ? { meta } : {});
 	}
 
@@ -4081,8 +4110,17 @@ export class SettingsCenter implements Component {
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = centeredWindow(rows.length, selectedLine, height);
-		return fitRows(renderSectionLane(clioTheme(), rows.slice(start, end), width), width, height);
+		if (rows.length <= height) return fitRows(renderSectionLane(clioTheme(), rows, width), width, height);
+		// A list longer than its rows says how much is below it, the way the rows page does.
+		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, height - 1));
+		return fitRows(
+			[
+				...renderSectionLane(clioTheme(), rows.slice(start, end), width),
+				renderRowsPosition(clioTheme(), { start: start + 1, end, total: rows.length, unit: "sections" }, width),
+			],
+			width,
+			height,
+		);
 	}
 
 	private renderRowsPage(width: number, height: number): string[] {

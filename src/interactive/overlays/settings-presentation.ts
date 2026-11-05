@@ -423,7 +423,8 @@ export function renderTargetTable(
 	for (const item of items) {
 		starts.push(lines.length);
 		if (item.id === "targets") {
-			lines.push(...table.slice(0, 2));
+			// Column names over no connection would read as the action row's columns.
+			if (targets.length > 0) lines.push(...table.slice(0, 2));
 			continue;
 		}
 		if (item.targetConsole) {
@@ -681,8 +682,8 @@ function pinNote(body: ReadonlyArray<string>, note: ReadonlyArray<string>, width
 /** The `3–9 of 14 rows` line a windowed rows lane ends on. */
 export function renderRowsPosition(
 	theme: ClioTheme,
-	position: { start: number; end: number; total: number },
+	position: { start: number; end: number; total: number; unit?: string },
 	width: number,
 ): string {
-	return positionRow(theme, { ...position, unit: "rows" }, width);
+	return positionRow(theme, { ...position, unit: position.unit ?? "rows" }, width);
 }
