@@ -1084,6 +1084,9 @@ export class ClioEditor extends Editor {
 				this.reopenSuggestions();
 				return;
 			}
+		} else if (acceptsSuggestion && this.isShowingAutocomplete() && this.selectedSuggestion()?.disabledReason) {
+			// A row that refuses keeps the list and the reason under it. Closing would strand a partial `/co` on the composer.
+			return;
 		} else this.suggestionsAreStale();
 		const killsText = KILL_ACTIONS.some((action) => keybindings.matches(data, action));
 		const closesSuggestions =
