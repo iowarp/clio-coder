@@ -722,8 +722,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (deps.transitions.state !== "closed") return;
 		if (fleetInFlight !== null) {
 			deps.notify(
-				"warning",
-				`fleet ${fleetInFlight.name} is still running, so /fleet run is refused until it settles. /fleet shows its progress`,
+				"info",
+				`fleet ${fleetInFlight.name} is still running; start another once it settles · /fleet`,
 				"fleet-run:in-flight",
 			);
 			return;
@@ -819,8 +819,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.then((outcome) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
-				// A stop asked for from the board is over once the plan is; its notice must not surface after this one.
-				for (const key of progressNoticeKeys(fleetRootId)) deps.dismissNotification?.(key);
+				// A stop asked for from the board, and a refusal that said this plan runs, are over once it settles.
+				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
 				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
 				if (plan?.state === "cancelled") {
@@ -841,8 +841,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.catch((error: unknown) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
-				// A stop asked for from the board is over once the plan is; its notice must not surface after this one.
-				for (const key of progressNoticeKeys(fleetRootId)) deps.dismissNotification?.(key);
+				// A stop asked for from the board, and a refusal that said this plan runs, are over once it settles.
+				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const failed = deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
 				if (failed?.state === "cancelled") {
 					deps.stderr(`${renderFleetPlanCard(failed, deps.terminal.columns).join("\n")}\n`);
