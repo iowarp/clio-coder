@@ -26,7 +26,14 @@ import {
 	thinkingEffectNote,
 } from "../../domains/providers/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import { fuzzyFilter, getKeybindings, Input, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	fuzzyFilter,
+	getKeybindings,
+	Input,
+	matchesKey,
+	stripTerminalSequences,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
 import {
 	buildResponsiveHint,
@@ -38,13 +45,13 @@ import {
 	showClioOverlayFrame,
 	windowRows,
 } from "../overlay-frame.js";
-import type { ClioToken, StatusKind, TableCell, TableColumn } from "../theme/index.js";
+import type { ClioToken, Fact, StatusKind, TableCell, TableColumn } from "../theme/index.js";
 import {
 	chip,
 	chipRow,
 	clioTheme,
-	dotSep,
 	emptyState,
+	factRows,
 	fitIdentityLabel,
 	GLYPH,
 	padAnsi,
@@ -405,7 +412,7 @@ function buildSummary(rows: ReadonlyArray<ModelRow>, targets: number, activeRef:
 function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: ProvidersContract }): ModelItemsResult {
 	const activeTarget = deps.settings.chat?.target?.trim() ?? "";
 	const activeModel = deps.settings.chat?.model?.trim() ?? "";
-	const activeRef = activeTarget && activeModel ? `${activeTarget}/${activeModel}` : activeTarget;
+	const activeRef = activeTarget && activeModel ? modelRefWords(activeTarget, activeModel) : activeTarget;
 	const favoriteSet = new Set(deps.settings.chat.modelPicker?.favorites ?? []);
 	const recentSet = new Set(listRecentModels({ limit: deps.settings.chat.modelPicker?.recentLimit ?? 12 }));
 	const list = [...deps.providers.list()]
@@ -653,7 +660,11 @@ function modelTableLines(rows: ReadonlyArray<ModelRow>, selectedIndex: number, w
 			: theme.fg("menuOption", label, row.selectable ? "normal" : "disabled");
 		return [
 			`${pointer} ${activeMark(row)} ${model}`,
-			theme.fg(row.context === "-" || row.context === "?" ? "unknownValue" : "counter", row.context),
+			// The column is headed ctx, so its cells are bare counts: `128k`, or `?` for unknown.
+			theme.fg(
+				row.context === "-" || row.context === "?" || row.context === "?ctx" ? "unknownValue" : "counter",
+				row.context.replace(/ctx$/u, ""),
+			),
 			{ text: row.badges, tone: "muted" },
 			...(layout.showState ? [row.residency ? theme.fg(RESIDENCY_TONES[row.residency], row.residency) : ""] : []),
 			...(layout.showTarget ? [theme.fg("modelIdentity", row.target)] : []),
@@ -672,23 +683,6 @@ function capabilityNames(caps: CapabilityFlags): string {
 	if (caps.rerank) names.push("rerank");
 	if (caps.fim) names.push("fim");
 	return names.length > 0 ? names.join(", ") : "none";
-}
-
-function sourceLabel(source: ModelSource): string {
-	switch (source) {
-		case "configured":
-			return "configured";
-		case "live":
-			return "live probe";
-		case "cache":
-			return "cached list";
-		case "catalog":
-			return "catalog";
-		case "default":
-			return "target default";
-		default:
-			return "no model ids";
-	}
 }
 
 function healthStatus(row: ModelRow): StatusKind {
@@ -713,14 +707,13 @@ function healthStatus(row: ModelRow): StatusKind {
  */
 function formatModelDetail(row: ModelRow, width: number, maxRows: number): string[] {
 	const theme = clioTheme();
-	const ref = row.model.length > 0 ? `${row.target}/${row.model}` : row.target;
 	const tags: string[] = [];
-	if (row.active) tags.push("current");
+	if (row.active) tags.push("in use");
+	if (row.defaultModel) tags.push("its connection's default");
+	if (row.scoped) tags.push("in the model cycle");
 	if (row.favorite) tags.push("favorite");
-	if (row.recent) tags.push("recent");
-	if (row.scoped) tags.push("scoped");
-	if (row.defaultModel) tags.push("default");
-	const state = tags.length > 0 ? tags.join("+") : row.selectable ? "candidate" : "not selectable";
+	if (row.recent) tags.push("used recently");
+	const state = tags.length > 0 ? tags.join(", ") : row.selectable ? "not in use" : "cannot be picked";
 	const availability = row.available ? row.healthText : `${row.healthText}; ${row.reason || "unavailable"}`;
 	const residency = modelResidencySentence(row.residency ?? null, row.model, row.target);
 	// Residency reads as its own line in its own tone, above the facts that give way first.
@@ -731,35 +724,56 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 					width,
 				).slice(0, 2)
 			: [];
-	const loadState =
-		residency === null && row.loadState
-			? `state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
-			: null;
-	const facts = [
-		`source ${row.sourceNote ?? sourceLabel(row.source)}`,
-		loadState,
-		row.runtimeName,
-		row.apiFamily,
-		`max output ${row.maxTokens}`,
-		`thinking ${row.thinking ?? "-"}${row.thinkingNote ? ` (${row.thinkingNote}, your setting is kept)` : ""}`,
-		`streaming ${row.streaming === false ? "no" : "yes"}`,
-		`image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"}`,
-		capabilityNames(row.caps),
-	].filter((fact): fact is string => fact !== null);
-	// Severity colors the way the targets hub colors it, through the shared mapping.
-	// The thinking fact above already says what runs and why, so its codes do not repeat it in jargon.
-	const diagnostics = (row.diagnostics ?? [])
-		.filter((entry) => entry.severity !== "info" && !entry.code.startsWith("thinking-"))
+	// Severity colors the way the targets hub colors it, through the shared mapping. The thinking
+	// fact already says what runs and why, and an unknown context window is the context fact's own
+	// value, so neither repeats as a diagnostic.
+	const shown = (row.diagnostics ?? []).filter((entry) => entry.severity !== "info");
+	const contextNote = shown.find((entry) => entry.code === CONTEXT_UNVERIFIED_CODE);
+	const diagnostics = shown
+		.filter((entry) => entry !== contextNote && !entry.code.startsWith("thinking-"))
 		.slice(0, 2)
-		.map((entry) => {
+		.flatMap((entry) => {
 			const token = diagnosticSeverityToken(entry.severity);
-			return theme.fg(
-				token,
-				`${token === "error" ? GLYPH.error : GLYPH.warn} ${formatRuntimeResolutionDiagnostic(entry)}`,
+			return capWrapped(
+				wrapTextWithAnsi(theme.fg(token, `${token === "error" ? GLYPH.error : GLYPH.warn} ${entry.message}`), width),
+				2,
 			);
-		})
-		.flatMap((line) => wrapTextWithAnsi(line, width).slice(0, 1));
-	const factLines = wrapTextWithAnsi(facts.map((fact) => chip(theme, fact, "muted")).join(dotSep(theme)), width);
+		});
+	const known = (value: string): boolean => value !== "?" && value !== "-" && value.length > 0;
+	const context = row.context.replace(/ctx$/u, "");
+	// In the order a switch is decided on: how much the model holds, how it thinks, what it can do.
+	const facts: Fact[] = [
+		known(context)
+			? { label: "context", value: `${context} tokens` }
+			: {
+					label: "context",
+					// The diagnostic's own sentence took three rows at 60 columns and pushed thinking off the card.
+					value: contextNote ? "unknown, so Clio compacts at its token budget; clio-coder configure can set it" : "unknown",
+					tone: contextNote ? "warning" : "muted",
+				},
+		{
+			label: "thinking",
+			value: `${row.thinking ?? "not reported"}${row.thinkingNote ? `; ${row.thinkingNote}, your setting is kept` : ""}`,
+		},
+		{ label: "can use", value: capabilityNames(row.caps) },
+		{
+			label: "replies",
+			value: [
+				known(row.maxTokens) ? `up to ${row.maxTokens} tokens` : "no reported length limit",
+				row.streaming === false ? "whole, not streamed" : "streamed",
+				acceptsImageInput({ vision: row.caps.vision }) ? "takes images" : "text only",
+			].join(" · "),
+		},
+		...(residency === null && row.loadState
+			? [{ label: "state", value: `${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}` }]
+			: []),
+		{ label: "runtime", value: `${row.runtimeName} · ${row.sourceNote ?? modelListWords(row.source)}` },
+	];
+	const factLines = factRows(
+		theme,
+		facts.map((fact) => ({ ...fact, tone: fact.tone ?? "muted" })),
+		width,
+	);
 	// A route that cannot answer says what to do about it before any fact about the route.
 	const unreachable = !row.available || healthStatus(row) === "error";
 	const next = unreachable
@@ -775,16 +789,15 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		1,
 		Math.min(factLines.length, maxRows - 1 - next.length - residencyLines.length - diagnostics.length),
 	);
-	const kept = factLines.slice(0, factBudget);
-	const last = kept.at(-1);
-	if (factLines.length > kept.length && last !== undefined) kept[kept.length - 1] = `${last}${GLYPH.ellipsis}`;
+	const kept = capWrapped(factLines, factBudget);
 	return [
 		chipRow(
 			theme,
 			[
 				statusChip(theme, healthStatus(row), availability),
-				theme.fg("annotation", `${state} ${ref}`),
-				chip(theme, `auth ${row.authText}`, "muted"),
+				// The table row above names the model and its connection; this says what it is to you.
+				theme.fg("annotation", state),
+				chip(theme, authWords(row.authText), "muted"),
 			],
 			width,
 		),
@@ -793,6 +806,70 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		...kept,
 		...diagnostics,
 	];
+}
+
+/** The diagnostic an unknown context window raises; the detail's context fact carries its sentence instead. */
+const CONTEXT_UNVERIFIED_CODE = "context-window-unverified";
+
+/** At most `max` rows, the last closing on an ellipsis when rows were cut. */
+function capWrapped(rows: ReadonlyArray<string>, max: number): string[] {
+	if (rows.length <= max) return [...rows];
+	const kept = rows.slice(0, Math.max(1, max));
+	const last = kept.at(-1);
+	if (last !== undefined && !stripTerminalSequences(last).trimEnd().endsWith(GLYPH.ellipsis))
+		kept[kept.length - 1] = `${last}${GLYPH.ellipsis}`;
+	return kept;
+}
+
+/** A connection and its model the way the composer names them: `mock · mock/judge-model`, never `mock/mock/judge-model`. */
+export function modelRefWords(target: string, model: string): string {
+	return model.length > 0 ? `${target} · ${model}` : target;
+}
+
+/** Where the picker's list of this connection's models came from, in words. */
+function modelListWords(source: ModelSource): string {
+	switch (source) {
+		case "configured":
+			return "models listed in settings";
+		case "live":
+			return "models listed by the server just now";
+		case "cache":
+			return "models from a cached list";
+		case "catalog":
+			return "models from Clio's catalog";
+		case "default":
+			return "only the connection's default model";
+		default:
+			return "no model ids";
+	}
+}
+
+/** The credential a connection uses, in words. */
+function authWords(authText: string): string {
+	const [source = "", detail] = authText.split(":");
+	switch (source) {
+		case "not required":
+		case "not-required":
+		case "none":
+			return "no sign-in needed";
+		case "disconnected":
+			return "not signed in";
+		case "unknown":
+			return "sign-in unknown";
+		case "env":
+		case "environment":
+			return detail ? `key from ${detail}` : "key from the environment";
+		case "stored-api-key":
+			return "saved API key";
+		case "stored-oauth":
+			return "signed in through the browser";
+		case "runtime-override":
+			return "key set for this run";
+		case "fallback":
+			return "fallback credential";
+		default:
+			return detail ? `${source} (${detail})` : source;
+	}
 }
 
 /**
@@ -897,7 +974,7 @@ function renderModelOverlayLines(input: {
 			theme,
 			[
 				chip(theme, mode, "accent"),
-				chip(theme, `${selectableFiltered}/${input.summary.totalModels} models`, "muted"),
+				chip(theme, `${selectableFiltered} of ${input.summary.totalModels} models`, "muted"),
 				chip(theme, `${input.summary.targets} targets`, "muted"),
 				chip(theme, `${input.summary.localModels} local`, "muted"),
 				chip(theme, `${input.summary.cloudModels} cloud`, "muted"),
@@ -953,10 +1030,14 @@ function renderModelOverlayLines(input: {
 			);
 		}
 	}
-	lines.push("");
+	// With no budget known yet the detail renders whole, the way every other windowed body does. A short
+	// dock gives the detail what the table leaves and cuts it with a mark, rather than overfilling the frame
+	// and losing the rows below the table to the frame's own cut.
+	const spare = bodyRows > 0 ? bodyRows - lines.length : Number.POSITIVE_INFINITY;
+	if (spare >= 3) lines.push("");
 	if (selected) {
-		const spare = bodyRows > 0 ? bodyRows - lines.length : detail.length;
-		if (spare > detail.length) detail = formatModelDetail(selected, width, spare);
+		const room = Math.max(1, spare >= 3 ? spare - 1 : spare);
+		detail = capWrapped(formatModelDetail(selected, width, room), room);
 		lines.push(...detail);
 	} else lines.push(theme.fg("menuDescription", "no selected model"));
 	return lines.map((line) => padAnsi(line, width, GLYPH.ellipsis));
