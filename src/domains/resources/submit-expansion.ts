@@ -49,10 +49,37 @@ function shortAttachmentPath(filePath: string, cwd: string): string {
 	return filePath;
 }
 
-function attachmentNote(paths: ReadonlyArray<string>, cwd: string): string {
-	const shown = paths.slice(0, ATTACHMENT_NOTE_LIMIT).map((filePath) => shortAttachmentPath(filePath, cwd));
-	const more = paths.length - shown.length;
-	return `attached ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+/**
+ * What the transcript says about the files a request named. A file whose bytes
+ * went to the model is "attached"; a large or binary one went by name only,
+ * and calling that attached let the operator believe the model had read it.
+ * A file that could not be read is said too, since nothing else would say it.
+ */
+function attachmentNote(
+	paths: ReadonlyArray<string>,
+	diagnostics: ReadonlyArray<{ type: string; message: string; path?: string }>,
+	cwd: string,
+): string | undefined {
+	const named = new Map(
+		diagnostics.flatMap((item) => (item.type === "warning" && item.path ? [[item.path, item.message] as const] : [])),
+	);
+	const inlined = paths.filter((filePath) => !named.has(filePath));
+	const byName = paths.filter((filePath) => named.has(filePath));
+	const unreadable = diagnostics.filter((item) => item.type === "error" && item.path);
+	const parts: string[] = [];
+	if (inlined.length > 0) {
+		const shown = inlined.slice(0, ATTACHMENT_NOTE_LIMIT).map((filePath) => shortAttachmentPath(filePath, cwd));
+		const more = inlined.length - shown.length;
+		parts.push(`attached ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`);
+	}
+	for (const filePath of byName.slice(0, ATTACHMENT_NOTE_LIMIT))
+		parts.push(
+			`sent ${shortAttachmentPath(filePath, cwd)} by name only: ${named.get(filePath)}, so Clio reads it in parts with its tools`,
+		);
+	if (byName.length > ATTACHMENT_NOTE_LIMIT) parts.push(`${byName.length - ATTACHMENT_NOTE_LIMIT} more by name only`);
+	for (const item of unreadable.slice(0, ATTACHMENT_NOTE_LIMIT))
+		parts.push(`could not attach ${shortAttachmentPath(item.path ?? "", cwd)}: ${item.message}`);
+	return parts.length > 0 ? parts.join("; ") : undefined;
 }
 
 export interface SubmitExpansionOptions {
@@ -93,8 +120,7 @@ export async function expandSubmitText(
 		...(signal ? { signal } : {}),
 		...(onExtract ? { onExtract: (filePath: string) => onExtract(shortAttachmentPath(filePath, cwd)) } : {}),
 	});
-	const attached =
-		fileExpansion.referencedPaths.length > 0 ? attachmentNote(fileExpansion.referencedPaths, cwd) : undefined;
+	const attached = attachmentNote(fileExpansion.referencedPaths, fileExpansion.diagnostics, cwd);
 	const display = promptExpansion?.expanded
 		? {
 				text: parsed.text.trim(),
