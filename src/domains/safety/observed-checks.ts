@@ -80,7 +80,7 @@ function workWindowStart(entries: ReadonlyArray<unknown>, boardId: string, taskI
 		new Map(
 			(Array.isArray(entry.subgoals) ? entry.subgoals : []).flatMap((goal) => {
 				const item = record(goal);
-				return item ? [[item.id, item.status] as const] : [];
+				return item && typeof item.id === "string" ? [[item.id, item.status] as const] : [];
 			}),
 		);
 	const sameStatuses = (left: Map<string, unknown>, right: Map<string, unknown>): boolean =>

@@ -52,7 +52,7 @@ import { buildFooterDashboard } from "./footer/dashboard.js";
 import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
-import { composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
+import { activeTaskRail, composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
@@ -602,6 +602,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
+		getTaskRail: (room) => {
+			const board = deps.getTaskBoard?.();
+			if (!board) return null;
+			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
+			return activeTaskRail(clioTheme(), board, room, status.phase !== "idle" && status.phase !== "ended");
+		},
 		getModelLabel: () => {
 			const current = deps.getSettings?.();
 			// Keep raw fields separate through the terminal-lease proxy until render knows its width.

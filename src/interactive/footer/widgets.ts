@@ -1,5 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -316,6 +317,26 @@ export function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): stri
 	const active = board.tasks.find((task) => task.status === "active");
 	if (!active) return null;
 	return `${theme.fg("activity", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("counter", active.title)}`;
+}
+
+/** The active task on the composer rail: its id and as much of its title as the leftover room holds. */
+export function activeTaskRail(
+	theme: ClioTheme,
+	board: TaskBoardSnapshot,
+	room: number,
+	running: boolean,
+): string | null {
+	const active = board.tasks.find((task) => task.status === "active");
+	if (!active) return null;
+	const lead = `${GLYPH.running} ${active.id} `;
+	const title = truncateToWidth(
+		sanitizeCallTargetText(active.title),
+		Math.max(1, room - visibleWidth(lead)),
+		GLYPH.ellipsis,
+		false,
+	);
+	// Active on the board is not running: with the agent stopped the task keeps its place and loses the live ink.
+	return `${theme.fg(running ? "activity" : "annotation", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("menuDescription", title)}`;
 }
 
 /**

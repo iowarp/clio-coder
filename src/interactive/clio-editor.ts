@@ -78,6 +78,8 @@ export interface EditorChrome {
 	getModelLabel: () => TargetIdentity | string;
 	/** Effective label plus whether the model actually has an effort range. */
 	getThinkingLabel: () => string;
+	/** The board's active task for the rail, fitted to `room`; null when no task is active. */
+	getTaskRail?: (room: number) => string | null;
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[]; note?: string };
@@ -176,6 +178,9 @@ const THINKING_BRAINS: Readonly<Record<string, number>> = {
 const THINKING_BRAIN_SLOTS = 4;
 
 /** Four static marks; textual fallback preserves exact state when graphics cannot. */
+/** Under this the current task's title is a stub, and the rail says nothing rather than half a name. */
+const TASK_RAIL_MIN_ROOM = 20;
+
 function thinkingRailHint(
 	theme: ClioTheme,
 	thinking: ReturnType<NonNullable<EditorChrome["getThinking"]>>,
@@ -636,7 +641,10 @@ export class ClioEditor extends Editor {
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
-		const left = loop ? `${theme.fg(rail.tone ?? "composerRail", "━")} ${loop}` : "";
+		// The current task takes only what the rail's state left over, and an active loop outranks it.
+		const task = !loop && loopRoom >= TASK_RAIL_MIN_ROOM ? this.chrome.getTaskRail?.(loopRoom) : null;
+		const leftText = loop ?? task;
+		const left = leftText ? `${theme.fg(rail.tone ?? "composerRail", "━")} ${leftText}` : "";
 		return renderEditorRail(theme, width, { left, leftRaw: true, right: hint, rightRaw: true }, rail);
 	}
 
