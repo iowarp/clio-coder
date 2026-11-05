@@ -450,9 +450,9 @@ function applyMutation(
 		const notes: string[] = [];
 		const replacedOpen = board ? taskBoardCounts(board).open - retained.length : 0;
 		if (board && replacedOpen > 0) {
-			notes.push(`replaced board "${board.title}" with ${replacedOpen} agent task(s) still open`);
+			notes.push(`replaced board "${board.title}" with ${replacedOpen} agent ${replacedOpen === 1 ? "task" : "tasks"} still open`);
 		}
-		if (retained.length > 0) notes.push(`preserved ${retained.length} open operator task(s)`);
+		if (retained.length > 0) notes.push(`preserved ${retained.length} open operator ${retained.length === 1 ? "task" : "tasks"}`);
 		const start = nextTaskId(retained);
 		return {
 			board: {

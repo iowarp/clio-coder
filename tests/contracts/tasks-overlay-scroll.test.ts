@@ -95,7 +95,7 @@ test("the docked board never cuts a section it cannot reach (BT-015)", () => {
 	const board = mount();
 	const first = board.render();
 	doesNotMatch(first.join("\n"), /more rows/u, "the frame never has to cut the board");
-	match(first.join("\n"), /\d+–\d+ of \d+ rows/u, "an overflowing board says where the window is");
+	match(first.join("\n"), /tasks \d+(?:–\d+)? of \d+ · PgUp/u, "an overflowing board says where the window is");
 	match(first.slice(0, 2).join("\n"), /Divide rounding/u, "the board opens at its top");
 
 	// Paging down reaches the end, and every row of the whole board was on screen once.
@@ -163,7 +163,7 @@ test("a board that fits renders whole, with no position row and no page hint (BT
 	const small: TaskBoardSnapshot = { ...BOARD, tasks: BOARD.tasks.slice(3) };
 	const board = mount(small, USER_TASKS.slice(1));
 	const screen = board.render();
-	doesNotMatch(screen.join("\n"), /of \d+ rows/u);
+	doesNotMatch(screen.join("\n"), /tasks \d+(?:–\d+)? of \d+/u);
 	match(screen.join("\n"), /Operator tasks/u);
 	doesNotMatch(board.frame.dockHint(200) ?? "", /PgUp/u);
 	const large = mount();

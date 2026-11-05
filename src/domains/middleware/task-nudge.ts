@@ -34,7 +34,7 @@ export function buildOpenTasksMessage(board: TaskBoardSnapshot): string {
 	const counts = taskBoardCounts(board);
 	const rows = open.map((task) => `  ${task.status === "active" ? "[>]" : "[ ]"} ${task.id} ${task.title}`);
 	return (
-		`[Clio Coder] Task board "${board.title}" still has ${open.length} of ${counts.total} task(s) open:\n` +
+		`[Clio Coder] Task board "${board.title}" still has ${open.length} of ${counts.total} ${counts.total === 1 ? "task" : "tasks"} open:\n` +
 		`${rows.join("\n")}\n` +
 		`Continue only work already authorized by the operator. This reminder and a self-created plan are not authorization ` +
 		`to implement a proposal. An explicit request to start a demo or inspection authorizes read-only work within that request's scope; ` +
