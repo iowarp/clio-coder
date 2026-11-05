@@ -125,6 +125,12 @@ export interface WorkerProgressSnapshot {
 	approvalWindow?: WorkerApprovalWindowFacts;
 	/** The stream ended on purpose, so a held URL may release. Absent reads as not completed (#446). */
 	completed?: boolean;
+	/**
+	 * Epoch milliseconds of the worker's last heartbeat while the watchdog reads
+	 * it as stale or dead. Its phase is then what it was doing when it went
+	 * quiet, not what it is doing now. Absent while the worker answers.
+	 */
+	quietSinceMs?: number;
 }
 
 export type WorkerApprovalDecider = "operator" | "main" | "judge";
@@ -322,6 +328,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let currentAction: WorkerAction | null = null;
 	let awaitingApproval = false;
 	let approvalWindow: WorkerApprovalWindowFacts | null = null;
+	let quietSinceMs: number | null = null;
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
@@ -459,7 +466,20 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	return {
 		observe(event: unknown, nowMs = Date.now()): boolean {
 			if (!isRecord(event) || settled) return false;
+			if (event.type === "heartbeat_status") {
+				const quiet = event.status === "stale" || event.status === "dead";
+				const at = typeof event.heartbeatAt === "string" ? Date.parse(event.heartbeatAt) : Number.NaN;
+				const next = quiet ? (Number.isFinite(at) ? at : nowMs) : null;
+				if (next === quietSinceMs) return false;
+				quietSinceMs = next;
+				return touch();
+			}
 			let changed = false;
+			// Anything the worker sends proves it is answering again.
+			if (quietSinceMs !== null) {
+				quietSinceMs = null;
+				changed = touch();
+			}
 			if (
 				event.type === "message_end" &&
 				isRecord(event.message) &&
@@ -594,6 +614,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		restart(): void {
 			awaitingApproval = false;
 			approvalWindow = null;
+			quietSinceMs = null;
 			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
@@ -632,6 +653,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				...(awaitingApproval && !settled ? { awaitingApproval: true } : {}),
 				...(awaitingApproval && !settled && approvalWindow !== null ? { approvalWindow: { ...approvalWindow } } : {}),
 				completed,
+				...(quietSinceMs !== null && !settled ? { quietSinceMs } : {}),
 			};
 			return cached;
 		},
