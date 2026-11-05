@@ -777,7 +777,12 @@ function dispatchCardBody(
 		`${theme.fg("annotation", "cost")} ${theme.fg("body", cost)}`,
 	];
 	const context = row.telemetry?.activity.contextTokens;
-	const contextUnit = context ? theme.fg("body", `ctx ${context.display}`) : null;
+	const contextFigure = context
+		? options.expanded === true
+			? context.display
+			: compactQuantity(context.display)
+		: null;
+	const contextUnit = contextFigure ? theme.fg("body", `ctx ${contextFigure}`) : null;
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
@@ -863,7 +868,16 @@ function dispatchCardBody(
 			runId: row.runId,
 			stepId: row.phase?.stepId ?? null,
 		});
-		bodyLines.push(...cardWrappedValueLines(theme, "record", theme.fg("warning", `open: ${warning}`), contentWidth));
+		// The call id and rule are for the inspector; the fold says only that the changed-files list may be short.
+		const brief = `changed-files list may be incomplete: ${sanitizeCallTargetText(row.writeRecordDowngrade.tool)} can write paths it does not name`;
+		bodyLines.push(
+			...cardWrappedValueLines(
+				theme,
+				"record",
+				theme.fg("warning", options.expanded === true ? `open: ${warning}` : brief),
+				contentWidth,
+			),
+		);
 	}
 	// The proof row is present only when the telemetry projection knows an
 	// evidence state for this run; an unknown/none state adds no line.
