@@ -1833,7 +1833,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (operatorExtensions?.busy) reasons.push("an extension is busy");
 		const why = reasons.length > 0 ? reasons.join(", ") : "work is still running";
 		notify(
-			"warning",
+			"info",
 			`${pressed}: not exiting, ${why}. ${[...actions, "/quit stops everything and exits"].join(" · ")}`,
 			"keyboard:exit",
 		);
@@ -1885,6 +1885,14 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			return queue.steer.length + queue.followUp.length > 0;
 		},
 		explainProtectedExit: () => explainProtectedExit("Ctrl+C"),
+		explainEscapeGuard: () =>
+			notifications.add({
+				level: "info",
+				key: "keyboard:escape",
+				text: "That Esc closed a panel, so the run is still going. Esc again in a moment cancels it.",
+				ttlMs: 2_500,
+			}),
+		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
 		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),

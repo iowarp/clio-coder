@@ -54,6 +54,8 @@ export interface InteractiveInputRuntimeDeps {
 	tui?: TUI;
 	hasQueuedMessages?: () => boolean;
 	explainProtectedExit?: () => void;
+	explainEscapeGuard?: () => void;
+	hasActiveEditorBash?: () => boolean;
 	explainSearchUnavailable?: () => void;
 	explainThinkingUnavailable?: () => void;
 	keybindings: {
@@ -372,6 +374,8 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		isAutocompleteVisible: () => deps.editor.isShowingAutocomplete?.() ?? false,
 		hasQueuedMessages: () => deps.hasQueuedMessages?.() ?? false,
 		explainProtectedExit: () => deps.explainProtectedExit?.(),
+		explainEscapeGuard: () => deps.explainEscapeGuard?.(),
+		...(deps.hasActiveEditorBash ? { hasActiveEditorBash: deps.hasActiveEditorBash } : {}),
 		forwardFocusedInput: (data) => {
 			const active = search();
 			if (active) {

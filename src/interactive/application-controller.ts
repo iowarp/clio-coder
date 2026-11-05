@@ -10,6 +10,13 @@ import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-life
  */
 export const APPLICATION_DOUBLE_TAP_MS = 3_000;
 const ARMED_TICK_MS = 1_000;
+/**
+ * How long after Esc closes something an Esc is not read as cancelling the run.
+ * Layered surfaces invite a run of presses, and the extra one used to fall
+ * through to the composer and cancel work the operator only meant to look away
+ * from.
+ */
+const ESC_GUARD_MS = 1_200;
 
 export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",
@@ -97,6 +104,8 @@ export interface ApplicationControllerDeps {
 	routeComposerKey?: (data: string) => boolean;
 	hasQueuedMessages?: () => boolean;
 	explainProtectedExit?: () => void;
+	/** An Esc was absorbed because it followed one that closed a surface; the run is still going. */
+	explainEscapeGuard?: () => void;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
 	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
@@ -104,6 +113,7 @@ export interface ApplicationControllerDeps {
 	matchesAction: (data: string, id: ClioKeybinding) => boolean;
 	dispatchAction: (id: ClioKeybinding) => boolean;
 	cancelActiveEditorBash: () => boolean;
+	hasActiveEditorBash?: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
 	getEditorText: () => string;
@@ -385,7 +395,19 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		if (first) deps.dismissNotification(first.id);
 	};
 
+	/** When an Esc last closed an overlay or a suggestion list. */
+	let lastOwnerEscapeAt = 0;
 	const handleInput = (data: string): ApplicationInputResult => {
+		if (!isEscapeKey(data) || isKeyRelease(data)) return routeInput(data);
+		const before = deps.getOverlayState();
+		const closesSuggestions = before === "closed" && (deps.isAutocompleteVisible?.() ?? false);
+		const result = routeInput(data);
+		if (closesSuggestions || (before !== "closed" && deps.getOverlayState() === "closed")) {
+			lastOwnerEscapeAt = deps.clock.now();
+		}
+		return result;
+	};
+	const routeInput = (data: string): ApplicationInputResult => {
 		if (isKeyRelease(data)) return { consume: true };
 		if (isKeyRepeat(data) && !(deps.matchesRepeatableInput?.(data) ?? false)) return { consume: true };
 		if (matchesKey(data, "ctrl+c")) {
@@ -423,6 +445,17 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			return undefined;
 		}
 		if (isEscapeKey(data) && deps.isAutocompleteVisible?.()) return undefined;
+		if (
+			isEscapeKey(data) &&
+			lastOwnerEscapeAt > 0 &&
+			deps.clock.now() - lastOwnerEscapeAt < ESC_GUARD_MS &&
+			(deps.isStreaming() || deps.hasActiveEditorBash?.() === true)
+		) {
+			// Each absorbed press restarts the window, so a run of presses cannot walk through it.
+			lastOwnerEscapeAt = deps.clock.now();
+			deps.explainEscapeGuard?.();
+			return { consume: true };
+		}
 		if (isEscapeKey(data) && deps.cancelActiveEditorBash()) return { consume: true };
 		if (isEscapeKey(data) && deps.isStreaming()) {
 			deps.cancelActiveRun();

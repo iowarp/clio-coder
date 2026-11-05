@@ -70,7 +70,14 @@ import { getKeybindings, Input, isKeyRelease, matchesKey, visibleWidth, wrapText
 import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, centeredWindow, fitRows, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	buildHint,
+	centeredWindow,
+	fitRows,
+	type OverlayEscVerb,
+	type RowBudgetedBody,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import { barSep, clioTheme, emptyState, GLYPH, padAnsi, sectionRule, selectionRow, titleRow } from "../theme/index.js";
 import type { FleetNodeSettingsUi } from "./fleet-node-settings.js";
 import { fleetNodeSettingsSubmenu } from "./fleet-node-settings.js";
@@ -3182,6 +3189,14 @@ export class SettingsCenter implements Component {
 		this.options.onCancel();
 	}
 
+	/** What the next Esc does, in the words the rail shows; the same order as `back`. */
+	escapeVerb(): OverlayEscVerb {
+		if (this.filterDraft !== null) return "cancel filter";
+		if (this.submenuComponent) return "back to list";
+		if (this.level === "rows" && this.sections().length > 0) return "back to sections";
+		return "close settings";
+	}
+
 	private depth(): SettingsNavigationDepth {
 		return this.submenuComponent ? "detail" : this.level;
 	}
@@ -4003,10 +4018,12 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		markerId: "settings",
 		title: "Settings",
 		footerHint: (innerWidth) => {
-			// The submenu renders its own authoritative choose/back legend. Keeping
-			// the parent row controls in the outer border at the same time advertises
-			// actions (preview, open, filter) that this input depth does not route.
-			if (center.getSelection().submenuOpen) return undefined;
+			// The submenu renders its own choose/back legend. Keeping the parent row
+			// controls in the outer border at the same time advertises actions
+			// (preview, open, filter) that this input depth does not route, so the
+			// border says only where Esc lands.
+			const esc = center.escapeVerb();
+			if (center.getSelection().submenuOpen) return buildHint([], esc);
 			return innerWidth < WIDE_LAYOUT_MIN_WIDTH
 				? buildHint(
 						[
@@ -4014,7 +4031,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 							{ key: "Enter", verb: "open" },
 							{ key: "/", verb: "filter" },
 						],
-						"back",
+						esc,
 					)
 				: buildHint(
 						[
@@ -4024,7 +4041,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 							{ key: "Enter", verb: "open" },
 							{ key: "/", verb: "filter" },
 						],
-						"back",
+						esc,
 					);
 		},
 	});
