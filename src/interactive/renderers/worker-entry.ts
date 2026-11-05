@@ -14,6 +14,7 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
+import { plainOutcomeLabel, workerFailureHeadline } from "../../domains/dispatch/failure-headline.js";
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
@@ -34,7 +35,7 @@ import {
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
-import { workerPhaseActivity } from "../worker-activity.js";
+import { compactQuantity, WAITING_FOR_APPROVAL, workerActionParts, workerPhaseActivity } from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
@@ -201,9 +202,9 @@ function outcomeUnit(result: WorkerRunResultSummary): string {
 		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
 	}
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
-	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} canceled`);
+	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
 	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
-	return theme.fg("error", `${GLYPH.error} ${result.outcomeCode ?? result.outcome}`);
+	return theme.fg("error", `${GLYPH.error} ${plainOutcomeLabel(result.outcomeCode ?? result.outcome)}`);
 }
 
 /**
@@ -358,10 +359,12 @@ function attemptLines(entry: WorkerEntryState, width: number): string[] {
  * line of facts; the reason is prose and wraps like prose, so a long message
  * cannot make the result line heavier than the answer above it.
  */
-function failureLines(entry: WorkerEntryState, width: number): string[] {
+function failureLines(entry: WorkerEntryState, width: number, inspect = false): string[] {
 	const message = entry.result?.failureMessage;
-	if (message === undefined) return [];
-	const first = (message.split("\n", 1)[0] ?? "").trim();
+	// A cancelled card's header already says so; the SIGTERM the worker logged adds nothing but alarm.
+	if (message === undefined || (entry.result?.outcome === "canceled" && !inspect)) return [];
+	// Inspection states the receipt's own words; the transcript leads with the reason a person acts on.
+	const first = inspect ? (message.split("\n", 1)[0] ?? "").trim() : (workerFailureHeadline(message) ?? "");
 	return first.length === 0 ? [] : railLines(`${GLYPH.error} ${first}`, "error", width);
 }
 
@@ -386,6 +389,11 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
 			: meta(`${SEPARATOR}${entry.telemetry.activity.elapsed.display}`);
+	// A narrow row keeps what happened and lets the identity take the cut.
+	if (width < NARROW_CARD_WIDTH) {
+		const lead = `${cardPrefix(entry)}${status} `;
+		return truncateToWidth(`${lead}${identityUnits(entry).join(meta(SEPARATOR))}`, width, GLYPH.ellipsis, false);
+	}
 	const full = ` ${status}${elapsed}`;
 	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
 	// Reserve one identity cell. The optional hint yields before execution
@@ -405,57 +413,32 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const metrics: string[] = [];
 	const exitCode = entry.result?.exitCode;
-	if (exitCode !== undefined && exitCode !== 0) metrics.push(`exit ${exitCode}`);
+	if (exitCode !== undefined && exitCode !== 0 && (inspect || entry.result?.outcome !== "canceled")) {
+		metrics.push(`exit ${exitCode}`);
+	}
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
+	if (!inspect) {
+		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
+		if (calls !== undefined) metrics.push(`${calls} tool calls`);
+		const figure = tokens === undefined ? null : compactQuantity(tokens);
+		if (figure !== null) metrics.push(`${figure} tokens`);
+		return metrics;
+	}
 	if (tokens !== undefined) metrics.push(`${tokens} tokens processed`);
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
-
 	if (calls !== undefined) metrics.push(`${calls} tool calls`);
-	if (inspect && entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
+	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
-}
-
-/**
- * The descriptor vocabulary's progressive verbs in the past tense. A verb that
- * names a tool rather than an act (`git`, `context`, `gateway`, `tasks`) reads
- * the same either way.
- */
-const FINISHED_VERBS: Readonly<Record<string, string>> = {
-	reading: "read",
-	editing: "edited",
-	writing: "wrote",
-	listing: "listed",
-	running: "ran",
-	searching: "searched",
-	finding: "found",
-	fetching: "fetched",
-	verifying: "verified",
-	navigating: "navigated",
-	inspecting: "inspected",
-	monitoring: "monitored",
-	steering: "steered",
-	dispatching: "dispatched",
-	deleting: "deleted",
-	moving: "moved",
-	thinking: "thought",
-	calling: "called",
-};
-
-/** A call's object, marked when the safety layer cut it to its length cap. */
-function descriptorObject(descriptor: NonNullable<WorkerAction["descriptor"]>): string {
-	if (descriptor.object === undefined) return "";
-	return ` ${descriptor.object}${descriptor.truncated === true ? GLYPH.ellipsis : ""}`;
 }
 
 /** A finished call as `verb object` in the past tense, or its tool name when the runtime sent no descriptor. */
 function finishedAction(action: WorkerAction): string {
-	const descriptor = action.descriptor;
+	const parts = workerActionParts(action, "finished");
+	const verb = functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(parts.verb));
 	const actionText =
-		descriptor === undefined
-			? functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(action.tool))
-			: `${functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(FINISHED_VERBS[descriptor.verb] ?? descriptor.verb))}${theme.fg("toolTarget", descriptor.object === undefined ? "" : ` ${sanitizeCallTargetText(descriptorObject(descriptor))}`)}`;
+		parts.object.length === 0 ? verb : `${verb}${theme.fg("toolTarget", ` ${sanitizeCallTargetText(parts.object)}`)}`;
 	const failure = action.outcome === "blocked" ? "blocked" : action.outcome === "error" ? "failed" : null;
 	return failure === null
 		? actionText
@@ -482,10 +465,13 @@ function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
 function describedAction(entry: WorkerEntryState): string | null {
 	const action = entry.progress?.currentAction;
 	if (action === null || action === undefined) return null;
-	return action.descriptor ? `${action.descriptor.verb}${descriptorObject(action.descriptor)}` : action.tool;
+	if (entry.progress?.awaitingApproval === true) return WAITING_FOR_APPROVAL;
+	const parts = workerActionParts(action, "running");
+	return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
 }
 
 const TIMER_WIDTH = 7;
+const NARROW_CARD_WIDTH = 72;
 
 function workerName(entry: WorkerEntryState): string {
 	return displayText(entry, "name", entry.council?.label ?? entry.agentId);
@@ -540,7 +526,7 @@ function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number
 			: "workers";
 	return meta(
 		truncateToWidth(
-			`${siblings.length} ${name} · ${running} running · ${done} done${failed > 0 ? ` · ${failed} failed/canceled` : ""}`,
+			`${siblings.length} ${name} · ${running} running · ${done} done${failed > 0 ? ` · ${failed} failed/cancelled` : ""}`,
 			width,
 			GLYPH.ellipsis,
 			false,
@@ -557,6 +543,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	const tools = calls === undefined ? "" : `tools ${calls}`;
 	const tokens = entry.telemetry?.row.tokens.display;
+	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
 	const current = isPending(entry) ? describedAction(entry) : null;
 	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
 	const activity =
@@ -570,7 +557,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const facts = [
 		target,
 		tools,
-		tokens === undefined ? "" : `${tokens} tokens`,
+		tokenFigure === null ? "" : `${tokenFigure} tokens`,
 		activity && `${GLYPH.phaseTool} ${activity}`,
 	].filter(Boolean);
 	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
@@ -599,10 +586,11 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
 	const elapsed = entry.telemetry?.activity.elapsed.display;
 	const tokens = entry.telemetry?.row.tokens.display;
+	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	const facts = [
 		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
-		...(tokens === undefined ? [] : [`${tokens} tokens`]),
+		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
 		...(calls === undefined ? [] : [`${calls} calls`]),
 	];
 	// The elapsed time is the line's live signal, so a narrow row cuts the
@@ -611,7 +599,9 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const activity = displayText(entry, "activity", doing);
 	const current = entry.progress?.currentAction;
 	const prefix =
-		action === null ? `${glyph} ${idle}` : `${GLYPH.phaseTool} ${current?.descriptor?.verb ?? current?.tool ?? ""}`;
+		action === null
+			? `${glyph} ${idle}`
+			: `${GLYPH.phaseTool} ${entry.progress?.awaitingApproval === true ? WAITING_FOR_APPROVAL : current ? workerActionParts(current, "running").verb : ""}`;
 	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
 	const styledActivity = (shown: string): string => {
 		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);
@@ -755,7 +745,7 @@ export function renderWorkerEntryLines(
 			].flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "body", safeWidth));
 	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
-		failureLines(entry, safeWidth),
+		failureLines(entry, safeWidth, inspect),
 		budget(detail.errorRows),
 		safeWidth,
 		false,

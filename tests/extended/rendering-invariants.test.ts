@@ -1122,7 +1122,7 @@ describe("Pi TUI compatibility", () => {
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 80) ?? []).map(stripTerminalSequences).join("\n");
 			match(plain, /System One breakers/u);
-			match(plain, /local-small open 120s after 3 consecutive timeouts/u);
+			match(plain, /local-small paused 120s after 3 consecutive timeouts/u);
 		} finally {
 			handle.hide();
 		}
@@ -2137,7 +2137,7 @@ describe("transcript block grammar", () => {
 		deepStrictEqual(trail, [
 			`  │ ${GLYPH.phaseTool} … 1 earlier call · /view dispatch:run-5`,
 			`  │ ${GLYPH.phaseTool} read docs/a-long-name${GLYPH.ellipsis}`,
-			`  │ ${GLYPH.phaseTool} gateway evidence ${GLYPH.times}3`,
+			`  │ ${GLYPH.phaseTool} used evidence ${GLYPH.times}3`,
 		]);
 	});
 

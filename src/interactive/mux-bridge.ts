@@ -21,6 +21,7 @@
 
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { AgentStatusChangedPayload, DispatchRunIdentity } from "../core/telemetry/live-events.js";
+import { plainOutcomeLabel, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { MuxContract, MuxLog } from "../domains/mux/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 
@@ -35,6 +36,7 @@ const LONG_RUN_MS = 60_000;
 
 /** How much terminal detail may reach a toast body or a notice line. */
 const DETAIL_MAX_CHARS = 96;
+const FAILURE_NOTICE_HOLD_MS = 400;
 
 export type PanesNotificationsPolicy = "failures" | "all" | "off";
 
@@ -95,6 +97,9 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 
 	/** Start stamps, so a terminal event without a duration still gets one. */
 	const startedAt = new Map<string, number>();
+	const originOfRun = new Map<string, DispatchRunIdentity["requestOrigin"]>();
+	const retrying = new Set<string>();
+	const heldFailures = new Map<string, ReturnType<typeof setTimeout>>();
 	let disposed = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	/** Serializes wire work: notifies and self-reports must not interleave. */
@@ -131,6 +136,29 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		return sanitizeCallTargetText(value).slice(0, DETAIL_MAX_CHARS);
 	};
 
+	/**
+	 * One failure, one notice (F09). An operator-started run reports through its
+	 * own command, and an attempt with a retry coming is not yet a failure. A retry
+	 * is stamped internal, so its origin is read from the run that started the chain.
+	 * The retry's schedule can land just after the attempt's terminal event, hence the hold.
+	 */
+	const noticeFailure = (
+		identity: DispatchRunIdentity & { lineage?: { rootRunId: string } },
+		outcome: BridgeRunOutcome,
+		rawDetail: string | null | undefined,
+	): void => {
+		const origin = originOfRun.get(identity.lineage?.rootRunId ?? identity.runId) ?? identity.requestOrigin;
+		if (deps.notice === undefined || origin === "user" || retrying.delete(identity.runId)) return;
+		const why = workerFailureHeadline(rawDetail);
+		const text = `${identity.agentId} ${plainOutcomeLabel(outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${identity.runId}`;
+		const hold = setTimeoutFn(() => {
+			heldFailures.delete(identity.runId);
+			if (!disposed) deps.notice?.("error", text);
+		}, FAILURE_NOTICE_HOLD_MS);
+		hold.unref?.();
+		heldFailures.set(identity.runId, hold);
+	};
+
 	const onTerminal = (
 		identity: DispatchRunIdentity,
 		rawOutcome: string,
@@ -143,12 +171,10 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		const failed = isFailure(outcome);
 		const qualifies = policy === "all" || (policy === "failures" && failed);
 		if (!qualifies) return;
-		const detail = boundedDetail(fields.detail);
+		const detail = boundedDetail(workerFailureHeadline(fields.detail));
 		const durationMs =
 			typeof fields.durationMs === "number" ? fields.durationMs : begun === undefined ? null : now() - begun;
-		if (failed) {
-			deps.notice?.("error", `${identity.agentId} ${outcome} (${identity.runId})${detail ? `: ${detail}` : ""}`);
-		}
+		if (failed) noticeFailure(identity, outcome, fields.detail);
 		if (!deps.mux.available()) return;
 		draining = draining.then(async () => {
 			if (disposed) return;
@@ -169,8 +195,21 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 	};
 
 	const unsubscribers = [
+		deps.bus.subscribe("run.enqueued", (payload) => {
+			originOfRun.set(payload.runId, payload.requestOrigin);
+		}),
 		deps.bus.subscribe("run.started", (payload) => {
 			startedAt.set(payload.runId, now());
+		}),
+		deps.bus.subscribe("run.progressed", (payload) => {
+			if ((payload.event as { type?: unknown } | null)?.type !== "retry_scheduled") return;
+			const held = heldFailures.get(payload.runId);
+			if (held === undefined) {
+				retrying.add(payload.runId);
+				return;
+			}
+			clearTimeoutFn(held);
+			heldFailures.delete(payload.runId);
 		}),
 		deps.bus.subscribe("run.completed", (payload) => {
 			onTerminal(payload, payload.outcome, { durationMs: payload.durationMs, detail: payload.outcomeDetail });
@@ -210,6 +249,8 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 			disposed = true;
 			if (timer !== null) clearTimeoutFn(timer);
 			timer = null;
+			for (const held of heldFailures.values()) clearTimeoutFn(held);
+			heldFailures.clear();
 			for (const unsubscribe of unsubscribers) unsubscribe();
 			startedAt.clear();
 		},

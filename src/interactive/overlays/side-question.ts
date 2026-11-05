@@ -12,7 +12,7 @@ import {
 	redactStreamingUrlCredentials,
 	redactUrlCredentials,
 } from "../../domains/safety/redaction.js";
-import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import { type Component, type OverlayHandle, type TUI, truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { animationStep, clioTheme, GLYPH, rule, spinnerFrame } from "../theme/index.js";
 
@@ -30,6 +30,8 @@ export interface SideQuestionOverlaySession extends OverlayHandle {
 	setAnswer(text: string): void;
 	/** Settle the overlay on a final phase. */
 	settle(phase: SideQuestionOverlayPhase): void;
+	/** Name the route the round was sent on, or the one that answered. */
+	setRoute(route: string): void;
 }
 
 export interface OpenSideQuestionOverlayOptions {
@@ -57,6 +59,7 @@ function formatSideQuestionBody(
 	phase: SideQuestionOverlayPhase,
 	width: number,
 	spinner: string,
+	route: string | null = null,
 ): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
@@ -67,6 +70,7 @@ function formatSideQuestionBody(
 	if (phase.kind === "error") {
 		for (const line of wrapTextWithAnsi(theme.fg("error", redactUrlCredentials(phase.reason)), contentWidth))
 			lines.push(line);
+		if (route !== null) lines.push(routeLine("asked", route, contentWidth));
 		return lines;
 	}
 	const body = phase.text.trim();
@@ -80,13 +84,28 @@ function formatSideQuestionBody(
 		}
 	}
 	if (phase.kind === "streaming") {
-		lines.push(theme.fg("activity", body.length > 0 ? spinner : `${spinner} asking…`));
+		const asking = route === null ? `${spinner} asking…` : `${spinner} asking ${route}`;
+		lines.push(
+			truncateToWidth(
+				theme.fg("activity", body.length > 0 && route === null ? spinner : asking),
+				contentWidth,
+				GLYPH.ellipsis,
+				false,
+			),
+		);
 	} else if (phase.kind === "aborted") {
 		lines.push(theme.fg("menuDescription", "cancelled"));
-	} else if (body.length === 0) {
-		lines.push(theme.fg("annotation", "the model returned no text"));
+		if (route !== null) lines.push(routeLine("asked", route, contentWidth));
+	} else {
+		if (body.length === 0) lines.push(theme.fg("annotation", "the model returned no text"));
+		if (route !== null) lines.push(routeLine("answered by", route, contentWidth));
 	}
 	return lines;
+}
+
+/** State word first, so a narrow box cuts the route rather than what happened. */
+function routeLine(word: string, route: string, width: number): string {
+	return truncateToWidth(clioTheme().fg("annotation", `${word} ${route}`), width, GLYPH.ellipsis, false);
 }
 
 /**
@@ -96,6 +115,7 @@ function formatSideQuestionBody(
  */
 export class SideQuestionOverlayBody implements Component {
 	private phase: SideQuestionOverlayPhase = { kind: "streaming", text: "" };
+	route: string | null = null;
 	private readonly prose = new AssistantProseProjection();
 
 	constructor(
@@ -118,7 +138,7 @@ export class SideQuestionOverlayBody implements Component {
 	}
 
 	render(width: number): string[] {
-		return formatSideQuestionBody(this.question, this.phase, width, spinnerFrame(animationStep(this.now())));
+		return formatSideQuestionBody(this.question, this.phase, width, spinnerFrame(animationStep(this.now())), this.route);
 	}
 
 	invalidate(): void {}
@@ -146,6 +166,11 @@ export function openSideQuestionOverlay(tui: TUI, options: OpenSideQuestionOverl
 		setAnswer(text: string): void {
 			if (settled) return;
 			body.set({ kind: "streaming", text });
+			body.invalidate();
+			tui.requestRender();
+		},
+		setRoute(route: string): void {
+			body.route = route;
 			body.invalidate();
 			tui.requestRender();
 		},

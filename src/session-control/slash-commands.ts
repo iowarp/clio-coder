@@ -17,6 +17,7 @@ import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -418,19 +419,22 @@ async function runAttributed(
 			progressBus?.emit("run.progressed", { runId: handle.runId, agentId: request.agentId, event });
 		}
 		const receipt = await handle.finalPromise;
+		const view = `/view dispatch:${handle.runId}`;
 		if (receipt.outcome === "canceled") {
-			notice("warn", `${command} aborted: ${receipt.outcomeDetail ?? "operator abort"}`);
+			const why = workerFailureHeadline(receipt.outcomeDetail) ?? "cancelled at your request";
+			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
-			const failure = receipt.failureMessage ? ` ${receipt.failureMessage}` : "";
-			notice("error", `${command} failed: exit=${receipt.exitCode}${failure}`);
+			const why = workerFailureHeadline(receipt.failureMessage) ?? `exit code ${receipt.exitCode}`;
+			notice("error", `${request.agentId} failed: ${why} · ${view}`);
 		}
 		if (share) shareReceipt(request.agentId, receipt, deps);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		if (err instanceof AdmissionCanceledError) {
-			notice("warn", `${command} aborted: ${msg.replace(/^dispatch:\s*/u, "")}`);
+			notice("warn", `${command} cancelled: ${msg.replace(/^dispatch:\s*/u, "")}`);
 		} else {
-			notice("error", `${command} failed: ${msg}`);
+			// Nothing started, so this is a refusal to start and has no run to inspect.
+			notice("error", `${command} refused: ${msg.replace(/^dispatch:\s*/u, "")}`);
 		}
 	}
 }

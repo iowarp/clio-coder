@@ -29,20 +29,23 @@ export const DRAFT_OVERLAY_TITLE = "Drafts";
 
 export type DraftCandidatePhase =
 	| { kind: "streaming"; text: string }
-	| { kind: "drafted"; text: string }
-	| { kind: "failed"; reason: string };
+	| { kind: "drafted"; text: string; route?: string }
+	| { kind: "failed"; reason: string; route?: string };
 
 export interface DraftOverlayState {
 	request: string;
 	candidates: DraftCandidatePhase[];
 	selected: number;
 	scroll: number;
+	/** The route the round was sent on; a settled candidate may name the one that answered. */
+	route?: string;
 	/** The whole round was cancelled or refused before any candidate ran. */
 	refused?: string;
 }
 
 export interface DraftOverlaySession extends OverlayHandle {
 	setCandidate(index: number, phase: DraftCandidatePhase): void;
+	setRoute(route: string): void;
 	refuse(reason: string): void;
 }
 
@@ -91,13 +94,15 @@ function candidateRows(state: DraftOverlayState, width: number): string[] {
 		const label = DRAFT_LABELS[index] ?? String(index + 1);
 		const cursor = index === state.selected ? theme.fg("selectedOption", GLYPH.cursor) : " ";
 		const head = `${cursor} ${index === state.selected ? theme.fg("selectedOption", label) : label}  `;
+		const route = phase.kind === "streaming" ? state.route : (phase.route ?? state.route);
+		const routeUnit = route === undefined ? "" : theme.fg("annotation", ` · ${route}`);
 		let body: string;
 		if (phase.kind === "failed") {
 			body = theme.fg("error", `${GLYPH.error} ${redactUrlCredentials(phase.reason)}`);
 		} else {
 			body = theme.fg(phase.kind === "streaming" ? "annotation" : "menuDescription", candidateStatus(phase));
 		}
-		return truncateToWidth(`${head}${body}`, width);
+		return truncateToWidth(`${head}${body}${routeUnit}`, width, GLYPH.ellipsis, false);
 	});
 }
 
@@ -280,6 +285,11 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 		setCandidate(index, phase) {
 			if (closed || index < 0 || index >= state.candidates.length) return;
 			state.candidates[index] = phase;
+			tui.requestRender();
+		},
+		setRoute(route) {
+			if (closed) return;
+			state.route = route;
 			tui.requestRender();
 		},
 		refuse(reason) {

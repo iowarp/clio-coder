@@ -40,11 +40,11 @@ function systemOneBreakerPhrase(breaker: SystemOneBreakerView): string {
 	const timeouts = `${breaker.failures} consecutive timeout${breaker.failures === 1 ? "" : "s"}`;
 	switch (breaker.state) {
 		case "open":
-			return `open ${Math.ceil(breaker.remainingMs / 1000)}s after ${timeouts}`;
+			return `paused ${Math.ceil(breaker.remainingMs / 1000)}s after ${timeouts}`;
 		case "probing":
 			return `probing after ${timeouts}`;
 		case "half-open":
-			return `half-open after ${timeouts}; the next call probes`;
+			return `recovering after ${timeouts}; the next call tests it`;
 		case "closed":
 			return timeouts;
 	}
