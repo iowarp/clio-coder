@@ -286,9 +286,17 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 	)}`;
 }
 
+/** `5m`, `1h`, `90s`: a limit in the words a person reads it in; `300000ms` made the operator do arithmetic. */
+function limitWords(ms: number): string {
+	const seconds = Math.round(ms / 1000);
+	if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+	if (seconds % 60 === 0) return `${seconds / 60}m`;
+	return `${seconds}s`;
+}
+
 /** An abort is the run ending under the command, never its own timeout, and the model has to be able to tell which (#445). */
 function bashAbortStatus(elapsedMs: number, timeoutMs: number, cause: string | null): string {
-	const span = `after ${Math.round(elapsedMs / 1000)}s of its ${timeoutMs}ms timeout`;
+	const span = `after ${Math.round(elapsedMs / 1000)}s of its ${limitWords(timeoutMs)} time limit`;
 	return cause === null
 		? `bash: command aborted ${span}. The host ended the run and recorded no cause.`
 		: `bash: command aborted ${span}. The host ended the run: ${cause}`;
