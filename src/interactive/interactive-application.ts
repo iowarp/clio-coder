@@ -1992,9 +1992,16 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					notify("info", "Suspend is not supported on Windows.", "keyboard:suspend");
 					return;
 				}
-				void suspendTerminalAsync(suspendProcessUntilContinued).catch((err: unknown) => {
-					notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
-				});
+				void suspendTerminalAsync(suspendProcessUntilContinued).then(
+					(suspended) => {
+						if (!suspended) {
+							notify("info", "Ctrl+Z needs Clio started from an interactive shell with job control", "keyboard:suspend");
+						}
+					},
+					(err: unknown) => {
+						notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
+					},
+				);
 			},
 			canExit: () => {
 				const blocker = exitBlocker();
