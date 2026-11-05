@@ -382,7 +382,7 @@ export function dispatchStatusPresentation(
 		case "aborted":
 			return { glyph: GLYPH.cancelled, label: "cancelled", token: "annotation" };
 		case "stale":
-			return { glyph: GLYPH.warnInline, label: "stale", token: "warning" };
+			return { glyph: GLYPH.warnInline, label: "not responding", token: "warning" };
 		case "enqueued":
 			return { glyph: GLYPH.queued, label: "queued", token: "body" };
 	}

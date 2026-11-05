@@ -458,6 +458,8 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			if (type === "heartbeat_status") {
 				const status = resolveHeartbeat(event.status);
 				if (status && !isTerminal(summary.status) && summary.status !== "cancelling") summary.status = status;
+				// The fold keeps when the worker went quiet, so its last phase is not read as what it is doing now.
+				summary.progressFold.observe(event);
 				if (status === "dead") summary.progressFold.settle(undefined, false);
 				markChanged();
 				return;

@@ -16,6 +16,8 @@ export interface EditorSteerMention {
 export interface RunningDispatchRef {
 	runId: string;
 	agentId: string;
+	/** Waiting for a worker slot: it resolves as an address but takes no message until it starts. */
+	queued?: boolean;
 }
 
 export type SteerTargetResolution =

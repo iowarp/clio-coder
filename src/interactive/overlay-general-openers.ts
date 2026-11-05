@@ -802,9 +802,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onStepSettled: (outcome) => deps.fleetPlans?.stepSettled(fleetRootId, outcome),
 			onStarted: () => {
 				deps.fleetPlans?.start(fleetRootId, preview);
+				// Counted from the waves, as the approval card counts them, so a resumed run names only what it runs.
+				const steps = preview.waves.reduce((total, wave) => total + wave.steps.length, 0);
 				deps.notify(
 					"info",
-					`fleet ${preview.name}: ${preview.plan.steps.length} steps running in the background · /fleet shows detail`,
+					`fleet ${preview.name}: ${steps} ${steps === 1 ? "step" : "steps"} running in the background · /fleet shows detail`,
 					"fleet-run:started",
 				);
 			},

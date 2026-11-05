@@ -65,6 +65,8 @@ export type { WorkerProgressSnapshot };
 export interface WorkerAttempt {
 	runId: string;
 	targetLabel: string;
+	/** Why the attempt left the route before it, including the alternates it skipped. */
+	moveReason?: string;
 	outcome?: string;
 }
 
@@ -338,7 +340,11 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				if (toolCallLimit === undefined) delete existing.toolCallLimit;
 				else existing.toolCallLimit = toolCallLimit;
 				delete existing.result;
-				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
+				existing.attempts.push({
+					runId,
+					targetLabel: workerTargetLabel(runtime),
+					...(payload.routeMove !== undefined ? { moveReason: payload.routeMove.reason } : {}),
+				});
 				assignmentByRun.set(runId, assignmentId);
 				const progress = progressByAssignment.get(assignmentId);
 				if (progress !== undefined) {

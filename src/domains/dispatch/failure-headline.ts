@@ -7,6 +7,12 @@
 
 const HEADLINE_MAX_CHARS = 140;
 
+/**
+ * Why a stalled run ended. Its receipt names the kill signal and the output the
+ * kill cut short, which are what stopping a silent worker costs, not why it stopped.
+ */
+export const STALLED_RUN_HEADLINE = "stopped responding, so Clio stopped it";
+
 const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	vram_capacity_fit_failure: "model did not fit in memory",
 	worker_tool_call_cap_exhausted: "hit the tool-call limit",
@@ -25,6 +31,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	information_flow_blocked: "blocked by information flow",
 	spawn_failed: "could not start",
 	denied_by_policy: "denied by policy",
+	stalled: "stopped responding",
 	timed_out: "timed out",
 	canceled: "cancelled",
 };

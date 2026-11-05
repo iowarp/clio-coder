@@ -17,7 +17,7 @@ import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import { STALLED_RUN_HEADLINE, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -451,6 +451,8 @@ async function runAttributed(
 					? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} in its worktree on branch ${receipt.worktree.branch}`
 					: "";
 			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${kept} · ${view}`);
+		} else if (receipt.outcome === "stalled") {
+			notice("error", `${request.agentId} ${STALLED_RUN_HEADLINE} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const why = workerFailureHeadline(receipt.failureMessage) ?? `exit code ${receipt.exitCode}`;
 			notice("error", `${request.agentId} failed: ${why} · ${view}`);

@@ -2,7 +2,7 @@ import type { ExtensionStatus } from "../../domains/extensions/public-api.js";
 import type { ExtensionSkin } from "../../domains/extensions/public-api-v2.js";
 import type { ActiveExtensionWorkspace, ExtensionSurfaceModel } from "../../domains/extensions/surface-model.js";
 import type { View } from "../../domains/extensions/view.js";
-import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
+import type { Component, TUI } from "../../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { GLYPH } from "../theme/glyphs.js";
 import { applySkin, clioTheme, frame } from "../theme/index.js";
@@ -10,12 +10,14 @@ import type { SemanticRole } from "../theme/tokens.js";
 import { skinEpoch } from "../theme/tokens.js";
 import { renderView } from "./view-renderer.js";
 
-/** The floating stack matches the host's task island width, so the two read as one family. */
-const WORKSPACE_ISLAND_WIDTH = 48;
-const ISLAND_MIN_COLUMNS = 80;
+/** Island tiles share a row of the dock, each between these widths, one column apart. */
+const ISLAND_TILE_MAX_WIDTH = 48;
+const ISLAND_TILE_MIN_WIDTH = 30;
+const ISLAND_BODY_ROWS = 6;
+/** Below this terminal height the islands keep one row naming them instead of tiles. */
 const ISLAND_MIN_ROWS = 18;
-const ISLAND_BODY_ROWS = 12;
-const ISLAND_STACK_ROWS = 28;
+/** Share of the terminal's rows the tiles may take, so the transcript keeps most of the screen. */
+const ISLAND_ROW_SHARE = 0.4;
 const HEADER_ROWS = 12;
 const BOARD_ROWS = 14;
 
@@ -28,18 +30,12 @@ const STATUS_ROLES = {
 
 export interface WorkspaceSurfaceDeps {
 	model: ExtensionSurfaceModel;
-	tui: Pick<TUI, "requestRender" | "showOverlay">;
+	tui: Pick<TUI, "requestRender">;
 	skinFor(active: ActiveExtensionWorkspace): ExtensionSkin | null;
 	/** How the operator leaves, as the exit label prints it. */
 	leaveHint(): string;
-	/** Host overlays own the screen; the floating stack hides under them like the task island. */
-	isOverlayOpen(): boolean;
-	/**
-	 * Screen rows above the composer in the last frame. The stack is placed by
-	 * screen row from the top, so on a short frame it stops above the composer
-	 * rail (4.6.7) and drops the islands that do not fit whole.
-	 */
-	rowsAboveComposer?(): number | null;
+	/** The terminal's height, which bounds how many dock rows the island tiles take. */
+	terminalRows?(): number;
 	/** A workspace key was pressed through the leader menu. */
 	press(extensionId: string, action: string): void;
 	/** Open the board in the pressable panel; absent where no such panel exists. */
@@ -63,7 +59,10 @@ export interface WorkspaceSurfaces {
 	active(): ActiveExtensionWorkspace | null;
 	/** The banner part: the workspace header while one is active, the host banner otherwise. */
 	banner(host: Component): Component;
-	/** Workspace board followed by owner-labelled ambient bands above the steering queue. */
+	/**
+	 * Workspace board, its island tiles, then owner-labelled ambient bands, all
+	 * in the dock above the steering queue.
+	 */
 	readonly board: Component;
 	/** First segment of the composer's top rail, or null to keep the host's model nickname. */
 	rail(width: number): string | null;
@@ -73,8 +72,6 @@ export interface WorkspaceSurfaces {
 	statusFacts(width: number): string[];
 	/** The active workspace's leader entries: its declared keys, then how to leave. */
 	leaderTargets(): Array<{ key: string; label: string; run: () => void }>;
-	/** Re-evaluate the floating stack; called on model change and by the host's island tick. */
-	refresh(): void;
 	dispose(): void;
 }
 
@@ -108,62 +105,65 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 	const draw = (view: View, width: number, rows: number): string[] =>
 		renderView(view, Math.max(1, width), { maxRows: rows }).lines;
 
-	/** One row of top margin and one clear row above the composer rail, from the last frame. */
+	/**
+	 * The workspace's islands as framed tiles side by side in the dock. They
+	 * were a floating stack anchored top right, which painted over transcript
+	 * words, so they now take rows of their own like the task board's row. A
+	 * tile row that does not fit the budget whole becomes one row naming the
+	 * islands left out.
+	 */
+	const islandRows = (active: ActiveExtensionWorkspace, width: number, budget: number): string[] => {
+		const theme = clioTheme();
+		const board = active.board === "island" && active.regions.includes("board") ? regionView(active, "board") : undefined;
+		const tiles: Array<{ title: string; view: View; meta?: string }> = [
+			...(board ? [{ title: active.title, view: board }] : []),
+			...(active.regions.includes("islands")
+				? (deps.model.entry(active.extensionId)?.islands ?? []).map((island) => ({
+						title: island.title,
+						view: island.view,
+						...(island.meta ? { meta: island.meta } : {}),
+					}))
+				: []),
+		];
+		if (tiles.length === 0 || width < 1) return [];
+		const left = (from: number): string => {
+			const rest = tiles.slice(from);
+			const names = rest.map((tile) => tile.title).join(", ");
+			const lead =
+				from === 0 ? "Islands" : `${rest.length} more ${rest.length === 1 ? "island" : "islands"} need a taller terminal`;
+			const row = `${theme.fg("sectionHeading", lead)}${theme.fg("border", " · ")}${theme.fg("annotation", names)}`;
+			return truncateToWidth(row, width, GLYPH.ellipsis, false);
+		};
+		if (budget < ISLAND_BODY_ROWS) return budget > 0 ? [left(0)] : [];
+		const columns = Math.max(1, Math.min(tiles.length, Math.floor((width + 1) / (ISLAND_TILE_MIN_WIDTH + 1))));
+		const tileWidth = Math.max(4, Math.min(ISLAND_TILE_MAX_WIDTH, Math.floor((width - (columns - 1)) / columns)));
+		const out: string[] = [];
+		for (let index = 0; index < tiles.length; index += columns) {
+			const group = tiles.slice(index, index + columns);
+			const bodies = group.map((tile) => draw(tile.view, tileWidth - 4, ISLAND_BODY_ROWS));
+			const height = Math.max(...bodies.map((body) => body.length));
+			const more = index + columns < tiles.length ? 1 : 0;
+			if (out.length + height + 2 + more > budget) {
+				out.push(left(index));
+				break;
+			}
+			const framed = group.map((tile, at) =>
+				frame(
+					theme,
+					tile.title,
+					[...(bodies[at] ?? []), ...Array.from({ length: height - (bodies[at]?.length ?? 0) }, () => "")],
+					tileWidth,
+					tile.meta ? { rightMeta: tile.meta } : {},
+				),
+			);
+			for (let row = 0; row < height + 2; row++) out.push(framed.map((lines) => lines[row] ?? "").join(" "));
+		}
+		return out;
+	};
 	const islandBudget = (): number => {
-		const above = deps.rowsAboveComposer?.() ?? null;
-		return above === null ? ISLAND_STACK_ROWS : Math.max(0, Math.min(ISLAND_STACK_ROWS, above - 2));
-	};
-	const islandLines = (budget: number): string[] => {
-		const active = deps.model.activeWorkspace;
-		if (!active) return [];
-		return memo("islands", String(budget), () => {
-			const theme = clioTheme();
-			const inner = WORKSPACE_ISLAND_WIDTH - 4;
-			const out: string[] = [];
-			const push = (lines: string[]): boolean => {
-				if (out.length + lines.length > budget) return false;
-				out.push(...lines);
-				return true;
-			};
-			const board =
-				active.board === "island" && active.regions.includes("board") ? regionView(active, "board") : undefined;
-			if (board) push(frame(theme, active.title, draw(board, inner, ISLAND_BODY_ROWS), WORKSPACE_ISLAND_WIDTH));
-			if (active.regions.includes("islands"))
-				for (const island of deps.model.entry(active.extensionId)?.islands ?? []) {
-					const lines = frame(
-						theme,
-						island.title,
-						draw(island.view, inner, ISLAND_BODY_ROWS),
-						WORKSPACE_ISLAND_WIDTH,
-						island.meta ? { rightMeta: island.meta } : {},
-					);
-					if (!push(lines)) break;
-				}
-			return out;
-		});
-	};
-	const islandComponent: Component = {
-		render: () => islandLines(islandBudget()),
-		invalidate: () => cache.delete("islands"),
-	};
-	let islandHandle: OverlayHandle | undefined;
-	let islandHidden = true;
-	const refresh = (): void => {
-		// Whether there is a stack at all, not whether the last frame had room
-		// for it: the budget is applied at each render, so a frame that grows
-		// shows what a short one could not.
-		const hidden = islandLines(ISLAND_STACK_ROWS).length === 0;
-		if (!islandHandle && !hidden)
-			islandHandle = deps.tui.showOverlay(islandComponent, {
-				anchor: "top-right",
-				width: WORKSPACE_ISLAND_WIDTH,
-				margin: { top: 1, right: 1 },
-				nonCapturing: true,
-				// Checked at composite time, so an overlay opening hides the stack without a model change.
-				visible: (width, height) => width >= ISLAND_MIN_COLUMNS && height >= ISLAND_MIN_ROWS && !deps.isOverlayOpen(),
-			});
-		if (islandHandle && hidden !== islandHidden) islandHandle.setHidden(hidden);
-		islandHidden = hidden;
+		const rows = deps.terminalRows?.();
+		if (rows === undefined) return ISLAND_BODY_ROWS * 2 + 4;
+		return rows < ISLAND_MIN_ROWS ? 1 : Math.floor(rows * ISLAND_ROW_SHARE);
 	};
 
 	// The skin follows the workspace: on when one is entered, off when it is left or dropped.
@@ -174,16 +174,18 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			if (skin || skinned) applySkin(skin);
 			skinned = skin !== null;
 		}
-		refresh();
 		deps.tui.requestRender();
 	});
 
 	const board: Component = {
 		render(width) {
-			return memo("board", String(width), () => {
+			const budget = islandBudget();
+			return memo("board", `${width}:${budget}`, () => {
 				const active = takes("board");
 				const view = active?.board === "band" ? regionView(active, "board") : undefined;
 				const lines = view ? draw(view, width, BOARD_ROWS) : [];
+				const workspace = deps.model.activeWorkspace;
+				if (workspace) lines.push(...islandRows(workspace, width, budget));
 				for (const id of deps.model.ids().sort()) {
 					const band = deps.model.entry(id)?.band;
 					if (!band) continue;
@@ -286,11 +288,8 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 				{ key: WORKSPACE_LEAVE_KEY, label: `Leave ${active.title}`, run: () => deps.leave() },
 			];
 		},
-		refresh,
 		dispose() {
 			unsubscribe();
-			islandHandle?.hide();
-			islandHandle = undefined;
 			if (skinned) applySkin(null);
 			skinned = false;
 		},

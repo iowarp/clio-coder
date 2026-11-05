@@ -94,8 +94,8 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		strictEqual(opened, 2, "the failed start left no run in flight");
 		accept();
 		strictEqual(notices.at(-1)?.[0], "fleet-run:started");
-		// The started notice names the plan by its steps; the plan hash stays with the approval card.
-		ok(notices.at(-1)?.[1].includes("steps running in the background"));
+		// The started notice names the plan by the steps its waves run; the plan hash stays with the approval card.
+		ok(notices.at(-1)?.[1].includes("1 step running in the background"));
 		ok(!notices.at(-1)?.[1].includes(expectedPlanHash));
 		deepStrictEqual(runLimits, [{ delegatedTools: ["read"] }]);
 		openers.startFleetRun("survey", {});

@@ -1,6 +1,6 @@
 import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
-import { writeDiagnostic } from "../../core/diagnostics.js";
+import { writeDiagnostic, writeHeadlessDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
@@ -1104,6 +1104,23 @@ async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_
  * were previously silent; a swallowed ledger or finalization failure must at
  * least leave a stderr trace for triage. Never throws.
  */
+/**
+ * Every alternate route a retry tried refused it at admission. The retry never
+ * ran, which is a failed recovery, not a policy decision, so it settles in
+ * these words rather than as a denial.
+ */
+class RetryRoutesRefusedError extends Error {}
+
+/** One refused alternate in words: a down target says so, anything else keeps admission's reason. */
+function routeRefusalWords(targetId: string, error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	const reason = message
+		.replace(/^dispatch: /u, "")
+		.replace(/^admission denied: /u, "")
+		.replace(/^target '[^']*' unavailable: /u, "");
+	return /^health down\b/u.test(reason) ? `${targetId} is down` : `${targetId} could not take it (${reason})`;
+}
+
 function reportDispatchDiagnostic(scope: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
 	try {
@@ -4760,6 +4777,8 @@ export function createDispatchBundle(
 		// settlement share one run journal, independently of assignment lineage (#434).
 		retryReq.runIdHint = newRunId();
 		let terminal: Promise<RunResult> | undefined;
+		/** Set when the retry moved to an alternate target, so a refused admission can move on to the next one. */
+		let tryAlternates = false;
 		const reasonKey = retryReasonKey(controlRootFor(run.runId), attempt);
 		retryReasons.set(reasonKey, reason);
 		try {
@@ -4825,6 +4844,7 @@ export function createDispatchBundle(
 					if (alternate !== null) {
 						retryReq.target = alternate.target;
 						retryReq.model = alternate.model;
+						tryAlternates = true;
 					} else {
 						// No other route can serve the request, so placement picks again.
 						// That is usually the failed route itself, which the chain may
@@ -4835,7 +4855,7 @@ export function createDispatchBundle(
 				if (decision.excludedRouteParts.includes("model")) delete retryReq.model;
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
-			const handle = await dispatch(retryReq, undefined, run.hostRun === undefined ? undefined : { hostRun: run.hostRun });
+			const handle = await dispatchRetryAcrossAlternates(run, retryReq, tryAlternates, moveReason);
 			// Cancellation can arrive while retry admission is awaiting a handle.
 			if (canceledControlRoots.has(controlRootsByAttempt.get(run.runId) ?? run.lineage.rootRunId)) {
 				contract.abort(handle.runId);
@@ -4870,9 +4890,11 @@ export function createDispatchBundle(
 			retryReasons.delete(reasonKey);
 			retryBackoff.delete(controlRootFor(run.runId));
 			const message = err instanceof Error ? err.message : String(err);
-			const denial = `retry attempt ${attempt} rejected: ${message}`;
-			// Keep the denial visible on headless surfaces and assignment state.
-			reportDispatchDiagnostic(`run ${run.runId}`, new Error(denial));
+			const routesRefused = err instanceof RetryRoutesRefusedError;
+			const denial = routesRefused ? message : `retry attempt ${attempt} rejected: ${message}`;
+			// Keep the denial visible on headless surfaces and assignment state; a
+			// terminal owner states it from the run.failed below in its own words.
+			writeHeadlessDiagnostic(`[clio-coder:dispatch] run ${run.runId}: ${denial}\n`);
 			// The last completed attempt remains the immutable terminal evidence.
 			try {
 				const previousReceipt = await run.finalPromise;
@@ -4890,11 +4912,73 @@ export function createDispatchBundle(
 				runtimeId: run.runtimeId,
 				runtimeKind: run.runtimeKind,
 				reason: "retry_denied",
-				outcome: "denied_by_policy" satisfies RunOutcome,
+				outcome: (routesRefused ? "failed" : "denied_by_policy") satisfies RunOutcome,
 				outcomeDetail: denial,
 			});
 		}
 		await terminal;
+	}
+
+	/**
+	 * Admit a retry, and when it moved to an alternate target that admission
+	 * refuses, move on to the next alternate. Health is often unknown until
+	 * admission probes a target, so the first alternate in configured order can
+	 * be down while a later one is healthy. Each alternate is tried once, the
+	 * list is the configured routes, and the retry stays one attempt. Every
+	 * refusal is journaled on the assignment and named in the move's reason.
+	 */
+	async function dispatchRetryAcrossAlternates(
+		run: ActiveRun,
+		retryReq: DispatchRequest,
+		tryAlternates: boolean,
+		moveReason: string,
+	): ReturnType<typeof dispatch> {
+		const refused: Array<{ target: string; model: string; words: string }> = [];
+		for (;;) {
+			try {
+				return await dispatch(retryReq, undefined, run.hostRun === undefined ? undefined : { hostRun: run.hostRun });
+			} catch (error) {
+				const target = retryReq.target;
+				const model = retryReq.model;
+				if (!tryAlternates || target === undefined || model === undefined || draining || !retryChainIsLive(run))
+					throw error;
+				const words = routeRefusalWords(target, error);
+				refused.push({ target, model, words });
+				context.bus.emit("run.progressed", {
+					runId: run.lineage.rootRunId,
+					agentId: run.agentId,
+					task: run.task,
+					...(run.agentAudience !== undefined ? { agentAudience: run.agentAudience } : {}),
+					...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
+					targetId: run.targetId,
+					wireModelId: run.wireModelId,
+					runtimeId: run.runtimeId,
+					runtimeKind: run.runtimeKind,
+					event: {
+						type: "route_refused",
+						targetId: target,
+						modelId: model,
+						reason: error instanceof Error ? error.message : String(error),
+					},
+				});
+				const next = eligibleAlternateRoute(
+					run,
+					retryReq,
+					undefined,
+					(candidate) => !refused.some((entry) => entry.target === candidate.target && entry.model === candidate.model),
+				);
+				const skipped = refused.map((entry) => entry.words).join("; ");
+				if (next === null) throw new RetryRoutesRefusedError(`no other route would take the retry: ${skipped}`);
+				retryReq.target = next.target;
+				retryReq.model = next.model;
+				retryReq.runIdHint = newRunId();
+				retryReq.routeMove = {
+					fromTargetId: run.targetId,
+					fromModelId: run.wireModelId,
+					reason: `${moveReason}; ${skipped}, so ${next.target} took the retry`,
+				};
+			}
+		}
 	}
 
 	function requireLedger(): Ledger {
@@ -5259,6 +5343,10 @@ export function createDispatchBundle(
 				if (identity.targetId === run.targetId && identity.wireModelId === run.wireModelId) {
 					return { candidate, unavailable: "route resolved to the failed route" };
 				}
+				// Admission refuses a target that is down or unusable, so choosing one spent the retry on a refusal
+				// while a healthy alternate sat later in the configured order.
+				const usability = targetUsabilityProblem(providers.list().find((entry) => entry.target.id === identity.targetId));
+				if (usability !== null) return { candidate, unavailable: usability };
 				const capabilities = capabilityInfoForModel(providers, identity.targetId, identity.wireModelId);
 				const contextWindow = capabilities?.contextWindow ?? 0;
 				windows.set(`${route.targetId}\0${route.modelId}`, contextWindow);

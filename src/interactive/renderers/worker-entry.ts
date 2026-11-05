@@ -15,7 +15,11 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
-import { plainOutcomeLabel, workerFailureHeadline } from "../../domains/dispatch/failure-headline.js";
+import {
+	plainOutcomeLabel,
+	STALLED_RUN_HEADLINE,
+	workerFailureHeadline,
+} from "../../domains/dispatch/failure-headline.js";
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
@@ -37,7 +41,13 @@ import {
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
-import { approvalWaitWords, compactQuantity, workerActionParts, workerPhaseActivity } from "../worker-activity.js";
+import {
+	approvalWaitWords,
+	compactQuantity,
+	workerActionParts,
+	workerPhaseActivity,
+	workerQuietWords,
+} from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
@@ -373,7 +383,11 @@ function attemptLines(entry: WorkerEntryState, width: number): string[] {
 	return entry.attempts.flatMap((attempt, index) =>
 		index === 0
 			? []
-			: railLines(`${ATTEMPT}failed over → attempt ${index + 1} on ${attempt.targetLabel}`, "warning", width),
+			: railLines(
+					`${ATTEMPT}failed over → attempt ${index + 1} on ${attempt.targetLabel}${attempt.moveReason ? `: ${sanitizeCallTargetText(attempt.moveReason)}` : ""}`,
+					"warning",
+					width,
+				),
 	);
 }
 
@@ -387,7 +401,11 @@ function failureLines(entry: WorkerEntryState, width: number, inspect = false): 
 	// A cancelled card's header already says so; the SIGTERM the worker logged adds nothing but alarm.
 	if (message === undefined || (entry.result?.outcome === "canceled" && !inspect)) return [];
 	// Inspection states the receipt's own words; the transcript leads with the reason a person acts on.
-	const first = inspect ? (message.split("\n", 1)[0] ?? "").trim() : (workerFailureHeadline(message) ?? "");
+	const first = inspect
+		? (message.split("\n", 1)[0] ?? "").trim()
+		: entry.result?.outcome === "stalled"
+			? STALLED_RUN_HEADLINE
+			: (workerFailureHeadline(message) ?? "");
 	return first.length === 0 ? [] : railLines(`${GLYPH.error} ${first}`, "error", width);
 }
 
@@ -585,16 +603,19 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const tools = calls === undefined ? "" : `tools ${calls}`;
 	const tokens = entry.telemetry?.row.tokens.display;
 	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
-	const current = isPending(entry) ? describedAction(entry) : null;
+	const quiet = isPending(entry) ? workerQuietWords(entry.progress) : null;
+	const current = isPending(entry) && quiet === null ? describedAction(entry) : null;
 	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
 	const activity =
-		current !== null
-			? clean(current)
-			: last !== undefined
-				? clean(finishedAction(last))
-				: isPending(entry)
-					? workerPhaseActivity(entry.progress?.phase)[1]
-					: "";
+		quiet !== null
+			? quiet
+			: current !== null
+				? clean(current)
+				: last !== undefined
+					? clean(finishedAction(last))
+					: isPending(entry)
+						? workerPhaseActivity(entry.progress?.phase)[1]
+						: "";
 	const facts = [
 		target,
 		tools,
@@ -629,16 +650,21 @@ function latestWords(text: string, room: number): string {
  * how long it has run, and what it has spent. No spinner; the panel's clock
  * moves the elapsed.
  */
-function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, includeTimer = true): string {
+function progressLine(entry: WorkerEntryState, width: number, nowMs: number, includeTimer = true): string {
 	const elapsed = entry.telemetry?.activity.elapsed.display;
 	// The wait's words shorten to leave the clock beside them, because a cut here would lose the time left.
 	const waitRoom =
 		width - RAIL_WIDTH - 2 - (!includeTimer || elapsed === undefined ? 0 : elapsed.length + SEPARATOR.length);
-	const action = describedAction(entry, waitRoom);
-	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
+	// A worker whose heartbeat stopped is doing nothing it can be seen doing, so its last call or phase would read as current.
+	const quiet = workerQuietWords(entry.progress, nowMs);
+	const action = quiet !== null ? null : describedAction(entry, waitRoom);
+	const [glyph, idle] = quiet !== null ? [GLYPH.warnInline, quiet] : workerPhaseActivity(entry.progress?.phase);
 	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
 	const answer =
-		entry.helper || action !== null || (entry.progress?.phase !== undefined && entry.progress.phase !== "writing")
+		entry.helper ||
+		quiet !== null ||
+		action !== null ||
+		(entry.progress?.phase !== undefined && entry.progress.phase !== "writing")
 			? ""
 			: latestWords(answerText(entry, stripDeadToolCallMarkup(entry.text)), width - RAIL_WIDTH - PROGRESS_FACTS_ROOM);
 	// A wait on the operator is not a tool running, so it carries the mark every other human wait does.

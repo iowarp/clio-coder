@@ -3,7 +3,7 @@ import type {
 	WorkerApprovalDecider,
 	WorkerProgressSnapshot,
 } from "../domains/telemetry/worker-progress.js";
-import { GLYPH } from "./theme/index.js";
+import { formatWaitClock, GLYPH } from "./theme/index.js";
 import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
 /**
@@ -20,6 +20,19 @@ const WORKER_PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, wo
 	tool: [GLYPH.phaseTool, "between calls"],
 	settled: [GLYPH.phaseWaiting, "finishing"],
 };
+
+/**
+ * A worker whose heartbeat stopped, in words: how long it has been quiet. Its
+ * phase is what it was doing when it went quiet, so every surface says this
+ * instead while the watchdog reads it as stale.
+ */
+export function workerQuietWords(
+	progress: Pick<WorkerProgressSnapshot, "quietSinceMs"> | undefined,
+	now = Date.now(),
+): string | null {
+	if (progress?.quietSinceMs === undefined) return null;
+	return `not responding for ${formatWaitClock(now - progress.quietSinceMs)}`;
+}
 
 /** The phase's glyph and words; `starting` until the stream reports a phase. */
 export function workerPhaseActivity(phase: string | undefined): readonly [glyph: string, words: string] {
@@ -159,9 +172,14 @@ export function approvalWaitWords(
  * the call's object beside the verb; the island has room for the verb alone.
  */
 export function workerActivityWords(
-	progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction" | "awaitingApproval" | "approvalWindow">,
+	progress: Pick<
+		WorkerProgressSnapshot,
+		"phase" | "currentAction" | "awaitingApproval" | "approvalWindow" | "quietSinceMs"
+	>,
 	options: { now?: number; room?: number } = {},
 ): string {
+	const quiet = workerQuietWords(progress, options.now);
+	if (quiet !== null) return quiet;
 	if (progress.awaitingApproval === true) return approvalWaitWords(progress, options);
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
