@@ -116,6 +116,8 @@ export interface DispatchBoardRow {
 	trust?: TrustSummaryProjection;
 	/** Which validator failed and on what evidence, beside a validation-failed verdict. */
 	validationFailure?: string;
+	/** Read back from the run ledger because it settled before this Clio process started (J2-F16). */
+	earlier?: true;
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
 	/** Assignment retry attempts observed on the assignment event stream. */
@@ -879,7 +881,19 @@ function dispatchCardBody(
 	const started = runOriginWords(row);
 	const bodyLines = [
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
-		...(started === null ? [] : [cardUnitsLine(theme, "started", [theme.fg("body", started)], contentWidth)]),
+		...(started === null && row.earlier !== true
+			? []
+			: [
+					cardUnitsLine(
+						theme,
+						"started",
+						[
+							...(started === null ? [] : [theme.fg("body", started)]),
+							...(row.earlier === true ? [theme.fg("annotation", "recorded before this Clio started")] : []),
+						],
+						contentWidth,
+					),
+				]),
 	];
 	// One current-operation row is useful at a glance; prose and policy expand on demand.
 	if (row.progress) {
@@ -2026,6 +2040,7 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
 	readDurablePlans?: () => ReadonlyArray<FleetPlanRunView>,
+	readDurableRuns?: () => ReadonlyArray<DispatchBoardRow>,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
@@ -2044,6 +2059,28 @@ export function createDispatchBoardStore(
 	const unsubscribe = projection.subscribe((snapshot) => {
 		current = snapshot;
 	});
+	// Settled workers from before this process, read once like the durable plans; a run this process folds outranks it.
+	let earlierRuns: ReadonlyArray<DispatchBoardRow> | null = null;
+	const historyRows = (): ReadonlyArray<DispatchBoardRow> => {
+		if (earlierRuns === null) {
+			try {
+				earlierRuns = readDurableRuns?.() ?? [];
+			} catch {
+				// An unreadable ledger costs the history, never the board.
+				earlierRuns = [];
+			}
+		}
+		const live = new Set(current.runs.map((run) => run.runId));
+		const view = projection.read?.live() ?? null;
+		return earlierRuns
+			.filter((row) => !live.has(row.runId))
+			.map((row) => {
+				const telemetry = view?.run(row.runId) ?? null;
+				return telemetry === null
+					? row
+					: { ...row, usage: dispatchRunUsage(view, row.runId), ttft: dispatchRunTtft(view, row.runId), telemetry };
+			});
+	};
 	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
 		const view = projection.read?.live() ?? null;
 		return [...current.runs]
@@ -2063,12 +2100,15 @@ export function createDispatchBoardStore(
 		plans,
 		rows() {
 			const planRows = plans.runs().map((plan) => fleetPlanRow(plan, Date.now()));
-			if (planRows.length === 0) return projectRows(false);
+			const earlier = historyRows();
+			if (planRows.length === 0 && earlier.length === 0) return projectRows(false);
 			const finishedAt = (row: DispatchBoardRow): number =>
 				row.plan !== undefined ? (row.plan.finishedAtMs ?? Date.now()) : Date.now() - row.elapsedMs;
-			return [...projectRows(false), ...planRows].sort(
+			// Earlier rows follow this process's own, newest first as the ledger read sorted them.
+			const current = [...projectRows(false), ...planRows].sort(
 				(a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || finishedAt(b) - finishedAt(a),
 			);
+			return [...current, ...earlier];
 		},
 		activeRows: () => projectRows(true),
 		liveRows: () => [...plans.live().map((plan) => fleetPlanRow(plan, Date.now())), ...projectRows(true)],
