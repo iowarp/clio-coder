@@ -282,12 +282,18 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		// Only the ask_user tool's own rounds may answer themselves; a settings
 		// confirmation or any other caller keeps waiting for the operator.
 		const windowMs = invokeOptions?.unattendedFallback === true ? (deps.getUnattendedWindowMs?.() ?? 0) : 0;
+		// A round nobody's tool asked for is the operator's own action asking to be confirmed.
+		const confirmation = !recordAnswer && !toolBacked;
+		const round = {
+			...(windowMs > 0
+				? { unattended: { windowMs, ...(deps.unattendedTimers !== undefined ? { timers: deps.unattendedTimers } : {}) } }
+				: {}),
+			...(confirmation ? { confirmation } : {}),
+		};
 		const result = await activeSession.ask(
 			questions,
 			invokeOptions?.decisionPresentation,
-			windowMs > 0
-				? { unattended: { windowMs, ...(deps.unattendedTimers !== undefined ? { timers: deps.unattendedTimers } : {}) } }
-				: undefined,
+			Object.keys(round).length > 0 ? round : undefined,
 		);
 		if (result.timedOut !== undefined) deps.onRoundTimedOut?.(questions, result);
 		if (result.unavailable === true) {

@@ -127,6 +127,11 @@ export interface AskUserRoundOptions {
 	 * first (#421). Only a model's ask_user round carries it.
 	 */
 	unattended?: { windowMs: number; timers?: UnattendedTimers };
+	/**
+	 * A choice the operator's own action raised (send now, a settings switch),
+	 * not the model's interview: the card says confirm, and Esc cancels the action.
+	 */
+	confirmation?: boolean;
 }
 
 export interface AskUserOverlaySession extends OverlayHandle {
@@ -551,6 +556,7 @@ class AskUserOverlayView implements Component {
 	/** performance.now() before which input other than Esc is dropped. */
 	private inputGuardUntil = 0;
 	private harnessInterview: ToolInvokeOptions["harnessInterview"];
+	private confirmation = false;
 	/** The round's unattended countdown, while one runs or until the operator holds it. */
 	private countdown: UnattendedCountdown | null = null;
 
@@ -571,6 +577,7 @@ class AskUserOverlayView implements Component {
 		this.questions = [...questions];
 		this.presentation = presentation;
 		this.harnessInterview = round?.harnessInterview;
+		this.confirmation = round?.confirmation === true;
 		this.states = this.questions.map((question, index) =>
 			createQuestionState(question, this.harnessInterview?.initial?.[index]),
 		);
@@ -701,7 +708,7 @@ class AskUserOverlayView implements Component {
 	}
 
 	interviewTitle(): string | undefined {
-		return this.harnessInterview?.title;
+		return this.harnessInterview?.title ?? (this.confirmation && this.phase === "asking" ? "Confirm" : undefined);
 	}
 
 	decisionTone(): ClioToken {
@@ -1072,7 +1079,7 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		const cancel = {
-			verb: "cancel interview",
+			verb: this.confirmation ? "cancel" : "cancel interview",
 			short: "cancel",
 			back: () => (this.phase === "asking" ? this.cancel() : this.deps.onCancel()),
 		};
@@ -1119,7 +1126,7 @@ class AskUserOverlayView implements Component {
 
 	/** Whether the next Esc cancels the interview rather than closing a layer on it. */
 	private escapeAtRoot(): boolean {
-		return innermostEscapeLayer(this.escapeLayers())?.verb === "cancel interview";
+		return this.escapeLayers().findIndex((layer) => layer) === this.escapeLayers().length - 1;
 	}
 
 	private hintEntries(): { entries: HintEntry[]; esc: HintEntry } {
@@ -1334,7 +1341,7 @@ class AskUserOverlayView implements Component {
 	 */
 	private renderQuestionHeader(question: AskUserQuestion, width: number, stripNamesIt = false): string[] {
 		const theme = clioTheme();
-		const parts: string[] = [theme.fg("pendingAnswer", "Clio asks you")];
+		const parts: string[] = [theme.fg("pendingAnswer", this.confirmation ? "Confirm" : "Clio asks you")];
 		// The strip above already carries the active question's name with the
 		// cursor on it; the header repeats it only when there is no strip.
 		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, question.header));
