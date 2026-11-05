@@ -114,6 +114,8 @@ export interface DispatchBoardRow {
 	 * implies a verdict the terminal bus event cannot carry.
 	 */
 	trust?: TrustSummaryProjection;
+	/** Which validator failed and on what evidence, beside a validation-failed verdict. */
+	validationFailure?: string;
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
 	/** Assignment retry attempts observed on the assignment event stream. */
@@ -640,7 +642,18 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 	const detail = compact
 		? []
 		: wrapTextWithAnsi(theme.fg("annotation", row.trust.text), valueWidth).map((line) => `${" ".repeat(gutter)}${line}`);
-	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...detail];
+	// A failed validation names its validator and evidence right under the verdict, so a passing answer above it
+	// never reads as a contradiction.
+	const why =
+		row.validationFailure === undefined
+			? []
+			: cardWrappedValueLines(
+					theme,
+					"why",
+					`${theme.fg("body", row.validationFailure)}${theme.fg("annotation", ` · /view dispatch:${row.runId}`)}`,
+					contentWidth,
+				);
+	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...why, ...detail];
 }
 
 /** `2/2 steps`, then the first step that failed. Unsettled steps are not counted as anything yet. */
@@ -1891,6 +1904,7 @@ function toRow(
 		...(entry.council !== undefined ? { council: { ...entry.council } } : {}),
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
 		...(entry.trust !== undefined ? { trust: entry.trust } : {}),
+		...(entry.validationFailure !== undefined ? { validationFailure: entry.validationFailure } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),

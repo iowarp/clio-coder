@@ -70,6 +70,8 @@ export interface TelemetryRunSummary {
 	council?: { group: string; label: string; color?: string; round: number };
 	hostVerification?: "verified" | "rejected" | "skipped" | "not_implicated";
 	trust?: TrustSummaryProjection;
+	/** Which validator failed and on what evidence, when the trust status says validation failed. */
+	validationFailure?: string;
 	rerouteCount?: number;
 	failoverHops?: number;
 	contextWindow?: number;
@@ -104,9 +106,13 @@ export interface TelemetrySnapshot {
 /** Runtime readers supplied after dispatch is composed, avoiding a domain dependency cycle. */
 export interface TelemetryRunReaders {
 	dispatchSnapshot?: () => DispatchSnapshot;
-	readRunResult?: (
-		runId: string,
-	) => { text?: string; trust?: CanonicalTrustStatus; contractKind?: string; contract?: string } | null;
+	readRunResult?: (runId: string) => {
+		text?: string;
+		trust?: CanonicalTrustStatus;
+		contractKind?: string;
+		contract?: string;
+		validationFailure?: string;
+	} | null;
 }
 
 /** Run projection controls shared by the contract and the in-memory projection. */
