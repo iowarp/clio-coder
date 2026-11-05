@@ -125,6 +125,24 @@ function reviewFacts(step: LibraryPlanStep, review: LibraryStepReview | undefine
 }
 
 /** One step's facts, in the order the questions matter. */
+/** Why a copy that takes effect still does not load, in the operator's words. */
+const COPY_NOT_LOADED: Record<NonNullable<LibraryPlanStep["effectiveAfter"]>["state"], string> = {
+	loadable: "Clio cannot load it",
+	disabled: "it is disabled, so Clio skips it",
+	shadowed: "another copy shadows it",
+	invalid: "its package is invalid, so Clio cannot load it",
+	incompatible: "it does not support this Clio version",
+	damaged: "its files changed since install, so Clio cannot load it",
+	untrusted: "it waits for workspace trust before Clio loads it",
+};
+
+/** Which copy is in effect after the step, and whether Clio loads it. */
+function afterwardsText(after: NonNullable<LibraryPlanStep["effectiveAfter"]>): string {
+	const copy = `the ${after.scope} copy is in effect`;
+	if (after.loadable && after.state === "loadable") return `${copy} and Clio loads it`;
+	return `${copy}, but ${COPY_NOT_LOADED[after.state]}`;
+}
+
 function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined, detail: boolean): Fact[] {
 	const theme = clioTheme();
 	const facts: Fact[] = [{ label: "Package", value: step.identity.ref }];
@@ -161,7 +179,7 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 	if (step.effectiveAfter)
 		facts.push({
 			label: "Afterwards",
-			value: `${step.effectiveAfter.scope} copy, ${step.effectiveAfter.loadable ? "loadable" : "not loadable"} (${step.effectiveAfter.state})`,
+			value: afterwardsText(step.effectiveAfter),
 			tone: "info",
 		});
 	facts.push({ label: "Fallback", value: step.fallbackNote, tone: "muted" });
