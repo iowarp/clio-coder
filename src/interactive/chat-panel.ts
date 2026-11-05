@@ -105,9 +105,23 @@ import { type TurnSpend, turnHoldsCalls, turnSpend } from "./turn-spend.js";
 // Wiring code ink through that hook colors only the ink, and nothing
 // post-processes already-rendered output. codeInk matches the language word
 // only, so the hook drops the rest of an info string such as `ts title="a.ts"`.
-const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) =>
-	codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")),
-);
+// Pi wraps every rendered row at its spaces, so a long code line came back as
+// pieces that dropped the space at each break and could not be rejoined
+// exactly. Code ink leaves Pi with no space to break at: each space travels as
+// CODE_SPACE, Pi can only cut a long line at full width without dropping
+// anything, and `markdownRows` rejoins the pieces, restores the spaces and
+// wraps the source line once under its continuation mark. The blank braille
+// pattern is one column wide and is not whitespace to Pi's tokenizer.
+// The block indent opens with CODE_LINE, a noncharacter that marks where each
+// source line starts, so a piece Pi cut off is never mistaken for a new line.
+const CODE_SPACE = "\u2800";
+const CODE_LINE = "\uFDD1";
+const CHAT_MARKDOWN_THEME = {
+	...markdownTheme(clioTheme(), (code, lang) =>
+		codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")).map((line) => line.replaceAll(" ", CODE_SPACE)),
+	),
+	codeBlockIndent: `${CODE_LINE}${CODE_SPACE}`,
+};
 // /export writes plain text inside its own fence, so Pi's top-level fence rows
 // are noise there and widen that outer fence. Pi gives no switch for them, so
 // the export panel's theme tags every fence row it draws with a Unicode
@@ -873,7 +887,8 @@ function exportFenceRow(row: string): string | null {
  * space, which Mermaid rows use.
  */
 function fitMarkdownRow(padded: string, width: number, bareFences: boolean): string[] {
-	const trimmed = padded.replace(/ +$/u, "");
+	// A fence nested in a quote is not rejoined, so its code row still carries CODE_SPACE.
+	const trimmed = padded.replace(/ +$/u, "").replace(CODE_LINE, " ").replaceAll(CODE_SPACE, " ");
 	const line = bareFences ? exportFenceRow(trimmed) : trimmed;
 	if (line === null) return [];
 	const parts = visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line];
@@ -882,19 +897,25 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 	);
 }
 
-/** A fence row as Pi draws it; a list or a quote nests it behind its own indent. */
-const FENCE_ROW = /^( *)```/u;
+/** A fence row as Pi draws it, export-tagged or not; a list or a quote nests it behind its own indent. */
+const FENCE_ROW = /^( *)\uFDD0?```/u;
 
 /**
- * Pi wraps a long code line after it adds the block's indent, so the rest of that line lands at the left margin and reads
- * as prose or as a separate statement. Each wrapped piece keeps the indent and a mark that says it continues the line above.
+ * One source line of a fenced code block, rejoined from the pieces Pi cut it
+ * into. A line that fits prints as it is; a longer one wraps once at its spaces,
+ * and each wrapped piece keeps the block's indent behind a mark that says it
+ * continues the line above, so it never reads as prose or a separate statement.
  */
-function fitCodeContinuationRow(padded: string, fenceIndent: string, width: number): string[] {
+function fitCodeLine(line: string, fenceIndent: string, width: number, bareFences: boolean): string[] {
 	const theme = clioTheme();
-	const mark = `${fenceIndent}  ${theme.fg("annotation", GLYPH.codeWrap)} `;
+	const text = line.replace(CODE_LINE, " ").replaceAll(CODE_SPACE, " ").replace(/ +$/u, "");
+	if (visibleWidth(text) <= width) return [theme.base("assistantProse", text)];
+	const lead = `${fenceIndent}  `;
+	const body = text.startsWith(lead) ? text.slice(lead.length) : text.replace(/^ +/u, "");
+	const mark = bareFences ? lead : `${lead}${theme.fg("annotation", GLYPH.codeWrap)} `;
 	const room = Math.max(1, width - visibleWidth(mark));
-	return wrapTextWithAnsi(padded.replace(/ +$/u, "").replace(/^ +/u, ""), room).map((part) =>
-		theme.base("assistantProse", `${mark}${part}`),
+	return wrapTextWithAnsi(body, room).map((part, index) =>
+		theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`),
 	);
 }
 
@@ -902,16 +923,34 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 	const padded = md.render(width);
 	const rows: string[] = [];
 	let fenceIndent: string | null = null;
+	// The code line being rejoined: its first row from Pi, then each piece Pi cut off it.
+	let code: string | null = null;
+	const codeKeys: string[] = [];
+	const flushCode = (): void => {
+		if (code === null) return;
+		const key = `\0code\0${code}`;
+		codeKeys.push(key);
+		let parts = memo?.rows.get(key);
+		if (parts === undefined) {
+			parts = fitCodeLine(code, fenceIndent ?? "", width, bareFences);
+			memo?.rows.set(key, parts);
+		}
+		for (const part of parts) rows.push(part);
+		code = null;
+	};
 	for (const row of padded) {
 		const fence = row.includes("```") ? FENCE_ROW.exec(stripTerminalSequences(row)) : null;
-		if (fence !== null) fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
-		else if (
-			fenceIndent !== null &&
-			!bareFences &&
-			row.trim().length > 0 &&
-			!stripTerminalSequences(row).startsWith(`${fenceIndent}  `)
-		) {
-			rows.push(...fitCodeContinuationRow(row, fenceIndent, width));
+		if (fence !== null) {
+			flushCode();
+			fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
+		} else if (fenceIndent !== null) {
+			const trimmed = row.replace(/ +$/u, "");
+			if (stripTerminalSequences(trimmed).startsWith(`${fenceIndent}${CODE_LINE}`) || code === null) {
+				flushCode();
+				code = trimmed;
+			} else {
+				code += trimmed.replace(/^ +/u, "");
+			}
 			continue;
 		}
 		let parts = memo?.rows.get(row);
@@ -921,12 +960,13 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 		}
 		for (const part of parts) rows.push(part);
 	}
+	flushCode();
 	// Each delta strands the old tail rows. Keep the live ones, so eviction never costs a re-measure.
 	if (memo !== undefined && memo.rows.size > padded.length * 2 + 256) {
 		const live = new Map<string, string[]>();
-		for (const row of padded) {
-			const parts = memo.rows.get(row);
-			if (parts !== undefined) live.set(row, parts);
+		for (const key of [...padded, ...codeKeys]) {
+			const parts = memo.rows.get(key);
+			if (parts !== undefined) live.set(key, parts);
 		}
 		memo.rows = live;
 	}
