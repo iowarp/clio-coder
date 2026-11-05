@@ -8545,6 +8545,7 @@ export function createDispatchBundle(
 						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
 						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
 						escalationsDenied: escalationCounts.denied,
+						escalationsTimedOut: escalationCounts.timedOut,
 						finalText: finishContractAssistantText,
 						limitationDetail:
 							finishContract?.assessment.evidence

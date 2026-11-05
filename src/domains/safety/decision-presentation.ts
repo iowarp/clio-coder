@@ -230,7 +230,7 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 	const tool = facts.tool ?? "the presented tool";
 	const actionClass = facts.actionClass ?? "unknown";
 	if (facts.origin.kind === "worker") {
-		return `Approval authorizes this ${actionClass} call to ${tool} and identical calls under the same permission conditions for this worker run. Each call still passes the safety net. The autonomy level does not change.`;
+		return `Approval authorizes this one ${actionClass} call to ${tool}. An identical call in this worker run asks again. Each call still passes the safety net. The autonomy level does not change.`;
 	}
 	if (isSessionCodeConsent(facts)) {
 		return `Approval runs this ${actionClass} call to ${tool} and lets test runners run without asking for the rest of this session. It does not change the autonomy level.`;
@@ -259,7 +259,7 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 		case "system":
 			return "The call can change state outside the workspace or state the classifier cannot safely bound.";
 		case "worker":
-			return "A dispatched worker is parked. This run remembers your answer for the same tool, arguments, approval axis, and safety classification; other runs are unaffected.";
+			return "A dispatched worker is parked until you answer or its window runs out. This run remembers a denial for the same tool, arguments, approval axis, and safety classification, and never an approval; other runs are unaffected.";
 	}
 }
 
@@ -301,13 +301,13 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			: tier === "safety-net"
 				? "Approve guarded action once"
 				: tier === "worker"
-					? "Approve matching calls in this worker run"
+					? "Approve this worker call once"
 					: tier === "outward"
 						? "Approve outward decision once"
 						: "Approve workspace action once";
 	const stopConsequence =
 		facts.origin.kind === "worker"
-			? "Denies this worker request and ends the active main-agent turn. Other worker requests retain their timeout policy."
+			? "Denies this worker request and ends any active main-agent turn. This worker keeps running without the call, and other worker requests still wait for you."
 			: "Denies every parked request from this turn and ends the run.";
 	return [
 		{
@@ -315,7 +315,7 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			label: approveLabel,
 			consequence:
 				facts.origin.kind === "worker"
-					? "Runs this request and remembers approval for identical calls under the same permission conditions in this worker run."
+					? "Runs only this request. An identical call in this worker run asks again."
 					: sessionConsent
 						? "Runs the presented request and lets test runners run without asking until this session ends."
 						: "Runs only the presented request and does not change the autonomy level.",
@@ -325,7 +325,7 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			label: "Deny this request",
 			consequence:
 				facts.origin.kind === "worker"
-					? "Denies this request and remembers denial for identical calls under the same permission conditions in this worker run."
+					? "Denies this request and refuses identical calls under the same permission conditions in this worker run without asking."
 					: sessionConsent
 						? "Denies only the presented request; the next test runner asks again."
 						: "Denies only the presented request and advances the queue.",

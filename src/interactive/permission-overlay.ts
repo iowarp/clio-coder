@@ -194,7 +194,11 @@ function targetBlock(theme: ClioTheme, target: string, risk: Tone, width: number
 /** The card line for a worker ask routed through the main agent, or null for every other card. */
 function workerGrantAuthority(view: ApprovalRequestView): string | null {
 	const grant = view.workerGrant;
-	if (grant === undefined) return null;
+	if (grant === undefined) {
+		return view.origin.kind === "worker"
+			? "yours alone. fleet.permissions.mode escalate asks you, not the main agent."
+			: null;
+	}
 	if (grant.authority === "operator") {
 		return "operator only. This rail is not the main agent's to grant; your answer decides it.";
 	}
@@ -232,7 +236,11 @@ export function permissionRailTitle(
 		view.origin.kind === "worker" ? `Worker ${view.origin.agentId}` : context.actor.length > 0 ? context.actor : "Clio";
 	const depth = context.queueDepth ?? view.queueDepth ?? 0;
 	const count = depth > 1 ? ` · 1 of ${depth}` : "";
-	const candidates = [`${who} needs approval · ${presentation.kind}${count}`, `${who} needs approval${count}`];
+	// `Worker coder needs approval · worker call` says worker twice and nothing about the call.
+	const candidates = [
+		...(view.origin.kind === "worker" ? [] : [`${who} needs approval · ${presentation.kind}${count}`]),
+		`${who} needs approval${count}`,
+	];
 	return candidates.find((candidate) => visibleWidth(candidate) <= context.room) ?? `Needs approval${count}`;
 }
 
@@ -291,14 +299,21 @@ function permissionChoices(
 	const stopWords = stop?.consequence.includes("main-agent turn") ? "ends the main-agent turn" : "ends the turn";
 	const draftNote = hasDraft ? ` · inert until Backspace clears your draft` : "";
 	if (presentation.tier === "worker") {
+		// An approval is never remembered, only a denial (`deniedEscalations` in the
+		// worker runtime, F8), and the stop key does not reach the worker's process.
 		return [
 			{
 				key: "Enter",
 				verb: "allow",
-				consequence: `runs it and holds for identical calls in this worker run${draftNote}`,
+				consequence: `runs this one call; an identical call asks again${draftNote}`,
 			},
-			{ key: "Esc", verb: "deny", consequence: "skips it and holds for identical calls in this worker run" },
-			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
+			{ key: "Esc", verb: "deny", consequence: "skips it; an identical call in this run is refused without asking" },
+			{
+				key: PERMISSION_STOP_KEY,
+				verb: "stop",
+				consequence: "denies it and ends any main turn; this worker keeps running",
+				tone: "error",
+			},
 		];
 	}
 	if (view.axis.kind === "net" && view.axis.ruleId === SESSION_CODE_CONSENT_RULE_ID) {
@@ -424,6 +439,15 @@ function permissionFacts(
 	// only for a worker, whose id and run the operator cannot read anywhere else.
 	if (view.origin.kind === "worker") {
 		facts.push({ label: "asked by", value: `worker ${view.origin.agentId} (run ${view.origin.runId})`, tone: "muted" });
+		// A worker card has no inspect key: its arguments stay in the worker, so a
+		// cut command is one the operator cannot finish reading anywhere.
+		if (view.tool === "bash" && view.target?.endsWith("…") === true) {
+			facts.push({
+				label: "cut",
+				value: "this card shows the start of the call; the rest stays inside the worker and cannot be read here.",
+				tone: "warning",
+			});
+		}
 	}
 	const authority = workerGrantAuthority(view);
 	if (authority !== null) facts.push({ label: "authority", value: authority });
@@ -438,6 +462,21 @@ function permissionFacts(
 		const answer = hasDraft ? "Backspace clears your draft, then Enter allows" : "Enter allows";
 		lines.push(
 			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, Esc denies`), width),
+		);
+	} else if (countdown !== null && view.origin.kind === "worker") {
+		// The window runs inside the worker's process, so no key here can hold it.
+		const after =
+			view.workerFallback === "fail"
+				? "denies this call and fails the worker run"
+				: "denies this call; the worker carries on without it";
+		lines.push(
+			...wrapTextWithAnsi(
+				theme.fg(
+					"warning",
+					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} ${after}. No key pauses this.`,
+				),
+				width,
+			),
 		);
 	} else if (countdown !== null) {
 		lines.push(
