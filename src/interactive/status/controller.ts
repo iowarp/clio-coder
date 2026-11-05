@@ -1,7 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { ownerTelemetryContext } from "../../core/telemetry/context.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
-import { isRunAbortedPayload } from "../../core/telemetry/live-events.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
 import {
@@ -232,25 +231,9 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 				lastDispatchProgressAt = at;
 				apply({ type: "dispatch_progress" });
 			}),
-			deps.bus.subscribe("run.aborted", (payload) => {
-				scheduleAbortCeiling();
-				settleCancelWhenStopped();
-				// Carry abort provenance into the summary; a dispatch drain and a
-				// user stream-cancel must not collapse into one hardcoded path.
-				// A malformed payload still ends the run, just without detail.
-				if (isRunAbortedPayload(payload)) {
-					apply(
-						{
-							type: "run_aborted",
-							source: payload.source,
-							...(payload.reason !== undefined ? { reason: payload.reason } : {}),
-						},
-						true,
-					);
-					return;
-				}
-				apply({ type: "run_aborted" }, true);
-			}),
+			// `run.aborted` names a worker run, and only dispatch publishes it. Reading it here turned the
+			// operator's cancel of one worker into `Clio is cancelling · stop requested` over a main turn
+			// that was still streaming, with Esc still bound to stop it. The main turn's own abort is `turn.aborted`.
 			deps.bus.subscribe("turn.aborted", (payload) => {
 				scheduleAbortCeiling();
 				settleCancelWhenStopped();
