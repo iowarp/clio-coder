@@ -16,6 +16,8 @@ export interface FollowUpQueuePanelOptions {
 	getSendNowKey?: () => string | undefined;
 	/** The overlay holding the keyboard, `closed` when the composer has it. */
 	getOverlayState?: () => string;
+	/** No run is going to take the queue, so it waits for the operator (#447). */
+	isHeld?: () => boolean;
 	now?: () => number;
 }
 
@@ -29,10 +31,12 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 	const render = (width: number): string[] => {
 		const overlay = options.getOverlayState?.() ?? "closed";
 		const now = (options.now ?? Date.now)();
+		const held = options.isHeld?.() === true;
 		// The waits are part of the key: a cache over the last queue change froze them at the age they had then.
 		const key = [
 			skinEpoch(),
 			overlay,
+			held,
 			options.getDequeueKey?.(),
 			options.getNavigateKey?.(),
 			options.getSendNowKey?.(),
@@ -88,7 +92,7 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 			lines.push(truncateToWidth(theme.fg("annotation", row), bodyWidth, "…", false));
 		}
 
-		cachedLines = frame(theme, "Steering Queue", lines, bodyWidth + 4);
+		cachedLines = frame(theme, held ? "Steering Queue · held, nothing sent" : "Steering Queue", lines, bodyWidth + 4);
 		cachedWidth = width;
 		cachedKey = key;
 		dirty = false;

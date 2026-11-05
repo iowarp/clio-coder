@@ -134,7 +134,7 @@ export interface OverlayGeneralOpenersDeps {
 	queueNavigator?: {
 		chat: Pick<
 			import("../session-control/chat-loop.js").ChatLoop,
-			"queueEntries" | "removeQueuedEntry" | "moveQueuedEntry" | "setQueuedEntryKind"
+			"queueEntries" | "removeQueuedEntry" | "moveQueuedEntry" | "setQueuedEntryKind" | "isStreaming" | "turnPreparation"
 		>;
 		toEditor(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
 		sendNow(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
@@ -839,6 +839,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "queue-navigator";
 		deps.transitions.handle = openQueueNavigatorFactory(deps.tui, {
 			entries: () => queue.chat.queueEntries(),
+			isHeld: () => !queue.chat.isStreaming() && queue.chat.turnPreparation().phase === "idle",
 			remove: (id) => void queue.chat.removeQueuedEntry(id),
 			move: (id, delta) => queue.chat.moveQueuedEntry(id, delta),
 			toggleKind: (entry) => void queue.chat.setQueuedEntryKind(entry.id, entry.kind === "steer" ? "follow-up" : "steer"),

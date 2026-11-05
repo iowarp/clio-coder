@@ -397,6 +397,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getNavigateKey: () => keybindings.actionLabel("clio-coder.queue.open"),
 		getSendNowKey: () => keybindings.actionLabel("clio-coder.message.interrupt"),
 		...(deps.getOverlayState ? { getOverlayState: deps.getOverlayState } : {}),
+		isHeld: () => !deps.chat.isStreaming() && deps.chat.turnPreparation().phase === "idle",
 	});
 	const statusController = factories.createStatusController({
 		chat: deps.chat,

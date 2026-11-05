@@ -36,6 +36,8 @@ export const QUEUE_NAVIGATOR_OVERLAY_WIDTH = 88;
 
 export interface QueueNavigatorDeps {
 	entries(): ReadonlyArray<QueuedChatMessage>;
+	/** No run is going to take the queue, so no slot is coming for it (#447). */
+	isHeld?(): boolean;
 	remove(id: string): void;
 	move(id: string, delta: -1 | 1): boolean;
 	/** Flip one entry between the next slot and the end of the turn. */
@@ -150,7 +152,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			const slot = queueSlotWord(selected);
 			rows.push(
 				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
-					meta: `${slot === "steer" ? "next slot" : "end of turn"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
+					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "next slot" : "end of turn"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
 				}),
 			);
 			const text = selected.text.split("\n").flatMap((line) => wrapTextWithAnsi(theme.fg("body", line), safeWidth));
@@ -242,7 +244,7 @@ export function openQueueNavigatorOverlay(tui: TUI, deps: QueueNavigatorDeps): O
 		anchor: "center",
 		width: QUEUE_NAVIGATOR_OVERLAY_WIDTH,
 		markerId: "queue-navigator",
-		title: () => `Steering Queue (${deps.entries().length})`,
+		title: () => `Steering Queue (${deps.entries().length})${deps.isHeld?.() === true ? " · held, nothing sent" : ""}`,
 		footerHint: () => body.footerHint(),
 	});
 }

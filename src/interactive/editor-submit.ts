@@ -715,7 +715,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	const restoreQueuedFollowUpsToEditor = (): void => {
 		const restored = deps.chat.clearQueuedFollowUps();
 		if (restored.length === 0) {
-			deps.io.stderr("[follow-up] no queued messages to restore\n");
+			deps.notify("info", "nothing is queued to restore", "queue:empty");
 			return;
 		}
 		const currentText = deps.editor.getExpandedText?.() ?? deps.editor.getText();
