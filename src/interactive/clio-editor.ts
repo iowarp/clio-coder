@@ -574,7 +574,9 @@ export class ClioEditor extends Editor {
 			const exact = exactRouteLabel(route);
 			const atRouteMoment =
 				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
-			if (actor === undefined && workspace === null && exact !== null && atRouteMoment) {
+			// A narrow rail would pay for the full route with the wait's elapsed, which outranks any name.
+			const routeAffordable = width >= 60 || status?.live !== true;
+			if (actor === undefined && workspace === null && exact !== null && atRouteMoment && routeAffordable) {
 				const routed = status
 					? this.chrome.getHarnessStatus?.(width, reserved, visibleWidth(lead) + visibleWidth(exact) + 2)
 					: null;
