@@ -843,6 +843,7 @@ function dispatchCardBody(
 	}
 	if (row.status === "enqueued" && row.endpoint !== undefined) {
 		const active = options.endpointActive ?? 0;
+		const label = sanitizeCallTargetText(row.endpoint.label);
 		bodyLines.push(
 			...cardWrappedValueLines(
 				theme,
@@ -850,8 +851,10 @@ function dispatchCardBody(
 				theme.fg(
 					"body",
 					// The main turn's stream counts and is not gated, so `in use` can pass the
-					// limit, and one settling then does not free a slot.
-					`for a slot on ${sanitizeCallTargetText(row.endpoint.label)}: ${active} in use against a limit of ${row.endpoint.limit}, the main turn included. It starts once the count is under the limit.`,
+					// limit, and one settling then does not free a slot. The fold keeps the count and Enter explains it.
+					options.expanded === true
+						? `for a slot on ${label}: ${active} in use against a limit of ${row.endpoint.limit}, the main turn included. It starts once the count is under the limit.`
+						: `for a slot on ${label}: ${active} in use, limit ${row.endpoint.limit}`,
 				),
 				contentWidth,
 			),
@@ -862,7 +865,13 @@ function dispatchCardBody(
 			...cardWrappedValueLines(
 				theme,
 				"waiting",
-				theme.fg("body", "for a worker slot. It starts when a running worker finishes, or [x] cancels it."),
+				// The fold leaves `[x] cancel` to the rail below it.
+				theme.fg(
+					"body",
+					options.expanded === true
+						? "for a worker slot. It starts when a running worker finishes, or [x] cancels it."
+						: "until a worker slot frees",
+				),
 				contentWidth,
 			),
 		);

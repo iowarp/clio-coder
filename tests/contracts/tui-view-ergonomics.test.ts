@@ -75,9 +75,7 @@ test("filter persists across preview, back, refresh, and terminal widths", async
 		await settle();
 		match(plain(view, width), /> report/u);
 	}
-	view.handleInput("\x1b");
-	strictEqual(closed(), false);
-	match(plain(view), /List · 2\/2/u);
+	// The filter came with the open and was never edited, so Esc closes rather than clears it.
 	view.handleInput("\x1b");
 	strictEqual(closed(), true);
 });

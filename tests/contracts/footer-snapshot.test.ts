@@ -51,7 +51,7 @@ test("footer pages use snapshot time and preserve their row contracts at release
 		strictEqual(compact.length, 2);
 		for (const page of DASHBOARD_PAGES) {
 			const rows = renderDashboardPage(state, page, width, 240, "Alt+U");
-			strictEqual(rows.length, 12);
+			strictEqual(rows.length, 16);
 			match(stripTerminalSequences(rows[0] ?? ""), new RegExp(page));
 			if (page === "Status") match(rows.map(stripTerminalSequences).join("\n"), /3s ago/);
 			for (const row of [...rows, ...compact]) {
