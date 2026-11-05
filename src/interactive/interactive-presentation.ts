@@ -623,6 +623,17 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});
+	/** Routes that streamed reasoning this session, which the thinking rail then cannot deny. */
+	const reasoningRoutes = new Set<string>();
+	const routeKey = (target: string | null | undefined, model: string | null | undefined): string => `${target ?? ""}#${model ?? ""}`;
+	const unsubscribeReasoning = deps.chat.onEvent((event) => {
+		if (event.type !== "thinking_delta" || event.delta.length === 0) return;
+		const current = deps.getSettings?.();
+		const key = routeKey(current?.chat?.target, current?.chat?.model);
+		if (reasoningRoutes.has(key)) return;
+		reasoningRoutes.add(key);
+		deps.tui.requestRender();
+	});
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getTaskRail: (room) => {
@@ -720,6 +731,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.model,
 				current?.chat?.thinkingLevel ?? "off",
 			)?.thinking;
+			// A route with no thinking control can still send reasoning, and what it sent outranks what its catalog row says.
+			if (thinking?.mechanism === "none" && reasoningRoutes.has(routeKey(current?.chat?.target, current?.chat?.model))) {
+				return { label: "off", hasLevels: false, supportedLevels: [], note: "model reasons anyway" };
+			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
 			const note = thinking ? thinkingEffectNote(thinking) : null;
@@ -1002,6 +1017,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		banner.dispose();
 		footer.dispose();
 		unsubscribeProjection();
+		unsubscribeReasoning();
 		for (const off of unsubscribeTelemetry) off();
 		if (dropCheck) clearTimeout(dropCheck);
 		contextActivityStore.unsubscribe();
