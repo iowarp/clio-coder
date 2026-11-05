@@ -33,6 +33,7 @@ import { dockTop } from "../../src/interactive/dock.js";
 import { exitSpend } from "../../src/interactive/exit-summary-collector.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
+import { usageCoverage, usageFigure, usageGap } from "../../src/interactive/usage-words.js";
 import { dtoLies } from "../harness/telemetry-lies.js";
 import {
 	coldParityDtos,
@@ -106,7 +107,11 @@ test("the footer and the exit card show the session's tokens and cost as the rea
 	strictEqual(footer.cost, usd.display);
 	const card = exitSpend(view, "1970-01-01T00:00:00.000Z");
 	ok(card.kind === "ready");
-	strictEqual(card.tokens, tokens.display);
+	// The figure is the read model's own; the line states its coverage once, after it (F4).
+	strictEqual(
+		card.tokens,
+		[usageFigure(tokens), usageCoverage(usageGap(tokens))].filter((part) => part !== null).join(" · "),
+	);
 	strictEqual(card.cost, usd.display);
 	deepStrictEqual(
 		card.models.map((row) => [row.key, row.calls, row.cost]),
@@ -127,7 +132,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 30).join("\n") ?? "");
 		ok(text.includes(cold.session.totals.usd.display), text);
-		ok(text.includes(cold.session.totals.tokens.display), text);
+		ok(text.includes(usageFigure(cold.session.totals.tokens)), text);
 	} finally {
 		usage.hide();
 	}

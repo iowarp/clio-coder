@@ -2,7 +2,6 @@ import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
-import { renderCoverage } from "../core/telemetry/render.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
@@ -17,6 +16,7 @@ import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, rule } from "./theme/index.js";
+import { usageCoverageSentence, usageFigure } from "./usage-words.js";
 
 const DEFAULT_CONTENT_WIDTH = 104;
 
@@ -91,7 +91,7 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>, con
 	});
 }
 
-const BARE_COUNT = /^~?\d[\d,]*$/;
+const BARE_COUNT = /^[≥~]*\d[\d,]*$/u;
 
 /**
  * A token display with its unit. The unit follows a bare count ("5,120 tokens"); a display that carries its own gap
@@ -103,15 +103,18 @@ function tokensText(display: string): string {
 
 /** Whole-session token rows, optionally for one model group; every value is the read model's own display. */
 function tokenRows(view: TelemetryView, model?: string): Array<readonly [string, string, string?]> {
+	// Each row is the figure alone; the coverage row above the table says once how many calls reported nothing (F4).
 	const display = (metric: FactMetric) =>
-		view.quantity(
-			factRef({
-				scope: "session",
-				owner: view.sessionId,
-				metric,
-				...(model === undefined ? {} : { group: { by: "model", key: model } }),
-			}),
-		)?.display ?? "unknown";
+		usageFigure(
+			view.quantity(
+				factRef({
+					scope: "session",
+					owner: view.sessionId,
+					metric,
+					...(model === undefined ? {} : { group: { by: "model", key: model } }),
+				}),
+			),
+		);
 	return [
 		["input", display("input")],
 		["output", display("output")],
@@ -145,15 +148,15 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 			),
 			["model calls", byRole.total.calls.display],
 			["harness overhead", session.overhead.share.display],
-			...(hasUnknown(tokenCoverage) ? [["token coverage", renderCoverage(tokenCoverage.fact)] as const] : []),
+			...(hasUnknown(tokenCoverage) ? [["usage data", usageCoverageSentence(tokenCoverage) ?? ""] as const] : []),
 			...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 			...tokenRows(view),
 			...(cached
 				? [
-						["uncached prefill", cache.uncachedPrefill.display] as const,
-						["re-prefilled", cache.rePrefilled.display, `${cache.breaks.length} breaks`] as const,
-						["cache-break bill", cache.breakUsd.display] as const,
+						["uncached prefill", usageFigure(cache.uncachedPrefill)] as const,
+						["re-prefilled", usageFigure(cache.rePrefilled), `${cache.breaks.length} breaks`] as const,
+						["cache-break bill", usageFigure(cache.breakUsd)] as const,
 						[
 							"cache verdicts",
 							`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
@@ -255,8 +258,8 @@ function renderActivity(
 	else {
 		const totals = view.session().totals;
 		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
-		lines.push(`${label("Session")}${cost}${theme.fg("counter", tokensText(totals.tokens.display))}${elapsed}`);
-		const tokenCoverage = hasUnknown(totals.tokens) ? renderCoverage(totals.tokens.fact) : null;
+		lines.push(`${label("Session")}${cost}${theme.fg("counter", tokensText(usageFigure(totals.tokens)))}${elapsed}`);
+		const tokenCoverage = usageCoverageSentence(totals.tokens);
 		const neverSent = view.session().own.counts.dispositions.neverSent;
 		const usage = [tokenCoverage, nonZero(neverSent) ? `${neverSent.display} never sent` : null].filter(
 			(part) => part !== null,

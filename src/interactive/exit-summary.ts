@@ -168,7 +168,11 @@ export function renderExitSummary(
 		);
 		add(
 			"Time",
-			`${formatCompactMs(snapshot.wallMs)} wall this visit · ${spend.kind === "ready" ? `${spend.modelTime} model across the session` : `model ${SPEND_NOT_AVAILABLE}`}`,
+			[
+				`${formatCompactMs(snapshot.wallMs)} wall this visit`,
+				spend.kind === "ready" ? `${spend.modelTime} model across the session` : `model ${SPEND_NOT_AVAILABLE}`,
+				...(spend.kind === "ready" && spend.modelTimeCoverage !== null ? [spend.modelTimeCoverage] : []),
+			].join(" · "),
 		);
 		// Session totals cover every branch this session paid for; the visit's own share is its call count.
 		add("Tokens", spend.kind === "ready" ? spend.breakdown : SPEND_NOT_AVAILABLE);
