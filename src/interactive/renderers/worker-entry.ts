@@ -787,7 +787,8 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	const facts = [
 		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
 		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
-		...(calls === undefined ? [] : [renderCalls(calls, "call")]),
+		// An unknown count says nothing a person can use; `unknown calls` read as a fact about the worker.
+		...(calls === undefined || compactQuantity(calls) === null ? [] : [renderCalls(calls, "call")]),
 	];
 	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too. The form
 	// is picked for the room the facts beside it leave, so the row never cuts a clause mid-word.

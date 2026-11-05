@@ -369,6 +369,11 @@ type ToolSegment = {
 	 */
 	cardAttached?: true;
 	/**
+	 * Every worker card under this call settled cancelled, so the call was stopped rather than failed: the dispatch
+	 * tool reports a cancelled run as an error, and its row read ✗ above a card that read ⊘.
+	 */
+	cardsCancelled?: true;
+	/**
 	 * What a finished call rendered to, so a long live turn pays only for its running calls: every settled row
 	 * re-rendered on each update cost about 5 MB per frame at 320 calls. A finished call has no clock in its rows.
 	 * `changeSettledCall` drops all of this, and the fold over this call sees its revision move.
@@ -1435,6 +1440,7 @@ function renderToolSegmentLines(
 		notRun: seg.notRun,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
+		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
 		...shellActor(seg),
 	};
@@ -1486,6 +1492,7 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		resultSummary: seg.resultSummary,
 		actionClass: seg.actionClass,
 		cardAttached: seg.cardAttached,
+		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
 		...shellActor(seg),
 	};
@@ -1884,6 +1891,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const telemetryShown = (state: WorkerEntryState, view: TelemetryView | null): string =>
 		`${state.runId}\0${workerTelemetryDisplay(view?.run(state.runId) ?? null)}`;
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
+	/** A dispatch call whose every card settled cancelled reads as stopped on its own row too. */
+	const markCancelledDispatch = (toolCallId: string | undefined): void => {
+		if (toolCallId === undefined) return;
+		const cards = dispatchGroups.get(toolCallId) ?? [];
+		if (cards.length === 0 || !cards.every((card) => card.state.result?.outcome === "canceled")) return;
+		const parent = findSpawningCall(toolCallId);
+		if (parent === undefined || parent.segment.cardsCancelled === true) return;
+		parent.segment.cardsCancelled = true;
+		changeSettledCall(parent.segment);
+		invalidateEntryCache(parent.entry);
+	};
 	const workerRenderOptions = (
 		entry: TranscriptEntry,
 	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry" | "routeFirstOutput"> => {
@@ -2896,6 +2914,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				invalidateEntryCache(existing);
 				const lead = state.parentToolCallId === undefined ? undefined : dispatchGroups.get(state.parentToolCallId)?.[0];
 				if (lead !== undefined && lead !== existing) invalidateEntryCache(lead);
+				markCancelledDispatch(state.parentToolCallId);
 				markDirty();
 				return;
 			}

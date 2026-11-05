@@ -768,9 +768,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					: // A queued run's progress reads `starting`, which it is not until it has a slot.
 						row.status === "enqueued"
 						? "waiting for a slot"
-						: row.progress
-							? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
-							: dispatchStatusPresentation(row.status).label,
+						: // Its last phase reads `finishing`, which is work ending on its own; the board says `stopping`.
+							row.status === "cancelling"
+							? "stopping"
+							: row.progress
+								? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
+								: dispatchStatusPresentation(row.status).label,
 			now: Date.now(),
 		};
 	};
