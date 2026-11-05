@@ -612,7 +612,10 @@ export class ClioEditor extends Editor {
 			const room = this.railLabelRoom(width) - reserved - 2;
 			const named = this.chrome.getCompactionLabel?.(room - Math.max(4, Math.min(24, Math.floor(width / 3))) - 1) ?? null;
 			const alone = this.chrome.getCompactionLabel?.(room) ?? null;
-			activity = theme.fg("harnessAction", named ?? "is compacting context");
+			// The name is the first thing to go: a rail that cannot hold it beside the clock and Esc drops it, not them.
+			const facts = (label: string | null): number => (label ?? "").split(" · ").length;
+			const keepsName = named !== null && facts(named) >= facts(alone);
+			activity = theme.fg("harnessAction", (keepsName ? named : alone) ?? "is compacting context");
 			stateAlone = theme.fg("harnessAction", (alone ?? "compacting context").replace(/^is /u, ""));
 		} else if (mode === "PREPARING") {
 			lead = theme.fg("harnessAction", spinner);
