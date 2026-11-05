@@ -752,6 +752,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return {
 			// The strip over a dock reads the phase with the rail's own name and compaction facts, so the two cannot disagree (F2).
 			actor: phaseModelName(status),
+			...(deps.getSettings?.().chat?.target ? { target: deps.getSettings?.().chat?.target ?? "" } : {}),
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).

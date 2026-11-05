@@ -836,6 +836,13 @@ function retryRailLabel(
 			slot,
 		);
 	}
+	// A countdown the provider asked for needs a verb of its own: with no count the first fact stood where the state
+	// belongs and read `Judge-model mock says it is busy`.
+	const waiting = onWait
+		? room >= 40
+			? `is waiting to retry${count === null ? "" : ` (${count})`}`
+			: (count ?? "waiting")
+		: attempts;
 	const left = retry?.dueAt !== undefined ? formatStatedWait(Math.max(0, retry.dueAt - now)) : null;
 	const asked =
 		retry?.retryAfterMs !== undefined && retry.retryAfterMs > 0 ? formatStatedWait(retry.retryAfterMs) : null;
@@ -843,7 +850,7 @@ function retryRailLabel(
 	if (asked !== null && left !== null && room < 70) {
 		return fitRailFacts(
 			[
-				{ text: attempts, keep: 9 },
+				{ text: waiting, keep: 9 },
 				{ text: `provider wait ${left}`, short: `in ${left}`, keep: 8, distinguishes: true },
 				{ ...retryCauseFact(retry, now, server), keep: 6 },
 				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
@@ -855,7 +862,7 @@ function retryRailLabel(
 	}
 	return fitRailFacts(
 		[
-			{ text: attempts, keep: 9 },
+			{ text: waiting, keep: 9 },
 			{ ...retryCauseFact(retry, now, server), keep: 6 },
 			{
 				// What the server said outranks the long form of the countdown beside it.

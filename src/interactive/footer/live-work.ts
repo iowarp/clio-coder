@@ -22,6 +22,8 @@ import { type CompactionRailFacts, composerPhasePresentation } from "./widgets.j
 export interface LiveWorkFacts {
 	/** The name the composer rail gives the main agent. */
 	actor: string;
+	/** The target the main turn's requests go to, by its configured name, which the rail names too. */
+	target?: string;
 	status: AgentStatus;
 	/** The running compaction's stage and start, which the rail reads too; null or absent when none runs. */
 	compaction?: CompactionRailFacts | null;
@@ -208,7 +210,16 @@ export function liveWorkStrip(
 	if (mainActive) {
 		const compaction = facts.compaction ?? null;
 		const present = (labelRoom: number) =>
-			composerPhasePresentation(facts.status, room, facts.now, facts.actor, Math.max(10, labelRoom), 0, compaction);
+			composerPhasePresentation(
+				facts.status,
+				room,
+				facts.now,
+				facts.actor,
+				Math.max(10, labelRoom),
+				0,
+				compaction,
+				facts.target,
+			);
 		const loose = present(room - 2);
 		const subject = loose.subject ?? facts.actor;
 		const glyph = theme.fg(loose.token, loose.live ? GLYPH.running : loose.glyph);
