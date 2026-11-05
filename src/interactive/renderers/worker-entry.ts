@@ -621,7 +621,9 @@ const TIMER_WIDTH = 7;
 const NARROW_CARD_WIDTH = 72;
 
 function workerName(entry: WorkerEntryState): string {
-	return displayText(entry, "name", entry.council?.label ?? entry.agentId);
+	// The synthesis run carries the council's result, judged, voted or only collected, so it goes by the council.
+	const label = entry.council?.label === COUNCIL_SYNTHESIS_LABEL ? "council" : entry.council?.label;
+	return displayText(entry, "name", label ?? entry.agentId);
 }
 
 /** The widest header outcome word, so sibling cards line up. */

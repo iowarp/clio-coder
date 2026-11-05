@@ -1047,7 +1047,13 @@ function dispatchCardBody(
 				"control",
 				[
 					// The worker took the message; whether its model read it before the run ended is the transcript receipt's.
-					theme.fg("success", `${GLYPH.ok} the worker took your message`),
+					// A settled run's row cannot tell whether its model read the message; the transcript receipt says which.
+					theme.fg(
+						"success",
+						isTerminalStatus(row.status)
+							? `${GLYPH.ok} the worker took your message before the run ended`
+							: `${GLYPH.ok} the worker took your message`,
+					),
 					theme.fg("body", `${row.steerAcknowledgement.chars} chars`),
 				],
 				contentWidth,
@@ -1490,7 +1496,12 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 		const mark = completedRunMark(failure);
 		// Below sixty columns the cell keeps the worker card header's one word, so the agent column survives; the
 		// detail under the table states the caveat whole.
-		const words = width >= NARROW_STATUS_WIDTH ? failure.words : COMPACT_CAVEAT_WORD[failure.kind];
+		const words =
+			width >= NARROW_STATUS_WIDTH
+				? failure.words
+				: failure.kind === "refused"
+					? `${row.completion?.refusedCalls ?? 1} refused`
+					: COMPACT_CAVEAT_WORD[failure.kind];
 		return theme.fg(mark.token, `${mark.glyph} ${words}`);
 	}
 	const full = dispatchStatusPresentation(row.status, {
@@ -1834,11 +1845,13 @@ function formatDispatchBoardBody(
 	if (room <= 0) return lines;
 	const kept = detail.body.slice(0, Math.max(0, room - 1));
 	const hidden = detail.body.length - kept.length;
+	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
 	const where = [
 		`${hidden} more rows`,
 		...(detailExpanded ? [] : [`${detailKey} for detail`]),
 		`/view dispatch:${detail.runId}`,
 	];
+	while (where.length > 1 && visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) > width) where.pop();
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
