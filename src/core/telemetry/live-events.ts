@@ -350,19 +350,6 @@ export interface TurnAbortedPayload {
 	reason?: string;
 }
 
-const RUN_ABORT_SOURCES: ReadonlySet<string> = new Set<RunAbortSource>(["dispatch_abort", "dispatch_drain"]);
-
-export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
-	if (!value || typeof value !== "object") return false;
-	const p = value as Record<string, unknown>;
-	if (typeof p.source !== "string" || !RUN_ABORT_SOURCES.has(p.source)) return false;
-	if (typeof p.runId !== "string") return false;
-	if (p.startedAt !== null && typeof p.startedAt !== "string") return false;
-	if (p.elapsedMs !== null && typeof p.elapsedMs !== "number") return false;
-	if (p.reason !== undefined && typeof p.reason !== "string") return false;
-	return true;
-}
-
 /** Payload published on `context.pruned` after projected or summarized context shrinks. */
 export type ContextPrunedPayload = Static<typeof ContextPrunedSchema>;
 
