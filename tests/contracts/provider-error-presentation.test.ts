@@ -253,7 +253,7 @@ test("actual LiteLLM wrapper keeps route recovery and policy in primary JSON and
 		const output = plain(panel.render(120));
 		assert.match(output, /503/);
 		assert.match(output, /\/model/);
-		assert.match(output.replace(/\s+/g, " "), /did not retry or substitute another model/);
+		assert.match(output.replace(/\s+/g, " "), /did not substitute another model/);
 		assert.match(output, /chosen-route/);
 		const replay = createChatPanel();
 		rehydrateChatPanelFromTurns(replay, [

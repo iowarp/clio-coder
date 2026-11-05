@@ -62,7 +62,7 @@ export function presentProviderError(value: string): string {
 	// window, so a long diagnostic is matched on its bounded tail instead.
 	const beyondScan = value.length > SCAN_LIMIT;
 	const routeParts = (beyondScan ? providerErrorEvidence(value.slice(-ROUTE_ADVICE_TAIL)) : available).match(
-		/\n\n((LiteLLM route [^\n]+ failed\.) (Clio did not retry or substitute another model); (select a different route with \/model, then resend\.))$/,
+		/\n\n((LiteLLM route [^\n]+ failed\.) Clio did not (?:retry or )?(substitute another model); (select a different route with \/model, then resend\.))$/,
 	);
 	const routeAdvice = routeParts?.[1];
 	const sample =
@@ -122,7 +122,8 @@ export function presentProviderError(value: string): string {
 		const identity = routeParts?.[2];
 		const policy = routeParts?.[3];
 		const remedy = routeParts?.[4];
-		const advice = identity && policy && remedy ? `${remedy} ${policy}. ${identity}` : routeAdvice;
+		// A saved failure may claim no retry that the ladder since made untrue, so the policy is restated rather than replayed.
+		const advice = identity && policy && remedy ? `${remedy} Clio did not ${policy}. ${identity}` : routeAdvice;
 		summary = `${prefix}${summary.length > 60 ? " ..." : ""}; ${advice}`;
 	}
 	const shortened = summary.length > DISPLAY_LIMIT || value.length > SCAN_LIMIT || summary !== sample.trim();
