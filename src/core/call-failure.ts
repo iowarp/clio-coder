@@ -93,6 +93,7 @@ export function trackCallFetch(fetchImpl: typeof globalThis.fetch = (url, init) 
 	return {
 		fetch,
 		retryAfterMs: (): number | null => retryAfterMs,
+		observesResponses: (): boolean => !unobservedTransportStarted,
 		start(api?: string, transport?: string): void {
 			// WebSocket, AWS SDK and plugin transports can send without fetch (#429, #430).
 			unobservedTransportStarted =

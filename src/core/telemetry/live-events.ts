@@ -830,6 +830,7 @@ export type StatusPhase =
 	| "compacting"
 	| "dispatching"
 	| "stuck"
+	| "cancelling"
 	| "ended";
 
 export type WatchdogTier = 0 | 1 | 2 | 3 | 4;

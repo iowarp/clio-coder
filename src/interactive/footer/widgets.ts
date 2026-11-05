@@ -12,7 +12,7 @@ import { contextPercentRole } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
-import { formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
+import { computeWatchdogTier, formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	FUNCTION_ROLES,
@@ -342,6 +342,8 @@ type HarnessPhasePresentation = {
 	label: string;
 	token: ClioToken;
 	live: boolean;
+	/** Who is acting, when that is not the model the rail names by default. */
+	subject?: string;
 };
 
 function shortToolLabel(status: AgentStatus, width: number): string {
@@ -412,6 +414,8 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 				live: false,
 			};
 		}
+		case "cancelling":
+			return { glyph: GLYPH.cancelled, label: "Cancelling", token: "counter", live: false };
 		case "ended": {
 			const stop = status.summary?.stopReason;
 			if (stop === "error") return { glyph: GLYPH.error, label: "Failed", token: "error", live: false };
@@ -425,22 +429,27 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 	}
 }
 
-const COMPOSER_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
-	[ToolNames.Write]: "is writing a file",
-	[ToolNames.Edit]: "is editing a file",
-	[ToolNames.Read]: "is reading a file",
-	[ToolNames.Bash]: "is running a command",
-	[ToolNames.RunScript]: "is running a script",
-	[ToolNames.Grep]: "is searching",
-	[ToolNames.Find]: "is finding files",
-	[ToolNames.CodeNav]: "is navigating code",
+/** The verb for a call the harness executes, and the words when its arguments name no object. */
+const HARNESS_TOOL_ACTIVITY: Readonly<Record<string, { verb: string; bare: string }>> = {
+	[ToolNames.Write]: { verb: "is writing", bare: "is writing a file" },
+	[ToolNames.Edit]: { verb: "is editing", bare: "is editing a file" },
+	[ToolNames.Read]: { verb: "is reading", bare: "is reading a file" },
+	[ToolNames.Bash]: { verb: "is running", bare: "is running a command" },
+	[ToolNames.RunScript]: { verb: "is running", bare: "is running a script" },
+	[ToolNames.Grep]: { verb: "is searching for", bare: "is searching" },
+	[ToolNames.Find]: { verb: "is finding", bare: "is finding files" },
+	[ToolNames.CodeNav]: { verb: "is looking up", bare: "is navigating code" },
+};
+
+/** These calls leave the next step with a person or a worker, so the model's turn is what is waiting. */
+const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 	[ToolNames.Dispatch]: "is waiting for a worker",
 	[ToolNames.AskUser]: "needs input",
 };
 
 /** Room for the activity phrase on the composer rail, after its stretch, lead glyph and a short model name. */
 function railActivityRoom(width: number): number {
-	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - 14);
+	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - (width < 60 ? 9 : 14));
 }
 
 /** Facts in reading order, each with its priority. The lowest priorities leave first and the order never changes. */
@@ -467,7 +476,7 @@ function retryRailLabel(
 	modelWait: (from: number) => string | null,
 ): string {
 	const retry = status.retry;
-	const attempts = `retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
+	const attempts = `${room >= 22 ? "retrying" : "retry"} ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
 	if (retry?.stage === "attempt") {
 		const from = retry.attemptStartedAt;
 		return fitRailFacts(
@@ -493,14 +502,127 @@ function retryRailLabel(
 	);
 }
 
+function clockTime(at: number): string {
+	return new Date(at).toTimeString().slice(0, 8);
+}
+
+/**
+ * What a silent model wait can truthfully say, escalating with the age of the last evidence. None of it is a cause:
+ * no bytes means none arrived, and a target that may be loading or stuck is stated as exactly that much.
+ */
+function modelWaitFacts(
+	status: AgentStatus,
+	room: number,
+	now: number,
+	from: number,
+): ReadonlyArray<{ text: string | null; keep: number }> {
+	const tier = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt));
+	const request = status.modelRequest;
+	const sent = request && request.sentAt >= from ? request : null;
+	const evidence =
+		tier < 1
+			? null
+			: sent?.firstByteAt
+				? "response open, no output yet"
+				: sent?.bytesObservable
+					? "no bytes yet"
+					: "no output yet";
+	return [
+		{ text: sent ? `request sent ${clockTime(sent.sentAt)}` : null, keep: 3 },
+		{ text: evidence, keep: 5 },
+		{ text: tier >= 3 ? (room >= 60 ? "target may be loading or stuck" : "may be stuck") : null, keep: 7 },
+		{ text: tier >= 3 ? (room >= 50 ? "/model switches" : "/model") : null, keep: 6 },
+		{ text: tier === 2 ? "Esc cancels" : null, keep: 6 },
+	];
+}
+
+/** Silence after output has started: the phase is still the last thing observed, and the age of that is the fact. */
+function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<{ text: string | null; keep: number }> {
+	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
+	const tier = computeWatchdogTier(silentMs);
+	return [
+		{ text: tier >= 1 ? `no new output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}` : null, keep: 8 },
+		{ text: tier === 2 ? "Esc cancels" : null, keep: 6 },
+		{ text: tier >= 3 ? "may be stuck" : null, keep: 7 },
+		{ text: tier >= 3 ? "/model switches" : null, keep: 6 },
+	];
+}
+
+/**
+ * A running tool in the grammar of who is acting. A call the model asked for is the harness's process and the model
+ * is idle meanwhile; a direct shell line was never the model's at all. Time is the call's own.
+ */
+function toolActivity(
+	status: AgentStatus,
+	room: number,
+	now: number,
+	verb: string | null,
+	elapsedFrom: (from: number) => string | null,
+	modelName: string | undefined,
+): { label: string; subject?: string } {
+	const tool = status.tool;
+	const name = tool?.toolName ?? "tool";
+	const owned = MODEL_OWNED_TOOL_ACTIVITY[name];
+	if (owned !== undefined && tool?.operatorShell !== true) return { label: owned };
+	const activity = Object.hasOwn(HARNESS_TOOL_ACTIVITY, name) ? HARNESS_TOOL_ACTIVITY[name] : undefined;
+	const object = tool?.toolSubject ?? null;
+	const elapsed = tool?.startedAt ?? status.toolStartedAt;
+	const others = (status.activeTools ?? []).length - 1;
+	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
+	const tier = computeWatchdogTier(silentMs);
+	const full = verb ?? activity?.verb ?? "is running";
+	const lead = room >= 24 ? full : full.replace(/^is /u, "");
+	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9));
+	const phrase =
+		object === null || span === null
+			? verb !== null
+				? `${verb} ${truncateToWidth(name, 18, GLYPH.ellipsis, false)}`
+				: (activity?.bare ?? `is running ${truncateToWidth(name, room >= 40 ? 18 : 12, GLYPH.ellipsis, false)}`)
+			: `${lead} \`${truncateToWidth(object, span, GLYPH.ellipsis, false)}\`${others > 0 ? ` +${others}` : ""}`;
+	const label = fitRailFacts(
+		[
+			{ text: phrase, keep: 9 },
+			{ text: elapsed === undefined ? null : elapsedFrom(elapsed), keep: 8 },
+			{ text: verb === null && tier >= 2 ? "Esc cancels" : null, keep: 5 },
+			// The harness sees a tool's output; a direct shell line's goes straight to its card, so its silence is unknown here.
+			{
+				text:
+					verb === null && tier >= 3 && tool?.operatorShell !== true
+						? `no output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}`
+						: null,
+				keep: 6,
+			},
+			{ text: tool?.operatorShell !== true && modelName ? `requested by ${modelName}` : null, keep: 3 },
+		],
+		room,
+	);
+	return { label, subject: tool?.operatorShell === true ? "your shell" : "Clio" };
+}
+
 /** Subject-aware activity phrases for the model named on the composer rail. */
-export function composerPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
+export function composerPhasePresentation(
+	status: AgentStatus,
+	width: number,
+	now: number,
+	modelName?: string,
+): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
 	const room = railActivityRoom(width);
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
 		return elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsed * 1000);
+	};
+	const waitLabel = (): string => {
+		const from = status.waitingSince ?? status.since;
+		return fitRailFacts(
+			[
+				{ text: room >= 50 ? "is waiting for a response" : room >= 24 ? "is waiting" : "waiting", keep: 9 },
+				{ text: elapsedFrom(from), keep: 8 },
+				...modelWaitFacts(status, room, now, from),
+			],
+			room,
+		);
 	};
 	let label: string;
 	switch (status.phase) {
@@ -511,19 +633,23 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 			label = "is preparing";
 			break;
 		case "waiting_model":
-			label = "is waiting for a response";
+			label = waitLabel();
 			break;
 		case "thinking":
-			label = "is thinking";
+			label = fitRailFacts([{ text: "is thinking", keep: 9 }, ...silentStreamFacts(status, now)], room);
 			break;
 		case "writing":
-			label = status.preparingToolCall ? "is preparing a tool" : "is writing";
+			label = fitRailFacts(
+				[
+					{ text: status.preparingToolCall ? "is preparing a tool" : "is writing", keep: 9 },
+					...silentStreamFacts(status, now),
+				],
+				room,
+			);
 			break;
 		case "tool_running": {
-			const name = status.tool?.toolName ?? "tool";
-			const activity = Object.hasOwn(COMPOSER_TOOL_ACTIVITY, name) ? COMPOSER_TOOL_ACTIVITY[name] : undefined;
-			label = activity ?? `is running ${truncateToWidth(name, width >= 100 ? 18 : 12, GLYPH.ellipsis, false)}`;
-			break;
+			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName);
+			return { ...phase, ...activity };
 		}
 		case "tool_blocked":
 			label = "needs approval";
@@ -540,17 +666,27 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 		case "stuck":
 			label = `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`;
 			break;
+		}
 		case "ended": {
 			const stop = status.summary?.stopReason;
+			const short = room < 24;
 			label =
 				stop === "error"
-					? "failed"
+					? room >= 40
+						? "failed · /model switches"
+						: "failed"
 					: stop === "generation_guard"
-						? "stopped generating tool arguments"
+						? short
+							? "stopped"
+							: "stopped generating tool arguments"
 						: stop === "cancelled" || stop === "aborted"
-							? "was cancelled"
+							? short
+								? "cancelled"
+								: "was cancelled"
 							: stop === "length"
-								? "reached the output limit"
+								? short
+									? "output limit"
+									: "reached the output limit"
 								: "finished";
 			break;
 		}

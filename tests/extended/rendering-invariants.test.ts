@@ -2737,7 +2737,7 @@ describe("tool classes", () => {
 			plain,
 			new RegExp(`${GLYPH.classMutate} edited 2 files · \\+2 -1 ✓\\n  │ a\\.ts \\+1 -1 · b\\.ts \\+1 -0`, "u"),
 		);
-		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} ran`, "gmu"))?.length, 2, plain);
+		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} Clio ran`, "gmu"))?.length, 2, plain);
 		match(plain, new RegExp(`${GLYPH.toolHeader} read gone\\.ts ✗`, "u"));
 		match(plain, new RegExp(`${GLYPH.toolHeader} read c\\.ts · lines 1-1 of 1 ✓`, "u"));
 	});

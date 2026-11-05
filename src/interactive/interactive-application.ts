@@ -1341,6 +1341,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onLocalEntry: exitSummary.observeLocalEntry,
 		recordFeature,
 		onLocalBashRunning: presentation.setLocalBashRunning,
+		onLocalBashCancelling: presentation.setLocalBashCancelling,
 		returnToLiveEdge: liveEdge,
 		editor,
 		ui: tui,

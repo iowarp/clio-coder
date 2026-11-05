@@ -74,6 +74,7 @@ import {
 	SGR_ITALIC,
 	SGR_RESET,
 } from "./theme/index.js";
+import { modelNickname } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
 import { type TurnSpend, turnHoldsCalls, turnSpend } from "./turn-spend.js";
@@ -242,6 +243,8 @@ type ToolSegment = {
 	finished: boolean;
 	/** Pi streamed the call row before execution and later starts this same row. */
 	executionStarted: boolean;
+	/** The model whose request put this call on the harness. */
+	requestedBy?: string | undefined;
 	/** The assistant stream closed this call's argument block. */
 	argsComplete: boolean;
 	/**
@@ -1199,6 +1202,7 @@ function renderToolSegmentLines(
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
 		operatorGrant: seg.operatorGrant,
+		...shellActor(seg),
 	};
 	const options = { unbounded, diffStyle: seg.replayed ? ("plain" as const) : ("color" as const) };
 	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
@@ -1211,6 +1215,12 @@ function renderToolSegmentLines(
 		live: seg.live,
 		...(seg.previewDiff !== undefined ? { previewDiff: seg.previewDiff } : {}),
 	});
+}
+
+/** Shell-class calls say who started the process. Anything else already reads as a named action. */
+function shellActor(seg: ToolSegment): { actor?: "harness"; requestedBy?: string } {
+	if (seg.name !== ToolNames.Bash && seg.name !== ToolNames.RunScript) return {};
+	return { actor: "harness", ...(seg.requestedBy !== undefined ? { requestedBy: seg.requestedBy } : {}) };
 }
 
 /** A finished call changes only when a late result upgrades it or a worker card attaches to it. */
@@ -1243,6 +1253,7 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		actionClass: seg.actionClass,
 		cardAttached: seg.cardAttached,
 		operatorGrant: seg.operatorGrant,
+		...shellActor(seg),
 	};
 }
 
@@ -1652,6 +1663,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let runAwaitingRetry = false;
 	/** Provider attempts this run sent again, kept until its receipt can state them. */
 	let runRetries = 0;
+	/** The model the newest assistant message came from: the requester of the calls that follow it. */
+	let requestingModel: string | undefined;
 	/** The operator turn the current run's calls journal under, from its start event or a replayed run end. */
 	let runTurnId: string | undefined;
 	/**
@@ -2245,7 +2258,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const appendErrorSegment = (entry: Extract<TranscriptEntry, { role: "assistant" }>, text: string): void => {
 		const tail = entry.segments[entry.segments.length - 1];
 		if (tail?.kind === "error" && tail.text === text) return;
-		entry.segments.push({ kind: "error", text, at: stamp() });
+		entry.segments.push({ kind: "error", text, at: stamp(), ...(route !== null ? { route } : {}) });
 	};
 
 	/**
@@ -2898,6 +2911,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "message_start" && event.message.role === "assistant") {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
+				const respondedModel = (event.message as { model?: unknown }).model;
+				if (typeof respondedModel === "string" && respondedModel.length > 0)
+					requestingModel = modelNickname(respondedModel);
 				const model = assistantModelLabel(event.message);
 				if (model !== null && !assistant.models?.includes(model)) {
 					assistant.models ??= [];
@@ -2916,6 +2932,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					streamed.args = event.args;
 					streamed.executionStarted = true;
 					streamed.argsComplete = true;
+					streamed.requestedBy = requestingModel;
 					streamed.startedAtMs = now();
 					startEditPreview(streamed);
 					markDirty();
@@ -2945,6 +2962,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					at: stamp(),
 					finished: false,
 					executionStarted: true,
+					requestedBy: requestingModel,
 					argsComplete: true,
 					isError: false,
 					startedAtMs: now(),

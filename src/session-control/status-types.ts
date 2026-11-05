@@ -7,6 +7,15 @@ import type { StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js
 // keeps one import site.
 export type { AgentStatusChangedPayload, StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js";
 
+/** What is known about the outstanding model request, measured at the handoff to the provider. */
+export interface ModelRequestFacts {
+	sentAt: number;
+	/** Null until the provider opened a response. */
+	firstByteAt: number | null;
+	/** False on a transport that never reports a response, where "no bytes yet" would claim more than is known. */
+	bytesObservable: boolean;
+}
+
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
 export type TurnStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "cancelled" | "generation_guard";
@@ -31,6 +40,10 @@ export interface ToolOverlay {
 	startedAt?: number;
 	toolName: string;
 	toolPreview: string;
+	/** What the call acts on, in the operator's terms: its command, path or search. */
+	toolSubject?: string | undefined;
+	/** The operator started this process directly; no model asked for it. */
+	operatorShell?: boolean | undefined;
 }
 
 export interface DispatchOverlay {
@@ -94,6 +107,12 @@ export interface AgentStatus {
 	localRuntime: boolean;
 	/** The model is streaming tool arguments; execution has not started. */
 	preparingToolCall?: boolean;
+	/** Epoch ms this model round started waiting, which the rail times instead of the whole turn. */
+	waitingSince?: number | undefined;
+	/** Evidence about the outstanding request, carried while a model wait is on screen. */
+	modelRequest?: ModelRequestFacts | null | undefined;
+	/** Epoch ms a stop was requested. The phase holds until the work is observed to have stopped. */
+	cancelRequestedAt?: number | undefined;
 	runId?: string | null | undefined;
 	resumePhase?: StatusPhase | undefined;
 	activePhases?: ReadonlySet<OverlayPhase> | undefined;

@@ -915,6 +915,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
 						attempt?.stage("send", "start");
+						state.modelRequest = {
+							sentAt: Date.now(),
+							firstByteAt: null,
+							bytesObservable: tracking.observesResponses(),
+						};
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
 						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"), retry);
 						delete localRuntime.lastProviderStatus;
@@ -927,7 +932,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								localRuntime.lastProviderStatus = args[0].status;
 								// Pi retries a retryable status inside one attempt; the first byte is the response that
 								// opens the stream. Transports that never report a response leave it unobserved (#434).
-								if (args[0].status >= 200 && args[0].status < 300) attempt?.mark("firstByte");
+								if (args[0].status >= 200 && args[0].status < 300) {
+									attempt?.mark("firstByte");
+									if (state.modelRequest) state.modelRequest.firstByteAt ??= Date.now();
+								}
 								await request.options?.onResponse?.(...args);
 							},
 						};

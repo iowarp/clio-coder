@@ -80,7 +80,9 @@ export interface EditorChrome {
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
-	getHarnessStatus?: (width: number) => { label: string; glyph: string; token: ClioToken; live: boolean } | null;
+	getHarnessStatus?: (
+		width: number,
+	) => { label: string; glyph: string; token: ClioToken; live: boolean; subject?: string } | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
 	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
@@ -442,11 +444,19 @@ export class ClioEditor extends Editor {
 		// The approval cue keeps the rail; a workspace replaces only the identity segment.
 		const workspace =
 			mode === "CONFIRM" ? null : (this.chrome.getWorkspaceRail?.(Math.max(4, Math.floor(width / 2))) ?? null);
+		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
+		const actor = mode === "CONFIRM" ? undefined : status?.subject;
 		const identity =
-			workspace ??
+			(actor === undefined ? workspace : null) ??
 			theme.fg(
 				"activeModelIdentity",
-				truncateToWidth(nickname, Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
+				// A narrow rail keeps the state and gives way on who: the footer and /model still name the route.
+				truncateToWidth(
+					actor ?? nickname,
+					width < 60 ? (actor !== undefined ? 10 : 6) : Math.max(4, Math.min(24, Math.floor(width / 3))),
+					GLYPH.ellipsis,
+					false,
+				),
 			);
 		const label = [lead, identity, activity].filter(Boolean).join(" ");
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";

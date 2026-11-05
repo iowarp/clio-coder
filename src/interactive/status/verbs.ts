@@ -37,7 +37,13 @@ function elapsedSince(status: AgentStatus, now: number): string | null {
 	// A running tool times from its own start, not from turn start, so the
 	// footer never shows turn-elapsed as tool-elapsed.
 	const from =
-		status.phase === "tool_running" && status.toolStartedAt !== undefined ? status.toolStartedAt : status.since;
+		status.phase === "tool_running" && status.toolStartedAt !== undefined
+			? status.toolStartedAt
+			: status.phase === "waiting_model" && status.waitingSince !== undefined
+				? status.waitingSince
+				: status.phase === "cancelling" && status.cancelRequestedAt !== undefined
+					? status.cancelRequestedAt
+					: status.since;
 	return formatLiveElapsed(Math.max(0, now - from));
 }
 
@@ -79,6 +85,8 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		}
 		case "stuck":
 			return { text: "No output", toneHint: "error" };
+		case "cancelling":
+			return { text: "Cancelling", toneHint: "muted" };
 		case "ended": {
 			const stop = status.summary?.stopReason ?? "stop";
 			const elapsed = status.summary

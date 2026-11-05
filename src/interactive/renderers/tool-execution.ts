@@ -115,6 +115,10 @@ export interface ToolExecutionStart {
 	actionClass?: string | undefined;
 	/** Local `!!` bash output is visible to the operator but excluded from model context. */
 	excludeFromContext?: boolean | undefined;
+	/** Who started this process: the operator directly, or the harness for a model's request. */
+	actor?: "operator" | "harness" | undefined;
+	/** The model that asked the harness to run this call. */
+	requestedBy?: string | undefined;
 	/** A worker card sits under this dispatch call and states its task and outcome. */
 	cardAttached?: boolean | undefined;
 	/**
@@ -131,6 +135,8 @@ export interface ToolExecutionFinished {
 	result: unknown;
 	isError: boolean;
 	durationMs?: number | undefined;
+	actor?: "operator" | "harness" | undefined;
+	requestedBy?: string | undefined;
 	/** Persisted summary (bytes, truncated, offloadPath, observation counts). */
 	resultSummary?: Record<string, unknown> | undefined;
 	/** Honest terminal outcome for synthetic/or permission-blocked calls. */
@@ -1202,8 +1208,15 @@ function sublineParts(
 			? toolMeta(` · ${resourceLabel}`)
 			: "";
 	const inlineText = scalars.length > 0 ? theme.fg("toolArgument", ` · ${scalars.join(" · ")}`) : "";
+	// A process states who started it, because the two read the same otherwise and only one was the model's doing.
+	const executed = call.actor !== undefined && !notRun && status !== "forming" && status !== "ready";
+	const actor = !executed
+		? ""
+		: `${toolMeta(call.actor === "operator" ? "you" : "Clio")} ${!settled ? toolMeta(call.actor === "operator" ? "are " : "is ") : ""}`;
+	const requestedBy =
+		executed && call.requestedBy ? toolMeta(` (requested by ${sanitizeCallTargetText(call.requestedBy)})`) : "";
 	const head = (inline: string): string =>
-		`${classMark(row.spec.class)}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inline}`;
+		`${classMark(row.spec.class)}${actor}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${requestedBy}${scope}${answer}${resource}${inline}`;
 	const ledger = finished === null ? null : ledgerTail(finished, row);
 	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
@@ -1954,6 +1967,7 @@ export function renderBashTranscriptExecution(
 				phase: "running",
 				elapsedMs: execution.elapsedMs,
 				excludeFromContext: execution.excludeFromContext,
+				actor: "operator",
 			},
 			width,
 			bodyOptions.detail ?? transcriptDetail(),
@@ -1979,6 +1993,7 @@ export function renderBashTranscriptExecution(
 		exitCode: execution.exitCode,
 		...(execution.cancelled === true ? { outcome: "aborted" as const } : {}),
 		excludeFromContext: execution.excludeFromContext,
+		actor: "operator",
 		resultSummary: {
 			bytes: shownBytes,
 			truncated: execution.truncated === true,

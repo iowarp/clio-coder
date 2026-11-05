@@ -177,7 +177,7 @@ import type { NoticeSource } from "./notice-source.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
-import type { AgentStatusEvent } from "./status-types.js";
+import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
 import {
 	parseTriageAnswer,
 	runTriageRound,
@@ -678,6 +678,8 @@ export interface ChatLoop {
 	 * (issue #251).
 	 */
 	turnPreparation(): { phase: TurnPreparationPhase; since: number };
+	/** Evidence about the newest model request, for a surface that reports a silent wait. */
+	modelRequest(): ModelRequestFacts | null;
 	/** Fires on every preparation transition, including back to `idle`. */
 	onTurnPreparation(handler: (phase: TurnPreparationPhase) => void): () => void;
 	contextUsage(): LiveContextUsage;
@@ -3489,6 +3491,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		runningToolCalls(): number {
 			return toolStartTimes.size;
+		},
+
+		modelRequest() {
+			return state.modelRequest;
 		},
 
 		turnPreparation() {

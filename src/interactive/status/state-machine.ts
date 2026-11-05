@@ -5,12 +5,14 @@ import type { ChatLoopEvent, RetryStatusPhase } from "../../session-control/chat
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
+	type ModelRequestFacts,
 	type OverlayFrame,
 	type OverlayPhase,
 	type RetryOverlay,
 	type StatusPhase,
 	type ToolOverlay,
 	type TurnStopReason,
+	type TurnSummary,
 } from "../../session-control/status-types.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import { buildSummary, emptyRunTally, foldMessageIntoRunTally, summaryFromRunTally } from "./summary.js";
@@ -22,6 +24,7 @@ export interface ReduceContext {
 	modelId?: string;
 	targetId?: string;
 	runId?: string | null;
+	modelRequest?: ModelRequestFacts | null;
 }
 
 export interface WatchdogTickEvent {
@@ -70,6 +73,11 @@ export interface SubmitSettledStatusEvent {
 	type: "submit_settled";
 }
 
+/** The cancelled submit has returned, so nothing of the turn is still running. */
+export interface CancelSettledStatusEvent {
+	type: "cancel_settled";
+}
+
 export type StatusInputEvent =
 	| ChatLoopEvent
 	| WatchdogTickEvent
@@ -79,7 +87,8 @@ export type StatusInputEvent =
 	| ForceCancelledStatusEvent
 	| DispatchProgressStatusEvent
 	| SubmitAcceptedStatusEvent
-	| SubmitSettledStatusEvent;
+	| SubmitSettledStatusEvent
+	| CancelSettledStatusEvent;
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
 const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
@@ -119,6 +128,16 @@ function compactPreview(value: unknown): string {
 	} catch {
 		return String(value).slice(0, 60);
 	}
+}
+
+/** The one argument that says what a call is doing, flattened for a single rail row. */
+function toolSubject(args: unknown): string | undefined {
+	const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+	for (const key of ["command", "path", "file_path", "pattern", "query", "url", "symbol", "name"]) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim().length > 0) return value.replace(/\s+/gu, " ").trim();
+	}
+	return undefined;
 }
 
 function overlayFrame(status: AgentStatus): OverlayFrame {
@@ -315,6 +334,12 @@ function cancelledSummary(
 	});
 }
 
+/** The provisional cancel summary, closed at the moment the stop was observed. */
+function finalizedCancel(prev: AgentStatus, ctx: ReduceContext): TurnSummary | undefined {
+	const start = prev.since > 0 ? prev.since : ctx.now;
+	return prev.summary && { ...prev.summary, elapsedMs: Math.max(0, ctx.now - start) };
+}
+
 const ABORT_SOURCE_LABELS: Record<RunAbortSource | TurnAbortSource, string> = {
 	dispatch_abort: "dispatch abort",
 	dispatch_drain: "dispatch drain",
@@ -365,7 +390,15 @@ function leaveRetryOnOutput(prev: AgentStatus, ctx: ReduceContext): AgentStatus 
 
 export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
 	const next = reduceEvent(prev, event, ctx);
-	return next === prev ? prev : withHumanWait(next, ctx.now);
+	if (next === prev) return prev;
+	const waited = withHumanWait(next, ctx.now);
+	const awaitingModel =
+		waited.phase === "waiting_model" ||
+		(waited.phase === "stuck" && waited.resumePhase === "waiting_model") ||
+		(waited.phase === "retrying" && waited.retry?.stage === "attempt");
+	return awaitingModel && ctx.modelRequest !== waited.modelRequest
+		? { ...waited, modelRequest: ctx.modelRequest ?? undefined }
+		: waited;
 }
 
 function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
@@ -420,7 +453,7 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 		case "turn_start": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
-			if (base === "preparing") return { ...next, phase: "waiting_model", resumePhase: undefined };
+			if (base === "preparing") return { ...next, phase: "waiting_model", resumePhase: undefined, waitingSince: ctx.now };
 			return next;
 		}
 		case "message_start":
@@ -453,6 +486,7 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			const activeTools = (prev.activeTools ?? []).filter((tool) => tool.toolCallId !== event.toolCallId);
 			const next = { ...refreshMeaningful(prev, ctx), activeTools };
 			const remaining = activeTools.at(-1);
+			if (prev.phase === "cancelling") return { ...next, tool: remaining, toolStartedAt: remaining?.startedAt };
 			if (remaining && prev.phase === "tool_running")
 				return { ...next, tool: remaining, toolStartedAt: remaining.startedAt };
 			if (prev.phase === "tool_running")
@@ -537,12 +571,14 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 				startedAt: ctx.now,
 				toolName: call.toolName,
 				toolPreview: compactPreview(call.viaGateway ? call.args : event.args),
+				toolSubject: toolSubject(call.viaGateway ? call.args : event.args),
 			};
 			// Stamp this call's own start so the footer's running-tool timer counts
 			// from here, not from turn start.
 			return {
 				...refreshMeaningful(leaveRetryOnOutput(prev, ctx), ctx),
-				phase: "tool_running",
+				// A call already in the engine's hands can still start after the stop request; the turn stays cancelling.
+				phase: prev.phase === "cancelling" ? "cancelling" : "tool_running",
 				preparingToolCall: false,
 				tool,
 				toolStartedAt: ctx.now,
@@ -563,7 +599,10 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			return {
 				...refreshMeaningful(prev, ctx),
 				phase: "ended",
-				summary: cancelledSummary(prev, ctx, phase === "cancelled" ? "cancelled" : "error"),
+				summary:
+					prev.phase === "cancelling" && prev.summary
+						? finalizedCancel(prev, ctx)
+						: cancelledSummary(prev, ctx, phase === "cancelled" ? "cancelled" : "error"),
 				retry: undefined,
 				resumePhase: undefined,
 				activePhases: undefined,
@@ -613,7 +652,11 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			// run_aborted may already have stamped this run's abort provenance
 			// (loop guard, dispatch drain, user cancel). The rebuild from the
 			// settled message window keeps that detail instead of dropping it.
-			if (prev.phase === "ended" && prev.summary?.stopDetail !== undefined && summary.stopDetail === undefined) {
+			if (
+				(prev.phase === "ended" || prev.phase === "cancelling") &&
+				prev.summary?.stopDetail !== undefined &&
+				summary.stopDetail === undefined
+			) {
 				summary.stopDetail = prev.summary.stopDetail;
 			}
 			return {
@@ -637,14 +680,29 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 		case "overlay_pop":
 			return popOverlay(prev, event.overlay, ctx);
 		case "run_aborted":
-			if (!isActive(prev.phase)) return prev;
+			if (!isActive(prev.phase) || prev.phase === "cancelling") return prev;
+			// The request is not the stop. The turn reads as cancelling until its stream or child process has
+			// actually gone: `agent_end`, the ladder's own settlement or `cancel_settled` observes that.
 			return {
 				...refreshMeaningful(prev, ctx),
-				phase: "ended",
+				phase: "cancelling",
+				cancelRequestedAt: ctx.now,
 				summary: cancelledSummary(prev, ctx, "cancelled", false, runAbortDetail(event)),
+				retry: undefined,
+				preparingToolCall: false,
 				resumePhase: undefined,
 				activePhases: undefined,
 				overlayStack: [],
+			};
+		case "cancel_settled":
+			if (prev.phase !== "cancelling") return prev;
+			return {
+				...refreshMeaningful(prev, ctx),
+				phase: "ended",
+				summary: finalizedCancel(prev, ctx),
+				tool: undefined,
+				toolStartedAt: undefined,
+				activeTools: [],
 			};
 		case "force_cancelled":
 			return {
@@ -663,6 +721,8 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			}
 			const elapsed = Math.max(0, ctx.now - prev.lastMeaningfulAt);
 			const tier = computeWatchdogTier(elapsed);
+			// Stopping is already the claim on screen, and the abort ceiling bounds it.
+			if (prev.phase === "cancelling") return { ...prev, watchdogTier: tier, localRuntime: ctx.localRuntime };
 			if (tier === 4 && prev.phase !== "stuck") {
 				return {
 					...prev,

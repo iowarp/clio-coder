@@ -60,6 +60,7 @@ import type { SessionTranscript } from "./session-transcript.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController, humanWaitTotalMs } from "./status/index.js";
+import { modelNickname } from "./theme/labels.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
@@ -191,7 +192,9 @@ export interface InteractivePresentation {
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
 	announceSettingChanges(): void;
-	setLocalBashRunning(running: boolean): void;
+	setLocalBashRunning(running: boolean, command?: string): void;
+	/** The operator asked the running shell line to stop; it has not necessarily gone yet. */
+	setLocalBashCancelling(): void;
 	getQuotaSnapshots(): QuotaProviders;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
 	recordChatEvent(event: ChatLoopEvent): void;
@@ -450,6 +453,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 
 	let localBashStartedAt: number | null = null;
+	let localBashCommand: string | null = null;
+	let localBashCancelledAt: number | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
@@ -460,10 +465,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			if (localBashStartedAt === null || (status.phase !== "idle" && status.phase !== "ended")) return status;
 			return {
 				...status,
-				phase: "tool_running",
+				phase: localBashCancelledAt === null ? "tool_running" : "cancelling",
 				since: localBashStartedAt,
+				lastMeaningfulAt: Math.max(status.lastMeaningfulAt, localBashStartedAt),
 				toolStartedAt: localBashStartedAt,
-				tool: { toolName: "bash", toolPreview: "local shell" },
+				activeTools: [],
+				...(localBashCancelledAt === null ? {} : { cancelRequestedAt: localBashCancelledAt }),
+				tool: {
+					toolName: "bash",
+					toolPreview: "local shell",
+					startedAt: localBashStartedAt,
+					operatorShell: true,
+					...(localBashCommand === null ? {} : { toolSubject: localBashCommand }),
+				},
 			};
 		},
 		getTerminalColumns: () => deps.terminal.columns,
@@ -899,8 +913,16 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		chatRenderer,
 		io,
 		root,
-		setLocalBashRunning(running) {
+		setLocalBashRunning(running, command) {
 			localBashStartedAt = running ? Date.now() : null;
+			localBashCommand = running ? (command ?? null) : null;
+			localBashCancelledAt = null;
+			footer.refresh();
+			requestRender();
+		},
+		setLocalBashCancelling() {
+			if (localBashStartedAt === null) return;
+			localBashCancelledAt = Date.now();
 			footer.refresh();
 			requestRender();
 		},

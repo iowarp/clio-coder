@@ -355,7 +355,7 @@ test("/view titles each act with what its row states and ages it from when it ha
 		.inspectionArtifacts()
 		.map((artifact) => [artifact.title, Math.round((clock - artifact.timestamp) / 1_000)] as const);
 	deepStrictEqual(titles, [
-		["$ ran `npm test` · exit 1", 190],
+		["$ Clio ran `npm test` · exit 1", 190],
 		["± edited src/net/retry.js · +1 -1", 125],
 		["i interrupt refused: queued", 60],
 	]);
@@ -430,12 +430,12 @@ test("/view renders a transcript block at the preview's width, rail and hanging 
 	view.render(40);
 	await new Promise((resolve) => setImmediate(resolve));
 	const rows = view.render(40).map(stripTerminalSequences);
-	match(rows.join("\n"), /Preview · 1\/1[\s\S]*\$ ran `node scripts\/check\.js/u);
+	match(rows.join("\n"), /Preview · 1\/1[\s\S]*\$ Clio ran `node scripts\/check\.js/u);
 	const body = rows
 		.slice(rows.findIndex((row) => row.startsWith("transcript ·")) + 1)
 		.filter((row) => row.trim().length > 0);
 	ok(body.length > 4, rows.join("\n"));
-	match(body[0] ?? "", /^\$ ran/u);
+	match(body[0] ?? "", /^\$ Clio ran/u);
 	// Every wrapped row stays in the content column under its rail, as the transcript renders it.
 	for (const row of body.slice(1)) ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}`);
 	ok(

@@ -58,7 +58,9 @@ export function renderRetryStatus(
 	// diagnostic is one /view away and a settled retry states it below.
 	if (status.phase !== "cancelled" && status.phase !== "exhausted") {
 		const reason = presentProviderError(errorMessage).replace(AVAILABLE_DIAGNOSTIC, "").trim();
-		const row = renderNoticeRow(`${formatRetryStatus(heading)} · ${reason}`, "retry", width)[0] ?? "";
+		// A narrow row spends itself on the reason; the composer rail states the provider's wait alongside.
+		const { retryAfterMs: _asked, ...lean } = heading;
+		const row = renderNoticeRow(`${formatRetryStatus(width < 90 ? lean : heading)} · ${reason}`, "retry", width)[0] ?? "";
 		return [truncateToWidth(row, width, GLYPH.ellipsis)];
 	}
 	// One heading row leaves room for the failure itself, not just a View hint.
