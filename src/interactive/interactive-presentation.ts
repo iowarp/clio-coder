@@ -788,7 +788,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width, reserved = 0, identityCells) => {
+		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
@@ -796,10 +796,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				const name = phaseModelName(status);
 				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
 				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
-				// Beside other work a phase must say whose it is, so a rail wide enough to name it holds that name back from the
-				// lesser facts too. A narrower rail has no name to show, and reserving for one would only cost the phase its clock.
-				const named = width >= 100 ? visibleWidth(name) + 1 : 0;
-				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 + named : 0;
+				// The subject competes inside the fitter, so nothing is reserved for it here.
+				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 : 0;
 				const presented = composerPhasePresentation(
 					status,
 					width,
@@ -807,8 +805,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					name,
 					undefined,
 					reserved + beside,
-					identityCells,
 					runningCompaction(),
+					route?.target ?? undefined,
 				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
@@ -835,7 +833,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				},
 				width,
 				reserved,
-				identityCells,
+				phaseModelName(status),
 			);
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.

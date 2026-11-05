@@ -41,7 +41,8 @@ function phaseElapsedMs(status: AgentStatus, now: number): number {
 }
 
 /** Keys the rail offers that reach nothing under a dock, which takes Esc and any typing for itself. */
-const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/model|\/model moves it|\/model)(?= · |$)/gu;
+const RAIL_ONLY_FACTS =
+	/ · (?:Esc stops|Esc|then \/model to switch|then \/model|\/model to reroute|\/model to switch|\/model)(?= · |$)/gu;
 
 /** A label that already states its age (`has no output · 12s`) must not gain a second clock. */
 // `1m6s` is one clock too: its minutes and seconds are joined, so the pattern takes a compound form whole (B3).
@@ -177,102 +178,68 @@ export function besideCardDetail(
 	return [both, workers, main].find((text) => text !== null && visibleWidth(text) <= room) ?? null;
 }
 
-/** What Esc does in this view, and that it does not reach the run. */
-function escapeNote(verb: string | null, subject: string): { long: string; short: string; tiny: string } {
-	const going = `${subject} keeps going`;
-	const action = verb?.startsWith("close")
-		? `Esc closes this view, ${going}`
-		: verb?.startsWith("back")
-			? `Esc goes back, ${going}`
-			: verb?.endsWith("filter")
-				? `Esc clears the filter, ${going}`
-				: `closing this view leaves ${subject} going`;
-	return { long: action, short: going, tiny: "continues" };
-}
+/**
+ * The one tail the strip gives what runs behind a view: whole or absent. Two tails, `the run keeps going` and
+ * `continues`, read as two different claims depending on the width (S2). The view's own rail carries its Esc.
+ */
+const BEHIND_VIEW = "continues behind this view";
 
 /**
- * The line, or null when nothing is active. Candidates run from fullest to
- * leanest and the first that fits wins, so at 40 columns the phase and its
- * elapsed are what remain: identity, then the worker, then the Esc note go
- * first, and the words are never cut mid-phrase while a shorter form exists.
+ * The line, or null when nothing is active. Candidates run from fullest to leanest and the first that fits wins. The
+ * subject is the rail's own name and stays down to the narrowest widths, because a phase with no subject cannot say
+ * whose it is (S1); the worker summary, then the tail, give way first, and words are never cut mid-phrase while a
+ * shorter form exists.
  */
 export function liveWorkStrip(
 	theme: ClioTheme,
 	facts: LiveWorkFacts,
 	width: number,
-	escVerb: string | null,
+	_escVerb: string | null,
 ): string | null {
 	const room = Math.max(1, width);
 	const mainActive = isMainActive(facts.status);
 	const workers = [workerSummary(facts, room), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
 	const dot = theme.fg("border", " · ");
-	const note = escapeNote(
-		escVerb,
-		mainActive
-			? facts.status.tool?.operatorShell === true
-				? "the command"
-				: "the run"
-			: facts.workers.length > 1
-				? "work"
-				: facts.workers.length === 1
-					? facts.workers[0]?.plan !== undefined
-						? "the plan"
-						: "the worker"
-					: "it",
-	);
 	const quiet = (text: string): string => theme.fg("annotation", text);
 	const render = (lead: string, parts: ReadonlyArray<string | null>): string =>
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
 	let candidates: string[];
 	if (mainActive) {
 		const compaction = facts.compaction ?? null;
-		const phase = composerPhasePresentation(
-			facts.status,
-			room,
-			facts.now,
-			facts.actor,
-			undefined,
-			0,
-			undefined,
-			compaction,
-		);
-		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
+		const present = (labelRoom: number) =>
+			composerPhasePresentation(facts.status, room, facts.now, facts.actor, Math.max(10, labelRoom), 0, compaction);
+		const loose = present(room - 2);
+		const subject = loose.subject ?? facts.actor;
+		const glyph = theme.fg(loose.token, loose.live ? GLYPH.running : loose.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
-		const clockFor = (text: string): string | null => {
-			if (CARRIES_ELAPSED.test(stripTerminalSequences(text))) return null;
-			return formatWaitClock(phaseElapsedMs(facts.status, facts.now));
-		};
-		const label = railFree(phase.label);
-		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
-		const looseLabel = railFree(
-			composerPhasePresentation(facts.status, room, facts.now, facts.actor, room - 2, 0, undefined, compaction).label,
-		);
 		const clocked = (text: string): string => {
-			const elapsed = clockFor(text);
-			return `${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
+			const elapsed = CARRIES_ELAPSED.test(stripTerminalSequences(text))
+				? null
+				: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
+			return theme.fg(loose.token, elapsed === null ? text : `${text} · ${elapsed}`);
 		};
-		const owned = clocked(`${phase.subject ?? facts.actor} ${label}`);
-		const bare = clocked(looseLabel.replace(/^is /u, ""));
+		// The clock the strip may add takes up to eight cells, which the words leave for it.
+		const ownedLabel = railFree(present(room - 2 - visibleWidth(subject) - 1 - 8).label);
+		const owned = `${glyph} ${theme.fg("activeModelIdentity", subject)} ${clocked(ownedLabel)}`;
+		const bare = `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
 		candidates = [
-			render(owned, [workers, note.long]),
-			...(workers === null ? [] : [render(owned, [workers, note.short]), render(bare, [workers, note.short])]),
-			// A worker asking outranks the Esc note: with an overlay over its card, this row is all that says time is running.
+			render(owned, [workers, BEHIND_VIEW]),
+			...(workers === null ? [] : [render(owned, [workers])]),
+			// A worker asking outranks the tail: with an overlay over its card, this row is all that says time is running.
 			...(facts.workers.some((row) => row.progress?.awaitingApproval === true)
 				? [
 						render(bare, [workerSummary(facts, room - visibleWidth(bare) - 3)]),
 						`${glyph} ${quiet(workerSummary(facts, room - 2) ?? "")}`,
 					]
 				: []),
-			render(owned, [note.long]),
-			render(owned, [note.short]),
-			render(bare, [note.short]),
-			render(bare, [note.tiny]),
+			render(owned, [BEHIND_VIEW]),
+			render(owned, []),
 			render(bare, []),
 		];
 	} else {
 		const lead = `${theme.fg("activity", GLYPH.running)} ${theme.fg("activity", workers ?? "")}`;
-		candidates = [render(lead, [note.long]), render(lead, [note.short]), render(lead, [note.tiny]), lead];
+		candidates = [render(lead, [BEHIND_VIEW]), lead];
 	}
 	const fitted = candidates.find((candidate) => visibleWidth(candidate) <= room);
 	return fitted ?? truncateToWidth(candidates.at(-1) ?? "", room, GLYPH.ellipsis, false);

@@ -239,10 +239,9 @@ function accountHome(): string | null {
 }
 
 /**
- * The composer rail's room while it states the harness. The left stretch gives way as the terminal narrows, because at
- * 40 columns the state and the way out need those cells more than the composer's shape does.
+ * The composer rail's room while it states the harness. The left stretch keeps two cells and fills only what the state
+ * leaves over: a fixed stretch once cut a model name mid-word and hid Esc beside 16 cells of rule (R1, R5).
  */
 export function statusRailLabelRoom(width: number): number {
-	const stretch = Math.min(16, Math.max(3, 3 + Math.floor(((width - 40) * 13) / 40)));
-	return Math.max(1, width - stretch - 3);
+	return Math.max(1, width - 5);
 }
