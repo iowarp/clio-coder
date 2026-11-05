@@ -3,7 +3,7 @@ import type { PermissionRequestedPayload } from "../core/telemetry/live-events.j
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
-import { describeMainCallConsequences } from "../domains/safety/call-consequence.js";
+import { describeMainCallConsequences, mainCallExposure } from "../domains/safety/call-consequence.js";
 import { sanitizeCallTargetText, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -260,7 +260,7 @@ function mainApprovalRequestView(
 		...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
 			? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
 			: {}),
-		...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
+		exposure: call.tool === ToolNames.AskUser ? askUserExposure(call.args) : mainCallExposure(call, decision),
 		...(target.length > 0 ? { target } : {}),
 		...(mutation !== null ? { mutation } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
