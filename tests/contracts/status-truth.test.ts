@@ -1937,11 +1937,14 @@ test("a steer receipt says the worker's model has the message only once it joine
 	const rows: Array<(width: number) => string[]> = [];
 	const receipts = createSteerReceipts({ bus, append: (render) => rows.push(render), requestRender: () => {} });
 	const run = { runId: "r1", agentId: "verifier" } as Parameters<typeof receipts.sent>[0];
-	const head = (): string => stripTerminalSequences(rows[0]?.(120)[1] ?? "");
+	const head = (): string => stripTerminalSequences(rows[0]?.(120)[0] ?? "");
 	receipts.sent(run, "also check the lint output");
 	match(head(), /waiting for the worker to take it/u);
 	bus.emit("run.progressed", { runId: "r1", agentId: "verifier", event: { type: "clio_coder_steer_received" } });
 	match(head(), /verifier took your message · its model reads it at its next step/u);
+	// A narrow transcript wraps the head under its words, never back to the mark's column.
+	const narrow = (rows[0]?.(40) ?? []).map(stripTerminalSequences);
+	match(narrow[1] ?? "", /^ {2}\S/u);
 	bus.emit("run.progressed", {
 		runId: "r1",
 		agentId: "verifier",
@@ -1954,6 +1957,6 @@ test("a steer receipt says the worker's model has the message only once it joine
 	receipts.sent(run, "and the tests");
 	bus.emit("run.progressed", { runId: "r1", agentId: "verifier", event: { type: "clio_coder_steer_received" } });
 	bus.emit("run.aborted", { runId: "r1", agentId: "verifier" } as never);
-	match(stripTerminalSequences(rows[1]?.(120)[1] ?? ""), /took your message but stopped before its model read it/u);
+	match(stripTerminalSequences(rows[1]?.(120)[0] ?? ""), /took your message but stopped before its model read it/u);
 	receipts.dispose();
 });
