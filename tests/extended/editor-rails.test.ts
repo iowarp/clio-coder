@@ -70,14 +70,16 @@ test("composer reads live autonomy and holds the rail steady around an existing 
 	});
 	match(stripTerminalSequences(editor.render(80)[0] ?? ""), /YOLO/);
 	editor.setText("Do not change this draft");
+	// Only the live-work spinner moves; everything else on the rail holds still around the draft.
+	const steady = (row: string | undefined): string => (row ?? "").replace(/[\u2800-\u28ff]/gu, "");
 	const before = editor.render(80)[0];
 	now = 2200;
-	strictEqual(editor.render(80)[0], before);
+	strictEqual(steady(editor.render(80)[0]), steady(before));
 	strictEqual(editor.getText(), "Do not change this draft");
 	autonomy = "default";
 	doesNotMatch(stripTerminalSequences(editor.render(80)[0] ?? ""), /YOLO/);
 });
-test("the approval cue steps with the shared animation clock, and a working rail holds still", (t) => {
+test("a working rail steps with the shared animation clock, and the approval cue holds still", (t) => {
 	const env = { TERM: process.env.TERM, reduce: process.env.CLIO_CODER_REDUCE_MOTION };
 	process.env.TERM = "xterm-256color";
 	delete process.env.CLIO_CODER_REDUCE_MOTION;
@@ -100,8 +102,8 @@ test("the approval cue steps with the shared animation clock, and a working rail
 	const firstApproval = approval.render(80)[0];
 	// Inside one 480 ms step a repaint changes nothing.
 	now = 1_300;
-	strictEqual(approval.render(80)[0], firstApproval);
-	now = 1_700;
-	notStrictEqual(approval.render(80)[0], firstApproval);
 	strictEqual(working.render(80)[0], firstWorking);
+	now = 1_700;
+	notStrictEqual(working.render(80)[0], firstWorking);
+	strictEqual(approval.render(80)[0], firstApproval);
 });

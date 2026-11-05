@@ -71,7 +71,7 @@ import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { createDropAlerts } from "./telemetry-drops.js";
-import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
+import { ACTIVITY_STEP_MS } from "./theme/glyphs.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { formatWaitClock, modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
@@ -1071,12 +1071,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const clearScheduledInterval =
 		deps.clearScheduledInterval ??
 		((handle: PresentationTickerHandle): void => clearInterval(handle as ReturnType<typeof setInterval>));
-	// Routine progress needs second-resolution counters, not animation frames.
-	// Only a visible unanswered decision temporarily asks for a slow attention cue.
-	const needsAttention = (): boolean =>
+	// Counters need only second resolution. The composer rail's spinner steps faster while the model, a tool or the
+	// harness is working; a wait on the operator holds a still mark, so it needs no frames at all.
+	const awaitingOperator = (): boolean =>
 		deps.isAwaitingApproval?.() === true || dockTop(deps.tui)?.frame.dockAwaitingInput?.() === true;
+	const workIsMoving = (): boolean => {
+		if (awaitingOperator()) return false;
+		if (deps.chat.isStreaming() || deps.chat.turnPreparation().phase !== "idle" || localBashStartedAt !== null)
+			return true;
+		const phase = statusController.current().phase;
+		return phase !== "idle" && phase !== "ended" && phase !== "tool_blocked";
+	};
 	const presentationInterval = (): number =>
-		deps.getSettings?.().interface.demo !== false && motionEnabled() && needsAttention() ? ATTENTION_STEP_MS : 1_000;
+		deps.getSettings?.().interface.demo !== false && motionEnabled() && workIsMoving() ? ACTIVITY_STEP_MS : 1_000;
 	let tickerInterval = presentationInterval();
 	let lastActivitySecond = -1;
 	let tickersStopped = false;
@@ -1089,7 +1096,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerTicker = scheduleInterval(tickPresentation, tickerInterval);
 			footerTicker.unref?.();
 		}
-		let needsRender = tickerInterval === ATTENTION_STEP_MS;
+		let needsRender = tickerInterval === ACTIVITY_STEP_MS;
 		const second = Math.floor(performance.now() / 1_000);
 		if (second !== lastActivitySecond) {
 			lastActivitySecond = second;
