@@ -203,7 +203,7 @@ function identityRow(
 	// open inspection view nothing else names the class.
 	return {
 		rows: chipRows(theme, [tool, action], width),
-		ruleFact: { label: "asked by", value: axisText(view), tone: axisTone },
+		ruleFact: { label: "asked under", value: axisText(view), tone: axisTone },
 	};
 }
 

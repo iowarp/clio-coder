@@ -797,8 +797,14 @@ export function renderToolAwaitingApproval(
 	if (view === undefined) return lines;
 	// The lead row already names a target it can show whole, so `target` only adds what that row cut.
 	const leadShowsTarget = view.target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(view.target);
+	// The axis is a level or a rule, not a requester, so the row says why the call stopped as a sentence.
+	const actionWords = `${view.actionClass.replaceAll("_", " ")} action`;
+	const why =
+		view.axis.kind === "autonomy"
+			? `${approvalAxisText(view)} asks before ${actionWords}s`
+			: `${approvalAxisText(view)} held this ${actionWords} for you`;
+	lines.push(...indentAndWrap(toolMeta(why), width, false));
 	const facts = [
-		["asked by", `${approvalAxisText(view)} · ${view.actionClass.replaceAll("_", " ")} action`],
 		...(view.target !== undefined && view.target.length > 0 && !leadShowsTarget ? [["target", view.target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
