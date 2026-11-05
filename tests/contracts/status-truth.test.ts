@@ -11,6 +11,7 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { readTrailingWrittenCalls } from "../../src/core/tool-call-markup.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import { createGrantBroker } from "../../src/domains/dispatch/grant-broker.js";
+import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/run-findings.js";
 import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
 import {
 	createWorkerApprovalWindows,
@@ -33,7 +34,7 @@ import { createWorkerProgressFold, type WorkerProgressSnapshot } from "../../src
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
 import {
@@ -63,7 +64,7 @@ import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
-import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
+import { approvalWaitWords, workerActivityWords, workerSilenceWords } from "../../src/interactive/worker-activity.js";
 import {
 	classifyTurnEnding,
 	noteWrittenCalls,
@@ -1793,5 +1794,111 @@ test("a warning states when it clears and ends within a minute; a pinned notice 
 	deepStrictEqual(
 		center.list().map((notice) => notice.key),
 		["route"],
+	);
+});
+
+test("a verify call naming an undeclared check ran nothing, so it seals no failing validation fact", () => {
+	const stats = [{ tool: "verify", count: 2, ok: 1, errors: 1, blocked: 0 }];
+	deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [{ check: "npm test", outcome: "unresolved" }]), []);
+	const mixed = typedValidationFactsFromVerifyCalls(stats, [
+		{ check: "npm test", outcome: "unresolved" },
+		{ check: "test", outcome: "ok" },
+	]);
+	deepStrictEqual(
+		mixed.map((fact) => fact.passed),
+		[true],
+	);
+	// A declared check that ran and failed still seals a failure.
+	deepStrictEqual(
+		typedValidationFactsFromVerifyCalls(stats, [
+			{ check: "npm test", outcome: "unresolved" },
+			{ check: "test", outcome: "error" },
+		]).map((fact) => fact.passed),
+		[false],
+	);
+});
+
+test("a silent worker says whether its wait is usual for the route only from two or more of this session's calls", () => {
+	const now = 1_000_000;
+	const waiting = {
+		phase: "waiting",
+		currentAction: null,
+		awaitingApproval: false,
+		evidenceAtMs: now - 35_000,
+		settled: false,
+	} as const;
+	const words = (history: { calls: number; slowestMs: number } | null, progress: object = waiting) =>
+		workerSilenceWords(progress as typeof waiting, { now, history }) ?? "";
+	match(words(null), /no output for 35s · usual time for this route unknown/u);
+	match(words({ calls: 1, slowestMs: 2_000 }), /usual time for this route unknown/u);
+	match(words({ calls: 4, slowestMs: 400 }), /longer than usual for this route \(slowest under 1s\)/u);
+	match(words({ calls: 4, slowestMs: 60_000 }), /this route has taken up to 1m/u);
+	doesNotMatch(words({ calls: 4, slowestMs: 60_000 }), /longer than usual/u);
+	// A pause mid-answer is not a wait for first output, so first-output history says nothing about it.
+	match(words({ calls: 4, slowestMs: 400 }, { ...waiting, phase: "writing" }), /usual pauses unknown/u);
+	// Past the third tier the limit outranks `usual unknown` when the row is short.
+	const late = { ...waiting, evidenceAtMs: now - 95_000 };
+	strictEqual(
+		workerSilenceWords(late, { now, history: null, room: 60 }),
+		"no output for 1m35s · no time limit · x in /fleet stops it",
+	);
+	strictEqual(
+		workerSilenceWords(late, { now, history: { calls: 4, slowestMs: 400 }, room: 40 }),
+		"no output for 1m35s · longer than usual",
+	);
+});
+
+test("an opened Fleet Runs detail keeps its trust row on screen and says how many runs it hides", () => {
+	const rows: DispatchBoardRow[] = Array.from({ length: 12 }, (_, index) => ({
+		runId: `run-${index}`,
+		agentId: "verifier",
+		runtimeKind: "http",
+		runtimeId: "native",
+		targetId: "mock",
+		wireModelId: "mock/model",
+		status: "completed",
+		elapsedMs: 1000,
+		usage: { kind: "pending" },
+		lastContextTokens: null,
+		ttft: null,
+		taskSummary: "Run the tests and report each gate.",
+		outcomeDetail: "exit code 1; result contract failed after 2 bounded repair rounds",
+		trust: {
+			version: 1,
+			verdict: "compromised",
+			claimant: "worker",
+			unknown: [],
+			refs: [],
+			axes: {
+				artifactIntegrity: "verified",
+				validationGrounding: "failed",
+				independentReview: "absent",
+				contextProvenance: "recorded",
+				completionEvidence: "absent",
+			},
+			text: "sealed; recorded validation failed; not independently reviewed; context recorded; completion not recorded",
+		},
+	}));
+	const board = createDispatchBoardView(
+		() => rows,
+		() => undefined,
+	);
+	board.setBodyRows(10);
+	board.selectNext();
+	board.selectNext();
+	const folded = board.render(100).map(stripTerminalSequences);
+	match(folded.join("\n"), /1–5 of 12 runs/u);
+	strictEqual(board.wantsGrowth(), false);
+	board.toggleDetail();
+	strictEqual(board.wantsGrowth(), true);
+	const open = board.render(100).map(stripTerminalSequences);
+	ok(open.length <= 10, `open detail used ${open.length} rows`);
+	const text = open.join("\n");
+	match(text, /trust\s+✗ not trusted/u);
+	match(text, /completion not recorded/u);
+	match(text, /run 3 of 12 · 11 hidden while the detail is open/u);
+	ok(
+		open.some((line) => line.includes("❯")),
+		"the selected run stays listed",
 	);
 });
