@@ -30,7 +30,13 @@ export type TelemetryListener<N extends EventName = EventName> = (
  * subscribers read it and never mutate it.
  */
 export interface TelemetryHub {
-	emit<N extends EventName>(name: N, payload: EventPayload<N>, ctx?: TelemetryContext): boolean;
+	/** `timing` stamps a record its seam could not name a scope for when the fact happened. */
+	emit<N extends EventName>(
+		name: N,
+		payload: EventPayload<N>,
+		ctx?: TelemetryContext,
+		timing?: JournalEmissionTiming,
+	): boolean;
 	/**
 	 * Enqueue a content-bearing research record whose preimage the writer stores, reserves against the research cap
 	 * and cites before the record is written. The caller hands over ownership of `preimage` (#434).
@@ -87,10 +93,23 @@ export function attachJournalRoute(route: JournalRoute): void {
 		route.journal(emission.name, emission.payload, emission.preimage, emission.ctx, emission);
 }
 
-function journal(name: EventName, payload: unknown, preimage: unknown, ctx: TelemetryContext | undefined): boolean {
-	if (journalRoute) return journalRoute.journal(name, payload, preimage, ctx);
+function journal(
+	name: EventName,
+	payload: unknown,
+	preimage: unknown,
+	ctx: TelemetryContext | undefined,
+	timing?: JournalEmissionTiming,
+): boolean {
+	if (journalRoute) return journalRoute.journal(name, payload, preimage, ctx, timing);
 	if (earlyEmissions.length < EARLY_JOURNAL_LIMIT)
-		earlyEmissions.push({ name, payload, preimage, ctx, wallMs: Date.now(), mono: performance.now() });
+		earlyEmissions.push({
+			name,
+			payload,
+			preimage,
+			ctx,
+			wallMs: timing?.wallMs ?? Date.now(),
+			mono: timing?.mono ?? performance.now(),
+		});
 	else earlyDrops.set(name, (earlyDrops.get(name) ?? 0) + 1);
 	return false;
 }
@@ -126,8 +145,8 @@ export function createTelemetryHub(): TelemetryHub {
 	};
 
 	return {
-		emit(name, payload, ctx) {
-			const journaled = journal(name, payload, undefined, ctx);
+		emit(name, payload, ctx, timing) {
+			const journaled = journal(name, payload, undefined, ctx, timing);
 			deliver(name, payload, ctx);
 			return journaled;
 		},

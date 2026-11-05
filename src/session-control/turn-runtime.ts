@@ -277,6 +277,14 @@ export interface TurnRuntimeDeps {
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
 	sessionId?: () => string | undefined;
 	sessionOrigin?: () => TelemetrySessionOrigin | null;
+	/** A main-agent request is leaving now, on this attempt: what the run's messages hold, this request carries. */
+	onModelRequestSent?: (call: {
+		callId: string;
+		attemptId: string;
+		attempt: number;
+		context: TelemetrySessionLease["context"];
+	}) => void;
+	onModelCallSettled?: (facts: CallSettled) => void;
 	/**
 	 * Information-flow admission of one model request: the block reason when
 	 * the session's restricted context may not reach this target, or null.
@@ -793,7 +801,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			facts: CallSettled | undefined,
 			owner: TelemetrySessionLease["context"] | undefined,
 		): void => {
-			if (facts) settledAttempts.push(facts);
+			if (facts) {
+				settledAttempts.push(facts);
+				deps.onModelCallSettled?.(facts);
+			}
 			if (!facts || !deps.telemetry || owner?.sessionId !== deps.sessionOrigin?.()?.id) return;
 			// A call belongs to the turn its lease was taken for, never to whichever turn is active when it settles,
 			// including a stream that settles after its run ended (#434).
@@ -961,6 +972,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
 						attempt?.stage("send", "start");
+						if (attempt && journalLease)
+							deps.onModelRequestSent?.({
+								callId: attempt.callId,
+								attemptId: attempt.attemptId,
+								attempt: attempt.attempt,
+								context: journalLease.context,
+							});
 						const facts: ModelRequestFacts = {
 							sentAt: Date.now(),
 							modelId: currentModel.id,

@@ -2392,10 +2392,37 @@ export function timeline(
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	const entries: TimelineEntry[] = analysis.attempts.map((attempt) => callEntry(view, "own", id, attempt));
+	const attemptsById = new Map(analysis.attempts.map((attempt) => [attempt.started.attemptId as string, attempt]));
 	for (const record of source.accountQuota ?? []) if (record.k === "quota.read") entries.push(quotaEntry(record));
 	for (const record of source.journal.records) {
 		const at = record.t;
 		switch (record.k) {
+			case "message.stepped": {
+				const data = record.data;
+				const since = localClock(Math.max(0, Date.parse(at) - data.submittedAt));
+				const carrier = data.attemptId === undefined ? undefined : attemptsById.get(data.attemptId);
+				entries.push({
+					kind: "message",
+					at,
+					messageId: data.messageId,
+					step: data.step,
+					by: data.by ?? null,
+					chars: data.chars === undefined ? null : shownCount(data.chars),
+					lane: data.lane ?? null,
+					changedBy: data.changedBy ?? null,
+					why: data.why ?? null,
+					slot: data.slot ?? null,
+					reason: data.reason ?? null,
+					callId: (data.callId ?? null) as CallRowV1["callId"] | null,
+					attemptId: (data.attemptId ?? null) as CallRowV1["attemptId"] | null,
+					attempt: data.attempt ?? null,
+					callDisposition: data.attemptId === undefined ? null : (carrier?.settled?.disposition ?? "incomplete"),
+					callFailure: carrier?.settled?.stop.failure ?? null,
+					turnId: record.ctx.turnId ?? null,
+					sinceSubmit: { fact: since, display: renderFact(since, "duration") },
+				});
+				break;
+			}
 			case "turn.settled":
 				entries.push({
 					kind: "turn",
@@ -2618,11 +2645,12 @@ export function timeline(
 		"system-one": 8,
 		middleware: 9,
 		call: 10,
-		tool: 11,
-		"worker-channel": 12,
-		compaction: 13,
-		run: 14,
-		turn: 15,
+		message: 11,
+		tool: 12,
+		"worker-channel": 13,
+		compaction: 14,
+		run: 15,
+		turn: 16,
 	};
 	const within = (at: string) => !range || (at >= range.from && at <= range.to);
 	return {

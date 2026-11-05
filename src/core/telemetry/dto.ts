@@ -18,6 +18,13 @@ import {
 	CallSettledSchema,
 	EvidenceAssessedSchema,
 	EvidenceFindingsObjectSchema,
+	MESSAGE_BY,
+	MESSAGE_LANE,
+	MESSAGE_LANE_CHANGED_BY,
+	MESSAGE_REMOVAL,
+	MESSAGE_SLOT,
+	MESSAGE_STEP,
+	MESSAGE_WAIT_WHY,
 	MIDDLEWARE_EFFECTS,
 	ObjectRefSchema,
 	PricingSchema,
@@ -752,6 +759,34 @@ export const TimelineEntrySchema = Type.Union([
 	),
 	BudgetEntrySchema,
 	QuotaEntrySchema,
+	/**
+	 * One step of an operator message's path, read by `messageId`. A field a step does not state is null. A `carried`
+	 * row names the call and says how it settled; a message whose call did not settle is carried again by the next one.
+	 */
+	Type.Object(
+		{
+			kind: Type.Literal("message"),
+			...at,
+			messageId: ExistingId,
+			step: MESSAGE_STEP,
+			by: Type.Union([MESSAGE_BY, Type.Null()]),
+			chars: Type.Union([shown, Type.Null()]),
+			lane: Type.Union([MESSAGE_LANE, Type.Null()]),
+			changedBy: Type.Union([MESSAGE_LANE_CHANGED_BY, Type.Null()]),
+			why: Type.Union([MESSAGE_WAIT_WHY, Type.Null()]),
+			slot: Type.Union([MESSAGE_SLOT, Type.Null()]),
+			reason: Type.Union([MESSAGE_REMOVAL, Type.Null()]),
+			callId: Type.Union([CallIdSchema, Type.Null()]),
+			attemptId: Type.Union([AttemptIdSchema, Type.Null()]),
+			attempt: Type.Union([count, Type.Null()]),
+			callDisposition: Type.Union([Disposition, Type.Literal("incomplete"), Type.Null()]),
+			callFailure: Type.Union([FailureCause, Type.Null()]),
+			turnId: Type.Union([ExistingId, Type.Null()]),
+			/** Wall time since the message was submitted, from the record's own clock. */
+			sinceSubmit: shown,
+		},
+		closed,
+	),
 	/** One tool call as the model's tool wrapper settled it; its own time excludes any wait for approval. */
 	Type.Object(
 		{

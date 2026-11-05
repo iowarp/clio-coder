@@ -262,6 +262,7 @@ export const EVENTS = {
 		cc: "content-free",
 		project: projectEvidenceAssessed,
 	}),
+	"message.stepped": journal(S.MessageSteppedSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
 	"run.feed_appended": journal(S.RunFeedAppendedSchema, { tier: "operational", cc: "structural" }),
 	"run.usage_reported": journal(S.RunUsageSchema, { tier: "accountability", cc: "structural" }),
 	"run.linked": journal(S.RunLinkedSchema, { tier: "accountability", cc: "content-free" }),
@@ -555,6 +556,21 @@ export function journalDefinition(name: JournalEventName): JournalDefinition {
 	return EVENTS[name];
 }
 
+/** The facts each step of a message's path states, and only those. */
+const MESSAGE_STEP_FIELDS: Readonly<
+	Record<S.MessageStepped["step"], ReadonlyArray<Exclude<keyof S.MessageStepped, "messageId" | "step" | "submittedAt">>>
+> = {
+	submitted: ["by", "chars", "lane"],
+	queued: ["by", "chars", "lane"],
+	"lane-changed": ["lane", "changedBy"],
+	held: ["why"],
+	released: [],
+	"handed-over": ["slot", "lane"],
+	returned: ["why"],
+	carried: ["callId", "attemptId", "attempt"],
+	removed: ["reason"],
+};
+
 /** Schema validation plus the cross-field invariants that JSON Schema cannot express (#434). */
 export function validPayload<K extends JournalEventName>(kind: K, data: unknown): data is JournalPayload<K> {
 	if (!Value.Check(journalDefinition(kind).schema, data)) return false;
@@ -569,6 +585,11 @@ export function validPayload<K extends JournalEventName>(kind: K, data: unknown)
 	if (Object.hasOwn(PREIMAGE_SUBJECTS, kind)) {
 		const content = (data as JournalPayload<PreimageEventName>).content;
 		return content.subject === PREIMAGE_SUBJECTS[kind as PreimageEventName] && content.label === "resolvable";
+	}
+	if (kind === "message.stepped") {
+		const { messageId: _id, step, submittedAt: _at, ...facts } = data as S.MessageStepped;
+		const expected = MESSAGE_STEP_FIELDS[step];
+		return Object.keys(facts).length === expected.length && expected.every((field) => facts[field] !== undefined);
 	}
 	if (kind === "compaction.settled") {
 		const outcome = data as EventPayload<"compaction.settled">;

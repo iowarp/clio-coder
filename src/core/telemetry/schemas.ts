@@ -1680,6 +1680,64 @@ export const AuthRefreshedSchema = Type.Object(
 	},
 	closed,
 );
+export const MESSAGE_STEP = vocabulary([
+	"submitted",
+	"queued",
+	"lane-changed",
+	"held",
+	"released",
+	"handed-over",
+	"returned",
+	"carried",
+	"removed",
+]);
+export const MESSAGE_LANE = vocabulary(["prompt", "steer", "follow-up"]);
+export const MESSAGE_BY = vocabulary(["operator", "machine"]);
+export const MESSAGE_LANE_CHANGED_BY = vocabulary(["operator", "producer"]);
+/** Why a held message waits, or why a message handed to the engine came back. */
+export const MESSAGE_WAIT_WHY = vocabulary([
+	"operator-stop",
+	"interrupt",
+	"prompt-not-started",
+	"session-move",
+	"run-cancelled",
+]);
+export const MESSAGE_SLOT = vocabulary(["finish-turn", "prepare-next-turn", "prompt"]);
+export const MESSAGE_REMOVAL = vocabulary([
+	"removed",
+	"sent-now",
+	"to-editor",
+	"restored",
+	"cancelled",
+	"resubmitted",
+	"not-started",
+]);
+/**
+ * One step of an operator message's path from submit to the provider call that carried it. The id is minted by the
+ * host and never enters the request, so recording a path cannot change the prefix a provider caches. Lengths and
+ * points only: the text stays in the session ledger. A send-now or a resubmit keeps the id of the entry it took.
+ */
+export const MessageSteppedSchema = Type.Object(
+	{
+		messageId: ExistingId,
+		step: MESSAGE_STEP,
+		/** Epoch milliseconds the message was submitted, so any reader gets its wait from the record's own time. */
+		submittedAt: count,
+		by: Type.Optional(MESSAGE_BY),
+		/** The submitted text's length in UTF-16 code units. */
+		chars: Type.Optional(count),
+		lane: Type.Optional(MESSAGE_LANE),
+		changedBy: Type.Optional(MESSAGE_LANE_CHANGED_BY),
+		why: Type.Optional(MESSAGE_WAIT_WHY),
+		slot: Type.Optional(MESSAGE_SLOT),
+		reason: Type.Optional(MESSAGE_REMOVAL),
+		callId: Type.Optional(CallIdSchema),
+		attemptId: Type.Optional(AttemptIdSchema),
+		attempt: Type.Optional(count),
+	},
+	closed,
+);
+export type MessageStepped = Static<typeof MessageSteppedSchema>;
 /** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
 export const MiddlewareFiredSchema = Type.Object(
 	{
