@@ -25,6 +25,8 @@ export type ModelAdmissionEvent =
 	 * and `startedElsewhere` is a load already running when Clio looked.
 	 */
 	| { stage: "loading"; model: string; evidence: "requested" | "reported"; startedElsewhere?: boolean }
+	/** Clio itself holds this request at the session's cost ceiling; nothing has reached a provider. */
+	| { stage: "ceiling"; spentUsd: number; ceilingUsd: number }
 	/** Putting back a model an abandoned load evicted, which survives the cancel by design. */
 	| { stage: "restoring"; model: string }
 	/** The target loads on demand and said just now that the model is not serving, so this request pays for it. */
@@ -37,7 +39,7 @@ export type ModelAdmissionReporter = (event: ModelAdmissionEvent) => void;
 
 export type ModelAdmissionWait = Extract<
 	ModelAdmissionEvent,
-	{ stage: "lock" | "unloading" | "switching" | "loading" | "restoring" }
+	{ stage: "lock" | "unloading" | "switching" | "loading" | "restoring" | "ceiling" }
 > & {
 	/** Epoch ms this step began. A fresher report of the same step does not move it. */
 	since: number;
@@ -54,6 +56,8 @@ export interface ModelAdmissionFacts {
 	coldAtSend?: "absent" | "sleeping" | undefined;
 	/** Epoch ms this request first stood behind a step, which says `sentAt` was re-stamped at admission. */
 	admissionBeganAt?: number | undefined;
+	/** A load Clio asked for was left behind by this request, and nothing stops the target finishing it. */
+	abandonedLoad?: boolean | undefined;
 	/** A probe's last word on this model before the request, standing only until a reconcile looks for itself. */
 	probedResidency?: "absent" | "loading" | undefined;
 }
@@ -73,6 +77,7 @@ export function applyModelAdmission(
 			facts.coldAtSend = event.state;
 			return;
 		case "abandoned":
+			if (current?.stage === "loading") facts.abandonedLoad = true;
 			facts.admission = null;
 			return;
 		case "admitted": {

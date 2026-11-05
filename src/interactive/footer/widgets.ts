@@ -565,6 +565,20 @@ function admissionFacts(
 				subject: "Clio",
 				facts: [elapsed, way],
 			};
+		case "ceiling":
+			return {
+				head: "is holding the request at the cost ceiling",
+				tight: "is holding at ceiling",
+				subject: "Clio",
+				facts: [
+					elapsed,
+					{
+						text: `$${admission.spentUsd.toFixed(2)} of $${admission.ceilingUsd.toFixed(2)}`,
+						keep: 6,
+					},
+					way,
+				],
+			};
 		case "loading": {
 			const evidence =
 				admission.startedElsewhere === true
@@ -593,8 +607,13 @@ function admissionLabel(
 	elapsedFrom: (from: number) => string | null,
 ): { label: string; subject?: string } {
 	const { head, tight, subject, facts } = admissionFacts(admission, room, elapsedFrom);
+	// The long word for a wait gives way to what the wait owes: its clock, its owner and the way out.
+	const owed = facts.reduce(
+		(sum, fact) => (fact.keep >= 6 && fact.text !== null ? sum + 3 + visibleWidth(fact.short ?? fact.text) : sum),
+		8,
+	);
 	return {
-		label: fitRailFacts([{ text: room >= 40 ? head : tight, keep: 9 }, ...facts], room),
+		label: fitRailFacts([{ text: visibleWidth(head) + owed <= room ? head : tight, keep: 9 }, ...facts], room),
 		...(subject !== undefined ? { subject } : {}),
 	};
 }
@@ -623,11 +642,10 @@ function remainingSeconds(dueAt: number, now: number): number {
 function retryCauseFact(retry: RetryOverlay | undefined, now: number): Omit<RailFact, "keep"> {
 	switch (retry?.cause) {
 		case "model-loading": {
-			const age = retry.causeSince === undefined ? 0 : Math.floor(Math.max(0, now - retry.causeSince) / 1000);
-			const span = formatCompactMs(age * 1000);
-			return age < 1
-				? { text: "target says model is loading", short: "model loading" }
-				: { text: `target has said loading for ${span}`, short: `loading ${span}` };
+			const age = Math.max(0, now - (retry.causeSince ?? now));
+			return age < 1000
+				? { text: "target says model not loaded yet", short: "not loaded yet" }
+				: { text: `target has said not loaded for ${wholeSeconds(age)}`, short: `not loaded ${wholeSeconds(age)}` };
 		}
 		case "capacity":
 			return { text: "target says it is at capacity", short: "at capacity" };
@@ -673,7 +691,8 @@ function retryRailLabel(
 			{ text: attempts, keep: 9 },
 			{ ...retryCauseFact(retry, now), keep: 6 },
 			{
-				text: left === null ? null : `next attempt in ${left}s`,
+				// What the target said outranks the long form of the countdown beside it.
+				text: left === null ? null : retry?.cause !== undefined && room < 90 ? `in ${left}s` : `next attempt in ${left}s`,
 				...(left === null ? {} : { short: `in ${left}s` }),
 				keep: 8,
 			},
@@ -727,9 +746,16 @@ function modelWaitFacts(status: AgentStatus, now: number, from: number): Readonl
 				: loaded !== null
 					? { text: "may be stuck" }
 					: { text: "target state unknown", short: "state unknown" };
+	// Below every slot it can see, Clio's other work is company on the endpoint and no more than that about this wait.
+	const company = sent?.firstByteAt === null && sent.slots ? slotHolders(sent.slots) : null;
 	return [
 		{ text: sent ? `request sent ${clockTime(sent.sentAt)}` : null, keep: 1 },
 		{ text: loaded, keep: 2 },
+		{
+			text: company && tier >= 1 ? `${company.words} also on target` : null,
+			...(company ? { short: `${company.used} also on target` } : {}),
+			keep: 2,
+		},
 		{ text: sent?.firstByteAt ? null : (cold?.text ?? null), ...(cold ? { short: cold.short } : {}), keep: 3 },
 		{ text: evidence, keep: 4 },
 		{ text: verdict?.text ?? null, ...(verdict?.short ? { short: verdict.short } : {}), keep: 5 },
@@ -928,7 +954,7 @@ export function composerPhasePresentation(
 			}
 			// The clock keeps counting from where the wait began, so crossing the threshold changes the claim and not the time.
 			if (status.resumePhase === "waiting_model") {
-				label = waitLabel("has no output", "no output");
+				label = slotWaitLabel() ?? waitLabel("has no output", "no output");
 				break;
 			}
 			{
@@ -983,6 +1009,8 @@ export function composerPhasePresentation(
 		case "ended": {
 			const stop = status.summary?.stopReason;
 			const short = room < 24;
+			// Cancelling a request does not call back a load it started: the server may finish it regardless.
+			const leftLoading = status.modelRequest?.abandonedLoad === true;
 			label =
 				stop === "error"
 					? fitRailFacts(
@@ -997,9 +1025,13 @@ export function composerPhasePresentation(
 							? "stopped"
 							: "stopped generating tool arguments"
 						: stop === "cancelled" || stop === "aborted"
-							? short
-								? "cancelled"
-								: "was cancelled"
+							? fitRailFacts(
+									[
+										{ text: short ? "cancelled" : "was cancelled", keep: 9 },
+										{ text: leftLoading ? "target may finish the load" : null, short: "may still load", keep: 5 },
+									],
+									room,
+								)
 							: stop === "length"
 								? short
 									? "output limit"
@@ -1011,7 +1043,9 @@ export function composerPhasePresentation(
 	// A blocker or a silent wait has its own facts to state, and those outrank where the turn was going.
 	const namesRoute =
 		status.phase === "preparing" ||
-		(status.phase === "waiting_model" && computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) < 1) ||
+		(status.phase === "waiting_model" &&
+			computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) < 1 &&
+			slotWaitLabel() === null) ||
 		(status.phase === "ended" && status.summary?.stopReason !== "error");
 	return { ...phase, label, namesRoute };
 }

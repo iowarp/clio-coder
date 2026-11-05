@@ -1134,13 +1134,33 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							// stall (#423).
 							preInvocationStage = "budget admission";
 							stallSuspendDepth += 1;
+							// Parked at the ceiling this is Clio's queue, and no provider has heard of the request.
+							let parked: ModelRequestFacts | null = null;
 							try {
 								await deps.scheduling.admitPaidRequest({
 									waitForRaise: deps.headless !== true,
 									additionalUsd: () => unsettledSpendUsd,
 									getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 									contextTokens: input,
-									onBlocked: recordBlock,
+									onBlocked: (block) => {
+										recordBlock(block);
+										parked = {
+											sentAt: Date.now(),
+											modelId: target.wireModelId,
+											firstByteAt: null,
+											bytesObservable: false,
+										};
+										applyModelAdmission(
+											parked,
+											{
+												stage: "ceiling",
+												spentUsd: block.currentUsd + (block.projectedUsd ?? 0),
+												ceilingUsd: block.ceilingUsd,
+											},
+											Date.now(),
+										);
+										state.modelRequest = parked;
+									},
 									...(modelCall && journalLease
 										? {
 												telemetry: {
@@ -1155,6 +1175,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							} finally {
 								stallSuspendDepth -= 1;
 								lastActivityAt = performance.now();
+								if (parked !== null) (parked as ModelRequestFacts).admission = null;
 							}
 						} else {
 							const { currentUsd, ceilingUsd, pricing } = deps.scheduling.preflight();

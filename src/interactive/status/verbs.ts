@@ -1,3 +1,4 @@
+import type { ModelAdmissionWait } from "../../core/model-admission.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { AgentStatus } from "../../session-control/status-types.js";
 import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
@@ -47,6 +48,15 @@ function elapsedSince(status: AgentStatus, now: number): string | null {
 	return formatLiveElapsed(Math.max(0, now - from));
 }
 
+const ADMISSION_VERB: Readonly<Record<ModelAdmissionWait["stage"], string>> = {
+	lock: "Waiting for residency lock",
+	unloading: "Unloading model",
+	switching: "Switching model",
+	loading: "Loading model",
+	restoring: "Restoring model",
+	ceiling: "Held at cost ceiling",
+};
+
 function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["toneHint"] } | null {
 	const tier = status.watchdogTier;
 	switch (status.phase) {
@@ -55,6 +65,9 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "preparing":
 			return { text: "Preparing", toneHint: "normal" };
 		case "waiting_model":
+			if (status.modelRequest?.admission) {
+				return { text: ADMISSION_VERB[status.modelRequest.admission.stage], toneHint: "normal" };
+			}
 			return {
 				text: tier >= 2 ? "Waiting for model" : status.localRuntime ? "Waiting for local model" : "Waiting for model",
 				toneHint: "normal",
