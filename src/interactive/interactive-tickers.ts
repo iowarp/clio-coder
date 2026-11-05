@@ -17,6 +17,8 @@ export interface InteractiveTickerHandle {
 
 export interface InteractiveDispatchStore {
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	/** Active workers and running plans, when the store tracks plans. */
+	liveRows?(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 }
 
@@ -174,7 +176,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		contextIslandTicker = scheduleInterval(() => {
 			deps.dispatchBoardStore.reconcile();
 			const taskNeedsRender = renderTaskIsland();
-			const fleetActive = deps.dispatchBoardStore.activeRows().length > 0;
+			const fleetActive = (deps.dispatchBoardStore.liveRows?.() ?? deps.dispatchBoardStore.activeRows()).length > 0;
 			if (!deps.contextActivityStore.active() && !contextIslandVisible && !fleetActive && !taskNeedsRender) return;
 			renderContextIsland();
 			deps.tui.requestRender();

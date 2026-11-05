@@ -37,6 +37,8 @@ export interface FleetPlanRuns {
 	settle(rootId: string, outcome: FleetRunOutcome): FleetPlanRunView | null;
 	fail(rootId: string, message: string): FleetPlanRunView | null;
 	runs(): ReadonlyArray<FleetPlanRunView>;
+	/** The plans this session has running now, read without touching the disk because a repaint asks. */
+	live(): ReadonlyArray<FleetPlanRunView>;
 }
 
 function settledDetail(outcome: FleetRunStepOutcome): string | undefined {
@@ -129,6 +131,9 @@ export function createFleetPlanRuns(
 				for (const plan of readDurable()) if (!plans.has(plan.rootId)) plans.set(plan.rootId, plan);
 			}
 			return [...plans.values()];
+		},
+		live() {
+			return [...plans.values()].filter((plan) => plan.state === "running");
 		},
 	};
 }

@@ -183,12 +183,21 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 			theme,
 			[
 				theme.style("heading", preview.name, { bold: true }),
-				theme.fg("annotation", `plan ${preview.plan.hash.slice(0, 12)}`),
-				theme.fg("annotation", `approval ${preview.planHash.slice(0, 12)}`),
+				theme.fg("annotation", `${preview.plan.steps.length} ${preview.plan.steps.length === 1 ? "step" : "steps"}`),
 			],
 			width,
 		),
-		...factRows(theme, [{ label: "seals", value: "recipes, routes, commands, budget and replay", tone: "muted" }], width),
+		...factRows(
+			theme,
+			[
+				{
+					label: "seals",
+					value: `recipes, routes, commands, budget and replay under plan ${preview.plan.hash.slice(0, 12)}, approval ${preview.planHash.slice(0, 12)}`,
+					tone: "muted",
+				},
+			],
+			width,
+		),
 	];
 	if (preview.resume !== undefined) {
 		const replayed = [...preview.resume.replayed.keys()];

@@ -711,6 +711,24 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 	];
 }
 
+/** Step rows the live card keeps, so a long plan cannot push the composer off a short terminal. */
+const PLAN_LIVE_STEP_ROWS = 4;
+
+/** A running plan on the fleet card: its progress and clock, then the steps around the one running now. */
+function planIslandLines(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, width: number): string[] {
+	const head = `${theme.fg("activity", GLYPH.running)} ${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg("body", planProgressText(plan))}${dotSep(theme)}${theme.fg("annotation", formatCompactMs(row.elapsedMs))}`;
+	const steps = planStepLines(theme, plan, Math.max(1, width - 2));
+	const running = plan.steps.findIndex((step) => step.state === "running");
+	const start = Math.max(0, Math.min(Math.max(0, running - 1), steps.length - PLAN_LIVE_STEP_ROWS));
+	const shown = steps.slice(start, start + PLAN_LIVE_STEP_ROWS);
+	const hidden = steps.length - shown.length;
+	return [
+		truncateToWidth(head, width, GLYPH.ellipsis, false),
+		...shown.map((line) => `  ${line}`),
+		...(hidden > 0 ? [theme.fg("annotation", `  ${hidden} more steps · /fleet`)] : []),
+	];
+}
+
 /** The transcript's settled record of a plan, in the worker card's gutter grammar. */
 export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): string[] {
 	const theme = clioTheme();
@@ -966,6 +984,7 @@ const TASK_ISLAND_APPROVAL_LABEL_ROOM = 14;
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
+	if (row.plan !== undefined) return planIslandLines(theme, row, row.plan, width);
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
 	// A queued run has not started, so it has no elapsed time to be unavailable.
@@ -1968,6 +1987,8 @@ export function createDispatchBoardStore(
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	/** What the fleet card shows: plans running now, then the active workers. */
+	liveRows(): ReadonlyArray<DispatchBoardRow>;
 	/** Every worker run, without the plan rows: what a count or usage of workers reads. */
 	workerRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
@@ -2008,6 +2029,7 @@ export function createDispatchBoardStore(
 			);
 		},
 		activeRows: () => projectRows(true),
+		liveRows: () => [...plans.live().map((plan) => fleetPlanRow(plan, Date.now())), ...projectRows(true)],
 		workerRows: () => projectRows(false),
 		reconcile() {
 			projection.reconcileRuns();

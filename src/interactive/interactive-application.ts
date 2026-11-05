@@ -1758,12 +1758,14 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const selectedWatchableRun = (): { runId: string; agentId: string } | null => {
 		if (!watchPane) return null;
 		const row = dispatchBoard.selectedRow();
-		if (!row) return null;
+		if (!row || row.plan !== undefined) return null;
 		const decision = paneWatchDecision({ source: "workers-view", runStatus: row.status });
 		return decision.open ? { runId: row.runId, agentId: row.agentId } : null;
 	};
 	if (watchPane) {
-		dispatchBoard.setEnterWatches((row) => paneWatchDecision({ source: "workers-view", runStatus: row.status }).open);
+		dispatchBoard.setEnterWatches(
+			(row) => row.plan === undefined && paneWatchDecision({ source: "workers-view", runStatus: row.status }).open,
+		);
 	}
 	/**
 	 * Enter in the workers view. True means the watch pane took the key; false
