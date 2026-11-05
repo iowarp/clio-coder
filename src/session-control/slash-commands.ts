@@ -1141,35 +1141,36 @@ function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
  * its promise not to reach a renderer.
  */
 function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
-	const server = status.server ? `pane host ${status.server.version}, protocol ${status.server.protocol}` : "no server";
-	const lines = [
-		`panes: mode=${status.mode} ${status.available ? "available" : "unavailable"} (${server})`,
-		`  ${status.reason}`,
-		...(status.socketPath ? [`  socket ${status.socketPath}`] : []),
-		`  settings: enabled=${status.settings.enabled} notifications=${status.settings.notifications} layout=${status.settings.layout} journal=${status.settings.journal}`,
-		`  files: enabled=${status.settings.yazi.enabled} mode=${status.settings.yazi.mode} profile=${status.settings.yazi.profile} followCwd=${status.settings.yazi.followCwd}`,
-		`  file pane: mode=${status.yazi.mode} pane=${status.yazi.paneId ?? "none"} cwd=${status.yazi.paneCwd ?? "unknown"} lastLine=${status.yazi.lastLineAt === null ? "never" : new Date(status.yazi.lastLineAt).toISOString()} dropped=${status.yazi.droppedLines}`,
-	];
-	if (status.docks.length > 0) {
+	// What an operator asks first: can Clio open panes here, and which are open.
+	// The settings and wire facts follow on one details line, in words.
+	const host = status.server ? `Herdr ${status.server.version}` : "the pane host";
+	const lead = status.available
+		? `Panes: ${host} is available; Clio opens panes beside this one (${status.mode === "embedded" ? "in its own workspace" : "as a guest in this workspace"}).`
+		: `Panes: unavailable. ${status.reason}`;
+	const files =
+		status.yazi.mode === "closed" || status.yazi.paneId === null
+			? status.settings.yazi.enabled
+				? "closed · /files opens it"
+				: "off · turn on Files pane in /settings (Workspace & Files), then /files opens it"
+			: `open${status.yazi.paneCwd ? ` in ${status.yazi.paneCwd}` : ""} · picks land in the composer as @ mentions${status.yazi.droppedLines > 0 ? ` · ${status.yazi.droppedLines} picks dropped` : ""}`;
+	const lines = [lead, `  Files pane   ${files}`];
+	for (const dock of status.docks)
 		lines.push(
-			`  docks: ${status.docks
-				.map(
-					(dock) => `${dock.slot}=${dock.paneId} @${(dock.targetShare * 100).toFixed(0)}%${dock.hidden ? " hidden" : ""}`,
-				)
-				.join(", ")}`,
+			`  ${`${dock.slot[0]?.toUpperCase() ?? ""}${dock.slot.slice(1)} dock`.padEnd(12)} ${dock.hidden ? "hidden" : "shown"} · ${(dock.targetShare * 100).toFixed(0)}% of the window`,
 		);
-	}
-	if (status.panes.length === 0) {
-		lines.push("  no Clio-owned panes");
-	} else {
-		lines.push(`  ${status.panes.length} Clio-owned pane(s):`);
-		for (const pane of status.panes) {
-			const adopted = pane.adopted ? " adopted" : "";
-			const pending = pane.pending ? " opening" : "";
-			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${adopted}${pending}`);
-		}
-	}
-	lines.push(`  presets: ${PANES_PRESETS.map((preset) => `${preset.id} (${preset.summary})`).join(", ")}`);
+	if (status.panes.length === 0) lines.push("  Clio panes   none open");
+	else
+		for (const [index, pane] of status.panes.entries())
+			lines.push(
+				`  ${(index === 0 ? "Clio panes" : "").padEnd(12)} ${pane.label} (${pane.purpose}${pane.adopted ? ", adopted" : ""}${pane.pending ? ", opening" : ""})`,
+			);
+	lines.push(
+		`  Open one     ${PANES_PRESETS.map((preset) => `/panes open ${preset.id}: ${preset.summary}`).join("; ")}`,
+	);
+	if (status.available)
+		lines.push(
+			`  Details      ${status.socketPath ? `socket ${status.socketPath} · ` : ""}${status.server ? `protocol ${status.server.protocol} · ` : ""}notifications ${status.settings.notifications} · journal ${status.settings.journal ? "on" : "off"}`,
+		);
 	return lines;
 }
 
@@ -2834,20 +2835,22 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					if (result.paneId !== null) {
 						ctx.notice(
 							"success",
-							result.revealed
-								? `files pane shown (${result.paneId})`
-								: result.existing
-									? `files pane focused (${result.paneId})`
-									: `files pane opened (${result.paneId})`,
+							`${result.revealed ? "Files pane shown" : result.existing ? "Files pane focused" : "Files pane opened"} beside this one. Picks land in the composer as @ mentions; /files hides it.`,
 						);
 					}
 				} else if (result.status === "hidden") {
-					ctx.notice("info", "files pane hidden; /files shows it again and keeps its directory");
+					ctx.notice("info", "Files pane hidden; /files shows it again in the same directory.");
 				} else if (result.status === "closed") {
-					ctx.notice("info", "files pane closed");
+					ctx.notice("info", "Files pane closed.");
 				} else if (result.status === "missing-binary") {
 					ctx.io.stdout(`${result.detail}\n`);
 					ctx.render?.();
+				} else if (result.status === "refused" && /interface\.panes\.files\.enabled/u.test(result.reason)) {
+					// The gate's reason names the key; the operator also needs where to flip it.
+					ctx.notice(
+						"warn",
+						"The files pane is off. Turn on Files pane in /settings (Workspace & Files), or set interface.panes.files.enabled: true, then run /files again.",
+					);
 				} else {
 					ctx.notice("warn", result.reason);
 				}
