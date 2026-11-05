@@ -40,7 +40,7 @@ export function workerQuietWords(
 	// that end rather than leaving the operator to guess whether anything will happen.
 	const quietMs = Math.max(0, now - progress.quietSinceMs);
 	const endsInMs = DEFAULT_HEARTBEAT_SPEC.windowMs + DEFAULT_HEARTBEAT_SPEC.graceMs - quietMs;
-	const end = endsInMs > 0 ? `Clio stops it in ${formatWaitClock(endsInMs)}` : "Clio is stopping it";
+	const end = endsInMs >= 1000 ? `Clio stops it in ${formatWaitClock(endsInMs)}` : "Clio is stopping it";
 	return `not responding for ${formatWaitClock(quietMs)} · ${end}`;
 }
 

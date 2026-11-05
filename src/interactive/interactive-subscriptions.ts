@@ -161,9 +161,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		const why = workerFailureHeadline(payload.outcomeDetail);
 		// A council member goes by the label the operator watched it under, not the recipe every member shares.
 		const who = entry.council === undefined ? payload.agentId : `council member ${entry.council.label}`;
-		const text = sanitizeCallTargetText(
-			`${who} ${plainOutcomeLabel(payload.outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${payload.runId}`,
-		);
+		const label = plainOutcomeLabel(payload.outcome);
+		// A reason that already opens with the outcome says it once: `stopped responding, so Clio stopped it`.
+		const what = why === null ? label : why.startsWith(label) ? why : `${label}: ${why}`;
+		const text = sanitizeCallTargetText(`${who} ${what} · /view dispatch:${payload.runId}`);
 		const hold = setTimeout(() => {
 			heldRunFailures.delete(entry.assignmentId);
 			deps.notify("warning", text, `run-failed:${entry.assignmentId}`);
