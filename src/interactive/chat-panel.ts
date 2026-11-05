@@ -1159,6 +1159,21 @@ function stripThinkingEmphasis(text: string): string {
 		.join("");
 }
 
+/**
+ * A settled excerpt opens on a line of the reasoning, not on the end of one, so it never starts with `remain.)`. A live
+ * one keeps its rows, because a stream that has not reached a line start yet would otherwise show less of itself.
+ */
+function settledExcerptLimit(rows: ReadonlyArray<string>, text: string, limit: number): number {
+	const lineStarts = new Set(text.split("\n").map((line) => line.trimStart().slice(0, 12)));
+	let fitted = limit;
+	while (fitted > 2 && rows.length > fitted) {
+		const opening = (rows[rows.length - fitted + 1] ?? "").trimStart().slice(0, 12);
+		if (lineStarts.has(opening)) break;
+		fitted -= 1;
+	}
+	return fitted;
+}
+
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(
 	thinking: string,
@@ -1176,10 +1191,17 @@ function renderThinkingRail(
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
 	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
-	const rows = (unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0)).map(
-		(row) => `${REASON_RAIL()}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`,
+	const kept = unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0);
+	const rows = kept.map((row) => `${REASON_RAIL()}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`);
+	if (unbounded) return rows;
+	return previewRows(
+		rows,
+		open ? limit : settledExcerptLimit(kept, text, limit),
+		width,
+		true,
+		REASON_RAIL(),
+		PROSE_GUTTER_WIDTH,
 	);
-	return unbounded ? rows : previewRows(rows, limit, width, true, REASON_RAIL(), PROSE_GUTTER_WIDTH);
 }
 
 /**

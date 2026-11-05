@@ -9,6 +9,7 @@ import {
 	combineLiveBashOutput,
 	runBashCommand,
 } from "../core/bash-exec.js";
+import { TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -276,11 +277,13 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 		if (oldest !== undefined) observeNudgeSeenSessions.delete(oldest);
 	}
 	observeNudgeSeenSessions.add(key);
-	return (
-		"\n\n[note: prefer the structured observe tools over shell file inspection: read pages files with " +
-		"offset/limit; grep, find, ls and code_nav, direct or through gateway, search and map symbols. Their " +
-		"results are capped and continuable; keep bash for builds, git, and scripts.]"
-	);
+	// Framed as a note so the operator's row reads it as one and not as the command's last lines of output.
+	return `${TOOL_RESULT_NOTES_SEPARATOR}${toolResultNote(
+		"info",
+		"prefer the structured observe tools over shell file inspection: read pages files with " +
+			"offset/limit; grep, find, ls and code_nav, direct or through gateway, search and map symbols. Their " +
+			"results are capped and continuable; keep bash for builds, git, and scripts.",
+	)}`;
 }
 
 /** An abort is the run ending under the command, never its own timeout, and the model has to be able to tell which (#445). */

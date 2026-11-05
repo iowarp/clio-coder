@@ -2962,7 +2962,7 @@ describe("agent invocations", () => {
 			[`${GLYPH.workerHuman} council · round 1`, `${GLYPH.workerHuman} council · round 2`],
 		);
 		ok(
-			rows.some((row) => row.startsWith("  Architect · dynamo/qwen · run c0-r1 ✓ execution ok")),
+			rows.some((row) => row.startsWith("  Architect · dynamo/qwen ✓ execution ok")),
 			rows.join("\n"),
 		);
 		ok(
@@ -2990,7 +2990,7 @@ describe("agent invocations", () => {
 			],
 		});
 		const rows = renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("standard") }).map(stripTerminalSequences);
-		match(rows[0] ?? "", /run b1-r1 · attempt 2 ✓ execution ok/u);
+		match(rows[0] ?? "", /dynamo\/qwen · attempt 2 ✓ execution ok/u);
 		ok(
 			rows.some((row) => row.includes("↻ failed over → attempt 2 on dynamo/qwen")),
 			rows.join("\n"),

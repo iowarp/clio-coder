@@ -1656,7 +1656,8 @@ function asBashArgs(args: unknown): BashArgs | null {
 function resultLineCount(result: unknown): number {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (typeof unwrapped !== "string" || unwrapped.length === 0) return 0;
-	const normalized = unwrapped.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	// A note to the model is not output, so it adds no lines to what the command printed.
+	const normalized = splitModelNotes(unwrapped).body.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 	const withoutTerminator = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
 	return withoutTerminator.split("\n").length;
 }
