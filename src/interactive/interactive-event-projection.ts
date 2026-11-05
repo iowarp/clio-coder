@@ -279,6 +279,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
+		// The rail and a notice about the route both read the target's health, so a verdict repaints them on that frame.
+		deps.bus.subscribe("provider.health_changed", () => {
+			deps.refreshFooter();
+			deps.requestRender();
+		}),
 		deps.bus.subscribe("runtime.notice_raised", (payload) => {
 			const event = payload as RuntimeNoticePayload | null | undefined;
 			if (!event || typeof event !== "object" || typeof event.message !== "string" || typeof event.kind !== "string") {

@@ -52,7 +52,7 @@ import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboa
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
-import { createNotificationCenter } from "./footer/notifications.js";
+import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
 import { activeTaskRail, composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
@@ -442,11 +442,20 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		footer?.refresh();
 		requestRender();
 	});
+	/** A notice about the session's route stops the moment the route moves on, or the fault it reported clears. */
+	const routeNoticeStands = (notice: Notification): boolean => {
+		if (!notice.key?.startsWith("route-applied:")) return true;
+		const route = deps.getSettings?.().chat;
+		if (notice.key !== routeAppliedNoticeKey(route?.target, route?.model)) return false;
+		if (notice.level !== "warning") return true;
+		return deps.providers.list().find((status) => status.target.id === route?.target)?.health.status === "down";
+	};
 	const notifications = factories.createNotificationCenter({
 		onChange: () => {
 			footer?.refresh();
 			requestRender();
 		},
+		stillTrue: routeNoticeStands,
 	});
 	const notify = (level: InteractiveNoticeLevel, text: string, key?: string, ttlMs?: number): void => {
 		notifications.add({ level, text, ...(key ? { key } : {}), ...(ttlMs === undefined ? {} : { ttlMs }) });
