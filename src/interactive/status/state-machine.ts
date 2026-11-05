@@ -719,6 +719,10 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 				const held = prev.phase === "stuck" ? popOverlay(prev, "stuck", ctx) : prev;
 				return { ...held, watchdogTier: 0, localRuntime: ctx.localRuntime };
 			}
+			// A backoff is Clio's own countdown, so nothing is silent and no provider can be stuck during it.
+			if (prev.phase === "retrying" && prev.retry?.stage === "backoff") {
+				return { ...prev, watchdogTier: 0, localRuntime: ctx.localRuntime };
+			}
 			const elapsed = Math.max(0, ctx.now - prev.lastMeaningfulAt);
 			const tier = computeWatchdogTier(elapsed);
 			// Stopping is already the claim on screen, and the abort ceiling bounds it.

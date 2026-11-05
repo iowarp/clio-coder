@@ -60,12 +60,12 @@ import type { SessionTranscript } from "./session-transcript.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController, humanWaitTotalMs } from "./status/index.js";
-import { modelNickname } from "./theme/labels.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { createDropAlerts } from "./telemetry-drops.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
+import { modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
@@ -126,6 +126,7 @@ export interface InteractivePresentationDeps {
 	resources?: Pick<ResourcesContract, "skillsForDisplay" | "promptsForDisplay">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
+	recordTurnHumanWait?: (fields: { turnId: string; humanWaitMs: number }) => void;
 	jobs?: Pick<JobOperations, "list" | "subscribe">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
@@ -364,6 +365,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
+		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.
@@ -578,11 +580,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { targetId: current?.chat?.target, modelId: current?.chat?.model };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width) => {
+		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
-				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model));
+				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), reserved);
 			}
 			const target = deps.providers.list().find((candidate) => candidate.target.id === route?.target);
 			if (!target || !route?.target) return null;
@@ -597,6 +599,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					lastStop: onRoute ? last.stopReason : null,
 				},
 				width,
+				reserved,
 			);
 		},
 		...(deps.workspaceSurfaces
