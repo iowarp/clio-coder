@@ -185,6 +185,13 @@ export function liveWorkStrip(
 		candidates = [
 			render(owned, [workers, note.long]),
 			...(workers === null ? [] : [render(owned, [workers, note.short]), render(bare, [workers, note.short])]),
+			// A worker asking outranks the Esc note: with an overlay over its card, this row is all that says time is running.
+			...(facts.workers.some((row) => row.progress?.awaitingApproval === true)
+				? [
+						render(bare, [workerSummary(facts, room - visibleWidth(bare) - 3)]),
+						`${glyph} ${quiet(workerSummary(facts, room - 2) ?? "")}`,
+					]
+				: []),
 			render(owned, [note.long]),
 			render(owned, [note.short]),
 			render(bare, [note.short]),
