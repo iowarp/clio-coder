@@ -7741,7 +7741,10 @@ export function createDispatchBundle(
 			}
 			if (
 				event.type === "clio_coder_permission_resolved" &&
-				event.payload?.source === "policy" &&
+				// An escalation that timed out under fallback fail ends the run for this reason too; without
+				// it the receipt could say only `exit code 3`.
+				(event.payload?.source === "policy" ||
+					(event.payload?.source === "timeout" && (event.payload as { mode?: unknown }).mode === "fail")) &&
 				typeof event.payload.reason === "string"
 			) {
 				permissionDenialDetail = event.payload.reason;
