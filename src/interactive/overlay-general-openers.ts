@@ -711,7 +711,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	// The fleet this session started and has not seen settle. Launch returns at
 	// once so the session stays usable, which made a running fleet easy to read
 	// as finished; a second start is refused while one runs (Portus v3).
-	let fleetInFlight: { name: string; fleetRootId: string } | null = null;
+	let fleetInFlight: { name: string } | null = null;
 
 	const startFleetRun = (
 		name: string,
@@ -722,7 +722,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (fleetInFlight !== null) {
 			deps.notify(
 				"warning",
-				`fleet ${fleetInFlight.name} (root=${fleetInFlight.fleetRootId}) is still running; /fleet run is refused until it settles. clio-coder fleet events ${fleetInFlight.fleetRootId} --follow shows its progress`,
+				`fleet ${fleetInFlight.name} is still running, so /fleet run is refused until it settles. /fleet shows its progress`,
 				"fleet-run:in-flight",
 			);
 			return;
@@ -813,7 +813,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			},
 			onNotice: (text) => deps.stderr(`fleet ${preview.name}: ${text}\n`),
 		};
-		fleetInFlight = { name: preview.name, fleetRootId };
+		fleetInFlight = { name: preview.name };
 		void run(args)
 			.then((outcome) => {
 				fleetInFlight = null;
