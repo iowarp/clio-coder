@@ -7,6 +7,7 @@ import {
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { readTrailingWrittenCalls } from "../../src/core/tool-call-markup.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import { createGrantBroker } from "../../src/domains/dispatch/grant-broker.js";
 import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
@@ -55,7 +56,11 @@ import {
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
-import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
+import {
+	classifyTurnEnding,
+	noteWrittenCalls,
+	proseBeforeWrittenCalls,
+} from "../../src/session-control/chat-loop-messages.js";
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
@@ -840,6 +845,40 @@ test("a run reads as no answer only when nothing answers it and a run with real 
 	strictEqual(cause([reply([], "length")]), null);
 	strictEqual(cause([reply([], "error")]), null);
 	strictEqual(cause([reply([{ type: "toolCall", id: "a", name: "bash", arguments: {} }], "toolUse")]), null);
+});
+
+test("a reply that ended on a call to a session tool is told apart from one that quotes markup", () => {
+	const markup = (tool: string) => `<tool_call>\n{"name": "${tool}", "arguments": {"path": "a"}}\n</tool_call>`;
+	const onSurface = (tool: string) => tool === "edit" || tool === "read";
+	const read = (text: string) => readTrailingWrittenCalls(text, onSurface)?.tools ?? null;
+
+	deepStrictEqual(read(`I will apply the fix now. ${markup("edit")}`), ["edit"]);
+	deepStrictEqual(read(`Reading both.\n${markup("read")}\n${markup("edit")}`), ["read", "edit"]);
+	deepStrictEqual(read("Let me look.\n<function=read><parameter=path>a</parameter></function>"), ["read"]);
+	deepStrictEqual(read("<tool_call><function=read><parameter=path>a</parameter></function></tool_call>"), ["read"]);
+	// A quote: mid-text, finishing a sentence, inside a fence, not a tool here, or not a call at all.
+	strictEqual(read(`The model wrote ${markup("edit")} here.`), null);
+	strictEqual(read(`The model wrote ${markup("edit")}`), null);
+	strictEqual(read(`Like this:\n\n\`\`\`\n${markup("edit")}\n\`\`\``), null);
+	strictEqual(read(`Like this:\n\n\`\`\`\n${markup("edit")}`), null);
+	strictEqual(read(`Another agent uses this.\n${markup("get_weather")}`), null);
+	strictEqual(read("The opener is written <tool_call> in the template."), null);
+	strictEqual(read("Done.\n<tool_call>\n{not json}\n</tool_call>"), null);
+
+	const reply = (text: string) => {
+		const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" } as never;
+		noteWrittenCalls(message, onSurface);
+		return message;
+	};
+	const announced = classifyTurnEnding([reply(`I will apply the fix now. ${markup("edit")}`)]);
+	strictEqual(announced?.kind === "no_answer" ? announced.cause : announced?.kind, "tool_call_announced");
+	const answered = reply(`The bug is on line 4, and nothing was changed.\n\n${markup("edit")}`);
+	deepStrictEqual(classifyTurnEnding([answered]), { kind: "call_not_run", toolsRan: 0, writtenTools: ["edit"] });
+	strictEqual(
+		proseBeforeWrittenCalls(answered, `The bug is on line 4, and nothing was changed.\n\n${markup("edit")}`),
+		"The bug is on line 4, and nothing was changed.",
+	);
+	strictEqual(classifyTurnEnding([reply(`The model wrote ${markup("edit")} here.`)]), null);
 });
 
 test("a no-answer receipt says why, with or without usage, and never wears the green check", () => {

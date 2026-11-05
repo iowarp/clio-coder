@@ -39,8 +39,10 @@ import {
 	endedOnCancelledInterview,
 	extractText,
 	isSelfExplainingAbort,
+	proseBeforeWrittenCalls,
 	type TurnEnding,
 	turnNoAnswerSentence,
+	writtenCallsFact,
 } from "../session-control/chat-loop-messages.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
@@ -1196,7 +1198,12 @@ function renderTurnUsageLine(
 	const outcome = usage.outcome ?? "Done";
 	const glyph = receiptGlyph(outcome);
 	const room = Math.max(1, width - PROSE_GUTTER_WIDTH);
-	const quiet = usage.ending?.kind === "quiet" ? "no closing message" : null;
+	const quiet =
+		usage.ending?.kind === "quiet"
+			? "no closing message"
+			: usage.ending?.kind === "call_not_run"
+				? writtenCallsFact(usage.ending.writtenTools)
+				: null;
 	// A turn with no answer states why in every style: Brief drops receipts, not this.
 	const noAnswer =
 		usage.ending?.kind === "no_answer"
@@ -1208,6 +1215,11 @@ function renderTurnUsageLine(
 				)
 			: [];
 	if (receipt === "none") {
+		// A written call that did not run is news in every style too, and Brief has no receipt row to carry it otherwise.
+		if (usage.ending?.kind === "call_not_run")
+			return [
+				`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools)]), room)}`,
+			];
 		return noAnswer.length === 0 ? [] : [`${glyph}${dimLine(`${outcome}${receiptDuration(usage)}`, room)}`, ...noAnswer];
 	}
 	const spend = usage.spend;
@@ -2140,7 +2152,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const { messages, turnId, replayed } = run;
 		const ending = run.outcome === undefined ? classifyTurnEnding(messages as ReadonlyArray<AgentMessage>) : null;
 		// A provider that reports no usage still owes the operator the news that nothing answered.
-		if (run.always === true || messages.some(reportsCall) || ending?.kind === "no_answer") {
+		if (
+			run.always === true ||
+			messages.some(reportsCall) ||
+			ending?.kind === "no_answer" ||
+			ending?.kind === "call_not_run"
+		) {
 			// The usage line is a caption on rendered output, so it goes on the
 			// last entry that rendered any. A mid-turn notice splits entries, and
 			// a turn that stops after one leaves an empty tail entry behind: the
@@ -2401,7 +2418,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		text: string,
 		replaceTail = false,
 	): void => {
-		if (text.length === 0) return;
+		if (text.length === 0 && !replaceTail) return;
 		closeOpenThinking(entry);
 		const messageStart = Math.min(entry.messageStartSegmentIndex ?? 0, entry.segments.length);
 		const streamed: TextSegment[] = [];
@@ -2415,11 +2432,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			delete segment.diffusion;
 		};
 		if (replaceTail && streamed.length > 0) {
-			const [first, ...rest] = streamed;
+			const [first, ...rest] = text.length > 0 ? streamed : [undefined, ...streamed];
 			if (first) finalize(first, text);
-			for (const dead of rest) entry.segments.splice(entry.segments.indexOf(dead), 1);
+			for (const dead of rest) if (dead) entry.segments.splice(entry.segments.indexOf(dead), 1);
 			return;
 		}
+		if (text.length === 0) return;
 		if (streamed.length === 1 && streamed[0] !== undefined) {
 			const only = streamed[0];
 			// A diffusion frame is the whole text so far, never a slice of it, so
@@ -3333,7 +3351,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// tool-call markup on a synthesis-locked turn); the streamed tail
 				// must be replaced, not kept alongside a duplicate segment.
 				const sanitized = (event as { lockedSynthesisSanitized?: unknown }).lockedSynthesisSanitized === true;
-				if (text.length > 0) canonicalizeMessageText(assistant, text, sanitized);
+				// A call the reply only wrote out leaves the prose, and the receipt or the re-prompt notice says it did not run.
+				const prose = proseBeforeWrittenCalls(event.message, text);
+				if (text.length > 0) canonicalizeMessageText(assistant, prose, sanitized || prose !== text);
 				if (!messageCompleted) {
 					// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
