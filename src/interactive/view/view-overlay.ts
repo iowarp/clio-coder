@@ -388,7 +388,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 				? [
 						"[↑↓] select · [type] filter · [Enter] detail · [Esc] close",
 						"[↑↓] select · [Enter] detail · [Esc] close",
-						"[↑↓] select · [Enter] detail",
+						"[Enter] detail · [Esc] close",
 					]
 				: ["[↑↓] scroll · [i] details · [Esc] back", "[i] details · [Esc] back"];
 		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);

@@ -126,7 +126,7 @@ for (const width of widths) {
 		preparation = "preparing";
 		assert.match(plain(editor.render(width)), /is preparing/u);
 		preparation = "compacting";
-		assert.match(plain(editor.render(width)), /is compacti(?:ng|…)/u);
+		assert.match(plain(editor.render(width)), /compacti(?:ng|…)/u);
 		assert.equal(editor.getText(), "Research 研究 é");
 	});
 

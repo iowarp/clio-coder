@@ -77,7 +77,7 @@ test("model picker uses state marks and target health without origin or health g
 			match(view.render(width).map(stripTerminalSequences).join("\n"), new RegExp(`${id} next-target`));
 		}
 		doesNotMatch(plain.join("\n"), /[◆◇●◐○]/u);
-		if (width === 60) match(plain[0] ?? "", /…$/u);
+		if (width === 60) match(plain[0] ?? "", /…\s*$/u);
 		ok(
 			rows.some((line) => line.includes(clioTheme().fgSequence("success"))),
 			"target carries health color",

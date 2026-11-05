@@ -19,7 +19,7 @@ import {
 } from "./dispatch-board.js";
 import type { ClioToken, TableCell, Tone } from "./theme/index.js";
 import {
-	chipRow,
+	chipRows,
 	clioTheme,
 	emptyState,
 	GLYPH,
@@ -354,8 +354,8 @@ export function renderWorkerUsage(
 		const accounts = new Map<string, string>();
 		for (const row of rows) accounts.set(row.runtimeId, clean(workerQuotaLabel(row, snapshots)));
 		out.push(
-			...[...accounts].map(([runtime, label]) =>
-				chipRow(theme, [theme.fg("annotation", runtime), theme.fg("body", label)], safe),
+			...[...accounts].flatMap(([runtime, label]) =>
+				chipRows(theme, [theme.fg("annotation", runtime), theme.fg("body", label)], safe),
 			),
 		);
 	}

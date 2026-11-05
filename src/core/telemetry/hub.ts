@@ -15,7 +15,11 @@ import type { EventName, EventPayload, PreimageData, PreimageEventName } from ".
  *
  * Violate the invariant and shutdown.* ordering or banner timing will drift.
  */
-export type TelemetryListener<N extends EventName = EventName> = (payload: EventPayload<N>) => void | Promise<void>;
+export type TelemetryListener<N extends EventName = EventName> = (
+	payload: EventPayload<N>,
+	/** The context the emit named; absent when it named none, so a reader of whose event this is must allow for that. */
+	context?: TelemetryContext,
+) => void | Promise<void>;
 
 /**
  * The one emit path (#434). `emit` delivers the payload to in-process subscribers and, for a journal event, also
@@ -92,7 +96,7 @@ function journal(name: EventName, payload: unknown, preimage: unknown, ctx: Tele
 }
 
 /** Internal erased listener shape; payloads are typed at the hub seam only. */
-type StoredListener = (payload: never) => void | Promise<void>;
+type StoredListener = (payload: never, context?: TelemetryContext) => void | Promise<void>;
 
 function reportListenerError(name: string, error: unknown): void {
 	const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -102,7 +106,7 @@ function reportListenerError(name: string, error: unknown): void {
 export function createTelemetryHub(): TelemetryHub {
 	const registry = new Map<string, Set<StoredListener>>();
 
-	const deliver = (name: string, payload: unknown): void => {
+	const deliver = (name: string, payload: unknown, context?: TelemetryContext): void => {
 		const ls = registry.get(name);
 		if (!ls) return;
 		// Synchronous fan-out. A listener's error never reaches the emitter, but delivery is not deferred: deferred
@@ -111,7 +115,7 @@ export function createTelemetryHub(): TelemetryHub {
 		// effect on the next emit().
 		for (const listener of [...ls]) {
 			try {
-				const result = listener(payload as never);
+				const result = listener(payload as never, context);
 				if (result && typeof (result as Promise<void>).then === "function") {
 					(result as Promise<void>).catch((error) => reportListenerError(name, error));
 				}
@@ -124,7 +128,7 @@ export function createTelemetryHub(): TelemetryHub {
 	return {
 		emit(name, payload, ctx) {
 			const journaled = journal(name, payload, undefined, ctx);
-			deliver(name, payload);
+			deliver(name, payload, ctx);
 			return journaled;
 		},
 		// Content reaches the writer alone, never a subscriber: consent and the research cap govern it there (#434).

@@ -224,10 +224,12 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.dismissNotification("turn.interrupted");
 				deps.dismissNotification("finish.unverified");
 				deps.dismissNotification("finish.coverage-unverified");
+				deps.dismissNotification("safety:blocked");
 				deps.dismissHelperNotifications?.();
 			}
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
 			else if (event.type === "agent_end" && event.retryPending === undefined) {
+				deps.dismissNotification("keyboard:escape");
 				deps.stopTerminalProgress();
 				deps.onTurnEnded?.();
 			}
