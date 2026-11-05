@@ -103,6 +103,16 @@ export interface TurnSummary {
 	truncated: boolean;
 	/** Of `elapsedMs`, what the turn spent waiting on the operator rather than working. */
 	humanWaitMs?: number | undefined;
+	/** What kind of failure a `stopReason: "error"` turn hit, when the failed call recorded one. */
+	failure?: TurnFailureFacts | undefined;
+}
+
+/** The class of a failed provider call, enough for the status rail to give the same way out as the transcript. */
+export interface TurnFailureFacts {
+	targetId: string;
+	stage?: string;
+	errorClass?: string;
+	partialReply?: boolean;
 }
 
 /**
@@ -121,6 +131,8 @@ export interface RunTally {
 	toolErrorCount: number;
 	/** Direct response model-id observation for the last assistant call folded. */
 	responseModelIdObservation: ResponseModelIdObservation;
+	/** The class of the last assistant call folded, when that call failed. */
+	failure?: TurnFailureFacts | undefined;
 }
 
 export interface OverlayFrame {

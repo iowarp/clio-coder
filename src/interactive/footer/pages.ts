@@ -334,9 +334,18 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			labelled("free", theme.fg("counter", ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown")),
 			ledger.reserveTokens > 0 ? labelled("reserve", theme.fg("counter", formatFooterTokens(ledger.reserveTokens))) : null,
 			labelled("compaction", theme.fg("counter", compaction)),
+		],
+		width,
+	);
+	// Where the figures came from is a second thought, so it takes the second row.
+	const provenance = chipRow(
+		theme,
+		[
 			labelled("tools", theme.fg("counter", String(ledger.toolCount))),
 			theme.fg("annotation", ledger.measured ? "provider-anchored" : "estimated"),
-			facts.budget ? theme.fg("annotation", `${facts.budget.inputSource} accounting`) : null,
+			facts.budget && (ledger.measured || facts.budget.inputSource !== "estimated")
+				? theme.fg("annotation", `${facts.budget.inputSource} input`)
+				: null,
 			ledger.contextWindowSource ? theme.fg("annotation", `${ledger.contextWindowSource} window`) : null,
 		],
 		width,
@@ -365,6 +374,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	const out = [
 		bar,
 		headroom,
+		provenance,
 		sectionRule(theme, width, facts.budget ? "Capture diagnostics" : "Composition", {
 			meta: "/context for detail",
 		}),
@@ -859,10 +869,12 @@ export function dashboardPageViewport(
 			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })
 			: theme.fg("menuOption", `  ${index + 1} ${name}`),
 	);
+	// The rule keeps the brand from reading as part of whichever tab sits first.
+	const brand = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} `;
 	const tabText =
 		innerWidth >= 52
-			? `${brandMark(theme)} ${tabs.join(" ")}`
-			: `${brandMark(theme)} ${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
+			? `${brand}${tabs.join(" ")}`
+			: `${brand}${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
 	// The route sits flush right, the way a title row carries its meta, so the
 	// tabs and the identity read as one row with two ends rather than a sentence.
 	const identityRoom = innerWidth - visibleWidth(tabText) - 4;

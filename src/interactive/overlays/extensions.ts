@@ -30,7 +30,7 @@ import { detailWithHead, type ListOverlayItem, markdownRows, openListOverlay } f
 
 /** @internal exported for contract tests */
 export const EXTENSIONS_EMPTY =
-	"no extensions installed. install one with `clio-coder extensions install <path>`, then `clio-coder extensions list` shows what it contributed.";
+	"No extensions installed. Install one with `clio-coder extensions install <path>`, then `clio-coder extensions list` shows what it contributed.";
 
 const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
 

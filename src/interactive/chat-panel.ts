@@ -56,6 +56,8 @@ import {
 	presentProviderError,
 	providerErrorEvidence,
 	providerFailureAdvice,
+	providerFailureEvidence,
+	providerFailureHeadline,
 	readProviderFailureRoute,
 } from "./renderers/provider-error.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
@@ -862,10 +864,38 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 	);
 }
 
+/** A fence row as Pi draws it; a list or a quote nests it behind its own indent. */
+const FENCE_ROW = /^( *)```/u;
+
+/**
+ * Pi wraps a long code line after it adds the block's indent, so the rest of that line lands at the left margin and reads
+ * as prose or as a separate statement. Each wrapped piece keeps the indent and a mark that says it continues the line above.
+ */
+function fitCodeContinuationRow(padded: string, fenceIndent: string, width: number): string[] {
+	const theme = clioTheme();
+	const mark = `${fenceIndent}  ${theme.fg("annotation", GLYPH.codeWrap)} `;
+	const room = Math.max(1, width - visibleWidth(mark));
+	return wrapTextWithAnsi(padded.replace(/ +$/u, "").replace(/^ +/u, ""), room).map((part) =>
+		theme.base("assistantProse", `${mark}${part}`),
+	);
+}
+
 function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: RowMemo): string[] {
 	const padded = md.render(width);
 	const rows: string[] = [];
+	let fenceIndent: string | null = null;
 	for (const row of padded) {
+		const fence = row.includes("```") ? FENCE_ROW.exec(stripTerminalSequences(row)) : null;
+		if (fence !== null) fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
+		else if (
+			fenceIndent !== null &&
+			!bareFences &&
+			row.trim().length > 0 &&
+			!stripTerminalSequences(row).startsWith(`${fenceIndent}  `)
+		) {
+			rows.push(...fitCodeContinuationRow(row, fenceIndent, width));
+			continue;
+		}
 		let parts = memo?.rows.get(row);
 		if (parts === undefined) {
 			parts = fitMarkdownRow(row, width, bareFences);
@@ -948,6 +978,14 @@ function withoutLeadingBlanks(lines: string[]): string[] {
  */
 function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: boolean): string[] {
 	const out: string[] = [];
+	const headline = !unbounded && seg.route ? providerFailureHeadline(seg.route) : null;
+	if (seg.route && headline !== null) {
+		// The plain sentence and the way out read first; the row fold takes what the provider said before either.
+		for (const wrapped of wrapTextWithAnsi(headline, width)) out.push(`${RED_CRIT()}${wrapped}${RESET}`);
+		for (const row of [providerFailureAdvice(seg.route), providerFailureEvidence(seg.route, seg.text)])
+			for (const wrapped of wrapTextWithAnsi(row, width)) out.push(`${SECONDARY()}${wrapped}${RESET}`);
+		return out;
+	}
 	const shown = unbounded
 		? providerErrorEvidence(seg.text)
 		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null });
@@ -1032,7 +1070,7 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus, or
 	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const scheduled = /^job (\S+) (\S+)$/u.exec(origin ?? "");
 	if (scheduled !== null) {
-		const header = `${GLYPH.phaseTool} Scheduled loop · ${sanitizeCallTargetText(scheduled[1] ?? "")}`;
+		const header = `${GLYPH.scheduled} Scheduled loop · /loop status`;
 		return [
 			...wrapTextWithAnsi(clioTheme().fg("annotation", header), width),
 			...hangProseLines(

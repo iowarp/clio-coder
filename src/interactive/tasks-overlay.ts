@@ -153,17 +153,9 @@ function formatTasksOverlayBodyLines(
 	const theme = clioTheme();
 	const width = Math.max(1, Math.floor(contentWidth));
 	if (!board || board.tasks.length === 0) {
-		// The empty state is one statement and one remedy, and the remedy is the
-		// only thing on the surface that says how a board comes to exist. It used
-		// to be emitted at its natural length and hard-cut by the frame, so at 80
-		// and 40 columns the sentence ended at "before multi-step" and the reader
-		// was left with a fragment of the only instruction here.
+		// The empty state is one statement with its remedy on one row, so an empty board never sits above real content.
 		return {
-			lines: [
-				sectionHeading("Agent board", width),
-				...emptyRows(muted("No agent board in this session."), width),
-				...emptyRows(dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'), width),
-			],
+			lines: [collapsedSection("Agent board", "none yet, the agent declares one before multi-step work", width)],
 			spans: [],
 		};
 	}
@@ -260,8 +252,9 @@ function sectionHeading(label: string, width: number): string {
 	return fitRow(clioTheme().style("menuDescription", label, { bold: true }), width);
 }
 
-function emptyRows(text: string, width: number): string[] {
-	return wrapTextWithAnsi(text, Math.max(1, width - SECTION_GUTTER.length)).map((line) => `${SECTION_GUTTER}${line}`);
+/** A section with nothing in it: its name and what would fill it, on one row. */
+function collapsedSection(label: string, note: string, width: number): string {
+	return fitRow(`${clioTheme().style("menuDescription", label, { bold: true })}${dim(` · ${note}`)}`, width);
 }
 
 function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOverlaySelection): boolean {
@@ -309,11 +302,14 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	// The frame title already says Tasks; a second heading under it was the one
 	// title the overlay repeated.
 	const current = formatTasksOverlayBodyLines(state.board, width, currentSelected);
-	const lines = [...current.lines];
+	const boardEmpty = current.spans.length === 0;
+	const lines = boardEmpty ? [] : [...current.lines];
 	const spans = [...current.spans];
+	// Sections with content read first, in their usual order; the empty ones gather on single rows beneath them.
+	const empties = boardEmpty ? [...current.lines] : [];
 	let heading = 0;
 	const openSection = (label: string): void => {
-		lines.push("");
+		if (lines.length > 0) lines.push("");
 		heading = lines.length;
 		lines.push(sectionHeading(label, width));
 	};
@@ -324,9 +320,9 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		spans.push({ line, start: opensSection ? heading : line, end: lines.length });
 	};
 
-	openSection("Task history");
 	const historyRows = terminalHistoryRows(state.board, state.history);
-	if (historyRows.length === 0) lines.push(...emptyRows(dim("No terminal tasks from prior boards."), width));
+	if (historyRows.length === 0) empties.push(collapsedSection("Task history", "nothing from earlier boards", width));
+	else openSection("Task history");
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
 		const presentation = taskPresentation(row.task);
@@ -340,8 +336,8 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		]);
 	}
 
-	openSection("Artifacts");
-	if (state.artifacts.length === 0) lines.push(...emptyRows(dim("No workspace outputs recorded."), width));
+	if (state.artifacts.length === 0) empties.push(collapsedSection("Artifacts", "no workspace outputs recorded", width));
+	else openSection("Artifacts");
 	const workspace = state.workspace ?? process.cwd();
 	for (const artifact of state.artifacts) {
 		const rowSelection: TasksOverlaySelection = { kind: "artifact", artifact };
@@ -354,8 +350,9 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		]);
 	}
 
-	openSection("Operator tasks");
-	if (state.userTasks.length === 0) lines.push(...emptyRows(dim("No operator tasks in this project."), width));
+	if (state.userTasks.length === 0)
+		empties.push(collapsedSection("Operator tasks", "none in this project, [a] adds one", width));
+	else openSection("Operator tasks");
 	for (const task of state.userTasks) {
 		const rowSelection: TasksOverlaySelection = { kind: "user", task };
 		const presentation = USER_TASK_PRESENTATION[task.status];
@@ -366,6 +363,10 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 			),
 			...(task.note ? wrapTaskProse(`       ${dim("note")} `, muted(task.note), width) : []),
 		]);
+	}
+	if (empties.length > 0) {
+		if (lines.length > 0) lines.push("");
+		lines.push(...empties);
 	}
 	const last = spans.at(-1);
 	if (last) last.end = lines.length;

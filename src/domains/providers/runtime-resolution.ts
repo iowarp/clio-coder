@@ -880,7 +880,7 @@ export function resolveContextWindowDetails(
 	const warning: string | null = null;
 	const provenanceNotice =
 		effective === 0
-			? "Serving context window is unknown. Compaction is bounded by the economic token ceiling; probe the target or configure its deployment limit for request-fit accounting."
+			? "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
 			: null;
 	const servingLimit: ResolvedNumericField = {
 		value: effective > 0 ? effective : null,

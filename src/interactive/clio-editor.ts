@@ -774,12 +774,12 @@ export class ClioEditor extends Editor {
 		const room = this.approvalLabelRoom(width);
 		entry.frame.setRailRoom?.(room);
 		let body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
-		if (adaptive) {
-			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
-			let used = body.length;
-			while (used > 1 && stripTerminalSequences(body[used - 1] ?? "").trim() === "") used -= 1;
-			body = body.slice(0, dockAdaptiveRows(this.dockHost, used));
-		}
+		// The frame pads to its budget, and blank rows above the keys say nothing. A short surface keeps the rows its content
+		// has used so far, so a filter that narrows a list or a tab with less to show does not make the rails jump.
+		let used = body.length;
+		while (used > 1 && stripTerminalSequences(body[used - 1] ?? "").trim() === "") used -= 1;
+		entry.rowsUsed = Math.max(entry.rowsUsed ?? 0, used);
+		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : entry.rowsUsed);
 		const pad = " ".repeat(gutter);
 		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", entry.frame.dockTitle(), { bold: true });
 		const title = entry.frame.dockAwaitingInput?.()

@@ -120,7 +120,7 @@ function previewLine(meta: SessionMeta): string {
 function metaStrip(meta: SessionMeta): string {
 	// Closing a session does not establish that its run succeeded. A session that
 	// never ended reads as running only while its owning process is (#420).
-	const status = liveSessionOwner(meta) ? GLYPH.running : GLYPH.scoped;
+	const status = liveSessionOwner(meta) ? GLYPH.running : GLYPH.queued;
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";

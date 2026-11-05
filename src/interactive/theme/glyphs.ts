@@ -37,8 +37,10 @@ export const GLYPH = {
 	ok: "✓",
 	error: "✗",
 	cancelled: "⊘",
-	active: "◆",
-	scoped: "◇",
+	// The tip or lane the operator is on. Filled diamonds belong to model-started work.
+	active: "◉",
+	// A setting changed from its default. Hollow diamonds belong to operator-started work.
+	scoped: "*",
 	up: "↑",
 	down: "↓",
 	rail: "│",
@@ -63,6 +65,8 @@ export const GLYPH = {
 	phaseWriting: "◑",
 	phaseTool: "⚙",
 	phaseBlocked: "⏸",
+	// A turn that a schedule started, not the operator or the model.
+	scheduled: "◷",
 	phaseRetry: "↻",
 	phaseCompact: "♻",
 	phaseDispatch: "⇲",
@@ -89,6 +93,8 @@ export const GLYPH = {
 	// frame's own line so a meter never reads as a border.
 	meterFull: "━",
 	meterEmpty: "─",
+	// The rest of a code line that wrapped: the row above it continues here.
+	codeWrap: "↪",
 	// A sequence or next step: dashboard page order, a key chord's second key.
 	next: "→",
 	// A count of the same thing repeated: a worker's repeated call, a helper kind.

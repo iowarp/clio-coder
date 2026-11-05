@@ -5,6 +5,7 @@ import { redactStreamingSecretString, redactUrlCredentials } from "../../domains
 const SCAN_LIMIT = 8_192;
 const DISPLAY_LIMIT = 600;
 const ROUTE_ADVICE_TAIL = 1_024;
+const AVAILABLE_DIAGNOSTIC_TAIL = " ... [available diagnostic: /view transcript]";
 
 /** Discard incomplete control sequences at the scan boundary, including their payload. */
 function terminalSafePrefix(value: string, limit: number): string {
@@ -42,6 +43,17 @@ function terminalSafePrefix(value: string, limit: number): string {
 	return stripVTControlCharacters(parts.join(""));
 }
 
+/**
+ * Transport plumbing has a plain sentence, for the rows that have no failure class to word it from: a retry attempt, or a
+ * session saved before failures carried one. The original stays in the diagnostic.
+ */
+const PLAIN_TRANSPORT_FAILURES: ReadonlyArray<readonly [RegExp, string]> = [
+	[/Provider stream ended before a finish reason/iu, "The connection dropped before the reply finished."],
+	[/^(?:\[error\]\s*)?terminated\b/iu, "The connection dropped."],
+	[/^(?:\[error\]\s*)?(?:fetch failed|connection error|socket hang up)\b/iu, "The connection to the provider failed."],
+	[/\b(?:ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|UND_ERR_SOCKET)\b/u, "The connection to the provider failed."],
+];
+
 /** Available evidence is sanitized and redacted only when explicitly inspected. */
 export function providerErrorEvidence(value: string, scanLimit = value.length): string {
 	return redactSecretsText(
@@ -76,11 +88,16 @@ export function presentProviderError(value: string, options: { remedyStated?: bo
 	const html = /<!doctype\s+html|<html\b/i.test(sample);
 	if (html) {
 		const title = sample.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1];
-		const prefix = sample.slice(0, sample.indexOf("<")).trim();
+		const prefix = sample
+			.slice(0, sample.indexOf("<"))
+			.trim()
+			.replace(/[:;,\s]+$/u, "");
+		const titled = title !== undefined && prefix.length > 0 && title.startsWith(prefix.replace(/^.*\s/u, ""));
 		summary = [
-			prefix,
+			// The SDK's bare status and a gateway page's title usually say the same thing.
+			titled ? prefix.replace(/\S+$/u, "").trim() : prefix,
 			title,
-			routeAdvice ? "" : "Provider returned an HTML error page. Check the provider or gateway endpoint.",
+			routeAdvice ? "" : "the provider or a gateway answered with an HTML error page",
 		]
 			.filter(Boolean)
 			.join("; ");
@@ -119,6 +136,8 @@ export function presentProviderError(value: string, options: { remedyStated?: bo
 		sample.match(/"error"\s*:\s*\{[^{}]*?"code"\s*:\s*([45]\d{2})(?=\s*[,}])/i)?.[1];
 	if (status && !summary.includes(status)) summary = `HTTP ${status}; ${summary}`;
 	summary = summary.replace(/\s+/g, " ").trim();
+	const plainTransport = PLAIN_TRANSPORT_FAILURES.find(([plumbing]) => plumbing.test(summary))?.[1];
+	if (plainTransport !== undefined) summary = plainTransport;
 	if (routeAdvice && options.remedyStated !== true) {
 		// Keep route recovery ahead of long body detail so row clipping cannot
 		// spend the entire primary preview on the provider payload.
@@ -131,7 +150,7 @@ export function presentProviderError(value: string, options: { remedyStated?: bo
 		summary = `${prefix}${summary.length > 60 ? " ..." : ""}; ${advice}`;
 	}
 	const shortened = summary.length > DISPLAY_LIMIT || value.length > SCAN_LIMIT || summary !== sample.trim();
-	return `${summary.slice(0, DISPLAY_LIMIT)}${shortened ? " ... [available diagnostic: /view transcript]" : ""}`;
+	return `${summary.slice(0, DISPLAY_LIMIT)}${shortened ? AVAILABLE_DIAGNOSTIC_TAIL : ""}`;
 }
 
 /** The route a provider failure happened on, and enough of the failure to say what gets past it. */
@@ -165,26 +184,120 @@ function shownEndpoint(url: string): string {
 }
 
 const SWITCH_ROUTE = "/model switches route";
-const RESEND = "Up recalls your message and Enter resends it";
+const RESEND = "Up recalls your message, Enter resends";
+
+/** A fact for the composer rail, with the form it takes when cells run short. */
+export interface ProviderFailureRailFact {
+	text: string;
+	short?: string;
+}
+
+/** What the rail says about a failure, so it never gives a different way out than the block in the transcript. */
+export interface ProviderFailureRailFacts {
+	cause: ProviderFailureRailFact;
+	way?: ProviderFailureRailFact;
+}
+
+const RESEND_RAIL: ProviderFailureRailFact = { text: "Up resends" };
+
+function httpStatusOf(errorClass: string): number | null {
+	const status = /^http_(\d{3})$/u.exec(errorClass)?.[1];
+	return status === undefined ? null : Number(status);
+}
+
+/**
+ * The plain sentence that leads a provider failure. Null means nothing about the class says more than the failure's own
+ * text, which is then what the block leads with: a refused admission and a budget wait are already in Clio's words.
+ */
+export function providerFailureHeadline(route: ProviderFailureRoute): string | null {
+	const errorClass = route.errorClass ?? "";
+	const status = httpStatusOf(errorClass);
+	if (route.stage === "auth") {
+		if (status !== null) return "The provider refused the credential.";
+		return errorClass === "credential_expired"
+			? "The saved credential has expired."
+			: "This route has no usable credential.";
+	}
+	if (route.stage === "transport") {
+		const cut = route.partialReply === true ? "before the reply finished" : "before a reply arrived";
+		if (errorClass === "stream_dropped") return `The connection dropped ${cut}.`;
+		if (errorClass === "timeout") return `The request timed out ${cut}.`;
+		if (errorClass === "aborted") return `The request was cut off ${cut}.`;
+		return `The connection to the provider failed ${cut}.`;
+	}
+	if (status === null) return null;
+	if (status === 429) return "The provider is rate limiting this route.";
+	if (status >= 500) return `The provider failed on its side (HTTP ${status}).`;
+	if (status === 404) return "The provider does not know this model or endpoint (HTTP 404).";
+	if (status === 402) return "The provider wants payment or more quota (HTTP 402).";
+	return `The provider rejected the request (HTTP ${status}).`;
+}
+
+/** The same failure in rail cells. Null keeps the rail to the failure and the route switch. */
+export function providerFailureRailFacts(route: ProviderFailureRoute): ProviderFailureRailFacts | null {
+	const errorClass = route.errorClass ?? "";
+	const status = httpStatusOf(errorClass);
+	if (route.stage === "auth") {
+		const way = { text: `clio-coder configure --id ${route.targetId}` };
+		if (status !== null) return { cause: { text: "credential refused", short: "credential" }, way };
+		return {
+			cause:
+				errorClass === "credential_expired"
+					? { text: "credential expired", short: "expired" }
+					: { text: "no usable credential", short: "credential" },
+			way,
+		};
+	}
+	if (route.stage === "transport") {
+		const cause =
+			errorClass === "stream_dropped"
+				? { text: "connection dropped", short: "dropped" }
+				: errorClass === "timeout"
+					? { text: "request timed out", short: "timed out" }
+					: errorClass === "aborted"
+						? { text: "request cut off", short: "cut off" }
+						: { text: "connection failed", short: "no connection" };
+		return { cause, way: RESEND_RAIL };
+	}
+	if (status === 429)
+		return { cause: { text: "rate limited" }, way: { text: "Up resends once it clears", short: "Up resends" } };
+	if (status !== null && status >= 500)
+		return { cause: { text: "provider failing", short: "failing" }, way: RESEND_RAIL };
+	if (status === 404) return { cause: { text: "model or endpoint not found", short: "not found" } };
+	if (status !== null) return { cause: { text: "request rejected", short: "rejected" } };
+	return null;
+}
 
 /** What failed, what was kept and the next step, worded for this failure rather than for every failure. */
 export function providerFailureAdvice(route: ProviderFailureRoute): string {
-	const where = route.url !== undefined ? `${route.targetId} at ${shownEndpoint(route.url)}` : route.targetId;
 	const configure = `clio-coder configure --id ${route.targetId}`;
 	const errorClass = route.errorClass ?? "";
-	if (route.stage === "auth") {
-		const refused = /^http_/u.test(errorClass);
-		return `${where} ${refused ? "refused the credential" : "has no usable credential"}. ${configure} replaces it · ${SWITCH_ROUTE}.`;
-	}
+	if (route.stage === "auth") return `${configure} replaces it · ${SWITCH_ROUTE}.`;
 	if (route.stage === "transport") {
-		// The block folds at few rows, so this leads with what was kept; the route is the row above the block.
+		// The block folds at few rows, so the way out leads and what the model missed follows it.
 		return route.partialReply === true
-			? `Your message is kept. The partial reply stays on screen and the model will not see it. ${RESEND} · ${SWITCH_ROUTE}.`
-			: `Your message is kept and no reply arrived. ${RESEND} · ${SWITCH_ROUTE}.`;
+			? `${RESEND} · ${SWITCH_ROUTE}. The model will not see the partial reply.`
+			: `${RESEND} · ${SWITCH_ROUTE}.`;
 	}
-	if (errorClass === "http_429")
-		return `${where} is rate limiting this route. ${RESEND} once the limit clears · ${SWITCH_ROUTE}.`;
-	if (/^http_5/u.test(errorClass))
-		return `${where} is failing on its side. ${RESEND} once it recovers · ${SWITCH_ROUTE}.`;
-	return `Target ${where}. ${SWITCH_ROUTE} · ${configure} edits this target.`;
+	if (errorClass === "http_429") return `${RESEND} once the limit clears · ${SWITCH_ROUTE}.`;
+	if (/^http_5/u.test(errorClass)) return `${RESEND} once it recovers · ${SWITCH_ROUTE}.`;
+	return `${SWITCH_ROUTE} · ${configure} edits this target.`;
+}
+
+const ERROR_MARKER = /^\[error\]\s*/u;
+
+/**
+ * The technical half of a block a headline leads, on one row the operator can ignore: which endpoint, what it said, and
+ * where the full text lives. A transport failure's own text only restates the headline, so it names the endpoint alone.
+ */
+export function providerFailureEvidence(route: ProviderFailureRoute, value: string): string {
+	const where = route.url !== undefined ? `${route.targetId} at ${shownEndpoint(route.url)}` : route.targetId;
+	const said =
+		route.stage === "transport"
+			? ""
+			: presentProviderError(value, { remedyStated: true })
+					.replace(AVAILABLE_DIAGNOSTIC_TAIL, "")
+					.replace(ERROR_MARKER, "")
+					.trim();
+	return [where, said, "/view transcript has the full text"].filter(Boolean).join(" · ");
 }

@@ -219,15 +219,12 @@ export class MemoryOverlayView implements Component {
 		const statusLine = chipRow(
 			theme,
 			[
-				theme.fg("annotation", `Inspect memory · ${scope}`),
+				theme.fg("annotation", scope),
 				statusChip(theme, status.enabled ? "ok" : "cancelled", `background ${status.enabled ? "on" : "off"}`),
 				theme.fg("counter", `${status.size} ${status.size === 1 ? "entry" : "entries"}`),
 				working === null || working === "off" || working === "idle"
 					? null
 					: theme.fg(working === "reviewing" || working === "step running" ? "activity" : "warning", working),
-				status.route?.target && status.route.model
-					? theme.fg("annotation", `${status.tier} · ${status.route.target}/${status.route.model}`)
-					: theme.fg("annotation", status.tier),
 			],
 			width,
 		);

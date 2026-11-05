@@ -123,13 +123,17 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		const assignment = assignmentOfRun.get(payload.runId) ?? payload.runId;
 		if (status !== "working") assignmentOfRun.delete(payload.runId);
 		if (!helper) return;
+		const name = sanitizeCallTargetText(payload.agentId)
+			.slice(0, 80)
+			.replace(/^./, (letter) => letter.toUpperCase());
 		deps.notify(
 			status === "failed" ? "warning" : status === "completed" ? "success" : "info",
-			`Clio-Coder → ${sanitizeCallTargetText(payload.agentId)
-				.slice(0, 80)
-				.replace(/^./, (letter) =>
-					letter.toUpperCase(),
-				)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
+			// A helper runs for Clio, not for the operator's turn, so its failure costs that turn nothing and the run itself is on the board.
+			status === "failed"
+				? `Clio's ${name} helper failed; your turn is not affected · /fleet shows why`
+				: status === "completed"
+					? `Clio's ${name} helper finished`
+					: `Clio's ${name} helper is working`,
 			`helper:${assignment}`,
 		);
 	};

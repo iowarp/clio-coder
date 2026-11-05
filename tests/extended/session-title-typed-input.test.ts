@@ -326,7 +326,7 @@ it("persists and replays machine origin after the real engine injects a busy fol
 					const plain = raw.map(stripTerminalSequences).join("\n");
 					deepStrictEqual(raw.map(stripTerminalSequences), resumed.render(width).map(stripTerminalSequences));
 					match(plain, /Scheduled loop/u);
-					ok(plain.includes("job-watch"));
+					ok(!plain.includes("job-watch"), "the job id stays out of the primary row; /loop status names it");
 					doesNotMatch(plain, /▌/u);
 					ok(!raw.join("\n").includes("\x1b]133;A"), "scheduled prompts are not operator navigation markers");
 					ok(raw.every((row) => visibleWidth(row) <= width));

@@ -5,7 +5,14 @@ import {
 	endedOnCancelledInterview,
 	sumRunUsage,
 } from "../../session-control/chat-loop-messages.js";
-import type { RunTally, TurnStopReason, TurnSummary, WatchdogTier } from "../../session-control/status-types.js";
+import type {
+	RunTally,
+	TurnFailureFacts,
+	TurnStopReason,
+	TurnSummary,
+	WatchdogTier,
+} from "../../session-control/status-types.js";
+import { readProviderFailureRoute } from "../renderers/provider-error.js";
 
 export interface BuildSummaryInput {
 	startedAt: number;
@@ -48,6 +55,16 @@ export function emptyRunTally(): RunTally {
  * through here, so the two paths cannot drift into reporting a turn
  * differently depending on how it ended.
  */
+/** A message's failure class when it ended the call in an error; a later call in the run replaces it. */
+export function turnFailureFacts(message: unknown): TurnFailureFacts | undefined {
+	const record = message as { stopReason?: unknown; failureRoute?: unknown };
+	if (record.stopReason !== "error") return undefined;
+	const route = readProviderFailureRoute(record.failureRoute);
+	if (route === null) return undefined;
+	const { url: _endpoint, ...facts } = route;
+	return facts;
+}
+
 export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage): RunTally {
 	if (message.role === "toolResult") {
 		return {
@@ -59,8 +76,11 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	}
 	if (message.role !== "assistant") return tally;
 	const folded = sumRunUsage([message]);
+	const failure = turnFailureFacts(message);
+	const { failure: _earlier, ...unfailed } = tally;
 	return {
-		...tally,
+		...unfailed,
+		...(failure !== undefined ? { failure } : {}),
 		settledMessages: tally.settledMessages + 1,
 		responseModelIdObservation: folded.hadUsage
 			? folded.lastResponseModelIdObservation
@@ -91,6 +111,7 @@ export function summaryFromRunTally(tally: RunTally, input: SummaryFromTallyInpu
 		watchdogPeak: input.watchdogPeak,
 		truncated: input.truncated === true,
 		responseModelIdObservation: tally.responseModelIdObservation,
+		...(input.stopReason === "error" && tally.failure !== undefined ? { failure: tally.failure } : {}),
 	};
 }
 

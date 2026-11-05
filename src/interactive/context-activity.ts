@@ -101,7 +101,11 @@ export function formatContextActivityRailLines(
 	if (width >= 72 && !settled) {
 		const trail = stages
 			.map((phase, position) =>
-				theme.fg(position < index ? "success" : position === index ? "contextAction" : "annotation", PHASE_LABELS[phase]),
+				// The marks say where the run is without colour or weight; only the hue used to.
+				theme.fg(
+					position < index ? "success" : position === index ? "contextAction" : "annotation",
+					`${position < index ? `${GLYPH.ok} ` : position === index ? `${GLYPH.running} ` : ""}${PHASE_LABELS[phase]}`,
+				),
 			)
 			.join(theme.fg("border", " › "));
 		header = `${title}  ${trail}`;
