@@ -1978,15 +1978,23 @@ export interface BashTranscriptExecution {
  * exits, how long the stop took when that was long enough to notice. A card reading `you are running` beside a rail
  * reading `stopping` left the operator to guess which was true.
  */
-function bashStopRow(execution: BashTranscriptExecution): string | null {
+function bashStopRow(execution: BashTranscriptExecution, width: number): string | null {
 	const wait = execution.stopWaitMs;
 	if (wait === undefined) return null;
 	if (execution.running) {
 		const age = wait >= 1000 ? ` ${formatWaitClock(wait)} ago` : "";
-		return `${CONTENT_INDENT}${theme.fg("warning", GLYPH.cancelled)} ${toolMeta(`stop sent${age}, waiting for the command to exit`)}`;
+		const words = [`stop sent${age}, waiting for the command to exit`, `stop sent${age}, waiting to exit`, "stopping"];
+		const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
+		const fitted = words.find((text) => visibleWidth(text) <= room) ?? truncateToWidth("stopping", room, "", false);
+		return `${CONTENT_INDENT}${theme.fg("warning", GLYPH.cancelled)} ${toolMeta(fitted)}`;
 	}
 	if (wait < 1000) return null;
-	return `${CONTENT_INDENT}${theme.fg("toolMetadata", GLYPH.cancelled)} ${toolMeta(`stopped ${formatCompactMs(Math.floor(wait / 100) * 100)} after you asked`)}`;
+	const took = formatCompactMs(Math.floor(wait / 100) * 100);
+	const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
+	const words = [`stopped ${took} after you asked`, `stopped after ${took}`, took].find(
+		(text) => visibleWidth(text) <= room,
+	);
+	return words === undefined ? null : `${CONTENT_INDENT}${theme.fg("toolMetadata", GLYPH.cancelled)} ${toolMeta(words)}`;
 }
 
 /**
@@ -2016,7 +2024,7 @@ export function renderBashTranscriptExecution(
 		content: [{ type: "text", text: execution.output }],
 		details,
 	};
-	const stopRow = bashStopRow(execution);
+	const stopRow = bashStopRow(execution, width);
 	const withStop = (rows: string[]): string[] => (stopRow === null ? rows : [...rows, stopRow]);
 	if (execution.running) {
 		return withStop(

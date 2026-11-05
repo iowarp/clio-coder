@@ -44,7 +44,8 @@ function phaseElapsedMs(status: AgentStatus, now: number): number {
 const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/model|\/model moves it|\/model)(?= · |$)/gu;
 
 /** A label that already states its age (`has no output · 12s`) must not gain a second clock. */
-const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)\b/u;
+// `1m6s` is one clock too: its minutes and seconds are joined, so the pattern takes a compound form whole (B3).
+const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)(?:\d+(?:\.\d+)?(?:s|m))*\b/u;
 
 function workerElapsed(row: DispatchBoardRow): string | null {
 	// A plan has no run telemetry of its own; its clock is the board row's, from its start.
