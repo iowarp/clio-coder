@@ -5,27 +5,70 @@ import { formatKeyLabel } from "../keybinding-manager.js";
 const HINT_SEPARATOR = " · ";
 
 /**
- * Who answers the keyboard, and what Enter means to it. `surface` is a card, an
- * interview, an overlay or an open suggestion list: its own legend is on the rail
- * above the footer, so the row names no composer binding at all (F03).
+ * Who answers the keyboard, and what Enter does with what the composer holds now.
+ * `surface` is a card, an interview, an overlay, an open suggestion list or a draft
+ * addressed to a worker: its own legend is on the rail above the footer, so the row
+ * names no composer binding at all (F03). The prefixed forms carry the command the
+ * draft names, since that is the only true thing to say about its Enter.
  */
-export type ComposerKeyContext = "surface" | "send" | "steer" | "hold" | "shell";
+export type ComposerKeyContext =
+	| "surface"
+	| "idle"
+	| "send"
+	| "send-shell"
+	| "steer"
+	| "steer-empty"
+	| "hold"
+	| "hold-empty"
+	| "shell"
+	| "shell-refused"
+	| `command:${string}`
+	| `run-command:${string}`
+	| `usage:${string}`
+	| `check:${string}`;
 
-/** Bindings with nothing to act on while no run or queue exists. */
-const NEEDS_LIVE_RUN: ReadonlySet<string> = new Set([
-	"clio-coder.message.interrupt",
-	"clio-coder.message.dequeue",
-	"clio-coder.queue.open",
-	"clio-coder.dispatch.background",
-]);
+/** What is true right now that decides whether a learnable key would do anything. */
+export interface KeyHintFacts {
+	/** Off with interface.demo: the keys that answer this moment stay, the learning goes. */
+	learning?: boolean;
+	queued?: number;
+	workers?: number;
+	thinkingCycles?: boolean;
+}
 
-/** What is worth learning while a run holds the composer: the ways to reach or inspect that run. */
-const RUN_BINDINGS: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS> = [
-	"clio-coder.message.interrupt",
-	"clio-coder.queue.open",
-	"clio-coder.status.toggle",
-	"clio-coder.dispatchBoard.toggle",
-];
+/** One learning hint holds this long. The row is read at a glance, so it must not move under the eye. */
+const LEARNING_SLOT_MS = 60_000;
+
+/** The one shortcut an empty idle composer always offers; the rest are learned one at a time beside it. */
+const IDLE_PINNED: keyof typeof CLIO_APP_KEYBINDINGS = "clio-coder.model.select";
+
+/**
+ * Nonessential learning, in the order it is worth knowing. Deliberately a short
+ * list and not the catalog: exit and suspend are not lessons, and optional panes
+ * such as music and files belong to /help because the keys only work when the
+ * pane layer and the integration are on.
+ */
+function idleLearning(facts: KeyHintFacts): Array<keyof typeof CLIO_APP_KEYBINDINGS> {
+	return [
+		"clio-coder.library.toggle",
+		"clio-coder.status.toggle",
+		"clio-coder.output.cycle",
+		...(facts.thinkingCycles === false ? [] : (["clio-coder.thinking.cycle"] as const)),
+		"clio-coder.leader",
+	];
+}
+
+/** The ways to reach or inspect a run, each offered only when it has something to act on. */
+function runLearning(context: ComposerKeyContext, facts: KeyHintFacts): Array<keyof typeof CLIO_APP_KEYBINDINGS> {
+	const queued = facts.queued === undefined || facts.queued > 0;
+	const workers = facts.workers === undefined || facts.workers > 0;
+	return [
+		...(context === "steer" || queued ? (["clio-coder.message.interrupt"] as const) : []),
+		...(queued ? (["clio-coder.queue.open"] as const) : []),
+		"clio-coder.status.toggle",
+		...(workers ? (["clio-coder.dispatchBoard.toggle"] as const) : []),
+	];
+}
 
 /** The name before its aside: `Send now: interrupt the run…` reads `Send now`. Help keeps the sentence. */
 function shortDescription(description: string): string {
@@ -52,72 +95,80 @@ function catalogEntries(ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>): 
 	return ids.flatMap((id) => catalogEntry(id) ?? []);
 }
 
-/** Every composer binding that has something to act on without a live run. */
-function idleBindings(): Array<keyof typeof CLIO_APP_KEYBINDINGS> {
-	return (Object.keys(CLIO_APP_KEYBINDINGS) as Array<keyof typeof CLIO_APP_KEYBINDINGS>).filter(
-		(id) => CLIO_APP_KEYBINDINGS[id].scope === "composer" && !NEEDS_LIVE_RUN.has(id),
-	);
-}
-
-/** The keys that answer this moment. They hold still; only the learning beside them rotates. */
+/** The keys that answer this moment. They hold still; only the learning beside them changes. */
 function immediateEntries(context: ComposerKeyContext): string[] {
 	const submit = firstKey("tui.input.submit");
 	const cancel = firstKey("tui.select.cancel");
-	if (context === "steer")
-		return [submit ? `${submit} steers` : "", cancel ? `${cancel} stops the run` : ""].filter(Boolean);
-	if (context === "hold")
-		return [submit ? `${submit} holds your message` : "", cancel ? `${cancel} stops` : ""].filter(Boolean);
-	if (context === "shell") return cancel ? [`${cancel} stops the command`] : [];
+	const newline = firstKey("tui.input.newLine");
+	const enter = (what: string): string[] => (submit ? [`${submit} ${what}`] : []);
+	const esc = (what: string): string[] => (cancel ? [`${cancel} ${what}`] : []);
+	const colon = context.indexOf(":");
+	if (colon > 0) {
+		const name = context.slice(colon + 1);
+		if (context.startsWith("command:")) return enter(`runs ${name}`);
+		if (context.startsWith("run-command:")) return [...enter(`runs ${name}`), ...esc("stops the run")];
+		if (context.startsWith("usage:")) return enter(`shows what ${name} needs`);
+		return enter(`checks ${name}`);
+	}
+	switch (context) {
+		case "idle":
+			return catalogEntries([IDLE_PINNED]);
+		case "send":
+			return [...enter("sends"), ...(newline ? [`${newline} newline`] : [])];
+		case "send-shell":
+			return enter("runs this shell command");
+		case "steer":
+			return [...enter("steers"), ...esc("stops the run")];
+		case "steer-empty":
+			return ["Type to steer", ...esc("stops the run")];
+		case "hold":
+			return [...enter("holds your message"), ...esc("stops")];
+		case "hold-empty":
+			return esc("stops");
+		case "shell":
+			return esc("stops the command");
+		case "shell-refused":
+			return esc("stops what is running, then Enter runs this");
+		default:
+			return [];
+	}
+}
+
+function learningEntries(context: ComposerKeyContext, facts: KeyHintFacts): string[] {
+	if (facts.learning === false) return [];
+	if (context === "idle") {
+		const newline = firstKey("tui.input.newLine");
+		return [...(newline ? [`${newline} newline`] : []), ...catalogEntries(idleLearning(facts))];
+	}
+	if (context === "steer" || context === "steer-empty") return catalogEntries(runLearning(context, facts));
 	return [];
 }
 
 /**
- * Small rotating slices of the actual binding catalog; never invent an unbound shortcut.
- * Each page holds whole hints that fit `width`, so a narrow row drops trailing hints and
- * the dropped one leads the next page instead of ending a line cut mid-phrase. A hint
- * wider than the row on its own is never shown.
+ * The hint row's policy. The keys that answer this moment are pinned and describe
+ * what the composer holds now. While the composer is empty one learning hint may
+ * sit beside them, changing once a minute. A draft silences the learning, because
+ * the operator is typing and the row is about their Enter. A key whose target does
+ * not exist right now is never offered, and a hint wider than the row is never cut.
  */
 export function footerKeyHint(
 	now: number,
 	narrow = false,
 	width = Number.POSITIVE_INFINITY,
 	context: ComposerKeyContext = "send",
+	facts: KeyHintFacts = {},
 ): string | null {
 	if (context === "surface") return null;
-	const submit = firstKey("tui.input.submit");
-	const newline = firstKey("tui.input.newLine");
-	const fixed = immediateEntries(context);
-	const entries =
-		context === "send"
-			? [
-					...(submit ? [`${submit} send`] : []),
-					...(newline ? [`${newline} newline`] : []),
-					...catalogEntries(idleBindings()),
-				]
-			: catalogEntries(RUN_BINDINGS);
-	const count = narrow ? 1 : 2;
-	const pinned = fitWhole(fixed, width);
-	if (pinned.length > 0) {
-		const lead = pinned.join(HINT_SEPARATOR);
-		const room = width - visibleWidth(lead) - visibleWidth(HINT_SEPARATOR);
-		const extras = narrow ? [] : entries.filter((entry) => visibleWidth(entry) <= room);
-		const extra = extras.length > 0 ? extras[Math.floor(now / 12_000) % extras.length] : undefined;
-		return extra ? `${lead}${HINT_SEPARATOR}${extra}` : lead;
-	}
-	const pages: string[] = [];
-	for (let index = 0; index < entries.length; ) {
-		const page: string[] = [];
-		while (page.length < count && index < entries.length) {
-			const entry = entries[index] as string;
-			if (visibleWidth([...page, entry].join(HINT_SEPARATOR)) > width) break;
-			page.push(entry);
-			index += 1;
-		}
-		if (page.length === 0) index += 1;
-		else pages.push(page.join(HINT_SEPARATOR));
-	}
-	if (pages.length === 0) return null;
-	return pages[Math.floor(now / 12_000) % pages.length] ?? null;
+	// Sending is the composer's plain meaning, so with guidance off it needs no reminding. Everything else is a surprise worth stating.
+	if (facts.learning === false && (context === "idle" || context === "send")) return null;
+	const pinned = fitWhole(immediateEntries(context), width);
+	const lead = pinned.join(HINT_SEPARATOR);
+	const room = pinned.length > 0 ? width - visibleWidth(lead) - visibleWidth(HINT_SEPARATOR) : width;
+	const extras =
+		narrow && pinned.length > 0 ? [] : learningEntries(context, facts).filter((entry) => visibleWidth(entry) <= room);
+	const extra = extras[Math.floor(now / LEARNING_SLOT_MS) % Math.max(1, extras.length)];
+	if (pinned.length === 0) return extra ?? null;
+	return extra ? `${lead}${HINT_SEPARATOR}${extra}` : lead;
 }
 
 /** The leading entries that fit whole. */

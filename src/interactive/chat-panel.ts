@@ -36,6 +36,7 @@ import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-loop.js";
 import {
 	classifyTurnEnding,
+	endedOnCancelledInterview,
 	extractText,
 	isSelfExplainingAbort,
 	type TurnEnding,
@@ -160,6 +161,8 @@ export type { ReasoningTokenProvenance } from "./status/index.js";
 export interface ChatPanelTurnUsage {
 	elapsedMs?: number;
 	outcome?: string;
+	/** The newest failed turn this run: its prompt is one ↑ away in the composer's history. */
+	promptRecall?: boolean;
 	/** The operator turn whose spend the receipt reads from the telemetry read model (#434 §11.3). */
 	turnId?: string;
 	/** The calls the run's own messages settled; the receipt reads the fold until it holds them all. */
@@ -1179,7 +1182,11 @@ function renderTurnUsageLine(
 				? renderCalls(String(spend.calls), "call")
 				: null;
 		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
-		const rowFacts = [`${outcome}${receiptDuration(usage)}`, ...(quiet === null ? [] : [quiet])];
+		const rowFacts = [
+			`${outcome}${receiptDuration(usage)}`,
+			...(quiet === null ? [] : [quiet]),
+			...(usage.promptRecall === true ? [PROMPT_RECALL_FACT] : []),
+		];
 		for (const fact of [
 			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
 			spend?.coverageNote ?? null,
@@ -1201,6 +1208,7 @@ function renderTurnUsageLine(
 	// nothing was reused. A field with nothing to say is left out, and with no
 	// read model the line keeps only what the run itself knows.
 	const facts: string[] = [settled];
+	if (usage.promptRecall === true) facts.push(PROMPT_RECALL_FACT);
 	if (spend) {
 		if (spend.calls !== null && spend.calls > 1) facts.push(`${spend.calls} calls`);
 		facts.push(`in ${spend.input}`, `out ${spend.output}`);
@@ -1233,6 +1241,8 @@ function receiptDuration(usage: ChatPanelTurnUsage): string {
 	if (waited < 1000) return ` · ${formatCompactMs(usage.elapsedMs)}`;
 	return ` · ${formatCompactMs(Math.max(0, usage.elapsedMs - waited))} work · ${formatCompactMs(waited)} waiting on you`;
 }
+
+const PROMPT_RECALL_FACT = `${GLYPH.up} recalls your prompt`;
 
 function receiptGlyph(outcome: string): string {
 	if (outcome === "Done") return `${GREEN_OK()}${GLYPH.ok}${RESET} `;
@@ -1754,6 +1764,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let receiptView: TelemetryView | null = null;
 	/** The latest settled receipt eligible for the turn's post-settlement prewarm record. */
 	let lastSettledReceipt: Extract<TranscriptEntry, { role: "assistant" }> | null = null;
+	let promptRecallReceipt: Extract<TranscriptEntry, { role: "assistant" }> | null = null;
 	let cachedWidth: number | undefined;
 	let cachedRegions: { prefix: readonly string[]; tail: string[] } = { prefix: NO_ROWS, tail: [] };
 	/** The last frame concatenated, built on first request; null until someone asks for it. */
@@ -2149,8 +2160,20 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 									? "Output limit"
 									: ending?.kind === "no_answer"
 										? "No answer"
-										: "Done"),
+										: endedOnCancelledInterview(messages)
+											? "Cancelled"
+											: "Done"),
 				};
+				// Only the newest failure is one ↑ away; a later turn's prompt sits in front of an older one.
+				if (promptRecallReceipt?.turnUsage) {
+					delete promptRecallReceipt.turnUsage.promptRecall;
+					invalidateEntryCache(promptRecallReceipt);
+				}
+				promptRecallReceipt = null;
+				if (replayed === undefined && target.turnUsage.outcome === "Failed") {
+					target.turnUsage.promptRecall = true;
+					promptRecallReceipt = target;
+				}
 				trackReceipt(target);
 			}
 			const firstRunEntry = runStartIndex ?? runStartFallback(index);

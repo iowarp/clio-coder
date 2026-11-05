@@ -138,6 +138,8 @@ export interface EditorChrome {
 	getTurnPreparation?: () => TurnPreparationPhase;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
+	/** The draft is a command or a shell line, which Enter never queues for the run. */
+	getDraftOperator?: (text: string) => "command" | "shell" | null;
 	/** The running worker a draft's `@target` resolves to, by agent name, or null. */
 	getSteerRecipient?: (token: string) => string | null;
 	/** Resolved submit binding, formatted for display. */
@@ -386,7 +388,7 @@ export class ClioEditor extends Editor {
 	/** Rail words for a draft that is not what the composer would normally hold, or empty. */
 	private draftNote(width: number): string {
 		if (this.parkedDraft !== null) return width >= 80 ? "DRAFT KEPT · back after this command" : "DRAFT KEPT";
-		// Enter queues during a run, and the STEER or FOLLOW-UP beside this note already says so.
+		// Enter queues during a run, and the STEER beside this note already says so.
 		if (this.restoredDraft) {
 			if (width < 80) return "RESTORED";
 			return this.chrome.isStreaming?.() === true
@@ -532,9 +534,11 @@ export class ClioEditor extends Editor {
 						bold: true,
 					},
 				)
-			: mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0)
+			: mode === "STEER"
 				? theme.fg("draftState", mode)
-				: "";
+				: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
+					? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
+					: "";
 		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
 		const note = this.draftNote(width);
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";

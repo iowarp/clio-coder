@@ -763,6 +763,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		: undefined;
 	const presentation = createInteractivePresentation({
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
+		getQueuedMessageCount: () => {
+			const queue = deps.chat.queuedMessages();
+			return queue.steer.length + queue.followUp.length;
+		},
 		recordTurnHumanWait: (fields) => {
 			try {
 				if (!deps.session?.current()) return;
@@ -1915,6 +1919,14 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		});
 	};
 
+	let queueAtDispose: readonly string[] | null = null;
+	// What the operator typed, not its expansion; a peer's prompt is not theirs to resend.
+	const undeliveredMessages = (): readonly string[] =>
+		queueAtDispose ??
+		deps.chat
+			.queueEntries()
+			.filter((entry) => entry.origin === undefined)
+			.map((entry) => entry.display?.text ?? entry.text);
 	applicationController = createInteractiveInputRuntime({
 		tui,
 		...(workspaceSurfaces ? { extraLeaderTargets: () => workspaceSurfaces.leaderTargets() } : {}),
@@ -2063,7 +2075,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			disposeProjectionRemaining: eventProjection.disposeRemaining,
 			disposeOverlay: overlayLifecycle.dispose,
 			stopAgentProgress: agentProgress.stop,
-			disposeChat: () => deps.chat.dispose(),
+			disposeChat: () => {
+				// Disposing empties the queues, and the exit screen still has to name what was in them.
+				queueAtDispose = undeliveredMessages();
+				deps.chat.dispose();
+			},
 			disposeSubscriptions: () => {
 				clearTimeout(updateTimer);
 				updateAbort.abort();
@@ -2206,6 +2222,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			root: presentation.root,
 			editorChrome: presentation.editorChrome,
 			admitSubmission: (submission) => editorSubmit.admitCapturedText(submission.rawText, lease.abortSignal),
+			undeliveredMessages,
 			onHydratedFrame: (frameId, interactivity) => {
 				deps.onHydratedFrameCommit?.(frameId, interactivity);
 			},

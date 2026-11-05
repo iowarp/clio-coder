@@ -21,7 +21,7 @@ import type { SessionContract, TaskBoardSnapshot } from "../domains/session/inde
 import type { TelemetryContract, TokenThroughputSnapshot } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
-import { visibleWidth } from "../engine/tui.js";
+import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { createAssistantGenerationTiming } from "../session-control/assistant-generation-timing.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
@@ -50,6 +50,7 @@ import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
+import type { ComposerKeyContext } from "./footer/key-hints.js";
 import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
@@ -118,6 +119,8 @@ export interface InteractivePresentationDeps {
 	dispatch: Pick<DispatchContract, "snapshot">;
 	telemetry: TelemetryContract;
 	chat: ChatLoop;
+	/** Messages waiting in the queue, which decides whether its keys are worth offering. */
+	getQueuedMessageCount?: () => number;
 	workspaceFacts: WorkspaceFacts;
 	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
 	tui: TUI;
@@ -238,6 +241,33 @@ const DEFAULT_FACTORIES: InteractivePresentationFactories = {
 	createIo: createCommandOutputRunIo,
 	buildLayout,
 };
+
+/** A draft whose Enter is not a message: Clio runs it, wherever a turn is. */
+function draftOperator(text: string): "command" | "shell" | null {
+	if (parseEditorBashCommand(text)) return "shell";
+	const kind = parseSlashCommand(text.trim()).kind;
+	return kind === "unknown" || kind === "empty" ? null : "command";
+}
+
+/** What Enter does with this draft, for the hint row. An empty composer has nothing to say about Enter. */
+function draftKeyContext(text: string, streaming: boolean, holding: boolean, localShell: boolean): ComposerKeyContext {
+	const empty = text.trim().length === 0;
+	if (parseEditorBashCommand(text)) {
+		if (streaming || localShell) return "shell-refused";
+		return holding ? "hold" : "send-shell";
+	}
+	if (!empty && draftOperator(text) === "command") {
+		const parsed = parseSlashCommand(text.trim());
+		const name = truncateToWidth(text.trim().split(/\s+/u)[0] ?? "", 24, GLYPH.ellipsis, false);
+		if (parsed.kind === "usage-error") return `usage:${name}`;
+		if (parsed.kind === "unknown-command") return `check:${name}`;
+		return streaming ? `run-command:${name}` : `command:${name}`;
+	}
+	if (streaming) return empty ? "steer-empty" : "steer";
+	if (holding) return empty ? "hold-empty" : "hold";
+	if (localShell) return "shell";
+	return empty ? "idle" : "send";
+}
 
 function willEnterSteerActiveWork(deps: InteractivePresentationDeps, text: string): boolean {
 	const trimmed = text.trim();
@@ -566,9 +596,29 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getBackgroundCalls: () => backgroundCalls.active(),
 		getKeyContext: () => {
 			if (dockTop(deps.tui) !== null || composerEditor?.isShowingAutocomplete()) return "surface";
-			if (deps.chat.isStreaming()) return "steer";
-			if (deps.chat.turnPreparation().phase !== "idle") return "hold";
-			return localBashStartedAt !== null ? "shell" : "send";
+			const text = composerEditor?.getText() ?? "";
+			// The rail under a draft addressed to a worker already names its Enter and Esc.
+			if (composerEditor?.steerTarget(text)) return "surface";
+			return draftKeyContext(
+				text,
+				deps.chat.isStreaming(),
+				deps.chat.turnPreparation().phase !== "idle",
+				localBashStartedAt !== null,
+			);
+		},
+		getKeyHintFacts: () => {
+			const current = deps.getSettings?.();
+			const mechanism = resolveModelRuntimeCapabilitiesForProviders(
+				deps.providers,
+				current?.chat?.target,
+				current?.chat?.model,
+				current?.chat?.thinkingLevel ?? "off",
+			)?.thinking.mechanism;
+			return {
+				...(deps.getQueuedMessageCount ? { queued: deps.getQueuedMessageCount() } : {}),
+				workers: dispatchBoardStore.rows().length,
+				thinkingCycles: mechanism === "effort-levels" || mechanism === "budget-tokens",
+			};
 		},
 		get dismissKeyLabel() {
 			return keybindings.actionLabel("clio-coder.notifications.dismiss");
@@ -743,6 +793,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
+		getDraftOperator: draftOperator,
 		getSteerRecipient: (token) => {
 			try {
 				const running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
@@ -787,6 +838,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	editor.focused = true;
 	let skillCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
+		isTurnInFlight: () => deps.chat.isStreaming(),
 		// Completion runs per keystroke and only names templates, so it reads the
 		// committed plugin snapshot; submitting one verifies its tree first.
 		promptTemplates: () => deps.resources?.promptsForDisplay(getCwd()).items ?? [],

@@ -453,9 +453,15 @@ export class ViewOverlayView implements Component {
 		if (this.focus !== "list") return false;
 		this.filterInput.applyEdit("undo");
 		this.filterText = this.filterInput.getValue();
+		this.filterArrivedWithOpen = false;
 		this.selectInitialFilterMatch();
 		return true;
 	}
+	/**
+	 * The filter is still the one /view was opened with. The operator did not type
+	 * it, so it does not cost a key to leave: Esc closes until they edit it.
+	 */
+	private filterArrivedWithOpen = false;
 	private selectedIndex = 0;
 	private listScrollOffset = 0;
 	private contentScrollOffset = 0;
@@ -473,6 +479,11 @@ export class ViewOverlayView implements Component {
 	constructor(private readonly options: ViewOverlayOptions) {
 		this.filterText = options.initialFilter ?? "";
 		this.filterInput.handleInput(`\x1b[200~${this.filterText}\x1b[201~`);
+		this.filterArrivedWithOpen = this.filterText.length > 0;
+	}
+
+	private escClearsFilter(): boolean {
+		return this.filterText.length > 0 && !this.filterArrivedWithOpen;
 	}
 
 	refresh(): void {
@@ -507,7 +518,7 @@ export class ViewOverlayView implements Component {
 	}
 
 	getHint(innerWidth?: number): string {
-		return viewFooterHint(this.focus, !!this.selectedArtifact()?.verify, this.filterText.length > 0, innerWidth);
+		return viewFooterHint(this.focus, !!this.selectedArtifact()?.verify, this.escClearsFilter(), innerWidth);
 	}
 
 	private filteredArtifacts(): ViewArtifact[] {
@@ -849,7 +860,7 @@ export class ViewOverlayView implements Component {
 			if (this.focus === "content") {
 				this.focus = "list";
 				this.options.requestRender?.();
-			} else if (this.filterText.length > 0) this.clearFilter();
+			} else if (this.escClearsFilter()) this.clearFilter();
 			else this.options.onClose();
 			return;
 		}
@@ -867,6 +878,7 @@ export class ViewOverlayView implements Component {
 		const selected = this.selectedArtifact();
 		this.filterInput.applyEdit("clear");
 		this.filterText = this.filterInput.getValue();
+		this.filterArrivedWithOpen = false;
 		const retainedIndex = selected
 			? this.filteredArtifacts().findIndex((artifact) => artifactKey(artifact) === artifactKey(selected))
 			: -1;
@@ -893,6 +905,7 @@ export class ViewOverlayView implements Component {
 		this.filterInput.handleInput(data);
 		this.filterText = this.filterInput.getValue();
 		if (previous === this.filterText) return false;
+		this.filterArrivedWithOpen = false;
 		this.selectInitialFilterMatch();
 		return true;
 	}

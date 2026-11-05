@@ -511,7 +511,7 @@ test("a reading is never served for a different directory", () => {
 	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init to index this repo"));
 	cwd = "/tmp/work/second";
 	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("Checking project awareness…"));
-	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context to inspect project awareness"));
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("Next: type a task, then press Enter"));
 	deepStrictEqual(seen, ["/tmp/work/first", "/tmp/work/second"]);
 });
 
@@ -1011,7 +1011,7 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 	for (const label of [
 		"Session started",
 		"Project",
-		"AI usage",
+		"Also",
 		"Instructions",
 		"lines 129-180 left out",
 		"24,000-character",
@@ -1079,7 +1079,7 @@ test("account usage hydrates without moving the welcome frame or passing through
 	component.render(120);
 	let lines = component.render(120).map(stripAnsi);
 	strictEqual(lines.length, 18);
-	ok(lines.join("\n").includes("No usage data"));
+	ok(lines.join("\n").includes("/context") && !lines.join("\n").includes("No usage data"));
 	quota = "Claude 5h 23% used";
 	lines = component.render(120).map(stripAnsi);
 	strictEqual(lines.length, 18);
@@ -1095,7 +1095,7 @@ test("the wordmark stacks CLIO over CODER with details beside both words and no 
 		const lines = banner().render(width).map(stripAnsi);
 		for (const index of [2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) ok(lines[index]?.includes("██"));
 		ok(lines[2]?.includes("Session started"));
-		ok(lines[10]?.includes("AI usage"));
+		ok(lines[10]?.includes("Also"));
 		ok(!lines.join("\n").includes(">_C"));
 		ok(!lines.slice(1, 12).some((line) => line.includes("…") && line.indexOf("…") < 30));
 	}

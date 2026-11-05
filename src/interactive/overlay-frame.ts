@@ -418,6 +418,7 @@ function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): 
  */
 export type OverlayEscVerb =
 	| "close"
+	| "cancel"
 	| "clear filter"
 	| "back"
 	| "back to list"

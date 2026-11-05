@@ -61,6 +61,8 @@ export interface TerminalLeaseAdoption {
 	root: Component;
 	editorChrome: EditorChrome;
 	admitSubmission: (submission: BootSubmission) => Promise<void>;
+	/** The operator's queued messages still waiting for a slot, which exiting abandons. */
+	undeliveredMessages?: () => readonly string[];
 	onHydratedFrame?: (frameId: number | null, interactivity: BootInteractivity) => void;
 }
 
@@ -208,10 +210,24 @@ function stageZeroRoot(
 	return root;
 }
 
-function recoveryText(records: ReadonlyArray<BootSubmission>, draft: string, adopted: boolean): string | null {
-	if (records.length === 0 && draft.length === 0) return null;
-	// The session booted fine; this is a quit that left a draft in the composer.
-	if (adopted && records.length === 0) return `Unsent draft, not delivered to Clio:\n${draft}`;
+function recoveryText(
+	records: ReadonlyArray<BootSubmission>,
+	draft: string,
+	adopted: boolean,
+	queued: readonly string[] = [],
+): string | null {
+	if (records.length === 0 && draft.length === 0 && queued.length === 0) return null;
+	// The session booted fine; this is a quit that left words behind. Blank lines
+	// part the messages, since any one of them can span several lines itself.
+	if (adopted && records.length === 0) {
+		const left: string[] = [];
+		if (queued.length > 0) {
+			const count = queued.length === 1 ? "Queued message" : `${queued.length} queued messages`;
+			left.push(`${count}, not delivered to Clio:\n${queued.join("\n\n")}`);
+		}
+		if (draft.length > 0) left.push(`Unsent draft, not delivered to Clio:\n${draft}`);
+		return left.join("\n\n");
+	}
 	const sections = records.map((record) => `[queued ${record.sequence}] ${record.rawText}`);
 	if (draft.length > 0) sections.push(`[draft] ${draft}`);
 	return `Clio Coder recovered input from an interrupted boot; copy and resubmit after restart:\n${sections.join("\n")}`;
@@ -254,10 +270,12 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getPermissionInspection: () => editorChrome.getPermissionInspection?.() ?? "none",
 		getTurnPreparation: () => editorChrome.getTurnPreparation?.() ?? "idle",
 		willEnterSteer: (text) => editorChrome.willEnterSteer?.(text) ?? false,
+		getDraftOperator: (text) => editorChrome.getDraftOperator?.(text) ?? null,
 		getSteerRecipient: (token) => editorChrome.getSteerRecipient?.(token) ?? null,
 		getSubmitKeyLabel: () => editorChrome.getSubmitKeyLabel?.() ?? "Enter",
 		getNewlineKeyLabel: () => editorChrome.getNewlineKeyLabel?.() ?? "Ctrl+J",
 	};
+	let undeliveredMessages: TerminalLeaseAdoption["undeliveredMessages"];
 	const shell =
 		options.testing?.shell ??
 		createProcessInteractiveShell({
@@ -500,6 +518,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			// No await is permitted in this transaction: editor callbacks, root,
 			// input, and SIGINT become Stage 1 as one JavaScript turn.
 			editorChrome = adoption.editorChrome;
+			undeliveredMessages = adoption.undeliveredMessages;
 			inputDelegate = applicationInput;
 			host.replace(adoption.root);
 			tui.setFocus(editor);
@@ -560,9 +579,13 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 					}
 					attempt(() => flushDiagnostics());
 					const unsent = editor.unsentDraft();
-					if (closeOptions.recoverInput || submissions.length > 0 || unsent.length > 0) {
+					let queued: readonly string[] = [];
+					attempt(() => {
+						queued = undeliveredMessages?.() ?? [];
+					});
+					if (closeOptions.recoverInput || submissions.length > 0 || unsent.length > 0 || queued.length > 0) {
 						attempt(() => {
-							const recovered = recoveryText(submissions, unsent, adopted);
+							const recovered = recoveryText(submissions, unsent, adopted, queued);
 							if (recovered) write("stderr", `${recovered}\n`);
 						});
 					}

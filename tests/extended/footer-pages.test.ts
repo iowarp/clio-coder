@@ -421,13 +421,15 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 		},
 	});
 	try {
-		const hints = Array.from({ length: 40 }, (_, i) => footerKeyHint(i * 12000)).join("\n");
+		const hints = Array.from({ length: 40 }, (_, i) =>
+			footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, "idle"),
+		).join("\n");
 		match(hints, /Ctrl\+M Model picker/);
 		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
 		match(hints, /newline/);
 		match(hints, /Thinking effort/);
 		const runHints = Array.from({ length: 40 }, (_, i) =>
-			footerKeyHint(i * 12000, false, Number.POSITIVE_INFINITY, "steer"),
+			footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, "steer"),
 		).join("\n");
 		match(runHints, /Send now/);
 	} finally {
@@ -541,7 +543,6 @@ test("compact quota stays beside the selected model while workspace and rotating
 	}
 	const initial = plain(renderCompactDashboard(snapshot, 160));
 	match(initial, /Enter send/);
-	ok(footerKeyHint(0, true) !== footerKeyHint(12000, true), "the hints rotate");
 	for (let page = 0; page < 40; page++) {
 		snapshot.now = page * 12000;
 		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050 \*/);

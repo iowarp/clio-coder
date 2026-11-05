@@ -26,6 +26,7 @@ import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/reside
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
@@ -1300,5 +1301,38 @@ test("a moved request needs no retry budget and its aborted call forecasts no fa
 	deepStrictEqual(
 		ladder.statuses.map((status) => status.phase),
 		["moved"],
+	);
+});
+
+test("the hint row says what Enter does with the draft and never offers exit or a key with no target", () => {
+	const hint = (context: Parameters<typeof footerKeyHint>[3], now = 0): string =>
+		footerKeyHint(now, false, Number.POSITIVE_INFINITY, context, { queued: 0, workers: 0, thinkingCycles: false }) ?? "";
+	match(hint("run-command:/rewind"), /Enter runs \/rewind · Esc stops the run$/u);
+	doesNotMatch(hint("run-command:/rewind"), /steers/u);
+	match(hint("shell-refused"), /Esc stops what is running, then Enter runs this/u);
+	match(hint("steer-empty"), /^Type to steer · Esc stops the run/u);
+	const learned = Array.from({ length: 12 }, (_, slot) => hint("idle", slot * 60_000)).join("\n");
+	doesNotMatch(learned, /Exit|Suspend|Music|Files pane|Thinking effort/u);
+	strictEqual(hint("idle", 0), hint("idle", 59_999), "a learning hint holds for its minute");
+	strictEqual(hint("send", 0), hint("send", 600_000), "a draft silences the learning");
+	const running = Array.from({ length: 12 }, (_, slot) => hint("steer-empty", slot * 60_000)).join("\n");
+	doesNotMatch(running, /Workers dock|Queue navigator|Send now/u);
+});
+
+test("a cancelled interview ends the turn as cancelled, not as a success", () => {
+	strictEqual(
+		buildSummary({
+			startedAt: 0,
+			endedAt: 1,
+			modelId: "m",
+			targetId: "t",
+			messages: [
+				{ role: "assistant", stopReason: "toolUse", content: [], usage: {} },
+				{ role: "toolResult", toolName: "ask_user", details: { cancelled: true }, content: [] },
+			] as never,
+			watchdogPeak: 0,
+			cancelled: false,
+		}).stopReason,
+		"cancelled",
 	);
 });

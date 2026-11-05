@@ -304,6 +304,12 @@ function ranRealTool(message: AgentMessage): boolean {
  * may quote markup on the way to a real answer, so it only counts when no text followed, and text that keeps anything
  * besides markup stays the answer.
  */
+/** The turn ended because the operator dismissed the interview it was waiting on, which is not a finished answer. */
+export function endedOnCancelledInterview(messages: ReadonlyArray<unknown>): boolean {
+	const last = messages.at(-1) as { role?: unknown; toolName?: unknown; details?: { cancelled?: unknown } } | undefined;
+	return last?.role === "toolResult" && last.toolName === ToolNames.AskUser && last.details?.cancelled === true;
+}
+
 export function classifyTurnEnding(messages: ReadonlyArray<AgentMessage>): TurnEnding | null {
 	const last = [...messages].reverse().find((message) => message?.role === "assistant");
 	if (last === undefined) return null;

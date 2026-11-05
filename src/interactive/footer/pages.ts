@@ -722,7 +722,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const keyContext = state.keyContext ?? "send";
 	const surfaceOwnsKeys = keyContext === "surface";
 	// The keys that answer this moment, which a tip must not cover and a notice may.
-	const immediateKeys = keyContext === "steer" || keyContext === "hold" || keyContext === "shell";
+	const immediateKeys = keyContext !== "surface" && keyContext !== "idle" && keyContext !== "send";
 	// A tip is teaching for the idle composer. Under a card or an overlay, or while
 	// a run holds the keys, the slot stays with what applies; a real notice still shows.
 	const liveNotices = state.notices.filter(
@@ -807,7 +807,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 								"keyboardHint",
 								state.welcomeVisible
 									? ""
-									: ((state.demo !== false ? footerKeyHint(state.now, narrow, room, keyContext) : null) ?? `${key} Dashboard`),
+									: (footerKeyHint(state.now, narrow, room, keyContext, {
+											...state.keyHintFacts,
+											learning: state.demo !== false,
+										}) ?? `${key} Dashboard`),
 							);
 	// One line flattens a multi-line notice and cuts the end, which is where a
 	// remediation command sits. Name the key that opens the dashboard, whose

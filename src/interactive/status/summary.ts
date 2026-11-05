@@ -1,6 +1,10 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import type { AgentMessage } from "../../engine/types.js";
-import { classifyTurnEnding, sumRunUsage } from "../../session-control/chat-loop-messages.js";
+import {
+	classifyTurnEnding,
+	endedOnCancelledInterview,
+	sumRunUsage,
+} from "../../session-control/chat-loop-messages.js";
 import type { RunTally, TurnStopReason, TurnSummary, WatchdogTier } from "../../session-control/status-types.js";
 
 export interface BuildSummaryInput {
@@ -105,6 +109,9 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 	}
 	if ((stopReason === "stop" || stopReason === "toolUse") && classifyTurnEnding(input.messages)?.kind === "no_answer")
 		stopReason = "no_answer";
+	if (stopReason === "stop" || stopReason === "toolUse") {
+		if (endedOnCancelledInterview(input.messages)) stopReason = "cancelled";
+	}
 	return summaryFromRunTally(tally, {
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,

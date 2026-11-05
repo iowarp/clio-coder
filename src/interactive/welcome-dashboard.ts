@@ -328,7 +328,7 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 	if (stats.projectContext === "stale") return say("guidance", "Stale project awareness: /context refresh to fix.");
 	return say(
 		"guidance",
-		stats.projectContext === "checking" ? "Checking project awareness…" : "/context to inspect project awareness",
+		stats.projectContext === "checking" ? "Checking project awareness…" : "Next: type a task, then press Enter",
 	);
 }
 
@@ -569,12 +569,23 @@ export function buildWelcomeDashboardLines(
 			theme.fg(stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body", awareness),
 		),
 		"",
-		// "· used" labels the percentages; with no reading there is nothing to label.
-		theme.style("sectionHeading", subscriptionRows.some(Boolean) ? "AI usage · used" : "AI usage", { bold: true }),
-		...subscriptionRows.map((row, index) => row || (index === 0 ? theme.fg("annotation", "No usage data") : "")),
+		// The launchpad's height holds still as a reading arrives. Until one does, or
+		// on a route that never reports one, these rows name what to reach for instead
+		// of announcing an absence. The wide panel has a hints column for that already.
+		...(subscriptions.length > 0
+			? [theme.style("sectionHeading", "AI usage · used", { bold: true }), ...subscriptionRows]
+			: showHints
+				? ["", "", ""]
+				: [
+						theme.style("sectionHeading", "Also", { bold: true }),
+						`${theme.fg("guidance", "/help")}     ${theme.fg("body", "Commands and shortcuts")}`,
+						`${theme.fg("guidance", "/context")}  ${theme.fg("body", "What Clio knows about this repo")}`,
+					]),
 		showHints
 			? theme.fg("annotation", "/usage for limits and reset times")
-			: theme.fg("guidance", "/help  Commands and shortcuts · /usage  Limits"),
+			: subscriptions.length > 0
+				? theme.fg("guidance", "/help  Commands and shortcuts · /usage  Limits")
+				: `${theme.fg("guidance", "/usage")}    ${theme.fg("body", "Account limits and reset times")}`,
 	];
 	const artOffset = Math.floor((details.length - wordmark.length) / 2);
 
