@@ -779,7 +779,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		// from a settings or session read would otherwise leave it set and refuse
 		// every later fleet run in this session.
 		const turnConstraints = deps.standingTurnConstraints?.();
+		// The board's cancel reaches the runner through this, which stops the running step's process (J2-F02).
+		const stop = new AbortController();
 		const args: Parameters<typeof executeFleetRun>[0] = {
+			signal: stop.signal,
 			plan: preview.plan,
 			playbookName: preview.name,
 			commands: preview.commands,
@@ -802,6 +805,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onStepSettled: (outcome) => deps.fleetPlans?.stepSettled(fleetRootId, outcome),
 			onStarted: () => {
 				deps.fleetPlans?.start(fleetRootId, preview);
+				deps.fleetPlans?.bindStop(fleetRootId, () => stop.abort());
 				// Counted from the waves, as the approval card counts them, so a resumed run names only what it runs.
 				const steps = preview.waves.reduce((total, wave) => total + wave.steps.length, 0);
 				deps.notify(
@@ -819,6 +823,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				deps.dismissNotification?.("fleet-run:started");
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
 				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
+				if (plan?.state === "cancelled") {
+					deps.notify(
+						"info",
+						`fleet ${preview.name}: cancelled · ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded before the stop`,
+						"fleet-run:settled",
+					);
+					return;
+				}
 				deps.notify(
 					outcome.cleanRun ? "success" : "warning",
 					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on.
@@ -829,7 +841,12 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.catch((error: unknown) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
-				deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
+				const failed = deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
+				if (failed?.state === "cancelled") {
+					deps.stderr(`${renderFleetPlanCard(failed, deps.terminal.columns).join("\n")}\n`);
+					deps.notify("info", `fleet ${preview.name}: cancelled before every step settled`, "fleet-run:settled");
+					return;
+				}
 				if (error instanceof FleetWorkspaceBusyError) {
 					deps.notify("warning", `fleet ${preview.name}: ${error.message}`, "fleet-run:refused");
 					return;

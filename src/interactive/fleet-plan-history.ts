@@ -90,12 +90,11 @@ function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 		name: record.fleet,
 		startedAtMs: Date.parse(record.startedAt),
 		finishedAtMs: Number.isFinite(lastAt) ? lastAt : Date.parse(record.startedAt),
-		state: !ended ? "unsettled" : passed ? "passed" : "failed",
+		state: !ended ? "unsettled" : seal?.outcome === "aborted" ? "cancelled" : passed ? "passed" : "failed",
 		steps,
 		requiredStepCount: steps.length,
 		succeededStepCount,
 		costText: recordedCost(record, steps),
-		...(seal?.outcome === "aborted" ? { failure: "cancelled" } : {}),
 		...(!ended ? { failure: "no end recorded" } : {}),
 	};
 }

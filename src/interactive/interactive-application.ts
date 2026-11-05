@@ -1586,6 +1586,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		getSelectedRow: () => dispatchBoard.selectedRow(),
 		notify,
 		abortDispatch: (runId) => deps.dispatch.abort(runId),
+		cancelPlan: (rootId) => dispatchBoardStore.plans.cancel(rootId),
 		editor,
 		closeOverlay,
 		requestRender: () => tui.requestRender(),
