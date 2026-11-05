@@ -26,6 +26,7 @@ import { createAssistantGenerationTiming } from "../session-control/assistant-ge
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
+import type { TurnPreparationStep } from "../session-control/turn-state.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
@@ -71,7 +72,7 @@ import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { createDropAlerts } from "./telemetry-drops.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
-import { modelNickname } from "./theme/labels.js";
+import { formatWaitClock, modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { workerActivityWords } from "./worker-activity.js";
@@ -261,6 +262,17 @@ function willEnterSteerActiveWork(deps: InteractivePresentationDeps, text: strin
  * visual components, their mutable footer projection, and their refresh
  * timers as one lifecycle.
  */
+/** A step this short would flash a word nobody can read, so the rail keeps to `is preparing` until one lasts. */
+const PREPARATION_WORTH_NAMING_MS = 1000;
+const PREPARATION_STEP_WORDS: Readonly<Record<TurnPreparationStep, string>> = {
+	capabilities: "asking the target about the model",
+	"prompt-hook": "running your prompt hook",
+	images: "describing the attached images",
+	"turn-control": "reading turn controls",
+	"turn-start": "running turn-start steps",
+	compile: "compiling the prompt",
+};
+
 export function createInteractivePresentation(deps: InteractivePresentationDeps): InteractivePresentation {
 	const factories = { ...DEFAULT_FACTORIES, ...deps.factories };
 	const getCwd = deps.getCwd ?? (() => process.cwd());
@@ -625,7 +637,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	/** Routes that streamed reasoning this session, which the thinking rail then cannot deny. */
 	const reasoningRoutes = new Set<string>();
-	const routeKey = (target: string | null | undefined, model: string | null | undefined): string => `${target ?? ""}#${model ?? ""}`;
+	const routeKey = (target: string | null | undefined, model: string | null | undefined): string =>
+		`${target ?? ""}#${model ?? ""}`;
 	const unsubscribeReasoning = deps.chat.onEvent((event) => {
 		if (event.type !== "thinking_delta" || event.delta.length === 0) return;
 		const current = deps.getSettings?.();
@@ -757,6 +770,16 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
+		getPreparationDetail: () => {
+			const { phase, since, stage } = deps.chat.turnPreparation();
+			if (phase !== "preparing" || since <= 0) return null;
+			const now = Date.now();
+			if (now - since < PREPARATION_WORTH_NAMING_MS) return null;
+			const held = formatWaitClock(now - since);
+			return stage && now - stage.since >= PREPARATION_WORTH_NAMING_MS
+				? `${held} · ${PREPARATION_STEP_WORDS[stage.step]}`
+				: held;
+		},
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
 		getSteerRecipient: (token) => {
 			try {

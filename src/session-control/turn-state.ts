@@ -67,6 +67,8 @@ export interface ChatLoopRunSnapshot {
  * long enough for an operator to conclude the keystroke was lost.
  */
 export type TurnPreparationPhase = "idle" | "preparing" | "compacting";
+/** The awaited steps of a turn's preparation that can take real time. */
+export type TurnPreparationStep = "capabilities" | "prompt-hook" | "images" | "turn-control" | "turn-start" | "compile";
 
 /** A local request stage must stay distinct from an invoked stream stall (#424). */
 export type PreInvocationStage = "transform" | "auth" | "budget admission" | "admission";
@@ -105,6 +107,8 @@ export interface ChatTurnState {
 	turnPreparation: TurnPreparationPhase;
 	/** When the current preparation window opened, for its elapsed counter. */
 	turnPreparationSince: number;
+	/** The step inside the window worth naming if it takes time, with when it began. Null outside the window. */
+	turnPreparationStage: { step: TurnPreparationStep; since: number } | null;
 	/** Provider context rebuilt on session switch, consumed by the next runtime build. */
 	replayedContextMessages: AgentMessage[];
 	/** The user turn id of the in-flight submit; null between turns. */
@@ -195,6 +199,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		streaming: false,
 		turnPreparation: "idle",
 		turnPreparationSince: 0,
+		turnPreparationStage: null,
 		replayedContextMessages: [],
 		activeUserTurnId: null,
 		activeInterruptReason: null,

@@ -136,6 +136,8 @@ export interface EditorChrome {
 	 * indistinguishable from a dropped Enter (issue #251).
 	 */
 	getTurnPreparation?: () => TurnPreparationPhase;
+	/** How long the prompt has been held and the step taking the time, once either is worth a word. */
+	getPreparationDetail?: () => string | null;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
 	/** The running worker a draft's `@target` resolves to, by agent name, or null. */
@@ -554,8 +556,10 @@ export class ClioEditor extends Editor {
 			stateAlone = activity;
 		} else if (mode === "PREPARING" || mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
-			activity = theme.fg("harnessAction", mode === "PREPARING" ? "is preparing" : "is compacting context");
-			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? "preparing" : "compacting context");
+			const preparing = mode === "PREPARING" ? (this.chrome.getPreparationDetail?.() ?? null) : null;
+			const beside = preparing === null ? "" : ` · ${preparing}`;
+			activity = theme.fg("harnessAction", mode === "PREPARING" ? `is preparing${beside}` : "is compacting context");
+			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? `preparing${beside}` : "compacting context");
 		} else if (status) {
 			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
 			activity = theme.fg(status.token, status.label);
