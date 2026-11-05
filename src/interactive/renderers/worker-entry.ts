@@ -16,12 +16,7 @@ import {
 /** Bounded worker summaries share the main transcript's output style. */
 
 import { plainOutcomeLabel, workerFailureHeadline } from "../../domains/dispatch/failure-headline.js";
-import {
-	summarizeTrustStatus,
-	trustFailureWords,
-	trustStateWord,
-	validationClause,
-} from "../../domains/evidence/trust-projection.js";
+import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
@@ -196,15 +191,11 @@ function cardPrefix(entry: WorkerEntryState): string {
 /** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
 function settledAgainst(result: WorkerRunResultSummary): string | null {
 	if (result.outcome !== "succeeded") return null;
-	if (result.trust) {
-		const words = trustFailureWords(summarizeTrustStatus(result.trust));
-		if (words !== null) return words;
-	}
+	const trust = result.trust;
+	if (trust?.artifactIntegrity.state === "failed") return "seal broken";
+	if (trust?.validationGrounding.state === "failed") return "validation failed";
+	if (trust?.validationGrounding.state === "ungrounded") return "no check ran";
 	return result.contract === "fail" ? "result contract failed" : null;
-}
-
-function refusedCallsText(count: number): string {
-	return count === 1 ? "1 call refused" : `${count} calls refused`;
 }
 
 /**
