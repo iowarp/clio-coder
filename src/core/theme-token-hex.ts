@@ -1,6 +1,23 @@
 /** Terminal palette primitives. No renderer or website dependencies. */
 export type ThemeBackground = "dark" | "light";
 export type Hex = `#${string}`;
+export type Rgb = readonly [number, number, number];
+
+/** WCAG relative luminance of an sRGB color. */
+export function relativeLuminance(rgb: Rgb): number {
+	const channel = (value: number): number => {
+		const unit = value / 255;
+		return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+	};
+	return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+}
+
+/** WCAG contrast ratio between two colors, from 1 to 21. */
+export function contrastRatio(a: Rgb, b: Rgb): number {
+	const x = relativeLuminance(a);
+	const y = relativeLuminance(b);
+	return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
 
 /** [unknown background, dark, light], each as [truecolor, indexed color]. */
 type Projection = readonly [Hex, number];
@@ -9,22 +26,25 @@ type RampColor = readonly [Projection, Projection, Projection];
 /**
  * Warm stone and ivory follow the website's paper palette. Near-white is
  * reserved for answers and entered text; cyan and copper follow the IOWarp logo.
- * Unknown-background text occupies the middle luminance band. A declared
+ * Unknown-background colors occupy the narrow luminance band that holds 4.5:1 on
+ * both black and white. The dark and light projections hold 4.5:1 for text and
+ * 3:1 for rules on typical backgrounds and on the composer surface; see
+ * theme-contrast.ts for how they lift further on a reported background. A declared
  * surface supplies its own background and uses the corresponding projection.
  */
 export const TERMINAL_PALETTE = {
 	neutralSubdued: [
-		["#80786d", 244],
-		["#968d80", 245],
+		["#7d756b", 243],
+		["#978e81", 246],
 		["#716658", 242],
 	],
 	neutralSupporting: [
-		["#898071", 244],
+		["#7e7568", 243],
 		["#b1a592", 144],
 		["#65594b", 241],
 	],
 	neutralReading: [
-		["#928673", 245],
+		["#807565", 243],
 		["#c2b9aa", 180],
 		["#403a32", 238],
 	],
@@ -34,59 +54,59 @@ export const TERMINAL_PALETTE = {
 		["#322c24", 235],
 	],
 	neutralStrong: [
-		["#a0917c", 245],
+		["#817564", 243],
 		["#eeeae2", 255],
 		["#231f1a", 234],
 	],
 	ivorySubdued: [
 		["#807360", 243],
-		["#94836c", 244],
+		["#9c8d77", 144],
 		["#7a6850", 242],
 	],
 	ivorySupporting: [
-		["#8a8070", 244],
+		["#7f7567", 243],
 		["#b5a58e", 144],
 		["#68563f", 240],
 	],
 	ivoryReading: [
-		["#8f8271", 245],
+		["#807566", 243],
 		["#c9b89e", 180],
 		["#51412b", 237],
 	],
 	ivoryFocal: [
-		["#948773", 245],
+		["#817564", 243],
 		["#dbccb4", 187],
 		["#3e301f", 235],
 	],
 	ivoryStrong: [
-		["#998b78", 245],
+		["#817565", 243],
 		["#eee6d9", 230],
 		["#282015", 234],
 	],
 	cyanSupporting: [
-		["#288b91", 30],
+		["#268288", 30],
 		["#65afb6", 73],
 		["#326970", 23],
 	],
 	cyanReading: [
-		["#1b929a", 30],
+		["#18838b", 30],
 		["#55bec6", 80],
 		["#16666d", 23],
 	],
 	cyanFocal: [
-		["#15959e", 30],
+		["#13838b", 30],
 		["#43d9dc", 80],
 		["#0a666c", 23],
 	],
 	cyanStrong: [
-		["#09969f", 30],
+		["#08838b", 30],
 		["#8be9eb", 123],
 		["#07565c", 23],
 	],
 	turquoise: [
-		["#258e87", 30],
+		["#22847d", 30],
 		["#58c7b5", 79],
-		["#23685f", 29],
+		["#23685f", 23],
 	],
 	cyanDeep: [
 		["#29828e", 30],
@@ -94,24 +114,24 @@ export const TERMINAL_PALETTE = {
 		["#326375", 24],
 	],
 	orangeSupporting: [
-		["#a47b5b", 137],
+		["#946f52", 130],
 		["#c89977", 180],
 		["#805a3e", 95],
 	],
 	orangeReading: [
-		["#b77b47", 137],
+		["#9f6b3e", 130],
 		["#e7a16a", 215],
-		["#915321", 130],
+		["#915321", 94],
 	],
 	orangeFocal: [
-		["#c7783d", 172],
+		["#aa6634", 130],
 		["#ff9851", 209],
-		["#9a4812", 130],
+		["#9a4812", 94],
 	],
 	orangeStrong: [
-		["#ca7b3d", 172],
+		["#a86733", 130],
 		["#ffb578", 215],
-		["#843d0e", 130],
+		["#843d0e", 94],
 	],
 	successSupporting: [
 		["#409075", 65],
@@ -119,12 +139,12 @@ export const TERMINAL_PALETTE = {
 		["#326e53", 29],
 	],
 	success: [
-		["#2a9c5c", 65],
+		["#248750", 29],
 		["#34d399", 42],
-		["#1d7440", 28],
+		["#1d7440", 22],
 	],
 	syntaxLiteral: [
-		["#158990", 30],
+		["#14838a", 30],
 		["#59b9bd", 73],
 		["#0a666c", 23],
 	],
@@ -134,9 +154,9 @@ export const TERMINAL_PALETTE = {
 		["#76602a", 94],
 	],
 	warning: [
-		["#b08000", 136],
+		["#996f00", 100],
 		["#ffd166", 221],
-		["#805600", 94],
+		["#805600", 58],
 	],
 	errorSupporting: [
 		["#b66c6c", 131],
@@ -144,19 +164,19 @@ export const TERMINAL_PALETTE = {
 		["#934747", 131],
 	],
 	error: [
-		["#dd5353", 167],
+		["#ca4c4c", 131],
 		["#f87171", 210],
 		["#bf3030", 124],
 	],
 	border: [
 		["#737a80", 243],
-		["#526762", 240],
-		["#bbc3c8", 250],
+		["#6c7e79", 244],
+		["#7c8185", 244],
 	],
 	divider: [
 		["#737a80", 243],
-		["#3e514c", 239],
-		["#cbd1d6", 252],
+		["#657571", 243],
+		["#868a8e", 102],
 	],
 	surface: [
 		["#151412", 233],

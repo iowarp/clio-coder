@@ -1,5 +1,6 @@
-import { terminalBackground } from "../../core/terminal-background.js";
+import { terminalBackground, terminalBackgroundColor, terminalColorVersion } from "../../core/terminal-background.js";
 import { colorDisabled } from "../../core/terminal-preferences.js";
+import { adaptPalette, type ProjectedColor } from "../../core/theme-contrast.js";
 import {
 	DEFAULT_THEME_CONTEXT,
 	isSemanticRole,
@@ -23,15 +24,25 @@ export type { ThemeBackground } from "../../core/theme-token-hex.js";
 /** Semantic roles plus explicit compatibility names for configured roster colors. */
 export type ClioToken = SemanticRole | LegacyToken;
 
-interface TokenColor {
-	rgb: readonly [number, number, number];
-	xterm: number;
-}
+type TokenColor = ProjectedColor & { readonly terminalForeground?: boolean };
+// With no background reported, primary text is the terminal's own default
+// foreground, the one color certain to read. Secondary text and accents stay in
+// the mid-luminance band so the hierarchy survives.
+const TERMINAL_FOREGROUND_ON_UNKNOWN = new Set<PaletteColor>([
+	"neutralReading",
+	"neutralFocal",
+	"neutralStrong",
+	"ivoryReading",
+	"ivoryFocal",
+	"ivoryStrong",
+]);
 const PALETTES = new Map<ThemeBackground | null, Record<PaletteColor, TokenColor>>();
+let palettesVersion = terminalColorVersion();
 let overrides: Record<string, { dark: string; light: string }> | undefined;
 let epoch = 0;
+/** Moves with a skin or a terminal background change; painted-row caches key on it. */
 export function skinEpoch(): number {
-	return epoch;
+	return epoch + terminalColorVersion();
 }
 export function setPaletteSkin(palette: typeof overrides): void {
 	overrides =
@@ -49,16 +60,28 @@ function rgbXterm(rgb: readonly number[]): number {
 /** Any SGR sequence; built from the escape code so the source carries no control character. */
 const SGR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "gu");
 function palette(background: ThemeBackground | null): Record<PaletteColor, TokenColor> {
+	if (palettesVersion !== terminalColorVersion()) {
+		palettesVersion = terminalColorVersion();
+		PALETTES.clear();
+	}
 	let colors = PALETTES.get(background);
 	if (colors === undefined) {
-		colors = Object.fromEntries(
+		const projected = Object.fromEntries(
 			(Object.keys(TERMINAL_PALETTE) as PaletteColor[]).map((name): [PaletteColor, TokenColor] => {
 				const override = overrides?.[name]?.[background ?? "dark"];
 				const [hex, xterm] = override === undefined ? paletteProjection(name, background) : [override, 0];
 				const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
-				return [name, { rgb, xterm: override === undefined ? xterm : rgbXterm(rgb) }];
+				if (override !== undefined) return [name, { rgb, xterm: rgbXterm(rgb) }];
+				return [name, { rgb, xterm, terminalForeground: background === null && TERMINAL_FOREGROUND_ON_UNKNOWN.has(name) }];
 			}),
 		) as Record<PaletteColor, TokenColor>;
+		// The reported color solves only the palette of the scheme it belongs to, so
+		// a theme pinned to the other scheme keeps its declared projection.
+		const reported = background !== null && background === terminalBackground() ? terminalBackgroundColor() : null;
+		colors =
+			reported === null || background === null
+				? projected
+				: adaptPalette(projected, reported, background, new Set(Object.keys(overrides ?? {}) as PaletteColor[]));
 		PALETTES.set(background, colors);
 	}
 	return colors;
@@ -140,6 +163,7 @@ function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 function fgCode(color: TokenColor, truecolor: boolean): string {
+	if (color.terminalForeground) return "39";
 	return truecolor ? `38;2;${color.rgb[0]};${color.rgb[1]};${color.rgb[2]}` : `38;5;${color.xterm}`;
 }
 
@@ -157,10 +181,21 @@ export function createClioTheme(
 ): ClioTheme {
 	const truecolor = options.truecolor ?? detectTruecolor();
 	const color = options.color ?? !colorDisabled();
-	const background = options.background === undefined ? terminalBackground() : options.background;
+	// Shared themes outlive a light and dark switch, so a theme with no pinned
+	// background reads the live one, once per reported change.
+	let followed = options.background === undefined ? terminalBackground() : options.background;
+	let followedVersion = terminalColorVersion();
+	const currentBackground = (): ThemeBackground | null => {
+		if (options.background === undefined && followedVersion !== terminalColorVersion()) {
+			followedVersion = terminalColorVersion();
+			followed = terminalBackground();
+		}
+		return followed;
+	};
 	const context = () => options.context ?? renderContext;
 	const colorFor = (token: ClioToken, state?: RoleState): TokenColor => {
 		const scope = context();
+		const background = currentBackground();
 		return palette(projectsYolo(scope) ? (background ?? "dark") : background)[tokenStyle(token, scope, state).color];
 	};
 	const paint = (text: string, mods: PaintMods): string => {
