@@ -74,7 +74,10 @@ export function silenceNoteForms(
 		];
 	}
 	const request = status.modelRequest;
-	const sentAt = request?.sentAt ?? status.waitingSince ?? status.since;
+	// The clock the rail beside this row counts, so the two never read a second apart. Only an admission moves the send.
+	const waitingFrom = status.retry?.attemptStartedAt ?? status.waitingSince ?? status.since;
+	const sentAt =
+		request?.admissionBeganAt !== undefined && request.admissionBeganAt >= waitingFrom ? request.sentAt : waitingFrom;
 	const evidenceMs = now - (request?.firstByteAt ?? sentAt);
 	const silent = age(evidenceMs);
 	const claim = request?.firstByteAt

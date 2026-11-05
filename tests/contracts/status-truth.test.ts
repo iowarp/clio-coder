@@ -7,6 +7,7 @@ import {
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
 import {
 	createWorkerApprovalWindows,
 	WORKER_APPROVAL_HOLD_CEILING_MS,
@@ -28,6 +29,7 @@ import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
+import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
@@ -1301,4 +1303,59 @@ test("a moved request needs no retry budget and its aborted call forecasts no fa
 		ladder.statuses.map((status) => status.phase),
 		["moved"],
 	);
+});
+
+test("a long silence states its evidence age, what is usual and the limit, and never that anything progressed", () => {
+	const at = 1_000_000;
+	const waiting = {
+		phase: "waiting_model",
+		since: at - 95_000,
+		waitingSince: at - 95_000,
+		lastMeaningfulAt: at - 95_000,
+		watchdogTier: 3,
+		watchdogPeak: 3,
+		localRuntime: false,
+		modelRequest: { sentAt: at - 95_000, firstByteAt: null, bytesObservable: true },
+	} as never;
+	const first = (history: { calls: number; slowestMs: number } | null) =>
+		silenceNoteForms(waiting, at, DEFAULT_RETRY_SETTINGS, history)?.[0] ?? "";
+	match(
+		first(null),
+		/No bytes for 1m35s, usual time for this route unknown\. Clio ends this call after 10m of silence/u,
+	);
+	// One call is not a usual.
+	match(first({ calls: 1, slowestMs: 8_000 }), /usual time for this route unknown/u);
+	match(first({ calls: 3, slowestMs: 8_000 }), /longer than usual for this route \(slowest this session 8\.0s\)/u);
+	match(first({ calls: 3, slowestMs: 180_000 }), /this route has taken up to 3m this session/u);
+	const streaming = { ...(waiting as object), phase: "writing", lastMeaningfulAt: at - 95_000 } as never;
+	match(
+		silenceNoteForms(streaming, at, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "",
+		/No new output for 1m35s.*after 3m of silence/u,
+	);
+	strictEqual(
+		silenceNoteForms(
+			{ ...(waiting as object), lastMeaningfulAt: at - 60_000 } as never,
+			at,
+			DEFAULT_RETRY_SETTINGS,
+			null,
+		),
+		null,
+	);
+	strictEqual(
+		silenceNoteForms({ ...(waiting as object), phase: "tool_running" } as never, at, DEFAULT_RETRY_SETTINGS, null),
+		null,
+	);
+});
+
+test("a write refused beside a lint that changed nothing is a blocked change, and any changed path keeps the old reading", () => {
+	const stats = new Map(
+		[
+			{ tool: "bash", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 },
+			{ tool: "write", count: 1, ok: 0, errors: 0, blocked: 1, totalDurationMs: 1 },
+		].map((stat) => [stat.tool, stat]),
+	);
+	const classify = (tool: string) => (tool === "bash" ? "execute" : "write") as never;
+	strictEqual(blockedWriteAttempts(stats, classify, 0), 1);
+	strictEqual(blockedWriteAttempts(stats, classify, 2), null);
+	strictEqual(blockedWriteAttempts(stats, classify), null);
 });
