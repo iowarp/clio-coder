@@ -1,6 +1,12 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { decodePrintableKey, isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
-import { MUTATION_PREVIEW_KEY, PERMISSION_STOP_KEY, PERMISSION_TERMS_KEY } from "./permission-hint.js";
+import { backOutOneLayer } from "./escape-layers.js";
+import {
+	MUTATION_PREVIEW_KEY,
+	PERMISSION_STOP_KEY,
+	PERMISSION_TERMS_KEY,
+	permissionEscapeLayers,
+} from "./permission-hint.js";
 
 export type OverlayState =
 	| "closed"
@@ -60,6 +66,8 @@ export interface PermissionOverlayKeyDeps {
 	scrollMutationInspection?: (delta: number) => void;
 	/** Fold or unfold the standing approval terms on the card. */
 	togglePermissionTerms?: () => void;
+	/** Whether the terms are unfolded, so Esc folds them before it denies. */
+	isShowingPermissionTerms?: () => boolean;
 	/** Scroll a card taller than its rows (BT-005); false leaves the key unconsumed. */
 	scrollPermissionCard?: (delta: number) => boolean;
 	/** Page the fullscreen transcript behind a card that has nothing of its own to scroll; false when there is no viewport. */
@@ -194,8 +202,15 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		if (direction !== 0 && deps.scrollTranscript(direction)) return true;
 	}
 	if (isEscapeKey(data)) {
-		if ((deps.isInspectingMutation?.() ?? false) && deps.toggleMutationInspection) deps.toggleMutationInspection();
-		else deps.cancelPermission();
+		const inspecting = (deps.isInspectingMutation?.() ?? false) && deps.toggleMutationInspection !== undefined;
+		const terms = (deps.isShowingPermissionTerms?.() ?? false) && deps.togglePermissionTerms !== undefined;
+		backOutOneLayer(
+			permissionEscapeLayers(inspecting ? "open" : "closed", terms ? "open" : "closed", {
+				hideDetails: () => deps.toggleMutationInspection?.(),
+				hideTerms: () => deps.togglePermissionTerms?.(),
+				deny: deps.cancelPermission,
+			}),
+		);
 		return true;
 	}
 	// Denying one call does not stop the model asking again, and it re-asked six

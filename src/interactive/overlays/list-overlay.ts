@@ -11,6 +11,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { backOutOneLayer, type EscapeLayers, innermostEscapeLayer } from "../escape-layers.js";
 import { localKey } from "../keyboard-owner.js";
 import {
 	buildHint,
@@ -532,38 +533,51 @@ export class ListOverlayView implements Component {
 	}
 
 	/**
-	 * Esc clears a nonempty filter first. Explicit search then returns to the
-	 * list before a further Esc closes the overlay.
+	 * Esc by the shared rule: a nonempty filter clears first, explicit search then
+	 * returns to the list, an inner level is left before the overlay is (drilling
+	 * into a package's members and pressing Esc returns to the packages, not out of
+	 * the Library with the category, mode and scope the operator set), and only
+	 * then does Esc close. The footer reads its Esc word from the same list.
 	 */
-	private clearFilterOrClose(): void {
-		if (this.filterText.length > 0) {
-			this.filterText = "";
-			this.input.setValue("");
-			this.selectIndex(0);
-			this.onChange();
-			return;
-		}
-		if (this.options.explicitSearch && this.isFilterFocused) {
-			this.isFilterFocused = false;
-			this.onChange();
-			return;
-		}
-		// An inner level is left before the overlay is. Drilling into a package's
-		// members and pressing Esc should return to the packages, not close the
-		// Library and lose the category, mode and scope the operator set.
-		if (this.options.onBack?.active()) {
-			this.options.onBack.back();
-			this.onChange();
-			return;
-		}
-		this.options.onClose();
+	private escapeLayers(): EscapeLayers {
+		const onBack = this.options.onBack;
+		return [
+			this.filterText.length > 0 && {
+				verb: "clear filter",
+				back: () => {
+					this.filterText = "";
+					this.input.setValue("");
+					this.selectIndex(0);
+					this.onChange();
+				},
+			},
+			this.options.explicitSearch === true &&
+				this.isFilterFocused && {
+					verb: "back to list",
+					short: "back",
+					back: () => {
+						this.isFilterFocused = false;
+						this.onChange();
+					},
+				},
+			onBack?.active() === true && {
+				verb: "back",
+				back: () => {
+					onBack.back();
+					this.onChange();
+				},
+			},
+			{ verb: "close", back: () => this.options.onClose() },
+		];
 	}
 
-	/** The verb Esc carries right now, following clearFilterOrClose exactly. */
+	private clearFilterOrClose(): void {
+		backOutOneLayer(this.escapeLayers());
+	}
+
+	/** The verb Esc carries right now, read from the layers the key backs out of. */
 	private escapeVerb(): OverlayEscVerb {
-		if (this.filterText.length > 0) return "clear filter";
-		if (this.options.onBack?.active()) return "back";
-		return "close";
+		return (innermostEscapeLayer(this.escapeLayers())?.verb ?? "close") as OverlayEscVerb;
 	}
 
 	/**
@@ -597,7 +611,7 @@ export class ListOverlayView implements Component {
 		if (this.options.explicitSearch && this.isFilterFocused) {
 			return {
 				entries: [{ key: "Enter", verb: "back to list", critical: true }],
-				esc: this.filterText.length > 0 ? "clear filter" : "back",
+				esc: this.escapeVerb(),
 			};
 		}
 		const tabEntry = this.tabHintEntry();
@@ -676,13 +690,16 @@ export class ListOverlayView implements Component {
 	 */
 	private leadWidth(width: number, items: ReadonlyArray<ListOverlayItem>): number {
 		const narrow = width <= NARROW_ROW_WIDTH;
+		const cap = Math.max(8, Math.floor(width * LEAD_COLUMN_SHARE));
 		let widest = 0;
 		for (const item of items) {
 			const cells = item.cells;
 			if (!cells) continue;
-			widest = Math.max(widest, visibleWidth(narrow && cells.narrowLead !== undefined ? cells.narrowLead : cells.lead));
+			const full = visibleWidth(cells.lead);
+			const short = cells.narrowLead === undefined ? full : visibleWidth(cells.narrowLead);
+			widest = Math.max(widest, narrow || full > cap ? short : full);
 		}
-		return Math.min(widest, Math.max(8, Math.floor(width * LEAD_COLUMN_SHARE)));
+		return Math.min(widest, cap);
 	}
 
 	/**
@@ -696,7 +713,10 @@ export class ListOverlayView implements Component {
 		if (!cells) return item.label;
 		const theme = clioTheme();
 		const narrow = width <= NARROW_ROW_WIDTH;
-		const lead = narrow && cells.narrowLead !== undefined ? cells.narrowLead : cells.lead;
+		// A lead the column would cut takes its short form at any width: a whole
+		// `/run <agent> <task>` says more than `/run [--agent-profile <profile>] […`.
+		const lead =
+			cells.narrowLead !== undefined && (narrow || visibleWidth(cells.lead) > leadWidth) ? cells.narrowLead : cells.lead;
 		const fitted = padAnsi(truncateToWidth(lead, leadWidth, GLYPH.ellipsis, false), leadWidth);
 		if (focused) return `${fitted}  ${cells.text}`;
 		return `${theme.fg("menuOption", fitted)}  ${theme.fg("menuDescription", cells.text)}`;

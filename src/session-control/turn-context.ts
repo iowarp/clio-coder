@@ -171,7 +171,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { coldReasonText } from "./cold-reasons.js";
-import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./compaction-lines.js";
+import { footerTokens, renderCompactionSummaryLine, renderEvictionSkipLine } from "./compaction-lines.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
@@ -2125,7 +2125,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						beforeSummaryCall: async (hold) => {
 							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold);
 							if (!summaryLifecycleStarted) startSummaryLifecycle();
-							emitCompactionActivity("running", "summarizing session history", "summarize");
+							// The size being summarized is the one scale this stage has: the
+							// summarizer reports no progress of its own while it reads.
+							emitCompactionActivity(
+								"running",
+								`summarizing ${footerTokens(footerTokensBefore)} tokens of session history`,
+								"summarize",
+							);
 						},
 					})) ?? null
 				);

@@ -10,9 +10,11 @@ import {
 /**
  * Contrast rules for the palette, solved against the background the terminal
  * reports. Each color is paired with the surfaces it is painted on and a level,
- * and takes the strictest result across them. Text needs 4.5:1, a rail or meter
- * fill 3:1. Frames and dividers carry no words and stay quiet by design at 2:1;
- * a word on a rule is painted in a text role.
+ * and takes the strictest result across them. Text needs 4.5:1 and every mark
+ * without words needs 3:1, the WCAG floor for non-text contrast: a frame or
+ * divider tells the operator where a card or a section ends, and a meter's
+ * reserve segment is painted in the divider color. A word on a rule is painted
+ * in a text role.
  *
  * A color that passes is left alone. One that fails is mixed toward white or
  * black, which keeps its hue and can only reduce its chroma, so nothing turns
@@ -21,7 +23,7 @@ import {
  */
 const CONTRAST_TEXT = 4.5;
 const CONTRAST_UI = 3;
-const CONTRAST_HAIRLINE = 2;
+const CONTRAST_HAIRLINE = 3;
 const HAIRLINES = new Set<PaletteColor>(["border", "divider"]);
 
 export interface ProjectedColor {

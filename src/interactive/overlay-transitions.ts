@@ -15,6 +15,13 @@ export interface OverlayTransitionsDeps {
 	 * overlay held the screen; nothing else re-attempts that dialog.
 	 */
 	onOverlayClosed?: () => void;
+	/**
+	 * Whether an overlay a permission prompt interrupted still has something to
+	 * show. One that does not is put away when the prompt closes instead of coming
+	 * back: a queue navigator the run drained behind the card would otherwise
+	 * return empty and take the keys the operator typed next for the composer.
+	 */
+	restorable?: (state: OverlayState) => boolean;
 }
 
 export interface OverlayTransitions {
@@ -76,8 +83,12 @@ export function createOverlayTransitions(deps: OverlayTransitionsDeps): OverlayT
 		}
 		const leaving = state;
 		const leavingHandle = handle;
-		const restoring = leaving === "permission-confirm" ? interrupted : null;
+		let restoring = leaving === "permission-confirm" ? interrupted : null;
 		interrupted = null;
+		if (restoring !== null && deps.restorable?.(restoring.state) === false) {
+			restoring.handle?.hide();
+			restoring = null;
+		}
 		state = restoring?.state ?? "closed";
 		handle = restoring?.handle ?? null;
 		if (restoring === null) deps.stopDispatchBoardTicker();
