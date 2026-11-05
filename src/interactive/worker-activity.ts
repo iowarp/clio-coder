@@ -1,5 +1,6 @@
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
 import { GLYPH } from "./theme/index.js";
+import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
 /**
  * What a running worker is doing when no call is in flight, by the phase its
@@ -112,14 +113,33 @@ export function workerActionParts(action: WorkerAction, tense: "running" | "fini
 }
 
 /**
+ * Whose wait this is, when it ends and what happens then, because nothing else
+ * on a dock or rail says the ask has an end. Without a window the wait has no
+ * end this process knows of, so it states none.
+ */
+export function approvalWaitWords(
+	progress: Pick<WorkerProgressSnapshot, "approvalWindow">,
+	options: { now?: number; narrow?: boolean } = {},
+): string {
+	const window = progress.approvalWindow;
+	if (window === undefined) return WAITING_FOR_APPROVAL;
+	const left = formatUnattendedRemaining(window.expiresAt - (options.now ?? Date.now()));
+	const next = window.fallback === "fail" ? `run fails in ${left}` : `denied in ${left}`;
+	return [options.narrow === true ? "your approval" : WAITING_FOR_APPROVAL, ...(window.held ? ["held"] : []), next].join(
+		" · ",
+	);
+}
+
+/**
  * The activity a narrow row can afford: the running call's verb, or its tool
  * when the runtime sent no descriptor, else the phase's words. The card states
  * the call's object beside the verb; the island has room for the verb alone.
  */
 export function workerActivityWords(
-	progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction" | "awaitingApproval">,
+	progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction" | "awaitingApproval" | "approvalWindow">,
+	options: { now?: number; narrow?: boolean } = {},
 ): string {
-	if (progress.awaitingApproval === true) return WAITING_FOR_APPROVAL;
+	if (progress.awaitingApproval === true) return approvalWaitWords(progress, options);
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
 	return workerPhaseActivity(progress.phase)[1];

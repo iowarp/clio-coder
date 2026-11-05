@@ -22,7 +22,7 @@ export interface ApprovalRequestView {
 	tool: string;
 	actionClass: ActionClass;
 	axis: { kind: "net"; ruleId: string } | { kind: "autonomy"; level: string };
-	origin: { kind: "main" } | { kind: "worker"; agentId: string; runId: string };
+	origin: { kind: "main" } | { kind: "worker"; agentId: string; runId: string; endsWithTurn?: boolean };
 	/** Admission-normalized exposure. Caller prose never supplies presentation fields. */
 	exposure?: AutonomyExposure;
 	reason: string;

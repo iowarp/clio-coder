@@ -31,6 +31,7 @@ import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunResult, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
+import type { WorkerApprovalWindowView } from "./worker-approval-window.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
 
 export interface ResolvedVerificationCheck {
@@ -558,6 +559,19 @@ export interface DispatchContract {
 	 * fakes need not implement it; the real dispatch extension always does.
 	 */
 	resolveWorkerPermission?(runId: string, requestId: string, decision: "approve" | "deny"): void;
+
+	/**
+	 * The window this process runs for a worker's ask, or null when it runs none
+	 * (a main-routed ask, or a request that already settled). Only an ask with a
+	 * window can be held.
+	 */
+	workerPermissionWindow?(requestId: string): WorkerApprovalWindowView | null;
+	/** The main turn is waiting on this run, so cancelling the turn stops the worker too. */
+	workerRunEndsWithTurn?(runId: string): boolean;
+	/** The person is at this ask's card: it waits until its ceiling, then the fallback applies. */
+	holdWorkerPermission?(requestId: string): boolean;
+	/** The person is present and this ask is queued behind another card: its window starts again. */
+	restartWorkerPermission?(requestId: string): boolean;
 
 	/** Live main-agent grants for native worker asks; absent in minimal bundles. */
 	grants?: WorkerGrantsContract;

@@ -317,7 +317,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "default",
 		getOverlayState: () => overlayTransitions.state,
-		openPermissionOverlay: (view, inspect, invocation, advisory, countdown) => {
+		openPermissionOverlay: (view, inspect, invocation, advisory, countdown, workerWindow) => {
 			if (overlayTransitions.state === "permission-confirm") return false;
 			// The draft reader lets the card say that Enter is inert while a draft
 			// exists (#186), beside the rail that names the key that clears it.
@@ -329,6 +329,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				countdown,
 				() => editor.getText().length > 0,
 				() => deps.app.chat.isStreaming(),
+				workerWindow,
 			);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {

@@ -298,6 +298,14 @@ export interface WorkerEscalationConfig {
 	/** Posture applied when the operator does not decide within timeoutMs. */
 	fallback: "deny" | "fail";
 	/**
+	 * Set only by a dispatching process that runs timeoutMs itself and answers
+	 * with a timeout decision on stdin, which is what lets a person hold the
+	 * window. The worker's own timer then waits this long instead, as a backstop
+	 * for a parent that stopped answering. Absent means no parent owns the window,
+	 * and the worker applies the fallback at timeoutMs on its own.
+	 */
+	backstopMs?: number;
+	/**
 	 * "none" when the dispatching process has no operator who can answer a
 	 * worker escalation (headless run, ACP, the fleet CLI). The worker then
 	 * applies the fallback at once with a reason saying so, instead of parking
@@ -1160,6 +1168,13 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 		if (escalation.fallback !== "deny" && escalation.fallback !== "fail") {
 			throw new Error('WorkerSpec.escalation.fallback must be "deny" or "fail"');
+		}
+		const backstopMs = escalation.backstopMs;
+		if (
+			backstopMs !== undefined &&
+			(typeof backstopMs !== "number" || !Number.isFinite(backstopMs) || backstopMs < timeoutMs)
+		) {
+			throw new Error("WorkerSpec.escalation.backstopMs must be a finite number no shorter than timeoutMs");
 		}
 		if (escalation.responder !== undefined && escalation.responder !== "none") {
 			throw new Error('WorkerSpec.escalation.responder must be "none" when present');

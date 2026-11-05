@@ -18,7 +18,15 @@ export type DecisionAxis =
 	| { kind: "autonomy"; level: string }
 	| { kind: "safety-net"; ruleId: string };
 
-export type DecisionOrigin = { kind: "main" } | { kind: "worker"; agentId: string; runId: string };
+export type DecisionOrigin =
+	| { kind: "main" }
+	| {
+			kind: "worker";
+			agentId: string;
+			runId: string;
+			/** The main turn is waiting on this run, so ending the turn ends the worker too. */
+			endsWithTurn?: boolean;
+	  };
 
 /** A safety-net rail as the parked row, the grant row and the notice name it. */
 export function safetyNetRailText(ruleId: string): string {
@@ -307,7 +315,9 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 						: "Approve workspace action once";
 	const stopConsequence =
 		facts.origin.kind === "worker"
-			? "Denies this worker request and ends any active main-agent turn. This worker keeps running without the call, and other worker requests still wait for you."
+			? facts.origin.endsWithTurn === true
+				? "Denies this worker request and ends the main-agent turn, which also stops this worker because the turn is waiting on it. Other worker requests still wait for you."
+				: "Denies this worker request and ends any active main-agent turn. This worker keeps running without the call, and other worker requests still wait for you."
 			: "Denies every parked request from this turn and ends the run.";
 	return [
 		{

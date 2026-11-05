@@ -6,6 +6,12 @@ import {
 	type ModelAdmissionEvent,
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import {
+	createWorkerApprovalWindows,
+	WORKER_APPROVAL_HOLD_CEILING_MS,
+	workerApprovalBackstopMs,
+} from "../../src/domains/dispatch/worker-approval-window.js";
 import { mainCallExposure } from "../../src/domains/safety/call-consequence.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import {
@@ -13,13 +19,19 @@ import {
 	formatStatedWait,
 	RATE_LIMIT_WAIT_BUDGET_MS,
 	retryWaitCause,
+	retryWaitCause,
 	statedRetryWaitMs,
 } from "../../src/domains/session/retry.js";
+import { createWorkerProgressFold, type WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import { railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
+import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
+import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
 import {
 	type ApprovalRequestView,
 	createPermissionOverlayBody,
@@ -27,7 +39,14 @@ import {
 } from "../../src/interactive/permission-overlay.js";
 import { providerFailureAdvice } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
-import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
+import {
+	buildSummary,
+	reduceStatus,
+	reduceStatus,
+	type StatusInputEvent,
+	type StatusInputEvent,
+} from "../../src/interactive/status/index.js";
+import { workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
 import {
 	type AgentStatus,
@@ -38,6 +57,7 @@ import {
 import type { RetryStatusPayload, TurnRecoveryDeps } from "../../src/session-control/turn-recovery.js";
 import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
+import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 
 const STUCK_AFTER_MS = 180_000;
 
@@ -877,4 +897,273 @@ test("what just happened borrows the footer slot from a standing warning, never 
 	strictEqual(topNotification([standing, notice("older", "info", 500, 12_000)], 6_000)?.id, "standing");
 	strictEqual(topNotification([standing, notice("tip: keys", "info", 5_000, 17_000)], 6_000)?.id, "standing");
 	strictEqual(topNotification([notice("fault", "error", 1_000, null), applied], 6_000)?.id, "fault");
+});
+
+function manualWindows(denyResult = true) {
+	let at = 0;
+	const timers = new Map<number, { fire: () => void; dueAt: number }>();
+	let nextId = 0;
+	const denials: string[] = [];
+	const windows = createWorkerApprovalWindows({
+		now: () => at,
+		setTimer: (callback, ms) => {
+			nextId += 1;
+			timers.set(nextId, { fire: callback, dueAt: at + ms });
+			return nextId;
+		},
+		clearTimer: (handle) => {
+			timers.delete(handle as number);
+		},
+	});
+	return {
+		windows,
+		denials,
+		open(requestId: string, windowMs = 120_000): void {
+			windows.open({
+				runId: "run",
+				agentId: "coder",
+				requestId,
+				windowMs,
+				fallback: "deny",
+				deny: () => {
+					denials.push(requestId);
+					return denyResult;
+				},
+			});
+		},
+		advance(ms: number): void {
+			at += ms;
+			for (const [id, timer] of [...timers]) {
+				if (timer.dueAt > at) continue;
+				timers.delete(id);
+				timer.fire();
+			}
+		},
+	};
+}
+
+test("a parent-owned worker window answers with a timeout at its end, and a late answer is known to be late", () => {
+	const rig = manualWindows();
+	rig.open("ask");
+	rig.advance(119_000);
+	deepStrictEqual(rig.denials, []);
+	strictEqual(rig.windows.read("ask")?.remainingMs, 1_000);
+	rig.advance(1_000);
+	deepStrictEqual(rig.denials, ["ask"]);
+	ok(rig.windows.isExpired("ask"), "an answer racing the denial reaches nothing");
+	rig.windows.settle("ask");
+	strictEqual(rig.windows.read("ask"), null);
+});
+
+test("a key holds a worker window until its ceiling, not forever, and the worker's backstop sits past that", () => {
+	const rig = manualWindows();
+	rig.open("ask");
+	rig.advance(60_000);
+	ok(rig.windows.hold("ask"));
+	strictEqual(rig.windows.hold("ask"), false, "a second key cannot extend it");
+	const held = rig.windows.read("ask");
+	strictEqual(held?.held, true);
+	strictEqual(held?.remainingMs, WORKER_APPROVAL_HOLD_CEILING_MS - 60_000);
+	rig.advance(WORKER_APPROVAL_HOLD_CEILING_MS - 61_000);
+	deepStrictEqual(rig.denials, [], "still held past the window it was given");
+	rig.advance(1_000);
+	deepStrictEqual(rig.denials, ["ask"]);
+	ok(workerApprovalBackstopMs(120_000) > WORKER_APPROVAL_HOLD_CEILING_MS);
+	ok(workerApprovalBackstopMs(3_600_000) > 3_600_000, "a window past the ceiling still ends before the backstop");
+});
+
+test("an answered worker ask cannot be denied by its window afterwards", () => {
+	const rig = manualWindows();
+	rig.open("ask");
+	rig.windows.settle("ask");
+	rig.advance(WORKER_APPROVAL_HOLD_CEILING_MS);
+	deepStrictEqual(rig.denials, []);
+});
+
+test("a queued worker ask starts its window again when the person shows up, never past its ceiling", () => {
+	const rig = manualWindows();
+	rig.open("queued");
+	rig.advance(100_000);
+	ok(rig.windows.restart("queued"));
+	strictEqual(rig.windows.read("queued")?.remainingMs, 120_000);
+	rig.advance(100_000);
+	deepStrictEqual(rig.denials, []);
+	ok(rig.windows.hold("queued"));
+	strictEqual(rig.windows.restart("queued"), false, "a held window is not restarted");
+});
+
+test("only a denial on the permission_decision line can carry the timeout cause", () => {
+	const demux = createWorkerStdinDemux();
+	const seen: unknown[] = [];
+	demux.feed(`${JSON.stringify({ not: "a spec" })}\n`);
+	demux.readSpec().catch(() => {});
+	demux.onPermissionDecision((decision) => seen.push(decision));
+	demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "a", decision: "deny", cause: "timeout" })}\n`);
+	demux.feed(
+		`${JSON.stringify({ type: "permission_decision", requestId: "b", decision: "approve", cause: "timeout" })}\n`,
+	);
+	demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "c", decision: "deny" })}\n`);
+	deepStrictEqual(seen, [
+		{ requestId: "a", decision: "deny", cause: "timeout" },
+		{ requestId: "b", decision: "approve" },
+		{ requestId: "c", decision: "deny" },
+	]);
+});
+
+test("a worker's wait states when it ends, what happens then, and that it is held", () => {
+	const fold = createWorkerProgressFold();
+	fold.observe({ type: "clio_coder_permission_escalated", payload: { requestId: "ask", tool: "bash" } });
+	strictEqual(workerActivityWords(fold.snapshot()), "waiting for your approval", "no window, no claimed end");
+	fold.observe({
+		type: "clio_coder_permission_window",
+		payload: { requestId: "ask", held: false, expiresAt: 119_000, fallback: "deny" },
+	});
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · denied in 1:59");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, narrow: true }), "your approval · denied in 1:59");
+	fold.observe({
+		type: "clio_coder_permission_window",
+		payload: { requestId: "ask", held: true, expiresAt: 822_000, fallback: "fail" },
+	});
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · held · run fails in 13:42");
+	fold.observe({ type: "clio_coder_permission_resolved", payload: { requestId: "ask", tool: "bash" } });
+	strictEqual(fold.snapshot().approvalWindow, undefined);
+	strictEqual(fold.snapshot().awaitingApproval, undefined);
+});
+
+test("a worker card with a parent-owned window offers the hold, then says it is held and when it still ends", () => {
+	const view: ApprovalRequestView = {
+		requestId: "req",
+		tool: "bash",
+		actionClass: "execute",
+		axis: { kind: "autonomy", level: "default" },
+		origin: { kind: "worker", agentId: "coder", runId: "run" },
+		reason: "bash needs approval",
+	};
+	const card = (window: { remainingMs: number; held: boolean } | null, seen: ApprovalRequestView = view): string =>
+		createPermissionOverlayBody(
+			seen,
+			undefined,
+			undefined,
+			undefined,
+			() => (window === null ? 119_000 : null),
+			undefined,
+			undefined,
+			() => window,
+		)
+			.render(200)
+			.map((row) => stripTerminalSequences(row))
+			.join("\n");
+	match(card({ remainingMs: 119_000, held: false }), /No answer in 1:59 denies this call.*Any key holds the card\./u);
+	const held = card({ remainingMs: 822_000, held: true });
+	match(held, /Timer held\. No answer in 13:42 denies this call/u);
+	doesNotMatch(held, /Any key holds/u);
+	match(card(null), /No key pauses this\./u, "a window inside the worker makes no promise a key can keep");
+	const owned = card(null, { ...view, origin: { kind: "worker", agentId: "coder", runId: "run", endsWithTurn: true } });
+	match(owned, /ends the main turn, which also stops this worker/u);
+});
+
+test("a key on a worker card holds that ask, restarts the ones queued behind it, and the expiry says it was held", () => {
+	const bus = createTelemetryHub();
+	const holds: string[] = [];
+	const restarts: string[] = [];
+	const notices: string[] = [];
+	const windows = new Map([
+		[
+			"first",
+			{ held: false, remainingMs: 100_000, ceilingMs: 900_000, ceilingRemainingMs: 880_000, fallback: "deny" as const },
+		],
+		[
+			"second",
+			{ held: false, remainingMs: 90_000, ceilingMs: 900_000, ceilingRemainingMs: 870_000, fallback: "deny" as const },
+		],
+	]);
+	const readers: Array<() => { remainingMs: number; held: boolean } | null> = [];
+	let state: OverlayState = "closed";
+	const lifecycle = createOverlayPermissionLifecycle({
+		bus,
+		dispatch: {
+			workerPermissionWindow: (requestId) => windows.get(requestId) ?? null,
+			holdWorkerPermission: (requestId) => {
+				holds.push(requestId);
+				const window = windows.get(requestId);
+				if (window !== undefined) windows.set(requestId, { ...window, held: true });
+				return true;
+			},
+			restartWorkerPermission: (requestId) => {
+				restarts.push(requestId);
+				return true;
+			},
+		},
+		getAutonomy: () => "default",
+		getOverlayState: () => state,
+		openPermissionOverlay: (_view, _inspect, _invocation, _advisory, _countdown, workerWindow) => {
+			if (state === "permission-confirm") return false;
+			state = "permission-confirm";
+			if (workerWindow !== undefined) readers.push(workerWindow);
+			return true;
+		},
+		closeOverlay: () => {
+			if (state !== "permission-confirm") return;
+			state = "closed";
+			lifecycle.onPermissionOverlayClosed();
+		},
+		appendNotice: (_level, text) => {
+			notices.push(text);
+		},
+		applyApprovalState: () => {},
+		requestRender: () => {},
+		stopActiveTurn: () => {},
+	});
+	const ask = (requestId: string, runId: string): void => {
+		bus.emit("approval.requested", {
+			tool: "bash",
+			actionClass: "execute",
+			requestId,
+			requestedBy: runId,
+			origin: `worker:${runId}`,
+			agentId: "coder",
+			timeoutMs: 120_000,
+			fallback: "deny",
+			escalation: true,
+		});
+	};
+	ask("first", "run-a");
+	ask("second", "run-b");
+	deepStrictEqual(readers[0]?.(), { remainingMs: 100_000, held: false });
+	lifecycle.notePresence();
+	deepStrictEqual(holds, ["first"]);
+	deepStrictEqual(restarts, ["second"]);
+	strictEqual(readers[0]?.()?.held, true);
+	bus.emit("approval.resolved", {
+		status: "denied",
+		requestId: "first",
+		decidedBy: "timeout",
+		fallback: "deny",
+		at: 0,
+	} as never);
+	match(notices.at(-1) ?? "", /nobody answered in the 15m(?:0s)? it was held/u);
+	lifecycle.dispose();
+});
+
+test("the rail beside a worker's ask states its expiry, and a short rail keeps the time before the words", () => {
+	const progress = {
+		phase: "tool",
+		currentAction: null,
+		awaitingApproval: true,
+		approvalWindow: { expiresAt: 119_000, held: false, fallback: "deny" },
+	} as unknown as WorkerProgressSnapshot;
+	const facts = (width: number) =>
+		railDetail(
+			{
+				actor: "Judge-model",
+				status: INITIAL_STATUS,
+				workers: [{ agentId: "coder", status: "running", progress } as DispatchBoardRow],
+				workerActivity: (row, room) => workerActivityWords(row.progress ?? progress, { now: 0, narrow: room < 72 }),
+				background: [],
+				now: 0,
+			},
+			width,
+		);
+	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
+	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
 });

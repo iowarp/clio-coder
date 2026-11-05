@@ -614,12 +614,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
 		workers: dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row)),
 		background: backgroundCalls.active(),
-		workerActivity: (row) =>
+		workerActivity: (row, width) =>
 			// A queued run's progress reads `starting`, which it is not until it has a slot.
 			row.status === "enqueued"
 				? "waiting for a slot"
 				: row.progress
-					? workerActivityWords(row.progress)
+					? workerActivityWords(row.progress, { narrow: width < 72 })
 					: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});

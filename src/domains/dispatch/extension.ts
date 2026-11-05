@@ -482,6 +482,7 @@ import {
 	validateJobSpec,
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import { createWorkerApprovalWindows, workerApprovalBackstopMs } from "./worker-approval-window.js";
 import {
 	resolveWorkerMcpAdmission,
 	type WorkerMcpNetworkWithheld,
@@ -559,7 +560,12 @@ interface ActiveRun {
 	 * its binding (Phase D). Returns false when the channel is gone. Absent for
 	 * run kinds without one (ACP).
 	 */
-	resolvePermission?: (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding) => boolean;
+	resolvePermission?: (
+		requestId: string,
+		decision: "approve" | "deny",
+		binding?: WorkerDecisionBinding,
+		cause?: "timeout",
+	) => boolean;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	/** The permit this attempt ran under; a retry inherits it as a cap. Absent for ACP delegation. */
@@ -3195,6 +3201,12 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 				...(operatorUnattended ? { operatorResponder: "none" as const } : {}),
 				...(mainRouted && input.grantAttempt !== undefined ? { grant: { ...input.grantAttempt } } : {}),
 			};
+			// This process runs the window of an ask a person answers, so the person can
+			// hold it. With no responder, and on a brokered ask, the worker's timer stays
+			// the only one and keeps its short bound.
+			if (attended && !mainRouted && !unattended) {
+				spec.escalation.backstopMs = workerApprovalBackstopMs(spec.escalation.timeoutMs);
+			}
 		}
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
@@ -3848,6 +3860,19 @@ export function createDispatchBundle(
 			});
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
+	});
+	const workerApprovalWindows = createWorkerApprovalWindows({
+		now: monotonicNow,
+		onChange: ({ runId, agentId, requestId }, view) => {
+			context.bus.emit("run.progressed", {
+				runId,
+				agentId,
+				event: {
+					type: "clio_coder_permission_window",
+					payload: { requestId, held: view.held, expiresAt: now() + view.remainingMs, fallback: view.fallback },
+				},
+			});
+		},
 	});
 	const grantUnsubscribes: Array<() => void> = [];
 	const pendingCapacity = new Map<string, PendingCapacityAdmission>();
@@ -7373,12 +7398,13 @@ export function createDispatchBundle(
 			return steeringProvenance.map((entry) => ({ ...entry }));
 		};
 		const resolvePermission = sendToWorker
-			? (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding) =>
+			? (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding, cause?: "timeout") =>
 					sendToWorker({
 						type: "permission_decision",
 						requestId,
 						decision,
 						...(binding !== undefined ? { binding } : {}),
+						...(cause !== undefined ? { cause } : {}),
 					})
 			: undefined;
 		const heartbeatAt = worker.heartbeatAt;
@@ -7635,6 +7661,19 @@ export function createDispatchBundle(
 				typeof event.payload.requestId === "string"
 			) {
 				escalationCounts.requested += 1;
+				// Opened before the card is told, so its first frame already reads this window.
+				const windowMs = spec.escalation?.timeoutMs;
+				if (spec.escalation?.backstopMs !== undefined && windowMs !== undefined && resolvePermission !== undefined) {
+					const requestId = event.payload.requestId;
+					workerApprovalWindows.open({
+						runId: runIdForPermissionAudit,
+						agentId: req.agentId,
+						requestId,
+						windowMs,
+						fallback: spec.escalation.fallback,
+						deny: () => resolvePermission(requestId, "deny", undefined, "timeout"),
+					});
+				}
 				const ctx = isRecord(event.payload.decision) ? event.payload.decision : null;
 				const classification = ctx !== null && isRecord(ctx.classification) ? ctx.classification : null;
 				const policy = ctx !== null && isRecord(ctx.policy) ? ctx.policy : null;
@@ -7738,6 +7777,9 @@ export function createDispatchBundle(
 						providerErrorMessage = message;
 					}
 				}
+			}
+			if (event.type === "clio_coder_permission_resolved" && typeof event.payload?.requestId === "string") {
+				workerApprovalWindows.settle(event.payload.requestId);
 			}
 			if (
 				event.type === "clio_coder_permission_resolved" &&
@@ -8422,6 +8464,7 @@ export function createDispatchBundle(
 				if (drained) runJournal?.settleCalls(callUsage?.settleOpen("internal") ?? []);
 				const finalCallUsage = callUsage?.snapshot();
 				if (finalCallUsage) tokenMeter.usage = finalCallUsage;
+				workerApprovalWindows.settleRun(envelope.id);
 				// The worker is gone: every grant it held settles now, after its last
 				// execution report drained. Retries run as new attempts with new requests.
 				if (grantAttempt !== undefined) {
@@ -10293,6 +10336,7 @@ export function createDispatchBundle(
 				journalBridge = null;
 				for (const unsubscribe of grantUnsubscribes.splice(0)) unsubscribe();
 				grantBroker.dispose();
+				workerApprovalWindows.dispose();
 			})().then(resolveStop, rejectStop);
 			return stopPromise;
 		},
@@ -10956,6 +11000,9 @@ export function createDispatchBundle(
 				if (!result.ok) throw new Error(`resolveWorkerPermission: ${result.reason}`);
 				return;
 			}
+			if (workerApprovalWindows.isExpired(requestId)) {
+				throw new Error(`resolveWorkerPermission: run '${runId}' no longer accepts input for this ask; its window ended`);
+			}
 			const run = currentAssignmentRun(runId);
 			if (!run) {
 				throw new Error(
@@ -10977,7 +11024,19 @@ export function createDispatchBundle(
 					`resolveWorkerPermission: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`,
 				);
 			}
+			// Answered, so the window cannot send a timeout denial after this.
+			workerApprovalWindows.settle(requestId);
 		},
+		workerPermissionWindow: (requestId) => workerApprovalWindows.read(requestId),
+		workerRunEndsWithTurn: (runId) => {
+			const run = currentAssignmentRun(runId);
+			if (run === null || run.requestOrigin !== "agent" || run.detached === true) return false;
+			// A dispatch moved to the background belongs to its batch, beyond the turn that started it.
+			const assignmentId = run.lineage.rootRunId;
+			return !listDetachedBatches().some((batch) => batch.runs.some((entry) => entry.assignmentId === assignmentId));
+		},
+		holdWorkerPermission: (requestId) => workerApprovalWindows.hold(requestId),
+		restartWorkerPermission: (requestId) => workerApprovalWindows.restart(requestId),
 		grants: {
 			list(filter = {}) {
 				return grantBroker

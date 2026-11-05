@@ -324,7 +324,12 @@ export interface WorkerRunHandle {
 	 * attempt and the parked call's argument digest; one that does not denies
 	 * the call.
 	 */
-	resolvePermission?(requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding): boolean;
+	resolvePermission?(
+		requestId: string,
+		decision: "approve" | "deny",
+		binding?: WorkerDecisionBinding,
+		cause?: "timeout",
+	): boolean;
 }
 
 export type WorkerEventEmit = (event: AgentEvent | ClioWorkerEvent) => void;
@@ -1920,6 +1925,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			? {
 					timeoutMs: input.escalation?.timeoutMs ?? DEFAULT_ESCALATION_TIMEOUT_MS,
 					fallback: input.escalation?.fallback ?? DEFAULT_ESCALATION_FALLBACK,
+					...(input.escalation?.backstopMs !== undefined ? { backstopMs: input.escalation.backstopMs } : {}),
 				}
 			: null;
 	// Present only when the permit routes asks to the main agent with main
@@ -2129,9 +2135,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		requestId: string,
 		decision: "approve" | "deny",
 		binding: WorkerDecisionBinding | undefined,
+		cause: "timeout" | undefined,
 	): boolean => {
 		const active = activeEscalation;
 		if (!active || active.requestId !== requestId) return false;
+		// The parent's window ran out: the same denial this worker's own timer gives,
+		// so fallback fail still ends the run.
+		if (cause === "timeout" && decision === "deny") return resolveEscalation(requestId, "deny", "timeout");
 		if (grantBinding === undefined) return resolveEscalation(requestId, decision, "operator");
 		const mismatch =
 			binding === undefined
@@ -2253,8 +2263,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const argDigest = grantEffectDigest(effect);
 			// The timer must hold the event loop: its firing is what denies an
 			// escalation the orchestrator never resolves. clearActiveEscalation
-			// clears it on every resolution path.
-			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
+			// clears it on every resolution path. A parent that owns the window
+			// answers first, so under one this is only the backstop.
+			const timer = setTimeout(
+				() => resolveEscalation(requestId, "deny", "timeout"),
+				escalationConfig.backstopMs ?? escalationConfig.timeoutMs,
+			);
 			activeEscalation = {
 				requestId,
 				tool: call.tool,
@@ -2500,7 +2514,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			agent.steer(taskMessage(trimmed));
 			return true;
 		},
-		resolvePermission: (requestId: string, decision: "approve" | "deny", binding?: WorkerDecisionBinding) =>
-			resolveDecision(requestId, decision, binding),
+		resolvePermission: (
+			requestId: string,
+			decision: "approve" | "deny",
+			binding?: WorkerDecisionBinding,
+			cause?: "timeout",
+		) => resolveDecision(requestId, decision, binding, cause),
 	};
 }

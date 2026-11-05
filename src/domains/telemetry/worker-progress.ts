@@ -121,8 +121,24 @@ export interface WorkerProgressSnapshot {
 	settled: boolean;
 	/** The running call is parked on the operator's approval, so nothing is executing. Absent reads as not parked. */
 	awaitingApproval?: boolean;
+	/** When an unanswered ask ends and how, while the dispatching process runs its window. */
+	approvalWindow?: WorkerApprovalWindowFacts;
 	/** The stream ended on purpose, so a held URL may release. Absent reads as not completed (#446). */
 	completed?: boolean;
+}
+
+export interface WorkerApprovalWindowFacts {
+	/** Epoch milliseconds. */
+	expiresAt: number;
+	held: boolean;
+	fallback: "deny" | "fail";
+}
+
+function approvalWindowFacts(payload: unknown): WorkerApprovalWindowFacts | null {
+	if (typeof payload !== "object" || payload === null) return null;
+	const { expiresAt, held, fallback } = payload as Record<string, unknown>;
+	if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
+	return { expiresAt, held: held === true, fallback: fallback === "fail" ? "fail" : "deny" };
 }
 
 export interface WorkerProgressFold {
@@ -296,6 +312,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let droppedBytes = 0;
 	let currentAction: WorkerAction | null = null;
 	let awaitingApproval = false;
+	let approvalWindow: WorkerApprovalWindowFacts | null = null;
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
@@ -538,6 +555,17 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 					touch();
 					changed = true;
 				}
+				// The dispatching process opens the window around the same event, in either order.
+				if (!parked && approvalWindow !== null) {
+					approvalWindow = null;
+					touch();
+					changed = true;
+				}
+			}
+			if (event.type === "clio_coder_permission_window") {
+				approvalWindow = approvalWindowFacts(event.payload);
+				touch();
+				changed = true;
 			}
 
 			// The loop only starts after the orchestrator admits the attested worker, so
@@ -556,6 +584,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 		restart(): void {
 			awaitingApproval = false;
+			approvalWindow = null;
 			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
@@ -592,6 +621,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				toolNames: [...toolNames],
 				settled,
 				...(awaitingApproval && !settled ? { awaitingApproval: true } : {}),
+				...(awaitingApproval && !settled && approvalWindow !== null ? { approvalWindow: { ...approvalWindow } } : {}),
 				completed,
 			};
 			return cached;

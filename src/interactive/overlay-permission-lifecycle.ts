@@ -26,6 +26,7 @@ import {
 	describeCallTarget,
 	type PermissionAdvisoryReader,
 	type PermissionCountdownReader,
+	type WorkerWindowReader,
 } from "./permission-overlay.js";
 import { formatCompactMs } from "./theme/index.js";
 import { startUnattendedCountdown, type UnattendedCountdown, type UnattendedTimers } from "./unattended-countdown.js";
@@ -81,7 +82,14 @@ interface WorkerEscalationEntry {
 export interface OverlayPermissionLifecycleDeps {
 	toolRegistry?: PermissionToolRegistry;
 	bus: Pick<TelemetryHub, "emit" | "subscribe">;
-	dispatch: Pick<DispatchContract, "resolveWorkerPermission">;
+	dispatch: Pick<
+		DispatchContract,
+		| "resolveWorkerPermission"
+		| "workerPermissionWindow"
+		| "holdWorkerPermission"
+		| "restartWorkerPermission"
+		| "workerRunEndsWithTurn"
+	>;
 	getAutonomy(): string;
 	getOverlayState(): OverlayState;
 	/**
@@ -95,6 +103,7 @@ export interface OverlayPermissionLifecycleDeps {
 		invocation?: () => unknown,
 		advisory?: PermissionAdvisoryReader,
 		countdown?: PermissionCountdownReader,
+		workerWindow?: WorkerWindowReader,
 	): boolean;
 	closeOverlay(): void;
 	appendNotice(level: NoticeLevel, text: string, source?: NoticeSource): void;
@@ -309,13 +318,17 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 	};
 }
 
-function workerApprovalRequestView(entry: WorkerEscalationEntry, queueDepth: number): ApprovalRequestView {
+function workerApprovalRequestView(
+	entry: WorkerEscalationEntry,
+	queueDepth: number,
+	endsWithTurn: boolean,
+): ApprovalRequestView {
 	return {
 		requestId: entry.requestId,
 		tool: entry.tool,
 		actionClass: entry.actionClass,
 		axis: entry.axis,
-		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
+		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId, ...(endsWithTurn ? { endsWithTurn } : {}) },
 		reason: entry.reason,
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
 		...(entry.consequence !== undefined ? { consequence: entry.consequence } : {}),
@@ -355,8 +368,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let withdrawingWorker = false;
 	/** Set when the card on screen closed because its countdown ran out, not because anyone answered. */
 	let timedOut: UnattendedPark | null = null;
-	/** Countdowns of worker asks, shown only: the worker's process owns the window and applies its fallback. */
+	/**
+	 * Display clocks of worker asks. Dispatch runs the window where it can, and this
+	 * only redraws the card until the longest that window can last. Elsewhere the
+	 * worker's process owns the window and this is the time shown.
+	 */
 	const workerCountdowns = new Map<string, UnattendedCountdown>();
+	/** Asks whose window dispatch runs, so its answer is the only time to show for them. */
+	const dispatchWindows = new Set<string>();
+	/** The whole wait of an ask a key held, so its expiry says how long it was held. */
+	const heldWorkerCeilings = new Map<string, number>();
 	/** Unattended countdowns of parked main-agent calls, by approval request id. */
 	const countdowns = new Map<string, UnattendedPark & { countdown: UnattendedCountdown }>();
 	const onScreenRequestId = (): string | undefined => pendingPermission?.meta?.requestId;
@@ -442,11 +463,15 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 
 	/** Started when the ask arrives, because the worker's window runs from then, seen or not. */
 	const armWorkerCountdown = (entry: WorkerEscalationEntry): void => {
-		if (entry.timeoutMs === undefined || workerCountdowns.has(entry.requestId)) return;
+		if (workerCountdowns.has(entry.requestId)) return;
+		const window = deps.dispatch.workerPermissionWindow?.(entry.requestId) ?? null;
+		if (window !== null) dispatchWindows.add(entry.requestId);
+		const windowMs = window?.ceilingRemainingMs ?? entry.timeoutMs;
+		if (windowMs === undefined) return;
 		workerCountdowns.set(
 			entry.requestId,
 			startUnattendedCountdown({
-				windowMs: entry.timeoutMs,
+				windowMs,
 				...(deps.unattendedTimers !== undefined ? { timers: deps.unattendedTimers } : {}),
 				// The worker applies its fallback itself and that resolution withdraws the card.
 				onExpire: () => {},
@@ -459,12 +484,37 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const dropWorkerCountdown = (requestId: string): void => {
 		workerCountdowns.get(requestId)?.cancel();
 		workerCountdowns.delete(requestId);
+		dispatchWindows.delete(requestId);
+		heldWorkerCeilings.delete(requestId);
 	};
+	/** The clock of an ask only the worker times. An ask dispatch times reads its window instead. */
+	const workerClockReader =
+		(requestId: string): PermissionCountdownReader =>
+		() =>
+			dispatchWindows.has(requestId) ? null : (workerCountdowns.get(requestId)?.remainingMs() ?? null);
+	const workerWindowReader =
+		(requestId: string): WorkerWindowReader =>
+		() => {
+			const window = deps.dispatch.workerPermissionWindow?.(requestId) ?? null;
+			return window === null ? null : { remainingMs: window.remainingMs, held: window.held };
+		};
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		// The entry is still at the head of the queue here, so the queue's length counts it.
-		const view = workerApprovalRequestView(entry, workerQueue.length);
-		const reader: PermissionCountdownReader = () => workerCountdowns.get(entry.requestId)?.remainingMs() ?? null;
-		if (!deps.openPermissionOverlay(view, undefined, undefined, undefined, reader)) return false;
+		const endsWithTurn = deps.dispatch.workerRunEndsWithTurn?.(entry.runId) === true;
+		const view = workerApprovalRequestView(entry, workerQueue.length, endsWithTurn);
+		const { requestId } = entry;
+		if (
+			!deps.openPermissionOverlay(
+				view,
+				undefined,
+				undefined,
+				undefined,
+				workerClockReader(requestId),
+				workerWindowReader(requestId),
+			)
+		) {
+			return false;
+		}
 		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;
@@ -486,13 +536,18 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		fallback: "deny" | "fail",
 		cause: "timeout" | "terminal" | "late-answer" | "revoked",
 	): void => {
+		const heldFor = heldWorkerCeilings.get(entry.requestId);
 		dropWorkerCountdown(entry.requestId);
 		if (!markPermissionRequestSurfaced(expiredWorkerRequestIds, entry.requestId)) return;
 		const call = `${entry.agentId}'s ${entry.tool} call`;
 		const after = fallback === "fail" ? "and the worker run fails" : "and the worker carries on without it";
+		const waited =
+			heldFor !== undefined
+				? `in the ${formatCompactMs(heldFor)} it was held`
+				: `in ${entry.timeoutMs === undefined ? "its window" : formatCompactMs(entry.timeoutMs)}`;
 		const what =
 			cause === "timeout"
-				? `${call} was denied: nobody answered in ${entry.timeoutMs === undefined ? "its window" : formatCompactMs(entry.timeoutMs)}. It did not run, ${after}.`
+				? `${call} was denied: nobody answered ${waited}. It did not run, ${after}.`
 				: cause === "terminal"
 					? `${call} no longer needs an answer: its run ended, and the call did not run.`
 					: cause === "revoked"
@@ -719,7 +774,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		},
 		stopTurn: () => {
 			if (pendingPermission === null && pendingWorker === null) return;
-			const tool = pendingPermission?.call.tool ?? pendingWorker?.agentId;
+			const tool =
+				pendingPermission?.call.tool ??
+				(pendingWorker === null ? undefined : `${pendingWorker.agentId}'s ${pendingWorker.tool} call`);
 			stopping = true;
 			confirmed = false;
 			// closeOverlay drives onPermissionOverlayClosed, which denies under the
@@ -742,6 +799,14 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				else entry.countdown.restart();
 				changed = true;
 			}
+			if (pendingWorker !== null && deps.dispatch.holdWorkerPermission?.(pendingWorker.requestId) === true) {
+				const ceiling = deps.dispatch.workerPermissionWindow?.(pendingWorker.requestId)?.ceilingMs;
+				if (ceiling !== undefined) heldWorkerCeilings.set(pendingWorker.requestId, ceiling);
+				changed = true;
+			}
+			for (const queued of workerQueue) {
+				if (deps.dispatch.restartWorkerPermission?.(queued.requestId) === true) changed = true;
+			}
 			if (changed) deps.requestRender();
 		},
 		queuedWorkerAsks: () => workerQueue.length,
@@ -751,6 +816,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			dropAllCountdowns();
 			for (const countdown of workerCountdowns.values()) countdown.cancel();
 			workerCountdowns.clear();
+			dispatchWindows.clear();
+			heldWorkerCeilings.clear();
 			unsubscribePermission();
 			unsubscribeWorker();
 			unsubscribeWorkerResolution();

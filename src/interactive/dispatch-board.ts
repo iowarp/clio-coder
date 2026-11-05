@@ -56,7 +56,7 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { compactQuantity, WAITING_FOR_APPROVAL, workerActionParts, workerActivityWords } from "./worker-activity.js";
+import { approvalWaitWords, compactQuantity, workerActionParts, workerActivityWords } from "./worker-activity.js";
 
 export type DispatchBoardStatus = TelemetryRunSummary["status"];
 
@@ -517,7 +517,7 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	if (progress.awaitingApproval === true && current !== null) {
 		const wanted = workerActionParts(current, "running");
 		units.push(
-			theme.fg("warning", WAITING_FOR_APPROVAL),
+			theme.fg("warning", approvalWaitWords(progress)),
 			theme.fg("toolTarget", `${wanted.verb} ${wanted.object}`.trim()),
 		);
 	} else if (current !== null)
@@ -924,6 +924,9 @@ function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">)
 	return sanitizeCallTargetText(`${row.targetId}/${row.wireModelId}`);
 }
 
+/** Below this the island's status column cannot hold a whole approval sentence beside the worker's name and clock. */
+const TASK_ISLAND_NARROW_APPROVAL_WIDTH = 76;
+
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
 	const weekly = routeWeeklyQuota(row, quota);
@@ -941,9 +944,10 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	// A running row says what the run is doing in the inline card's words: the
 	// island said `running` beside a card that said `starting` (BT-007).
+	// An approval's time left must survive a narrow island, so its words shorten before the row cuts them.
 	const statusLabel =
 		row.status === "running" && row.progress !== undefined
-			? sanitizeCallTargetText(workerActivityWords(row.progress))
+			? sanitizeCallTargetText(workerActivityWords(row.progress, { narrow: width < TASK_ISLAND_NARROW_APPROVAL_WIDTH }))
 			: row.status === "enqueued" && row.endpoint !== undefined
 				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
 				: presentation.label;
@@ -1212,7 +1216,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			if (row.status === "cancelling") return { text: "stopping", tone: "warning" };
 			const progress = row.progress;
 			if (progress) {
-				if (progress.awaitingApproval === true) return { text: WAITING_FOR_APPROVAL, tone: "warning" };
+				if (progress.awaitingApproval === true) return { text: approvalWaitWords(progress), tone: "warning" };
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress));
 				const tail =

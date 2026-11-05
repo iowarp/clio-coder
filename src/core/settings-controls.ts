@@ -294,7 +294,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"workers.onPermission":
 		"Safety judge reviews the call against your own messages while Clio runs at default; it runs on an allow and is denied on a block or when the judge gives no verdict. Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
 	"workers.escalation.timeoutMs":
-		"Used only when workers ask you. In sessions with nobody available to answer, the fallback applies. Enter at least 1 millisecond.",
+		"Used only when workers ask you. A key on the card holds it for up to 15 minutes. In sessions with nobody available to answer, the fallback applies. Enter at least 1 millisecond.",
 	"workers.escalation.fallback": "Deny the tool lets the worker continue without it. Stop the worker ends the run.",
 	"workers.resilienceCooldownMs":
 		"After repeated failures, Clio waits before trying the same connection and model again. A successful run clears the wait. Choose 0 to disable it.",
