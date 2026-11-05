@@ -12,7 +12,7 @@ import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.j
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
-import { trustStateWord } from "../domains/evidence/trust-projection.js";
+import { plainTrustVerdict, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
@@ -54,7 +54,7 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { workerActivityWords } from "./worker-activity.js";
+import { workerActionParts, workerActivityWords } from "./worker-activity.js";
 
 export type DispatchBoardStatus = TelemetryRunSummary["status"];
 
@@ -463,17 +463,24 @@ function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): str
 }
 
 /**
- * One action as a phrase: the tool name, then the verb and object of its
- * redacted descriptor. The descriptor was bounded and scrubbed at the worker
- * seam, so this composes text and never inspects an argument.
+ * One action in plain words: the verb and object of its redacted descriptor,
+ * then the tool when the verb has not named it, as in `ran npm run lint (bash)`.
+ * The descriptor was bounded and scrubbed at the worker seam, so this composes
+ * text and never inspects an argument.
  */
-function actionPhrase(action: WorkerAction): string {
+function actionPhrase(action: WorkerAction, tense: "running" | "finished"): string {
 	const theme = clioTheme();
-	const descriptor = action.descriptor;
-	if (descriptor === undefined)
-		return functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(action.tool));
-	const object = descriptor.object === undefined ? "" : ` ${descriptor.object}${descriptor.truncated ? "…" : ""}`;
-	return `${theme.fg("toolCapability", sanitizeCallTargetText(action.tool))} ${functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(descriptor.verb))}${theme.fg("toolTarget", object.length === 0 ? "" : ` ${sanitizeCallTargetText(object)}`)}`;
+	const parts = workerActionParts(action, tense);
+	const verb = functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(parts.verb));
+	const object = parts.object.length === 0 ? "" : theme.fg("toolTarget", ` ${sanitizeCallTargetText(parts.object)}`);
+	const tool = parts.tool === null ? "" : theme.fg("toolCapability", ` (${sanitizeCallTargetText(parts.tool)})`);
+	const failure =
+		action.outcome === "error"
+			? theme.fg("error", ` ${GLYPH.error} failed`)
+			: action.outcome === "blocked"
+				? theme.fg("warning", ` ${GLYPH.error} blocked`)
+				: "";
+	return `${verb}${object}${tool}${failure}`;
 }
 
 /** The phase word an expanded card names, or null for a phase that says nothing new. */
@@ -501,9 +508,10 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	const recent = progress.recentActions[0];
 	const units: string[] = [];
 	if (phase !== null && current === null) units.push(phase);
-	if (current !== null) units.push(theme.base("body", `${theme.fg("toolMetadata", "now")} ${actionPhrase(current)}`));
+	if (current !== null)
+		units.push(theme.base("body", `${theme.fg("toolMetadata", "now:")} ${actionPhrase(current, "running")}`));
 	else if (recent !== undefined)
-		units.push(theme.base("body", `${theme.fg("toolMetadata", "last")} ${actionPhrase(recent)}`));
+		units.push(theme.base("body", `${theme.fg("toolMetadata", "last:")} ${actionPhrase(recent, "finished")}`));
 	if (units.length === 0) return null;
 	return cardUnitsLine(theme, "doing", units, contentWidth);
 }
@@ -523,9 +531,10 @@ export function renderDispatchActivity(row: DispatchBoardRow, width: number): st
 		settled: "Worker output finished",
 	}[progress.phase];
 	lines.push(...wrapTextWithAnsi(`${theme.fg("harnessHeading", "Now")}  ${phase}`, width));
-	if (progress.currentAction) lines.push(...wrapTextWithAnsi(`  → ${actionPhrase(progress.currentAction)}`, width));
+	if (progress.currentAction)
+		lines.push(...wrapTextWithAnsi(`  → ${actionPhrase(progress.currentAction, "running")}`, width));
 	for (const action of progress.recentActions.slice(0, 3))
-		lines.push(...wrapTextWithAnsi(`${theme.fg("annotation", "Recent")}  ${actionPhrase(action)}`, width));
+		lines.push(...wrapTextWithAnsi(`${theme.fg("annotation", "Recent")}  ${actionPhrase(action, "finished")}`, width));
 	if (progress.tailText.trim()) {
 		lines.push(theme.fg("annotation", progress.settled ? "Worker output" : "Live response · provisional"));
 		lines.push(...progressAnswerLines(theme, progress, row.runId, width, row.resultContract, 3));
@@ -598,17 +607,20 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes.independentReview === "absent" &&
 		axes.contextProvenance === "recorded" &&
 		axes.completionEvidence === "absent";
-	const trust =
-		row.trust === undefined
-			? theme.fg("annotation", isTerminalStatus(row.status) ? "run record not read back" : "not sealed yet")
-			: theme.fg(
-					trustVerdictToken(row.trust.verdict),
-					`${trustVerdictMark(row.trust.verdict)}${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
-				);
 	const host = row.hostVerification === undefined ? "" : ` · ${theme.fg("body", `host checks ${row.hostVerification}`)}`;
-	return wrapTextWithAnsi(`${trust}${host}`, valueWidth).map(
-		(line, index) => `${index === 0 ? cardKvKey(theme, "trust") : " ".repeat(gutter)}${line}`,
+	if (row.trust === undefined) {
+		const unread = theme.fg("annotation", isTerminalStatus(row.status) ? "run record not read back" : "not sealed yet");
+		return cardWrappedValueLines(theme, "trust", `${unread}${host}`, contentWidth);
+	}
+	// The verdict leads in plain words; the axes that back it follow as detail.
+	const verdict = theme.fg(
+		trustVerdictToken(row.trust.verdict),
+		`${trustVerdictMark(row.trust.verdict)}${plainTrustVerdict(row.trust)}`,
 	);
+	const detail = compact
+		? []
+		: wrapTextWithAnsi(theme.fg("annotation", row.trust.text), valueWidth).map((line) => `${" ".repeat(gutter)}${line}`);
+	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...detail];
 }
 
 /**
@@ -748,9 +760,7 @@ function dispatchCardBody(
 			runId: row.runId,
 			stepId: row.phase?.stepId ?? null,
 		});
-		bodyLines.push(
-			...wrapTextWithAnsi(`${cardKvKey(theme, "record")}${theme.fg("warning", `open: ${warning}`)}`, contentWidth),
-		);
+		bodyLines.push(...cardWrappedValueLines(theme, "record", theme.fg("warning", `open: ${warning}`), contentWidth));
 	}
 	// The proof row is present only when the telemetry projection knows an
 	// evidence state for this run; an unknown/none state adds no line.
@@ -1053,7 +1063,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 		case "cancelling": {
 			const progress = row.progress;
 			if (progress) {
-				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction)) };
+				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress));
 				const tail =
 					progress.phase === "writing"

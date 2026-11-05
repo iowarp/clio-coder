@@ -34,7 +34,7 @@ import {
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
-import { workerPhaseActivity } from "../worker-activity.js";
+import { workerActionParts, workerPhaseActivity } from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
@@ -417,45 +417,12 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	return metrics;
 }
 
-/**
- * The descriptor vocabulary's progressive verbs in the past tense. A verb that
- * names a tool rather than an act (`git`, `context`, `gateway`, `tasks`) reads
- * the same either way.
- */
-const FINISHED_VERBS: Readonly<Record<string, string>> = {
-	reading: "read",
-	editing: "edited",
-	writing: "wrote",
-	listing: "listed",
-	running: "ran",
-	searching: "searched",
-	finding: "found",
-	fetching: "fetched",
-	verifying: "verified",
-	navigating: "navigated",
-	inspecting: "inspected",
-	monitoring: "monitored",
-	steering: "steered",
-	dispatching: "dispatched",
-	deleting: "deleted",
-	moving: "moved",
-	thinking: "thought",
-	calling: "called",
-};
-
-/** A call's object, marked when the safety layer cut it to its length cap. */
-function descriptorObject(descriptor: NonNullable<WorkerAction["descriptor"]>): string {
-	if (descriptor.object === undefined) return "";
-	return ` ${descriptor.object}${descriptor.truncated === true ? GLYPH.ellipsis : ""}`;
-}
-
 /** A finished call as `verb object` in the past tense, or its tool name when the runtime sent no descriptor. */
 function finishedAction(action: WorkerAction): string {
-	const descriptor = action.descriptor;
+	const parts = workerActionParts(action, "finished");
+	const verb = functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(parts.verb));
 	const actionText =
-		descriptor === undefined
-			? functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(action.tool))
-			: `${functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(FINISHED_VERBS[descriptor.verb] ?? descriptor.verb))}${theme.fg("toolTarget", descriptor.object === undefined ? "" : ` ${sanitizeCallTargetText(descriptorObject(descriptor))}`)}`;
+		parts.object.length === 0 ? verb : `${verb}${theme.fg("toolTarget", ` ${sanitizeCallTargetText(parts.object)}`)}`;
 	const failure = action.outcome === "blocked" ? "blocked" : action.outcome === "error" ? "failed" : null;
 	return failure === null
 		? actionText
@@ -482,7 +449,8 @@ function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
 function describedAction(entry: WorkerEntryState): string | null {
 	const action = entry.progress?.currentAction;
 	if (action === null || action === undefined) return null;
-	return action.descriptor ? `${action.descriptor.verb}${descriptorObject(action.descriptor)}` : action.tool;
+	const parts = workerActionParts(action, "running");
+	return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
 }
 
 const TIMER_WIDTH = 7;
@@ -611,7 +579,9 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const activity = displayText(entry, "activity", doing);
 	const current = entry.progress?.currentAction;
 	const prefix =
-		action === null ? `${glyph} ${idle}` : `${GLYPH.phaseTool} ${current?.descriptor?.verb ?? current?.tool ?? ""}`;
+		action === null
+			? `${glyph} ${idle}`
+			: `${GLYPH.phaseTool} ${current ? workerActionParts(current, "running").verb : ""}`;
 	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
 	const styledActivity = (shown: string): string => {
 		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);

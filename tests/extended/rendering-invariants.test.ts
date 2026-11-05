@@ -2137,7 +2137,7 @@ describe("transcript block grammar", () => {
 		deepStrictEqual(trail, [
 			`  │ ${GLYPH.phaseTool} … 1 earlier call · /view dispatch:run-5`,
 			`  │ ${GLYPH.phaseTool} read docs/a-long-name${GLYPH.ellipsis}`,
-			`  │ ${GLYPH.phaseTool} gateway evidence ${GLYPH.times}3`,
+			`  │ ${GLYPH.phaseTool} used evidence ${GLYPH.times}3`,
 		]);
 	});
 

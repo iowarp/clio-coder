@@ -169,6 +169,42 @@ export function trustVerdictWord(status: CanonicalTrustStatus): string {
 	return trustStateWord("contextProvenance", "invalid");
 }
 
+/**
+ * The one sentence a person reads before the axis list: can this result be
+ * leaned on, and the reason that decides it. Always under 80 characters, so it
+ * fits a board row at ordinary widths. The axes stay the record; this only
+ * chooses which of them to say first.
+ */
+export function plainTrustVerdict(summary: Pick<TrustSummaryProjection, "verdict" | "axes">): string {
+	const { artifactIntegrity, validationGrounding, independentReview, contextProvenance } = summary.axes;
+	const reviewClause =
+		independentReview === "absent" || independentReview === "unknown" ? ", no independent review" : "";
+	switch (summary.verdict) {
+		case "compromised":
+			if (artifactIntegrity === "failed") return "not trusted: the run's seal is broken";
+			if (independentReview === "failed") return "not trusted: independent review failed";
+			if (validationGrounding === "failed") return `not trusted: validation failed${reviewClause}`;
+			if (validationGrounding === "ungrounded") return `not trusted: validation claimed but none ran${reviewClause}`;
+			if (independentReview === "not_independent") return "not trusted: the review was not independent";
+			if (contextProvenance === "invalid") return "not trusted: its context record is invalid";
+			return "not trusted";
+		case "reviewed":
+			return "trusted: independently reviewed and passed";
+		case "grounded":
+			return independentReview === "inconclusive"
+				? "checks passed: independent review inconclusive"
+				: `checks passed${reviewClause.replace(",", ":")}`;
+		case "unverified":
+			return validationGrounding === "unknown"
+				? `unverified: validation unknown${reviewClause}`
+				: `unverified: no checks observed${reviewClause}`;
+		case "unknown":
+			return artifactIntegrity === "absent"
+				? "unknown: no run record to check"
+				: "unknown: the run's seal was not checked";
+	}
+}
+
 /** The tier and body under one versioned label for receipt-facing surfaces. */
 export function formatTrustSummaryLine(status: CanonicalTrustStatus): string {
 	return `trust v${TRUST_SUMMARY_VERSION}: ${trustVerdictWord(status)}; ${formatTrustSummary(status)}`;

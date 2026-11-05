@@ -49,6 +49,7 @@ export interface WorkerSettledCall {
 	verb?: string;
 	object?: string;
 	truncated?: true;
+	capability?: string;
 }
 
 export interface WorkerSettledFields {
@@ -67,6 +68,7 @@ function settledCall(action: WorkerAction): WorkerSettledCall {
 		...(descriptor !== undefined ? { verb: descriptor.verb } : {}),
 		...(descriptor?.object !== undefined ? { object: descriptor.object } : {}),
 		...(descriptor?.truncated === true ? { truncated: true as const } : {}),
+		...(descriptor?.capability !== undefined ? { capability: descriptor.capability } : {}),
 	};
 }
 
@@ -85,7 +87,7 @@ export function workerSettledFields(state: WorkerEntryState): WorkerSettledField
 
 function settledCallFromData(value: unknown): WorkerSettledCall[] {
 	if (value === null || typeof value !== "object") return [];
-	const { tool, verb, object, truncated, outcome } = value as Record<string, unknown>;
+	const { tool, verb, object, truncated, outcome, capability } = value as Record<string, unknown>;
 	if (typeof tool !== "string" || tool.length === 0) return [];
 	return [
 		{
@@ -94,6 +96,7 @@ function settledCallFromData(value: unknown): WorkerSettledCall[] {
 			...(typeof verb === "string" && verb.length > 0 ? { verb } : {}),
 			...(typeof object === "string" && object.length > 0 ? { object } : {}),
 			...(truncated === true ? { truncated: true as const } : {}),
+			...(typeof capability === "string" && capability.length > 0 ? { capability } : {}),
 		},
 	];
 }
@@ -123,6 +126,7 @@ function settledCallAction(call: WorkerSettledCall): WorkerAction {
 			verb: call.verb,
 			...(call.object !== undefined ? { object: call.object } : {}),
 			...(call.truncated === true ? { truncated: true } : {}),
+			...(call.capability !== undefined ? { capability: call.capability } : {}),
 		},
 	};
 }

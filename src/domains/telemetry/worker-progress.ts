@@ -195,6 +195,7 @@ function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
 	if (verb === undefined)
 		return { tool, ...(toolCallId !== undefined ? { toolCallId } : {}), ...(outcome ? { outcome } : {}) };
 	const object = nonEmptyString(raw?.object);
+	const capability = nonEmptyString(raw?.capability);
 	return {
 		tool,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
@@ -203,6 +204,7 @@ function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
 			verb,
 			...(object !== undefined ? { object } : {}),
 			...(raw?.truncated === true ? { truncated: true } : {}),
+			...(capability !== undefined ? { capability } : {}),
 		},
 	};
 }
