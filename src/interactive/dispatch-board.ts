@@ -1786,6 +1786,13 @@ export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: 
 	return view ? (runUsagesOf(view).get(runId) ?? PENDING) : UNAVAILABLE;
 }
 
+const FLEET_PLAN_ROW_STATUS: Record<FleetPlanRunView["state"], DispatchBoardStatus> = {
+	running: "running",
+	passed: "completed",
+	failed: "failed",
+	unsettled: "stale",
+};
+
 function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 	return {
 		runId: plan.rootId,
@@ -1796,7 +1803,7 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 		targetId: "",
 		wireModelId: "",
 		taskSummary: planProgressText(plan),
-		status: plan.state === "running" ? "running" : plan.state === "passed" ? "completed" : "failed",
+		status: FLEET_PLAN_ROW_STATUS[plan.state],
 		elapsedMs: (plan.finishedAtMs ?? now) - plan.startedAtMs,
 		usage: UNAVAILABLE,
 		ttft: null,
@@ -1808,17 +1815,18 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 /** The board keeps display order and reads every run fact from telemetry; tokens and cost from its read model. */
 export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
+	readDurablePlans?: () => ReadonlyArray<FleetPlanRunView>,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
-	/** Plans the session started; their rows join `rows()` but never the worker count in `activeRows()`. */
+	/** Plans this session started and the durable ones before it; their rows join `rows()` but never `activeRows()`. */
 	plans: FleetPlanRuns;
 	unsubscribe(): void;
 } {
 	let current = projection.snapshot();
-	const plans = createFleetPlanRuns();
+	const plans = createFleetPlanRuns(Date.now, readDurablePlans);
 	const unsubscribe = projection.subscribe((snapshot) => {
 		current = snapshot;
 	});
