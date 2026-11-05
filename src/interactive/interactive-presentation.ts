@@ -727,8 +727,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				const name = modelNickname(out ?? route?.model);
 				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
 				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
-				// Beside other work a phase must say whose it is, so its own name is held back from the lesser facts too.
-				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 + visibleWidth(name) + 1 : 0;
+				// Beside other work a phase must say whose it is, so a rail wide enough to name it holds that name back from the
+				// lesser facts too. A narrower rail has no name to show, and reserving for one would only cost the phase its clock.
+				const named = width >= 100 ? visibleWidth(name) + 1 : 0;
+				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 + named : 0;
 				const presented = composerPhasePresentation(
 					status,
 					width,
