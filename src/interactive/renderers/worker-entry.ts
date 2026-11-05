@@ -35,7 +35,7 @@ import {
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
-import { workerActionParts, workerPhaseActivity } from "../worker-activity.js";
+import { compactQuantity, workerActionParts, workerPhaseActivity } from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
@@ -389,6 +389,11 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
 			: meta(`${SEPARATOR}${entry.telemetry.activity.elapsed.display}`);
+	// A narrow row keeps what happened and lets the identity take the cut.
+	if (width < NARROW_CARD_WIDTH) {
+		const lead = `${cardPrefix(entry)}${status} `;
+		return truncateToWidth(`${lead}${identityUnits(entry).join(meta(SEPARATOR))}`, width, GLYPH.ellipsis, false);
+	}
 	const full = ` ${status}${elapsed}`;
 	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
 	// Reserve one identity cell. The optional hint yields before execution
@@ -413,12 +418,18 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	}
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
+	if (!inspect) {
+		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
+		if (calls !== undefined) metrics.push(`${calls} tool calls`);
+		const figure = tokens === undefined ? null : compactQuantity(tokens);
+		if (figure !== null) metrics.push(`${figure} tokens`);
+		return metrics;
+	}
 	if (tokens !== undefined) metrics.push(`${tokens} tokens processed`);
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
-
 	if (calls !== undefined) metrics.push(`${calls} tool calls`);
-	if (inspect && entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
+	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
 
@@ -459,6 +470,7 @@ function describedAction(entry: WorkerEntryState): string | null {
 }
 
 const TIMER_WIDTH = 7;
+const NARROW_CARD_WIDTH = 72;
 
 function workerName(entry: WorkerEntryState): string {
 	return displayText(entry, "name", entry.council?.label ?? entry.agentId);
@@ -530,6 +542,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	const tools = calls === undefined ? "" : `tools ${calls}`;
 	const tokens = entry.telemetry?.row.tokens.display;
+	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
 	const current = isPending(entry) ? describedAction(entry) : null;
 	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
 	const activity =
@@ -543,7 +556,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const facts = [
 		target,
 		tools,
-		tokens === undefined ? "" : `${tokens} tokens`,
+		tokenFigure === null ? "" : `${tokenFigure} tokens`,
 		activity && `${GLYPH.phaseTool} ${activity}`,
 	].filter(Boolean);
 	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
@@ -572,10 +585,11 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
 	const elapsed = entry.telemetry?.activity.elapsed.display;
 	const tokens = entry.telemetry?.row.tokens.display;
+	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	const facts = [
 		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
-		...(tokens === undefined ? [] : [`${tokens} tokens`]),
+		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
 		...(calls === undefined ? [] : [`${calls} calls`]),
 	];
 	// The elapsed time is the line's live signal, so a narrow row cuts the

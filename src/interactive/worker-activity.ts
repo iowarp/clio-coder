@@ -22,6 +22,17 @@ export function workerPhaseActivity(phase: string | undefined): readonly [glyph:
 }
 
 /**
+ * A read-model quantity without its coverage clause: `≥999 (3 calls unknown)`
+ * reads `≥999`, which still says it is a lower bound. A wholly unknown figure is
+ * null so a row can leave it out, because `unknown tokens` tells a reader nothing
+ * they can act on. The clause stays in `/view` and the board's expanded detail.
+ */
+export function compactQuantity(display: string): string | null {
+	const figure = display.replace(/ \(.*\)$/u, "");
+	return figure === "unknown" || figure === "?" ? null : figure;
+}
+
+/**
  * The descriptor vocabulary's progressive verbs in the past tense. A verb that
  * names a tool rather than an act (`context`, `tasks`) reads the same either way.
  * A check that ran is `checked`, because `verified` would read as a pass on a

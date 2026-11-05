@@ -56,7 +56,7 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { workerActionParts, workerActivityWords } from "./worker-activity.js";
+import { compactQuantity, workerActionParts, workerActivityWords } from "./worker-activity.js";
 
 export type DispatchBoardStatus = TelemetryRunSummary["status"];
 
@@ -739,9 +739,14 @@ function dispatchCardBody(
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	const up = theme.fg("body", `${GLYPH.up} ${usage.prompt}`);
-	const down = theme.fg("body", `${GLYPH.down} ${usage.output}${rate !== null ? ` (${rate}/s wall avg)` : ""}`);
-	const total = theme.fg("body", `total ${usage.total}`);
+	// The fold leads with the figures; Enter adds the coverage clause each one was hedged with.
+	const figure = (display: string): string => (options.expanded === true ? display : (compactQuantity(display) ?? "?"));
+	const up = theme.fg("body", `${GLYPH.up} ${figure(usage.prompt)}`);
+	const down = theme.fg(
+		"body",
+		`${GLYPH.down} ${figure(usage.output)}${rate !== null ? (options.expanded === true ? ` (${rate}/s wall avg)` : ` ${rate}/s`) : ""}`,
+	);
+	const total = theme.fg("body", `total ${figure(usage.total)}`);
 
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
@@ -802,6 +807,20 @@ function dispatchCardBody(
 			...(recentTools.length > 0 ? [theme.fg("body", `recent ${recentTools.join(" ")}`)] : []),
 		];
 		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
+	}
+	if (row.status === "enqueued" && row.endpoint !== undefined) {
+		const active = options.endpointActive ?? 0;
+		bodyLines.push(
+			...cardWrappedValueLines(
+				theme,
+				"waiting",
+				theme.fg(
+					"body",
+					`for a slot on ${sanitizeCallTargetText(row.endpoint.label)}: ${active} of ${row.endpoint.limit} in use, starts when one settles`,
+				),
+				contentWidth,
+			),
+		);
 	}
 	if (row.retry) {
 		bodyLines.push(
@@ -929,11 +948,14 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	const up = theme.fg("body", `${GLYPH.up} ${usage.prompt}`);
-	const down = theme.fg("body", `${GLYPH.down} ${usage.output}${rate !== null ? ` (${rate}/s)` : ""}`);
+	const up = theme.fg("body", `${GLYPH.up} ${compactQuantity(usage.prompt) ?? "?"}`);
+	const down = theme.fg(
+		"body",
+		`${GLYPH.down} ${compactQuantity(usage.output) ?? "?"}${rate !== null ? ` (${rate}/s)` : ""}`,
+	);
 	const telemetry = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
-		: `  ${up}${dot}${down}${dot}${theme.fg("body", cost)}`;
+		: `  ${up}${dot}${down}${dot}${theme.fg("body", `cost ${cost}`)}`;
 	const task = row.taskSummary
 		? wrapTextWithAnsi(row.taskSummary, Math.max(1, width - 2))
 				.slice(0, 3)
@@ -1175,7 +1197,13 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 					}
 				: { text: task ?? "retrying", tone: "warning" };
 		case "enqueued":
-			return { text: task ?? "waiting for a slot", tone: "muted" };
+			// The wait's cause outranks the task, which the card under the table still states.
+			return {
+				text: row.endpoint
+					? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
+					: (task ?? "waiting for a slot"),
+				tone: "muted",
+			};
 		case "failed":
 		case "dead":
 			return { text: workerFailureHeadline(terminalDetail(row)) ?? task ?? "", tone: "error" };
@@ -1546,6 +1574,17 @@ export function createDispatchBoardView(
 	};
 }
 
+/** What the runs off the card are doing, so a queued or failed one is not hidden behind a count. */
+function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
+	const counts = new Map<string, number>();
+	for (const item of hidden) {
+		const label = item.kind === "council" ? item.group.status.label : dispatchStatusPresentation(item.row.status).label;
+		counts.set(label, (counts.get(label) ?? 0) + 1);
+	}
+	const states = [...counts].map(([label, count]) => `${count} ${label}`).join(" · ");
+	return `+ ${hidden.length} more · ${states} · /fleet`;
+}
+
 export function formatTaskIslandLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	maxRows = 4,
@@ -1578,7 +1617,7 @@ export function formatTaskIslandLines(
 		const hidden = items.length - visibleItems.length;
 		if (hidden > 0) {
 			body.push(innerDivider(clioTheme(), contentWidth));
-			body.push(clioTheme().fg("annotation", `+ ${hidden} more`));
+			body.push(clioTheme().fg("annotation", hiddenRunsSummary(items.slice(visibleItems.length))));
 		}
 	}
 

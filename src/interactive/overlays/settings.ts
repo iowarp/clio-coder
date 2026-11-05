@@ -3964,6 +3964,10 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		wizard = openTargetWizard(tui, target ? { mode: "edit", target: structuredClone(target) } : { mode: "add" }, () => {
 			wizard = null;
 			refreshRows();
+			// A target just added reads `? unknown` until probed, which the wizard already showed was reachable.
+			void deps.providers?.probeAllLive().then(refreshRows, () => {
+				// The health cell stays unknown, which is what a failed probe of the probe itself means.
+			});
 		});
 	};
 	const targetOperations = new Map<string, { operation: "connect" | "probe"; token: object }>();
