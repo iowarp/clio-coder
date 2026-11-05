@@ -86,6 +86,7 @@ export interface AskUserDecision {
 }
 
 export interface AskUserResult {
+	/** With `cancelled`, what the operator recorded before pressing Esc: never approval, always their words. */
 	answers: AskUserAnswer[];
 	cancelled?: true;
 	/**
@@ -382,7 +383,7 @@ function normalizeTimedOut(value: unknown): { afterSeconds: number } | undefined
 }
 
 function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, result: AskUserResult): AskUserResult {
-	if (result.cancelled === true) return cancelledAskUserResult();
+	if (result.unavailable === true) return unavailableAskUserResult();
 	const timedOut = normalizeTimedOut(result.timedOut);
 	const answers: AskUserAnswer[] = [];
 	for (let index = 0; index < questions.length; index += 1) {
@@ -404,6 +405,8 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 			...(value !== undefined ? { value } : {}),
 		});
 	}
+	// Esc ends the turn, but what the operator already recorded stays theirs.
+	if (result.cancelled === true) return { answers, cancelled: true };
 	return { answers, ...(timedOut !== undefined ? { timedOut } : {}) };
 }
 
@@ -464,7 +467,6 @@ function restoreQuestions(
 	shown: ReadonlyArray<AskUserQuestion>,
 	original: ReadonlyArray<AskUserQuestion>,
 ): AskUserResult {
-	if (result.cancelled === true) return result;
 	const originalByShown = new Map<string, string>();
 	for (const [index, question] of shown.entries()) {
 		const source = original[index]?.question;
@@ -774,7 +776,9 @@ function renderAskUserState(
 			: policy.status === "active"
 				? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
 				: policy.status === "cancelled"
-					? "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
+					? latestAnswers.length > 0
+						? "The operator recorded latest_answers, then dismissed the interview before answering the rest. A dismissal is not approval: make no edits, run no commands and dispatch no workers on these answers or a guess. The turn ends here; wait for the operator's next message, and do not ask again what latest_answers already says."
+						: "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
 					: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
 	return [
 		`ask_user result: ${event}`,
@@ -1041,7 +1045,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					policy.cancelled = true;
 					policy.endedAt = answeredAt;
 					if (!standalone) await persistAskUserTranscript(policy, options);
-					return okInterviewResult(policy, "cancelled", []);
+					return okInterviewResult(policy, "cancelled", result.answers);
 				}
 				if (timedOut !== undefined) {
 					// Clio answered for an absent operator, so the interview closes
