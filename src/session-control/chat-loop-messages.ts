@@ -398,8 +398,8 @@ export function turnNoAnswerSentence(ending: Extract<TurnEnding, { kind: "no_ans
 export function turnCallsNotRunSentence(ending: Extract<TurnEnding, { kind: "call_not_run" }>): string {
 	const tools = ending.writtenTools;
 	return tools.length === 1
-		? `The answer ends on a ${tools[0]} call the model wrote as plain text, so that call did not run.`
-		: `The answer ends on ${tools.length} calls the model wrote as plain text, so those calls did not run.`;
+		? `The answer ends on a written ${tools[0]} call. The model wrote it as plain text, so it did not run.`
+		: `The answer ends on ${tools.length} written calls. The model wrote them as plain text, so they did not run.`;
 }
 
 export function toolNamesFromAgentState(tools: ReadonlyArray<unknown>): string[] {

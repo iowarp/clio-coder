@@ -109,6 +109,7 @@ import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import {
 	classifyTurnEnding,
 	turnCallsNotRunSentence,
@@ -7332,7 +7333,8 @@ function promptResponse(
 			[ACP_TURN_META_KEY]: {
 				...(active.model ? { model: active.model } : {}),
 				...(active.ttftMs !== undefined ? { ttftMs: active.ttftMs } : {}),
-				...(active.generationMs && active.timedOutputTokens
+				// A rate over less than RATE_MIN_WINDOW_MS of generation measured the delivery, not the model, so it is left out.
+				...(active.generationMs !== undefined && active.generationMs >= RATE_MIN_WINDOW_MS && active.timedOutputTokens
 					? { outputTokensPerSecond: active.timedOutputTokens / (active.generationMs / 1000) }
 					: {}),
 			},
