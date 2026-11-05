@@ -70,8 +70,8 @@ const DEFAULT_INFO_TTL_MS = 12_000;
  * away, and never a permanent claim about a moment that has passed. The dashboard
  * keeps it afterwards. A notice stating a live condition pins with `ttlMs: 0`.
  */
-const DEFAULT_WARNING_TTL_MS = 120_000;
-const DEFAULT_ERROR_TTL_MS = 300_000;
+const DEFAULT_WARNING_TTL_MS = 60_000;
+const DEFAULT_ERROR_TTL_MS = 180_000;
 /** Later work never takes a notice off the footer sooner than this after it appeared. */
 const NOTICE_READING_FLOOR_MS = 8_000;
 /** Key of the notice confirming one applied route, which says something only while that route is the session's. */
@@ -580,7 +580,13 @@ export function formatNotificationPanel(
 			...wrapped.map((line, index) => fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width)),
 		);
 	};
-	for (const entry of entries.slice(0, maxRows)) row(entry, "notice", "");
+	// Each live notice says when it ends, so a warning never reads as a permanent claim.
+	const lifetime = (entry: Notification): string => {
+		if (options.now === undefined) return "";
+		if (entry.expiresAt === null) return " · stays until resolved";
+		return ` · clears in ${formatCompactMs(Math.ceil(Math.max(0, entry.expiresAt - options.now) / 1000) * 1000)}`;
+	};
+	for (const entry of entries.slice(0, maxRows)) row(entry, "notice", lifetime(entry));
 	for (const entry of ended) {
 		const age = options.now === undefined ? "" : ` · ${formatCompactMs(Math.max(0, options.now - entry.addedAt))} ago`;
 		row(entry, "annotation", age);

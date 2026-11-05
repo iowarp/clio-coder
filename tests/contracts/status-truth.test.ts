@@ -36,7 +36,12 @@ import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
-import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
+import {
+	createNotificationCenter,
+	formatNotificationPanel,
+	type Notification,
+	topNotification,
+} from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
@@ -1774,4 +1779,19 @@ test("a loop's result notices name its task and leave the job id to the line tha
 	strictEqual(finished?.text, 'loop "check the build" finished: 2 runs done');
 	const [paused] = loopTransitionNotices(previous, { ...job, state: "paused", reason: null });
 	strictEqual(paused?.text, `loop "check the build" is paused. /loop resume ${job.id} restarts its schedule`);
+});
+
+test("a warning states when it clears and ends within a minute; a pinned notice says it stays until resolved", () => {
+	let now = 1_000;
+	const center = createNotificationCenter({ now: () => now });
+	center.add({ level: "warning", text: "cancel was refused", key: "refusal" });
+	center.add({ level: "error", text: "route is down", key: "route", ttlMs: 0 });
+	const panel = formatNotificationPanel(center.list(), 120, { now }).map(stripTerminalSequences).join("\n");
+	match(panel, /cancel was refused · clears in 1m/);
+	match(panel, /route is down · stays until resolved/);
+	now += 60_000;
+	deepStrictEqual(
+		center.list().map((notice) => notice.key),
+		["route"],
+	);
 });

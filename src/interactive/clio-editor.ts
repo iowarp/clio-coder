@@ -21,7 +21,7 @@ import { type PermissionInspectionHint, permissionHintEntries } from "./permissi
 import type { SlashCompletionItem } from "./slash-autocomplete.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import {
-	attentionCue,
+	activityCue,
 	clioTheme,
 	editorTheme,
 	GLYPH,
@@ -595,13 +595,14 @@ export class ClioEditor extends Editor {
 		const suffixCols = visibleWidth(suffix) + (suffix ? 3 : 0);
 		const reserved = yoloCols + suffixCols;
 		const status = this.chrome.getHarnessStatus?.(width, reserved);
-		const spinner = GLYPH.running;
+		const spinner = activityCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true);
 		let lead = "";
 		let activity = "";
 		// The state when no name stands in front of it to read `is writing` with.
 		let stateAlone = "";
 		if (mode === "CONFIRM") {
-			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
+			// The operator owns this wait, so the mark holds still: motion is for work that is moving.
+			lead = theme.fg("attentionRail", GLYPH.phaseBlocked);
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
 			stateAlone = activity;
 		} else if (mode === "PREPARING" || mode === "COMPACTING") {
@@ -838,7 +839,7 @@ export class ClioEditor extends Editor {
 			? (this.chrome.getBesideCard?.(room - visibleWidth(plainTitle) - 5) ?? null)
 			: null;
 		const title = entry.frame.dockAwaitingInput?.()
-			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}${beside === null ? "" : theme.fg("annotation", ` · ${beside}`)}`
+			? `${theme.fg(rail.tone ?? "composerRail", GLYPH.phaseBlocked)} ${titleText}${beside === null ? "" : theme.fg("annotation", ` · ${beside}`)}`
 			: titleText;
 		const hint = entry.frame.dockHint(room + 4);
 		const lines = [
@@ -873,7 +874,7 @@ export class ClioEditor extends Editor {
 		const rail: EditorRailState = { ...this.railState("CONFIRM"), tone: "attentionRail" };
 		const room = this.approvalLabelRoom(width);
 		const route = this.chrome.getModelLabel();
-		const cue = attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true);
+		const cue = GLYPH.phaseBlocked;
 		const up = draft.hiddenAbove > 0 ? theme.fg("positionCount", `${GLYPH.up}${draft.hiddenAbove}`) : "";
 		const titleRoom = Math.max(1, room - visibleWidth(cue) - 1 - (up ? visibleWidth(up) + 3 : 0) - (rail.yolo ? 7 : 0));
 		const title = entry.frame.dockTitle({

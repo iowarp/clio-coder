@@ -66,7 +66,8 @@ export function renderActivityHeatmap(
 	const firstMonday = lastMonday - (weeks - 1) * 7 * DAY_MS;
 	const max = Math.max(0, ...days.values());
 
-	const months = Array.from({ length: weeks * 2 }, () => " ");
+	// The current week's label may run one cell past the grid, where the row has room for it.
+	const months = Array.from({ length: Math.min(weeks * 2 + 1, Math.max(0, contentWidth - gutter)) }, () => " ");
 	let lastMonth = -1;
 	for (let week = 0; week < weeks; week += 1) {
 		const monday = new Date(firstMonday + week * 7 * DAY_MS);
@@ -77,8 +78,9 @@ export function renderActivityHeatmap(
 		// began before the graph, so the row never opens on a partial month.
 		if (week === 0 && monday.getDate() > 7) continue;
 		const label = MONTHS[month] ?? "";
-		for (let index = 0; index < label.length && week * 2 + index < months.length; index += 1)
-			months[week * 2 + index] = label[index] ?? " ";
+		// A month the row cannot spell whole goes unlabelled: `No` reads as a word, not as November.
+		if (week * 2 + label.length > months.length) continue;
+		for (let index = 0; index < label.length; index += 1) months[week * 2 + index] = label[index] ?? " ";
 	}
 	const lines = [`${" ".repeat(gutter)}${theme.fg("body", months.join("").trimEnd())}`];
 	const rowLabels = ["M", "", "W", "", "F", "", ""];
