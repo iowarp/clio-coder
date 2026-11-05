@@ -16,6 +16,7 @@ import { finiteNonNegative } from "../context-bar.js";
 import { contextPercentRole } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
+import { providerFailureRailFacts } from "../renderers/provider-error.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { computeWatchdogTier, formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
@@ -535,6 +536,17 @@ const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc cancels", short: "Esc" 
 const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model switches", short: "/model" };
 /** A route change never reaches a request already out, so during a turn the way to another model runs through Esc. */
 const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model switches", short: "then /model" };
+
+/** A failed turn's rail: the failure, its class and the way out the transcript block gives for that class. */
+function failedTurnFacts(head: RailFact, failure: TurnSummary["failure"]): ReadonlyArray<RailFact> {
+	const facts = failure ? providerFailureRailFacts(failure) : null;
+	return [
+		head,
+		...(facts ? [{ ...facts.cause, keep: RAIL_ACTION_KEEP }] : []),
+		...(facts?.way ? [{ ...facts.way, keep: 6 }] : []),
+		{ ...MODEL_SWITCHES, keep: 8 },
+	];
+}
 
 /**
  * What a model request is standing behind, in the words of the step Clio is taking. Every form keeps elapsed and the way
@@ -1062,13 +1074,7 @@ export function composerPhasePresentation(
 			const leftLoading = status.modelRequest?.abandonedLoad === true;
 			label =
 				stop === "error"
-					? fitRailFacts(
-							[
-								{ text: "failed", keep: 9 },
-								{ ...MODEL_SWITCHES, keep: 8 },
-							],
-							room,
-						)
+					? fitRailFacts(failedTurnFacts({ text: "failed", keep: 9 }, status.summary?.failure), room)
 					: stop === "generation_guard"
 						? short
 							? "stopped"
@@ -1115,6 +1121,7 @@ export interface RouteReadinessFacts {
 	health: "healthy" | "degraded" | "unknown" | "down";
 	/** How the last turn on this exact route ended, when this session ran one. */
 	lastStop: TurnSummary["stopReason"] | null;
+	lastFailure?: TurnSummary["failure"];
 }
 
 /**
@@ -1167,13 +1174,7 @@ export function idleReadinessPresentation(
 			glyph: GLYPH.error,
 			token: "warning",
 			live: false,
-			label: fitRailFacts(
-				[
-					{ text: "last request failed", keep: 9 },
-					{ ...MODEL_SWITCHES, keep: 8 },
-				],
-				room,
-			),
+			label: fitRailFacts(failedTurnFacts({ text: "last request failed", keep: 9 }, facts.lastFailure), room),
 		};
 	}
 	if (facts.lastStop === "no_answer") {

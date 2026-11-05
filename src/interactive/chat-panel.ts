@@ -55,6 +55,8 @@ import {
 	presentProviderError,
 	providerErrorEvidence,
 	providerFailureAdvice,
+	providerFailureEvidence,
+	providerFailureHeadline,
 	readProviderFailureRoute,
 } from "./renderers/provider-error.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
@@ -941,6 +943,14 @@ function withoutLeadingBlanks(lines: string[]): string[] {
  */
 function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: boolean): string[] {
 	const out: string[] = [];
+	const headline = !unbounded && seg.route ? providerFailureHeadline(seg.route) : null;
+	if (seg.route && headline !== null) {
+		// The plain sentence and the way out read first; the row fold takes what the provider said before either.
+		for (const wrapped of wrapTextWithAnsi(headline, width)) out.push(`${RED_CRIT()}${wrapped}${RESET}`);
+		for (const row of [providerFailureAdvice(seg.route), providerFailureEvidence(seg.route, seg.text)])
+			for (const wrapped of wrapTextWithAnsi(row, width)) out.push(`${SECONDARY()}${wrapped}${RESET}`);
+		return out;
+	}
 	const shown = unbounded
 		? providerErrorEvidence(seg.text)
 		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null });

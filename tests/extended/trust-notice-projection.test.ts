@@ -44,8 +44,8 @@ for (const audience of ["internal", "shadow"] as const)
 			audience === "internal"
 				? []
 				: [
-						"Clio-Coder → Context-bootstrap · working · run helper-1",
-						"Clio-Coder → Context-bootstrap · failed · run helper-1",
+						"Clio's Context-bootstrap helper is working",
+						"Clio's Context-bootstrap helper failed; your turn is not affected · /fleet shows why",
 					],
 		);
 		strictEqual(islands, audience === "internal" ? 0 : 2);

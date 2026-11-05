@@ -23,6 +23,7 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import type { AgentMessage } from "../engine/types.js";
 import { classifyTurnEnding } from "../session-control/chat-loop-messages.js";
 import type { TurnStopReason, TurnSummary } from "./status/index.js";
+import { turnFailureFacts } from "./status/summary.js";
 
 function payloadRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -121,6 +122,7 @@ export function lastTurnSummaryFromLedger(
 	let sawAssistant = false;
 	const settled: AgentMessage[] = [];
 	let stopReason: TurnStopReason = "stop";
+	let failure: TurnSummary["failure"];
 	let toolCount = 0;
 	let toolErrorCount = 0;
 	let targetId = turn.targetId;
@@ -146,6 +148,7 @@ export function lastTurnSummaryFromLedger(
 		settled.push({ role: "assistant", ...record } as unknown as AgentMessage);
 		const reason = stopReasonOf(record.stopReason);
 		if (reason && reason !== "stop") stopReason = reason;
+		failure = turnFailureFacts(record);
 		targetId = targetId ?? nonEmptyString(record, "provider", "api");
 		modelId = modelId ?? nonEmptyString(record, "model");
 		responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
@@ -162,6 +165,7 @@ export function lastTurnSummaryFromLedger(
 		toolCount,
 		toolErrorCount,
 		stopReason,
+		...(stopReason === "error" && failure !== undefined ? { failure } : {}),
 		watchdogPeak: 0,
 		truncated: false,
 		responseModelIdObservation,

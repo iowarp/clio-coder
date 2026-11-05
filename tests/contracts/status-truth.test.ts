@@ -847,13 +847,29 @@ test("a no-answer receipt says why, with or without usage, and never wears the g
 test("each provider failure names its own way out", () => {
 	const route = { targetId: "gw", url: "http://gw.test:4000" };
 	const refused = providerFailureAdvice({ ...route, stage: "auth", errorClass: "http_401" });
-	match(refused, /refused the credential\. clio-coder configure --id gw replaces it/u);
+	match(refused, /^clio-coder configure --id gw replaces it/u);
 	const cut = providerFailureAdvice({ ...route, stage: "transport", errorClass: "stream_dropped", partialReply: true });
-	match(cut, /Your message is kept\. The partial reply stays on screen and the model will not see it\./u);
-	match(cut, /Up recalls your message and Enter resends it/u);
+	match(cut, /Up recalls your message, Enter resends/u);
+	match(cut, /The model will not see the partial reply\./u);
 	doesNotMatch(cut, /configure/u);
 	doesNotMatch(providerFailureAdvice({ ...route, stage: "provider", errorClass: "http_503" }), /configure/u);
 	match(providerFailureAdvice(route), /clio-coder configure --id gw edits this target/u);
+});
+
+test("a provider failure leads with a plain sentence and the rail gives the block's way out", () => {
+	const route = { targetId: "gw", url: "http://gw.test:4000" };
+	const dropped = { ...route, stage: "transport", errorClass: "stream_dropped", partialReply: true };
+	strictEqual(providerFailureHeadline(dropped), "The connection dropped before the reply finished.");
+	strictEqual(providerFailureRailFacts(dropped)?.cause.text, "connection dropped");
+	const refused = { ...route, stage: "auth", errorClass: "http_401" };
+	strictEqual(providerFailureHeadline(refused), "The provider refused the credential.");
+	strictEqual(providerFailureRailFacts(refused)?.way?.text, "clio-coder configure --id gw");
+	match(
+		providerFailureEvidence(refused, '401 {"error":{"message":"bad key"}}'),
+		/gw at http:\/\/gw\.test:4000 · HTTP 401; bad key/u,
+	);
+	strictEqual(providerFailureHeadline({ ...route, stage: "admission", errorClass: "admission_refused" }), null);
+	doesNotMatch(presentProviderError("Provider stream ended before a finish reason was received."), /finish reason/u);
 });
 
 test("what just happened borrows the footer slot from a standing warning, never from an error", () => {

@@ -679,6 +679,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					reason: target.reason,
 					health: target.health.status,
 					lastStop: onRoute ? last.stopReason : null,
+					...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
 				},
 				width,
 				reserved,
