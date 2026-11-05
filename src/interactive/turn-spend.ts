@@ -29,6 +29,8 @@ export interface TurnSpend {
 	coverageNote: string | null;
 	/** The token subtotals a one-row receipt can state, or null when no amount is known. */
 	tokens: string | null;
+	/** One call's own amounts, for a turn whose sum mixes a call that was moved away from with the one that answered. */
+	answer?: { tokens: string | null; cacheRead: string | null };
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -52,8 +54,18 @@ function nonZero(quantity: Quantity): boolean {
 	);
 }
 
-/** Null when the view cannot resolve the turn's references. */
-export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null {
+/** What the call that answered reported, which a moved turn's one-row receipt states in place of the sum. */
+function answerSpend(view: TelemetryView, turnId: string, callId: string): NonNullable<TurnSpend["answer"]> {
+	const usage = view.calls({ turnIds: [turnId] }).calls.find((call) => call.callId === callId)?.usage;
+	if (!usage || known(usage.input) + known(usage.output) <= 0) return { tokens: null, cacheRead: null };
+	return {
+		tokens: `in ${renderCompactCount(usage.input.fact)} · out ${renderCompactCount(usage.output.fact)}`,
+		cacheRead: nonZero(usage.cacheRead) ? renderCompactCount(usage.cacheRead.fact) : null,
+	};
+}
+
+/** Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts. */
+export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?: string): TurnSpend | null {
 	const read = (metric: FactMetric) =>
 		view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
 	const calls = read("calls");
@@ -85,6 +97,7 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 				? neverSentNote
 				: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
 		tokens: stated ? `in ${renderCompactCount(input.fact)} · out ${renderCompactCount(output.fact)}` : null,
+		...(answeringCallId === undefined ? {} : { answer: answerSpend(view, turnId, answeringCallId) }),
 	};
 }
 
