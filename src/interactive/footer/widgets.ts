@@ -346,6 +346,8 @@ type HarnessPhasePresentation = {
 	live: boolean;
 	/** Who is acting, when that is not the model the rail names by default. */
 	subject?: string;
+	/** The moment a person checks where the turn is going: idle, and before the model has answered. */
+	namesRoute?: boolean;
 };
 
 function shortToolLabel(status: AgentStatus, width: number): string {
@@ -455,6 +457,11 @@ const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
  */
 function railActivityRoom(width: number, reserved: number, identityCols = width < 60 ? 0 : 7): number {
 	return Math.max(10, statusRailLabelRoom(width) - 2 - identityCols - reserved);
+}
+
+/** The name's own cells within what a caller says the rail spends on the lead glyph, the name and their spaces. */
+function identityCols(identityCells: number | undefined): number | undefined {
+	return identityCells === undefined ? undefined : identityCells - 2;
 }
 
 interface RailFact {
@@ -651,9 +658,11 @@ export function composerPhasePresentation(
 	/** Room for the words alone, for a surface that draws them without the rail's identity beside them. */
 	labelRoom?: number,
 	reserved = 0,
+	/** What the rail will spend on the lead glyph and a name wider than a nickname, when it knows. */
+	identityCells?: number,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = labelRoom ?? railActivityRoom(width, reserved);
+	const room = labelRoom ?? railActivityRoom(width, reserved, identityCols(identityCells));
 	// A tool's actor is part of the claim, so its rail holds room for the name instead of letting it yield.
 	const toolRoom = labelRoom ?? railActivityRoom(width, reserved, (status.tool?.operatorShell === true ? 10 : 4) + 1);
 	const elapsedFrom = (from: number): string | null => {
@@ -800,7 +809,12 @@ export function composerPhasePresentation(
 			break;
 		}
 	}
-	return { ...phase, label };
+	// A blocker or a silent wait has its own facts to state, and those outrank where the turn was going.
+	const namesRoute =
+		status.phase === "preparing" ||
+		(status.phase === "waiting_model" && computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) < 1) ||
+		(status.phase === "ended" && status.summary?.stopReason !== "error");
+	return { ...phase, label, namesRoute };
 }
 
 /** What the route on screen is known to be able to do right now, in the terms the model picker already uses. */
@@ -821,11 +835,12 @@ export function idleReadinessPresentation(
 	facts: RouteReadinessFacts,
 	width: number,
 	reserved = 0,
+	identityCells?: number,
 ): HarnessPhasePresentation {
-	const room = railActivityRoom(width, reserved);
-	const quiet = { token: "counter" as const, live: false };
+	const room = railActivityRoom(width, reserved, identityCols(identityCells));
+	const quiet = { token: "counter" as const, live: false, namesRoute: true };
 	// Nothing here is urgent, so a narrow rail keeps saying which model the next prompt goes to.
-	const calmRoom = railActivityRoom(width, reserved, 7);
+	const calmRoom = railActivityRoom(width, reserved, identityCols(identityCells) ?? 7);
 	if (!facts.available) {
 		const why = facts.reason.trim();
 		return {
