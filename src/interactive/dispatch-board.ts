@@ -2,18 +2,14 @@ import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
-import {
-	formatBudgetPolicy,
-	formatBudgetReasons,
-	formatBudgetRequest,
-	formatEffectiveBudget,
-} from "../domains/dispatch/budget-envelope.js";
-import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
+import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
+import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
-import { plainTrustVerdict, trustFailureWords, trustStateWord } from "../domains/evidence/trust-projection.js";
+import { plainTrustVerdict, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
@@ -61,6 +57,7 @@ import { USAGE_NOT_MEASURED, usageLineCoverage } from "./usage-words.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
+	completedRunMark,
 	workerActionParts,
 	workerActivityWords,
 	workerPhaseActivity,
@@ -127,6 +124,8 @@ export interface DispatchBoardRow {
 	trust?: TrustSummaryProjection;
 	/** Which validator failed and on what evidence, beside a validation-failed verdict. */
 	validationFailure?: string;
+	/** How the settled run finished beside its outcome, for the caveat the worker card shows too. */
+	completion?: { toolCalls?: number; refusedCalls?: number; contract?: string };
 	/** Read back from the run ledger because it settled before this Clio process started (J2-F16). */
 	earlier?: true;
 	/** Dead-node failover hops recorded on this run's chain. */
@@ -838,9 +837,10 @@ function dispatchCardBody(
 	});
 	// The function phase is orange, while identity, cost and TTFT keep their own roles.
 	const failure = completedRunFailure(row);
+	const failureMark = completedRunMark(failure);
 	const statusStr =
 		failure !== null
-			? theme.fg("error", `${GLYPH.error} ${presentation.label} · ${failure}`)
+			? theme.fg(failureMark.token, `${failureMark.glyph} ${presentation.label} · ${failure.words}`)
 			: `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	// How long the model took to its first output, in words: a run that has not answered yet says so, and one that
@@ -1071,20 +1071,7 @@ function dispatchCardBody(
 		if (proofLine !== null) bodyLines.push(proofLine);
 	}
 	if (options.expanded === true && row.budget !== undefined) {
-		bodyLines.push(
-			...cardWrappedValueLines(
-				theme,
-				"policy",
-				theme.fg("body", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
-				contentWidth,
-			),
-			...cardWrappedValueLines(
-				theme,
-				"budget",
-				theme.fg("body", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
-				contentWidth,
-			),
-		);
+		bodyLines.push(...cardWrappedValueLines(theme, "limit", theme.fg("body", budgetLimitWords(row.budget)), contentWidth));
 	}
 	return bodyLines;
 }
@@ -1113,9 +1100,10 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	const failure = completedRunFailure(row);
+	const failureMark = completedRunMark(failure);
 	const glyph =
 		failure !== null
-			? theme.fg("error", GLYPH.error)
+			? theme.fg(failureMark.token, failureMark.glyph)
 			: theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	// A running row says what the run is doing in the inline card's words: the
 	// island said `running` beside a card that said `starting` (BT-007).
@@ -1138,7 +1126,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 			: row.status === "enqueued" && row.endpoint !== undefined
 				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
 				: failure !== null
-					? `done · ${failure}`
+					? `done · ${failure.words}`
 					: presentation.label;
 	// A narrow row keeps the worker's name over the rest of the phase's words, which the card below still states.
 	const nameRoom =
@@ -1153,7 +1141,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	}
 	const statusStr = theme.fg(
 		failure !== null
-			? "error"
+			? failureMark.token
 			: row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
 				? "shadowDispatchAction"
 				: presentation.token,
@@ -1408,8 +1396,11 @@ function firstLine(text: string): string {
 }
 
 /** What marks a run that finished as not to be leaned on, so its row cannot read as a plain success. */
-function completedRunFailure(row: Pick<DispatchBoardRow, "status" | "trust">): string | null {
-	return row.status === "completed" && row.trust !== undefined ? trustFailureWords(row.trust) : null;
+function completedRunFailure(
+	row: Pick<DispatchBoardRow, "status" | "trust" | "completion">,
+): CompletedRunCaveat | null {
+	if (row.status !== "completed") return null;
+	return completedRunCaveat({ ...(row.trust !== undefined ? { trust: row.trust } : {}), ...row.completion });
 }
 
 /** Who started a run, in words, because the row's glyph only implies it. */
@@ -1429,10 +1420,14 @@ function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | 
 }
 
 /** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
-function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
+function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined): string {
 	const failure = completedRunFailure(row);
-	// A narrow row drops `done`, which the mark already implies, so the worker's name keeps its column.
-	if (failure !== null) return theme.fg("error", `${GLYPH.error} ${width < 80 ? "" : "done · "}${failure}`);
+	// The caveat replaces `done` rather than trailing it: the mark already says the run finished, and the status
+	// column stays narrow enough that the task beside it still reads.
+	if (failure !== null) {
+		const mark = completedRunMark(failure);
+		return theme.fg(mark.token, `${mark.glyph} ${failure.words}`);
+	}
 	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" && tick !== undefined ? { tick } : {}),
 	});
@@ -1562,7 +1557,7 @@ export function runTableRows(
 			const cells: Array<string | TableCell> = [];
 			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 			cells.push(
-				runStatusCell(theme, row, options.tick, width),
+				runStatusCell(theme, row, options.tick),
 				`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 			);
 			if (anyPhase) cells.push("");
@@ -1580,7 +1575,7 @@ export function runTableRows(
 		const cells: Array<string | TableCell> = [];
 		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 		cells.push(
-			runStatusCell(theme, row, options.tick, width),
+			runStatusCell(theme, row, options.tick),
 			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 		);
 		if (anyPhase) cells.push(formatDispatchPhaseCell(row.phase, 14) ?? "");
@@ -2059,6 +2054,7 @@ function toRow(
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
 		...(entry.trust !== undefined ? { trust: entry.trust } : {}),
 		...(entry.validationFailure !== undefined ? { validationFailure: entry.validationFailure } : {}),
+		...(entry.completion !== undefined ? { completion: { ...entry.completion } } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),

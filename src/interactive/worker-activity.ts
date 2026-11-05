@@ -1,3 +1,4 @@
+import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
 import { DEFAULT_HEARTBEAT_SPEC } from "../domains/dispatch/heartbeat.js";
 import type {
 	WorkerAction,
@@ -6,6 +7,7 @@ import type {
 } from "../domains/telemetry/worker-progress.js";
 import { type RouteFirstOutput, usualFirstOutput } from "./footer/silence-note.js";
 import { TIER_THRESHOLDS_MS } from "./status/watchdog.js";
+import type { ClioToken } from "./theme/index.js";
 import { formatWaitClock, GLYPH } from "./theme/index.js";
 import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
@@ -265,4 +267,21 @@ export function workerActivityWords(
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
 	return workerSilenceWords(progress, options) ?? workerPhaseActivity(progress.phase)[1];
+}
+
+/**
+ * The mark and tone of a run that exited cleanly, from the shared caveat, so the worker card, the Fleet Runs row and
+ * the task island draw the same glyph for the same run.
+ */
+export function completedRunMark(caveat: CompletedRunCaveat | null): { glyph: string; token: ClioToken } {
+	switch (caveat?.kind) {
+		case "against":
+			return { glyph: GLYPH.error, token: "error" };
+		case "refused":
+			return { glyph: GLYPH.warn, token: "warning" };
+		case "no-tools":
+			return { glyph: GLYPH.queued, token: "toolMetadata" };
+		default:
+			return { glyph: GLYPH.ok, token: "success" };
+	}
 }

@@ -61,6 +61,15 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 		...(run.node !== undefined ? { node: run.node.id } : {}),
 		...(facts?.trust !== undefined ? { trust: summarizeTrustStatus(facts.trust) } : {}),
 		...(facts?.validationFailure !== undefined ? { validationFailure: facts.validationFailure } : {}),
+		...(facts !== null
+			? {
+					completion: {
+						...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
+						...(facts.refusedCalls !== undefined ? { refusedCalls: facts.refusedCalls } : {}),
+						...(facts.contract !== undefined ? { contract: facts.contract } : {}),
+					},
+				}
+			: {}),
 		...contract,
 		lastContextTokens: null,
 		runRecordId: run.id,

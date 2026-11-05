@@ -15,12 +15,19 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
+import type { CompletedRunCaveat } from "../../domains/dispatch/failure-headline.js";
 import {
+	completedRunCaveat,
 	plainOutcomeLabel,
+	refusedCallsWords,
 	STALLED_RUN_HEADLINE,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
-import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
+import {
+	summarizeTrustStatus,
+	trustStateWord,
+	validationClause,
+} from "../../domains/evidence/trust-projection.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -44,6 +51,7 @@ import {
 import {
 	approvalWaitWords,
 	compactQuantity,
+	completedRunMark,
 	workerActionParts,
 	workerPhaseActivity,
 	workerQuietWords,
@@ -207,18 +215,26 @@ function cardPrefix(entry: WorkerEntryState): string {
 	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
-/** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
-function settledAgainst(result: WorkerRunResultSummary): string | null {
+/** The shared caveat on a clean exit, so this card and the Fleet Runs row never disagree about how a run ended. */
+function settledCaveat(result: WorkerRunResultSummary): CompletedRunCaveat | null {
 	if (result.outcome !== "succeeded") return null;
-	const trust = result.trust;
-	if (trust?.artifactIntegrity.state === "failed") return "seal broken";
-	if (trust?.validationGrounding.state === "failed") return "validation failed";
-	if (trust?.validationGrounding.state === "ungrounded") return "no check ran";
-	return result.contract === "fail" ? "answer in the wrong format" : null;
+	return completedRunCaveat({
+		...(result.trust !== undefined ? { trust: summarizeTrustStatus(result.trust) } : {}),
+		...(result.contract !== undefined ? { contract: result.contract } : {}),
+		...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
+		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),
+	});
 }
 
-function refusedCallsText(count: number): string {
-	return count === 1 ? "1 call refused" : `${count} calls refused`;
+function settledMark(result: WorkerRunResultSummary): string {
+	const mark = completedRunMark(settledCaveat(result));
+	return theme.fg(mark.token, mark.glyph);
+}
+
+/** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
+function settledAgainst(result: WorkerRunResultSummary): string | null {
+	const caveat = settledCaveat(result);
+	return caveat?.kind === "against" ? caveat.words : null;
 }
 
 /**
@@ -234,15 +250,13 @@ function outcomeUnit(result: WorkerRunResultSummary): string {
 	// assignment that needed tools, so "execution ok" would read as a done task.
 	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
-	const against = settledAgainst(result);
-	if (against !== null) return `${theme.fg("error", `${GLYPH.error} ${against}`)}${meta(`${SEPARATOR}execution ok`)}`;
-	if (result.outcome === "succeeded" && result.toolCalls === 0) {
-		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
+	const caveat = settledCaveat(result);
+	if (caveat?.kind === "against") {
+		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}execution ok`)}`;
 	}
+	if (caveat?.kind === "no-tools") return theme.fg("toolMetadata", `${GLYPH.queued} ${caveat.words}`);
 	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
-	if (result.outcome === "succeeded" && (result.refusedCalls ?? 0) > 0) {
-		return theme.fg("warning", `${GLYPH.warn} finished with ${refusedCallsText(result.refusedCalls ?? 0)}`);
-	}
+	if (caveat?.kind === "refused") return theme.fg("warning", `${GLYPH.warn} finished with ${caveat.words}`);
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
 	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
@@ -506,7 +520,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	if (!inspect) {
 		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
 		if (calls !== undefined) metrics.push(renderCalls(calls));
-		if (refused > 0) metrics.push(refusedCallsText(refused));
+		if (refused > 0) metrics.push(refusedCallsWords(refused));
 		const figure = tokens === undefined ? null : compactQuantity(tokens);
 		if (figure !== null) metrics.push(`${figure} tokens`);
 		return metrics;
@@ -515,7 +529,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
 	if (calls !== undefined) metrics.push(renderCalls(calls));
-	if (refused > 0) metrics.push(refusedCallsText(refused));
+	if (refused > 0) metrics.push(refusedCallsWords(refused));
 	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
@@ -579,7 +593,7 @@ function headerWord(entry: WorkerEntryState): string {
 	if (outcome === "stalled") return "stalled";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
-	return entry.result.toolCalls === 0 ? "no tools" : "done";
+	return settledCaveat(entry.result)?.kind === "no-tools" ? "no tools" : "done";
 }
 
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
@@ -598,14 +612,9 @@ function alignedHeader(
 			? theme.fg("warning", GLYPH.phaseBlocked)
 			: entry.result?.outcome === "canceled"
 				? theme.fg("toolMetadata", GLYPH.cancelled)
-				: entry.result?.outcome !== "succeeded" || settledAgainst(entry.result) !== null
+				: entry.result?.outcome !== "succeeded"
 					? theme.fg("error", GLYPH.error)
-					: (entry.result.refusedCalls ?? 0) > 0
-						? theme.fg("warning", GLYPH.warn)
-						: theme.fg(
-								entry.result.toolCalls === 0 ? "toolMetadata" : "success",
-								entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
-							);
+					: settledMark(entry.result);
 	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.

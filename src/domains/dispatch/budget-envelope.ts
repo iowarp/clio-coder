@@ -493,3 +493,28 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 		return undefined;
 	}
 }
+
+/**
+ * The run's tool-call limit as a person reads it: how many calls it was planned for and where Clio stops it. The
+ * recipe policy, the request and the reason codes stay in `/view` and `clio-coder fleet view`, which keep them whole.
+ */
+export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
+	if (envelope.enforcement.classification === "external-one-shot") {
+		return "one launch; Clio cannot count its tool calls, so its time and output limits bound it";
+	}
+	const budget = workerBudgetFromEnvelope(envelope);
+	const codes = new Set(envelope.reasons.map((reason) => reason.code));
+	const notes = [
+		...(codes.has("global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
+		...(codes.has("retry-growth-authorized") || codes.has("revision-growth-authorized")
+			? ["more if it has to redo its answer"]
+			: []),
+	];
+	const limit =
+		budget.mode === "advisory"
+			? `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${budget.ceiling ?? budget.hardCap}`
+			: budget.synthesis
+				? `answers after ${budget.toolCalls} tool calls; Clio stops it at ${budget.hardCap}`
+				: `Clio stops it at ${budget.hardCap} tool calls`;
+	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
+}
