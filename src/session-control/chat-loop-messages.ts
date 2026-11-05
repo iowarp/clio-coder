@@ -394,6 +394,14 @@ export function turnNoAnswerSentence(ending: Extract<TurnEnding, { kind: "no_ans
 	}
 }
 
+/** The fact a `call_not_run` turn owes every surface beside its answer. */
+export function turnCallsNotRunSentence(ending: Extract<TurnEnding, { kind: "call_not_run" }>): string {
+	const tools = ending.writtenTools;
+	return tools.length === 1
+		? `The answer ends on a ${tools[0]} call the model wrote as plain text, so that call did not run.`
+		: `The answer ends on ${tools.length} calls the model wrote as plain text, so those calls did not run.`;
+}
+
 export function toolNamesFromAgentState(tools: ReadonlyArray<unknown>): string[] {
 	const names: string[] = [];
 	for (const tool of tools) {
