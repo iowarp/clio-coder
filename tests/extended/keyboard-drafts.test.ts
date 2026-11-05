@@ -45,7 +45,6 @@ function fixture(expand?: (text: string) => Promise<EditorSubmitExpansion>) {
 			runningToolCalls: () => 0,
 			queueEntries: () => [],
 			removeQueuedEntry: () => null,
-			flushQueueOnNextPrompt: noop,
 			clearQueuedFollowUps: () => {
 				const result = queue;
 				queue = [];

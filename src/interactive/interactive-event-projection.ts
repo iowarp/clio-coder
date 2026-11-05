@@ -50,6 +50,10 @@ export interface InteractiveEventProjectionDeps {
 	onChatEventIngress?: (event: ChatLoopEvent) => void;
 	applyChatEvent: (event: ChatLoopEvent) => void;
 	setFollowUpMessages: (messages: QueuedChatMessage[]) => void;
+	/** The held-queue notice in this surface's words, naming its bound keys. */
+	heldQueueNotice?: (count: number) => string;
+	/** A session change took these messages unsent; give them back. */
+	restoreDroppedQueue?: (texts: string[]) => void;
 	isAskUserWaiting: () => boolean;
 	closeAskUserSession: () => void;
 	resetAskUserCancellation: () => void;
@@ -144,8 +148,16 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					deps.notify("info", event.text, "compaction-notice");
 					return;
 				}
+				if (event.queueDropped !== undefined && deps.restoreDroppedQueue) {
+					deps.restoreDroppedQueue(event.queueDropped.texts);
+					return;
+				}
 				if (event.surface === "transcript") {
-					deps.applyChatEvent(event);
+					deps.applyChatEvent(
+						event.heldQueue !== undefined && deps.heldQueueNotice
+							? { ...event, text: deps.heldQueueNotice(event.heldQueue.count) }
+							: event,
+					);
 					// The footer names the armed skill surface; a change repaints it.
 					if (event.skillSurface !== undefined) deps.refreshFooter();
 					return;
