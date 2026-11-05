@@ -6,6 +6,7 @@ import type { RowBudgetedBody } from "./overlay-frame.js";
 import {
 	buildResponsiveHint,
 	centeredWindow,
+	FILTER_HINT,
 	fitRows,
 	selectionLabel,
 	selectionMark,
@@ -35,6 +36,8 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	private bodyRows = 16;
 	private complete = false;
 	private problem = "";
+	/** Answers the wizard has taken and not gone back over: none means Esc leaves the wizard rather than a step. */
+	private answered = 0;
 
 	constructor(
 		private readonly requestRender: () => void,
@@ -141,6 +144,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		}
 		if (matchesKey(data, "escape")) {
 			this.pending = null;
+			this.answered = Math.max(0, this.answered - 1);
 			pending.finish({ kind: "back" });
 			return;
 		}
@@ -153,11 +157,13 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 					return;
 				}
 				this.pending = null;
+				this.answered += 1;
 				pending.finish({ kind: "value", value });
 			} else {
 				const choice = pending.options.choices[pending.selected];
 				if (choice && this.choices(pending).includes(pending.selected)) {
 					this.pending = null;
+					this.answered += 1;
 					pending.finish({ kind: "selected", value: choice.value });
 				}
 			}
@@ -219,6 +225,26 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	}
 
 	invalidate(): void {}
+
+	/** The rail for the step on screen: a finished wizard offers only the way out, and Enter and Esc both take it. */
+	railHint(innerWidth: number): string {
+		const pending = this.pending;
+		if (!pending) {
+			return this.complete
+				? buildResponsiveHint([], { key: "Enter/Esc", verb: "back to Settings" })(innerWidth)
+				: buildResponsiveHint([], { key: "Esc", verb: "cancel" })(innerWidth);
+		}
+		return buildResponsiveHint(
+			[
+				...(pending.kind === "select"
+					? [{ key: "↑↓", verb: "choose" }, ...(pending.options.searchable ? [FILTER_HINT] : [])]
+					: []),
+				{ key: "Enter", verb: "continue" },
+				...(this.answered > 0 ? [{ key: "Ctrl+C", verb: "cancel" }] : []),
+			],
+			this.answered > 0 ? "back" : { key: "Esc", verb: "cancel" },
+		)(innerWidth);
+	}
 }
 
 export function openTargetWizard(tui: TUI, options: HostedTargetOptions, onClose: () => void): OverlayHandle {
@@ -232,14 +258,7 @@ export function openTargetWizard(tui: TUI, options: HostedTargetOptions, onClose
 	handle = showClioOverlayFrame(tui, body, {
 		title: options.mode === "edit" ? `Edit target: ${options.target.id}` : "Add target",
 		markerId: "target-wizard",
-		footerHint: buildResponsiveHint(
-			[
-				{ key: "↑↓", verb: "choose" },
-				{ key: "Enter", verb: "continue" },
-				{ key: "Ctrl+C", verb: "cancel" },
-			],
-			"back",
-		),
+		footerHint: (innerWidth) => body.railHint(innerWidth),
 	});
 	void body.start(options);
 	return {

@@ -161,7 +161,7 @@ export class SubmenuWrapper implements Component, RowBudgetedBody {
 	constructor(
 		private readonly title: SubmenuTitle,
 		private readonly child: Component,
-		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back"),
+		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back to list"),
 		private readonly note?: string,
 	) {}
 
