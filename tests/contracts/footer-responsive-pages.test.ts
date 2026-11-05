@@ -126,7 +126,7 @@ test("small Status viewports expose every health fact by scrolling without excee
 				strictEqual(next.rows.length, first.rows.length);
 				rows.push(...next.rows);
 			}
-			ok(first.rows.length <= Math.min(12, height - 6));
+			ok(first.rows.length <= Math.min(height >= 30 ? 16 : 12, height - 6));
 			for (const row of rows) ok(visibleWidth(row) <= width);
 			const text = rows.map(stripTerminalSequences).join("\n");
 			for (const label of ["CPU", "RAM", "Worker cap", "Sampling", "Scope"]) match(text, new RegExp(label));

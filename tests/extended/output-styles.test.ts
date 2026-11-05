@@ -321,6 +321,9 @@ test("the inspector wraps full text, accepts search letters, and supports Enter 
 	view.handleInput("\x1b");
 	strictEqual(closed, false);
 	match(plain(view.render(44)), /^> reasoning overview/mu);
+	// A typed filter clears before the view closes.
+	view.handleInput("\x1b");
+	strictEqual(closed, false);
 	view.handleInput("\x1b");
 	strictEqual(closed, true);
 });
