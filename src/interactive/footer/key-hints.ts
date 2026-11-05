@@ -33,6 +33,11 @@ export interface KeyHintFacts {
 	learning?: boolean;
 	queued?: number;
 	workers?: number;
+	/**
+	 * Whether the workers key opens the workers dock. Without a pane host it
+	 * opens the Fleet Runs board instead, and the hint names that.
+	 */
+	workersDock?: boolean;
 	thinkingCycles?: boolean;
 }
 
@@ -91,8 +96,14 @@ function catalogEntry(id: keyof typeof CLIO_APP_KEYBINDINGS): string | null {
 	return keys ? `${keys} ${shortDescription(CLIO_APP_KEYBINDINGS[id].description)}` : null;
 }
 
-function catalogEntries(ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>): string[] {
-	return ids.flatMap((id) => catalogEntry(id) ?? []);
+function catalogEntries(ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>, facts: KeyHintFacts = {}): string[] {
+	return ids.flatMap((id) => {
+		if (id === "clio-coder.dispatchBoard.toggle" && facts.workersDock === false) {
+			const keys = boundKeys(id);
+			return keys ? [`${keys} Fleet runs`] : [];
+		}
+		return catalogEntry(id) ?? [];
+	});
 }
 
 /** The keys that answer this moment. They hold still; only the learning beside them changes. */
@@ -140,7 +151,7 @@ function learningEntries(context: ComposerKeyContext, facts: KeyHintFacts): stri
 		const newline = firstKey("tui.input.newLine");
 		return [...(newline ? [`${newline} newline`] : []), ...catalogEntries(idleLearning(facts))];
 	}
-	if (context === "steer" || context === "steer-empty") return catalogEntries(runLearning(context, facts));
+	if (context === "steer" || context === "steer-empty") return catalogEntries(runLearning(context, facts), facts);
 	return [];
 }
 

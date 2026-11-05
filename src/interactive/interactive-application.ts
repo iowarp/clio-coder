@@ -767,6 +767,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const presentation = createInteractivePresentation({
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
 		getParkedCallCount: () => deps.toolRegistry?.parkedCount() ?? 0,
+		workersDockAvailable: () =>
+			deps.mux !== undefined && deps.mux.mode !== "none" && deps.createWatchPane !== undefined && deps.mux.available(),
 		getQueuedMessageCount: () => {
 			const queue = deps.chat.queuedMessages();
 			return queue.steer.length + queue.followUp.length;

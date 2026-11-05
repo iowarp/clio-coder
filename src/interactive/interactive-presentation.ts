@@ -124,6 +124,8 @@ export interface InteractivePresentationDeps {
 	chat: ChatLoop;
 	/** Messages waiting in the queue, which decides whether its keys are worth offering. */
 	getQueuedMessageCount?: () => number;
+	/** Whether the workers key reaches the workers dock rather than the Fleet Runs board. */
+	workersDockAvailable?: () => boolean;
 	workspaceFacts: WorkspaceFacts;
 	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
 	tui: TUI;
@@ -654,6 +656,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return {
 				...(deps.getQueuedMessageCount ? { queued: deps.getQueuedMessageCount() } : {}),
 				workers: dispatchBoardStore.rows().length,
+				...(deps.workersDockAvailable ? { workersDock: deps.workersDockAvailable() } : {}),
 				thinkingCycles: mechanism === "effort-levels" || mechanism === "budget-tokens",
 			};
 		},
