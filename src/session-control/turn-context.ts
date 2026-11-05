@@ -304,6 +304,8 @@ export interface TurnContext {
 	): void;
 	/** Bind first-session creation after append without rereading the prepared snapshot. */
 	commitMemoryTurn(runtime: AgentRuntime): void;
+	/** The per-route request configuration a submit binds when it commits, for a run that changes route after that. */
+	syncRouteConfiguration(agentRuntime: AgentRuntime): void;
 	ensureSessionPrompt(
 		agentRuntime: AgentRuntime,
 		beforeSend?: boolean,
@@ -2483,6 +2485,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				activePaths: Object.freeze([...sessionWorkingContextPaths]),
 			};
 		},
+
+		syncRouteConfiguration: syncCodexConfiguration,
 
 		commitMemoryTurn(runtime): void {
 			syncCodexConfiguration(runtime);

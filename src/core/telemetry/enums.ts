@@ -49,6 +49,7 @@ export const FailureCause = vocabulary([
 	"stall_mid_stream",
 	"operator_cancel",
 	"parent_cancel",
+	"route_moved",
 	"internal",
 ]);
 export type FailureCause = Static<typeof FailureCause>;

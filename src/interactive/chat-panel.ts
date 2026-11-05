@@ -170,6 +170,8 @@ export interface ChatPanelTurnUsage {
 	coldReasons?: ReadonlyArray<string>;
 	/** Provider attempts the run sent again after a failure. */
 	retries?: number;
+	/** The model the operator moved the waiting request to, which is the one the turn's answer came from. */
+	movedTo?: string;
 	/** Of `elapsedMs`, what the run spent waiting on the operator. */
 	humanWaitMs?: number;
 	/** How a normally stopped run closed when it wrote no answer. */
@@ -663,6 +665,8 @@ function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>
 		if (seg.kind === "tool") return true;
 		if (seg.kind === "text" && seg.text.trim().length > 0) return true;
 		if (seg.kind === "error" && seg.text.trim().length > 0) return true;
+		// A round that only reasoned still drew rows, and the receipt closes the turn beneath them.
+		if (seg.kind === "thinking" && (seg.text.trim().length > 0 || seg.notRetained === true)) return true;
 	}
 	return false;
 }
@@ -1167,24 +1171,28 @@ function renderTurnUsageLine(
 	}
 	const spend = usage.spend;
 	const retries = usage.retries ? `${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : null;
+	const moved = usage.movedTo ? `moved to ${modelNickname(usage.movedTo)}` : null;
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
 		const calls =
-			spend?.calls != null && (spend.calls > 1 || retries !== null) ? renderCalls(String(spend.calls), "call") : null;
+			spend?.calls != null && (spend.calls > 1 || retries !== null || moved !== null)
+				? renderCalls(String(spend.calls), "call")
+				: null;
 		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
 		const rowFacts = [`${outcome}${receiptDuration(usage)}`, ...(quiet === null ? [] : [quiet])];
 		for (const fact of [
-			calls !== null || retries !== null ? [calls, retries].filter(Boolean).join(", ") : null,
+			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
 			spend?.coverageNote ?? null,
 			spend?.tokens ?? null,
-			spend?.unknownField ?? null,
+			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
+			spend?.cacheRead != null && spend.cacheRead !== "?" ? `cached ${spend.cacheRead}` : null,
 		]) {
 			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
 		}
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts(rowFacts)), room)}`, ...noAnswer];
 	}
 	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
-	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${coverage}${retries === null ? "" : ` · ${retries}`}${receiptDuration(usage)}`;
+	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${coverage}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
 	// Detailed states what the turn spent, one fact per field, as the read model
 	// folds the turn with its workers, so the line and the footer agree: the
 	// calls it made, input and output tokens in the compact token format, what
@@ -1732,6 +1740,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let runAwaitingRetry = false;
 	/** Provider attempts this run sent again, kept until its receipt can state them. */
 	let runRetries = 0;
+	let runMovedTo: string | undefined;
 	/** The model the newest assistant message came from: the requester of the calls that follow it. */
 	let requestingModel: string | undefined;
 	/** The operator turn the current run's calls journal under, from its start event or a replayed run end. */
@@ -2004,7 +2013,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const turnRetryRow = (): Extract<TranscriptEntry, { role: "retryStatus" }> | null => {
 		for (let index = transcript.length - 1; index >= 0; index -= 1) {
 			const entry = transcript[index];
-			if (entry?.role === "retryStatus") return entry;
+			// A move closed that row: the attempts on the new route open their own.
+			if (entry?.role === "retryStatus") return entry.status.phase === "moved" ? null : entry;
 			if (entry?.role === "user") return null;
 		}
 		return null;
@@ -2125,6 +2135,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),
+					...(runMovedTo !== undefined ? { movedTo: runMovedTo } : {}),
 					...(ending === null ? {} : { ending }),
 					outcome:
 						run.outcome ??
@@ -2156,6 +2167,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		runColdReasons = [];
 		runTurnId = undefined;
 		runRetries = 0;
+		runMovedTo = undefined;
 		const runWasAborted = messages.some(
 			(message) =>
 				message && typeof message === "object" && (message as { stopReason?: unknown }).stopReason === "aborted",
@@ -2846,6 +2858,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			runStartIndex = undefined;
 			runAwaitingRetry = false;
 			runRetries = 0;
+			runMovedTo = undefined;
 			runColdReasons = [];
 			workerEntries.clear();
 			dispatchGroups.clear();
@@ -2876,6 +2889,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					return;
 				}
 				runRetries = 0;
+				runMovedTo = undefined;
 				// The run's cold-cache reasons arrive just before it starts, as the
 				// chat loop consumes them ahead of the prompt, so they are kept here
 				// and cleared once the run's receipt has stated them.
@@ -3274,6 +3288,20 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "retry_status") {
 				const status = event.status;
 				const row = turnRetryRow();
+				if (status.phase === "moved") {
+					runMovedTo = status.movedTo?.modelId;
+					// The run goes on, and its next start continues this receipt and clock.
+					runAwaitingRetry = true;
+					if (row) {
+						// An open countdown ends here, so the row that promised the retry becomes the one that says it did not happen.
+						invalidateEntryCache(row);
+						row.status = status;
+					} else {
+						transcript.push({ role: "retryStatus", status, at: stamp() });
+					}
+					markDirty();
+					return;
+				}
 				if (row) {
 					// One turn's attempts share one row. A retry row is stable, so it caches and can
 					// freeze; a new phase or countdown must drop that render first.
@@ -3306,6 +3334,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "agent_end") {
 				if (event.retryPending !== undefined) {
 					runAwaitingRetry = true;
+					// Closing an earlier round's entry would show its interim receipt as a Done the turn has not reached.
+					for (const entry of transcript) {
+						if (entry.role !== "assistant" || entry.turnUsage === undefined || entry.turnUsage.outcome !== undefined)
+							continue;
+						invalidateEntryCache(entry);
+						delete entry.turnUsage;
+						liveReceipts.delete(entry);
+					}
 					closeRunEntries(false);
 					markDirty();
 					return;

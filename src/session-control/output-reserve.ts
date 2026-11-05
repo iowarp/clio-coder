@@ -21,7 +21,13 @@
 import { recommendedOutputTokens, resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentRuntime } from "./turn-state.js";
 
-export function resolveTurnOutputReserve(agentRuntime: AgentRuntime, inputTokens: number): number {
+export function resolveTurnOutputReserve(
+	agentRuntime: {
+		runtimeResolution: AgentRuntime["runtimeResolution"];
+		agent: { state: { model: AgentRuntime["agent"]["state"]["model"] } };
+	},
+	inputTokens: number,
+): number {
 	// A runtime resolution always carries capability decisions in production. The
 	// optional read is for a partially built runtime: an absent cap is the
 	// resolver's own "no advertised limit" case, which falls back to the

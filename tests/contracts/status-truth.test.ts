@@ -19,7 +19,6 @@ import {
 	formatStatedWait,
 	RATE_LIMIT_WAIT_BUDGET_MS,
 	retryWaitCause,
-	retryWaitCause,
 	statedRetryWaitMs,
 } from "../../src/domains/session/retry.js";
 import { createWorkerProgressFold, type WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
@@ -31,6 +30,7 @@ import { railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
+import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
 import {
 	type ApprovalRequestView,
@@ -39,13 +39,7 @@ import {
 } from "../../src/interactive/permission-overlay.js";
 import { providerFailureAdvice } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
-import {
-	buildSummary,
-	reduceStatus,
-	reduceStatus,
-	type StatusInputEvent,
-	type StatusInputEvent,
-} from "../../src/interactive/status/index.js";
+import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
 import {
@@ -279,7 +273,7 @@ test("a silent wait keeps state, elapsed and the way out at every width past 90 
 			const state = label.indexOf(head);
 			const elapsed = label.search(/\b\d+m\d*s/u);
 			ok(state >= 0 && state < elapsed && elapsed < label.indexOf("Esc"), rail);
-			if (width >= 80) ok(label.includes("then /model"), rail);
+			if (width >= 80) ok(label.includes("/model"), rail);
 		}
 	}
 });
@@ -1166,4 +1160,145 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		);
 	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
 	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
+});
+
+test("a route pick says what it does to the running turn, and only what is still true", () => {
+	match(modelListTurnEffect("first-output") ?? "", /moves the waiting request/u);
+	match(modelListTurnEffect("retry-wait") ?? "", /sends the request now/u);
+	match(modelListTurnEffect("output") ?? "", /next turn, because output has started/u);
+	match(modelListTurnEffect("tool") ?? "", /next turn, because a tool is running/u);
+	strictEqual(modelListTurnEffect("idle"), null);
+	const fits = { kind: "fits" } as const;
+	match(routeTurnEffect("first-output", fits, "second") ?? "", /moves the waiting request to second/u);
+	match(routeTurnEffect("retry-wait", fits, "second") ?? "", /sends the request to second/u);
+	// Output arriving while the dialog is open changes the line, whatever the route's size.
+	match(routeTurnEffect("output", fits, "second") ?? "", /next turn, because output has started/u);
+	match(
+		routeTurnEffect("first-output", { kind: "too-large", neededTokens: 13000, window: 8000 }, "small") ?? "",
+		/next turn, because this conversation needs about 13k tokens and that model's window is 8k/u,
+	);
+	strictEqual(routeTurnEffect("first-output", { kind: "same" }, "same"), null);
+	strictEqual(routeTurnEffect("idle", fits, "second"), null);
+});
+
+test("a moved request reads as a move, and the same model on another target names the targets", () => {
+	const movedFrom = { targetId: "a", modelId: "lab/first-model" };
+	const movedTo = { targetId: "b", modelId: "lab/second-model" };
+	const moved = { phase: "moved", attempt: 1, maxAttempts: 1, movedFrom, movedTo } as const;
+	strictEqual(
+		formatRetryStatus({ ...moved, movedAborted: true }),
+		"moved to Second-model · First-model had sent no output",
+	);
+	strictEqual(
+		formatRetryStatus({ ...moved, movedAborted: false }),
+		"moved to Second-model instead of waiting on First-model",
+	);
+	strictEqual(
+		formatRetryStatus({ ...moved, movedTo: { targetId: "b", modelId: movedFrom.modelId }, movedAborted: true }),
+		"moved to b · a had sent no output",
+	);
+});
+
+/** A ladder whose agent answers at once, for what a pick does to it. */
+function movableLadder(retries: { enabled: boolean; maxRetries: number }) {
+	let sent = 0;
+	const runtime = {
+		runtimeId: "openai-compat",
+		runtimeResolution: { contextWindowDetails: { effectiveContextWindow: 131072 } },
+		agent: {
+			state: { messages: [] as unknown[], errorMessage: undefined as string | undefined },
+			async continue() {
+				sent += 1;
+				this.state.messages.push({
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					stopReason: "stop",
+					timestamp: Date.now(),
+				});
+			},
+		},
+	} as unknown as AgentRuntime;
+	const state = createTurnState();
+	const statuses: RetryStatusPayload[] = [];
+	const from = { targetId: "a", modelId: "first" };
+	const to = { targetId: "a", modelId: "second" };
+	let applied = 0;
+	const recovery = createTurnRecovery({
+		state,
+		isYolo: () => false,
+		turnIdentity: () => state,
+		persistence: { appendRetryStatus() {}, wasPersisted: () => true } as unknown as TurnRecoveryDeps["persistence"],
+		context: {} as unknown as TurnRecoveryDeps["context"],
+		retrySettings: () => ({ ...DEFAULT_RETRY_SETTINGS, ...retries }),
+		applyRouteMove: async () => {
+			state.routeMove = null;
+			applied += 1;
+			return { from, to };
+		},
+		markPersistedUserEcho: async (_text, prompt) => prompt(),
+		emitRetryStatus: (status) => {
+			statuses.push(status);
+		},
+		emitFailureMessage() {},
+		emitNotice() {},
+	});
+	return { recovery, runtime, state, statuses, sent: () => sent, applied: () => applied };
+}
+
+test("a pick during a stated wait goes now, on no wait of the old route's, and is no cancel or recovery", async () => {
+	const ladder = movableLadder({ enabled: true, maxRetries: 3 });
+	const errorMessage = "429 rate_limit_error: slow down";
+	let done = false;
+	void ladder.recovery
+		.runTransientRetryChain(ladder.runtime, "request", {
+			stopReason: "error",
+			errorMessage,
+			message: {
+				role: "assistant",
+				content: [],
+				stopReason: "error",
+				errorMessage,
+				retryAfterMs: 3_000_000,
+				timestamp: Date.now(),
+			} as never,
+		})
+		.then(() => {
+			done = true;
+		});
+	await nextLoop();
+	strictEqual(ladder.recovery.inRetryWait(), true);
+	ladder.state.routeMove = {} as never;
+	ladder.recovery.cancelRetryCountdown();
+	for (let tick = 0; !done && tick < 50; tick++) await nextLoop();
+	strictEqual(done, true);
+	strictEqual(ladder.sent(), 1);
+	strictEqual(ladder.applied(), 1);
+	deepStrictEqual(
+		ladder.statuses.map((status) => status.phase).filter((phase) => phase !== "waiting"),
+		["scheduled", "moved"],
+	);
+});
+
+test("a moved request needs no retry budget and its aborted call forecasts no failure", async () => {
+	const ladder = movableLadder({ enabled: false, maxRetries: 0 });
+	ladder.state.routeMove = {} as never;
+	const aborted = {
+		role: "assistant",
+		content: [],
+		stopReason: "error",
+		errorMessage: "aborted to move this request",
+		timestamp: Date.now(),
+	} as never;
+	ok(ladder.recovery.forecastRetry(ladder.runtime, aborted) !== null);
+	const handled = await ladder.recovery.runTransientRetryChain(ladder.runtime, "request", {
+		stopReason: "error",
+		errorMessage: "aborted to move this request",
+		message: aborted,
+	});
+	strictEqual(handled, true);
+	strictEqual(ladder.sent(), 1);
+	deepStrictEqual(
+		ladder.statuses.map((status) => status.phase),
+		["moved"],
+	);
 });

@@ -63,6 +63,7 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	stall_pre_invocation: "stalled before it was sent",
 	stall_first_token: "no reply arrived in time",
 	stall_mid_stream: "the reply stalled",
+	route_moved: "you moved it to another route",
 	operator_cancel: "you stopped it",
 	parent_cancel: "its parent run stopped it",
 	internal: "Clio failed internally",

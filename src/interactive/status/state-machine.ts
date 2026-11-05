@@ -636,6 +636,11 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 				return pushOverlay(active, "retrying", ctx, retryOverlay(event.status, previous, ctx.now));
 			}
 			if (phase === "recovered") return popOverlay(prev, "retrying", ctx);
+			// The next call is a first attempt on another route, so it waits under its own clock with nothing carried over.
+			if (phase === "moved") {
+				const moved = popOverlay(prev, "retrying", ctx);
+				return { ...moved, phase: "waiting_model", waitingSince: ctx.now, modelRequest: undefined };
+			}
 			// The attempt's own settlement already said how the turn ended.
 			if (!isActive(prev.phase)) return prev;
 			return {

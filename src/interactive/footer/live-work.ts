@@ -39,7 +39,7 @@ function phaseElapsedMs(status: AgentStatus, now: number): number {
 }
 
 /** Keys the rail offers that reach nothing under a dock, which takes Esc and any typing for itself. */
-const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/model)(?= · |$)/gu;
+const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/model|\/model moves it|\/model)(?= · |$)/gu;
 
 /** A label that already states its age (`has no output · 12s`) must not gain a second clock. */
 const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)\b/u;
