@@ -475,9 +475,9 @@ function cardWrappedValueLines(theme: ClioTheme, key: string, value: string, con
 function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, contentWidth: number): string | null {
 	const presentation = evidenceStatePresentation(evidence.state);
 	if (!presentation) return null;
-	const units = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
-	units.push(theme.fg("annotation", evidence.viewFilter));
-	return cardUnitsLine(theme, "proof", units, contentWidth);
+	const units = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word} to inspect`)];
+	units.push(theme.fg("annotation", `/view ${evidence.viewFilter}`));
+	return cardUnitsLine(theme, "evidence", units, contentWidth);
 }
 
 function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): string {
@@ -644,6 +644,22 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 					: "run record not read back",
 		);
 		return cardWrappedValueLines(theme, "trust", `${unread}${host}`, contentWidth);
+	}
+	// A run that failed or was stopped before any check ran has no verdict worth a reader's time beyond that fact;
+	// the axes stay one Enter away.
+	if (
+		!expanded &&
+		isTerminalStatus(row.status) &&
+		row.status !== "completed" &&
+		axes?.validationGrounding === "absent" &&
+		row.validationFailure === undefined
+	) {
+		return cardWrappedValueLines(
+			theme,
+			"trust",
+			`${theme.fg("annotation", "nothing was checked before it ended")}${host}`,
+			contentWidth,
+		);
 	}
 	// The verdict leads in plain words; the axes that back it follow as detail.
 	const verdict = theme.fg(
@@ -886,7 +902,7 @@ function dispatchCardBody(
 			? [theme.fg("warning", `failed over x${row.failoverHops}`)]
 			: []),
 		...(firstOutput === null ? [] : [theme.fg("body", firstOutput)]),
-		theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`),
+		...(cost === "—" ? [] : [theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)]),
 	];
 	const context = row.telemetry?.activity.contextTokens;
 	const contextFigure = context
@@ -1171,7 +1187,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 				)}`;
 	const telemetry = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
-		: `  ${tokens}${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
+		: `  ${tokens}${cost === "—" ? "" : `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`}`;
 	const task = row.taskSummary
 		? wrapTextWithAnsi(row.taskSummary, Math.max(1, width - 2))
 				.slice(0, 3)

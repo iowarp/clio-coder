@@ -1,5 +1,6 @@
 import type { ExitSummaryStyle, OutputStyle } from "../core/defaults.js";
 import { resolveExitSummaryStyle } from "../core/defaults.js";
+import { plainOutcomeLabel } from "../domains/dispatch/failure-headline.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ExitSummarySnapshot } from "./exit-summary-collector.js";
@@ -81,7 +82,7 @@ function outcomes(snapshot: ExitSummarySnapshot): string {
 	for (const worker of snapshot.workers) counts.set(worker.outcome, (counts.get(worker.outcome) ?? 0) + 1);
 	// Quitting drains the fleet, so a worker still running when the summary was taken did not keep running.
 	return [...counts]
-		.map(([outcome, n]) => `${count(n)} ${outcome === "running" ? "stopped by quitting" : outcome}`)
+		.map(([outcome, n]) => `${count(n)} ${outcome === "running" ? "stopped by quitting" : plainOutcomeLabel(outcome)}`)
 		.join(" · ");
 }
 

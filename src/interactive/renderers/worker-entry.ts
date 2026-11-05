@@ -831,6 +831,8 @@ function helperRow(
 function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, inspect: boolean): string | null {
 	// A cancelled run checked nothing by design, so a validation verdict under it says nothing the cancel did not.
 	if (!inspect && result?.outcome === "canceled") return null;
+	// A run that failed before any check ran has nothing to say about validation that its failure row does not.
+	if (!inspect && result?.outcome !== "succeeded" && result?.trust?.validationGrounding.state === "absent") return null;
 	// The failure row already says the answer was unusable; naming the report shape it missed is the record's detail.
 	if (
 		!inspect &&
