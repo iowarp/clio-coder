@@ -6,6 +6,7 @@ import type {
 	TaskMemorySnapshot,
 } from "../domains/memory/index.js";
 import { lessonSubject, MEMORY_MAIN_PROMPT_SCOPES } from "../domains/memory/index.js";
+import { stampLocal } from "./format-time.js";
 
 export type MemoryReviewState = "approved" | "pending" | "rejected";
 
@@ -164,8 +165,8 @@ export function memoryTaskDetail(entry: TaskMemoryEntry): string[] {
 		...(entry.evidenceSource ? ["", "## Source evidence", entry.evidenceSource.path, entry.evidenceSource.quote] : []),
 		"",
 		"## History",
-		`Created: ${entry.createdAt}`,
-		`Last touched: ${entry.lastTouchedAt}`,
+		`Created: ${stampLocal(entry.createdAt)}`,
+		`Last touched: ${stampLocal(entry.lastTouchedAt)}`,
 		`Recorded reminder contributions: ${entry.injectionCount}. This does not prove causal use.`,
 		"",
 		`Entry ID: ${entry.id}`,

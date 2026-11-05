@@ -10,7 +10,7 @@ import {
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { clockLocal } from "./format-time.js";
+import { stampLocal } from "./format-time.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import type { ClioToken } from "./theme/index.js";
@@ -129,8 +129,8 @@ function observedCheckRows(task: TaskBoardTask, width: number): string[] {
 	const theme = clioTheme();
 	const { passed, failed } = observedTaskChecks(task);
 	const facts = [
-		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${clockLocal(check.observedAt)}`)),
-		...passed.map((check) => theme.fg("success", `${check.name} passed at ${clockLocal(check.observedAt)}`)),
+		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${stampLocal(check.observedAt)}`)),
+		...passed.map((check) => theme.fg("success", `${check.name} passed at ${stampLocal(check.observedAt)}`)),
 	];
 	return facts.flatMap((fact) => wrapTaskProse(`       ${dim("observed")} `, fact, width));
 }
@@ -405,7 +405,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${stampLocal(artifact.timestamp)}`)}`,
 				width,
 			),
 		]);
