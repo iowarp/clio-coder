@@ -1902,3 +1902,37 @@ test("an opened Fleet Runs detail keeps its trust row on screen and says how man
 		"the selected run stays listed",
 	);
 });
+
+test("Esc on a permission card folds open terms before it denies, and every rail word follows the layer", async () => {
+	const { routeOverlayKey } = await import("../../src/interactive/overlay-key-routing.js");
+	const { permissionOverlayHint } = await import("../../src/interactive/permission-overlay.js");
+	let terms = true;
+	let denied = 0;
+	const noop = (): void => {};
+	const deps = {
+		cancelPermission: () => {
+			denied += 1;
+		},
+		confirmPermission: noop,
+		stopTurnFromPermission: noop,
+		closeOverlay: noop,
+		selectPreviousDispatch: noop,
+		selectNextDispatch: noop,
+		steerSelectedDispatch: noop,
+		cancelSelectedDispatch: noop,
+		toggleSelectedDispatchDetail: noop,
+		watchSelectedDispatch: () => false,
+		cancelAskUser: noop,
+		togglePermissionTerms: () => {
+			terms = !terms;
+		},
+		isShowingPermissionTerms: () => terms,
+	};
+	match(permissionOverlayHint(100, false, "closed", "open"), /\[Esc\] hide terms/u);
+	routeOverlayKey("\x1b", "permission-confirm", deps, () => false);
+	strictEqual(terms, false, "the first Esc folds the terms");
+	strictEqual(denied, 0, "reading the terms never answers the call");
+	match(permissionOverlayHint(100, false, "closed", "closed"), /\[Esc\] deny/u);
+	routeOverlayKey("\x1b", "permission-confirm", deps, () => false);
+	strictEqual(denied, 1, "from the card itself Esc denies");
+});
