@@ -160,6 +160,12 @@ export interface ListOverlayOptions {
 	/** Pre-applied filter text. */
 	initialFilter?: string;
 	/**
+	 * When some row holds every search word as written, show only those. Reference
+	 * lists want this: a letter-by-letter match of `Alt` across a sentence is noise
+	 * beside the rows that actually say Alt.
+	 */
+	exactMatchesOnly?: boolean;
+	/**
 	 * Extra hint entries beyond movement/filter/Esc (builder appends Esc). A
 	 * function is asked per frame and is handed the selected row, so a footer can
 	 * advertise the keys that row actually offers rather than a fixed set.
@@ -182,6 +188,21 @@ export interface ListOverlayOptions {
 	/** Secondary keyed actions, e.g. { i: install }. */
 	actions?: Record<string, (item: ListOverlayItem) => void>;
 	onClose: () => void;
+}
+
+/**
+ * Best-ranked rows keep their rank inside their group, and the group with the best
+ * row comes first, so the cursor starts on the top row and arrows walk the draw order.
+ * Rows with no group draw above every group, so they lead here too.
+ */
+function groupedByBestMatch(ranked: readonly ListOverlayItem[]): ListOverlayItem[] {
+	const groups = new Map<string | undefined, ListOverlayItem[]>([[undefined, []]]);
+	for (const item of ranked) {
+		const members = groups.get(item.group);
+		if (members) members.push(item);
+		else groups.set(item.group, [item]);
+	}
+	return [...groups.values()].flat();
 }
 
 export class ListOverlayView implements Component {
@@ -468,9 +489,20 @@ export class ListOverlayView implements Component {
 		const query = this.filterText.trim();
 		if (query.length === 0) return this.items;
 		if (this.filterMemo?.query === query) return this.filterMemo.items;
-		const items = fuzzyFilter([...this.items], query, (item) =>
-			item.searchGroup === false ? item.label : `${item.label} ${item.group ?? ""}`,
-		);
+		const searchText = (item: ListOverlayItem): string =>
+			item.searchGroup === false ? item.label : `${item.label} ${item.group ?? ""}`;
+		const ranked = fuzzyFilter([...this.items], query, searchText);
+		const words = query
+			.toLowerCase()
+			.split(/[\s/]+/u)
+			.filter(Boolean);
+		const exact = this.options.exactMatchesOnly
+			? ranked.filter((item) => {
+					const text = searchText(item).toLowerCase();
+					return words.every((word) => text.includes(word));
+				})
+			: [];
+		const items = groupedByBestMatch(exact.length > 0 ? exact : ranked);
 		this.filterMemo = { query, items };
 		return items;
 	}
@@ -674,7 +706,8 @@ export class ListOverlayView implements Component {
 	private renderedRowsFor(filteredItems: ReadonlyArray<ListOverlayItem>): RenderedRow[] {
 		const uniqueGroups: string[] = [];
 		const seenGroups = new Set<string>();
-		for (const item of this.items) {
+		// A search has already put the best group first; with no search this is the list's own order.
+		for (const item of filteredItems) {
 			if (item.group && !seenGroups.has(item.group)) {
 				seenGroups.add(item.group);
 				uniqueGroups.push(item.group);

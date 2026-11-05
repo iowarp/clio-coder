@@ -119,6 +119,8 @@ export interface InteractivePresentationDeps {
 	dispatch: Pick<DispatchContract, "snapshot">;
 	telemetry: TelemetryContract;
 	chat: ChatLoop;
+	/** Messages waiting in the queue, which decides whether its keys are worth offering. */
+	getQueuedMessageCount?: () => number;
 	workspaceFacts: WorkspaceFacts;
 	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
 	tui: TUI;
@@ -596,7 +598,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			);
 		},
 		getKeyHintFacts: () => {
-			const queue = deps.chat.queuedMessages();
 			const current = deps.getSettings?.();
 			const mechanism = resolveModelRuntimeCapabilitiesForProviders(
 				deps.providers,
@@ -605,7 +606,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.thinkingLevel ?? "off",
 			)?.thinking.mechanism;
 			return {
-				queued: queue.steer.length + queue.followUp.length,
+				...(deps.getQueuedMessageCount ? { queued: deps.getQueuedMessageCount() } : {}),
 				workers: dispatchBoardStore.rows().length,
 				thinkingCycles: mechanism === "effort-levels" || mechanism === "budget-tokens",
 			};

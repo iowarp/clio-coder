@@ -264,6 +264,7 @@ export function openHelpOverlay(
 		title: "Help Center",
 		items,
 		filterable: true,
+		exactMatchesOnly: true,
 		...(initialFilter ? { initialFilter } : {}),
 		onClose,
 	});

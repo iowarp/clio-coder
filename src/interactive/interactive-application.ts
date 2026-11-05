@@ -763,6 +763,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		: undefined;
 	const presentation = createInteractivePresentation({
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
+		getQueuedMessageCount: () => {
+			const queue = deps.chat.queuedMessages();
+			return queue.steer.length + queue.followUp.length;
+		},
 		recordTurnHumanWait: (fields) => {
 			try {
 				if (!deps.session?.current()) return;
