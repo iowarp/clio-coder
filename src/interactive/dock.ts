@@ -48,6 +48,8 @@ export interface DockEntry {
 	 * other menu changes height.
 	 */
 	adaptive?: boolean;
+	/** The most body rows this surface has needed since it opened, which is the height it keeps. */
+	rowsUsed?: number;
 	/** An approval owns the editor: the rails take the attention tone until it resolves. */
 	approval?: boolean;
 	/** The body states the run's lifecycle itself, so no live-work line joins it (the interview). */

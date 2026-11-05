@@ -81,6 +81,8 @@ export type WelcomeProjectContextState = "checking" | "ok" | "stale" | "none" | 
 
 export interface WelcomeDashboardDeps {
 	providers: Pick<ProvidersContract, "list">;
+	/** Terminal height, which decides whether the launchpad can afford its art. */
+	getTerminalRows?: () => number | undefined;
 	/** In-memory recipe inventory; excludes internal helper agents. */
 	getAgentCount?: () => number;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -456,6 +458,11 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 	];
 }
 
+/** Under this height the art gives way and the brand moves into the frame title. */
+const WELCOME_ART_MIN_ROWS = 30;
+/** Under this height even the launchpad's blank rows and tagline cost the composer its place. */
+const WELCOME_TIGHT_ROWS = 20;
+
 /** Shared by the instant shell and hydrated UI: one stable, framed welcome. */
 export function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
@@ -465,6 +472,7 @@ export function buildWelcomeDashboardLines(
 	hintPage = 0,
 	getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"],
 	tagline = SESSION_TAGLINE,
+	terminalRows?: number,
 ): string[] {
 	const version = versionLabel.replace(/ \(unreleased(?: · ([^)]+))?\)$/u, (_match, commit: string | undefined) =>
 		commit ? `·${commit}` : "",
@@ -484,11 +492,14 @@ export function buildWelcomeDashboardLines(
 	const room = Math.max(1, panelWidth - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
 	const wordmark = paintWelcomeWordmark(panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK, theme);
-	const sideBySide = panelWidth >= 76;
+	// A short terminal spends its rows on the composer and the first action: the art would take half of them.
+	const artFits = terminalRows === undefined || terminalRows >= WELCOME_ART_MIN_ROWS;
+	const tight = terminalRows !== undefined && terminalRows < WELCOME_TIGHT_ROWS;
+	const sideBySide = artFits && panelWidth >= 76;
 	// Too narrow for the art beside the details: the compact letters sit on one
 	// band above them, and below that the brand moves into the frame title.
-	const bandWordmark = sideBySide ? [] : paintWelcomeRowWordmark(theme);
-	const titleBrand = bandWordmark.length > 0 && visibleWidth(bandWordmark[0] ?? "") > room;
+	const bandWordmark = sideBySide || !artFits ? [] : paintWelcomeRowWordmark(theme);
+	const titleBrand = !artFits || (bandWordmark.length > 0 && visibleWidth(bandWordmark[0] ?? "") > room);
 	const band = titleBrand ? [] : bandWordmark;
 	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
 	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
@@ -550,8 +561,8 @@ export function buildWelcomeDashboardLines(
 						...(workspace.behind ? [`${workspace.behind} behind`] : []),
 					].join(" · ");
 	const details = [
-		...(band.length > 0 ? [...band, ""] : [""]),
-		...(band.length > 0
+		...(band.length > 0 ? [...band, ""] : artFits ? [""] : []),
+		...(band.length > 0 || !artFits
 			? [`${theme.style("sectionHeading", "Session started", { bold: true })}  ${theme.fg("body", SESSION_STARTED_AT)}`]
 			: [theme.style("sectionHeading", "Session started", { bold: true }), theme.fg("body", SESSION_STARTED_AT)]),
 		"",
@@ -577,11 +588,12 @@ export function buildWelcomeDashboardLines(
 			: theme.fg("guidance", "/help  Commands and shortcuts · /usage  Limits"),
 	];
 	const artOffset = Math.floor((details.length - wordmark.length) / 2);
+	const shownDetails = tight ? details.filter((row) => row !== "") : details;
 
 	const rows = Array.from(
-		{ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) },
+		{ length: Math.max(shownDetails.length, hints.length, sideBySide ? wordmark.length : 0) },
 		(_, index) => {
-			const detail = details[index] ?? "";
+			const detail = shownDetails[index] ?? "";
 			const art = sideBySide ? `${padAnsi(wordmark[index - artOffset] ?? "", artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
 			return fit(
@@ -596,7 +608,7 @@ export function buildWelcomeDashboardLines(
 	const versionTag = titleBrand ? "" : theme.fg("brandCopper", `v${version}`);
 	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
 	const action = actionRow(theme, stats, leftRoom);
-	const taglineRows = room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room) : [];
+	const taglineRows = room >= 36 && !tight ? wrapTextWithAnsi(theme.fg("body", tagline), room) : [];
 	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(action) - visibleWidth(versionTag)));
 	const title = titleBrand
 		? `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
@@ -689,10 +701,20 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
 				? WELCOME_HINTS[hintPage]?.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
 				: "";
-		const signature = `${skinEpoch()}\0${mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}`;
+		const terminalRows = this.deps.getTerminalRows?.();
+		const signature = `${skinEpoch()}\0${mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}\0${terminalRows}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
-		const lines = buildWelcomeDashboardLines(stats, this.version, width, mode, hintPage, this.deps.getKeyLabel);
+		const lines = buildWelcomeDashboardLines(
+			stats,
+			this.version,
+			width,
+			mode,
+			hintPage,
+			this.deps.getKeyLabel,
+			SESSION_TAGLINE,
+			terminalRows,
+		);
 		this.cachedRender = { width, signature, lines };
 		return lines;
 	}
@@ -876,12 +898,13 @@ export function createBootWelcome(
 		targets: "",
 		fleet: "",
 	};
-	let cached: { width: number; epoch: number; lines: string[] } | null = null;
+	let cached: { width: number; rows: number; epoch: number; lines: string[] } | null = null;
 	return {
 		render: (width) => {
-			if (cached?.width === width && cached.epoch === skinEpoch()) return cached.lines;
-			const lines = buildWelcomeDashboardLines(stats, version, width, mode, 0, getKeyLabel);
-			cached = { width, epoch: skinEpoch(), lines };
+			const rows = process.stdout.rows;
+			if (cached?.width === width && cached.rows === rows && cached.epoch === skinEpoch()) return cached.lines;
+			const lines = buildWelcomeDashboardLines(stats, version, width, mode, 0, getKeyLabel, SESSION_TAGLINE, rows);
+			cached = { width, rows, epoch: skinEpoch(), lines };
 			return lines;
 		},
 		invalidate: () => {

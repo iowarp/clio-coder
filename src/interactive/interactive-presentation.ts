@@ -323,6 +323,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const announcedPreloadCwds = new Set<string>();
 	const banner = factories.createBanner({
 		providers: deps.providers,
+		getTerminalRows: () => (deps.tui as Partial<Pick<TUI, "terminal">>).terminal?.rows,
 		...(deps.agents ? { getAgentCount: () => deps.agents?.listSpecs().filter(isUserVisibleAgent).length ?? 0 } : {}),
 		getWorkspaceSnapshot,
 		// The authoritative project-context reader. It is synchronous on a cache
@@ -721,6 +722,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.model,
 				current?.chat?.thinkingLevel ?? "off",
 			)?.thinking;
+			// Before the first probe answers, a local or gateway route's capabilities are guesses: `model has no thinking` showed
+			// on the first frame of a route about to say `think on`. Until then the rail says what was asked for and no more.
+			const status = deps.providers.list().find((candidate) => candidate.target.id === current?.chat?.target);
+			const asked = current?.chat?.thinkingLevel ?? "off";
+			if (status?.health.status === "unknown" && status.discoveredModelsSource !== "runtime" && asked !== "off") {
+				return { label: asked, hasLevels: false, note: "not checked yet" };
+			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
 			const note = thinking ? thinkingEffectNote(thinking) : null;

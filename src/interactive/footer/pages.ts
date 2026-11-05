@@ -856,10 +856,12 @@ export function dashboardPageViewport(
 			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })
 			: theme.fg("menuOption", `  ${index + 1} ${name}`),
 	);
+	// The rule keeps the brand from reading as part of whichever tab sits first.
+	const brand = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} `;
 	const tabText =
 		innerWidth >= 52
-			? `${brandMark(theme)} ${tabs.join(" ")}`
-			: `${brandMark(theme)} ${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
+			? `${brand}${tabs.join(" ")}`
+			: `${brand}${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
 	// The route sits flush right, the way a title row carries its meta, so the
 	// tabs and the identity read as one row with two ends rather than a sentence.
 	const identityRoom = innerWidth - visibleWidth(tabText) - 4;
