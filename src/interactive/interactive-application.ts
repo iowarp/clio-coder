@@ -98,6 +98,7 @@ import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.j
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import { renderView } from "./surfaces/view-renderer.js";
+import { followTerminalColors } from "./terminal-color-follow.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
@@ -983,6 +984,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					startUi: () => {
 						tui.start();
 						tui.requestRender(true);
+						terminalColors.refresh();
 					},
 					onDockKey: () => pressFilesKey("dock"),
 				})
@@ -999,6 +1001,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		tui.requestRender();
 	};
 	const agentProgress = createAgentProgress(terminal);
+	const terminalColors = followTerminalColors(tui);
 	// Only the interactive surface asks a diffusion provider for whole-response
 	// frames; it is the one consumer that can show noise settling into text.
 	setDiffusionFramesEnabled(process.stdout.isTTY === true);
@@ -1025,6 +1028,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const memorySweepNotice = deps.takeMemorySweepNotice?.() ?? null;
 	if (memorySweepNotice !== null) notify("warning", memorySweepNotice, "memory:flow-sweep");
 	const eventProjection = createInteractiveEventProjection({
+		heldQueueNotice: (count) =>
+			`${count === 1 ? "1 queued message is" : `${count} queued messages are`} held and nothing was sent. ${keybindings.actionLabel("clio-coder.message.interrupt")} sends the queue in order, ${keybindings.actionLabel("clio-coder.message.dequeue")} restores it to the composer, and a new prompt takes it at its first slot.`,
+		restoreDroppedQueue: (texts) => {
+			const current = editor.getExpandedText();
+			editor.setLiteralText([texts.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
+			notify(
+				"info",
+				`${texts.length === 1 ? "1 message" : `${texts.length} messages`} queued behind the old session ${texts.length === 1 ? "was" : "were"} put back in the editor`,
+				"session:queue",
+			);
+		},
 		isReloadReporting: () => deps.reloadClasses?.active === true,
 		bus: deps.bus,
 		chat: deps.chat,
@@ -1482,6 +1496,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		} finally {
 			tui.start();
 			tui.requestRender(true);
+			terminalColors.refresh();
 		}
 	};
 	overlayLifecycle = createOverlayLifecycle({
@@ -1515,10 +1530,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				editor.setRestoredText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
 				notify("info", RESTORED_DRAFT_NOTICE, "queue:restored");
 			},
-			sendNow: (entry) => {
-				if (deps.chat.removeQueuedEntry(entry.id, "sent-now") === null) return;
-				editorSubmit.interruptFromEditor(entry.text);
-			},
+			sendNow: (entry) => editorSubmit.interruptFromEditor(entry.text, entry),
 			restoreAll: () => editorSubmit.restoreQueuedFollowUpsToEditor(),
 		},
 		getSlashContext: () => slashRuntime.context,
@@ -1531,6 +1543,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			} finally {
 				tui.start();
 				tui.requestRender(true);
+				terminalColors.refresh();
 			}
 		},
 		suspendTerminalAsync,
@@ -1578,14 +1591,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 
 	const cancelActiveRun = (): void => {
 		operatorExtensions?.cancel();
-		// Esc must not eat typed work: queued steers and follow-ups return to the
-		// editor before the abort, the same restore the reference implementation
-		// performs. cancel() then finds both queues already empty.
-		const restored = deps.chat.clearQueuedFollowUps();
-		if (restored.length > 0) {
-			const current = editor.getExpandedText();
-			editor.setLiteralText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
-		}
+		// The stop holds the queue as separate entries and announces it once the run settles (#447).
 		chatRenderer.flush();
 		notifications.dismiss("keyboard:escape");
 		deps.chat.cancel();
@@ -2067,6 +2073,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				void operatorExtensions?.dispose();
 				detachMusicDockKey?.();
 				loopJobs?.dispose();
+				terminalColors.dispose();
 				detachYaziBridge?.();
 				yaziBridge?.dispose();
 				detachWorkersDockKey?.();

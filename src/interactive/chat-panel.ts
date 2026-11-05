@@ -128,9 +128,9 @@ const RESET = SGR_RESET;
 const SECONDARY = () => fgSequence("annotation");
 const TEAL = () => fgSequence("guidance");
 const REASON_INK = () => fgSequence("gutter");
-const RED_CRIT = fgSequence("error");
-const GREEN_OK = fgSequence("success");
-const AMBER_WARN = fgSequence("warning");
+const RED_CRIT = () => fgSequence("error");
+const GREEN_OK = () => fgSequence("success");
+const AMBER_WARN = () => fgSequence("warning");
 const AGENT_GLYPH = GLYPH.agent;
 const USER_BAR = GLYPH.userBar;
 
@@ -935,7 +935,7 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 	const out: string[] = [];
 	for (const line of (unbounded ? providerErrorEvidence(seg.text) : presentProviderError(seg.text)).split("\n")) {
 		for (const wrapped of wrapTextWithAnsi(line, width)) {
-			out.push(`${RED_CRIT}${wrapped}${RESET}`);
+			out.push(`${RED_CRIT()}${wrapped}${RESET}`);
 		}
 	}
 	if (seg.route) {
@@ -946,7 +946,7 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 }
 
 const CLIO_PREFIX = () => `${TEAL()}${AGENT_GLYPH}${RESET} `;
-const CLIO_PREFIX_ERROR = `${RED_CRIT}${AGENT_GLYPH}${RESET} `;
+const CLIO_PREFIX_ERROR = () => `${RED_CRIT()}${AGENT_GLYPH}${RESET} `;
 /**
  * Operator prompts wear the accent bar on every row and bold text, so the
  * operator's words are never the same weight as the agent prose beneath them.
@@ -1199,10 +1199,10 @@ function receiptDuration(usage: ChatPanelTurnUsage): string {
 }
 
 function receiptGlyph(outcome: string): string {
-	if (outcome === "Done") return `${GREEN_OK}${GLYPH.ok}${RESET} `;
-	if (outcome === "Failed") return `${RED_CRIT}${GLYPH.error}${RESET} `;
+	if (outcome === "Done") return `${GREEN_OK()}${GLYPH.ok}${RESET} `;
+	if (outcome === "Failed") return `${RED_CRIT()}${GLYPH.error}${RESET} `;
 	if (outcome === "Cancelled") return `${SECONDARY()}${GLYPH.cancelled}${RESET} `;
-	return `${AMBER_WARN}${GLYPH.warn}${RESET} `;
+	return `${AMBER_WARN()}${GLYPH.warn}${RESET} `;
 }
 
 function renderToolSegmentLines(
@@ -1581,7 +1581,7 @@ function renderEntryLines(
 		if (rendered.length === 0) continue;
 		flushReasoning("words");
 		if (seg.kind === "error") {
-			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR) });
+			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR()) });
 			continue;
 		}
 		blocks.push({ kind: "prose", lines: hangProseLines(rendered, CLIO_PREFIX()) });

@@ -90,9 +90,19 @@ export interface QueuedMessagesSnapshot {
 	followUp: ReadonlyArray<string>;
 }
 
+/** The surface-neutral wording; the TUI replaces it with one naming its bound keys. */
+export function heldQueueNotice(count: number): string {
+	const subject = count === 1 ? "1 queued message is" : `${count} queued messages are`;
+	return `[Clio Coder] ${subject} held and nothing was sent. A new prompt takes the queue at its first slot; clearing the queue returns it.`;
+}
+
 export interface TurnQueuesDeps {
 	state: ChatTurnState;
 	emitQueueUpdateEvent: (messages: QueuedChatMessage[]) => void;
+	/** An operator stop or an unstarted prompt left this many entries held. Falls back to a plain notice. */
+	emitQueueHeld?: (count: number) => void;
+	/** A session change took these operator entries unsent. Falls back to a plain notice. */
+	emitQueueDropped?: (texts: string[]) => void;
 	/**
 	 * Fired at injection time, when the engine drains a handed-over message into
 	 * the run (or the stranded fallback resubmits it). The transcript renders
@@ -106,7 +116,12 @@ export interface TurnQueuesDeps {
 	/** Late-bound `ChatLoop.submit`; wired by the loop after API construction. */
 	submit: (
 		text: string,
-		options?: { requestContinuation?: boolean; workingContextPaths?: ReadonlyArray<string>; origin?: string },
+		options?: {
+			requestContinuation?: boolean;
+			workingContextPaths?: ReadonlyArray<string>;
+			origin?: string;
+			queued?: QueuedChatMessage;
+		},
 	) => Promise<void>;
 	now?: () => number;
 }
@@ -145,17 +160,35 @@ export interface TurnQueues {
 	handOverAtFinishTurn(final: boolean): void;
 	/** Hand next-slot entries typed during a long preparation to Pi's second poll. */
 	handOverAfterPrepareNextTurn(): void;
-	/** Just before `agent.prompt`: a flush hands everything over so it lands with the first model call. */
-	handOverBeforePrompt(agent: EngineAgent): void;
+	/**
+	 * Just before `agent.prompt`: a flush hands everything over so it lands with
+	 * the first model call. `keepOperatorHold` is for a prompt the operator did
+	 * not type (a job, a peer, a continuation), which must not deliver what an
+	 * operator stop told them was held.
+	 */
+	handOverBeforePrompt(agent: EngineAgent, options?: { keepOperatorHold?: boolean }): void;
 	/** Arm the next prompt to carry the whole queue (Alt+S with an empty draft; the stranded fallback). */
 	flushOnNextPrompt(): void;
 	/**
 	 * The run was cancelled. Messages the engine was handed but never injected
 	 * come back to the head of the queue. An interrupt holds the queue for the
-	 * prompt that follows; a job cancellation preserves entries without holding
-	 * them for an interrupt. Other cancels drop the queue, as Esc expects.
+	 * prompt that follows. A job cancellation preserves every entry for the
+	 * settle path (#411). `settle` (a loop-guard or tool-budget stop) does the
+	 * same for the operator's entries and retires machine-origin ones. Any other
+	 * cancel is an operator stop: it sends nothing, retires machine-origin
+	 * entries and holds the operator's until they act (#447).
 	 */
-	onRunCancelled(options: { hold: boolean; preserve?: boolean }): void;
+	onRunCancelled(options: { hold: boolean; preserve?: boolean; settle?: boolean }): void;
+	/** A prompt carrying this entry never started: the entry returns to the head of the queue. */
+	requeueUnstarted(entry: QueuedChatMessage): void;
+	/** Say what a session change took unsent, for an entry no longer in the queue. */
+	reportDropped(entries: ReadonlyArray<QueuedChatMessage>): void;
+	/**
+	 * The submit that owned the session ended. A prompt that never started
+	 * leaves any queue held, and a held queue is announced here, after the stream
+	 * closed, so the notice cannot split the aborted assistant entry (#425).
+	 */
+	settleSubmit(promptStarted: boolean): void;
 	/** True (and consumed) when the loop already persisted this exact user text. */
 	consumePersistedEcho(text: string): boolean;
 	markPersistedUserEcho(text: string, prompt: () => Promise<void>): Promise<void>;
@@ -164,7 +197,8 @@ export interface TurnQueues {
 	/** Resubmit entries the run never took as a fresh prompt; true when one was sent. */
 	resubmitStranded(): Promise<boolean>;
 	resubmitRequestContinuation(): Promise<void>;
-	reset(): void;
+	/** `keepOperator`: the session did not change (a local shell line, a /tree move), so the operator's entries stay held. */
+	reset(options?: { keepOperator?: boolean }): void;
 }
 
 export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
@@ -179,9 +213,14 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	const inFlight: QueuedChatMessage[] = [];
 	const persistedUserEchoes: string[] = [];
 	let sequence = 0;
-	// Set by an interrupt: the queue waits for the fresh prompt instead of
-	// being resubmitted by the cancelled run's settle.
-	let held = false;
+	// The queue waits instead of being resubmitted by the cancelled run's settle:
+	// for the fresh prompt an interrupt is about to send, or for the operator to
+	// act after a stop.
+	let heldFor: "interrupt" | "operator" | null = null;
+	// Typed after the operator stop, while the run was still dying. It answers the
+	// stop instead of preceding it, so the settle sends it (#447).
+	let typedAfterStop = new WeakSet<QueuedChatMessage>();
+	let announcedHeld = 0;
 	let flushNext = false;
 
 	const emitQueueUpdate = (): void => {
@@ -220,6 +259,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			...(options?.origin !== undefined ? { origin: options.origin, pinned: true } : {}),
 		};
 		queuedAt.set(entry, performance.now());
+		if (heldFor === "operator" && options?.origin === undefined) typedAfterStop.add(entry);
 		if (options?.front === true) queue.unshift(entry);
 		else queue.push(entry);
 		emitQueueUpdate();
@@ -252,6 +292,14 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		}
 	};
 	const fromMachine = (entry: QueuedChatMessage): boolean => entry.origin !== undefined;
+
+	const reportDropped = (entries: ReadonlyArray<QueuedChatMessage>): void => {
+		if (entries.length === 0) return;
+		removed(entries, "cancelled");
+		const texts = entries.map((entry) => entry.text);
+		if (deps.emitQueueDropped) deps.emitQueueDropped(texts);
+		else deps.emitNotice(`[Clio Coder] the session changed; not sent: ${texts.join(" | ")}`);
+	};
 
 	const find = (id: string): number => queue.findIndex((entry) => entry.id === id);
 
@@ -326,7 +374,8 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		clearQueuedMirror(): QueuedChatMessage[] {
 			const drained = [...inFlight.splice(0, inFlight.length), ...queue.splice(0, queue.length)];
-			held = false;
+			heldFor = null;
+			announcedHeld = 0;
 			flushNext = false;
 			if (state.runtime) {
 				state.runtime.agent.clearAllQueues();
@@ -339,17 +388,20 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		handOverAtFinishTurn(final) {
 			const agent = state.runtime?.agent;
-			if (!agent || held) return;
+			if (!agent || heldFor !== null) return;
 			const steered = handOver(agent, "steer", "finish-turn");
 			if (final && steered === 0) handOver(agent, "follow-up", "finish-turn");
 		},
 		handOverAfterPrepareNextTurn() {
 			const agent = state.runtime?.agent;
-			if (!agent || held) return;
+			if (!agent || heldFor !== null) return;
 			handOver(agent, "steer", "prepare-next-turn");
 		},
-		handOverBeforePrompt(agent) {
-			held = false;
+		handOverBeforePrompt(agent, options) {
+			if (heldFor !== "operator" || options?.keepOperatorHold !== true) {
+				heldFor = null;
+				announcedHeld = 0;
+			}
 			if (!flushNext) return;
 			flushNext = false;
 			handOver(agent, "steer", "prompt");
@@ -358,21 +410,47 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		flushOnNextPrompt() {
 			flushNext = true;
 		},
-		onRunCancelled({ hold, preserve = false }) {
+		onRunCancelled({ hold, preserve = false, settle = false }) {
 			const changed = inFlight.length > 0 || queue.length > 0;
 			queue.unshift(...inFlight.splice(0, inFlight.length));
 			if (!hold && !preserve) {
-				const dropped = queue.splice(0, queue.length);
-				removed(
-					dropped.filter((entry) => !fromMachine(entry)),
-					"cancelled",
-				);
-				retire(dropped.filter(fromMachine), "the run was cancelled");
+				const machine = queue.filter(fromMachine);
+				for (const entry of machine) queue.splice(queue.indexOf(entry), 1);
+				retire(machine, "the run was cancelled");
 			}
-			// Job preservation must not clear an interrupt that already owns the queue (#411).
-			if (!preserve || hold) held = hold && queue.length > 0;
+			// Preservation must not clear an interrupt or a stop that already owns the queue (#411).
+			if (hold) heldFor = queue.length > 0 ? "interrupt" : null;
+			else if (!preserve && !settle) {
+				// Armed even with an empty queue: what arrives while the run dies must not
+				// reach a hand-over, and the settle clears an arm that caught nothing.
+				heldFor = queue.length > 0 || state.streaming ? "operator" : null;
+				typedAfterStop = new WeakSet();
+			}
 			state.runtime?.agent.clearAllQueues();
 			if (changed) emitQueueUpdate();
+		},
+		requeueUnstarted(entry) {
+			queue.unshift(entry);
+			flushNext = false;
+			emitQueueUpdate();
+		},
+		reportDropped,
+		settleSubmit(promptStarted) {
+			if (!promptStarted && queue.length > 0) {
+				heldFor = "operator";
+				// Whatever was said before, this attempt failed: say where the queue stands again.
+				announcedHeld = 0;
+			}
+			if (queue.length === 0) {
+				if (heldFor === "operator") heldFor = null;
+				announcedHeld = 0;
+				return;
+			}
+			// A count already announced stays quiet: a second Esc or a job's settle adds nothing.
+			if (heldFor !== "operator" || announcedHeld === queue.length) return;
+			announcedHeld = queue.length;
+			if (deps.emitQueueHeld) deps.emitQueueHeld(queue.length);
+			else deps.emitNotice(heldQueueNotice(queue.length));
 		},
 		consumePersistedEcho(text: string): boolean {
 			const idx = persistedUserEchoes.indexOf(text);
@@ -414,18 +492,26 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		 * is handed over. The entries become one fresh prompt: the first is the
 		 * prompt text, the rest are handed to the engine just before it starts,
 		 * so Pi's opening poll lands them with the same first model call, each as
-		 * its own user message. A held queue (an interrupt is about to prompt)
-		 * waits for that prompt instead.
+		 * its own user message. A held queue (an interrupt is about to prompt, or
+		 * the operator stopped the run) waits instead, except for a message typed
+		 * after that stop: it goes out as the prompt it would have been had the
+		 * tool died sooner, and the held entries take that prompt's first slot.
 		 */
 		async resubmitStranded(): Promise<boolean> {
-			if (held || queue.length === 0) return false;
-			const first = queue.shift();
+			const nextIndex = heldFor === null ? 0 : queue.findIndex((entry) => typedAfterStop.has(entry));
+			if (heldFor === "interrupt" || nextIndex < 0 || nextIndex >= queue.length) return false;
+			const afterStop = heldFor === "operator";
+			const [first] = queue.splice(nextIndex, 1);
 			if (!first) return false;
 			state.pendingRequestContinuation = false;
 			state.runtime?.agent.clearAllQueues();
-			flushNext = queue.length > 0;
+			flushNext = !afterStop && queue.length > 0;
 			emitQueueUpdate();
-			deps.emitNotice("[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.");
+			deps.emitNotice(
+				afterStop
+					? `[Clio Coder] the run has stopped; sending the message typed after the stop as a new prompt.${queue.length > 0 ? ` ${queue.length} held ${queue.length === 1 ? "message lands" : "messages land"} at its first slot.` : ""}`
+					: "[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.",
+			);
 			// The resubmit's own user echo is suppressed (markPersistedUserEcho), so
 			// this is the only place the first text can enter the transcript; the
 			// rest arrive through message_end like any handed-over message.
@@ -436,6 +522,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 					? { workingContextPaths: first.referencedPaths }
 					: {}),
 				...(first.origin !== undefined ? { origin: first.origin } : {}),
+				queued: first,
 			});
 			return true;
 		},
@@ -444,12 +531,20 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			state.pendingRequestContinuation = false;
 			await deps.submit("", { requestContinuation: true });
 		},
-		reset(): void {
-			retire([...inFlight, ...queue].filter(fromMachine), "the session was reset");
+		reset(options): void {
+			const unsent = [...inFlight, ...queue];
+			retire(unsent.filter(fromMachine), "the session was reset");
+			const operator = unsent.filter((entry) => !fromMachine(entry));
+			if (options?.keepOperator !== true) reportDropped(operator);
 			queue.length = 0;
 			inFlight.length = 0;
 			persistedUserEchoes.length = 0;
-			held = false;
+			heldFor = null;
+			if (options?.keepOperator === true && operator.length > 0) {
+				queue.push(...operator);
+				heldFor = "operator";
+				typedAfterStop = new WeakSet();
+			} else announcedHeld = 0;
 			flushNext = false;
 			emitQueueUpdate();
 		},
