@@ -37,6 +37,8 @@ export interface OpenModelScopeOverlayDeps {
 	onCancel: () => void;
 	/** What choosing does to the turn in flight, asked on every frame so it stays true up to the Enter. */
 	turnEffect?: () => string | null;
+	/** What the swap costs the session's history, when it costs anything. Sized once: choosing does not change it. */
+	switchCost?: string | null;
 }
 
 /** The swap as the operator typed it, for the dialog title. */
@@ -90,9 +92,13 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 
 	const effect: Component = {
 		render(width) {
+			const room = Math.max(1, width);
+			const theme = clioTheme();
 			const text = deps.turnEffect?.();
-			if (!text) return [];
-			return [...wrapTextWithAnsi(clioTheme().fg("accent", text), Math.max(1, width)), ""];
+			return [
+				...(text ? [...wrapTextWithAnsi(theme.fg("accent", text), room), ""] : []),
+				...(deps.switchCost ? [...wrapTextWithAnsi(theme.fg("annotation", deps.switchCost), room), ""] : []),
+			];
 		},
 		invalidate() {},
 	};

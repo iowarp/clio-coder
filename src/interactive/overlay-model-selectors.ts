@@ -42,6 +42,9 @@ export interface OverlayModelSelectorsDeps {
 	onSelectModel?: (ref: { target: string; model: string }, scope: ModelScopeChoice) => void;
 	/** A pick made during a turn takes effect on the next one, which the confirmation has to say. */
 	isTurnInFlight?: () => boolean;
+	/** What the next request would resend of this session, null or zero when it has no history yet. */
+	historyTokens?: () => number | null;
+	routeLeavesCache?: (route: { target: string; model: string }) => boolean;
 	/** What the running turn is waiting on, read live: it decides whether a pick moves the request. */
 	routeMoveWait?: () => RouteMoveWait;
 	routeMoveFit?: (route: { target: string; model: string }) => RouteMoveFit;
@@ -87,6 +90,12 @@ export function modelListTurnEffect(wait: RouteMoveWait): string | null {
 	if (wait === "first-output") return "No output yet, so a pick moves the waiting request.";
 	if (wait === "retry-wait") return "Waiting to retry, so a pick sends the request now.";
 	return `A pick applies from the next turn, because ${notThisTurn(wait)}.`;
+}
+
+/** What a swap costs a session with history, in the words of its journal's `model_changed` cold reason. */
+export function routeSwitchCost(historyTokens: number | null | undefined, leavesCache: boolean): string | null {
+	if (!leavesCache || !historyTokens || historyTokens <= 0) return null;
+	return `A new model starts with no prompt cache, so the next turn re-reads this session's ${formatFooterTokens(historyTokens)} tokens.`;
 }
 
 /** The line in the scope dialog, once the route is known. */
@@ -156,8 +165,13 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		// Sized once: nothing grows the context while a request waits, and the frame loop must not re-estimate it.
 		const fit =
 			deps.routeMoveWait?.() !== "idle" ? deps.routeMoveFit?.({ target: ref.target, model: ref.model }) : undefined;
+		const switchCost = routeSwitchCost(
+			deps.historyTokens?.(),
+			deps.routeLeavesCache?.({ target: ref.target, model: ref.model }) ?? false,
+		);
 		deps.transitions.handle = openModelScope(deps.tui, {
 			ref,
+			...(switchCost ? { switchCost } : {}),
 			...(deps.routeMoveWait
 				? { turnEffect: () => routeTurnEffect(deps.routeMoveWait?.() ?? "idle", fit, ref.model) }
 				: {}),

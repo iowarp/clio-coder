@@ -729,6 +729,8 @@ export interface ChatLoop {
 	routeMoveWait?(): RouteMoveWait;
 	/** Whether the running turn's request could go to this route. */
 	routeMoveFit?(route: { target: string; model: string }): RouteMoveFit;
+	/** Whether the next request on this route would leave the route the session's cached prefix belongs to (#434). */
+	routeLeavesCache?(route: { target: string; model: string }): boolean;
 	/** Send the waiting request to the route settings now name, if it still can go. Call after the pick is applied. */
 	moveWaitingRequest?(): RouteMoveResult;
 	/** Fires on every preparation transition, including back to `idle`. */
@@ -3739,6 +3741,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return candidate ? routeFit(candidate) : { kind: "unresolved", reason: "no route is configured" };
 			} catch (err) {
 				return { kind: "unresolved", reason: err instanceof Error ? err.message : String(err) };
+			}
+		},
+
+		routeLeavesCache(route) {
+			try {
+				const candidate = turnRuntime.previewRoute(route);
+				if (!candidate) return false;
+				const runtime = state.runtime;
+				// A session resumed with nothing sent yet has no runtime; the route it would run on is the one it left off with.
+				const current = runtime
+					? { targetId: runtime.targetId, wireModelId: runtime.wireModelId }
+					: (() => {
+							const resolved = turnRuntime.previewRoute();
+							return resolved ? { targetId: resolved.target.target.id, wireModelId: resolved.target.wireModelId } : null;
+						})();
+				return (
+					current === null ||
+					current.targetId !== candidate.target.target.id ||
+					current.wireModelId !== candidate.target.wireModelId
+				);
+			} catch {
+				// An unresolvable route has no cost to state; the rest of the dialog and the pick itself report it.
+				return false;
 			}
 		},
 
