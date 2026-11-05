@@ -28,13 +28,20 @@ export function footerTokens(tokens: number): string {
 /**
  * The persistent transcript row an automatic or `/context compact` run leaves.
  * Example:
- *   [context engine] compacted 36.2K → 28.6K tokens; 42 messages summarized to 1823 chars
- * Split-turn runs carry a `(split turn)` suffix so the user knows the cut
- * landed mid-turn and upstream context may need a re-read.
+ *   Clio compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary
+ * The `[context engine]` tag and `summarized to 1823 chars` were Clio's own bookkeeping; the row says what changed for
+ * the conversation. A split-turn run says the cut landed inside a turn, so upstream context may need a re-read, and a
+ * run that saved nothing says so instead of leaving `13K → 13K` to be decoded.
  */
+/** How the compaction row starts, so a surface that routes it to the footer can tell it apart. */
+export const COMPACTION_LINE_LEAD = "Clio compacted ";
+
 export function renderCompactionSummaryLine(input: CompactionSummaryLineInput): string {
-	const tail = input.isSplitTurn ? " (split turn)" : "";
-	return `[context engine] compacted ${footerTokens(input.tokensBefore)} → ${footerTokens(input.tokensAfter)} tokens; ${input.messagesSummarized} messages summarized to ${input.summaryChars} chars${tail}`;
+	const count = input.messagesSummarized;
+	const messages = `${count} earlier message${count === 1 ? "" : "s"} now read${count === 1 ? "s" : ""} as one summary`;
+	const flat = input.tokensAfter >= input.tokensBefore ? "; the context is no smaller" : "";
+	const tail = input.isSplitTurn ? " (the cut fell inside a turn)" : "";
+	return `${COMPACTION_LINE_LEAD}${footerTokens(input.tokensBefore)} → ${footerTokens(input.tokensAfter)} tokens: ${messages}${flat}${tail}`;
 }
 
 /** Why the non-destructive stage had nothing to do before a summary ran. */

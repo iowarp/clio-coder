@@ -331,7 +331,8 @@ test("unfinished JSON message projects useful prose and waiting/running do not r
 		const panel = createChatPanel();
 		panel.applyEvent({ type: "retry_status", status: { phase, attempt: 1, maxAttempts: 2, errorMessage: raw } });
 		const row = plain(panel.render(43)).trim();
-		assert.equal(row.split("\n").length, 1);
+		// Two rows at most: the reason breaks between facts rather than mid-word (N3).
+		assert.ok(row.split("\n").length <= 2);
 		assert.doesNotMatch(row, /\{"message|payload payload/);
 		const artifact = panel.inspectionArtifacts()[0];
 		assert.ok(artifact);

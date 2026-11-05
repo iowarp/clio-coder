@@ -61,6 +61,31 @@ export function usageFigure(quantity: UsageQuantity | null | undefined): string 
 	return stripUsageClause(quantity.display);
 }
 
+/**
+ * The figure with one mark at most, for a line that states its gaps and estimates once in words: `≥999` still says it
+ * is a lower bound, while `≥~999` stacked a second qualifier on every number of the line (E1). The estimate moves to
+ * `usageEstimates`, which says it once for the whole line.
+ */
+export function usageLineFigure(quantity: UsageQuantity | null | undefined): string {
+	const figure = usageFigure(quantity);
+	if (figure === USAGE_NOT_MEASURED) return figure;
+	// A single estimated fact's display names its method in parentheses; the line's estimate clause says it instead.
+	return figure.replace(/^(≥?)~/u, "$1").replace(/ \([^()]*\)$/u, "");
+}
+
+/** Calls whose figure Clio estimated because the provider did not report one. */
+export function usageEstimatedCalls(quantity: UsageQuantity | null | undefined): number {
+	if (!quantity) return 0;
+	const fact = quantity.fact;
+	return isSum(fact) ? fact.coverage.estimated : fact.kind === "estimated" ? 1 : 0;
+}
+
+/** `Clio estimated usage for 3 calls`, or null when no figure was estimated. Pairs with `usageLineFigure`. */
+export function usageEstimates(calls: number, data = "usage"): string | null {
+	if (calls <= 0) return null;
+	return `Clio estimated ${data} for ${count(calls)} ${calls === 1 ? "call" : "calls"}`;
+}
+
 /** A figure that says nothing a reader can use: unmeasured, or a lower bound of zero. */
 export function usageSaysNothing(figure: string): boolean {
 	return figure === USAGE_NOT_MEASURED || figure === "≥0" || figure === "≥~0";
@@ -84,7 +109,8 @@ export function usageLineCoverage(
 	const base = gaps[0]?.gap ?? 0;
 	const wider = gaps.filter((entry) => entry.gap > base && !usageUnmeasured(figureOf(figures, entry.label)));
 	const lead = usageCoverage(base, data);
-	const extra = wider.map((entry) => `${count(entry.gap)} no ${entry.label}`);
+	// `4 no out` read as a stray fragment beside the lead clause; the extra gap is a sentence of its own words.
+	const extra = wider.map((entry) => `${count(entry.gap)} had no ${entry.label} figure`);
 	if (lead === null && extra.length === 0) return null;
 	if (lead === null)
 		return wider

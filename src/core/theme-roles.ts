@@ -129,6 +129,11 @@ export const TEXT_ROLES = {
 /** Structural and category roles are independent of the text intensity ladder. */
 export const STRUCTURAL_ROLES = {
 	border: "border",
+	/**
+	 * The ` · ` between facts in a text row reads as punctuation, so it holds the 3:1 of a meter's track rather than a
+	 * frame's 2:1: on the light ground the frame color measured 2.15:1 and the dots between footer facts faded out.
+	 */
+	separator: "meterTrack",
 	divider: "divider",
 	gutter: "border",
 	quoteRail: "turquoise",

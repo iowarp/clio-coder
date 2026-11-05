@@ -297,7 +297,9 @@ export class ScrollingBody implements Component, RowBudgetedBody {
 		const memo = this.memo;
 		if (memo && memo.all === all && memo.offset === start && memo.rows === this.rows) return memo.visible;
 		const visible = [...window];
-		if (position) visible.push(positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width));
+		// The position only: every owner names the scroll keys on its rail while the body overflows, and the row
+		// repeating them in another spelling said the same keys twice.
+		if (position) visible.push(positionRow(clioTheme(), position, width));
 		this.memo = { all, offset: start, rows: this.rows, visible };
 		return visible;
 	}

@@ -164,7 +164,7 @@ export function formatContextActivityRailLines(
 	const hintRoom = hint ? visibleWidth(hint) + 3 : 0;
 	if (hint && width - hintRoom >= 16) {
 		rows.push(
-			`${padAnsi(message, width - hintRoom, GLYPH.ellipsis)}${theme.fg("border", " · ")}${theme.fg("harnessAction", hint)}`,
+			`${padAnsi(message, width - hintRoom, GLYPH.ellipsis)}${theme.fg("separator", " · ")}${theme.fg("harnessAction", hint)}`,
 		);
 	} else if (hint) {
 		rows.push(padAnsi(theme.fg("harnessAction", hint), width, GLYPH.ellipsis));

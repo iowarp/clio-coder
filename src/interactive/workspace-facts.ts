@@ -62,10 +62,13 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 	let inFlight: Promise<void> | null = null;
 
 	const applyGitStatus = (base: WorkspaceSnapshot, git: GitStatusProbeResult): void => {
+		// Git running out of time is no answer: the last known facts stay on screen.
+		if (git.undetermined === true) return;
 		// ahead/behind/recentCommits stay as session bind captured them. The polling
 		// probe does not read them (two subprocesses for fields the footer never
 		// paints), and the workspace context tool reads the bound snapshot, not this one.
-		liveWorkspaceSnapshot = { ...base, branch: git.branch, dirty: git.dirty };
+		const { gitUnknown: _unknown, ...known } = base;
+		liveWorkspaceSnapshot = { ...known, isGit: git.isGit, branch: git.branch, dirty: git.dirty };
 	};
 
 	const refreshLiveWorkspaceGit = (force = false): Promise<void> => {
@@ -73,7 +76,8 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 		if (!force && now() - lastWorkspaceProbeAt < 5_000) return Promise.resolve();
 		if (inFlight) return inFlight;
 		lastWorkspaceProbeAt = now();
-		if (!base.isGit) {
+		// A repository whose first probe timed out is asked again, rather than read as no repository for the session.
+		if (!base.isGit && base.gitUnknown !== true) {
 			liveWorkspaceSnapshot = base;
 			return Promise.resolve();
 		}

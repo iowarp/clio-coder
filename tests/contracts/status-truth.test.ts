@@ -372,7 +372,7 @@ test("a cold load keeps its state, clock and way out at every width and never sa
 		match(label, /Esc/);
 		doesNotMatch(label, /request sent|no bytes|waiting for a response/);
 	}
-	match(composerPhasePresentation(status, 200, at + 12_000).label, /target reports loading/);
+	match(composerPhasePresentation(status, 200, at + 12_000).label, /the server reports loading/);
 });
 
 test("the load that confirmed residency closes the wait for it, and the response gets its own clock", () => {
@@ -461,7 +461,7 @@ test("silence alone never claims a load, and only a word from the target earns o
 	const at = 1_000_000;
 	const late = at + 100_000;
 	const silent = composerPhasePresentation(waitOnRequest({}, at), 200, late).label;
-	match(silent, /target state unknown/);
+	match(silent, /cannot tell if the server is working/);
 	doesNotMatch(silent, /loading/);
 	const probed = composerPhasePresentation(waitOnRequest({ probedResidency: "absent" }, at), 200, late).label;
 	match(probed, /not resident at last probe/);
@@ -527,9 +527,9 @@ test("a backoff says what the target said it is waiting on, and nothing when it 
 			200,
 			at,
 		).label;
-	match(backoff("model-loading"), /target has said not loaded for 20/);
-	match(backoff("capacity"), /at capacity/);
-	match(backoff("rate-limit"), /rate limited/);
+	match(backoff("model-loading"), /the server has said not loaded for 20/);
+	match(backoff("capacity"), /the server says it is busy/);
+	match(backoff("rate-limit"), /the server is rate limiting/);
 	doesNotMatch(backoff(undefined), /loading|capacity|limited|not loaded/);
 	strictEqual(retryWaitCause({ kind: "model-loading", message: "Model is unloaded." }), "model-loading");
 	strictEqual(retryWaitCause({ kind: "transient-provider", message: "503: server overloaded" }), "capacity");
@@ -554,7 +554,7 @@ test("a cancel that leaves a load behind and a restore that outlives the cancel 
 		200,
 		at + 2_000,
 	).label;
-	match(ended, /was cancelled · target may finish the load/);
+	match(ended, /was cancelled · the server may finish the load/);
 	const stopping = composerPhasePresentation(
 		{
 			...INITIAL_STATUS,
@@ -808,8 +808,9 @@ test("a long countdown reads in minutes on the rail and says the provider asked 
 			now,
 			"Qwopus3.8",
 		).label;
-	match(status(111), /in 56m52s · provider asked for 1h · Esc cancels/u);
-	match(status(80), /provider wait 56m52s · Esc cancels/u);
+	match(status(111), /in 56m52s · provider asked for 1h · Esc stops/u);
+	match(status(80), /in 56m52s · provider asked for 1h · Esc stops/u);
+	match(status(60), /provider wait 56m52s · Esc/u);
 	doesNotMatch(status(111), /3412s/u);
 });
 

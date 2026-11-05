@@ -149,6 +149,18 @@ export function renderNoticeRow(
 	const tagged = LEADING_TAG.exec(body);
 	const styled = tagged ? styleTaggedNotice(body) : theme.fg("body", body);
 	const inner = Math.max(1, width - 2);
-	const rows = visibleWidth(styled) <= inner ? [styled] : wrapTextWithAnsi(styled, inner);
+	const rows = visibleWidth(styled) <= inner ? [styled] : trimStrandedSeparators(wrapTextWithAnsi(styled, inner));
 	return rows.map((row, index) => (index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`));
+}
+
+const ANSI_RUN = "((?:\u001b\\[[0-9;]*m)*)";
+const TRAILING_SEPARATOR = new RegExp(`\\s*·${ANSI_RUN}\\s*$`, "u");
+const LEADING_SEPARATOR = new RegExp(`^${ANSI_RUN}·\\s+`, "u");
+
+/**
+ * A wrap between two facts leaves their ` · ` at a row's end or start, where it separates nothing: `recovered after
+ * 2 provider waits ·` read as a fact cut off (N3, E4). The break itself already separates them.
+ */
+function trimStrandedSeparators(rows: ReadonlyArray<string>): string[] {
+	return rows.map((row) => row.replace(TRAILING_SEPARATOR, "$1").replace(LEADING_SEPARATOR, "$1"));
 }

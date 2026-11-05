@@ -443,6 +443,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
+		getStopRequestedAt: () => {
+			const status = statusController.current();
+			return status.phase === "cancelling" ? (status.cancelRequestedAt ?? null) : null;
+		},
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
 		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
 		requestRender,
@@ -748,6 +752,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return {
 			// The strip over a dock reads the phase with the rail's own name and compaction facts, so the two cannot disagree (F2).
 			actor: phaseModelName(status),
+			...(deps.getSettings?.().chat?.target ? { target: deps.getSettings?.().chat?.target ?? "" } : {}),
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
@@ -788,7 +793,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width, reserved = 0, identityCells) => {
+		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
@@ -796,10 +801,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				const name = phaseModelName(status);
 				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
 				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
-				// Beside other work a phase must say whose it is, so a rail wide enough to name it holds that name back from the
-				// lesser facts too. A narrower rail has no name to show, and reserving for one would only cost the phase its clock.
-				const named = width >= 100 ? visibleWidth(name) + 1 : 0;
-				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 + named : 0;
+				// The subject competes inside the fitter, so nothing is reserved for it here.
+				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 : 0;
 				const presented = composerPhasePresentation(
 					status,
 					width,
@@ -807,8 +810,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					name,
 					undefined,
 					reserved + beside,
-					identityCells,
 					runningCompaction(),
+					route?.target ?? undefined,
 				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
@@ -835,7 +838,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				},
 				width,
 				reserved,
-				identityCells,
+				phaseModelName(status),
 			);
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
@@ -951,8 +954,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	composerEditor = editor;
+	// The setting the operator chose, not the rail's reading of it: a capability probe landing after launch moved the
+	// label and announced `Think Off` as if someone had changed it (F5).
 	const readSettingState = () => ({
-		thinking: editorChrome.getThinkingLabel(),
+		thinking: deps.getSettings?.()?.chat?.thinkingLevel ?? "off",
 		output: editorChrome.getOutputStyle?.() ?? "standard",
 		autonomy: editorChrome.getAutonomy?.() ?? "default",
 	});
@@ -962,12 +967,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const previous = lastSettingState;
 		lastSettingState = next;
 		const changes: string[] = [];
-		const title = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-		if (next.thinking !== previous.thinking) changes.push(`Think ${title(next.thinking)}`);
+		if (next.thinking !== previous.thinking) changes.push(`Thinking set to ${next.thinking}`);
 		if (next.output !== previous.output)
-			changes.push(`Verbose ${{ compact: "Minimal", standard: "Default", detailed: "Detailed" }[next.output]}`);
+			changes.push(
+				`Transcript detail set to ${{ compact: "minimal", standard: "default", detailed: "detailed" }[next.output]}`,
+			);
 		if (next.autonomy !== previous.autonomy)
-			changes.push(`Autonomy ${next.autonomy === "yolo" ? "YOLO" : title(next.autonomy)}`);
+			changes.push(`Autonomy set to ${next.autonomy === "yolo" ? "YOLO" : next.autonomy}`);
 		if (changes.length)
 			notifications.add({
 				level: "info",

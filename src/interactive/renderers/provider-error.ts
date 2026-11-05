@@ -239,12 +239,12 @@ export function providerFailureRailFacts(route: ProviderFailureRoute): ProviderF
 	const status = httpStatusOf(errorClass);
 	if (route.stage === "auth") {
 		const way = { text: `clio-coder configure --id ${route.targetId}` };
-		if (status !== null) return { cause: { text: "credential refused", short: "credential" }, way };
+		if (status !== null) return { cause: { text: "credential refused", short: "key refused" }, way };
 		return {
 			cause:
 				errorClass === "credential_expired"
-					? { text: "credential expired", short: "expired" }
-					: { text: "no usable credential", short: "credential" },
+					? { text: "credential expired", short: "key expired" }
+					: { text: "no usable credential", short: "no key" },
 			way,
 		};
 	}
@@ -262,7 +262,7 @@ export function providerFailureRailFacts(route: ProviderFailureRoute): ProviderF
 	if (status === 429)
 		return { cause: { text: "rate limited" }, way: { text: "Up resends once it clears", short: "Up resends" } };
 	if (status !== null && status >= 500)
-		return { cause: { text: "provider failing", short: "failing" }, way: RESEND_RAIL };
+		return { cause: { text: "provider failing", short: "server error" }, way: RESEND_RAIL };
 	if (status === 404) return { cause: { text: "model or endpoint not found", short: "not found" } };
 	if (status !== null) return { cause: { text: "request rejected", short: "rejected" } };
 	return null;
