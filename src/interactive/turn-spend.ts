@@ -57,7 +57,7 @@ function nonZero(quantity: Quantity): boolean {
 /** What the call that answered reported, which a moved turn's one-row receipt states in place of the sum. */
 function answerSpend(view: TelemetryView, turnId: string, callId: string): NonNullable<TurnSpend["answer"]> {
 	const usage = view.calls({ turnIds: [turnId] }).calls.find((call) => call.callId === callId)?.usage;
-	if (!usage || known(usage.input) + known(usage.output) <= 0) return { tokens: null, cacheRead: null };
+	if (!usage || (known(usage.input) <= 0 && known(usage.output) <= 0)) return { tokens: null, cacheRead: null };
 	return {
 		tokens: `in ${renderCompactCount(usage.input.fact)} · out ${renderCompactCount(usage.output.fact)}`,
 		cacheRead: nonZero(usage.cacheRead) ? renderCompactCount(usage.cacheRead.fact) : null,
