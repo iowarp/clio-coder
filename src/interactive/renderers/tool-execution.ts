@@ -1799,7 +1799,15 @@ function renderResultBlock(
 /** A question the operator dismissed finished cleanly, but nothing was answered, so its mark is not a success. */
 function settledStatus(finished: ToolExecutionFinished): HeaderStatus {
 	// A delegation whose worker was cancelled did not fail; its card under the row already says who stopped it.
-	if (finished.isError) return detailsOf(finished.result)?.outcome === "canceled" ? "cancelled" : "error";
+	if (finished.isError) {
+		const details = detailsOf(finished.result);
+		if (details?.outcome === "canceled") return "cancelled";
+		// A command the run ended under, by a stop or the host, did not fail on its own: it wears ⊘ like the turn's
+		// receipt beside it rather than ✗. Its own timeout is still a failure.
+		if (details?.aborted === true && details.timedOut !== true && resolveRow(finished).spec.class === "execute")
+			return "cancelled";
+		return "error";
+	}
 	return resolveRow(finished).spec.class === "interaction" && detailsOf(finished.result)?.cancelled === true
 		? "cancelled"
 		: "ok";

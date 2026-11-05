@@ -161,6 +161,6 @@ const LEADING_SEPARATOR = new RegExp(`^${ANSI_RUN}·\\s+`, "u");
  * A wrap between two facts leaves their ` · ` at a row's end or start, where it separates nothing: `recovered after
  * 2 provider waits ·` read as a fact cut off (N3, E4). The break itself already separates them.
  */
-export function trimStrandedSeparators(rows: ReadonlyArray<string>): string[] {
+function trimStrandedSeparators(rows: ReadonlyArray<string>): string[] {
 	return rows.map((row) => row.replace(TRAILING_SEPARATOR, "$1").replace(LEADING_SEPARATOR, "$1"));
 }
