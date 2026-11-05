@@ -408,7 +408,14 @@ function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): 
  * `back` is for a submode that returns to the surface that opened it: a
  * settings submenu, the `/tree` label editor.
  */
-export type OverlayEscVerb = "close" | "clear filter" | "back";
+export type OverlayEscVerb =
+	| "close"
+	| "clear filter"
+	| "back"
+	| "back to list"
+	| "back to sections"
+	| "cancel filter"
+	| "close settings";
 
 export interface HintEntry {
 	key: string;

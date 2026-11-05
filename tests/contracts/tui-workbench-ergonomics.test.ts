@@ -212,7 +212,7 @@ for (const width of widths) {
 		);
 		const folded = board.render(width);
 		bounded(folded, width);
-		assert.match(plain(folded), /doing.*now current-研究/u);
+		assert.match(plain(folded), /doing.*now: current-研究/u);
 		assert.doesNotMatch(plain(folded), /policy|budget|phase.*—/u);
 		assert.ok(folded.length <= 13, `compact card used ${folded.length} rows`);
 		board.toggleDetail();
@@ -373,7 +373,7 @@ for (const width of widths) {
 		const folded = board.render(width);
 		bounded(folded, width);
 		const words = (lines: string[]) => plain(lines).replace(/│/gu, " ").replace(/\s+/gu, " ");
-		assert.match(words(folded), /unverified; no validation observed/u);
+		assert.match(words(folded), /unverified: no checks observed/u);
 		assert.doesNotMatch(words(folded), /independently reviewed|context recorded/u);
 		board.toggleDetail();
 		const full = board.render(width);
@@ -394,6 +394,6 @@ for (const width of widths) {
 			axes: { ...row.trust.axes, validationGrounding: "failed" },
 			text: row.trust.text.replace("no validation observed", "validation failed by host"),
 		};
-		assert.match(words(board.render(width)), /compromised.*validation failed by host/u);
+		assert.match(words(board.render(width)), /not trusted.*validation failed by host/u);
 	});
 }

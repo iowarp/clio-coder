@@ -1122,7 +1122,7 @@ describe("Pi TUI compatibility", () => {
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 80) ?? []).map(stripTerminalSequences).join("\n");
 			match(plain, /System One breakers/u);
-			match(plain, /local-small open 120s after 3 consecutive timeouts/u);
+			match(plain, /local-small paused 120s after 3 consecutive timeouts/u);
 		} finally {
 			handle.hide();
 		}
@@ -2137,7 +2137,7 @@ describe("transcript block grammar", () => {
 		deepStrictEqual(trail, [
 			`  │ ${GLYPH.phaseTool} … 1 earlier call · /view dispatch:run-5`,
 			`  │ ${GLYPH.phaseTool} read docs/a-long-name${GLYPH.ellipsis}`,
-			`  │ ${GLYPH.phaseTool} gateway evidence ${GLYPH.times}3`,
+			`  │ ${GLYPH.phaseTool} used evidence ${GLYPH.times}3`,
 		]);
 	});
 
@@ -2737,7 +2737,7 @@ describe("tool classes", () => {
 			plain,
 			new RegExp(`${GLYPH.classMutate} edited 2 files · \\+2 -1 ✓\\n  │ a\\.ts \\+1 -1 · b\\.ts \\+1 -0`, "u"),
 		);
-		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} ran`, "gmu"))?.length, 2, plain);
+		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} Clio ran`, "gmu"))?.length, 2, plain);
 		match(plain, new RegExp(`${GLYPH.toolHeader} read gone\\.ts ✗`, "u"));
 		match(plain, new RegExp(`${GLYPH.toolHeader} read c\\.ts · lines 1-1 of 1 ✓`, "u"));
 	});

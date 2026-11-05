@@ -60,8 +60,21 @@ const READ_SHAPED_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(research|investigate|explore|survey|compare|find out)\b/i,
 	/\b(read|inspect|explain|understand|summarize|describe|walk through|map|locate|trace|find where|look at)\b/i,
 ];
-const VERIFICATION_REQUEST = /\b(?:check whether|verify|validate|confirm|run (?:the )?tests?)\b/i;
-const MUTATION_REQUEST = /\b(?:write|implement|add|create|build|develop|fix|edit|change|modify|refactor|update)\b/i;
+/**
+ * What a verification recipe is for: running gates and reporting on them. The
+ * run form allows words between the verb and its gate so "run this project's
+ * unit tests" reads the same as "run the tests".
+ */
+const VERIFICATION_REQUEST =
+	/\b(?:check|verify|validate|confirm|report|ensure|make sure|see (?:if|whether))\b|\b(?:re-?run|run|execute)\b[^.;\n]{0,60}\b(?:tests?|suites?|specs?|lint(?:er)?|type-?check|checks?|gates?|builds?|ci)\b|\btest (?:the|that|whether|if)\b|\btests? (?:pass|fail|succeed|still pass)/i;
+/**
+ * A mutation asked for rather than mentioned. The verb has to open a clause, so
+ * "do not edit files" and "verify the fix" stay reports while "run the tests
+ * and fix any failures" stays a change. Writing up the report itself is not a
+ * mutation unless it names somewhere on disk to put it.
+ */
+const IMPERATIVE_MUTATION =
+	/(?:^|[.;:!?,\n]\s*|\b(?:and|then|also|please|must|should|need to|needs to)\s+)(?:implement|add|create|build(?=\s+(?:a|an|the\s+(?:new|missing))\b)|develop|fix|edit|change|modify|refactor|update|write(?!\s+(?:up\s+)?(?:(?:a|an|the|your)\s+)?(?:\w+\s+)?(?:report|summary)\b(?!\s+(?:to|into|in|on)\b)))\b/i;
 
 /**
  * Contracts whose postcondition is a report. A recipe that declares one has
@@ -144,7 +157,7 @@ export function assessCapabilityMismatch(input: CapabilityMismatchInput): Capabi
 	if (
 		input.capabilityClass === "verification" &&
 		VERIFICATION_REQUEST.test(input.task) &&
-		!MUTATION_REQUEST.test(input.task)
+		!IMPERATIVE_MUTATION.test(input.task)
 	) {
 		return null;
 	}

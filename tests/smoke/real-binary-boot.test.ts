@@ -313,7 +313,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 				const exited = cli.waitForExit();
 				cli.child.stdin.write("\u0004");
 				// A press that lands in that settling tail is refused out loud; the next one exits.
-				const refused = cli.waitFor(/Work or queued messages remain/u, 3_000).then(
+				const refused = cli.waitFor(/not exiting/u, 3_000).then(
 					() => cli.child.stdin.write("\u0004"),
 					() => undefined,
 				);

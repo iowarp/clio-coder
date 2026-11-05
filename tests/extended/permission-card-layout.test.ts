@@ -258,7 +258,7 @@ function unattendedFixture(windowMs: number) {
 	});
 	const notices: string[] = [];
 	const stops: string[] = [];
-	const countdowns: Array<() => number | null> = [];
+	const countdowns: Array<() => number | "held" | null> = [];
 	let state: OverlayState = "closed";
 	const lifecycle: OverlayPermissionLifecycle = createOverlayPermissionLifecycle({
 		toolRegistry: registry,
@@ -346,7 +346,7 @@ test("a key on the card holds its countdown, and a 0 window waits forever (#421)
 			});
 			await tick();
 			if (windowMs > 0) f.lifecycle.notePresence();
-			strictEqual(f.countdowns[0]?.(), null, "no countdown left to show");
+			strictEqual(f.countdowns[0]?.(), windowMs > 0 ? "held" : null, "no countdown left to run");
 			f.clock.advance(600_000);
 			await tick();
 			strictEqual(settled, false, `${windowMs}: the card still waits for the operator`);

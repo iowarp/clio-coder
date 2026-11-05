@@ -1,23 +1,29 @@
 import { truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { RetryStatusPayload } from "../../session-control/chat-loop.js";
-import { clioTheme } from "../theme/index.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { renderNoticeRow } from "./notice.js";
 import { previewBudget, previewRows } from "./preview.js";
 import { presentProviderError, providerErrorEvidence } from "./provider-error.js";
 
+const AVAILABLE_DIAGNOSTIC = /\s*\.\.\. \[available diagnostic: \/view transcript\]$/u;
+
+/** The wait the provider named, beside the one Clio is actually sitting out. */
+function askedFor(status: RetryStatusPayload): string {
+	return status.retryAfterMs !== undefined ? ` (provider asked for ${Math.ceil(status.retryAfterMs / 1000)}s)` : "";
+}
+
 function rawRetryStatus(status: RetryStatusPayload, unbounded: boolean): string {
-	const showError = unbounded || (status.phase !== "waiting" && status.phase !== "retrying");
 	const suffix =
-		showError && status.errorMessage
+		status.errorMessage !== undefined && status.errorMessage.length > 0
 			? `: ${unbounded ? providerErrorEvidence(status.errorMessage) : presentProviderError(status.errorMessage)}`
 			: "";
 	if (status.phase === "waiting") {
-		return `provider retry ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${suffix}`;
+		return `provider retry ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${askedFor(status)}${suffix}`;
 	}
 	if (status.phase === "scheduled") {
 		const seconds = Math.ceil((status.delayMs ?? 0) / 1000);
-		return `provider retry ${status.attempt}/${status.maxAttempts} scheduled in ${seconds}s${suffix}`;
+		return `provider retry ${status.attempt}/${status.maxAttempts} in ${seconds}s${askedFor(status)}${suffix}`;
 	}
 	if (status.phase === "retrying") return `provider retry ${status.attempt}/${status.maxAttempts} running${suffix}`;
 	if (status.phase === "cancelled") return `provider retry cancelled (${status.attempt}/${status.maxAttempts})${suffix}`;
@@ -45,8 +51,17 @@ export function renderRetryStatus(
 	if (unbounded) return renderNoticeRow(formatRetryStatus(status, true), "retry", width);
 	const limit = previewBudget(detail.errorRows, terminalRows);
 	const { errorMessage, ...heading } = status;
-	if (!errorMessage || status.phase === "waiting" || status.phase === "retrying" || status.phase === "recovered") {
+	if (!errorMessage) {
 		return previewRows(renderNoticeRow(formatRetryStatus(heading), "retry", width), limit, width, false, "  ", 2);
+	}
+	// Attempts collapse into this one row while the retry is open, so the reason stays on it; the full
+	// diagnostic is one /view away and a settled retry states it below.
+	if (status.phase !== "cancelled" && status.phase !== "exhausted") {
+		const reason = presentProviderError(errorMessage).replace(AVAILABLE_DIAGNOSTIC, "").trim();
+		// A narrow row spends itself on the reason; the composer rail states the provider's wait alongside.
+		const { retryAfterMs: _asked, ...lean } = heading;
+		const row = renderNoticeRow(`${formatRetryStatus(width < 90 ? lean : heading)} · ${reason}`, "retry", width)[0] ?? "";
+		return [truncateToWidth(row, width, GLYPH.ellipsis)];
 	}
 	// One heading row leaves room for the failure itself, not just a View hint.
 	// The diagnosis hangs in the content column beneath the mark.

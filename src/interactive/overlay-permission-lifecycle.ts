@@ -425,8 +425,11 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	};
 	const countdownReader =
 		(requestId: string): PermissionCountdownReader =>
-		() =>
-			countdowns.get(requestId)?.countdown.remainingMs() ?? null;
+		() => {
+			const countdown = countdowns.get(requestId)?.countdown;
+			if (countdown === undefined) return null;
+			return countdown.state() === "held" ? "held" : countdown.remainingMs();
+		};
 
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		// The entry is still at the head of the queue here, so the queue's length counts it.

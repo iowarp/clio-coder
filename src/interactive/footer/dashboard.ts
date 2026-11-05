@@ -102,7 +102,7 @@ export interface FooterDashboardDeps {
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
-	getShutdownArmed?: () => boolean;
+	getShutdownArmed?: () => boolean | string;
 	/** Skills whose tool surface is armed across turns; the compact line names them. */
 	getActiveEggs?: () => readonly string[];
 	getActiveSkillSurface?: () => ReadonlyArray<string>;

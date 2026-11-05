@@ -4,13 +4,19 @@ import type { LeaderKeyController } from "./leader-key.js";
 import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-lifecycle.js";
 
 /**
- * How long a first Ctrl+C keeps the second armed. 500ms expired before an
- * operator who had typed into the wrong pane could read the "again to quit"
+ * How long a first Ctrl+C keeps the second armed. Shorter windows expired before
+ * an operator who had typed into the wrong pane could read the "again to quit"
  * hint and press again, so the TUI looked like it ignored Ctrl+C.
  */
-export const APPLICATION_DOUBLE_TAP_MS = 1_200;
-/** How long after an Esc spent inside an overlay the next Esc is taken for the same gesture. */
-const OVERLAY_ESC_GRACE_MS = 1_000;
+export const APPLICATION_DOUBLE_TAP_MS = 3_000;
+const ARMED_TICK_MS = 1_000;
+/**
+ * How long after Esc closes something an Esc is not read as cancelling the run.
+ * Layered surfaces invite a run of presses, and the extra one used to fall
+ * through to the composer and cancel work the operator only meant to look away
+ * from.
+ */
+const ESC_GUARD_MS = 1_200;
 
 export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",
@@ -42,18 +48,11 @@ export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.exit",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
-export type CtrlCAction =
-	| "cancel-stream"
-	| "close-overlay"
-	| "clear-editor"
-	| "arm-shutdown"
-	| "shutdown"
-	| "protect-queue";
+export type CtrlCAction = "cancel-stream" | "close-overlay" | "arm-shutdown" | "shutdown" | "protect-queue";
 
 export interface CtrlCActionState {
 	overlayState: OverlayState;
 	streaming: boolean;
-	editorText: string;
 	lastCtrlCAt: number;
 	now: number;
 	hasQueuedMessages?: boolean;
@@ -62,7 +61,6 @@ export interface CtrlCActionState {
 function resolveApplicationCtrlCAction(state: CtrlCActionState): CtrlCAction {
 	if (state.overlayState !== "closed") return "close-overlay";
 	if (state.streaming) return "cancel-stream";
-	if (state.editorText.length > 0) return "clear-editor";
 	if (state.hasQueuedMessages) return "protect-queue";
 	if (state.lastCtrlCAt > 0 && state.now - state.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) return "shutdown";
 	return "arm-shutdown";
@@ -106,6 +104,10 @@ export interface ApplicationControllerDeps {
 	routeComposerKey?: (data: string) => boolean;
 	hasQueuedMessages?: () => boolean;
 	explainProtectedExit?: () => void;
+	/** An Esc was absorbed because it followed one that closed a surface; the run is still going. */
+	explainEscapeGuard?: () => void;
+	/** Esc while the draft addresses a worker backs out of the steer and keeps the text. */
+	cancelSteerDraft?: () => boolean;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
 	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
@@ -113,12 +115,10 @@ export interface ApplicationControllerDeps {
 	matchesAction: (data: string, id: ClioKeybinding) => boolean;
 	dispatchAction: (id: ClioKeybinding) => boolean;
 	cancelActiveEditorBash: () => boolean;
+	hasActiveEditorBash?: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
-	/** An Esc that followed one spent inside an overlay was held rather than cancelling; say so. */
-	explainHeldEscape?: () => void;
 	getEditorText: () => string;
-	clearEditor: () => void;
 	requestRender: () => void;
 	/**
 	 * Ctrl+C armed the double-tap and is waiting for the second press, or the
@@ -127,9 +127,10 @@ export interface ApplicationControllerDeps {
 	 * 500ms window that quits was undiscoverable and a first press was
 	 * indistinguishable from a key the application never received (issue #108).
 	 * The footer's leader indicator exists for exactly this reason and this
-	 * rides beside it.
+	 * rides beside it. While armed it fires again each second with the time left,
+	 * and says whether an unsent draft is staying in the composer.
 	 */
-	onShutdownArmedChange?: (armed: boolean) => void;
+	onShutdownArmedChange?: (armed: boolean, detail?: ShutdownArmDetail) => void;
 	closeOverlay: () => void;
 	listNotifications: () => ReadonlyArray<{ id: string }>;
 	dismissNotification: (id: string) => void;
@@ -162,6 +163,11 @@ export interface ApplicationControllerDeps {
 	registerTerminalTeardown?: (teardown: () => void | Promise<void>) => void;
 }
 
+export interface ShutdownArmDetail {
+	secondsLeft: number;
+	draftKept: boolean;
+}
+
 export type ApplicationInputResult = { consume: true } | undefined;
 
 export interface ApplicationController {
@@ -184,7 +190,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	const keepAlive = deps.intervals.setInterval(() => {}, 1 << 30);
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
-	let lastOverlayEscAt = Number.NEGATIVE_INFINITY;
 
 	let shutdownArmed = false;
 	let armedIndicator: ApplicationIntervalHandle | null = null;
@@ -210,13 +215,28 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		// a press that lands after the window by the clock but before the late
 		// timer fires must not leave that timer to clear the hint mid-window.
 		clearArmedIndicatorTimer();
-		const changed = armed !== shutdownArmed;
 		shutdownArmed = armed;
 		if (armed) {
-			armedIndicator = deps.intervals.setInterval(() => setShutdownArmed(false), APPLICATION_DOUBLE_TAP_MS);
+			let ticksLeft = Math.ceil(APPLICATION_DOUBLE_TAP_MS / ARMED_TICK_MS);
+			const announce = (): void =>
+				deps.onShutdownArmedChange?.(true, {
+					secondsLeft: Math.ceil((ticksLeft * ARMED_TICK_MS) / 1000),
+					draftKept: deps.getEditorText().length > 0,
+				});
+			armedIndicator = deps.intervals.setInterval(() => {
+				ticksLeft -= 1;
+				if (ticksLeft <= 0) {
+					setShutdownArmed(false);
+					return;
+				}
+				announce();
+				deps.requestRender();
+			}, ARMED_TICK_MS);
 			armedIndicator.unref?.();
+			announce();
+		} else {
+			deps.onShutdownArmedChange?.(false);
 		}
-		if (changed) deps.onShutdownArmedChange?.(armed);
 		deps.requestRender();
 	};
 
@@ -325,7 +345,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		const action = resolveApplicationCtrlCAction({
 			overlayState: deps.getOverlayState(),
 			streaming: deps.isStreaming(),
-			editorText: deps.getEditorText(),
 			lastCtrlCAt,
 			now: deps.clock.now(),
 			hasQueuedMessages: deps.hasQueuedMessages?.() ?? false,
@@ -357,24 +376,15 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.closeOverlay();
 			return;
 		}
-		if (action === "clear-editor") {
-			// Clearing a draft consumes this press as an editor action, just like
-			// cancelling a stream or closing an overlay consumes it as their action.
-			// It must not become the hidden first half of a shutdown double tap.
-			lastCtrlCAt = 0;
-			setShutdownArmed(false);
-			deps.clearEditor();
-			deps.requestRender();
-			return;
-		}
 		if (action === "protect-queue") {
 			lastCtrlCAt = 0;
 			setShutdownArmed(false);
 			deps.explainProtectedExit?.();
 			return;
 		}
-		// arm-shutdown. The one branch that used to fall off the end of this
-		// function with nothing to show for the press.
+		// arm-shutdown, with or without a draft. A first press used to clear the
+		// draft in silence, so an unsent prompt was lost to the gesture that also
+		// quits; the draft now stays and the second press is what leaves.
 		setShutdownArmed(true);
 	};
 
@@ -387,12 +397,30 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		if (first) deps.dismissNotification(first.id);
 	};
 
+	/** When an Esc last closed an overlay or a suggestion list. */
+	let lastOwnerEscapeAt = 0;
 	const handleInput = (data: string): ApplicationInputResult => {
+		if (!isEscapeKey(data) || isKeyRelease(data)) return routeInput(data);
+		const before = deps.getOverlayState();
+		const closesSuggestions = before === "closed" && (deps.isAutocompleteVisible?.() ?? false);
+		const result = routeInput(data);
+		if (closesSuggestions || (before !== "closed" && deps.getOverlayState() === "closed")) {
+			lastOwnerEscapeAt = deps.clock.now();
+		}
+		return result;
+	};
+	const routeInput = (data: string): ApplicationInputResult => {
 		if (isKeyRelease(data)) return { consume: true };
 		if (isKeyRepeat(data) && !(deps.matchesRepeatableInput?.(data) ?? false)) return { consume: true };
 		if (matchesKey(data, "ctrl+c")) {
 			handleCtrlC();
 			return { consume: true };
+		}
+		// Any other key means the operator went on working, so a later Ctrl+C
+		// must not quit on the strength of the earlier one.
+		if (shutdownArmed) {
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
 		}
 		if (deps.leaderKeys.isPending() && deps.leaderKeys.route(data)) return { consume: true };
 		if (deps.leaderKeys.route(data)) return { consume: true };
@@ -410,7 +438,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.forwardFocusedInput?.(data);
 			return { consume: true };
 		}
-		if (isEscapeKey(data) && deps.getOverlayState() !== "closed") lastOverlayEscAt = deps.clock.now();
 		if (deps.routeOverlayKey(data)) return { consume: true };
 		if (overlayOwnsInput(deps.getOverlayState())) {
 			if (deps.forwardFocusedInput) {
@@ -420,15 +447,24 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			return undefined;
 		}
 		if (isEscapeKey(data) && deps.isAutocompleteVisible?.()) return undefined;
+		if (isEscapeKey(data) && deps.cancelSteerDraft?.()) {
+			lastOwnerEscapeAt = deps.clock.now();
+			return { consume: true };
+		}
+		if (
+			isEscapeKey(data) &&
+			lastOwnerEscapeAt > 0 &&
+			deps.clock.now() - lastOwnerEscapeAt < ESC_GUARD_MS &&
+			(deps.isStreaming() || deps.hasActiveEditorBash?.() === true)
+		) {
+			// Each absorbed press restarts the window, so a run of presses cannot walk through it.
+			lastOwnerEscapeAt = deps.clock.now();
+			deps.explainEscapeGuard?.();
+			return { consume: true };
+		}
 		if (isEscapeKey(data) && deps.cancelActiveEditorBash()) return { consume: true };
 		if (isEscapeKey(data) && deps.isStreaming()) {
-			// A mashed Esc leaving an overlay must not reach the run behind it: the
-			// status line just said closing the view leaves the run going.
-			const heldAfterOverlay =
-				deps.explainHeldEscape !== undefined && deps.clock.now() - lastOverlayEscAt <= OVERLAY_ESC_GRACE_MS;
-			lastOverlayEscAt = Number.NEGATIVE_INFINITY;
-			if (heldAfterOverlay) deps.explainHeldEscape?.();
-			else deps.cancelActiveRun();
+			deps.cancelActiveRun();
 			return { consume: true };
 		}
 		// pi-tui's dedicated history actions are editor actions even when an

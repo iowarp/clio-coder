@@ -23,6 +23,7 @@ import type {
 import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
+import type { ModelRequestFacts } from "./status-types.js";
 
 export interface ChatLoopTarget {
 	target: TargetDescriptor;
@@ -137,6 +138,8 @@ export interface ChatTurnState {
 	toolProseAbortReason: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
 	streamStallReason: string | null;
+	/** The newest model request of this session, read by the status surfaces as evidence during a silent wait. */
+	modelRequest: ModelRequestFacts | null;
 	/** Local stage held at a watchdog abort; null once invoked or after recovery (#424). */
 	streamStallStage: PreInvocationStage | null;
 	/** Answer length at the last tool-prose scan, so the scan samples instead of running per delta. */
@@ -189,6 +192,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		yoloContinuations: 0,
 		toolProseAbortReason: null,
 		streamStallReason: null,
+		modelRequest: null,
 		streamStallStage: null,
 		toolProseAssessedChars: 0,
 		turnToolCalls: 0,

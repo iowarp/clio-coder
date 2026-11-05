@@ -541,6 +541,7 @@ test("compact quota stays beside the selected model while workspace and rotating
 	}
 	const initial = plain(renderCompactDashboard(snapshot, 160));
 	match(initial, /Enter send/);
+	ok(footerKeyHint(0, true) !== footerKeyHint(12000, true), "the hints rotate");
 	for (let page = 0; page < 40; page++) {
 		snapshot.now = page * 12000;
 		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050 \*/);

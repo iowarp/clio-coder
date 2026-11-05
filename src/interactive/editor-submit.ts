@@ -20,9 +20,12 @@ import {
 	parseEditorSteerMention,
 	type RunningDispatchRef,
 	resolveSteerTarget,
+	steerDraftToken,
 } from "./editor-steer.js";
 import type { ChatDraft } from "./interactive-slash-runtime.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
+
+export const RESTORED_DRAFT_NOTICE = "Back in the composer. Enter sends it; a / or ! command first keeps it aside.";
 
 /** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
 export const EDITOR_BASH_SHUTDOWN_MS = 6000;
@@ -67,6 +70,8 @@ export interface EditorSubmitEditor {
 	getExpandedText?(): string;
 	readonly draftRevision?: number;
 	setLiteralText?(text: string): void;
+	/** Literal text that came back from the queue, which the next command must not append to. */
+	setRestoredText?(text: string): void;
 	setText(text: string): void;
 	addToHistory(text: string): void;
 }
@@ -106,7 +111,10 @@ export interface EditorSubmitSessionTranscript {
 export interface EditorSubmitDeps {
 	askEgg?: import("../tools/ask-user.js").AskUserHandler;
 	onLocalEntry?: (entry: SessionEntry) => void;
-	onLocalBashRunning?: (running: boolean) => void;
+	onLocalBashRunning?: (running: boolean, command?: string) => void;
+	onLocalBashCancelling?: () => void;
+	/** A steer was handed to a worker's queue; the transcript tracks it from here. */
+	onSteerSent?: (run: RunningDispatchRef, text: string) => void;
 	/** Note a harness feature the operator used, for demo guidance; see recordOperatorFeature. */
 	recordFeature?: (feature: string) => void;
 	/** Bring a fullscreen transcript back to its live edge before a local command's block lands. */
@@ -222,7 +230,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		);
 		deps.ui.requestRender();
 
-		deps.onLocalBashRunning?.(true);
+		deps.onLocalBashRunning?.(true, parsed.command);
 		let settlement!: Promise<void>;
 		settlement = (async () => {
 			try {
@@ -343,6 +351,15 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		};
 	};
 
+	const runningDispatchRefs = (): RunningDispatchRef[] => {
+		try {
+			return deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+		} catch {
+			// Only the bare-address check reads this; without a fleet the line goes on as a prompt.
+			return [];
+		}
+	};
+
 	const submitEditorSteerMention = (mention: { target: string; text: string }): EditorSteerSubmission => {
 		let running: RunningDispatchRef[] = [];
 		try {
@@ -362,6 +379,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		if (resolution.kind === "match") {
 			try {
 				deps.dispatch.steer(resolution.run.runId, mention.text);
+				deps.onSteerSent?.(resolution.run, mention.text);
 				deps.notify(
 					"info",
 					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
@@ -425,6 +443,21 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.editor.setText(literalText);
 			}
 			if (runEditorBash(text)) deps.ui.requestRender();
+			return;
+		}
+		// A bare `@run-id` from the board with nothing typed would reach the model as
+		// a prompt. A bare `@name` stays chat: only the exact run id is an address.
+		const bareToken = steerDraftToken(trimmed);
+		const addressed =
+			bareToken === trimmed.slice(1) ? runningDispatchRefs().find((run) => run.runId === bareToken) : undefined;
+		if (addressed) {
+			deps.notify(
+				"info",
+				`Type the guidance for ${addressed.agentId} after the address, then Enter`,
+				`steer:${addressed.runId}`,
+			);
+			deps.editor.setText(`${literalText.trimEnd()} `);
+			deps.ui.requestRender();
 			return;
 		}
 		const steerMention = parseEditorSteerMention(trimmed);
@@ -675,7 +708,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		}
 		const currentText = deps.editor.getExpandedText?.() ?? deps.editor.getText();
 		const queuedText = restored.join("\n\n");
-		setLiteralText([queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n"));
+		const text = [queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n");
+		if (deps.editor.setRestoredText) deps.editor.setRestoredText(text);
+		else setLiteralText(text);
+		deps.notify("info", RESTORED_DRAFT_NOTICE, "queue:restored");
 		deps.ui.requestRender();
 	};
 
@@ -695,6 +731,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		},
 		cancelActiveEditorBash: () => {
 			if (!activeEditorBash) return false;
+			deps.onLocalBashCancelling?.();
 			activeEditorBash.abort();
 			return true;
 		},

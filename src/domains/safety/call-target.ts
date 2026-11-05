@@ -144,6 +144,8 @@ export interface CallActionDescriptor {
 	object?: string;
 	/** Whether the object was cut to {@link CALL_ACTION_OBJECT_MAX_CHARS}. */
 	truncated?: boolean;
+	/** The capability a gateway call reached, which is the tool the operator thinks of. */
+	capability?: string;
 }
 
 /**
@@ -180,9 +182,8 @@ const CALL_ACTION_VOCABULARY: Readonly<Record<string, { verb: string; field: str
 	clio_library: { verb: "searching", field: "query" },
 	data: { verb: "inspecting", field: "path" },
 	artifact: { verb: "writing", field: "kind" },
-	// The gateway's descriptor names the capability it reaches, so worker
-	// telemetry and receipts read "gateway git" rather than an opaque call.
-	gateway: { verb: "gateway", field: "capability" },
+	// Only an op this table cannot name lands here; describeGatewayCall reads the rest.
+	gateway: { verb: "calling", field: "capability" },
 	monitor: { verb: "monitoring", field: "run_id" },
 	steer: { verb: "steering", field: "run_id" },
 	tasks: { verb: "tasks", field: "action" },
@@ -280,6 +281,40 @@ function boundActionObject(value: unknown): { object: string; truncated: boolean
 }
 
 /**
+ * A gateway call as what it does. Workers reach most capabilities through the
+ * gateway, so naming the wrapper put `gateway gateway run script shell bash` on
+ * the doing line for a run that was only looking a tool up.
+ */
+function describeGatewayCall(args: Record<string, unknown> | undefined): CallActionDescriptor | null {
+	const capability = boundActionObject(args?.capability);
+	if (args?.op === "call" && capability !== null && capability.object !== "gateway") {
+		const inner = args.args;
+		const described = describeCallAction(
+			capability.object,
+			typeof inner === "object" && inner !== null && !Array.isArray(inner)
+				? (inner as Record<string, unknown>)
+				: undefined,
+		);
+		return { ...(described ?? { verb: "calling" }), capability: capability.object };
+	}
+	if (args?.op === "find") {
+		const query = boundActionObject(typeof args.query === "string" ? `tools for ${args.query}` : undefined);
+		return { verb: "searching", ...(query === null ? { object: "tools" } : describedObject(query)) };
+	}
+	if (args?.op === "describe" && capability !== null) {
+		return { verb: "inspecting", ...describedObject({ ...capability, object: `tool ${capability.object}` }) };
+	}
+	if (args?.op === "chain" && Array.isArray(args.steps)) {
+		return { verb: "running", object: `a chain of ${args.steps.length} tools` };
+	}
+	return null;
+}
+
+function describedObject(bounded: { object: string; truncated: boolean }): { object: string; truncated?: boolean } {
+	return { object: bounded.object, ...(bounded.truncated ? { truncated: true } : {}) };
+}
+
+/**
  * Compose the redacted action descriptor for one tool call. Called at the
  * trusted seams that hold the arguments (the tool registry's admission path,
  * the Claude tool mapper, and the ACP update mapper) so the descriptor, and
@@ -293,6 +328,14 @@ export function describeCallAction(
 	tool: string,
 	args: Record<string, unknown> | undefined,
 ): CallActionDescriptor | null {
+	if (tool === "gateway") {
+		const gateway = describeGatewayCall(args);
+		if (gateway !== null) return gateway;
+	}
+	// A bare verify lists what can be checked; saying it verified something would claim a check that never ran.
+	if (tool === "verify" && args?.check === undefined && args?.path === undefined) {
+		return { verb: "listing", object: "checks" };
+	}
 	const known = CALL_ACTION_VOCABULARY[tool];
 	const candidates = known?.field ? [known.field, ...CALL_ACTION_OBJECT_FIELDS] : [...CALL_ACTION_OBJECT_FIELDS];
 	let bounded: { object: string; truncated: boolean } | null = null;

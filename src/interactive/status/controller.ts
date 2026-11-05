@@ -163,6 +163,13 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 		}, TIER_THRESHOLDS_MS.postAbortCeiling);
 	};
 
+	/** The submit returning is the observation that a cancelled turn has stopped, whatever else it left unsaid. */
+	const settleCancelWhenStopped = (): void => {
+		void Promise.resolve(deps.chat.whenSettled?.()).then(() => {
+			if (!disposed) apply({ type: "cancel_settled" }, true);
+		});
+	};
+
 	const apply = (event: StatusInputEvent, force = false): void => {
 		const at = now();
 		const target = currentTarget();
@@ -173,6 +180,7 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			modelId: target.modelId,
 			targetId: target.targetId,
 			runId: deps.chat.getSessionId(),
+			modelRequest: deps.chat.modelRequest?.() ?? null,
 		});
 		if (next === prev) return;
 		status = next;
@@ -226,6 +234,7 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			}),
 			deps.bus.subscribe("run.aborted", (payload) => {
 				scheduleAbortCeiling();
+				settleCancelWhenStopped();
 				// Carry abort provenance into the summary; a dispatch drain and a
 				// user stream-cancel must not collapse into one hardcoded path.
 				// A malformed payload still ends the run, just without detail.
@@ -244,6 +253,7 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			}),
 			deps.bus.subscribe("turn.aborted", (payload) => {
 				scheduleAbortCeiling();
+				settleCancelWhenStopped();
 				apply(
 					{
 						type: "run_aborted",

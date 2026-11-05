@@ -176,8 +176,8 @@ import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
-import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
-import type { AgentStatusEvent } from "./status-types.js";
+import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
+import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
 import {
 	parseTriageAnswer,
 	runTriageRound,
@@ -214,6 +214,7 @@ import {
 } from "./turn-queues.js";
 import {
 	createTurnRecovery,
+	type RetryForecast,
 	type RetryStatusEvent,
 	reclassifyStallAbort,
 	recoveryAttemptHasOutput,
@@ -236,7 +237,7 @@ export type {
 	QueueRemovalReason,
 	SteeringMode,
 } from "./turn-queues.js";
-export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
+export type { RetryForecast, RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
 export type { ChatLoopRunSnapshot, TurnPreparationPhase } from "./turn-state.js";
 
@@ -442,7 +443,14 @@ export type ChatLoopEvent = (
 	| ChatNoticeEvent
 	| AgentStatusEvent
 	| ToolApprovalStateEvent
-) & { modelTimeMs?: number };
+) & {
+	modelTimeMs?: number;
+	/**
+	 * On a `message_end` or `agent_end` that closes a failed attempt: the attempt recovery will try next. The failure is
+	 * then an event of a turn still underway, not that turn's outcome.
+	 */
+	retryPending?: RetryForecast;
+};
 
 export interface PromptSubmitInput {
 	/** What the operator typed: the template invocation when one expanded. */
@@ -563,6 +571,8 @@ export interface SideQuestionOptions {
 	signal?: AbortSignal;
 	/** Streamed answer text so the overlay fills as the provider produces it. */
 	onDelta?: (partialText: string) => void;
+	/** The route the round was admitted on, before any answer arrives. */
+	onRoute?: (route: OutOfTurnRoute) => void;
 }
 
 export interface DraftOptions {
@@ -570,10 +580,14 @@ export interface DraftOptions {
 	signal?: AbortSignal;
 	/** One candidate's streamed text, by index in start order. */
 	onCandidate?: (index: number, partialText: string) => void;
+	/** The route the candidates were admitted on, before any text arrives. */
+	onRoute?: (route: OutOfTurnRoute) => void;
 }
 
 /** One `/draft` candidate: its text, or why its round produced none. */
-export type DraftCandidate = { status: "drafted"; text: string } | { status: "failed"; reason: string };
+export type DraftCandidate = ({ status: "drafted"; text: string } | { status: "failed"; reason: string }) & {
+	route?: OutOfTurnRoute;
+};
 
 export type DraftOutcome =
 	| { status: "drafted"; candidates: DraftCandidate[]; aborted: boolean }
@@ -594,7 +608,7 @@ export interface HandoffRoundOptions extends SideQuestionOptions {
  * started and the provider rejected.
  */
 export type SideQuestionOutcome =
-	| { status: "answered"; text: string }
+	| { status: "answered"; text: string; route?: OutOfTurnRoute }
 	| { status: "aborted"; text: string }
 	| { status: "refused"; reason: string }
 	| { status: "failed"; reason: string };
@@ -670,6 +684,8 @@ export interface ChatLoop {
 	 * (issue #251).
 	 */
 	turnPreparation(): { phase: TurnPreparationPhase; since: number };
+	/** Evidence about the newest model request, for a surface that reports a silent wait. */
+	modelRequest(): ModelRequestFacts | null;
 	/** Fires on every preparation transition, including back to `idle`. */
 	onTurnPreparation(handler: (phase: TurnPreparationPhase) => void): () => void;
 	contextUsage(): LiveContextUsage;
@@ -1566,10 +1582,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (status.phase === "retrying") turnRetryAttempts += 1;
 			emit({ type: "retry_status", status });
 		},
-		emitFailureMessage: (message) => emit({ type: "message_end", message }),
+		emitFailureMessage: (message) => {
+			const forecast = state.runtime ? recovery.forecastRetry(state.runtime, message) : null;
+			emit({ type: "message_end", message, ...(forecast ? { retryPending: forecast } : {}) });
+		},
 		emitNotice,
 	});
+	/** Set between a retried attempt's `message_end` and the `agent_end` that closes that attempt. */
+	let attemptRetryForecast: RetryForecast | null = null;
 	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
+		if (event.type === "agent_end" && attemptRetryForecast !== null) {
+			Object.assign(event, { retryPending: attemptRetryForecast });
+			attemptRetryForecast = null;
+		}
 		if (event.type === "message_end") {
 			if (event.message.role === "assistant") {
 				const terminal = terminalFailureFromAssistantMessage(event.message);
@@ -1580,6 +1605,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			rewriteStallAbortMessage(state, event.message);
 			explainInterruptedAssistant(event.message, state.activeInterruptReason);
+			if (event.message.role === "assistant") {
+				attemptRetryForecast = state.runtime ? recovery.forecastRetry(state.runtime, event.message) : null;
+				if (attemptRetryForecast !== null) Object.assign(event, { retryPending: attemptRetryForecast });
+			}
 			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {
 				for (const block of event.message.content) {
 					if (block.type !== "text") continue;
@@ -3055,6 +3084,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRetryAttempts = 0;
 				providerRetryAttempts = 0;
 				const machineMessageStart = agentRuntime.agent.state.messages.length;
+				recovery.noteAttemptStart(machineMessageStart);
 				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 				const priorAskUserPolicy = state.currentAskUserPolicy;
 				state.currentPendingSkillPolicy = pendingSkillPolicy;
@@ -3164,6 +3194,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 				} finally {
+					recovery.settleOpenForecast();
 					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 					// Esc on an interview resolves it as cancelled and the tool ends the turn
 					// itself, so no interrupt is raised and `canceled` stays false. The turn
@@ -3468,6 +3499,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return toolStartTimes.size;
 		},
 
+		modelRequest() {
+			return state.modelRequest;
+		},
+
 		turnPreparation() {
 			return { phase: state.turnPreparation, since: state.turnPreparationSince };
 		},
@@ -3637,6 +3672,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// moment it was asked in had passed.
 			const prepared = await prepareOutOfTurnRound(null, options.signal, false, false);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			const route = { targetId: prepared.runtime.targetId, wireModelId: prepared.runtime.wireModelId };
+			options.onRoute?.(route);
 			// A snapshot, taken now: a running turn keeps appending to the live list
 			// while this round awaits admission and streams.
 			const messages = [...prepared.runtime.agent.state.messages];
@@ -3664,7 +3701,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
-			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
+			return result.aborted
+				? { status: "aborted", text: result.text }
+				: {
+						status: "answered",
+						text: result.text,
+						route: { ...route, ...(result.reportedModel !== undefined ? { reportedModel: result.reportedModel } : {}) },
+					};
 		},
 
 		async draftCandidates(request: string, count: number, options: DraftOptions = {}): Promise<DraftOutcome> {
@@ -3677,6 +3720,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// flight the same way (#415): the drafts answer the session as it stands now.
 			const prepared = await prepareOutOfTurnRound(null, options.signal, false, false);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			const route = { targetId: prepared.runtime.targetId, wireModelId: prepared.runtime.wireModelId };
+			options.onRoute?.(route);
 			const messages = [...prepared.runtime.agent.state.messages];
 			const candidates = await Promise.all(
 				DRAFT_TEMPERATURES.slice(0, count).map(async (temperature, index): Promise<DraftCandidate> => {
@@ -3710,9 +3755,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								options.signal,
 							),
 						);
-						return draftCandidateFromText(result.text);
+						return {
+							...draftCandidateFromText(result.text),
+							route: { ...route, ...(result.reportedModel !== undefined ? { reportedModel: result.reportedModel } : {}) },
+						};
 					} catch (err) {
-						return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+						return { status: "failed", reason: err instanceof Error ? err.message : String(err), route };
 					}
 				}),
 			);

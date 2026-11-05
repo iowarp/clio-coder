@@ -719,7 +719,9 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			.join("/") || "Dashboard";
 	const leaderKey = formatKeyLabel(getKeybindings().getKeys("clio-coder.leader")[0], "");
 	const urgent = state.session.shutdownArmed
-		? "Ctrl+C again to quit"
+		? typeof state.session.shutdownArmed === "string"
+			? state.session.shutdownArmed
+			: "Ctrl+C again to quit"
 		: state.session.leaderArmed
 			? leaderKey
 				? `${leaderKey} ${GLYPH.next} choose key`

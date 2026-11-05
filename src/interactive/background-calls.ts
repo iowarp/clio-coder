@@ -44,7 +44,7 @@ export function createBackgroundCallTracker(
 ): BackgroundCallTracker {
 	const calls = new Map<string, BackgroundCall>();
 	// A presentation built without a live bus has nothing to track.
-	if (typeof bus.subscribe !== "function") return { active: () => [], dispose: () => {} };
+	if (typeof bus?.subscribe !== "function") return { active: () => [], dispose: () => {} };
 	const unsubscribe = [
 		bus.subscribe("call.started", (payload, context) => {
 			const known = context ? PURPOSES[context.agent.role] : undefined;

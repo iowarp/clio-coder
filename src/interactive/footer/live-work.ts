@@ -138,12 +138,12 @@ export function liveWorkStrip(
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
 	let candidates: string[];
 	if (mainActive) {
-		const phase = composerPhasePresentation(facts.status, room, facts.now);
+		const phase = composerPhasePresentation(facts.status, room, facts.now, facts.actor);
 		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
 		const elapsed = CARRIES_ELAPSED.test(phase.label) ? null : formatCompactMs(phaseElapsedMs(facts.status, facts.now));
 		const clocked = (text: string): string =>
 			`${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
-		const owned = clocked(`${facts.actor} ${phase.label}`);
+		const owned = clocked(`${phase.subject ?? facts.actor} ${phase.label}`);
 		const bare = clocked(phase.label.replace(/^is /u, ""));
 		candidates = [
 			render(owned, [workers, note.long]),

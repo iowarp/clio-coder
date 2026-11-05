@@ -64,8 +64,8 @@ import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY } from "./com
 import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
-import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
-import { renderExitSummary } from "./exit-summary.js";
+import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS, RESTORED_DRAFT_NOTICE } from "./editor-submit.js";
+import { renderExitSummary, renderExitWithoutConversation } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
 import { createExtensionDevSession, type ExtensionDevSession } from "./extension-dev-session.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
@@ -92,6 +92,7 @@ import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
+import { createSteerReceipts } from "./steer-receipts.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
@@ -596,7 +597,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 * A Ctrl+C armed the double tap and its 500ms window is still open. Owned
 	 * here for the same reason as the leader flag above.
 	 */
-	let shutdownArmed = false;
+	/** False, or the armed line the footer shows while a second Ctrl+C would quit. */
+	let shutdownArmed: string | false = false;
 	const updateAbort = new AbortController();
 	let updateTimer: ReturnType<typeof setTimeout> | undefined;
 	let updateMonitor: ReturnType<typeof import("./update-monitor.js").startUpdateMonitor> | undefined;
@@ -1225,7 +1227,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					operator: operatorExtensions,
 					editorBash: editorSubmit.hasActiveEditorBash(),
 					reloading: deps.reloadClasses?.active === true,
-					shuttingDown: shutdownArmed || getTerminationCoordinator().getPhase() !== "idle",
+					shuttingDown: shutdownArmed !== false || getTerminationCoordinator().getPhase() !== "idle",
 				}),
 			settle: () => deps.chat.whenSettled(),
 			armHandoff: () => deps.armRestartHandoff?.(),
@@ -1337,10 +1339,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		listWorkerRuns: () => chatPanel.workerStates(),
 	});
 
+	const steerReceipts = createSteerReceipts({
+		bus: deps.bus,
+		append: (render, isLive) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(render, isLive), "steer-receipt"),
+		requestRender: () => tui.requestRender(),
+	});
 	const editorSubmit = createEditorSubmitController({
+		onSteerSent: (run, text) => steerReceipts.sent(run, text),
 		onLocalEntry: exitSummary.observeLocalEntry,
 		recordFeature,
 		onLocalBashRunning: presentation.setLocalBashRunning,
+		onLocalBashCancelling: presentation.setLocalBashCancelling,
 		returnToLiveEdge: liveEdge,
 		editor,
 		ui: tui,
@@ -1471,6 +1480,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		terminal,
 		dispatchBoard,
 		setFleetRunPhase: (runId, phase) => dispatchBoardStore.setFleetPhase(runId, phase),
+		fleetPlans: dispatchBoardStore.plans,
 		chatPanel,
 		resetTranscript: adoptExistingConversation,
 		io,
@@ -1483,7 +1493,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			toEditor: (entry) => {
 				if (deps.chat.removeQueuedEntry(entry.id, "to-editor") === null) return;
 				const current = editor.getExpandedText();
-				editor.setLiteralText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
+				editor.setRestoredText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
+				notify("info", RESTORED_DRAFT_NOTICE, "queue:restored");
 			},
 			sendNow: (entry) => {
 				if (deps.chat.removeQueuedEntry(entry.id, "sent-now") === null) return;
@@ -1557,7 +1568,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			editor.setLiteralText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
 		}
 		chatRenderer.flush();
-		notifications.dismiss("esc:held");
+		notifications.dismiss("keyboard:escape");
 		deps.chat.cancel();
 		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
 		footer.refresh();
@@ -1803,12 +1814,43 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 	});
 
-	const explainProtectedExit = (): void =>
+	const firstKeyLabel = (id: ClioKeybinding, fallback: string): string =>
+		formatKeyLabel(keybindings.getKeys(id)[0], fallback);
+	/** Answers a refused exit with what is in the way and the key that deals with each thing. */
+	const explainProtectedExit = (pressed = "Ctrl+D"): void => {
+		const running = deps.dispatch.snapshot().running;
+		const queue = deps.chat.queuedMessages();
+		const queued = queue.steer.length + queue.followUp.length;
+		const reasons: string[] = [];
+		const actions: string[] = [];
+		if (running.length > 0) {
+			reasons.push(
+				running.length === 1 ? `${running[0]?.agentId ?? "a worker"} is running` : `${running.length} workers are running`,
+			);
+			actions.push(
+				`${firstKeyLabel("clio-coder.dispatchBoard.toggle", "/fleet")} shows ${running.length === 1 ? "it" : "them"}`,
+			);
+		}
+		if (queued > 0) {
+			reasons.push(`${queued} message${queued === 1 ? " is" : "s are"} queued`);
+			actions.push(`${firstKeyLabel("clio-coder.message.dequeue", "/queue")} restores ${queued === 1 ? "it" : "them"}`);
+		}
+		if (editorSubmit.hasActiveEditorBash()) {
+			reasons.push("a shell command is running");
+			actions.push("Esc stops it");
+		}
+		if (deps.chat.isStreaming() || deps.chat.turnPreparation().phase !== "idle") {
+			reasons.push("a turn is running");
+			actions.push("Esc cancels it");
+		}
+		if (operatorExtensions?.busy) reasons.push("an extension is busy");
+		const why = reasons.length > 0 ? reasons.join(", ") : "work is still running";
 		notify(
 			"info",
-			`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
+			`${pressed}: not exiting, ${why}. ${[...actions, "/quit stops everything and exits"].join(" · ")}`,
 			"keyboard:exit",
 		);
+	};
 	const exitBlocker = (): "editor" | "work" | "settling" | null => {
 		if (editor.getText().length > 0) return "editor";
 		const queue = deps.chat.queuedMessages();
@@ -1855,7 +1897,26 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			const queue = deps.chat.queuedMessages();
 			return queue.steer.length + queue.followUp.length > 0;
 		},
-		explainProtectedExit,
+		explainProtectedExit: () => explainProtectedExit("Ctrl+C"),
+		explainEscapeGuard: () =>
+			notifications.add({
+				level: "info",
+				key: "keyboard:escape",
+				text: "That Esc closed a panel, so the run is still going. Esc again in a moment cancels it.",
+				ttlMs: 2_500,
+			}),
+		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
+		cancelSteerDraft: () => {
+			const agent = editor.dropSteerTarget();
+			if (agent === null) return false;
+			notify(
+				"info",
+				`Steer to ${agent} not sent. ${editor.getText().length > 0 ? "Your text stays as a draft; Enter now sends it to Clio." : ""}`.trim(),
+				"steer:cancelled",
+			);
+			tui.requestRender();
+			return true;
+		},
 		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
@@ -1916,8 +1977,16 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onLeaderStateChange: (pending) => {
 			leaderArmed = pending;
 		},
-		onShutdownArmedChange: (armed) => {
-			shutdownArmed = armed;
+		onShutdownArmedChange: (armed, detail) => {
+			const workers = armed ? deps.dispatch.snapshot().running.length : 0;
+			shutdownArmed = !armed
+				? false
+				: [
+						...(detail?.draftKept === true ? ["draft kept"] : []),
+						// Quitting drains the fleet, which is not obvious from a composer with nothing in it.
+						...(workers > 0 ? [`${workers} worker${workers === 1 ? "" : "s"} will stop`] : []),
+						`Ctrl+C again to quit${detail ? ` (${detail.secondsLeft}s)` : ""}`,
+					].join(" · ");
 			// The footer caches its composed text, and arming only requested a frame.
 			// Without a recompose the hint showed when some other refresh happened
 			// to land and the expiry left it standing, so it was never tied to the
@@ -1946,13 +2015,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			(operatorExtensions?.busy ?? false) ||
 			(upgradeFlow?.isRunning() ?? false),
 		cancelActiveRun,
-		explainHeldEscape: () =>
-			notifications.add({
-				level: "info",
-				text: "Esc closed the view and the run keeps going · Esc again stops it",
-				key: "esc:held",
-				ttlMs: 4_000,
-			}),
 		editor,
 		editorSubmit,
 		requestRender: () => tui.requestRender(),
@@ -1992,6 +2054,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				peerInbox?.dispose();
 				interactiveSubscriptions.dispose();
 				exitSummary.dispose();
+				steerReceipts.dispose();
 			},
 		},
 		beforeStopUi: (() => {
@@ -2009,14 +2072,22 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onCleanExit: () => {
 			const ui = deps.getSettings?.().interface;
-			const lines = renderExitSummary(
-				exitSummary.snapshot(),
-				ui?.exitSummary ?? "auto",
-				process.stdout.columns ?? 80,
-				process.stdout.isTTY === true,
-				ui?.outputDetail ?? "standard",
-				process.stdout.rows ?? 48,
-			);
+			const snapshot = exitSummary.snapshot();
+			const lines =
+				snapshot === null
+					? renderExitWithoutConversation(
+							ui?.exitSummary ?? "auto",
+							ui?.outputDetail ?? "standard",
+							process.stdout.isTTY === true,
+						)
+					: renderExitSummary(
+							snapshot,
+							ui?.exitSummary ?? "auto",
+							process.stdout.columns ?? 80,
+							process.stdout.isTTY === true,
+							ui?.outputDetail ?? "standard",
+							process.stdout.rows ?? 48,
+						);
 			if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
 		},
 		onShutdown: async () => {

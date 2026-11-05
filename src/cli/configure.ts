@@ -89,6 +89,7 @@ import {
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
 	targetApiKeyRef,
+	targetUrlProblem,
 	validateContextWindowOverride,
 	validateResolvedModel,
 	type WireModelInventory,
@@ -479,6 +480,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		printError(`target ${args.id} already exists with runtime ${existing.runtime}`);
 		return 2;
 	}
+	const argsUrlProblem = args.url ? targetUrlProblem(args.url) : null;
+	if (argsUrlProblem !== null) {
+		printError(`--url: ${argsUrlProblem}`);
+		return 2;
+	}
 	let url: string | undefined = args.url ? normalizeUrl(args.url, runtime.id) : existing?.url;
 	if (!url && support.supportsCustomUrl) {
 		url = offeredUrlFor(runtime);
@@ -815,11 +821,12 @@ async function runTargetSetupInteractive(
 		for (;;) {
 			const urlInput = await ask(rl, runtime.gatewayUrl.label, defaults.url ?? existing?.url);
 			if (urlInput === null) return 0;
-			if (urlInput.length > 0) {
+			const problem = urlInput.length > 0 ? targetUrlProblem(urlInput) : `the ${runtime.gatewayUrl.label} is required.`;
+			if (problem === null) {
 				url = normalizeUrl(urlInput, runtime.id);
 				break;
 			}
-			process.stdout.write(`  the ${runtime.gatewayUrl.label} is required.\n`);
+			process.stdout.write(`  ${problem}\n`);
 		}
 	} else if (support.supportsCustomUrl) {
 		const urlDefault = defaults.url ?? existing?.url ?? defaultUrlFor(runtime.id);
@@ -829,6 +836,11 @@ async function runTargetSetupInteractive(
 			urlDefault,
 		);
 		if (urlInput === null) return 0;
+		const problem = urlInput.length > 0 ? targetUrlProblem(urlInput) : null;
+		if (problem !== null) {
+			printError(problem);
+			return 2;
+		}
 		if (urlInput.length > 0) url = normalizeUrl(urlInput, runtime.id);
 	} else if (defaults.url) {
 		url = normalizeUrl(defaults.url, runtime.id);
