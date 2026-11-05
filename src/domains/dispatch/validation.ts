@@ -146,6 +146,8 @@ export interface JobSpec {
 	/** Normalized model-declared path, output, and host verification intent. */
 	intent?: DispatchIntent;
 	requestOrigin?: DispatchRequestOrigin;
+	/** Who asked for the work a failover attempt continues. Display only: policy reads requestOrigin. */
+	rootRequestOrigin?: DispatchRequestOrigin;
 	/** The route this request moved off and why, for the notice its start event carries. */
 	routeMove?: { fromTargetId: string; fromModelId: string; reason: string };
 	/**
@@ -202,6 +204,7 @@ const KNOWN_KEYS = new Set([
 	"plannedNode",
 	"protectedArtifactRemap",
 	"reroutes",
+	"rootRequestOrigin",
 	"routeMove",
 	"requiredCapabilities",
 	"toolProfile",
@@ -510,6 +513,12 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
 		if (typeof spec.requestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 			errors.push("requestOrigin must be one of: user|agent|internal|harness");
+		}
+	}
+
+	if ("rootRequestOrigin" in spec && spec.rootRequestOrigin !== undefined) {
+		if (typeof spec.rootRequestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.rootRequestOrigin)) {
+			errors.push("rootRequestOrigin must be one of: user|agent|internal|harness");
 		}
 	}
 

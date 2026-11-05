@@ -605,6 +605,8 @@ export interface DispatchRunIdentity {
 	task?: string | undefined;
 	agentAudience?: AgentAudience | undefined;
 	requestOrigin?: DispatchRequestOrigin | undefined;
+	/** Who asked for the work a failover attempt continues. Display only: policy reads requestOrigin. */
+	rootRequestOrigin?: DispatchRequestOrigin | undefined;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;

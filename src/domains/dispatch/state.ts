@@ -299,6 +299,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				executionRole: input.executionRole,
 				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),
 				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
+				...(input.rootRequestOrigin !== undefined ? { rootRequestOrigin: input.rootRequestOrigin } : {}),
 				task: input.task,
 				...(input.projection !== undefined ? { projection: structuredClone(input.projection) } : {}),
 				...(input.budget !== undefined ? { budget: structuredClone(input.budget) } : {}),

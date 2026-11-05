@@ -1703,7 +1703,7 @@ function toRow(
 		runId: entry.runId,
 		agentId: entry.agentId,
 		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),
-		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.requestOrigin } : {}),
+		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.rootRequestOrigin ?? entry.requestOrigin } : {}),
 		runtimeKind: entry.runtimeKind ?? "http",
 		runtimeId: entry.runtimeId ?? "-",
 		targetId: entry.targetId ?? "-",

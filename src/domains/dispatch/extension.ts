@@ -821,6 +821,10 @@ function requestOriginFor(req: DispatchRequest): DispatchRequestOrigin {
 	return req.requestOrigin ?? "agent";
 }
 
+function rootOriginFields(req: DispatchRequest): { rootRequestOrigin?: DispatchRequestOrigin } {
+	return req.rootRequestOrigin !== undefined ? { rootRequestOrigin: req.rootRequestOrigin } : {};
+}
+
 /** The move a start event names: only one that actually left the route it came from. */
 function routeMoveFields(
 	req: DispatchRequest,
@@ -4672,6 +4676,8 @@ export function createDispatchBundle(
 			// as an operator pin and freeze every later retry in the chain.
 			failover: failoverModeFor(run.req),
 			requestOrigin: "internal",
+			// Policy reads the stamp above; the board still names who asked for the work.
+			rootRequestOrigin: run.req.rootRequestOrigin ?? requestOriginFor(run.req),
 			routeMove: { fromTargetId: run.targetId, fromModelId: run.wireModelId, reason: moveReason },
 			// A retry starts with no grants and runs no wider than this attempt.
 			...(run.permit !== undefined ? { inheritedPermitAllowance: { ...run.permit.allowance } } : {}),
@@ -6131,6 +6137,7 @@ export function createDispatchBundle(
 				agentId: req.agentId,
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				requestOrigin: lifecycle.requestOrigin,
+				...rootOriginFields(req),
 				task: req.task,
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
 				targetId,
@@ -6211,6 +6218,7 @@ export function createDispatchBundle(
 					agentId: req.agentId,
 					task: req.task,
 					requestOrigin: lifecycle.requestOrigin,
+					...rootOriginFields(req),
 					...routeMoveFields(req, targetId, wireModelId),
 					targetId,
 					wireModelId,
@@ -7865,6 +7873,7 @@ export function createDispatchBundle(
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
+				...rootOriginFields(req),
 				task: req.task,
 				...(req.intent !== undefined ? { intent: structuredClone(req.intent) } : {}),
 				budget: lifecycle.budgetEnvelope,
@@ -7969,6 +7978,7 @@ export function createDispatchBundle(
 			// per-worker meter. All optional so consumers degrade to local/plain.
 			const fleetIdentity = {
 				sessionId: req.ownerSessionId ?? null,
+				...rootOriginFields(req),
 				budget: lifecycle.budgetEnvelope,
 				...(endpoint !== null ? { endpoint: { key: endpoint.key, label: endpoint.label, limit: endpoint.limit } } : {}),
 				...(placement !== undefined && placement !== null ? { node: placement.node.id } : {}),

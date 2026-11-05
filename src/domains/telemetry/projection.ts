@@ -321,6 +321,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		const additions = {
 			agentAudience: parseAgentAudience(id.agentAudience, summary.agentAudience),
 			requestOrigin: parseRequestOrigin(id.requestOrigin, summary.requestOrigin),
+			rootRequestOrigin: parseRequestOrigin(id.rootRequestOrigin, summary.rootRequestOrigin),
 			node: parseNonEmptyString(id.node) ?? summary.node,
 			endpoint: parseEndpointCapacity(id.endpoint) ?? summary.endpoint,
 			gate: parseGateBadge(id.gate) ?? summary.gate,
