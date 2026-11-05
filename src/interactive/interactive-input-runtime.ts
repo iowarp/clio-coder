@@ -104,6 +104,7 @@ export interface InteractiveInputRuntimeDeps {
 		toggleMutationInspection(): void;
 		scrollMutationInspection(delta: number): void;
 		togglePermissionTerms(): void;
+		isShowingPermissionTerms?(): boolean;
 		scrollPermissionCard(delta: number): boolean;
 		cancelAskUser(): void;
 		toggleFooterDashboardState(): void;
@@ -495,6 +496,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					toggleMutationInspection: () => deps.overlay.toggleMutationInspection(),
 					scrollMutationInspection: (delta) => deps.overlay.scrollMutationInspection(delta),
 					togglePermissionTerms: () => deps.overlay.togglePermissionTerms(),
+					isShowingPermissionTerms: () => deps.overlay.isShowingPermissionTerms?.() ?? false,
 					scrollPermissionCard: (delta) => deps.overlay.scrollPermissionCard(delta),
 					scrollTranscript: (direction) => (deps.tui ? scrollTranscriptPage(deps.tui, direction) : false),
 					canToggleOwner,
