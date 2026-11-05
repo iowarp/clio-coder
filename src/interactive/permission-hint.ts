@@ -93,7 +93,8 @@ export function permissionHintEntries(
 		// open, Esc closes it and the rail says so; deny is one more Esc.
 		escapeHintEntry(
 			permissionEscapeLayers(inspection, terms ?? "closed", NO_ACTIONS),
-			inspection === "open" || terms === "open" ? true : composerHasDraft,
+			// An open view names its own way out in its rule, so on a narrow rail the answer keys outrank it.
+			inspection === "open" || terms === "open" ? false : composerHasDraft,
 		) ?? { key: "Esc", verb: "deny" },
 	];
 }

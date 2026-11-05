@@ -1089,8 +1089,9 @@ class AskUserOverlayView implements Component {
 		return [
 			text &&
 				questionHasOptions(question) && {
-					verb: "back to options",
-					short: "back",
+					// The draft is dropped (#260 keeps Esc the discard gesture), so the words say so.
+					verb: "discard text, back to options",
+					short: "discard text",
 					back: () => this.escapeFromTextInput(question, state),
 				},
 			text &&
@@ -1153,7 +1154,7 @@ class AskUserOverlayView implements Component {
 				});
 			entries.push(...scroll);
 			if (this.questions.length > 1)
-				entries.push({ key: "Tab/Shift+Tab", verb: "question", short: "next", critical: false });
+				entries.push({ key: "Tab/Shift+Tab", verb: "question", critical: false });
 			entries.push(record);
 			return { entries, esc };
 		}
