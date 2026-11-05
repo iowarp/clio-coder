@@ -56,7 +56,7 @@ function recordedCost(record: FleetRunRecord, steps: ReadonlyArray<FleetPlanStep
  * with neither a seal nor an end stamp reads as unsettled rather than running:
  * its process may be gone, and nothing here can see that.
  */
-export function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
+function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 	const results = new Map(record.steps.map((entry) => [entry.stepId, entry.result]));
 	const steps = (record.planSteps ?? []).flatMap((entry): FleetPlanStepView[] => {
 		const planned = plannedStepOf(entry);

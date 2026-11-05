@@ -206,6 +206,7 @@ import { createTurnPrewarm, type PrewarmOutcome, subscribePrewarmToCompaction } 
 import {
 	createTurnQueues,
 	DEFAULT_STEERING_MODE,
+	heldQueueNotice,
 	type QueuedChatMessage,
 	type QueuedMessageKind,
 	type QueuedMessagesSnapshot,
@@ -283,6 +284,10 @@ export interface ChatNoticeEvent {
 	 * every other surface renders the notice exactly as before.
 	 */
 	admission?: { reason: string };
+	/** Present only on the notice that entries wait in a held queue; the TUI names its bound keys. */
+	heldQueue?: { count: number };
+	/** Present only on the notice that a session change took these operator messages unsent; the TUI returns them to the composer. */
+	queueDropped?: { texts: string[] };
 	/**
 	 * Present only on a notice about the skill tool surface. The TUI transcript
 	 * states it as a `§` row (or, for a load that narrows nothing, not at all,
@@ -499,6 +504,10 @@ export interface ChatSubmitOptions {
 	 * for the two states in which it degrades to `next-slot` instead.
 	 */
 	steering?: SteeringMode;
+	/** This prompt is an entry taken off the queue: it returns to the head if the prompt never starts (#447). */
+	queued?: QueuedChatMessage;
+	/** Carry the rest of the queue with this prompt's first model call, instead of at its first slot. */
+	flushQueue?: boolean;
 	/**
 	 * Queue the message at the head of the steering queue instead of the tail:
 	 * a send-now the operator chose to wait with, or one the run refused.
@@ -648,8 +657,6 @@ export interface ChatLoop {
 	moveQueuedEntry(id: string, delta: -1 | 1): boolean;
 	/** The operator's choice of slot for one entry; pins it against producers. */
 	setQueuedEntryKind(id: string, kind: QueuedMessageKind): boolean;
-	/** Arm the next fresh prompt to carry the whole queue with its first model call. */
-	flushQueueOnNextPrompt(): void;
 	/**
 	 * Why an interrupt would be refused right now, or null when it would
 	 * cancel the run. An attached dispatch is refused because the parent's abort
@@ -1336,9 +1343,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// --- module composition -------------------------------------------------
 
 	let operatorSpokeAt = 0;
+	// The session whose run the queue was typed behind; a reset within it keeps the operator's entries (#447).
+	let queueSessionId: string | null = null;
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
+		emitQueueHeld: (count) =>
+			emit({ type: "notice", level: "info", surface: "transcript", text: heldQueueNotice(count), heldQueue: { count } }),
+		emitQueueDropped: (texts) =>
+			emit({
+				type: "notice",
+				level: "warning",
+				surface: "transcript",
+				text: `[Clio Coder] the session changed; not sent: ${texts.join(" | ")}`,
+				queueDropped: { texts },
+			}),
 		emitQueuedUserTurn: (entry) =>
 			emit({
 				type: "queued_user_turn",
@@ -2416,7 +2435,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		removeQueuedEntry: (id, reason) => queues.removeEntry(id, reason),
 		moveQueuedEntry: (id, delta) => queues.moveEntry(id, delta),
 		setQueuedEntryKind: (id, kind) => queues.setEntryKind(id, kind),
-		flushQueueOnNextPrompt: () => queues.flushOnNextPrompt(),
 		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
 		clearSkillSurface: () => {
 			const cleared = skillSurfaceNames(state.activeSkillSurface);
@@ -2434,10 +2452,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
 			let owner: AbortController | null = null;
+			let promptStarted = false;
 			const generation = submitGeneration;
 			const admissionCurrent = (): boolean =>
 				!disposed && generation === submitGeneration && !owner?.signal.aborted && options.isAdmissionCurrent?.() !== false;
-			if (!admissionCurrent()) return;
+			const returnUnstarted = (): void => {
+				if (options.queued === undefined || promptStarted || disposed) return;
+				if (generation === submitGeneration) queues.requeueUnstarted(options.queued);
+				else queues.reportDropped([options.queued]);
+			};
+			if (!admissionCurrent()) {
+				returnUnstarted();
+				return;
+			}
 			const submittedAt = performance.now();
 			let interrupted = false;
 			if (state.streaming) {
@@ -2467,7 +2494,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							auditReason: "operator interrupted the run with a message",
 						});
 						await prior;
-						if (!admissionCurrent()) return;
+						if (!admissionCurrent()) {
+							returnUnstarted();
+							return;
+						}
 						if (!state.streaming) {
 							interrupted = true;
 						} else {
@@ -2492,6 +2522,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							"error",
 						);
 						options.onRefused?.("constrained-turn-in-flight");
+						returnUnstarted();
 						return;
 					}
 					const hasImages = options.images !== undefined && options.images.length > 0;
@@ -2530,6 +2561,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			owner = new AbortController();
 			submitOwner?.abort();
 			submitOwner = owner;
+			if (options.flushQueue === true) queues.flushOnNextPrompt();
 			let turnLease: TelemetrySessionLease | undefined;
 			try {
 				await sessionResetSettlement;
@@ -2967,8 +2999,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				context.commitMemoryTurn(agentRuntime);
 				// An interrupt was submitted while a run was active, so no caller drew
 				// it in the transcript; render it here, after the cancel notice and the
-				// cancelled run's leftovers, which is the order the ledger has.
-				if (interrupted)
+				// cancelled run's leftovers, which is the order the ledger has. A queued
+				// entry sent from idle has no caller to draw it either.
+				if (interrupted || (options.steering === "interrupt" && options.queued !== undefined))
 					emit({
 						type: "queued_user_turn",
 						text: operatorText,
@@ -3095,7 +3128,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						if (!admissionCurrent()) return Promise.resolve();
 						// A flushed queue rides Pi's opening poll, so it lands with this
 						// prompt's first model call; a held queue waits for the first slot.
-						queues.handOverBeforePrompt(agentRuntime.agent);
+						promptStarted = true;
+						queueSessionId = api.getSessionId();
+						queues.handOverBeforePrompt(agentRuntime.agent, {
+							keepOperatorHold:
+								options.machineTurn !== undefined || options.origin !== undefined || options.requestContinuation === true,
+						});
 						if (userTurnId) context.commitSessionPosture(agentRuntime, userTurnId);
 						return agentRuntime.agent.prompt(runtimePromptText, images);
 					});
@@ -3384,11 +3422,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			} finally {
 				void turnLease?.release();
+				returnUnstarted();
 				if (submitOwner === owner) {
 					submitOwner = null;
 					// Template bounds end with their turn; prewarm and jobs see only
 					// the host's remaining prompt or session ceiling (#423).
 					state.currentTurnConstraints = promptToolLimits;
+					if (!disposed) queues.settleSubmit(promptStarted);
 				}
 			}
 		},
@@ -3409,10 +3449,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			recovery.cancelRetryCountdown();
 			// Settle the queue before the abort settles the in-flight prompt: a
 			// cancelled run must not deliver queued messages on its own. An
-			// interrupt holds them for the prompt it is about to send; any other
-			// cancel drops them (Esc already returned them to the editor). A job
-			// cancellation preserves successors for its ordinary settlement path (#411).
-			queues.onRunCancelled({ hold: options?.reason === INTERRUPT_CANCEL_REASON, preserve: preserveQueue });
+			// interrupt holds them for the prompt it is about to send, and an operator
+			// stop holds them until the operator acts (#447). A guard stop was not the
+			// operator's choice, and a job cancellation has successors to protect
+			// (#411), so both leave the entries to the ordinary settlement path.
+			queues.onRunCancelled({
+				hold: options?.reason === INTERRUPT_CANCEL_REASON,
+				preserve: preserveQueue,
+				settle: options?.source === "loop_guard",
+			});
 			const requestedReason = options?.reason?.trim();
 			if (wasStreaming) {
 				// Keep immediate feedback in the footer. A transcript notice here
@@ -3601,7 +3646,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			recovery.cancelRetryCountdown();
 			cancelTriage();
-			queues.reset();
+			const sessionId = api.getSessionId();
+			queues.reset({ keepOperator: sessionId !== null && sessionId === queueSessionId });
+			queueSessionId = sessionId;
 			middleware.clearPendingReminders();
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;

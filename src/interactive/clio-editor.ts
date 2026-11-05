@@ -78,6 +78,8 @@ export interface EditorChrome {
 	getModelLabel: () => TargetIdentity | string;
 	/** Effective label plus whether the model actually has an effort range. */
 	getThinkingLabel: () => string;
+	/** The board's active task for the rail, fitted to `room`; null when no task is active. */
+	getTaskRail?: (room: number) => string | null;
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[]; note?: string };
@@ -188,6 +190,9 @@ const THINKING_BRAINS: Readonly<Record<string, number>> = {
 const THINKING_BRAIN_SLOTS = 4;
 
 /** Four static marks; textual fallback preserves exact state when graphics cannot. */
+/** Under this the current task's title is a stub, and the rail says nothing rather than half a name. */
+const TASK_RAIL_MIN_ROOM = 20;
+
 function thinkingRailHint(
 	theme: ClioTheme,
 	thinking: ReturnType<NonNullable<EditorChrome["getThinking"]>>,
@@ -677,7 +682,10 @@ export class ClioEditor extends Editor {
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
-		const left = loop ? `${theme.fg(rail.tone ?? "composerRail", "━")} ${loop}` : "";
+		// The current task takes only what the rail's state left over, and an active loop outranks it.
+		const task = !loop && loopRoom >= TASK_RAIL_MIN_ROOM ? this.chrome.getTaskRail?.(loopRoom) : null;
+		const leftText = loop ?? task;
+		const left = leftText ? `${theme.fg(rail.tone ?? "composerRail", "━")} ${leftText}` : "";
 		return renderEditorRail(theme, width, { left, leftRaw: true, right: hint, rightRaw: true }, rail);
 	}
 
@@ -877,7 +885,9 @@ export class ClioEditor extends Editor {
 		for (let index = start; index < end; index++)
 			appendSuggestion(items[index] ?? "", this.autocompleteSourceStart + index);
 		if (items.length === 0) appendSuggestion(theme.fg("emptyState", "No suggestions to display"), -1);
-		if (hasCount && listRoom > 1 && last !== undefined) appendSuggestion(last, lines.length - 1);
+		// The count row exists only when the list overflows, which is when the page keys move it.
+		if (hasCount && listRoom > 1 && last !== undefined)
+			appendSuggestion(`${last.trimEnd()}${theme.fg("keyboardHint", " · PgUp/PgDn page")}`, lines.length - 1);
 		for (const line of panel.slice(0, panelRows)) {
 			rows.push(padAnsi(`  ${line}`, width));
 			rowMap.push(-1);

@@ -612,7 +612,7 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			createStatusController: () => ({ current: () => ({ phase: "idle" }), reset: noop, dispose: noop }),
 			createDispatchBoardStore: () => ({ rows: () => [], activeRows: () => [], unsubscribe: noop }),
 			createContextActivityStore: () => ({ current: () => null, unsubscribe: noop }),
-			createNotificationCenter: () => ({ add: noop, list: () => [], dismiss: noop }),
+			createNotificationCenter: () => ({ add: noop, list: () => [], ended: () => [], dismiss: noop }),
 			buildFooter: (deps: Parameters<typeof buildFooterDashboard>[0]) => {
 				footerDeps = deps;
 				return realFooter

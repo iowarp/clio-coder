@@ -73,7 +73,13 @@ class SessionSelectList extends SelectList {
 			);
 		}
 		if (start > 0 || end < this.sessionItems.length)
-			rows.push(positionRow(theme, { start: start + 1, end, total: this.sessionItems.length, unit: "sessions" }, width));
+			rows.push(
+				positionRow(
+					theme,
+					{ start: start + 1, end, total: this.sessionItems.length, unit: "sessions", keys: ["PgUp/PgDn page"] },
+					width,
+				),
+			);
 		return rows;
 	}
 

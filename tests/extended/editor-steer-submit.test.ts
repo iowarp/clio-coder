@@ -35,7 +35,6 @@ function fixture(runs: RunningDispatchRef[] = []) {
 			runningToolCalls: () => 0,
 			queueEntries: () => [],
 			removeQueuedEntry: () => null,
-			flushQueueOnNextPrompt: noop,
 			clearQueuedFollowUps: () => [],
 			interruptRefusal: () => null,
 			submit: async (text) => {
@@ -85,6 +84,26 @@ it("editor submission refuses an explicit whitespace-only rename and retains the
 	await assert.rejects(f.controller.admitCapturedText(text), /needs correction/);
 	assert.equal(dispatched, text);
 	assert.deepEqual(f.history, []);
+});
+
+it("Alt+S on a held idle queue takes the first entry as a queued flush; an empty queue sends nothing", async () => {
+	const f = fixture();
+	const first = { id: "a", text: "one", kind: "steer", enqueuedAt: 0 } as const;
+	const sent: unknown[] = [];
+	f.deps.chat.submit = async (text, options) => {
+		sent.push([text, options?.queued, options?.flushQueue]);
+	};
+	f.controller.interruptFromEditor();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(sent, []);
+	f.deps.chat.queueEntries = () => [
+		{ ...first },
+		{ id: "peer", text: "p", kind: "follow-up", enqueuedAt: 0, origin: "x" },
+	];
+	f.deps.chat.removeQueuedEntry = () => ({ ...first });
+	f.controller.interruptFromEditor();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(sent, [["one", first, true]]);
 });
 
 it("Fleet Runs steering remains addressed when the selected worker finishes before Enter", () => {

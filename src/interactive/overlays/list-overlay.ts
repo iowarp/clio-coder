@@ -219,6 +219,8 @@ export class ListOverlayView implements Component {
 	private detailKeyPending = false;
 	/** Cells the rail under this list has for keys, or zero while the composer has not said. */
 	private railRoom = 0;
+	/** Rows one PgUp or PgDn moves the selection by while no pane takes those keys. */
+	private listPage = 1;
 	/** Lines one PgUp or PgDn moves the pane by: the rows it shows, never a fixed count. */
 	private detailPage = 1;
 	/** Rendered rows of the pinned head the last frame drew, for the key row to check against. */
@@ -758,6 +760,7 @@ export class ListOverlayView implements Component {
 			}
 
 			this.listScrollOffset = Math.max(0, Math.min(this.listScrollOffset, renderedRows.length - itemRows));
+			this.listPage = Math.max(1, itemRows);
 
 			const visibleRows = renderedRows.slice(this.listScrollOffset, this.listScrollOffset + itemRows);
 			const leadWidth = this.leadWidth(width - 2, filteredItems);
@@ -802,6 +805,7 @@ export class ListOverlayView implements Component {
 								end: Math.min(renderedRows.length, start + visibleRows.length - 1),
 								total: renderedRows.length,
 								...(this.options.unit !== undefined ? { unit: this.options.unit } : {}),
+								...(this.detailPaneVisible() ? {} : { keys: ["PgUp/PgDn page"] }),
 							},
 							width,
 						),
@@ -1278,6 +1282,21 @@ export class ListOverlayView implements Component {
 		}
 
 		const filteredItems = this.filteredItems();
+
+		// With no pane on screen the page keys move the selection through the list.
+		if (matchesKey(data, "pageUp") || matchesKey(data, "pageDown")) {
+			if (
+				filteredItems.length > 0 &&
+				!this.detailPaneVisible() &&
+				!(this.options.explicitSearch && this.isFilterFocused)
+			) {
+				const next = this.selectedIndex + (matchesKey(data, "pageDown") ? this.listPage : -this.listPage);
+				this.selectIndex(Math.max(0, Math.min(next, filteredItems.length - 1)));
+				this.isFilterFocused = false;
+				this.onChange();
+			}
+			return;
+		}
 
 		if (this.isFilterFocused) {
 			if (matchesKey(data, "up")) {

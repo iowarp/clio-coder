@@ -12,7 +12,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
+import { resolveModelRuntimeCapabilitiesForProviders, thinkingEffectNote } from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
@@ -52,7 +52,7 @@ import { buildFooterDashboard } from "./footer/dashboard.js";
 import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
-import { composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
+import { activeTaskRail, composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
@@ -606,6 +606,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
+		getTaskRail: (room) => {
+			const board = deps.getTaskBoard?.();
+			if (!board) return null;
+			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
+			return activeTaskRail(clioTheme(), board, room, status.phase !== "idle" && status.phase !== "ended");
+		},
 		getModelLabel: () => {
 			const route = deps.getSettings?.().chat;
 			// A route with no model of its own runs on its target's default, which the rail has to name.
@@ -686,23 +692,17 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			)?.thinking;
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
-			const coerced = thinking !== undefined && thinking.configuredLevel !== thinking.effectiveLevel;
+			const note = thinking ? thinkingEffectNote(thinking) : null;
 			return {
-				label: coerced
-					? thinking.display
-					: thinking?.mechanism === "none"
-						? "unavailable"
-						: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
+				label:
+					note !== null && thinking
+						? thinking.display
+						: thinking?.mechanism === "none"
+							? "unavailable"
+							: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
-				...(coerced
-					? {
-							note:
-								thinking.mechanism === "none"
-									? "model has no thinking"
-									: `${thinking.configuredLevel} runs as ${thinking.display}`,
-						}
-					: {}),
+				...(note !== null ? { note } : {}),
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",

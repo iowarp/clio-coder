@@ -750,7 +750,27 @@ is next slot.
 | --- | --- | --- |
 | Next slot | `Enter` | Between tool batches, mid-run. The agent keeps going and reads every queued message before its next model call. A message typed during the run's final model call is handed over at the end of that call, so the run carries on with it instead of ending. |
 | End of turn | `t` on the entry in the queue navigator, or ACP mode `end-of-turn` | When the whole run settles and Clio would hand control back. A turn is the whole run, not one model round. |
-| Send now | `Alt+S`, `Ctrl+G` `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the draft as a fresh prompt. Anything already queued stays queued and lands at the new run's first slot. With an empty draft, Alt+S flushes the queue: the first entry is the prompt and the rest land with its first model call. While a tool call is running, Alt+S asks whether to stop it or to send after it finishes; waiting queues the message ahead of everything else. |
+| Send now | `Alt+S`, `Ctrl+G` `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the draft as a fresh prompt. Anything already queued stays queued and lands at the new run's first slot. With an empty draft, Alt+S flushes the queue, running or held: the first entry is the prompt and the rest land with its first model call. While a tool call is running, Alt+S asks whether to stop it or to send after it finishes; waiting queues the message ahead of everything else. |
+
+### Queued messages after a stop
+
+`Esc`, `Ctrl+C` and `Alt+X` at a permission card end the run and send nothing.
+Queued messages stay in the panel as separate entries, in order, and a notice
+says how many wait and which keys act on them. `Alt+S` with an empty composer
+sends them in order, each as its own user message. A new prompt takes them at
+its first slot. `Alt+Q` restores them to the composer. A peer's or other
+machine-origin entry is dropped with a notice instead of being held.
+
+A message you submit after the stop, while a slow tool is still dying, is the
+prompt it would have been had the tool died sooner: it is sent when the run
+settles, and the held entries take its first slot. Pressing `Esc` again holds
+it with the rest.
+
+A loop-guard or tool-budget stop was not your choice, so your queued messages
+are delivered as a fresh prompt when the run settles. If a prompt never starts,
+for instance because its target is gone, the entry it carried returns to the
+head of the queue and the notice repeats. A local shell line or `/tree` move
+keeps the queue. Changing session returns it to the composer with a notice.
 
 ### The queue navigator
 
