@@ -21,6 +21,7 @@ import type { SessionContract, TaskBoardSnapshot } from "../domains/session/inde
 import type { TelemetryContract, TokenThroughputSnapshot } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
+import { visibleWidth } from "../engine/tui.js";
 import { createAssistantGenerationTiming } from "../session-control/assistant-generation-timing.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
@@ -634,7 +635,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				// Once a request is out the rail names the model it went to, whatever route was picked since.
 				const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
 				const name = modelNickname(out ?? route?.model);
-				const presented = composerPhasePresentation(status, width, Date.now(), name, undefined, reserved, identityCells);
+				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
+				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
+				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 : 0;
+				const presented = composerPhasePresentation(
+					status,
+					width,
+					Date.now(),
+					name,
+					undefined,
+					reserved + beside,
+					identityCells,
+				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
 					...presented,
