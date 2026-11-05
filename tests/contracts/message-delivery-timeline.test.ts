@@ -2,7 +2,7 @@
  * What became of an operator message, read back the way `clio-coder telemetry timeline` reads it: the real queue and
  * recorder write into an in-memory journal, and the timeline read model answers from those records.
  */
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import { mainAgent } from "../../src/core/telemetry/context.js";
@@ -12,8 +12,9 @@ import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { abandonedSettlement, beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import { foldMessagePaths } from "../../src/domains/session/message-path-view.js";
 import type { SessionSource } from "../../src/domains/telemetry/read-model.js";
-import { timeline } from "../../src/domains/telemetry/read-model.js";
+import { callsReport, timeline } from "../../src/domains/telemetry/read-model.js";
 import { createMessagePath } from "../../src/session-control/message-path.js";
 import { createTurnQueues } from "../../src/session-control/turn-queues.js";
 import type { ChatTurnState } from "../../src/session-control/turn-state.js";
@@ -73,7 +74,7 @@ function rig(sessionId: string) {
 					mono: record.mono,
 				}) as TelemetryRecord,
 		);
-	const read = (): { dto: TimelineV1; rows: MessageEntry[] } => {
+	const read = (): { dto: TimelineV1; rows: MessageEntry[]; source: SessionSource } => {
 		const source: SessionSource = {
 			sessionId,
 			journal: { present: true, records: records(), modes: ["standard"], skipped: 0, damaged: 0 },
@@ -82,7 +83,7 @@ function rig(sessionId: string) {
 		};
 		const dto = timeline(source, null, { now: new Date() });
 		ok(Value.Check(TimelineSchema, dto), [...Value.Errors(TimelineSchema, dto)][0]?.message);
-		return { dto, rows: dto.entries.filter((entry): entry is MessageEntry => entry.kind === "message") };
+		return { dto, source, rows: dto.entries.filter((entry): entry is MessageEntry => entry.kind === "message") };
 	};
 	const prompt = () =>
 		queues.handOverBeforePrompt(agent as unknown as Parameters<typeof queues.handOverBeforePrompt>[0]);
@@ -219,6 +220,52 @@ test("no message text reaches the journal or the timeline, and its length does",
 			rows.filter((row) => row.chars !== null).map((row) => row.chars?.display),
 			[String(sentinel.length), String(sentinel.length)],
 		);
+	} finally {
+		f.release();
+	}
+});
+
+test("/view folds each path to what happened, what carried it, and no raw id or text in its primary rows", () => {
+	const f = rig("path-view");
+	try {
+		const delivered = f.queues.steer("SENTINEL delivered");
+		ok(delivered);
+		f.queues.handOverAtFinishTurn(false);
+		f.queues.acknowledgeInjected("SENTINEL delivered");
+		f.sendCall(false);
+		f.sendCall();
+		const failed = f.queues.steer("SENTINEL failed");
+		ok(failed);
+		f.queues.handOverAtFinishTurn(false);
+		f.queues.acknowledgeInjected("SENTINEL failed");
+		f.sendCall(false);
+		const removed = f.queues.steer("SENTINEL removed");
+		ok(removed);
+		f.queues.removeEntry(removed.id);
+		const held = f.queues.steer("SENTINEL held");
+		ok(held);
+		f.queues.onRunCancelled({ hold: false });
+		const { dto, source } = f.read();
+		const calls = callsReport(source, {}, { now: new Date() }).calls;
+		const fold = (queued?: ReadonlySet<string>) =>
+			new Map(foldMessagePaths(dto, calls, queued, () => "12:00:00").map((path) => [path.id, path]));
+
+		const live = fold(new Set([held.id]));
+		strictEqual(live.get(delivered.id)?.state, "delivered");
+		match(live.get(delivered.id)?.summary ?? "", /Delivered by call \d+ to m,.*1 earlier call/u);
+		strictEqual(live.get(failed.id)?.state, "failed");
+		match(live.get(failed.id)?.title ?? "", /^Failed · steer · \d+ chars$/u);
+		strictEqual(live.get(removed.id)?.state, "removed");
+		strictEqual(live.get(held.id)?.state, "held");
+		match(live.get(held.id)?.summary ?? "", /you stopped the run/u);
+		for (const path of live.values()) {
+			const primary = [path.title, path.summary, ...path.steps].join("\n");
+			strictEqual(primary.includes(path.id), false);
+			strictEqual(primary.includes("SENTINEL"), false);
+		}
+		// A message the queue no longer holds has no live slot coming, whatever its last row said.
+		strictEqual(fold(new Set()).get(held.id)?.state, "lost");
+		strictEqual(fold().get(held.id)?.state, "held");
 	} finally {
 		f.release();
 	}

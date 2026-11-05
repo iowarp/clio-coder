@@ -32,6 +32,7 @@ import { AcpRequestError } from "./errors.js";
  * panel's rendering of the conversation a client already holds.
  */
 export const ACP_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
+	"message-path",
 	"accountability",
 	"evidence",
 	"run",
@@ -104,6 +105,7 @@ function expectedFormat(
 		case "dispatch":
 		case "tool-output":
 		case "transcript":
+		case "message-path":
 			return "text";
 		case "prompt-manifest":
 		case "audit":

@@ -542,6 +542,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	const toggleDispatchBoard = (): void => {
+				...(deps.queueNavigator
+					? {
+							queuedMessageIds: () => new Set(deps.queueNavigator?.chat.queueEntries().map((entry) => entry.id)),
+						}
+					: {}),
 		if (deps.transitions.state === "dispatch-board") {
 			deps.closeOverlay();
 			return;

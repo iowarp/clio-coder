@@ -101,6 +101,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 	switch (category) {
 		case "transcript":
 			return "Transcript details";
+		case "message-path":
+			return "What happened to your messages";
 		case "accountability":
 			return "Accountability";
 		case "evidence":
@@ -129,6 +131,7 @@ function categoryLabel(category: ViewArtifactCategory): string {
 const VIEW_ARTIFACT_CATEGORY_SET = new Set<ViewArtifactCategory>(VIEW_ARTIFACT_CATEGORIES);
 const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
 	"transcript",
+	"message-path",
 	"task-ledger",
 	"workspace",
 	"protected-artifact",
@@ -378,7 +381,27 @@ function buildArtifactHeaderLines(
 	];
 }
 
-function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
+/** The row's outcome as a glyph that reads without colour, for a category whose rows carry one. */
+function artifactToneMark(tone: ViewArtifact["tone"]): string {
+	const theme = clioTheme();
+	switch (tone) {
+		case "ok":
+			return `${theme.fg("success", GLYPH.ok)} `;
+		case "error":
+			return `${theme.fg("error", GLYPH.error)} `;
+		case "warning":
+			return `${theme.fg("warning", GLYPH.warn)} `;
+		case "muted":
+			return `${theme.fg("annotation", GLYPH.cancelled)} `;
+		case "active":
+			return `${theme.fg("info", GLYPH.queued)} `;
+		default:
+			return "";
+	}
+}
+
+function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, filtered: boolean, innerWidth?: number): string {
+	const listEsc = filtered ? "clear filter" : "close";
 	// One pane at a time needs an explicit Enter and Escape route in the hint;
 	// the generic elider can drop the action in the middle of a long hint.
 	if (innerWidth !== undefined && viewUsesSinglePane(innerWidth - 2)) {
@@ -711,7 +734,7 @@ export class ViewOverlayView implements Component {
 			}
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
-			const cursor = `${selectionMark(selected)} `;
+			const cursor = `${selectionMark(selected)} ${artifactToneMark(row.item.tone)}`;
 			const safeTitle = viewArtifactDisplayText(row.item.title);
 			const title = theme.fg("menuOption", safeTitle, selected ? "selected" : "normal");
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
