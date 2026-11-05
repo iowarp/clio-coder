@@ -66,7 +66,15 @@ import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
 import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import { TURN_CONTROL_WORKFLOWS } from "../../domains/turn-control/index.js";
 import type { Component, OverlayHandle, SettingItem, TUI } from "../../engine/tui.js";
-import { getKeybindings, Input, isKeyRelease, matchesKey, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	getKeybindings,
+	Input,
+	isKeyRelease,
+	matchesKey,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
@@ -3107,8 +3115,10 @@ export class SettingsCenter implements Component {
 		}
 		const kb = getKeybindings();
 		if (data === "/") {
-			this.filterDraft = this.filterQuery;
-			this.filterInput.setValue(this.filterDraft);
+			// A fresh draft, because typed text appended to a committed query read as `judgesettings`
+			// when someone typed /settings with the screen still open. Esc restores the committed one.
+			this.filterDraft = "";
+			this.filterInput.setValue("");
 			return;
 		}
 		if (matchesKey(data, "tab")) {
@@ -3173,6 +3183,13 @@ export class SettingsCenter implements Component {
 			this.options.requestRender?.();
 			return;
 		}
+		if (this.filterQuery.length > 0) {
+			this.filterQuery = "";
+			this.pendingValue = null;
+			this.normalizeSelection();
+			this.options.requestRender?.();
+			return;
+		}
 		if (this.level === "rows" && this.sections().length > 0) {
 			this.level = "sections";
 			this.pendingValue = null;
@@ -3190,8 +3207,17 @@ export class SettingsCenter implements Component {
 		const draft = this.filterDraft ?? "";
 		const kb = getKeybindings();
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter")) {
-			this.filterQuery = draft.trim();
+			const query = draft.trim();
 			this.filterDraft = null;
+			// The screen's own command typed into its own filter means home, not a search for the word.
+			if (query.toLowerCase() === "settings") {
+				this.filterQuery = "";
+				this.selectedSectionId = SETTINGS_SECTIONS[0].id;
+			} else {
+				this.filterQuery = query;
+			}
+			// Enter hands the keys to the results, so the cursor moving onto a row is the visible answer.
+			this.level = "rows";
 			this.normalizeSelection();
 			this.options.requestRender?.();
 			return;
@@ -3641,9 +3667,17 @@ export class SettingsCenter implements Component {
 		];
 	}
 
-	/** The one-line filter editor, shown at every width while it owns input. */
+	/** The one-line filter editor, shown at every width while it owns input, or what a committed filter is hiding. */
 	private filterEditorLines(width: number): string[] {
-		if (this.filterDraft === null) return [];
+		if (this.filterDraft === null) {
+			if (this.filterQuery.length === 0) return [];
+			const matches = this.sections().reduce(
+				(count, section) => count + section.items.filter((item) => this.isSelectableRow(item)).length,
+				0,
+			);
+			const text = `filter “${this.filterQuery}” · ${matches} ${matches === 1 ? "match" : "matches"} · Esc clears · / starts over`;
+			return [truncateToWidth(clioTheme().fg("searchQuery", text), width, GLYPH.ellipsis, false)];
+		}
 		// The editor draws its own caret, so the row stops faking one with `_`.
 		this.filterInput.focused = true;
 		return this.filterInput.render(width).map((line) => clioTheme().base("searchQuery", line));
