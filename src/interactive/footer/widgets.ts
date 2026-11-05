@@ -975,7 +975,16 @@ export function composerPhasePresentation(
 		case "writing":
 			label = fitRailFacts(
 				[
-					{ text: status.preparingToolCall ? "is preparing a tool" : "is writing", keep: 9 },
+					{
+						text: status.preparingToolCall
+							? "is preparing a tool"
+							: status.writingCallAsText
+								? room >= 40
+									? "is writing a tool call as text, so it will not run"
+									: "writing a call as text"
+								: "is writing",
+						keep: 9,
+					},
 					...silentStreamFacts(status, now),
 				],
 				room,

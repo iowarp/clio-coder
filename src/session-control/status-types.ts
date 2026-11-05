@@ -140,6 +140,8 @@ export interface AgentStatus {
 	localRuntime: boolean;
 	/** The model is streaming tool arguments; execution has not started. */
 	preparingToolCall?: boolean;
+	/** Tool-call markup is open in the answer channel, so nothing is being prepared and nothing will run from it. */
+	writingCallAsText?: boolean | undefined;
 	/** Epoch ms this model round started waiting, which the rail times instead of the whole turn. */
 	waitingSince?: number | undefined;
 	/** Evidence about the outstanding request, carried while a model wait is on screen. */
