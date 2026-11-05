@@ -87,6 +87,7 @@ import {
 	fallbackIdentityPrompt,
 	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
+	noteWrittenCalls,
 	sumRunUsage,
 	TOOL_MARKUP_REPROMPT,
 	TOOL_MARKUP_REPROMPT_NOTICE,
@@ -1496,7 +1497,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const noAnswer = turn.message.stopReason === "stop" ? classifyTurnEnding([turn.message]) : null;
 			if (
 				noAnswer?.kind === "no_answer" &&
-				(noAnswer.cause === "tool_call_in_reasoning" || noAnswer.cause === "tool_call_as_text") &&
+				(noAnswer.cause === "tool_call_in_reasoning" ||
+					noAnswer.cause === "tool_call_as_text" ||
+					noAnswer.cause === "tool_call_announced") &&
 				currentRun() &&
 				state.activeInterruptReason === null &&
 				!state.synthesisToolLock &&
@@ -1672,6 +1675,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (sanitizeLockedSynthesisMessage(event.message)) {
 					enrichedEvent = { ...event, lockedSynthesisSanitized: true } as typeof event;
 				}
+			}
+			// Same object again, so the ledger row below and every reader of the settled run see the stamp.
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				noteWrittenCalls(event.message, (tool) => {
+					const attached = toolNamesFromAgentState(localRuntime.agent.state.tools);
+					if (attached.includes(tool)) return true;
+					return attached.includes("gateway") && (deps.gatewayCapabilityNames?.().includes(tool) ?? false);
+				});
 			}
 			// The run's start and end name the operator turn its calls journal under, so the transcript receipt reads
 			// that turn's spend from the read model (#434 §11.3).

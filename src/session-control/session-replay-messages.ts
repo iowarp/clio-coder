@@ -269,6 +269,8 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 			"diagnostics",
 			"contextUsageInvalidated",
 			"clioCoderReasoningNotRetained",
+			"clioCoderReasoningToolMarkup",
+			"clioCoderWrittenCalls",
 		]) {
 			if (obj?.[key] !== undefined) message[key] = obj[key];
 		}

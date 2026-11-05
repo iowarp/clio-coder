@@ -85,7 +85,14 @@ export interface EditorChrome {
 	getTaskRail?: (room: number) => string | null;
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
-	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[]; note?: string };
+	getThinking?: () => {
+		label: string;
+		hasLevels: boolean;
+		supportedLevels?: readonly string[];
+		note?: string;
+		/** The rail has nothing worth a permanent slot to say about this route right now. */
+		quiet?: boolean;
+	};
 	/** `identityCells` is what the rail will spend naming the exact route instead of the short nickname. */
 	getHarnessStatus?: (
 		width: number,
@@ -103,6 +110,8 @@ export interface EditorChrome {
 	} | null;
 	/** What keeps running behind a dock that hides this rail; null at idle. `escVerb` is what the dock's Esc does. */
 	getLiveWorkStrip?: (width: number, escVerb: string | null) => string | null;
+	/** What keeps going beside a card holding the rail, in at most `room` cells; null when nothing does. */
+	getBesideCard?: (room: number) => string | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
 	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
@@ -205,6 +214,7 @@ function thinkingRailHint(
 	thinking: ReturnType<NonNullable<EditorChrome["getThinking"]>>,
 	width: number,
 ): string {
+	if (thinking.quiet) return "";
 	const level = thinking.label;
 	const levels = thinking.supportedLevels ?? [];
 	const count = Object.hasOwn(THINKING_BRAINS, level) ? THINKING_BRAINS[level] : undefined;
@@ -817,9 +827,14 @@ export class ClioEditor extends Editor {
 		entry.rowsUsed = Math.max(entry.rowsUsed ?? 0, used);
 		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : entry.rowsUsed);
 		const pad = " ".repeat(gutter);
-		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", entry.frame.dockTitle(), { bold: true });
+		const plainTitle = entry.frame.dockTitle();
+		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", plainTitle, { bold: true });
+		// A question holds the rail like a card does, so it says what it is not holding up too.
+		const beside = entry.frame.dockAwaitingInput?.()
+			? (this.chrome.getBesideCard?.(room - visibleWidth(plainTitle) - 5) ?? null)
+			: null;
 		const title = entry.frame.dockAwaitingInput?.()
-			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
+			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}${beside === null ? "" : theme.fg("annotation", ` · ${beside}`)}`
 			: titleText;
 		const hint = entry.frame.dockHint(room + 4);
 		const lines = [
@@ -861,7 +876,8 @@ export class ClioEditor extends Editor {
 			room: titleRoom,
 			actor: modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId),
 		});
-		const label = `${theme.fg("attentionRail", cue)} ${theme.style(entry.frame.dockTone() ?? "decisionCue", title, { bold: true })}`;
+		const beside = this.chrome.getBesideCard?.(titleRoom - visibleWidth(title) - 3) ?? null;
+		const label = `${theme.fg("attentionRail", cue)} ${theme.style(entry.frame.dockTone() ?? "decisionCue", title, { bold: true })}${beside === null ? "" : theme.fg("annotation", ` · ${beside}`)}`;
 		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
 		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
 		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";

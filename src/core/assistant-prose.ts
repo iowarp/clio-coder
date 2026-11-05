@@ -6,9 +6,10 @@
  */
 const GRAPHEMES = new Intl.Segmenter("en", { granularity: "grapheme" });
 const EMOJI = /\p{Emoji_Presentation}|\p{Extended_Pictographic}|[0-9#*]\uFE0F?\u20E3/u;
-// Technical text arrows and copyright/trademark symbols also belong to the
-// Unicode emoji inventory. Preserve their ordinary text presentation.
-const TEXT_SYMBOL = /^[©®™\u2190-\u21FF]\uFE0E?$/u;
+// Technical text arrows, copyright/trademark symbols and the check and cross a
+// test runner prints also belong to the Unicode emoji inventory. Preserve their
+// ordinary text presentation: dropping one left `all ✔)` reading `all )`.
+const TEXT_SYMBOL = /^[©®™\u2190-\u21FF\u2714\u2716]\uFE0E?$/u;
 
 export interface AssistantProseFilter {
 	push(chunk: string): string;

@@ -183,7 +183,7 @@ for (const [columns, rows] of [
 		ok(!text.some((row) => row.includes("…")), "nothing is elided");
 		strictEqual(
 			text[2],
-			"Clio-Coder asks you · Research Exploration; Material Science",
+			"Clio asks you · Research Exploration; Material Science",
 			"the speaker and question header lead the dialog",
 		);
 		const lastQuestionRow = text.findIndex((row) => row.includes("combination?"));

@@ -966,16 +966,32 @@ class AskUserOverlayView implements Component {
 		// the header, which the question under it already explains.
 		const count =
 			this.questions.length > 1 && answered > 0 ? `${answered} answered` : earlier > 0 ? `${earlier} earlier` : null;
-		const ledger = count === null ? null : `${count}${pointToLedger && earlier > 0 ? " [a]" : ""}`;
-		const parts = this.harnessInterview
-			? [this.harnessPosition(), ...(moveKey === null ? [] : [moveKey])]
-			: [
-					...(this.questions.length > 1 ? [`Q${this.index + 1} of ${this.questions.length}`] : []),
-					...(moveKey === null ? [] : [moveKey]),
-					...(ledger === null ? [] : [ledger]),
-					...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
-					...(question.header ? [question.header] : []),
-				];
+		const pointer = pointToLedger && earlier > 0 ? " [a]" : "";
+		const ledger = count === null ? null : `${count}${pointer}`;
+		const move = moveKey === null ? [] : [moveKey];
+		// Esc ends the turn and keeps what is recorded. A box too short for the ledger row says so here.
+		const kept = this.history.length + (this.questions.length > 1 ? answered : 0);
+		const escKeeps = kept > 0 && this.hintEntries().escVerb === "cancel" ? kept : 0;
+		const keepsWhole = `Esc keeps ${escKeeps === 1 ? "it" : "them"}`;
+		const keepsNamed = `Esc keeps answer${escKeeps === 1 ? "" : "s"}${pointer}`;
+		const fits = (parts: string[]): boolean => visibleWidth(parts.join(" · ")) <= width;
+		const position = this.questions.length > 1 ? `Q${this.index + 1} of ${this.questions.length}` : null;
+		const shortPosition = this.questions.length > 1 ? [`Q${this.index + 1}/${this.questions.length}`] : [];
+		let parts: string[];
+		if (this.harnessInterview) {
+			parts = [this.harnessPosition(), ...move];
+			if (escKeeps > 0 && fits([...parts, keepsNamed])) parts.push(keepsNamed);
+		} else {
+			const full = [...(position === null ? [] : [position]), ...move, ...(ledger === null ? [] : [ledger])];
+			if (escKeeps > 0) full.push(keepsWhole);
+			parts = escKeeps > 0 && !fits(full) ? [...shortPosition, ...move, keepsNamed] : full;
+			// What the question under the row already explains fits whole or gives way.
+			const optional = [
+				...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
+				...(question.header ? [question.header] : []),
+			];
+			for (const part of optional) if (fits([...parts, part])) parts.push(part);
+		}
 		if (parts.length === 0) return [];
 		return [fitRow(theme.style("positionCount", parts.join(" · "), { bold: true }), width)];
 	}
@@ -1262,7 +1278,7 @@ class AskUserOverlayView implements Component {
 	 */
 	private renderQuestionHeader(question: AskUserQuestion, width: number, stripNamesIt = false): string[] {
 		const theme = clioTheme();
-		const parts: string[] = [theme.fg("pendingAnswer", "Clio-Coder asks you")];
+		const parts: string[] = [theme.fg("pendingAnswer", "Clio asks you")];
 		// The strip above already carries the active question's name with the
 		// cursor on it; the header repeats it only when there is no strip.
 		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, question.header));
@@ -1796,8 +1812,7 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		// The interview names waiting, sent and between-rounds in its own body.
 		ownsStatus: true,
 		title: () =>
-			view.interviewTitle() ??
-			(view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
+			view.interviewTitle() ?? (view.isDecisionPending() ? `Clio interview · ${view.decisionTitle()}` : "Clio interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),
 		footerHint: (innerWidth) => view.railHint(Math.max(1, innerWidth - 3)),
