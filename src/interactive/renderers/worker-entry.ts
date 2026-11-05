@@ -198,6 +198,10 @@ function settledAgainst(result: WorkerRunResultSummary): string | null {
 	return result.contract === "fail" ? "result contract failed" : null;
 }
 
+function refusedCallsText(count: number): string {
+	return count === 1 ? "1 call refused" : `${count} calls refused`;
+}
+
 /**
  * The run's overall outcome, leading with the mark that decides it. A clean
  * exit under a failed validation leads with the failure and keeps the
