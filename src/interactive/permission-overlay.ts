@@ -9,6 +9,7 @@ import {
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ApprovalRequestView } from "../session-control/approval-request-view.js";
+import { planFacts, planHeadline, readDispatchPlan } from "./dispatch-plan-summary.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
 	type MutationInspector,
@@ -373,6 +374,13 @@ function permissionChoices(
 			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
 		];
 	}
+	if (view.artifact !== undefined) {
+		return [
+			{ key: "Enter", verb: "allow", consequence: `starts every worker in the plan${draftNote}` },
+			{ key: "Esc", verb: "deny", consequence: "skips it; no worker starts" },
+			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
+		];
+	}
 	return [
 		{ key: "Enter", verb: "allow", consequence: `runs this one ${actionClass.replace(/_/gu, " ")} call${draftNote}` },
 		{ key: "Esc", verb: "deny", consequence: "skips it" },
@@ -513,6 +521,11 @@ function paintMutationRow(theme: ClioTheme, row: string, diff: boolean): string 
 	return row;
 }
 
+/** The sealed plan text as rows, each field line wrapped on its own. */
+function planTextRows(text: string, width: number): string[] {
+	return text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, width));
+}
+
 function wrapArtifactLine(value: string, max: number): string[] {
 	if (value.length <= max) return [value];
 	const lines: string[] = [];
@@ -562,7 +575,10 @@ function permissionFacts(
 ): PermissionFactRows {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const identity = identityRow(theme, view, presentation, width);
-	const target = view.target !== undefined && view.target.length > 0 ? targetBlock(theme, view.target, risk, width) : [];
+	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
+	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
+	const targetText = plan !== null ? planHeadline(plan) : view.target;
+	const target = targetText !== undefined && targetText.length > 0 ? targetBlock(theme, targetText, risk, width) : [];
 	const facts: Fact[] = identity.ruleFact === null ? [] : [identity.ruleFact];
 	if (view.netReason !== undefined && view.netReason.length > 0) facts.push({ label: "why", value: view.netReason });
 	if (view.consequence !== undefined && view.consequence.length > 0) {
@@ -721,9 +737,14 @@ function permissionCardSections(
 	const timerClause = compactCountdownClause(view, countdown);
 	const rest: string[] = [];
 	if (view.artifact !== undefined) {
+		const plan = readDispatchPlan(view.artifact.text);
 		rest.push(
-			sectionRule(theme, content, "Resolved dispatch plan"),
-			...view.artifact.text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, content)),
+			...(plan === null
+				? [sectionRule(theme, content, "Resolved dispatch plan"), ...planTextRows(view.artifact.text, content)]
+				: [
+						sectionRule(theme, content, "Plan", { meta: `${MUTATION_PREVIEW_KEY} shows every field` }),
+						...factRows(theme, planFacts(plan), content, CARD_FACT_ROWS),
+					]),
 		);
 	}
 	const choices = permissionChoices(view, presentation, hasDraft, mainTurn);
@@ -1022,11 +1043,23 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				this.view.tool === "bash" ? "shell" : undefined,
 			);
 			this.lastLineCount = rows.length;
+			// The sealed plan text is what an approval covers, field for field; it leads the details the card summarizes.
+			const artifact = this.view.artifact;
+			if (artifact !== undefined) {
+				rows.unshift(
+					sectionRule(theme, content, "Resolved dispatch plan"),
+					...planTextRows(artifact.text, content),
+					sectionRule(theme, content, "Exact invocation"),
+				);
+				this.lastLineCount = rows.length;
+			}
 			const identity = identityRow(theme, this.view, permissionDecisionPresentation(this.view), content);
 			const head = [
 				...identity.rows,
 				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content, CARD_FACT_ROWS)),
-				sectionRule(theme, content, "Exact invocation", { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
+				sectionRule(theme, content, artifact !== undefined ? "Details" : "Exact invocation", {
+					meta: `Esc or ${MUTATION_PREVIEW_KEY} closes`,
+				}),
 			];
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
 			const pane = windowRows(rows, this.scroll, this.lastVisibleRows);
