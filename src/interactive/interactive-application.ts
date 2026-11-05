@@ -1557,6 +1557,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			editor.setLiteralText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
 		}
 		chatRenderer.flush();
+		notifications.dismiss("esc:held");
 		deps.chat.cancel();
 		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
 		footer.refresh();

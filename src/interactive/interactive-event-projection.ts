@@ -229,6 +229,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			}
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
 			else if (event.type === "agent_end") {
+				deps.dismissNotification("esc:held");
 				deps.stopTerminalProgress();
 				deps.onTurnEnded?.();
 			}
