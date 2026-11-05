@@ -8,6 +8,7 @@ import {
 	type TUI,
 } from "../../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
+import { extensionOwnerLabel } from "../surfaces/owner-label.js";
 import { type RenderedView, renderView, type ViewTarget } from "../surfaces/view-renderer.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
@@ -115,7 +116,7 @@ export function openExtensionViewPanel(tui: TUI, owner: string, deps: Omit<Panel
 		anchor: "center",
 		width: 88,
 		markerId: "extension-panel",
-		title: () => `Extension: ${owner} · ${deps.panel()?.title ?? "expired"}`,
+		title: () => `${extensionOwnerLabel(owner)} · ${deps.panel()?.title ?? "expired"}`,
 		footerHint: buildHint([
 			{ key: "Up/Down/Tab", verb: "select" },
 			{ key: "Enter", verb: "press" },

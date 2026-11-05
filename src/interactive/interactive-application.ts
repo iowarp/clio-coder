@@ -101,6 +101,7 @@ import {
 	opensOwnSurface,
 } from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
+import { bindExtensionOwnerNames, extensionOwnerLabel } from "./surfaces/owner-label.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import { renderView } from "./surfaces/view-renderer.js";
 import { followTerminalColors } from "./terminal-color-follow.js";
@@ -674,6 +675,25 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	// Every extension surface names its owner by the installed package's name. The
+	// inventory is read from disk, so the names are re-read at most every two
+	// seconds rather than on every painted frame.
+	let ownerNames: { at: number; names: Map<string, string> } = { at: 0, names: new Map() };
+	bindExtensionOwnerNames(
+		deps.extensions
+			? (extensionId) => {
+					const now = Date.now();
+					if (now - ownerNames.at > 2000) {
+						const list = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
+						ownerNames = {
+							at: now,
+							names: new Map(list.filter((entry) => entry.effective).map((entry) => [entry.id, entry.name])),
+						};
+					}
+					return ownerNames.names.get(extensionId);
+				}
+			: undefined,
+	);
 	const turnObservations = operatorExtensions
 		? createTurnObservations((observation) => operatorExtensions.observeV2(observation))
 		: undefined;
@@ -736,6 +756,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				leave: () => {
 					operatorExtensions.leaveWorkspace();
 				},
+
 				focusBoard: (extensionId, title, view) => {
 					if (!ambientSurfaces?.focusRegion(extensionId, title, view, "board"))
 						notify("info", "Close the open panel first; the board opens over the composer.");
@@ -756,7 +777,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				notice: (notice) => notifications.add(notice),
 				appendCard: (render) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(render), "extension-card"),
 				showText: (owner, text) =>
-					slashRuntime.context.showReference?.({ command: owner, source: "operator extension", text }),
+					slashRuntime.context.showReference?.({ command: owner, source: extensionOwnerLabel(owner), kind: "result", text }),
 				fill: (text) => editor.setLiteralText(text),
 				submit: (text) => {
 					editor.setLiteralText(text);
@@ -1200,7 +1221,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			// unless the result opened something of its own.
 			if (output.api === 2) {
 				if (output.text && !opensOwnSurface(output))
-					slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
+					slashRuntime.context.showReference?.({
+						command: invocation,
+						source: extensionOwnerLabel(id ?? invocation),
+						kind: "result",
+						text: output.text,
+					});
 				else if (!output.text && !hasExtensionDrawing(output))
 					slashRuntime.context.notice("info", `/${invocation} ran and returned nothing to show.`);
 				else if (!output.text && !opensOwnSurface(output))
@@ -1213,7 +1239,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				overlayLifecycle.openExtensionPanelState(id ?? invocation, output.panel, valid)
 			)
 				operatorPanelValid = valid;
-			else slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
+			else
+				slashRuntime.context.showReference?.({
+					command: invocation,
+					source: extensionOwnerLabel(id ?? invocation),
+					kind: "result",
+					text: output.text,
+				});
 		},
 		io,
 		bus: deps.bus,

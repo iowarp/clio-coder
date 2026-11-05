@@ -10,6 +10,7 @@ import type { NotificationInput } from "../footer/notifications.js";
 import type { OverlayLifecycleController } from "../overlay-lifecycle.js";
 import { clioTheme, frame } from "../theme/index.js";
 import type { ExtensionDockHost } from "./extension-dock.js";
+import { extensionOwnerLabel } from "./owner-label.js";
 import { renderView } from "./view-renderer.js";
 
 const DRAWING_KEYS = [
@@ -90,7 +91,7 @@ export function createAmbientSurfaces(deps: AmbientDeps): AmbientSurfaces {
 		if (!disposed)
 			deps.notice({
 				level: "warning",
-				text: `${owner}: ${problem instanceof Error ? problem.message : String(problem)}`,
+				text: `${extensionOwnerLabel(owner)}: ${problem instanceof Error ? problem.message : String(problem)}`,
 				key: `extension:${owner}:error`,
 			});
 	};
@@ -202,7 +203,7 @@ export function createAmbientSurfaces(deps: AmbientDeps): AmbientSurfaces {
 								: event.toast.tone === "warning" || event.toast.tone === "error"
 									? event.toast.tone
 									: "info",
-						text: `${event.extensionId}: ${event.toast.text}`,
+						text: `${extensionOwnerLabel(event.extensionId)}: ${event.toast.text}`,
 						ttlMs: 12000,
 						key: `extension:${event.extensionId}:toast`,
 					});
@@ -211,7 +212,7 @@ export function createAmbientSurfaces(deps: AmbientDeps): AmbientSurfaces {
 					deps.appendCard((width) =>
 						frame(
 							clioTheme(),
-							`Extension: ${event.extensionId}`,
+							extensionOwnerLabel(event.extensionId),
 							renderView(event.view, Math.max(1, width - 4), { maxRows: 22 }).lines,
 							Math.max(4, width),
 						).map((line) => truncateToWidth(line, Math.max(1, width))),

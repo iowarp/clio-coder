@@ -8,6 +8,7 @@ import { GLYPH } from "../theme/glyphs.js";
 import { applySkin, clioTheme, frame } from "../theme/index.js";
 import type { SemanticRole } from "../theme/tokens.js";
 import { skinEpoch } from "../theme/tokens.js";
+import { extensionOwnerLabel } from "./owner-label.js";
 import { renderView } from "./view-renderer.js";
 
 /** Island tiles share a row of the dock, each between these widths, one column apart. */
@@ -27,6 +28,20 @@ const STATUS_ROLES = {
 	warning: "warning",
 	error: "error",
 } as const satisfies Record<NonNullable<ExtensionStatus["tone"]>, SemanticRole>;
+
+/**
+ * An extension status as `Owner: words`. A status that already opens with its
+ * owner's name ("Local status ready") gives the name to the label instead of
+ * saying it twice, so the footer reads "Local status: ready".
+ */
+export function ownedStatus(owner: string, text: string): { owner: string; text: string } {
+	const trimmed = text.trim();
+	if (trimmed.toLowerCase().startsWith(owner.toLowerCase())) {
+		const rest = trimmed.slice(owner.length).replace(/^[\s:·-]+/u, "");
+		if (rest.length > 0) return { owner: trimmed.slice(0, owner.length), text: rest };
+	}
+	return { owner, text: trimmed };
+}
 
 export interface WorkspaceSurfaceDeps {
 	model: ExtensionSurfaceModel;
@@ -189,10 +204,14 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 				for (const id of deps.model.ids().sort()) {
 					const band = deps.model.entry(id)?.band;
 					if (!band) continue;
-					const owner = clioTheme().fg("sectionHeading", `${id} · `);
+					// The band is labelled with the name the operator installed, not the package id.
+					const owner = clioTheme().fg("sectionHeading", `${extensionOwnerLabel(id)} · `);
+					const indent = " ".repeat(visibleWidth(owner));
 					const rows = draw(band, Math.max(1, width - visibleWidth(owner)), 3);
 					lines.push(
-						...rows.map((row, index) => truncateToWidth(`${index === 0 ? owner : "  "}${row}`, width, GLYPH.ellipsis, false)),
+						...rows.map((row, index) =>
+							truncateToWidth(`${index === 0 ? owner : indent}${row}`, width, GLYPH.ellipsis, false),
+						),
 					);
 				}
 				return lines;
@@ -252,12 +271,15 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 		statusFacts(width) {
 			return memo("status", String(width), () => {
 				const theme = clioTheme();
-				const room = Math.max(8, Math.floor(width / 4));
+				// The footer gives its facts up to two fifths of the row; one status may use all of it.
+				const room = Math.max(12, Math.floor(width * 0.4));
 				return deps.model.ids().flatMap((id) => {
 					const status = deps.model.entry(id)?.status;
 					if (!status) return [];
-					const text = truncateToWidth(`${id} ${status.text}`, room, GLYPH.ellipsis, false);
-					return [theme.fg(STATUS_ROLES[status.tone ?? "neutral"], text)];
+					const { owner, text } = ownedStatus(extensionOwnerLabel(id), status.text);
+					const label = `${owner}: `;
+					const body = truncateToWidth(text, Math.max(4, room - visibleWidth(label)), GLYPH.ellipsis, false);
+					return [`${theme.fg("annotation", label)}${theme.fg(STATUS_ROLES[status.tone ?? "neutral"], body)}`];
 				});
 			});
 		},

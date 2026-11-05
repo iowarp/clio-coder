@@ -9,6 +9,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, type RowBudgetedBody, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
+import { extensionOwnerLabel } from "../surfaces/owner-label.js";
 import { clioTheme, emptyState } from "../theme/index.js";
 
 /** Rows the panel shows while the frame has not said how many it has. */
@@ -77,7 +78,7 @@ export function openExtensionPanel(
 			anchor: "center",
 			width: 88,
 			markerId: "extension-panel",
-			title: `Extension: ${owner}`,
+			title: extensionOwnerLabel(owner),
 			footerHint: buildHint([{ key: "Up/Down", verb: "scroll" }]),
 		},
 	);

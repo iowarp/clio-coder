@@ -736,6 +736,8 @@ export interface PromptReferenceCard {
 	source: string;
 	/** The body to show, already reduced to its reference block. */
 	text: string;
+	/** What the card is, beside its source; `reference` when absent. An extension's answer is a `result`. */
+	kind?: string;
 }
 
 /**
