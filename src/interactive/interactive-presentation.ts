@@ -136,7 +136,7 @@ export interface InteractivePresentationDeps {
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
-	getShutdownArmed?: () => boolean;
+	getShutdownArmed?: () => boolean | string;
 	/** Whether a permission prompt owns the keyboard, for the composer's CONFIRM rail. */
 	isAwaitingApproval?: () => boolean;
 	/** Whether that prompt has a mutation to inspect, and whether it is open (issue #254). */

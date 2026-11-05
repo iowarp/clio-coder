@@ -116,7 +116,7 @@ export interface InteractiveInputRuntimeDeps {
 	/** Armed/disarmed transitions of the Ctrl+G leader, for the footer indicator. */
 	onLeaderStateChange?: (pending: boolean) => void;
 	/** Armed/disarmed transitions of the Ctrl+C double tap, for the same indicator row. */
-	onShutdownArmedChange?: (armed: boolean) => void;
+	onShutdownArmedChange?: (armed: boolean, detail?: import("./application-controller.js").ShutdownArmDetail) => void;
 	dispatchBoard: {
 		selectPrevious(): void;
 		selectNext(): void;
@@ -529,13 +529,12 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		isStreaming: deps.isStreaming,
 		cancelActiveRun: deps.cancelActiveRun,
 		getEditorText: () => deps.editor.getText(),
-		clearEditor: () => deps.editor.setText(""),
 		requestRender: deps.requestRender,
 		// The footer pulls the flag when it refreshes, so the refresh has to land
 		// before the controller asks for the frame. The controller owns the render
 		// request on this path, which is why this hook does not make one.
-		onShutdownArmedChange: (armed) => {
-			deps.onShutdownArmedChange?.(armed);
+		onShutdownArmedChange: (armed, detail) => {
+			deps.onShutdownArmedChange?.(armed, detail);
 			deps.refreshFooter();
 		},
 		closeOverlay: () => deps.overlay.closeOverlay(),

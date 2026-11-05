@@ -24,6 +24,8 @@ import {
 import type { ChatDraft } from "./interactive-slash-runtime.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 
+export const RESTORED_DRAFT_NOTICE = "Back in the composer. Enter sends it; a / or ! command first keeps it aside.";
+
 /** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
 export const EDITOR_BASH_SHUTDOWN_MS = 6000;
 
@@ -67,6 +69,8 @@ export interface EditorSubmitEditor {
 	getExpandedText?(): string;
 	readonly draftRevision?: number;
 	setLiteralText?(text: string): void;
+	/** Literal text that came back from the queue, which the next command must not append to. */
+	setRestoredText?(text: string): void;
 	setText(text: string): void;
 	addToHistory(text: string): void;
 }
@@ -675,7 +679,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		}
 		const currentText = deps.editor.getExpandedText?.() ?? deps.editor.getText();
 		const queuedText = restored.join("\n\n");
-		setLiteralText([queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n"));
+		const text = [queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n");
+		if (deps.editor.setRestoredText) deps.editor.setRestoredText(text);
+		else setLiteralText(text);
+		deps.notify("info", RESTORED_DRAFT_NOTICE, "queue:restored");
 		deps.ui.requestRender();
 	};
 

@@ -208,8 +208,10 @@ function stageZeroRoot(
 	return root;
 }
 
-function recoveryText(records: ReadonlyArray<BootSubmission>, draft: string): string | null {
+function recoveryText(records: ReadonlyArray<BootSubmission>, draft: string, adopted: boolean): string | null {
 	if (records.length === 0 && draft.length === 0) return null;
+	// The session booted fine; this is a quit that left a draft in the composer.
+	if (adopted && records.length === 0) return `Unsent draft, not delivered to Clio:\n${draft}`;
 	const sections = records.map((record) => `[queued ${record.sequence}] ${record.rawText}`);
 	if (draft.length > 0) sections.push(`[draft] ${draft}`);
 	return `Clio Coder recovered input from an interrupted boot; copy and resubmit after restart:\n${sections.join("\n")}`;
@@ -529,6 +531,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		},
 		close(closeOptions = {}): Promise<void> {
 			if (closePromise) return closePromise;
+			const adopted = state === "adopted";
 			state = "closing";
 			epoch += 1;
 			closePromise = (async () => {
@@ -552,9 +555,10 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 						errors.push(error);
 					}
 					attempt(() => flushDiagnostics());
-					if (closeOptions.recoverInput || submissions.length > 0 || editor.getText().length > 0) {
+					const unsent = editor.unsentDraft();
+					if (closeOptions.recoverInput || submissions.length > 0 || unsent.length > 0) {
 						attempt(() => {
-							const recovered = recoveryText(submissions, editor.getText());
+							const recovered = recoveryText(submissions, unsent, adopted);
 							if (recovered) write("stderr", `${recovered}\n`);
 						});
 					}

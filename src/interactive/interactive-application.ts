@@ -64,7 +64,7 @@ import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY } from "./com
 import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
-import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
+import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS, RESTORED_DRAFT_NOTICE } from "./editor-submit.js";
 import { renderExitSummary } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
 import { createExtensionDevSession, type ExtensionDevSession } from "./extension-dev-session.js";
@@ -596,7 +596,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 * A Ctrl+C armed the double tap and its 500ms window is still open. Owned
 	 * here for the same reason as the leader flag above.
 	 */
-	let shutdownArmed = false;
+	/** False, or the armed line the footer shows while a second Ctrl+C would quit. */
+	let shutdownArmed: string | false = false;
 	const updateAbort = new AbortController();
 	let updateTimer: ReturnType<typeof setTimeout> | undefined;
 	let updateMonitor: ReturnType<typeof import("./update-monitor.js").startUpdateMonitor> | undefined;
@@ -1225,7 +1226,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					operator: operatorExtensions,
 					editorBash: editorSubmit.hasActiveEditorBash(),
 					reloading: deps.reloadClasses?.active === true,
-					shuttingDown: shutdownArmed || getTerminationCoordinator().getPhase() !== "idle",
+					shuttingDown: shutdownArmed !== false || getTerminationCoordinator().getPhase() !== "idle",
 				}),
 			settle: () => deps.chat.whenSettled(),
 			armHandoff: () => deps.armRestartHandoff?.(),
@@ -1483,7 +1484,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			toEditor: (entry) => {
 				if (deps.chat.removeQueuedEntry(entry.id, "to-editor") === null) return;
 				const current = editor.getExpandedText();
-				editor.setLiteralText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
+				editor.setRestoredText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
+				notify("info", RESTORED_DRAFT_NOTICE, "queue:restored");
 			},
 			sendNow: (entry) => {
 				if (deps.chat.removeQueuedEntry(entry.id, "sent-now") === null) return;
@@ -1912,8 +1914,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onLeaderStateChange: (pending) => {
 			leaderArmed = pending;
 		},
-		onShutdownArmedChange: (armed) => {
-			shutdownArmed = armed;
+		onShutdownArmedChange: (armed, detail) => {
+			shutdownArmed = !armed
+				? false
+				: `${detail?.draftKept === true ? "draft kept · " : ""}Ctrl+C again to quit${detail ? ` (${detail.secondsLeft}s)` : ""}`;
 			// The footer caches its composed text, and arming only requested a frame.
 			// Without a recompose the hint showed when some other refresh happened
 			// to land and the expiry left it standing, so it was never tied to the

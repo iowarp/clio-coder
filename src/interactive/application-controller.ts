@@ -4,11 +4,12 @@ import type { LeaderKeyController } from "./leader-key.js";
 import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-lifecycle.js";
 
 /**
- * How long a first Ctrl+C keeps the second armed. 500ms expired before an
- * operator who had typed into the wrong pane could read the "again to quit"
+ * How long a first Ctrl+C keeps the second armed. Shorter windows expired before
+ * an operator who had typed into the wrong pane could read the "again to quit"
  * hint and press again, so the TUI looked like it ignored Ctrl+C.
  */
-export const APPLICATION_DOUBLE_TAP_MS = 1_200;
+export const APPLICATION_DOUBLE_TAP_MS = 3_000;
+const ARMED_TICK_MS = 1_000;
 
 export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",
@@ -40,18 +41,11 @@ export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.exit",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
-export type CtrlCAction =
-	| "cancel-stream"
-	| "close-overlay"
-	| "clear-editor"
-	| "arm-shutdown"
-	| "shutdown"
-	| "protect-queue";
+export type CtrlCAction = "cancel-stream" | "close-overlay" | "arm-shutdown" | "shutdown" | "protect-queue";
 
 export interface CtrlCActionState {
 	overlayState: OverlayState;
 	streaming: boolean;
-	editorText: string;
 	lastCtrlCAt: number;
 	now: number;
 	hasQueuedMessages?: boolean;
@@ -60,7 +54,6 @@ export interface CtrlCActionState {
 function resolveApplicationCtrlCAction(state: CtrlCActionState): CtrlCAction {
 	if (state.overlayState !== "closed") return "close-overlay";
 	if (state.streaming) return "cancel-stream";
-	if (state.editorText.length > 0) return "clear-editor";
 	if (state.hasQueuedMessages) return "protect-queue";
 	if (state.lastCtrlCAt > 0 && state.now - state.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) return "shutdown";
 	return "arm-shutdown";
@@ -114,7 +107,6 @@ export interface ApplicationControllerDeps {
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
 	getEditorText: () => string;
-	clearEditor: () => void;
 	requestRender: () => void;
 	/**
 	 * Ctrl+C armed the double-tap and is waiting for the second press, or the
@@ -123,9 +115,10 @@ export interface ApplicationControllerDeps {
 	 * 500ms window that quits was undiscoverable and a first press was
 	 * indistinguishable from a key the application never received (issue #108).
 	 * The footer's leader indicator exists for exactly this reason and this
-	 * rides beside it.
+	 * rides beside it. While armed it fires again each second with the time left,
+	 * and says whether an unsent draft is staying in the composer.
 	 */
-	onShutdownArmedChange?: (armed: boolean) => void;
+	onShutdownArmedChange?: (armed: boolean, detail?: ShutdownArmDetail) => void;
 	closeOverlay: () => void;
 	listNotifications: () => ReadonlyArray<{ id: string }>;
 	dismissNotification: (id: string) => void;
@@ -156,6 +149,11 @@ export interface ApplicationControllerDeps {
 	 * `/quit` on the same build ended with `?25h`.
 	 */
 	registerTerminalTeardown?: (teardown: () => void | Promise<void>) => void;
+}
+
+export interface ShutdownArmDetail {
+	secondsLeft: number;
+	draftKept: boolean;
 }
 
 export type ApplicationInputResult = { consume: true } | undefined;
@@ -205,13 +203,28 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		// a press that lands after the window by the clock but before the late
 		// timer fires must not leave that timer to clear the hint mid-window.
 		clearArmedIndicatorTimer();
-		const changed = armed !== shutdownArmed;
 		shutdownArmed = armed;
 		if (armed) {
-			armedIndicator = deps.intervals.setInterval(() => setShutdownArmed(false), APPLICATION_DOUBLE_TAP_MS);
+			let ticksLeft = Math.ceil(APPLICATION_DOUBLE_TAP_MS / ARMED_TICK_MS);
+			const announce = (): void =>
+				deps.onShutdownArmedChange?.(true, {
+					secondsLeft: Math.ceil((ticksLeft * ARMED_TICK_MS) / 1000),
+					draftKept: deps.getEditorText().length > 0,
+				});
+			armedIndicator = deps.intervals.setInterval(() => {
+				ticksLeft -= 1;
+				if (ticksLeft <= 0) {
+					setShutdownArmed(false);
+					return;
+				}
+				announce();
+				deps.requestRender();
+			}, ARMED_TICK_MS);
 			armedIndicator.unref?.();
+			announce();
+		} else {
+			deps.onShutdownArmedChange?.(false);
 		}
-		if (changed) deps.onShutdownArmedChange?.(armed);
 		deps.requestRender();
 	};
 
@@ -320,7 +333,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		const action = resolveApplicationCtrlCAction({
 			overlayState: deps.getOverlayState(),
 			streaming: deps.isStreaming(),
-			editorText: deps.getEditorText(),
 			lastCtrlCAt,
 			now: deps.clock.now(),
 			hasQueuedMessages: deps.hasQueuedMessages?.() ?? false,
@@ -352,24 +364,15 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.closeOverlay();
 			return;
 		}
-		if (action === "clear-editor") {
-			// Clearing a draft consumes this press as an editor action, just like
-			// cancelling a stream or closing an overlay consumes it as their action.
-			// It must not become the hidden first half of a shutdown double tap.
-			lastCtrlCAt = 0;
-			setShutdownArmed(false);
-			deps.clearEditor();
-			deps.requestRender();
-			return;
-		}
 		if (action === "protect-queue") {
 			lastCtrlCAt = 0;
 			setShutdownArmed(false);
 			deps.explainProtectedExit?.();
 			return;
 		}
-		// arm-shutdown. The one branch that used to fall off the end of this
-		// function with nothing to show for the press.
+		// arm-shutdown, with or without a draft. A first press used to clear the
+		// draft in silence, so an unsent prompt was lost to the gesture that also
+		// quits; the draft now stays and the second press is what leaves.
 		setShutdownArmed(true);
 	};
 
@@ -388,6 +391,12 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		if (matchesKey(data, "ctrl+c")) {
 			handleCtrlC();
 			return { consume: true };
+		}
+		// Any other key means the operator went on working, so a later Ctrl+C
+		// must not quit on the strength of the earlier one.
+		if (shutdownArmed) {
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
 		}
 		if (deps.leaderKeys.isPending() && deps.leaderKeys.route(data)) return { consume: true };
 		if (deps.leaderKeys.route(data)) return { consume: true };

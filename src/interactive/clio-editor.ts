@@ -282,6 +282,14 @@ export class ClioEditor extends Editor {
 	/** The line a suggestion list was built for, stamped when the list first shows. */
 	private suggestionStamp: { list: unknown; text: string; line: number; col: number } | null = null;
 	private pastedOperatorTokens = new Set<string>();
+	/**
+	 * The text is untouched since it came back from the queue. The next key is the
+	 * one that can run it together with a command: `/settings` then `/usage` once
+	 * reached the model as `/settings/usage`.
+	 */
+	private restoredDraft = false;
+	/** A restored draft set aside for the command being typed; it returns when the composer empties. */
+	private parkedDraft: string | null = null;
 
 	get draftRevision(): number {
 		return this.revision;
@@ -291,6 +299,29 @@ export class ClioEditor extends Editor {
 	setLiteralText(text: string): void {
 		this.setText(text);
 		this.pastedBangOffsets = new Set([...text.matchAll(/!/gu)].map((match) => match.index));
+	}
+
+	setRestoredText(text: string): void {
+		this.setLiteralText(text);
+		this.restoredDraft = text.length > 0;
+	}
+
+	/** Everything typed and not sent, including a draft set aside for a command. */
+	unsentDraft(): string {
+		return [this.parkedDraft ?? "", this.getExpandedText()].filter((part) => part.trim().length > 0).join("\n\n");
+	}
+
+	private cursorAtEnd(): boolean {
+		const lines = this.getLines();
+		const cursor = this.getCursor();
+		return cursor.line === lines.length - 1 && cursor.col === (lines[cursor.line] ?? "").length;
+	}
+
+	/** Rail words for a draft that is not what the composer would normally hold, or empty. */
+	private draftNote(width: number): string {
+		if (this.parkedDraft !== null) return width >= 80 ? "DRAFT KEPT · back after this command" : "DRAFT KEPT";
+		if (this.restoredDraft) return width >= 80 ? "RESTORED · Enter sends · / keeps it aside" : "RESTORED";
+		return "";
 	}
 
 	override applyEdit(operation: Parameters<Editor["applyEdit"]>[0]): void {
@@ -452,7 +483,8 @@ export class ClioEditor extends Editor {
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const draftLabel = mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "";
 		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
-		let suffix = join([position, draftLabel]);
+		const note = this.draftNote(width);
+		let suffix = join([position, draftLabel, note ? theme.fg("draftState", note) : ""]);
 		// A draft typed while Clio holds a consumed prompt is accepted and sent in
 		// order once preparation or compaction ends, so the rail says what Enter
 		// does. The mode's own words outrank it on a narrow rail.
@@ -840,6 +872,14 @@ export class ClioEditor extends Editor {
 	/** Paste is always literal; a later deliberate key submits it. */
 	override handleInput(data: string): void {
 		this.revision += 1;
+		if (this.restoredDraft && !this.bracketedPasteActive && (data === "/" || data === "!") && this.cursorAtEnd()) {
+			this.parkedDraft = this.getExpandedText();
+			this.restoredDraft = false;
+			this.pastedBangOffsets.clear();
+			this.pastedOperatorTokens.clear();
+			super.setText("");
+		}
+		const parkedBeforeInput = this.parkedDraft;
 		const openedPaste = data.includes("\x1b[200~");
 		const closedPaste = data.includes("\x1b[201~");
 		const pasteMutation = this.bracketedPasteActive || openedPaste;
@@ -902,6 +942,8 @@ export class ClioEditor extends Editor {
 			this.reopenSuggestions();
 		}
 		const textAfterInput = this.getText();
+		// A parked draft that came back during this key is still untouched.
+		if (textAfterInput !== textBeforeInput && this.parkedDraft === parkedBeforeInput) this.restoredDraft = false;
 		this.pastedBangOffsets = remapPastedBangOffsets(
 			textBeforeInput,
 			textAfterInput,
@@ -910,6 +952,7 @@ export class ClioEditor extends Editor {
 		);
 		if (openedPaste) this.bracketedPasteActive = true;
 		if (closedPaste) this.bracketedPasteActive = false;
+		if (this.parkedDraft !== null && this.getText().length === 0) this.setText("");
 		if (pasteMutation && textAfterInput !== this.getExpandedText()) {
 			// A large paste is represented by an opaque visible token. Remember the
 			// inserted token through edits and undo, without depending on its format.
@@ -937,6 +980,13 @@ export class ClioEditor extends Editor {
 		this.pastedOperatorTokens.clear();
 		this.pastedBangOffsets.clear();
 		this.bracketedPasteActive = false;
+		this.restoredDraft = false;
+		if (text.length === 0 && this.parkedDraft !== null) {
+			const parked = this.parkedDraft;
+			this.parkedDraft = null;
+			this.setRestoredText(parked);
+			return;
+		}
 		super.setText(text);
 	}
 }
