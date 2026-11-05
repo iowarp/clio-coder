@@ -184,6 +184,8 @@ type EditorSteerSubmission = "accepted" | "rejected";
 export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubmitController {
 	let shuttingDown = false;
 	let activeEditorBash: AbortController | null = null;
+	/** Marks the running line's stop request, so its card says the stop went out while the process still runs (HS18). */
+	let markEditorBashStop: (() => void) | null = null;
 	let activeEditorBashSettlement: Promise<void> | null = null;
 
 	const runEditorBash = (text: string): boolean => {
@@ -220,10 +222,20 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			totalBytes: 0,
 			excludeFromContext: parsed.excludeFromContext,
 		};
+		let stopRequestedAt: number | null = null;
+		markEditorBashStop = () => {
+			stopRequestedAt ??= performance.now();
+		};
 		deps.chatPanel.appendReplayBlock(
 			(width, detail, unbounded) =>
 				renderBashTranscriptExecution(
-					{ ...execution, ...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}) },
+					{
+						...execution,
+						...(execution.running ? { elapsedMs: Math.max(0, performance.now() - startedAt) } : {}),
+						...(execution.running && stopRequestedAt !== null
+							? { stopWaitMs: Math.max(0, performance.now() - stopRequestedAt) }
+							: {}),
+					},
 					width,
 					undefined,
 					{ detail, ...(unbounded ? { unbounded } : {}) },
@@ -267,6 +279,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					deps.onLocalEntry?.(entry);
 					execution.output = entry.output;
 					execution.running = false;
+					if (stopRequestedAt !== null) execution.stopWaitMs = Math.max(0, performance.now() - stopRequestedAt);
 					execution.exitCode = entry.exitCode;
 					execution.cancelled = entry.cancelled;
 					execution.truncated = entry.truncated;
@@ -302,7 +315,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.io.stderr(`[bash] ${msg}\n`);
 			} finally {
 				deps.onLocalBashRunning?.(false);
-				if (activeEditorBash === abort) activeEditorBash = null;
+				if (activeEditorBash === abort) {
+					activeEditorBash = null;
+					markEditorBashStop = null;
+				}
 				if (activeEditorBashSettlement === settlement) activeEditorBashSettlement = null;
 				deps.ui.requestRender();
 			}
@@ -791,6 +807,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		cancelActiveEditorBash: () => {
 			if (!activeEditorBash) return false;
 			deps.onLocalBashCancelling?.();
+			markEditorBashStop?.();
 			activeEditorBash.abort();
 			return true;
 		},

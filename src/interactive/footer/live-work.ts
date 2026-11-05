@@ -17,12 +17,14 @@ import type { AgentStatus } from "../status/index.js";
 import type { ClioTheme } from "../theme/index.js";
 import { formatCompactMs, formatWaitClock, GLYPH } from "../theme/index.js";
 import { modelNickname } from "../theme/labels.js";
-import { composerPhasePresentation } from "./widgets.js";
+import { type CompactionRailFacts, composerPhasePresentation } from "./widgets.js";
 
 export interface LiveWorkFacts {
 	/** The name the composer rail gives the main agent. */
 	actor: string;
 	status: AgentStatus;
+	/** The running compaction's stage and start, which the rail reads too; null or absent when none runs. */
+	compaction?: CompactionRailFacts | null;
 	/** Active fleet runs, helpers excluded; only the first is named. */
 	workers: ReadonlyArray<DispatchBoardRow>;
 	/** How the worker's current action reads on the fleet dock, in the columns its row leaves it. */
@@ -42,7 +44,8 @@ function phaseElapsedMs(status: AgentStatus, now: number): number {
 const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/model|\/model moves it|\/model)(?= · |$)/gu;
 
 /** A label that already states its age (`has no output · 12s`) must not gain a second clock. */
-const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)\b/u;
+// `1m6s` is one clock too: its minutes and seconds are joined, so the pattern takes a compound form whole (B3).
+const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)(?:\d+(?:\.\d+)?(?:s|m))*\b/u;
 
 function workerElapsed(row: DispatchBoardRow): string | null {
 	// A plan has no run telemetry of its own; its clock is the board row's, from its start.
@@ -223,7 +226,17 @@ export function liveWorkStrip(
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
 	let candidates: string[];
 	if (mainActive) {
-		const phase = composerPhasePresentation(facts.status, room, facts.now);
+		const compaction = facts.compaction ?? null;
+		const phase = composerPhasePresentation(
+			facts.status,
+			room,
+			facts.now,
+			facts.actor,
+			undefined,
+			0,
+			undefined,
+			compaction,
+		);
 		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
 		const clockFor = (text: string): string | null => {
@@ -232,7 +245,9 @@ export function liveWorkStrip(
 		};
 		const label = railFree(phase.label);
 		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
-		const looseLabel = railFree(composerPhasePresentation(facts.status, room, facts.now, undefined, room - 2).label);
+		const looseLabel = railFree(
+			composerPhasePresentation(facts.status, room, facts.now, facts.actor, room - 2, 0, undefined, compaction).label,
+		);
 		const clocked = (text: string): string => {
 			const elapsed = clockFor(text);
 			return `${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;

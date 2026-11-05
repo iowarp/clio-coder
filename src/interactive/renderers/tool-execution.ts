@@ -57,6 +57,7 @@ import {
 	clioTheme,
 	collapseHomePath,
 	formatCompactMs,
+	formatWaitClock,
 	functionText,
 	GLYPH,
 	holdFact,
@@ -1968,6 +1969,32 @@ export interface BashTranscriptExecution {
 	fullOutputPath?: string | undefined;
 	excludeFromContext?: boolean | undefined;
 	error?: string | undefined;
+	/** Since the operator asked it to stop: live while it runs on, then how long it took to exit (HS18). */
+	stopWaitMs?: number | undefined;
+}
+
+/**
+ * The row a stop request owes the card: while the process runs on, that the stop went out and how long ago; once it
+ * exits, how long the stop took when that was long enough to notice. A card reading `you are running` beside a rail
+ * reading `stopping` left the operator to guess which was true.
+ */
+function bashStopRow(execution: BashTranscriptExecution, width: number): string | null {
+	const wait = execution.stopWaitMs;
+	if (wait === undefined) return null;
+	if (execution.running) {
+		const age = wait >= 1000 ? ` ${formatWaitClock(wait)} ago` : "";
+		const words = [`stop sent${age}, waiting for the command to exit`, `stop sent${age}, waiting to exit`, "stopping"];
+		const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
+		const fitted = words.find((text) => visibleWidth(text) <= room) ?? truncateToWidth("stopping", room, "", false);
+		return `${CONTENT_INDENT}${theme.fg("warning", GLYPH.cancelled)} ${toolMeta(fitted)}`;
+	}
+	if (wait < 1000) return null;
+	const took = formatCompactMs(Math.floor(wait / 100) * 100);
+	const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
+	const words = [`stopped ${took} after you asked`, `stopped after ${took}`, took].find(
+		(text) => visibleWidth(text) <= room,
+	);
+	return words === undefined ? null : `${CONTENT_INDENT}${theme.fg("toolMetadata", GLYPH.cancelled)} ${toolMeta(words)}`;
 }
 
 /**
@@ -1997,20 +2024,24 @@ export function renderBashTranscriptExecution(
 		content: [{ type: "text", text: execution.output }],
 		details,
 	};
+	const stopRow = bashStopRow(execution, width);
+	const withStop = (rows: string[]): string[] => (stopRow === null ? rows : [...rows, stopRow]);
 	if (execution.running) {
-		return renderToolPreview(
-			{
-				toolCallId: "local-bash",
-				toolName: "bash",
-				args,
-				phase: "running",
-				elapsedMs: execution.elapsedMs,
-				excludeFromContext: execution.excludeFromContext,
-				actor: "operator",
-			},
-			width,
-			bodyOptions.detail ?? transcriptDetail(),
-			{ ...bodyOptions, operator: true, partialResult: result },
+		return withStop(
+			renderToolPreview(
+				{
+					toolCallId: "local-bash",
+					toolName: "bash",
+					args,
+					phase: "running",
+					elapsedMs: execution.elapsedMs,
+					excludeFromContext: execution.excludeFromContext,
+					actor: "operator",
+				},
+				width,
+				bodyOptions.detail ?? transcriptDetail(),
+				{ ...bodyOptions, operator: true, partialResult: result },
+			),
 		);
 	}
 	const message = execution.error?.trim();
@@ -2039,9 +2070,11 @@ export function renderBashTranscriptExecution(
 			...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
 		},
 	};
-	return bodyOptions.unbounded
-		? renderToolExecution(finished, width, bodyOptions)
-		: renderToolPreview(finished, width, bodyOptions.detail ?? transcriptDetail(), { ...bodyOptions, operator: true });
+	return withStop(
+		bodyOptions.unbounded
+			? renderToolExecution(finished, width, bodyOptions)
+			: renderToolPreview(finished, width, bodyOptions.detail ?? transcriptDetail(), { ...bodyOptions, operator: true }),
+	);
 }
 
 /**

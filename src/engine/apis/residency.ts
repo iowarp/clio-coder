@@ -597,6 +597,15 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 		return { decision: "reconcile", evict: [], fallbackEvict: [], keepResident, notices };
 	}
 
+	/** Each resident Clio will not unload, with the reason in the operator's words rather than the tier's name. */
+	const unloadBlockers = (residents: ResidentClassified[], allowed: ResidentClassified[]): string =>
+		residents
+			.filter((entry) => !allowed.includes(entry))
+			.map(
+				(entry) =>
+					`'${entry.modelId}' (${!entry.loadedByClio ? "this Clio session did not load it" : entry.protection === "config" ? "settings still use it" : entry.protection === "worker" ? "a worker is using it" : "the server pins it"})`,
+			)
+			.join(", ");
 	// Only loads attributed to this Clio session may be eviction candidates.
 	// Configured model names describe demand, not ownership of foreign loads.
 	const owned = others.filter((entry) => entry.loadedByClio);
@@ -664,7 +673,7 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 						facts,
 						"will-not-fit",
 						"error",
-						`cannot load '${facts.keepModelId}' on '${facts.targetId}': its ${facts.capacity} instance slots cannot be freed using Clio-owned, evictable models (${others.map((entry) => entry.modelId).join(", ")}). Unload one manually or raise the server's max instances.`,
+						`cannot load '${facts.keepModelId}' on '${facts.targetId}': the server holds ${facts.capacity} ${facts.capacity === 1 ? "model" : "models"} at a time, and Clio may not unload ${unloadBlockers(others, candidates)}. Unload one on the server or raise its max instances.`,
 						{ residentCount: facts.resident.length, maxInstances: facts.capacity },
 					),
 				);

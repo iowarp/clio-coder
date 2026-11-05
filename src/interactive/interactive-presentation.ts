@@ -13,6 +13,20 @@ import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { resolveModelRuntimeCapabilitiesForProviders, thinkingEffectNote } from "../domains/providers/index.js";
+
+/**
+ * Why the rail's thinking word differs from the level asked for, in the operator's terms (TY05). `medium runs as on`
+ * made the reader decode a mapping; a toggle model has no levels at all, which is the fact that explains the word.
+ */
+function railThinkingNote(thinking: Parameters<typeof thinkingEffectNote>[0]): string | null {
+	const note = thinkingEffectNote(thinking);
+	if (note === null) return null;
+	if (thinking.mechanism === "on-off") return "this model has no levels";
+	if (thinking.mechanism === "always-on") return "this model always thinks";
+	if (thinking.mechanism === "none") return note;
+	return `${thinking.configuredLevel} not offered`;
+}
+
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
@@ -57,6 +71,7 @@ import type { ComposerKeyContext } from "./footer/key-hints.js";
 import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
+import { routeFirstOutput } from "./footer/silence-note.js";
 import type { CompactionRailFacts } from "./footer/widgets.js";
 import {
 	activeTaskRail,
@@ -72,8 +87,9 @@ import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js
 import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
+import { createSilenceTranscriptRow } from "./silence-row.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
-import type { StatusController, TurnSummary } from "./status/index.js";
+import type { AgentStatus, StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController, humanWaitTotalMs } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
@@ -648,6 +664,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const text = composerEditor?.getText() ?? "";
 			// The rail under a draft addressed to a worker already names its Enter and Esc.
 			if (composerEditor?.steerTarget(text)) return "surface";
+			// A stop already asked for owns an empty composer's hint until the work has exited.
+			const stopping =
+				localBashCancelledAt !== null ||
+				(footerDeps.getAgentStatus?.() ?? statusController.current()).phase === "cancelling";
+			if (stopping && text.trim().length === 0) return "stopping";
 			return draftKeyContext(
 				text,
 				deps.chat.isStreaming(),
@@ -717,23 +738,33 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		if (plan.state === "cancelling") return `stopping ${running.join(", ") || "its steps"}`;
 		return running.length > 0 ? `running ${running.join(", ")} · ${count}` : count;
 	};
-	const currentLiveWork = (): LiveWorkFacts => ({
-		actor: modelNickname(deps.getSettings?.().chat?.model),
-		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
-		// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-		workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
-		background: backgroundCalls.active(),
-		workerActivity: (row, room) =>
-			row.plan !== undefined
-				? planRailWords(row.plan)
-				: // A queued run's progress reads `starting`, which it is not until it has a slot.
-					row.status === "enqueued"
-					? "waiting for a slot"
-					: row.progress
-						? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
-						: dispatchStatusPresentation(row.status).label,
-		now: Date.now(),
-	});
+	/** The model the rail names for a phase: once a request is out, the model it went to, whatever route was picked since. */
+	const phaseModelName = (status: AgentStatus): string => {
+		const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
+		return modelNickname(out ?? deps.getSettings?.().chat?.model);
+	};
+	const currentLiveWork = (): LiveWorkFacts => {
+		const status = footerDeps.getAgentStatus?.() ?? statusController.current();
+		return {
+			// The strip over a dock reads the phase with the rail's own name and compaction facts, so the two cannot disagree (F2).
+			actor: phaseModelName(status),
+			status,
+			compaction: runningCompaction(),
+			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
+			workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
+			background: backgroundCalls.active(),
+			workerActivity: (row, room) =>
+				row.plan !== undefined
+					? planRailWords(row.plan)
+					: // A queued run's progress reads `starting`, which it is not until it has a slot.
+						row.status === "enqueued"
+						? "waiting for a slot"
+						: row.progress
+							? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
+							: dispatchStatusPresentation(row.status).label,
+			now: Date.now(),
+		};
+	};
 	const runningCompaction = (): CompactionRailFacts | null => {
 		const activity = contextActivityStore.current();
 		return activity?.kind === "compaction" && activity.completedAtMs === null
@@ -762,9 +793,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
-				// Once a request is out the rail names the model it went to, whatever route was picked since.
-				const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
-				const name = modelNickname(out ?? route?.model);
+				const name = phaseModelName(status);
 				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
 				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
 				// Beside other work a phase must say whose it is, so a rail wide enough to name it holds that name back from the
@@ -800,6 +829,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					reason: target.reason,
 					health: target.health.status,
 					lastStop: onRoute ? last.stopReason : null,
+					workerAnswered:
+						(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
 					...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
 				},
 				width,
@@ -862,7 +893,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
-			const note = thinking ? thinkingEffectNote(thinking) : null;
+			const note = thinking ? railThinkingNote(thinking) : null;
 			return {
 				label:
 					note !== null && thinking
@@ -1117,6 +1148,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const presentationInterval = (): number =>
 		deps.getSettings?.().interface.demo !== false && motionEnabled() && workIsMoving() ? ACTIVITY_STEP_MS : 1_000;
 	let tickerInterval = presentationInterval();
+	// A minute of silence on a model call earns a transcript row that outlives the rail's escalation (F8).
+	const silenceRow = createSilenceTranscriptRow({
+		append: (render, isLive) => chatPanel.appendReplayBlock((width) => render(width), isLive),
+		modelName: (status) => modelNickname(status.modelRequest?.modelId ?? deps.getSettings?.().chat?.model),
+	});
 	let lastActivitySecond = -1;
 	let tickersStopped = false;
 	const tickPresentation = (): void => {
@@ -1132,6 +1168,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const second = Math.floor(performance.now() / 1_000);
 		if (second !== lastActivitySecond) {
 			lastActivitySecond = second;
+			silenceRow.observe(statusController.current(), Date.now());
 			const statusActive =
 				!["idle", "ended"].includes(statusController.current().phase) ||
 				localBashStartedAt !== null ||

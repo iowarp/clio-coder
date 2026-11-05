@@ -1112,6 +1112,29 @@ function lastAssistantText(messages: ReadonlyArray<AgentMessage>): string {
 	return "";
 }
 
+/**
+ * Why a forced compaction failed, in words: `compaction stream failed: 401: {"message":"invalid api key"}` reads
+ * `the provider answered 401: invalid api key`.
+ */
+function compactionFailureReason(err: unknown): string {
+	const raw = (err instanceof Error ? err.message : String(err)).replace(/^compaction stream failed:\s*/u, "");
+	const status = /^(\d{3}):\s*/u.exec(raw);
+	const rest = status ? raw.slice(status[0].length) : raw;
+	let detail = rest.trim();
+	try {
+		const parsed: unknown = JSON.parse(detail);
+		const message =
+			parsed && typeof parsed === "object" && "message" in parsed && typeof parsed.message === "string"
+				? parsed.message
+				: null;
+		if (message !== null) detail = message;
+	} catch {
+		// Not JSON: the provider's text is already the reason.
+	}
+	detail = detail.replace(/[.\s]+$/u, "");
+	return status ? `The provider answered ${status[1]}: ${detail}` : `The summary call failed: ${detail}`;
+}
+
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const sessionResetListeners = new Set<() => void>();
@@ -4221,7 +4244,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					);
 					return;
 				}
-				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
+				// A failed summary saved nothing either, and the operator needs that, the reason in words and the way on (HS14).
+				const tokens = context.contextUsage().tokens;
+				emitNotice(
+					`[/context compact] failed; context unchanged${tokens !== null ? ` at ${footerTokens(tokens)} tokens` : ""}. ${compactionFailureReason(err)}. /context compact tries again; /model picks another route to summarize on.`,
+					"error",
+				);
 				return;
 			} finally {
 				leavePreparation();
