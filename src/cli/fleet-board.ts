@@ -504,7 +504,7 @@ function runRecordLines(paint: BoardPaint, model: TakeoverModel, width: number):
 	if (isLive(card.state)) return [];
 	const lines: string[] = [
 		"",
-		paint.fg("divider", `${RULE.repeat(2)} run record ${RULE.repeat(Math.max(0, width - 14))}`),
+		`${paint.fg("divider", RULE.repeat(2))} ${paint.fg("annotation", "run record")} ${paint.fg("divider", RULE.repeat(Math.max(0, width - 14)))}`,
 	];
 	lines.push(cut(verdictText(paint, card), width));
 	const record = card.record;

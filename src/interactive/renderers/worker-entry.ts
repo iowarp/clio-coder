@@ -564,7 +564,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
 	if (model && modelRoom > 0) facts.splice(target ? 1 : 0, 0, truncateToWidth(model, modelRoom, GLYPH.ellipsis, false));
 	return truncateToWidth(
-		`${theme.fg("gutter", RAIL)}${theme.style("toolMetadata", truncateToWidth(facts.join(SEPARATOR), room, GLYPH.ellipsis, false), { dim: true })}`,
+		`${theme.fg("gutter", RAIL)}${theme.fg("metadata", truncateToWidth(facts.join(SEPARATOR), room, GLYPH.ellipsis, false))}`,
 		width,
 		GLYPH.ellipsis,
 		false,
