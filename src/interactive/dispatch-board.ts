@@ -1693,9 +1693,10 @@ export interface DispatchBoardView extends Component, RowBudgetedBody {
 	toggleDetail(): void;
 	detailExpanded(): boolean;
 	/** Whether Enter on the selected row opens the watch pane instead of its detail. */
-	enterWatches(): boolean;
+	/** Whether `w` can open the watch pane on the selected run. */
+	canWatch(): boolean;
 	/** Say which rows Enter takes to the watch pane; only a session with a pane host has any. */
-	setEnterWatches(predicate: (row: DispatchBoardRow) => boolean): void;
+	setWatchable(predicate: (row: DispatchBoardRow) => boolean): void;
 }
 
 export function createDispatchBoardView(
@@ -1706,7 +1707,7 @@ export function createDispatchBoardView(
 	// Detail is a property of the operator's attention, not of a run, so it
 	// follows the cursor rather than pinning to the row it was opened on.
 	let expanded = false;
-	let enterWatches: (row: DispatchBoardRow) => boolean = () => false;
+	let watchable: (row: DispatchBoardRow) => boolean = () => false;
 	let bodyRows = 0;
 	let memo: { key: string; lines: string[] } | null = null;
 
@@ -1757,12 +1758,9 @@ export function createDispatchBoardView(
 					.filter((run) => run.evidence)
 					.map((run) => run.runId)
 					.join(",") ?? "";
-			const selectedRow = currentRows.find((row) => row.runId === selectedRunId);
-			// Where Enter goes to the watch pane, the words on the card name the key that still opens detail.
-			const detailKey = selectedRow !== undefined && enterWatches(selectedRow) ? "d" : "Enter";
-			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${detailKey}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
+			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
-			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded, detailKey);
+			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded);
 			memo = { key, lines };
 			return lines;
 		},
@@ -1789,12 +1787,12 @@ export function createDispatchBoardView(
 		detailExpanded(): boolean {
 			return expanded;
 		},
-		enterWatches(): boolean {
+		canWatch(): boolean {
 			const row = normalizeSelection(rows());
-			return row !== null && enterWatches(row);
+			return row !== null && watchable(row);
 		},
-		setEnterWatches(predicate: (row: DispatchBoardRow) => boolean): void {
-			enterWatches = predicate;
+		setWatchable(predicate: (row: DispatchBoardRow) => boolean): void {
+			watchable = predicate;
 			memo = null;
 		},
 		invalidate(): void {

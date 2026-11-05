@@ -1762,14 +1762,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		return decision.open ? { runId: row.runId, agentId: row.agentId } : null;
 	};
 	if (watchPane) {
-		dispatchBoard.setEnterWatches(
+		dispatchBoard.setWatchable(
 			(row) => row.plan === undefined && paneWatchDecision({ source: "workers-view", runStatus: row.status }).open,
 		);
 	}
 	/**
-	 * Enter in the workers view. True means the watch pane took the key; false
-	 * (panes off, nothing watchable under the policy) falls back to the inline
-	 * worker-progress detail, so a terminal run's Enter still expands its card.
+	 * `w` in the workers view. True means the watch pane took the key; false
+	 * means panes are off or nothing selected is watchable under the policy.
 	 */
 	const watchSelectedDispatch = (): boolean => {
 		const selected = selectedWatchableRun();
