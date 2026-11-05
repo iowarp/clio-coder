@@ -4,7 +4,7 @@ import type { AgentStatus } from "../../session-control/status-types.js";
 import { computeWatchdogTier } from "../status/index.js";
 import { formatCompactMs } from "../theme/index.js";
 
-/** What this session's settled main calls say about how long a route takes to its first output. */
+/** What this session's settled calls of one role say about how long a route takes to its first output. */
 export interface RouteFirstOutput {
 	calls: number;
 	slowestMs: number;
@@ -13,22 +13,52 @@ export interface RouteFirstOutput {
 /** One call is a data point. It takes two before Clio says what is usual for a route. */
 const USUAL_MIN_CALLS = 2;
 
+/** The history when it is enough to say what is usual, else null. */
+export function usualFirstOutput(history: RouteFirstOutput | null | undefined): RouteFirstOutput | null {
+	return history !== null && history !== undefined && history.calls >= USUAL_MIN_CALLS ? history : null;
+}
+
+/** One fold of a view's calls per role, keyed by route, so a board of running workers reads it once per telemetry batch. */
+const routeFolds = new WeakMap<TelemetryView, Map<string, ReadonlyMap<string, RouteFirstOutput>>>();
+
+function routeFold(view: TelemetryView, role: "main" | "worker"): ReadonlyMap<string, RouteFirstOutput> {
+	let byRole = routeFolds.get(view);
+	if (!byRole) {
+		byRole = new Map();
+		routeFolds.set(view, byRole);
+	}
+	const cached = byRole.get(role);
+	if (cached) return cached;
+	const fold = new Map<string, RouteFirstOutput>();
+	// The session's own journal holds the main agent's calls; each worker's calls are in the run journal it references.
+	const calls =
+		role === "main"
+			? view.calls({ roles: ["main"] }).calls
+			: view.runs().flatMap((run) => view.calls({ runId: run.runId, roles: ["worker"] }).calls);
+	for (const call of calls) {
+		const fact = call.timing.ttft.fact;
+		if (!("kind" in fact) || (fact.kind !== "measured" && fact.kind !== "estimated")) continue;
+		const key = `${call.target.targetId}\0${call.target.requestedModel}`;
+		const seen = fold.get(key);
+		fold.set(key, { calls: (seen?.calls ?? 0) + 1, slowestMs: Math.max(seen?.slowestMs ?? 0, fact.value) });
+	}
+	byRole.set(role, fold);
+	return fold;
+}
+
+/**
+ * How long this session's calls on a route took to their first output. The main agent's calls describe the main
+ * agent's route and a worker's calls describe workers on theirs, because a worker's prompt and tools differ from the
+ * main agent's even on the same model. Null while the view seeds or the route has no measured call.
+ */
 export function routeFirstOutput(
 	view: TelemetryView | null | undefined,
 	targetId: string | null | undefined,
 	modelId: string | null | undefined,
+	role: "main" | "worker" = "main",
 ): RouteFirstOutput | null {
 	if (!view || view.seeding || !targetId || !modelId) return null;
-	let calls = 0;
-	let slowestMs = 0;
-	for (const call of view.calls({ roles: ["main"] }).calls) {
-		if (call.target.targetId !== targetId || call.target.requestedModel !== modelId) continue;
-		const fact = call.timing.ttft.fact;
-		if (!("kind" in fact) || (fact.kind !== "measured" && fact.kind !== "estimated")) continue;
-		calls += 1;
-		slowestMs = Math.max(slowestMs, fact.value);
-	}
-	return calls === 0 ? null : { calls, slowestMs };
+	return routeFold(view, role).get(`${targetId}\0${modelId}`) ?? null;
 }
 
 /** `10m`, not the counter form `10m0s`: a limit reads as a round figure, and an age never lands exactly on one for long. */
@@ -85,7 +115,7 @@ export function silenceNoteForms(
 		: request?.bytesObservable
 			? `No bytes for ${silent}`
 			: `No output for ${silent}`;
-	const known = history !== null && history.calls >= USUAL_MIN_CALLS ? history : null;
+	const known = usualFirstOutput(history);
 	if (known === null) {
 		return [
 			`${claim}, usual time for this route unknown. ${ends}.`,

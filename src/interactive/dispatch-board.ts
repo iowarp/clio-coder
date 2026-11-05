@@ -28,6 +28,7 @@ import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { DOCK_BODY_ROWS_MAX } from "./dock.js";
 import { createFleetPlanRuns, type FleetPlanRuns, type FleetPlanRunView } from "./fleet-plan-runs.js";
+import { type RouteFirstOutput, routeFirstOutput } from "./footer/silence-note.js";
 import { centeredWindow, type GrowableBody, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
@@ -56,7 +57,13 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { approvalWaitWords, compactQuantity, workerActionParts, workerActivityWords } from "./worker-activity.js";
+import {
+	approvalWaitWords,
+	compactQuantity,
+	workerActionParts,
+	workerActivityWords,
+	workerSilenceWords,
+} from "./worker-activity.js";
 
 export type DispatchBoardStatus = TelemetryRunSummary["status"];
 
@@ -99,6 +106,8 @@ export interface DispatchBoardRow {
 	usage: DispatchRunUsage;
 	/** The run's first call's TTFT as the read model displays it; null before that call settles (#434). */
 	ttft: string | null;
+	/** This session's worker calls on the run's route, for saying whether a silent wait is unusual; running rows only. */
+	routeFirstOutput?: RouteFirstOutput | null;
 	outcomeDetail?: string | null;
 	/** Fleet node id; absent renders as the local node. */
 	node?: string;
@@ -513,13 +522,23 @@ function progressPhaseUnit(theme: ClioTheme, progress: WorkerProgressSnapshot): 
 	}
 }
 
-/** The `doing` row: the phase, then the running call or the most recent one, with its object. */
-function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, contentWidth: number): string | null {
+/**
+ * The `doing` row: the phase, then the running call or the most recent one, with its object. A model gone quiet adds
+ * how long and whether that is usual for the route, the words the table row and the rail use.
+ */
+function progressActionLine(
+	theme: ClioTheme,
+	progress: WorkerProgressSnapshot,
+	contentWidth: number,
+	history: RouteFirstOutput | null,
+): string | null {
 	const phase = progressPhaseUnit(theme, progress);
 	const current = progress.currentAction;
 	const recent = progress.recentActions[0];
 	const units: string[] = [];
 	if (phase !== null && current === null) units.push(phase);
+	const silence = workerSilenceWords(progress, { history, room: contentWidth - 22 });
+	if (silence !== null) units.push(theme.fg("warning", silence));
 	if (progress.awaitingApproval === true && current !== null) {
 		const wanted = workerActionParts(current, "running");
 		units.push(
@@ -897,7 +916,7 @@ function dispatchCardBody(
 	];
 	// One current-operation row is useful at a glance; prose and policy expand on demand.
 	if (row.progress) {
-		const doing = progressActionLine(theme, row.progress, contentWidth);
+		const doing = progressActionLine(theme, row.progress, contentWidth, row.routeFirstOutput ?? null);
 		if (doing !== null) bodyLines.push(doing);
 		if (options.expanded === true)
 			bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth, row.resultContract));
@@ -1060,6 +1079,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		row.status === "running" && row.progress !== undefined
 			? sanitizeCallTargetText(
 					workerActivityWords(row.progress, {
+						history: row.routeFirstOutput ?? null,
 						// Beside the glyph, the name and the clock, each with its separator.
 						room:
 							width -
@@ -1379,7 +1399,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			if (progress) {
 				if (progress.awaitingApproval === true) return { text: approvalWaitWords(progress), tone: "warning" };
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
-				const words = sanitizeCallTargetText(workerActivityWords(progress));
+				const words = sanitizeCallTargetText(workerActivityWords(progress, { history: row.routeFirstOutput ?? null }));
 				const tail =
 					progress.phase === "writing"
 						? firstLine(redactStreamingSecretString(progress.tailText, progress.completed === true))
@@ -2124,10 +2144,16 @@ export function createDispatchBoardStore(
 					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
 					(b.finishedAtMs ?? b.startedAtMs) - (a.finishedAtMs ?? a.startedAtMs),
 			)
-			.map((run) => ({
-				...toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId), dispatchRunTtft(view, run.runId)),
-				telemetry: view?.run(run.runId) ?? null,
-			}))
+			.map((run) => {
+				const row = toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId), dispatchRunTtft(view, run.runId));
+				return {
+					...row,
+					telemetry: view?.run(run.runId) ?? null,
+					...(row.status === "running"
+						? { routeFirstOutput: routeFirstOutput(view, row.targetId, row.wireModelId, "worker") }
+						: {}),
+				};
+			})
 			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
 	return {
