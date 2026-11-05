@@ -609,6 +609,9 @@ export function composerPhasePresentation(
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
 	const room = railActivityRoom(width);
+	// A tool's actor is a short word rather than a model name, and the room it leaves belongs to the command and its time.
+	const actorWidth = visibleWidth(status.tool?.operatorShell === true ? "your shell" : "Clio");
+	const toolRoom = Math.max(room, width - actorWidth - 4 - (width < 60 ? 9 : 14));
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
@@ -649,7 +652,7 @@ export function composerPhasePresentation(
 			);
 			break;
 		case "tool_running": {
-			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName);
+			const activity = toolActivity(status, toolRoom, now, null, elapsedFrom, modelName);
 			return { ...phase, ...activity };
 		}
 		case "tool_blocked":
@@ -667,7 +670,7 @@ export function composerPhasePresentation(
 		case "stuck":
 			if (status.resumePhase === "tool_running" && status.tool) {
 				// Its own process has gone quiet, which is not the model having no output.
-				return { ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName) };
+				return { ...phase, ...toolActivity(status, toolRoom, now, null, elapsedFrom, modelName) };
 			}
 			label = fitRailFacts(
 				[
@@ -691,7 +694,7 @@ export function composerPhasePresentation(
 							...(status.cancelRequestedAt !== undefined ? { startedAt: status.cancelRequestedAt } : {}),
 						},
 					},
-					room,
+					toolRoom,
 					now,
 					"is stopping",
 					elapsedFrom,

@@ -80,8 +80,10 @@ import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import {
 	buildHint,
+	buildResponsiveHint,
 	centeredWindow,
 	fitRows,
+	type HintEntry,
 	type OverlayEscVerb,
 	type RowBudgetedBody,
 	showClioOverlayFrame,
@@ -4064,27 +4066,26 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			// controls in the outer border at the same time advertises actions
 			// (preview, open, filter) that this input depth does not route, so the
 			// border says only where Esc lands.
-			const esc = center.escapeVerb();
-			if (center.getSelection().submenuOpen) return buildHint([], esc);
-			return innerWidth < WIDE_LAYOUT_MIN_WIDTH
-				? buildHint(
-						[
+			const verb = center.escapeVerb();
+			// The destination is the first word to go, so a narrow rail still has room for what Enter does.
+			const esc: HintEntry = { key: "Esc", verb, short: verb.split(" ")[0] ?? verb };
+			if (center.getSelection().submenuOpen) return buildResponsiveHint([], esc)(innerWidth);
+			return buildResponsiveHint(
+				innerWidth < WIDE_LAYOUT_MIN_WIDTH
+					? [
 							{ key: "↑↓", verb: "move" },
 							{ key: "Enter", verb: "open" },
 							{ key: "/", verb: "filter" },
-						],
-						esc,
-					)
-				: buildHint(
-						[
+						]
+					: [
 							{ key: "Tab", verb: "switch level" },
 							{ key: "Space", verb: "preview" },
 							{ key: "p", verb: "pin" },
 							{ key: "Enter", verb: "open" },
 							{ key: "/", verb: "filter" },
 						],
-						esc,
-					);
+				esc,
+			)(innerWidth);
 		},
 	});
 	return {

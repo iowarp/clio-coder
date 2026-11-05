@@ -165,10 +165,8 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 					: [
 							spend.tokens === null && spend.neverSent === null
 								? null
-								: theme.fg(
-										"counter",
-										`${sessionTokens(spend.tokens ?? "0", width)}${spend.neverSent ? ` · ${spend.neverSent}` : ""}`,
-									),
+								: theme.fg("counter", sessionTokens(spend.tokens ?? "0", width)),
+							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
 							spend.cost === null ? null : theme.fg("counter", spend.cost),
 						]),
 			board && board.tasks.length > 0 ? labelled("tasks", taskBoardValue(theme, board)) : null,

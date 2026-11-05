@@ -10,7 +10,7 @@
 
 import { ToolNames } from "../../core/tool-names.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
-import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
@@ -37,6 +37,9 @@ function phaseElapsedMs(status: AgentStatus, now: number): number {
 	const start = status.phase === "tool_running" ? (status.toolStartedAt ?? status.since) : status.since;
 	return Math.max(0, now - start);
 }
+
+/** Keys the rail offers that reach nothing under a dock, which takes Esc and any typing for itself. */
+const RAIL_ONLY_FACTS = / · (?:Esc cancels|\/model switches|\/model)(?= · |$)/gu;
 
 /** A label that already states its age (`has no output · 12s`) must not gain a second clock. */
 const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)\b/u;
@@ -101,14 +104,13 @@ export function railDetail(facts: LiveWorkFacts, width: number): string | null {
 /** What Esc does in this view, and that it does not reach the run. */
 function escapeNote(verb: string | null, subject: string): { long: string; short: string; tiny: string } {
 	const going = `${subject} keeps going`;
-	const action =
-		verb === "close"
-			? `Esc closes this view, ${going}`
-			: verb === "back"
-				? `Esc goes back, ${going}`
-				: verb === "clear filter"
-					? `Esc clears the filter, ${going}`
-					: `closing this view leaves ${subject} going`;
+	const action = verb?.startsWith("close")
+		? `Esc closes this view, ${going}`
+		: verb?.startsWith("back")
+			? `Esc goes back, ${going}`
+			: verb?.endsWith("filter")
+				? `Esc clears the filter, ${going}`
+				: `closing this view leaves ${subject} going`;
 	return { long: action, short: going, tiny: "continues" };
 }
 
@@ -138,13 +140,16 @@ export function liveWorkStrip(
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
 	let candidates: string[];
 	if (mainActive) {
-		const phase = composerPhasePresentation(facts.status, room, facts.now, facts.actor);
+		const phase = composerPhasePresentation(facts.status, room, facts.now);
 		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
-		const elapsed = CARRIES_ELAPSED.test(phase.label) ? null : formatCompactMs(phaseElapsedMs(facts.status, facts.now));
+		const label = phase.label.replace(RAIL_ONLY_FACTS, "");
+		const elapsed = CARRIES_ELAPSED.test(stripTerminalSequences(label))
+			? null
+			: formatCompactMs(phaseElapsedMs(facts.status, facts.now));
 		const clocked = (text: string): string =>
 			`${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
-		const owned = clocked(`${phase.subject ?? facts.actor} ${phase.label}`);
-		const bare = clocked(phase.label.replace(/^is /u, ""));
+		const owned = clocked(`${phase.subject ?? facts.actor} ${label}`);
+		const bare = clocked(label.replace(/^is /u, ""));
 		candidates = [
 			render(owned, [workers, note.long]),
 			render(owned, [note.long]),

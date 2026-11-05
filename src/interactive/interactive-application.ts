@@ -1902,7 +1902,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			notifications.add({
 				level: "info",
 				key: "keyboard:escape",
-				text: "That Esc closed a panel, so the run is still going. Esc again in a moment cancels it.",
+				text: "Run still going · Esc again cancels",
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
