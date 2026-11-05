@@ -44,6 +44,9 @@ const SESSION_STARTED_AT = new Intl.DateTimeFormat("en-US", {
 	minute: "2-digit",
 	timeZoneName: "short",
 }).format(new Date(performance.timeOrigin));
+const SESSION_STARTED_TIME = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(
+	new Date(performance.timeOrigin),
+);
 
 export const WELCOME_TAGLINES = [
 	"Ask Clio how to use or extend it.",
@@ -458,6 +461,28 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 	];
 }
 
+function awarenessLabel(stats: WelcomeDashboardStats): string {
+	return {
+		checking: "Checking…",
+		ok: "Current",
+		stale: "Stale",
+		none: "Not indexed",
+		malformed: "Needs repair",
+	}[stats.projectContext];
+}
+
+function gitSummary(stats: WelcomeDashboardStats): string {
+	const workspace = stats.workspace;
+	if (workspace === null) return "Checking…";
+	if (!workspace.isGit) return "No Git repository";
+	return [
+		workspaceBranch(stats) || "Detached HEAD",
+		workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
+		...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
+		...(workspace.behind ? [`${workspace.behind} behind`] : []),
+	].join(" · ");
+}
+
 /** Under this height the art gives way and the brand moves into the frame title. */
 const WELCOME_ART_MIN_ROWS = 30;
 /** Under this height even the launchpad's blank rows and tagline cost the composer its place. */
@@ -488,18 +513,19 @@ export function buildWelcomeDashboardLines(
 			: [];
 	if (mode === "session")
 		return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth), ...coverageRows(safeWidth)];
+	// A short terminal spends its rows on the composer and the first answer: the
+	// launchpad keeps identity, place and the next step, and drops the rest.
+	if (terminalRows !== undefined && terminalRows < WELCOME_ART_MIN_ROWS)
+		return compactLaunchpad(theme, stats, version, safeWidth, terminalRows < WELCOME_TIGHT_ROWS, coverageRows);
 	const panelWidth = safeWidth;
 	const room = Math.max(1, panelWidth - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
 	const wordmark = paintWelcomeWordmark(panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK, theme);
-	// A short terminal spends its rows on the composer and the first action: the art would take half of them.
-	const artFits = terminalRows === undefined || terminalRows >= WELCOME_ART_MIN_ROWS;
-	const tight = terminalRows !== undefined && terminalRows < WELCOME_TIGHT_ROWS;
-	const sideBySide = artFits && panelWidth >= 76;
+	const sideBySide = panelWidth >= 76;
 	// Too narrow for the art beside the details: the compact letters sit on one
 	// band above them, and below that the brand moves into the frame title.
-	const bandWordmark = sideBySide || !artFits ? [] : paintWelcomeRowWordmark(theme);
-	const titleBrand = !artFits || (bandWordmark.length > 0 && visibleWidth(bandWordmark[0] ?? "") > room);
+	const bandWordmark = sideBySide ? [] : paintWelcomeRowWordmark(theme);
+	const titleBrand = bandWordmark.length > 0 && visibleWidth(bandWordmark[0] ?? "") > room;
 	const band = titleBrand ? [] : bandWordmark;
 	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
 	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
@@ -541,28 +567,11 @@ export function buildWelcomeDashboardLines(
 				: truncateToWidth(link, Math.max(1, detailWidth), "", false);
 	}
 	const subscriptionRows = Array.from({ length: WELCOME_SUBSCRIPTION_ROWS }, (_, index) => subscriptions[index] ?? "");
-	const awareness = {
-		checking: "Checking…",
-		ok: "Current",
-		stale: "Stale",
-		none: "Not indexed",
-		malformed: "Needs repair",
-	}[stats.projectContext];
-	const workspace = stats.workspace;
-	const git =
-		workspace === null
-			? "Checking…"
-			: !workspace.isGit
-				? "No Git repository"
-				: [
-						workspaceBranch(stats) || "Detached HEAD",
-						workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
-						...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
-						...(workspace.behind ? [`${workspace.behind} behind`] : []),
-					].join(" · ");
+	const awareness = awarenessLabel(stats);
+	const git = gitSummary(stats);
 	const details = [
-		...(band.length > 0 ? [...band, ""] : artFits ? [""] : []),
-		...(band.length > 0 || !artFits
+		...(band.length > 0 ? [...band, ""] : [""]),
+		...(band.length > 0
 			? [`${theme.style("sectionHeading", "Session started", { bold: true })}  ${theme.fg("body", SESSION_STARTED_AT)}`]
 			: [theme.style("sectionHeading", "Session started", { bold: true }), theme.fg("body", SESSION_STARTED_AT)]),
 		"",
@@ -599,7 +608,7 @@ export function buildWelcomeDashboardLines(
 				: `${theme.fg("guidance", "/usage")}    ${theme.fg("body", "Account limits and reset times")}`,
 	];
 	const artOffset = Math.floor((details.length - wordmark.length) / 2);
-	const shownDetails = tight ? details.filter((row) => row !== "") : details;
+	const shownDetails = details;
 
 	const rows = Array.from(
 		{ length: Math.max(shownDetails.length, hints.length, sideBySide ? wordmark.length : 0) },
@@ -619,7 +628,7 @@ export function buildWelcomeDashboardLines(
 	const versionTag = titleBrand ? "" : theme.fg("brandCopper", `v${version}`);
 	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
 	const action = actionRow(theme, stats, leftRoom);
-	const taglineRows = room >= 36 && !tight ? wrapTextWithAnsi(theme.fg("body", tagline), room) : [];
+	const taglineRows = room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room) : [];
 	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(action) - visibleWidth(versionTag)));
 	const title = titleBrand
 		? `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
@@ -629,6 +638,108 @@ export function buildWelcomeDashboardLines(
 		title,
 		[...rows, ...coverageRows(room), ...taglineRows, innerDivider(theme, room), fit(`${action}${gap}${versionTag}`)],
 		panelWidth,
+	);
+}
+
+/**
+ * The launchpad for a terminal under WELCOME_ART_MIN_ROWS rows: about 9 rows,
+ * one fact per row on a shared value axis, and 4 rows under
+ * WELCOME_TIGHT_ROWS, where only the place and the next step remain. The full
+ * panel took 16 of 20 rows and left the composer one.
+ */
+function compactLaunchpad(
+	theme: ClioTheme,
+	stats: WelcomeDashboardStats,
+	version: string,
+	width: number,
+	tight: boolean,
+	coverageRows: (room: number) => string[],
+): string[] {
+	const room = Math.max(1, width - 4);
+	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
+	const title = `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`;
+	const started = theme.fg("annotation", `started ${SESSION_STARTED_TIME}`);
+	const actionLine = (): string => {
+		const spare = room - visibleWidth(started) - 2;
+		const action = actionRow(theme, stats, spare >= 24 ? spare : room);
+		return spare >= 24
+			? `${action}${" ".repeat(Math.max(2, room - visibleWidth(action) - visibleWidth(started)))}${started}`
+			: action;
+	};
+	if (tight) {
+		const branch = workspaceBranch(stats);
+		const place = fitByPriority(
+			theme,
+			[
+				{ text: theme.fg("workspacePath", fitPathTail(workspacePath(stats), Math.max(8, room - 12))), rank: 0 },
+				...(branch
+					? [
+							{
+								text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", "*") : ""}`,
+								rank: 1,
+							},
+						]
+					: []),
+			],
+			room,
+		);
+		return frame(theme, title, [fit(place), fit(actionLine())], width);
+	}
+	const labelWidth = "Awareness".length + 2;
+	const field = (label: string, value: string): string =>
+		fit(`${theme.fg("fieldName", label.padEnd(labelWidth))}${value}`);
+	const valueRoom = Math.max(1, room - labelWidth);
+	const accounts =
+		stats.quota === null
+			? []
+			: [
+					field(
+						"Accounts",
+						`${truncateToWidth(
+							theme.fg(
+								"body",
+								sanitizeCallTargetText(stats.quota)
+									.replace(/% used/g, "%")
+									.replace(/\/wk /g, " · wk "),
+							),
+							Math.max(1, valueRoom - 8),
+							GLYPH.ellipsis,
+							false,
+						)} ${theme.fg("guidance", "/usage")}`,
+					),
+				];
+	const also = fitByPriority(
+		theme,
+		[
+			{ text: `${theme.fg("guidance", "/help")} ${theme.fg("body", "commands")}`, rank: 0 },
+			{ text: `${theme.fg("guidance", "/context")} ${theme.fg("body", "repo awareness")}`, rank: 1 },
+			...(stats.quota === null
+				? [{ text: `${theme.fg("guidance", "/usage")} ${theme.fg("body", "limits")}`, rank: 2 }]
+				: []),
+		],
+		valueRoom,
+	);
+	const coverage = coverageRows(room);
+	return frame(
+		theme,
+		title,
+		[
+			field("Workspace", theme.fg("workspacePath", fitPathTail(workspacePath(stats), valueRoom))),
+			field("Git", theme.fg("body", gitSummary(stats))),
+			field(
+				"Awareness",
+				theme.fg(
+					stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body",
+					awarenessLabel(stats),
+				),
+			),
+			...accounts,
+			field("Also", also),
+			...(coverage.length > 0 ? [fit(coverage.length > 1 ? `${coverage[0]}${GLYPH.ellipsis}` : (coverage[0] ?? ""))] : []),
+			innerDivider(theme, room),
+			fit(actionLine()),
+		],
+		width,
 	);
 }
 
