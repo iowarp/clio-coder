@@ -446,6 +446,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.commitSetting ? { commitSetting: deps.app.commitSetting } : {}),
 		...(deps.app.settingOrigin ? { settingOrigin: deps.app.settingOrigin } : {}),
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
+		isTurnInFlight: () => deps.app.chat.isStreaming(),
 		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
 		...(deps.app.getRouteBreakers ? { getRouteBreakers: deps.app.getRouteBreakers } : {}),

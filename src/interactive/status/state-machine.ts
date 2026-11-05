@@ -426,6 +426,7 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 				dispatch: undefined,
 				humanWaitMs: undefined,
 				humanWaitSince: undefined,
+				modelRequest: undefined,
 			};
 		case "submit_settled":
 			if (prev.preparingSubmission !== true) return prev;

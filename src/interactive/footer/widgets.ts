@@ -497,6 +497,8 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number): string {
 
 const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc cancels", short: "Esc" };
 const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model switches", short: "/model" };
+/** A route change never reaches a request already out, so during a turn the way to another model runs through Esc. */
+const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model switches", short: "then /model" };
 
 /** Whole seconds, the way a countdown reads: a wait never shows as over before it is. */
 function remainingSeconds(dueAt: number, now: number): number {
@@ -521,7 +523,7 @@ function retryRailLabel(
 				{ text: from !== undefined ? modelWait(from) : null, keep: 8 },
 				{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
 				{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
-				{ ...MODEL_SWITCHES, text: tier >= 3 ? MODEL_SWITCHES.text : null, keep: 6 },
+				{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 			],
 			room,
 		);
@@ -570,7 +572,7 @@ function modelWaitFacts(status: AgentStatus, now: number, from: number): Readonl
 		{ text: evidence, keep: 4 },
 		{ text: tier >= 3 ? "target may be loading or stuck" : null, short: "may be stuck", keep: 5 },
 		{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
-		{ ...MODEL_SWITCHES, text: tier >= 3 ? MODEL_SWITCHES.text : null, keep: 6 },
+		{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 	];
 }
 
@@ -583,7 +585,7 @@ function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<Rail
 		{ text: tier >= 1 ? `no new output for ${age}` : null, short: `silent ${age}`, keep: 8 },
 		{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
 		{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
-		{ ...MODEL_SWITCHES, text: tier >= 3 ? MODEL_SWITCHES.text : null, keep: 6 },
+		{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 	];
 }
 
@@ -734,7 +736,7 @@ export function composerPhasePresentation(
 						{ text: formatCompactMs(Math.floor(silentMs / 1000) * 1000), keep: 8 },
 						{ text: "may be stuck", keep: 4 },
 						{ ...ESC_CANCELS, keep: 7 },
-						{ ...MODEL_SWITCHES, keep: 6 },
+						{ ...MODEL_AFTER_ESC, keep: 6 },
 					],
 					room,
 				);

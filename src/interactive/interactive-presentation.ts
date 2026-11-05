@@ -615,8 +615,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
+				// Once a request is out the rail names the model it went to, whatever route was picked since.
+				const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
+				const name = modelNickname(out ?? route?.model);
+				const presented = composerPhasePresentation(status, width, Date.now(), name, undefined, reserved);
 				return {
-					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), undefined, reserved),
+					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
+					...presented,
 					...(detail ? { detail } : {}),
 				};
 			}

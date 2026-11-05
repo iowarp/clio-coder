@@ -226,7 +226,7 @@ test("a silent wait keeps state, elapsed and the way out at every width past 90 
 			const state = label.indexOf(head);
 			const elapsed = label.search(/\b\d+m\d*s/u);
 			ok(state >= 0 && state < elapsed && elapsed < label.indexOf("Esc"), rail);
-			if (width >= 60) ok(label.includes("/model"), rail);
+			if (width >= 80) ok(label.includes("then /model"), rail);
 		}
 	}
 });
