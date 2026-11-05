@@ -162,13 +162,8 @@ export class AcpEventMapper {
 			this.toolStarts.delete(toolCallId);
 			const isError = status !== "completed";
 			const result = toolContentText(update.content) || update.rawOutput || status;
-			out.push({
-				type: "tool_execution_end",
-				toolCallId,
-				toolName: title,
-				result,
-				isError,
-			} as unknown as AgentEvent);
+			// The outcome leads the end event, as it does for an in-process tool,
+			// because run effects judge a failed check by it when the call settles.
 			out.push({
 				type: "clio_coder_tool_finish",
 				payload: {
@@ -179,6 +174,13 @@ export class AcpEventMapper {
 					outcome: isError ? "error" : "ok",
 				},
 			});
+			out.push({
+				type: "tool_execution_end",
+				toolCallId,
+				toolName: title,
+				result,
+				isError,
+			} as unknown as AgentEvent);
 			this.toolKinds.delete(toolCallId);
 		}
 		return out;
