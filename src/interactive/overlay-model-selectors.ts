@@ -151,7 +151,11 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					down ? "this route is down, so turns fail until it answers; /model switches" : null,
 					note !== null && thinking ? `thinking ${thinking.display} (${note})` : null,
 				];
-				deps.notify(down ? "warning" : "success", facts.filter(Boolean).join(" · "), routeAppliedNoticeKey(ref.target, ref.model));
+				deps.notify(
+					down ? "warning" : "success",
+					facts.filter(Boolean).join(" · "),
+					routeAppliedNoticeKey(ref.target, ref.model),
+				);
 				deps.refreshFooter();
 			},
 			onCancel: () => {
