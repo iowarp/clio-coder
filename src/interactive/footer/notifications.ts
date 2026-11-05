@@ -355,14 +355,24 @@ function bySeverityThenRecency(a: Notification, b: Notification): number {
 /**
  * The one notice a one-slot surface shows: the head of the center's own order.
  * The compact footer sorted by recency alone, so a fresh info notice hid an
- * unresolved error that the notice panel still ranked first.
+ * unresolved error that the notice panel still ranked first. A warning stands
+ * for minutes, though, so what just happened borrows the slot from it for as long
+ * as that word lasts, and the warning comes back when it ends (J1-F13).
  */
 export function topNotification(notices: ReadonlyArray<Notification>, now: number): Notification | undefined {
 	let top: Notification | undefined;
 	for (const entry of notices) {
 		if (isLive(entry, now) && (top === undefined || bySeverityThenRecency(entry, top) < 0)) top = entry;
 	}
-	return top;
+	if (top?.level !== "warning") return top;
+	const standing = top;
+	let newer: Notification | undefined;
+	for (const entry of notices) {
+		const brief = (entry.level === "info" || entry.level === "success") && entry.expiresAt !== null;
+		if (!brief || !isLive(entry, now) || entry.text.startsWith("tip: ") || entry.addedAt <= standing.addedAt) continue;
+		if (newer === undefined || entry.addedAt > newer.addedAt) newer = entry;
+	}
+	return newer ?? top;
 }
 
 export interface NotificationCenterOptions {

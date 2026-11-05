@@ -2892,8 +2892,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							if (idle) idleReuseNoticeStamp = idleStamp;
 							if (recompile) recompileReuseNoticeStamp = recompileStamp;
 							const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : `${Math.floor(elapsedMs / 60_000)}m`;
-							const reason = [idle ? "idle" : "", recompile ? "prompt recompile pending" : ""].filter(Boolean).join(", ");
-							const text = `reuse uncertain: last use ${elapsed} ago; estimated re-prefill ${inclusiveInputTokens.toLocaleString("en-US")} tokens (previous call input; ${reason})`;
+							const reason = [idle ? `idle ${elapsed}` : "", recompile ? "prompt changed" : ""].filter(Boolean).join(", ");
+							const text = `cache may be cold: about ${inclusiveInputTokens.toLocaleString("en-US")} tokens may be read again (${reason})`;
 							if (deps.emitCacheReuseNotice) deps.emitCacheReuseNotice(text);
 							else deps.emitNotice(text);
 						};
@@ -3175,7 +3175,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// included) the window comes from the live resolution or the resumed
 			// snapshot, and the token facts from the snapshot: the resumed
 			// messages are the ones it measured.
-			const routed = state.runtime && !routeSuperseded(state.runtime.targetId, state.runtime.wireModelId) ? state.runtime : null;
+			const routed =
+				state.runtime && !routeSuperseded(state.runtime.targetId, state.runtime.wireModelId) ? state.runtime : null;
 			const window = routed
 				? {
 						contextWindow: routed.runtimeResolution.contextWindowDetails.effectiveContextWindow,
