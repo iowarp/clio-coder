@@ -222,7 +222,7 @@ function workerGrantAuthority(view: ApprovalRequestView): string | null {
 	const grant = view.workerGrant;
 	if (grant === undefined) {
 		return view.origin.kind === "worker"
-			? "yours alone. fleet.permissions.mode escalate asks you, not the main agent."
+			? "yours alone. Worker approvals are set to Ask me, so the main agent cannot answer this for you."
 			: null;
 	}
 	if (grant.authority === "operator") {
