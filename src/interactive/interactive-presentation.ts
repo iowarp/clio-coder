@@ -22,7 +22,7 @@ import type { TelemetryContract, TokenThroughputSnapshot } from "../domains/tele
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { createAssistantGenerationTiming } from "../session-control/assistant-generation-timing.js";
+import { createAssistantGenerationTiming, RATE_MIN_WINDOW_MS } from "../session-control/assistant-generation-timing.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
@@ -502,7 +502,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const { outputTokens, estimated } = generationTiming.output();
 		if (outputTokens <= 0) return null;
 		const { durationMs } = timing;
-		return { tokensPerSecond: outputTokens / (durationMs / 1000), outputTokens, estimated, durationMs };
+		// Zero reads as no rate; the output count still shows while the window is too short to divide (RATE_MIN_WINDOW_MS).
+		const tokensPerSecond = durationMs >= RATE_MIN_WINDOW_MS ? outputTokens / (durationMs / 1000) : 0;
+		return { tokensPerSecond, outputTokens, estimated, durationMs };
 	};
 	let footer: FooterDashboardPanel;
 	const backgroundCalls = createBackgroundCallTracker(deps.bus, () => {
