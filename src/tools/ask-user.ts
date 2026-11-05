@@ -403,6 +403,20 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 }
 
 /**
+ * The option an absent operator gets, and the one a surface tags as recommended:
+ * the option whose label says so, else the first, which is where the prompt
+ * contract puts it. -1 for a question with no options.
+ */
+export function recommendedOptionIndex(question: Pick<AskUserQuestion, "options">): number {
+	const options = question.options ?? [];
+	if (options.length === 0) return -1;
+	return Math.max(
+		0,
+		options.findIndex((option) => /\brecommended\b/iu.test(option.label)),
+	);
+}
+
+/**
  * Answer every question of a round nobody is asked because the session runs
  * at yolo (#407). Each takes its recommended (first) option, an outward one
  * included, because yolo already admits the outward step itself; a free-text
@@ -410,7 +424,7 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
  */
 function resolveAwayAnswers(questions: ReadonlyArray<AskUserQuestion>): AskUserAnswer[] {
 	return questions.map((question): AskUserAnswer => {
-		const first = question.options?.[0]?.label;
+		const first = question.options?.[recommendedOptionIndex(question)]?.label;
 		if (first === undefined) return { question: question.question, answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true };
 		return { question: question.question, answer: first, options: [first], auto: true };
 	});
@@ -433,7 +447,7 @@ function resolveUnattendedAnswers(
 		const operator = answered.find((answer) => answer.question === question.question);
 		if (operator !== undefined) return [operator];
 		if (exposure === "outward") return [{ question: question.question, answer: UNATTENDED_OUTWARD_ANSWER, auto: true }];
-		const first = question.options?.[0]?.label;
+		const first = question.options?.[recommendedOptionIndex(question)]?.label;
 		if (first === undefined) return [{ question: question.question, answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true }];
 		return [{ question: question.question, answer: first, options: [first], auto: true }];
 	});

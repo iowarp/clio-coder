@@ -14,7 +14,12 @@ export function footerKeyHint(now: number, narrow = false, width = Number.POSITI
 	const bindings = getKeybindings();
 	const entries = [
 		...bindings.getKeys("tui.input.submit").map((key) => `${formatKeyLabel(key)} send`),
-		...bindings.getKeys("tui.input.newLine").map((key) => `${formatKeyLabel(key)} newline`),
+		// One spelling: the first binding is the one every terminal delivers, and
+		// rotating through the others read as if the key kept changing.
+		...bindings
+			.getKeys("tui.input.newLine")
+			.slice(0, 1)
+			.map((key) => `${formatKeyLabel(key)} newline`),
 		...Object.entries(CLIO_APP_KEYBINDINGS).flatMap(([id, spec]) => {
 			if (spec.scope !== "composer") return [];
 			const keys = bindings.getKeys(id as keyof typeof CLIO_APP_KEYBINDINGS);

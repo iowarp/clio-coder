@@ -63,7 +63,8 @@ export interface SessionFacts {
 	 * the frame identical to the idle frame, so the operator had no way to learn
 	 * that a second press quits, and no way to tell the first press registered.
 	 */
-	shutdownArmed?: boolean;
+	/** A string is the exact line to show, with the time left and what happens to a draft. */
+	shutdownArmed?: boolean | string;
 	/**
 	 * Skills whose tool surface stays armed across turns. Shown on the compact
 	 * line while it lasts, so a narrowed tool set is never implicit.

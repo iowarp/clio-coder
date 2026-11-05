@@ -136,7 +136,7 @@ export interface InteractivePresentationDeps {
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
-	getShutdownArmed?: () => boolean;
+	getShutdownArmed?: () => boolean | string;
 	/** Whether a permission prompt owns the keyboard, for the composer's CONFIRM rail. */
 	isAwaitingApproval?: () => boolean;
 	/** Whether that prompt has a mutation to inspect, and whether it is open (issue #254). */
@@ -616,6 +616,16 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
+		getSteerRecipient: (token) => {
+			try {
+				const running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+				const resolved = resolveSteerTarget(token, running);
+				return resolved.kind === "match" ? resolved.run.agentId : null;
+			} catch {
+				// The rail repaints every frame; an unreadable fleet just leaves it unlabelled.
+				return null;
+			}
+		},
 		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Ctrl+J"),
 	};
