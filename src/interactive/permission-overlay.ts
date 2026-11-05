@@ -75,7 +75,28 @@ export type PermissionAdvisoryReader = () => string;
  * operator is present, null when no window applies.
  */
 export type PermissionCountdown = number | "held" | null;
+
+/**
+ * A worker ask whose window the dispatching process runs, so a key can hold it.
+ * A bare number on a worker card is a window inside the worker, which no key
+ * reaches. A held window still ends, at its ceiling, so it keeps its time left.
+ */
+export interface WorkerWindowCountdown {
+	remainingMs: number;
+	held: boolean;
+}
+
+/** What a card's timer row is drawn from. */
+type CardCountdown = PermissionCountdown | WorkerWindowCountdown;
+
+function isWorkerWindow(countdown: CardCountdown): countdown is WorkerWindowCountdown {
+	return typeof countdown === "object" && countdown !== null;
+}
+
+/** A held window turns back into a warning this close to its ceiling. */
+const HELD_WINDOW_WARNING_MS = 60_000;
 export type PermissionCountdownReader = () => PermissionCountdown;
+export type WorkerWindowReader = () => WorkerWindowCountdown | null;
 
 /** Whether the composer holds a draft, read once per frame: Enter is inert while it does (#186). */
 export type PermissionDraftReader = () => boolean;
@@ -385,10 +406,20 @@ function markContinued(row: string, width: number): string {
 /** The countdown as one clause for the row that also says where the window is, on a card too short for its sentence. */
 function compactCountdownClause(
 	view: ApprovalRequestView,
-	countdown: PermissionCountdown,
+	countdown: CardCountdown,
 ): { outcome: string; holds: string; tone: ClioToken } | null {
 	if (countdown === null) return null;
 	if (countdown === "held") return { outcome: `${GLYPH.phaseBlocked} timer held`, holds: "", tone: "annotation" };
+	if (isWorkerWindow(countdown)) {
+		const left = formatUnattendedRemaining(countdown.remainingMs);
+		const ending = view.workerFallback === "fail" ? "fails the run" : "denies";
+		if (!countdown.held) return { outcome: `${GLYPH.warn} ${left} ${ending}`, holds: "key holds", tone: "warning" };
+		return {
+			outcome: `${GLYPH.phaseBlocked} held, ${left} ${ending}`,
+			holds: "",
+			tone: countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation",
+		};
+	}
 	const remaining = formatUnattendedRemaining(countdown);
 	if (view.origin.kind !== "worker") {
 		return { outcome: `${GLYPH.warn} ${remaining} denies`, holds: "key holds", tone: "warning" };
@@ -469,7 +500,7 @@ function permissionFacts(
 	presentation: DecisionPresentation,
 	width: number,
 	advisory: string,
-	countdown: PermissionCountdown,
+	countdown: CardCountdown,
 	hasDraft: boolean,
 ): PermissionFactRows {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
@@ -521,17 +552,24 @@ function permissionFacts(
 	// Last among the facts so it never scrolls away: the operator who walks
 	// past the screen reads what happens if they keep walking.
 	const timer: string[] = [];
+	const answer = hasDraft ? "Backspace clears your draft, then Enter allows" : "Enter allows";
+	const after =
+		view.workerFallback === "fail"
+			? "denies this call and fails the worker run"
+			: "denies this call; the worker carries on without it";
 	if (countdown === "held") {
-		const answer = hasDraft ? "Backspace clears your draft, then Enter allows" : "Enter allows";
 		timer.push(
 			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, Esc denies`), width),
 		);
+	} else if (isWorkerWindow(countdown)) {
+		const left = formatUnattendedRemaining(countdown.remainingMs);
+		const sentence = countdown.held
+			? `${GLYPH.phaseBlocked} Timer held. No answer in ${left} ${after}. ${answer}, Esc denies.`
+			: `${GLYPH.warn} No answer in ${left} ${after}. Any key holds the card.`;
+		const tone = !countdown.held || countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation";
+		timer.push(...wrapTextWithAnsi(theme.fg(tone, sentence), width));
 	} else if (countdown !== null && view.origin.kind === "worker") {
 		// The window runs inside the worker's process, so no key here can hold it.
-		const after =
-			view.workerFallback === "fail"
-				? "denies this call and fails the worker run"
-				: "denies this call; the worker carries on without it";
 		timer.push(
 			...wrapTextWithAnsi(
 				theme.fg(
@@ -595,7 +633,7 @@ function permissionCardSections(
 	width: number,
 	terms = false,
 	advisory = "",
-	countdown: PermissionCountdown = null,
+	countdown: CardCountdown = null,
 	hasDraft = false,
 	rowBudget = 0,
 	mainTurn?: boolean,
@@ -769,6 +807,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		private readonly countdown?: PermissionCountdownReader,
 		private readonly draft?: PermissionDraftReader,
 		private readonly mainTurn?: PermissionMainTurnReader,
+		private readonly workerWindow?: WorkerWindowReader,
 	) {}
 
 	canInspect(): boolean {
@@ -847,7 +886,11 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			this.scroll,
 			this.cardScroll,
 			advisory,
-			typeof countdownMs === "number" ? Math.ceil(countdownMs / 1000) : (countdownMs ?? ""),
+			typeof countdownMs === "number"
+				? Math.ceil(countdownMs / 1000)
+				: isWorkerWindow(countdownMs)
+					? `${Math.ceil(countdownMs.remainingMs / 1000)}:${countdownMs.held}`
+					: (countdownMs ?? ""),
 			hasDraft,
 			mainTurn,
 			skinEpoch(),
@@ -862,7 +905,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	private renderFresh(
 		width: number,
 		advisory: string,
-		countdownMs: PermissionCountdown,
+		countdownMs: CardCountdown,
 		hasDraft: boolean,
 		mainTurn: boolean | undefined,
 	): string[] {
@@ -1080,10 +1123,9 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 	}
 
-	private readCountdown(): PermissionCountdown {
-		if (this.countdown === undefined) return null;
+	private readCountdown(): CardCountdown {
 		try {
-			return this.countdown();
+			return this.workerWindow?.() ?? this.countdown?.() ?? null;
 		} catch {
 			return null;
 		}
@@ -1125,6 +1167,7 @@ export function createPermissionOverlayBody(
 	countdown?: PermissionCountdownReader,
 	draft?: PermissionDraftReader,
 	mainTurn?: PermissionMainTurnReader,
+	workerWindow?: WorkerWindowReader,
 ): PermissionOverlayBodyHandle {
-	return new PermissionOverlayBody(view, inspect, invocation, advisory, countdown, draft, mainTurn);
+	return new PermissionOverlayBody(view, inspect, invocation, advisory, countdown, draft, mainTurn, workerWindow);
 }

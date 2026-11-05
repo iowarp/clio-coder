@@ -36,7 +36,7 @@ import {
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
-import { compactQuantity, WAITING_FOR_APPROVAL, workerActionParts, workerPhaseActivity } from "../worker-activity.js";
+import { approvalWaitWords, compactQuantity, workerActionParts, workerPhaseActivity } from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
@@ -466,7 +466,7 @@ function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
 function describedAction(entry: WorkerEntryState): string | null {
 	const action = entry.progress?.currentAction;
 	if (action === null || action === undefined) return null;
-	if (entry.progress?.awaitingApproval === true) return WAITING_FOR_APPROVAL;
+	if (entry.progress?.awaitingApproval === true) return approvalWaitWords(entry.progress);
 	const parts = workerActionParts(action, "running");
 	return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
 }
@@ -602,7 +602,7 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const prefix =
 		action === null
 			? `${glyph} ${idle}`
-			: `${GLYPH.phaseTool} ${entry.progress?.awaitingApproval === true ? WAITING_FOR_APPROVAL : current ? workerActionParts(current, "running").verb : ""}`;
+			: `${GLYPH.phaseTool} ${entry.progress?.awaitingApproval === true ? approvalWaitWords(entry.progress) : current ? workerActionParts(current, "running").verb : ""}`;
 	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
 	const styledActivity = (shown: string): string => {
 		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);

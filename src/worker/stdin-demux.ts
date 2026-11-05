@@ -83,6 +83,11 @@ export interface WorkerPermissionDecision {
 	requestId: string;
 	decision: "approve" | "deny";
 	binding?: WorkerDecisionBinding;
+	/**
+	 * The parent's window for this ask ran out. Only a denial can carry it, and
+	 * the worker then applies its fallback exactly as its own timer would.
+	 */
+	cause?: "timeout";
 }
 
 function parseDecisionBinding(value: unknown): WorkerDecisionBinding | null {
@@ -266,10 +271,13 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			// A malformed binding is delivered as no binding, which a grant-bound
 			// park treats as a mismatch and denies.
 			const binding = parseDecisionBinding((value as { binding?: unknown }).binding);
+			const decision = (value as { decision: "approve" | "deny" }).decision;
+			const timedOut = decision === "deny" && (value as { cause?: unknown }).cause === "timeout";
 			deliverPermissionDecision({
 				requestId: (value as { requestId: string }).requestId,
-				decision: (value as { decision: "approve" | "deny" }).decision,
+				decision,
 				...(binding !== null ? { binding } : {}),
+				...(timedOut ? { cause: "timeout" as const } : {}),
 			});
 			return;
 		}

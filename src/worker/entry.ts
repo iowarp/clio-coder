@@ -349,8 +349,8 @@ async function main(): Promise<number> {
 	// Permission-decision lines resolve a parked escalation. Unknown or
 	// duplicate requestIds return false and are dropped without crashing the
 	// worker; runtimes without an escalation loop simply have no handler.
-	demux.onPermissionDecision(({ requestId, decision, binding }) => {
-		const resolved = handle.resolvePermission?.(requestId, decision, binding) ?? false;
+	demux.onPermissionDecision(({ requestId, decision, binding, cause }) => {
+		const resolved = handle.resolvePermission?.(requestId, decision, binding, cause) ?? false;
 		if (!resolved) {
 			process.stderr.write(`[worker] dropped permission_decision for unknown request '${requestId}'\n`);
 		}
