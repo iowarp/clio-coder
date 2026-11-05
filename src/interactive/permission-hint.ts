@@ -57,6 +57,7 @@ export function permissionHintEntries(
 	inspection: PermissionInspectionHint = "none",
 	terms?: PermissionTermsHint,
 	scrollable = false,
+	stopVerb = "stop turn",
 ): HintEntry[] {
 	return [
 		composerHasDraft
@@ -79,7 +80,7 @@ export function permissionHintEntries(
 						{ key: MUTATION_PREVIEW_KEY, verb: "hide details", short: "hide", critical: false },
 					]
 				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect details", short: "inspect", critical: false }]),
-		{ key: PERMISSION_STOP_KEY, verb: "stop turn", short: "stop", critical: true },
+		{ key: PERMISSION_STOP_KEY, verb: stopVerb, short: "stop", critical: true },
 		// With a draft, deny and stop are the only immediate answers, so Esc
 		// outranks the narrowing that would otherwise drop it first.
 		{ key: "Esc", verb: "deny", critical: composerHasDraft },

@@ -81,7 +81,7 @@ import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibili
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
 import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
-import { describeMainCallConsequences } from "../../domains/safety/call-consequence.js";
+import { describeMainCallConsequences, mainCallExposure } from "../../domains/safety/call-consequence.js";
 import { describeCallTarget, sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE } from "../../domains/safety/command-consequence.js";
 import type { DecisionPresentation, TrustedDecisionFacts } from "../../domains/safety/decision-presentation.js";
@@ -3013,7 +3013,7 @@ function installPermissionBridge(input: {
 				? { kind: "safety-net", ruleId: meta.axis.slice("net:".length) || "unknown" }
 				: { kind: "autonomy", level: meta.axis.slice("autonomy:".length) || DEFAULT_AUTONOMY_LEVEL },
 			origin: { kind: "main" },
-			...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
+			exposure: call.tool === ToolNames.AskUser ? askUserExposure(call.args) : mainCallExposure(call, decision),
 		});
 		const presentation = classifyDecisionPresentation(facts);
 		const approveAction = presentation.requiredActions.find((action) => action.id === "approve-once");

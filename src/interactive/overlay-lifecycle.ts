@@ -328,6 +328,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				advisory,
 				countdown,
 				() => editor.getText().length > 0,
+				() => deps.app.chat.isStreaming(),
 			);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {
@@ -364,6 +365,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 						body.isShowingTerms() ? "open" : "closed",
 						body.isCardScrollable(),
 						body.isShowingChoices(),
+						view.origin.kind === "worker" && !deps.app.chat.isStreaming() ? "stop" : undefined,
 					),
 			});
 			if (!overlayTransitions.showPermission(handle)) {

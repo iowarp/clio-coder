@@ -31,6 +31,7 @@ import { terminalBackground } from "../core/terminal-background.js";
 import { colorDisabled } from "../core/terminal-preferences.js";
 import { resolveRole, type SemanticRole } from "../core/theme-roles.js";
 import { paletteProjection } from "../core/theme-token-hex.js";
+import { plainOutcomeLabel } from "../domains/dispatch/failure-headline.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
@@ -237,6 +238,13 @@ function phaseWords(phase: WorkerPhase): [string, string] {
 	}
 }
 
+/** The conformance state as a phrase; the raw state stays on the run record and `/view`. */
+function contractWords(contract: string): string {
+	if (contract === "pass") return "contract met";
+	if (contract === "fail") return "contract failed";
+	return `contract ${contract.replace(/-/gu, " ")}`;
+}
+
 /** What a finished worker's record says, in the transcript's words. */
 function verdictText(paint: BoardPaint, card: WorkerCard): string {
 	const record = card.record;
@@ -250,10 +258,10 @@ function verdictText(paint: BoardPaint, card: WorkerCard): string {
 	} else if (record.outcome === "canceled") {
 		parts.push(paint.fg("toolMetadata", "⊘ cancelled"));
 	} else {
-		parts.push(paint.fg("error", `✗ ${clean(record.outcomeCode ?? record.outcome)}`));
+		parts.push(paint.fg("error", `✗ ${clean(plainOutcomeLabel(record.outcomeCode ?? record.outcome))}`));
 	}
 	if (record.contract !== undefined) {
-		parts.push(paint.fg(record.contract === "fail" ? "error" : "toolMetadata", `contract ${record.contract}`));
+		parts.push(paint.fg(record.contract === "fail" ? "error" : "toolMetadata", contractWords(record.contract)));
 	}
 	// A broken or unchecked seal outranks the verdict built on it.
 	if (record.seal !== undefined && record.seal !== "sealed") parts.push(paint.fg("warning", clean(record.seal)));

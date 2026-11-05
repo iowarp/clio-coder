@@ -946,6 +946,8 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`task: ${env.task}`,
 						`status: ${env.status}`,
 						`outcome: ${env.outcome ?? "unknown"}`,
+						// Primary rows say this in words, so the exact code stays readable here.
+						...(run?.settled.outcomeCode ? [`outcome code: ${run.settled.outcomeCode}`] : []),
 						`exit: ${env.exitCode ?? "?"}`,
 						`target: ${env.targetId}`,
 						`model: ${this.deps.formatModelId?.(env.wireModelId) ?? sanitizeCallTargetText(env.wireModelId)}`,

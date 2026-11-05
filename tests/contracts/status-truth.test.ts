@@ -5,11 +5,18 @@ import {
 	type ModelAdmissionEvent,
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
+import { mainCallExposure } from "../../src/domains/safety/call-consequence.js";
+import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { retryWaitCause } from "../../src/domains/session/retry.js";
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
+import {
+	type ApprovalRequestView,
+	createPermissionOverlayBody,
+	permissionRailTitle,
+} from "../../src/interactive/permission-overlay.js";
 import { reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import {
 	type AgentStatus,
@@ -540,4 +547,79 @@ test("a reconcile reports the switch it makes and the restore a failed load forc
 		events.map((event) => event.stage),
 		["switching", "loading", "restoring"],
 	);
+});
+
+test("an outward call is not titled a workspace action", () => {
+	const decision = (exposure?: "outward"): SafetyDecision =>
+		({
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [], ...(exposure ? { exposure } : {}) },
+		}) as never;
+	const push = { tool: "bash", args: { command: "git push origin main" } };
+	strictEqual(mainCallExposure(push, decision("outward")), "outward");
+	strictEqual(mainCallExposure({ tool: "bash", args: { command: "npm publish" } }, decision()), "outward");
+	strictEqual(mainCallExposure({ tool: "bash", args: { command: "npm test" } }, decision()), "local");
+	const view: ApprovalRequestView = {
+		requestId: "req",
+		tool: "bash",
+		actionClass: "execute",
+		axis: { kind: "autonomy", level: "default" },
+		origin: { kind: "main" },
+		exposure: "outward",
+		reason: "bash needs approval",
+	};
+	match(permissionRailTitle(view, { actor: "Clio", room: 80 }), /outward consequence/u);
+	doesNotMatch(permissionRailTitle(view, { actor: "Clio", room: 80 }), /workspace action/u);
+});
+
+test("a 40x15 card shows the effect and every choice without scrolling, and leaves no label alone", () => {
+	const view: ApprovalRequestView = {
+		requestId: "req",
+		tool: "bash",
+		actionClass: "execute",
+		axis: { kind: "autonomy", level: "default" },
+		origin: { kind: "main" },
+		exposure: "outward",
+		reason: "bash needs approval",
+		target: "git push origin main",
+		consequence: ["Publishes to origin"],
+	};
+	const body = createPermissionOverlayBody(
+		view,
+		undefined,
+		undefined,
+		() => "Clio's safety judge gave no verdict because its answer could not be read.",
+		() => 298_000,
+	);
+	body.setBodyRows(8);
+	const rows = body.render(36).map((row) => stripTerminalSequences(row).trimEnd());
+	strictEqual(rows.length, 8);
+	const card = rows.join("\n");
+	match(card, /effect\s+Publishes to origin/u);
+	match(card, /\[Enter\] allow/u);
+	match(card, /\[Esc\] deny/u);
+	match(card, /\[alt\+x\] stop/u);
+	match(card, /4:58 denies/u, "the timer stays on screen beside the position");
+	for (const row of rows) doesNotMatch(row, /^(?:rule|effect|advisory)$/u);
+});
+
+test("a worker card's stop does not promise to end a main turn that is not running", () => {
+	const view: ApprovalRequestView = {
+		requestId: "req",
+		tool: "bash",
+		actionClass: "execute",
+		axis: { kind: "autonomy", level: "default" },
+		origin: { kind: "worker", agentId: "coder", runId: "run" },
+		reason: "bash needs approval",
+	};
+	const stopRow = (running: boolean): string => {
+		const body = createPermissionOverlayBody(view, undefined, undefined, undefined, undefined, undefined, () => running);
+		return body
+			.render(200)
+			.map((row) => stripTerminalSequences(row))
+			.join("\n");
+	};
+	match(stopRow(false), /no main turn is running/u);
+	doesNotMatch(stopRow(false), /ends the main/u);
+	match(stopRow(true), /ends the main turn/u);
 });

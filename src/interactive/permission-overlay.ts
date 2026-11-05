@@ -6,7 +6,7 @@ import {
 	safetyNetRailText,
 } from "../domains/safety/decision-presentation.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
-import { type Component, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ApprovalRequestView } from "../session-control/approval-request-view.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
@@ -79,6 +79,9 @@ export type PermissionCountdownReader = () => PermissionCountdown;
 
 /** Whether the composer holds a draft, read once per frame: Enter is inert while it does (#186). */
 export type PermissionDraftReader = () => boolean;
+
+/** Whether a main-agent turn is running, read once per frame: a worker card's stop ends one only if it is. */
+export type PermissionMainTurnReader = () => boolean;
 
 export interface PermissionOverlayBodyHandle extends Component, RowBudgetedBody {
 	/** Whether this card has a mutation the operator can read locally. */
@@ -260,8 +263,9 @@ export function permissionOverlayHint(
 	terms: PermissionTermsHint = "closed",
 	scrollable = false,
 	choicesShown = false,
+	stopVerb?: string,
 ): string {
-	const entries = permissionHintEntries(composerHasDraft, inspection, terms, scrollable);
+	const entries = permissionHintEntries(composerHasDraft, inspection, terms, scrollable, stopVerb);
 	// While the card's own rows name allow, deny and stop with what they do,
 	// the rail carries only the keys those rows do not: terms, inspect, scroll,
 	// and the Backspace that clears a draft. The moment the rows leave the
@@ -293,10 +297,10 @@ function permissionChoices(
 	view: ApprovalRequestView,
 	presentation: DecisionPresentation,
 	hasDraft: boolean,
+	mainTurn?: boolean,
 ): Parameters<typeof choiceRows>[1] {
 	const actionClass = view.actionClass;
-	const stop = presentation.requiredActions.find((action) => action.id === "stop");
-	const stopWords = stop?.consequence.includes("main-agent turn") ? "ends the main-agent turn" : "ends the turn";
+	const stopWords = "ends the turn";
 	const draftNote = hasDraft ? ` · inert until Backspace clears your draft` : "";
 	if (presentation.tier === "worker") {
 		// An approval is never remembered, only a denial (`deniedEscalations` in the
@@ -311,7 +315,13 @@ function permissionChoices(
 			{
 				key: PERMISSION_STOP_KEY,
 				verb: "stop",
-				consequence: "denies it and ends any main turn; this worker keeps running",
+				// A worker asks while the main agent is often idle, and a key cannot end a turn that is not running.
+				consequence:
+					mainTurn === undefined
+						? "denies it and ends any main turn; this worker keeps running"
+						: mainTurn
+							? "denies it and ends the main turn; this worker keeps running"
+							: "denies it; no main turn is running, and this worker keeps running",
 				tone: "error",
 			},
 		];
@@ -346,6 +356,45 @@ function compactChoiceRows(theme: ClioTheme, choices: ReadonlyArray<Choice>, wid
 			`${held(`${keyCap(theme, choice.key)} ${theme.style(toneRole(choice.tone ?? "neutral"), choice.verb, { bold: true })}`)}${theme.fg("decisionConsequence", `: ${choice.consequence}`)}`,
 	);
 	return wrapTextWithAnsi(parts.join(theme.fg("divider", " · ")), width).map(releaseSpaces);
+}
+
+/**
+ * The same choices as keys and verbs alone, for a card whose effect would
+ * otherwise lose rows to them. Their consequences stay in the scrolled window,
+ * and Enter still says what it waits for while a draft holds it.
+ */
+function bareChoiceRows(theme: ClioTheme, choices: ReadonlyArray<Choice>, width: number, hasDraft: boolean): string[] {
+	const bare = choices.map((choice, index) => ({
+		...choice,
+		verb: index === 0 && hasDraft ? `${choice.verb} after Backspace` : choice.verb,
+	}));
+	const held = (text: string): string => text.replaceAll(" ", "\u00a0");
+	const parts = bare.map((choice) =>
+		held(`${keyCap(theme, choice.key)} ${theme.style(toneRole(choice.tone ?? "neutral"), choice.verb, { bold: true })}`),
+	);
+	return wrapTextWithAnsi(parts.join(theme.fg("divider", " · ")), width).map(releaseSpaces);
+}
+
+/** A target row whose next row is out of view, marked so it cannot be read as the end of the command. */
+function markContinued(row: string, width: number): string {
+	return visibleWidth(row) + 2 <= width
+		? `${row} ${GLYPH.ellipsis}`
+		: truncateToWidth(row, width, GLYPH.ellipsis, false);
+}
+
+/** The countdown as one clause for the row that also says where the window is, on a card too short for its sentence. */
+function compactCountdownClause(
+	view: ApprovalRequestView,
+	countdown: PermissionCountdown,
+): { outcome: string; holds: string; tone: ClioToken } | null {
+	if (countdown === null) return null;
+	if (countdown === "held") return { outcome: `${GLYPH.phaseBlocked} timer held`, holds: "", tone: "annotation" };
+	const remaining = formatUnattendedRemaining(countdown);
+	if (view.origin.kind !== "worker") {
+		return { outcome: `${GLYPH.warn} ${remaining} denies`, holds: "key holds", tone: "warning" };
+	}
+	const outcome = view.workerFallback === "fail" ? "fails the run" : "denies";
+	return { outcome: `${GLYPH.warn} ${remaining} ${outcome}`, holds: "", tone: "warning" };
 }
 
 /**
@@ -392,6 +441,23 @@ function wrapArtifactLine(value: string, max: number): string[] {
 }
 
 /**
+ * A label keeps its value's row at every width: a window edge between a label
+ * and the value under it left a lone `rule` on the 40-column card.
+ */
+const CARD_FACT_ROWS = { stack: "never" } as const;
+
+interface PermissionFactRows {
+	/** Identity, target, the fact table and the timer, in reading order. */
+	lines: string[];
+	target: string[];
+	effect: string[];
+	/** Every fact row but the effect's. */
+	others: string[];
+	/** The timer sentence as a short card's window carries it; a held timer's position row says all of it. */
+	windowTimer: string[];
+}
+
+/**
  * The facts that identify the call, in reading order: the identity row, the
  * exact target in a gutter, then the labelled table. The target is the one
  * thing never clipped, because a deep path's file name is what says what the
@@ -405,13 +471,10 @@ function permissionFacts(
 	advisory: string,
 	countdown: PermissionCountdown,
 	hasDraft: boolean,
-): string[] {
+): PermissionFactRows {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const identity = identityRow(theme, view, presentation, width);
-	const lines = [...identity.rows];
-	if (view.target !== undefined && view.target.length > 0) {
-		lines.push(...targetBlock(theme, view.target, risk, width));
-	}
+	const target = view.target !== undefined && view.target.length > 0 ? targetBlock(theme, view.target, risk, width) : [];
 	const facts: Fact[] = identity.ruleFact === null ? [] : [identity.ruleFact];
 	if (view.netReason !== undefined && view.netReason.length > 0) facts.push({ label: "why", value: view.netReason });
 	if (view.consequence !== undefined && view.consequence.length > 0) {
@@ -455,12 +518,12 @@ function permissionFacts(
 	// that no part of the harness acted on. The sentence says so itself; the
 	// styling keeps it from reading as a verdict at a glance.
 	if (advisory.length > 0) facts.push({ label: "advisory", value: advisory, tone: "muted" });
-	lines.push(...factRows(theme, facts, width));
 	// Last among the facts so it never scrolls away: the operator who walks
 	// past the screen reads what happens if they keep walking.
+	const timer: string[] = [];
 	if (countdown === "held") {
 		const answer = hasDraft ? "Backspace clears your draft, then Enter allows" : "Enter allows";
-		lines.push(
+		timer.push(
 			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, Esc denies`), width),
 		);
 	} else if (countdown !== null && view.origin.kind === "worker") {
@@ -469,7 +532,7 @@ function permissionFacts(
 			view.workerFallback === "fail"
 				? "denies this call and fails the worker run"
 				: "denies this call; the worker carries on without it";
-		lines.push(
+		timer.push(
 			...wrapTextWithAnsi(
 				theme.fg(
 					"warning",
@@ -479,7 +542,7 @@ function permissionFacts(
 			),
 		);
 	} else if (countdown !== null) {
-		lines.push(
+		timer.push(
 			...wrapTextWithAnsi(
 				theme.fg(
 					"warning",
@@ -489,7 +552,27 @@ function permissionFacts(
 			),
 		);
 	}
-	return lines;
+	// The same table split around the effect, one label column across both, for
+	// a short card that leads its window with what the call does.
+	const widest = facts.reduce((max, fact) => Math.max(max, visibleWidth(fact.label)), 0);
+	const aligned = facts.map((fact) => ({ ...fact, label: fact.label.padEnd(widest) }));
+	return {
+		lines: [...identity.rows, ...target, ...factRows(theme, facts, width, CARD_FACT_ROWS), ...timer],
+		target,
+		effect: factRows(
+			theme,
+			aligned.filter((fact) => fact.label.trimEnd() === "effect"),
+			width,
+			CARD_FACT_ROWS,
+		),
+		others: factRows(
+			theme,
+			aligned.filter((fact) => fact.label.trimEnd() !== "effect"),
+			width,
+			CARD_FACT_ROWS,
+		),
+		windowTimer: countdown === "held" ? [] : timer,
+	};
 }
 
 /**
@@ -515,12 +598,17 @@ function permissionCardSections(
 	countdown: PermissionCountdown = null,
 	hasDraft = false,
 	rowBudget = 0,
+	mainTurn?: boolean,
 ): {
 	facts: string[];
 	/** Leading fact rows that name the call; a short card pins them beside the answer keys. */
 	identityRows: number;
-	/** Whether the row after the identity is the target's first. */
-	hasTarget: boolean;
+	/** The same facts split for a short card's window. */
+	parts: PermissionFactRows;
+	/** The choices without their consequences, when a short card's effect needs the rows. */
+	bareChoices: string[];
+	/** The timer as one clause for the position row of a short card. */
+	timerClause: ReturnType<typeof compactCountdownClause>;
 	rest: string[];
 	termsAt: number | null;
 	choicesAt: number;
@@ -529,9 +617,10 @@ function permissionCardSections(
 	const theme = clioTheme();
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
-	const facts = permissionFacts(theme, view, presentation, content, advisory, countdown, hasDraft);
+	const parts = permissionFacts(theme, view, presentation, content, advisory, countdown, hasDraft);
+	const facts = parts.lines;
 	const identityRows = identityRow(theme, view, presentation, content).rows.length;
-	const hasTarget = view.target !== undefined && view.target.length > 0;
+	const timerClause = compactCountdownClause(view, countdown);
 	const rest: string[] = [];
 	if (view.artifact !== undefined) {
 		rest.push(
@@ -539,7 +628,8 @@ function permissionCardSections(
 			...view.artifact.text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, content)),
 		);
 	}
-	const choices = permissionChoices(view, presentation, hasDraft);
+	const choices = permissionChoices(view, presentation, hasDraft, mainTurn);
+	const bareChoices = bareChoiceRows(theme, choices, content, hasDraft);
 	const full = choiceRows(theme, choices, content);
 	// A short dock (a draft under the card, a 24-row terminal) may not hold the
 	// facts and three choice rows together, and the choices are what the keys
@@ -548,7 +638,8 @@ function permissionCardSections(
 	const choicesAt = rest.length;
 	rest.push(...(fits ? full : compactChoiceRows(theme, choices, content)));
 	const choicesRows = rest.length - choicesAt;
-	if (!terms) return { facts, identityRows, hasTarget, rest, termsAt: null, choicesAt, choicesRows };
+	const shared = { facts, identityRows, parts, bareChoices, timerClause };
+	if (!terms) return { ...shared, rest, termsAt: null, choicesAt, choicesRows };
 	const wrapTerm = (text: string): string[] => wrapTextWithAnsi(theme.fg("decisionExplanation", text), content);
 	const termsAt = rest.length;
 	rest.push(
@@ -560,7 +651,7 @@ function permissionCardSections(
 		...wrapTerm(`Stop: ${actionConsequence(presentation, "stop")}`),
 		...wrapTerm("Hard-blocked actions remain blocked."),
 	);
-	return { facts, identityRows, hasTarget, rest, termsAt, choicesAt, choicesRows };
+	return { ...shared, rest, termsAt, choicesAt, choicesRows };
 }
 
 /**
@@ -602,6 +693,7 @@ function permissionInspectionLines(
 				{ label: "mutation", value: mutationFactsLine(preview.facts) },
 			],
 			content,
+			CARD_FACT_ROWS,
 		),
 		sectionRule(theme, content, previewLabel(preview.heading), { meta: `${MUTATION_PREVIEW_KEY} closes` }),
 		...previewReason(theme, preview.heading, content),
@@ -676,6 +768,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		private readonly advisory?: PermissionAdvisoryReader,
 		private readonly countdown?: PermissionCountdownReader,
 		private readonly draft?: PermissionDraftReader,
+		private readonly mainTurn?: PermissionMainTurnReader,
 	) {}
 
 	canInspect(): boolean {
@@ -741,6 +834,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const advisory = this.readAdvisory();
 		const countdownMs = this.readCountdown();
 		const hasDraft = this.readDraft();
+		const mainTurn = this.readMainTurn();
 		// The countdown is keyed by the second it displays, so a card with a
 		// window redraws once a second and a card without one never redraws
 		// for it.
@@ -755,16 +849,23 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			advisory,
 			typeof countdownMs === "number" ? Math.ceil(countdownMs / 1000) : (countdownMs ?? ""),
 			hasDraft,
+			mainTurn,
 			skinEpoch(),
 		].join("|");
 		if (this.memo?.key === key) return this.memo.lines;
 		this.choicesShown = false;
-		const lines = this.renderFresh(width, advisory, countdownMs, hasDraft);
+		const lines = this.renderFresh(width, advisory, countdownMs, hasDraft, mainTurn);
 		this.memo = { key, lines };
 		return lines;
 	}
 
-	private renderFresh(width: number, advisory: string, countdownMs: PermissionCountdown, hasDraft: boolean): string[] {
+	private renderFresh(
+		width: number,
+		advisory: string,
+		countdownMs: PermissionCountdown,
+		hasDraft: boolean,
+		mainTurn: boolean | undefined,
+	): string[] {
 		if (this.argumentsOpen && this.invocation) {
 			const theme = clioTheme();
 			const content = Math.max(8, Math.floor(width));
@@ -780,7 +881,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			const identity = identityRow(theme, this.view, permissionDecisionPresentation(this.view), content);
 			const head = [
 				...identity.rows,
-				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content)),
+				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content, CARD_FACT_ROWS)),
 				sectionRule(theme, content, "Exact invocation", { meta: `${MUTATION_PREVIEW_KEY} closes` }),
 			];
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
@@ -801,6 +902,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				countdownMs,
 				hasDraft,
 				this.bodyRows,
+				mainTurn,
 			);
 			return this.windowCard(sections, width);
 		}
@@ -819,10 +921,12 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	 * everything else instead: an answer key is never live while the call it
 	 * answers is off screen, and the keys are never the rows the frame cuts. The
 	 * target's first row joins the identity when the window keeps a row without
-	 * it. With no known budget the card renders whole.
+	 * it, and the window opens on the effect, because what the call does outranks
+	 * every other fact on a card this short. With no known budget the card
+	 * renders whole.
 	 */
 	private windowCard(sections: ReturnType<typeof permissionCardSections>, width: number): string[] {
-		const { facts, identityRows, hasTarget, rest, termsAt, choicesAt, choicesRows } = sections;
+		const { facts, identityRows, parts, bareChoices, timerClause, rest, termsAt, choicesAt, choicesRows } = sections;
 		const whole = [...facts, ...rest];
 		const budget = this.bodyRows;
 		if (budget <= 0 || whole.length <= budget) {
@@ -855,46 +959,111 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			this.choicesShown = choicesAt >= this.cardScroll && choicesAt + choicesRows <= end;
 			return [...facts, ...rest.slice(this.cardScroll, end), position(this.cardScroll + 1, end, rest.length)];
 		}
-		const choices = rest.slice(choicesAt, choicesAt + choicesRows);
-		const answerRows = identityRows + choices.length;
-		// Too short to hold the choices as well: they join the window and every
-		// answer key is on the rail, so the identity holds and every row stays reachable.
-		if (budget < answerRows + 2) {
-			const all = [...facts.slice(identityRows), ...rest];
+		const fullChoices = rest.slice(choicesAt, choicesAt + choicesRows);
+		const answerRows = identityRows + fullChoices.length;
+		// Too short to hold the choices as well, even as bare keys beside what the
+		// call is and does: they join the window and every answer key is on the
+		// rail, so the identity holds and every row stays reachable.
+		const callRows = identityRows + Math.min(parts.target.length, 1) + parts.effect.length;
+		if (budget < answerRows + 2 && budget < callRows + bareChoices.length + 1) {
+			const all = [...parts.target, ...parts.effect, ...parts.others, ...parts.windowTimer, ...rest];
 			const positioned = budget >= identityRows + 2;
 			const window = Math.max(0, budget - identityRows - (positioned ? 1 : 0));
 			this.cardMaxScroll = window > 0 ? Math.max(0, all.length - window) : 0;
 			if (this.jumpToTerms) {
 				this.jumpToTerms = false;
-				if (termsAt !== null) this.cardScroll = facts.length - identityRows + termsAt;
+				if (termsAt !== null) this.cardScroll = all.length - rest.length + termsAt;
 			}
 			this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
 			const end = this.cardScroll + window;
-			const choicesFrom = facts.length - identityRows + choicesAt;
+			const choicesFrom = all.length - rest.length + choicesAt;
 			this.choicesShown = choicesFrom >= this.cardScroll && choicesFrom + choicesRows <= end;
 			return [
 				...facts.slice(0, Math.min(identityRows, budget)),
 				...all.slice(this.cardScroll, end),
-				...(positioned ? [position(this.cardScroll + 1, end, all.length)] : []),
+				...(positioned
+					? [
+							timerClause === null
+								? position(this.cardScroll + 1, end, all.length)
+								: this.timedPosition(timerClause, this.cardScroll + 1, end, all.length, width),
+						]
+					: []),
 			];
 		}
-		const pinned = identityRows + (hasTarget && budget >= answerRows + 3 ? 1 : 0);
-		const scrolled = [...facts.slice(pinned), ...rest.slice(0, choicesAt), ...rest.slice(choicesAt + choicesRows)];
-		const height = budget - pinned - choices.length - 1;
+		const hasTarget = parts.target.length > 0;
+		const hasEffect = parts.effect.length > 0;
+		// Rows the target may have once the identity, the choices, the position row
+		// and the whole effect are placed. An effect that leaves it none takes the
+		// rows the consequences spend, and they move into the window instead.
+		const targetRoom = (choiceRows: number): number =>
+			budget - identityRows - choiceRows - 1 - parts.effect.length - (hasEffect ? 0 : 1);
+		const bare = targetRoom(fullChoices.length) < (hasTarget ? 1 : 0) && bareChoices.length < fullChoices.length;
+		const choices = bare ? bareChoices : fullChoices;
+		const targetPinned =
+			!hasTarget || budget < identityRows + choices.length + 3
+				? 0
+				: Math.max(1, Math.min(parts.target.length, targetRoom(choices.length)));
+		// A cut target must not read as the whole command, and it stays one block rather than folding around the effect.
+		const targetRows = parts.target.slice(0, targetPinned);
+		const lastTarget = targetRows.at(-1);
+		if (lastTarget !== undefined && targetPinned < parts.target.length) {
+			targetRows[targetPinned - 1] = markContinued(lastTarget, width);
+		}
+		const allFacts = [
+			...(targetPinned === 0 ? parts.target : []),
+			...parts.effect,
+			...(targetPinned === 0 ? [] : parts.target.slice(targetPinned)),
+			...parts.others,
+			...parts.windowTimer,
+		];
+		const scrolled = [
+			...allFacts,
+			...(bare ? rest : [...rest.slice(0, choicesAt), ...rest.slice(choicesAt + choicesRows)]),
+		];
+		const pinned = [...facts.slice(0, identityRows), ...targetRows];
+		const height = budget - pinned.length - choices.length - 1;
 		this.cardMaxScroll = Math.max(0, scrolled.length - height);
 		if (this.jumpToTerms) {
 			this.jumpToTerms = false;
-			if (termsAt !== null) this.cardScroll = facts.length - pinned + termsAt - choicesRows;
+			if (termsAt !== null) this.cardScroll = allFacts.length + termsAt - (bare ? 0 : choicesRows);
 		}
 		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
 		const end = this.cardScroll + height;
 		this.choicesShown = true;
 		return [
-			...facts.slice(0, pinned),
+			...pinned,
 			...scrolled.slice(this.cardScroll, end),
-			position(this.cardScroll + 1, end, scrolled.length),
+			timerClause === null
+				? position(this.cardScroll + 1, end, scrolled.length)
+				: this.timedPosition(timerClause, this.cardScroll + 1, end, scrolled.length, width),
 			...choices,
 		];
+	}
+
+	/**
+	 * The position row on a short card with a live timer. It carries the time and
+	 * what running out does, because the sentence that says so at length has moved
+	 * into the window and the card denies itself whether or not anyone scrolls.
+	 */
+	private timedPosition(
+		clause: NonNullable<ReturnType<typeof compactCountdownClause>>,
+		start: number,
+		end: number,
+		total: number,
+		width: number,
+	): string {
+		const theme = clioTheme();
+		const holds = clause.holds.length > 0 ? ` · ${clause.holds}` : "";
+		const terms = this.terms ? ` · ${PERMISSION_TERMS_KEY} back` : "";
+		const candidates = [
+			`${clause.outcome}${holds} · ${start}–${end} of ${total} rows · ↑↓ scroll${terms}`,
+			// The rail names the arrows at every width this form is needed.
+			`${clause.outcome}${holds} · ${start}–${end}/${total}`,
+			`${clause.outcome} · ${start}–${end}/${total}`,
+		];
+		const text = candidates.find((candidate) => visibleWidth(candidate) <= width) ?? candidates.at(-1) ?? "";
+		const timer = text.startsWith(`${clause.outcome}${holds}`) ? `${clause.outcome}${holds}` : clause.outcome;
+		return fitRow(`${theme.fg(clause.tone, timer)}${theme.fg("annotation", text.slice(timer.length))}`, width);
 	}
 
 	/**
@@ -917,6 +1086,15 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			return this.countdown();
 		} catch {
 			return null;
+		}
+	}
+
+	private readMainTurn(): boolean | undefined {
+		if (this.mainTurn === undefined) return undefined;
+		try {
+			return this.mainTurn();
+		} catch {
+			return undefined;
 		}
 	}
 
@@ -946,6 +1124,7 @@ export function createPermissionOverlayBody(
 	advisory?: PermissionAdvisoryReader,
 	countdown?: PermissionCountdownReader,
 	draft?: PermissionDraftReader,
+	mainTurn?: PermissionMainTurnReader,
 ): PermissionOverlayBodyHandle {
-	return new PermissionOverlayBody(view, inspect, invocation, advisory, countdown, draft);
+	return new PermissionOverlayBody(view, inspect, invocation, advisory, countdown, draft, mainTurn);
 }

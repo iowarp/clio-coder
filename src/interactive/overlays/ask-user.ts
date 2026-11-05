@@ -13,6 +13,7 @@ import {
 	renderFakeCursor,
 	type SelectItem,
 	SelectList,
+	stripTerminalSequences,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
@@ -75,6 +76,7 @@ const MIN_LABEL_COLUMN = 12;
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
 const OTHER_CAPTION = "Other · recorded exactly as typed";
+const OTHER_POINTER = "[t] type an answer";
 const CURSOR_CELL = renderFakeCursor(" ");
 
 type OptionDetail = "all" | "focused" | "none";
@@ -449,6 +451,7 @@ function layoutOptionRows(
 	width: number,
 	recommendedIndex = -1,
 	detail: OptionDetail = "all",
+	pointToOther = false,
 ): OptionRowLayout {
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
@@ -456,7 +459,9 @@ function layoutOptionRows(
 		rows: items.map((item, index) => {
 			const focused = index === focusedIndex;
 			const tag = index === recommendedIndex ? ` ${theme.fg("annotation", "recommended")}` : "";
-			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}`;
+			// The free-text key, on the row it belongs to, when neither rail nor legend has room for it.
+			const pointer = pointToOther && item.value === "other" ? ` ${theme.fg("keyboardHint", OTHER_POINTER)}` : "";
+			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}${pointer}`;
 			const prefix = focused ? theme.fg("selectedOption", `${GLYPH.cursor} `) : "  ";
 			const labels = wrapTextWithAnsi(label, safeWidth - 2).map((line, at) => `${at === 0 ? prefix : "  "}${line}`);
 			const description = detail === "all" || (detail === "focused" && focused) ? item.description?.trim() : undefined;
@@ -476,7 +481,14 @@ function layoutOptionRows(
  * never split across the window edge, so a description is read whole or not
  * at all, and one arrow key brings any hidden option back.
  */
-function windowOptionRows(layout: OptionRowLayout, focusedIndex: number, rowBudget: number, width: number): string[] {
+function windowOptionRows(
+	layout: OptionRowLayout,
+	focusedIndex: number,
+	rowBudget: number,
+	width: number,
+	/** Where the free-text row sits when its key has nowhere else to be named, or -1. */
+	otherIndex = -1,
+): string[] {
 	const theme = clioTheme();
 	const total = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
 	if (total <= rowBudget) return layout.rows.flat();
@@ -504,7 +516,8 @@ function windowOptionRows(layout: OptionRowLayout, focusedIndex: number, rowBudg
 		}
 	}
 	const visible = layout.rows.slice(start, end).flat();
-	const marker = `  (${focusedIndex + 1}/${layout.rows.length})${start > 0 ? ` ${GLYPH.up}` : ""}${end < layout.rows.length ? ` ${GLYPH.down}` : ""}`;
+	const otherHidden = otherIndex >= 0 && (otherIndex < start || otherIndex >= end);
+	const marker = `  (${focusedIndex + 1}/${layout.rows.length})${start > 0 ? ` ${GLYPH.up}` : ""}${end < layout.rows.length ? ` ${GLYPH.down}` : ""}${otherHidden ? ` · ${OTHER_POINTER}` : ""}`;
 	return [...visible, fitRow(theme.fg("annotation", marker), width)];
 }
 
@@ -846,6 +859,13 @@ class AskUserOverlayView implements Component {
 		const theme = clioTheme();
 		const gap = fit.spacing ? [""] : [];
 		const countdown = this.renderCountdown(width, fit.headers);
+		const legend = fit.legend ? this.renderKeyLegend(width, fit.headers ? 2 : 1) : [];
+		// A key neither the rail nor the legend could keep is named where it acts.
+		const named = this.keysOnScreen(legend);
+		const moveKey = this.moveKey();
+		// The legend writes `[Tab/Shift+Tab]`, so the text field's key is matched by its start.
+		const pointToMove = moveKey !== null && !named.includes(moveKey.replace(/\]$/u, ""));
+		const pointToOther = !named.includes("[t]");
 		const strip = fit.headers
 			? [
 					fitRow(
@@ -862,11 +882,10 @@ class AskUserOverlayView implements Component {
 					...countdown,
 					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
 				]
-			: [...this.renderCompactPosition(question, width), ...countdown];
+			: [...this.renderCompactPosition(question, width, pointToMove ? moveKey : null), ...countdown];
 		const header = fit.headers ? this.renderQuestionHeader(question, width, !hasMenu && this.questions.length > 1) : [];
 		const details = this.renderDecisionContext(width);
 		const status = this.status.length > 0 ? wrapTextWithAnsi(statusChip(theme, "warning", this.status), width) : [];
-		const legend = fit.legend ? this.renderKeyLegend(width, fit.headers ? 2 : 1) : [];
 		const body = [
 			...(this.harnessInterview?.intro?.(width) ?? []),
 			...formatAskUserQuestion(question.question, width).map((line) => theme.fg("decisionQuestion", line)),
@@ -881,7 +900,7 @@ class AskUserOverlayView implements Component {
 		);
 		this.optionDetailRows = [];
 		this.controlWindowed = false;
-		const control = this.renderControlLines(width, controlBudget, fit.detail);
+		const control = this.renderControlLines(width, controlBudget, fit.detail, pointToOther);
 		const movedDetails = this.optionDetailRows.length > 0;
 		body.push(...this.optionDetailRows);
 		const ledgerBudget = Math.max(
@@ -923,19 +942,32 @@ class AskUserOverlayView implements Component {
 	}
 
 	/** Where the round stands on one row, for a body that has given up its header rows. */
-	private renderCompactPosition(question: AskUserQuestion, width: number): string[] {
+	private renderCompactPosition(question: AskUserQuestion, width: number, moveKey: string | null = null): string[] {
 		const theme = clioTheme();
 		const answered = this.states.filter((state) => state.answer.trim().length > 0).length;
 		const parts = this.harnessInterview
-			? [this.harnessPosition()]
+			? [this.harnessPosition(), ...(moveKey === null ? [] : [moveKey])]
 			: [
 					...(this.questions.length > 1 ? [`Q${this.index + 1} of ${this.questions.length}`] : []),
+					...(moveKey === null ? [] : [moveKey]),
 					...(question.header ? [question.header] : []),
 					...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
 					...(this.questions.length > 1 && answered > 0 ? [`${answered} answered`] : []),
 				];
 		if (parts.length === 0) return [];
 		return [fitRow(theme.style("positionCount", parts.join(" · "), { bold: true }), width)];
+	}
+
+	/** The key that moves between this round's questions, as the rail would name it; null with one question. */
+	private moveKey(): string | null {
+		if (this.questions.length <= 1) return null;
+		return this.currentState()?.mode === "text" ? "[Tab]" : "[←/→]";
+	}
+
+	/** The rail and the legend as plain text, to tell which keys they already name. */
+	private keysOnScreen(legend: ReadonlyArray<string>): string {
+		const rail = this.railRoom > 0 ? this.railHint(this.railRoom) : "";
+		return stripTerminalSequences([rail, ...legend].join(" "));
 	}
 
 	/** The keys the rail cannot hold, so every control stays on screen when there is a row for it. */
@@ -1233,14 +1265,19 @@ class AskUserOverlayView implements Component {
 		return spacing ? [...strip, ""] : strip;
 	}
 
-	private renderControlLines(width: number, rowBudget: number, detail: OptionDetail = "all"): string[] {
+	private renderControlLines(
+		width: number,
+		rowBudget: number,
+		detail: OptionDetail = "all",
+		pointToOther = false,
+	): string[] {
 		this.ensureControl();
 		const state = this.currentState();
 		const question = this.currentQuestion();
 		if (state?.mode === "text" && question) {
 			return [...(this.text?.render(width) ?? [""]), ...this.textPreview(question, state, width)];
 		}
-		return this.renderSelectControl(width, rowBudget, detail);
+		return this.renderSelectControl(width, rowBudget, detail, pointToOther);
 	}
 
 	/** Earlier rounds first, then this round's answered siblings. */
@@ -1298,7 +1335,7 @@ class AskUserOverlayView implements Component {
 		];
 	}
 
-	private renderSelectControl(width: number, rowBudget: number, detail: OptionDetail): string[] {
+	private renderSelectControl(width: number, rowBudget: number, detail: OptionDetail, pointToOther: boolean): string[] {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		const selectedItem = this.list?.getSelectedItem();
@@ -1308,7 +1345,7 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail);
+		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail, pointToOther);
 		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
 		this.controlWindowed = totalRows > rowBudget;
 		if (totalRows + items.length <= rowBudget) {
@@ -1325,7 +1362,8 @@ class AskUserOverlayView implements Component {
 				width,
 			);
 		}
-		return windowOptionRows(layout, focusedIndex, rowBudget, width);
+		const otherIndex = pointToOther ? items.findIndex((item) => item.value === "other") : -1;
+		return windowOptionRows(layout, focusedIndex, rowBudget, width, otherIndex);
 	}
 
 	private ensureControl(): void {
