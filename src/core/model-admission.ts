@@ -26,7 +26,7 @@ export type ModelAdmissionEvent =
 	 */
 	| { stage: "loading"; model: string; evidence: "requested" | "reported"; startedElsewhere?: boolean }
 	/** Clio itself holds this request at the session's cost ceiling; nothing has reached a provider. */
-	| { stage: "ceiling"; spentUsd: number; ceilingUsd: number }
+	| { stage: "ceiling"; spentUsd: number; ceilingUsd: number; pricing?: { estimated: boolean; unpriced: boolean } }
 	/** Putting back a model an abandoned load evicted, which survives the cancel by design. */
 	| { stage: "restoring"; model: string }
 	/** The target loads on demand and said just now that the model is not serving, so this request pays for it. */

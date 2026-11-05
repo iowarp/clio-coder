@@ -1,4 +1,5 @@
 import type { ModelAdmissionWait } from "../../core/model-admission.js";
+import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
@@ -596,7 +597,7 @@ function admissionFacts(
 				facts: [
 					elapsed,
 					{
-						text: `$${admission.spentUsd.toFixed(2)} of $${admission.ceilingUsd.toFixed(2)}`,
+						text: `${renderUsdSpend(admission.spentUsd, admission.pricing)} of ${renderUsdLimit(admission.ceilingUsd)}`,
 						keep: 6,
 					},
 					way,

@@ -1160,6 +1160,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 												stage: "ceiling",
 												spentUsd: block.currentUsd + (block.projectedUsd ?? 0),
 												ceilingUsd: block.ceilingUsd,
+												...(block.pricing ? { pricing: block.pricing } : {}),
 											},
 											Date.now(),
 										);
