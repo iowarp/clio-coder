@@ -2138,6 +2138,35 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 	};
 
+	const insertEntryAt = (at: number, entry: TranscriptEntry): void => {
+		transcript.splice(at, 0, entry);
+		if (runStartIndex !== undefined && at <= runStartIndex) runStartIndex += 1;
+		// A frozen prefix is a run of indices. Inserting inside it renumbers
+		// every entry behind the cut, so the freeze has to go.
+		if (frozen !== null && at < frozen.through) frozen = null;
+		if (prerender !== null && at < prerender.next) prerender.next = at;
+		// The entry behind the new card has a new predecessor, which decides
+		// whether it stacks or opens a council group.
+		const behind = transcript[at + 1];
+		if (behind !== undefined) invalidateEntryCache(behind);
+	};
+
+	/**
+	 * Add a row that is not part of the reply being written. The next delta lands
+	 * on the transcript's tail, so a row pushed under an open message cut the reply
+	 * in two and the settling message printed it a third time, whole. That took a
+	 * `/run`, a worker's card or any notice arriving during a main stream. The row
+	 * goes above the open message instead, which keeps the reply in one piece.
+	 */
+	const appendRow = (entry: TranscriptEntry): void => {
+		const tail = transcript[transcript.length - 1];
+		if (tail?.role === "assistant" && tail.pending && tail.messageStartSegmentIndex !== undefined) {
+			insertEntryAt(transcript.length - 1, entry);
+			return;
+		}
+		transcript.push(entry);
+	};
+
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
 		if (last && last.role === "assistant") {
@@ -2579,7 +2608,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// A prompt opens the next turn, whose retries are not the last receipt's.
 			lastSettledReceipt = null;
 			lastSettledReceipt = null;
-			transcript.push({
+			appendRow({
 				role: "user",
 				text,
 				at: stamp(),
@@ -2589,7 +2618,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			markDirty();
 		},
 		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
-			transcript.push({ role: "replayBlock", renderBlock, at: stamp(), isLive });
+			appendRow({ role: "replayBlock", renderBlock, at: stamp(), isLive });
 			markDirty();
 		},
 		applyWorkerState(state: WorkerEntryState): void {
@@ -2628,20 +2657,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				invalidateEntryCache(parent.entry);
 			}
 			const at = workerInsertionIndex(state);
-			if (at === null) {
-				transcript.push(entry);
-			} else {
-				transcript.splice(at, 0, entry);
-				if (runStartIndex !== undefined && at <= runStartIndex) runStartIndex += 1;
-				// A frozen prefix is a run of indices. Inserting inside it renumbers
-				// every entry behind the cut, so the freeze has to go.
-				if (frozen !== null && at < frozen.through) frozen = null;
-				if (prerender !== null && at < prerender.next) prerender.next = at;
-				// The entry behind the new card has a new predecessor, which decides
-				// whether it stacks or opens a council group.
-				const behind = transcript[at + 1];
-				if (behind !== undefined) invalidateEntryCache(behind);
-			}
+			if (at === null) appendRow(entry);
+			else insertEntryAt(at, entry);
 			markDirty();
 		},
 		workerStates(): ReadonlyArray<WorkerEntryState> {
@@ -2850,7 +2867,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const skillSurface = event.skillSurface;
 				if (skillSurface !== undefined) {
 					if (skillSurface.state === "loaded") return;
-					transcript.push({
+					appendRow({
 						role: "replayBlock",
 						renderBlock: (width) => renderSkillSurfaceRow(skillSurface, width),
 						at: stamp(),
@@ -2865,7 +2882,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const text = event.text;
 				const mark = event.operatorCancel === true ? "cancelled" : event.level;
 				const source = event.source;
-				transcript.push({
+				appendRow({
 					role: "replayBlock",
 					renderBlock: (width) => renderNoticeRow(text, mark, width, source),
 					at: stamp(),
