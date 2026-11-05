@@ -100,6 +100,8 @@ export interface OverlayGeneralOpenersDeps {
 	dataDir: string;
 	notify: (level: "info" | "success" | "warning" | "error", text: string, key?: string) => void;
 	dismissNotification?: (key: string) => void;
+	/** Writes a command's record to the transcript. */
+	getSlashNotice?: () => import("./command-fallbacks.js").CommandNotice;
 	dispatch: DispatchContract;
 	/** The process's System One, whose engine breakers `/health` shows; read when the overlay opens. */
 	systemOne?: () => SystemOne | undefined;
@@ -380,6 +382,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			deps.notify("warning", "/rewind needs an open session.", "rewind:no-session");
 			return;
 		}
+		// A refusal from an earlier attempt would sit on the footer of the very list it said could not open.
+		deps.dismissNotification?.("rewind:no-session");
+		deps.dismissNotification?.("rewind:turn");
 		const snapshots = createWorkspaceSnapshots({
 			stateDir: deps.stateDir,
 			sessionId,
@@ -426,13 +431,24 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				record,
 				plan: preview.plan,
 				columns: deps.terminal.columns,
-				onCancel: deps.closeOverlay,
+				onCancel: () => {
+					deps.closeOverlay();
+					deps.notify("info", "rewind cancelled; no files changed", "rewind:outcome");
+				},
 				onConfirm: () => {
 					deps.closeOverlay();
 					if (turnBlocksRewind()) return;
+					deps.notify("info", `restoring files from snapshot #${n}…`, "rewind:outcome");
 					void snapshots.restore(n).then((outcome) => {
+						// A restore changes the work tree, so the record goes in the transcript;
+						// a footer notice can sit behind another one and then scroll away for good.
+						deps.dismissNotification?.("rewind:outcome");
 						const notice = formatRewindOutcome(outcome);
-						deps.notify(notice.level, notice.text, "rewind:outcome");
+						const transcript = deps.getSlashNotice?.();
+						if (transcript)
+							transcript(notice.level === "warning" ? "warn" : notice.level === "error" ? "error" : "info", notice.text);
+						else deps.notify(notice.level, notice.text, "rewind:outcome");
+						deps.refreshFooter();
 						deps.requestRender();
 					});
 				},

@@ -518,6 +518,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		refreshFooter: () => footer.refresh(),
 		toggleFooter: () => footer.toggleExpanded(),
 		...(deps.dismissNotification ? { dismissNotification: deps.dismissNotification } : {}),
+		getSlashNotice: () => deps.getSlashContext().notice,
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
 		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),
