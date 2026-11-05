@@ -242,10 +242,10 @@ test("Activity retains fast tool actions between calls and shows live worker out
 			action: { verb: "reading", object: "src/interactive/overlays/ask-user.ts" },
 		},
 	});
-	match(render(), /Now.*Executing tool/);
+	match(render(), /Now.*reading src\/interactive\/overlays\/ask-user\.ts/);
 	progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "read1" } });
 	match(render(), /Recent.*ask-user\.ts/);
-	match(render(), /awaiting next worker event/);
+	match(render(), /Now +Waiting on the model/);
 	progress.observe({
 		type: "message_update",
 		assistantMessageEvent: { type: "thinking_delta", delta: "private reasoning must never render" },
@@ -256,7 +256,7 @@ test("Activity retains fast tool actions between calls and shows live worker out
 		type: "message_update",
 		assistantMessageEvent: { type: "text_delta", delta: "Found the question navigation handlers." },
 	});
-	match(render(), /Now.*Streaming response/);
+	match(render(), /Now +Writing/);
 	match(render(), /Found the question navigation handlers/);
 	match(render(), /Live response · provisional/);
 });

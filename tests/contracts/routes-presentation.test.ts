@@ -39,7 +39,7 @@ test("board and fleet approval share target labels without the observe glyph", (
 			board.resetSelection();
 			if (expanded) board.toggleDetail();
 			const rows = board.render(width);
-			match(rows.map(stripTerminalSequences).join("\n"), /http · blade · dynamo\/qwopus/);
+			match(rows.map(stripTerminalSequences).join("\n"), /target +blade · dynamo\/qwopus/);
 			for (const line of rows) ok(visibleWidth(line) <= width);
 		}
 		const rows = formatFleetRunApprovalBody({ ok: true, preview }, width, 0);

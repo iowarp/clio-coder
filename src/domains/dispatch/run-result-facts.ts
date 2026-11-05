@@ -75,6 +75,11 @@ export interface RunResultSummary {
 	 * checks is never left unexplained (J2-F01). Present only when the trust status says validation failed.
 	 */
 	validationFailure?: string;
+	/**
+	 * The Clio task worktree the run worked in, and whether it is still on disk when the result is read: a cancelled or
+	 * no-work run's worktree with nothing in it is removed at settlement, one holding changes is kept on its branch.
+	 */
+	taskWorktree?: { branch: string; changedPaths: number; kept: boolean };
 }
 
 /** A run's projection: the summary plus the answer it delivered. */
@@ -162,6 +167,15 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 		toolCalls: settled.toolCalls,
 		...(refusedCalls > 0 ? { refusedCalls } : {}),
 		...(placement !== undefined ? { placement } : {}),
+		...(worktree !== null && !external
+			? {
+					taskWorktree: {
+						branch: worktree.branch,
+						changedPaths: worktree.changedPaths?.length ?? 0,
+						kept: existsSync(worktree.path),
+					},
+				}
+			: {}),
 		...(contract !== undefined ? { contract } : {}),
 		...(contractKind !== undefined ? { contractKind } : {}),
 		...(text ? { text } : {}),

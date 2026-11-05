@@ -1936,3 +1936,62 @@ test("Esc on a permission card folds open terms before it denies, and every rail
 	routeOverlayKey("\x1b", "permission-confirm", deps, () => false);
 	strictEqual(denied, 1, "from the card itself Esc denies");
 });
+||||||| 6f7742c6f
+
+
+test("a worker failure's primary words name what happened to the task, never the validator, repair loop or loop guard", async () =>
+{
+	const { workerFailureHeadline } = await import("../../src/domains/dispatch/failure-headline.js");
+	const cases: Array<[string, RegExp]> = [
+		[
+			"exit code 1; result contract failed after 2 bounded repair rounds: the reply after the tool-call lockout held only tool-call markup and was removed; tools are off, so emit the required terminal result format; stderr: [worker] synthesis lock: reply was tool-call markup only",
+			/^it gave no usable answer: it kept calling tools after they were turned off$/u,
+		],
+		[
+			"exit code 1; result contract failed after 2 bounded repair rounds: Verifier result payload failed: result must be valid JSON",
+			/^its answer was not in the format Clio asked for$/u,
+		],
+		[
+			"the operator denied the worker's permission request, so it changed nothing and the assignment was not done",
+			/^you denied its permission request, so it changed nothing$/u,
+		],
+		["no worker activity within the stall window", /^stopped responding, so Clio stopped it$/u],
+		[
+			"worker_turn_timeout: round 1 exceeded the 20 second response limit",
+			/^its model gave no complete reply within the 20s worker response limit$/u,
+		],
+	];
+	for (const [detail, words] of cases) {
+		const headline = workerFailureHeadline(detail) ?? "";
+		match(headline, words);
+		doesNotMatch(headline, /result contract|bounded repair|lockout|synthesis lock|stall window|operator/u);
+	}
+}
+)
+
+test("a steer receipt says the worker's model has the message only once it joined the model's context", async () => {
+	const { createSteerReceipts } = await import("../../src/interactive/steer-receipts.js");
+	const bus = createTelemetryHub();
+	const rows: Array<(width: number) => string[]> = [];
+	const receipts = createSteerReceipts({ bus, append: (render) => rows.push(render), requestRender: () => {} });
+	const run = { runId: "r1", agentId: "verifier" } as Parameters<typeof receipts.sent>[0];
+	const head = (): string => stripTerminalSequences(rows[0]?.(120)[1] ?? "");
+	receipts.sent(run, "also check the lint output");
+	match(head(), /waiting for the worker to take it/u);
+	bus.emit("run.progressed", { runId: "r1", agentId: "verifier", event: { type: "clio_coder_steer_received" } });
+	match(head(), /verifier took your message · its model reads it at its next step/u);
+	bus.emit("run.progressed", {
+		runId: "r1",
+		agentId: "verifier",
+		event: {
+			type: "message_end",
+			message: { role: "user", content: [{ type: "text", text: "also check the lint output" }] },
+		},
+	});
+	match(head(), /verifier's model has your message/u);
+	receipts.sent(run, "and the tests");
+	bus.emit("run.progressed", { runId: "r1", agentId: "verifier", event: { type: "clio_coder_steer_received" } });
+	bus.emit("run.aborted", { runId: "r1", agentId: "verifier" } as never);
+	match(stripTerminalSequences(rows[1]?.(120)[1] ?? ""), /took your message but stopped before its model read it/u);
+	receipts.dispose();
+});

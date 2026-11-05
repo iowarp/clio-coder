@@ -366,6 +366,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "reasonCode"
 			| "policySource"
 			| "denial"
+			| "unresolved"
 		>
 	>();
 	const toolTelemetry: ToolTelemetry = {
@@ -383,6 +384,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
 				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
 				...(event.denial === undefined ? {} : { denial: event.denial }),
+				...(event.unresolved === true ? { unresolved: true as const } : {}),
 			});
 		},
 	};
@@ -1652,6 +1654,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),
 								...(admission.reason === undefined ? {} : { blockReason: admission.reason }),
 								...(admission.denial === undefined ? {} : { denial: admission.denial }),
+								// A verify call naming a check that does not exist ran nothing; a headless receipt must not seal it as a failed check.
+								...(admission.unresolved === true ? { unresolved: true } : {}),
 							}),
 				} as typeof event;
 			} else if (event.type === "agent_end") {

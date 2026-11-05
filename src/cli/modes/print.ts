@@ -401,14 +401,17 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (tool === ToolNames.Verify) {
 		stats.verifyCalls.push({
 			check: stats.pendingVerifyCalls.get(event.toolCallId) ?? null,
+			// A check name that resolved to nothing ran nothing, as in a worker's receipt, so it seals no failed validation.
 			outcome:
-				outcome === "ok" || outcome === "error" || outcome === "blocked"
-					? outcome
-					: outcome === undefined
-						? event.isError
-							? "error"
-							: "ok"
-						: null,
+				outcome === "error" && (event as { unresolved?: unknown }).unresolved === true
+					? "unresolved"
+					: outcome === "ok" || outcome === "error" || outcome === "blocked"
+						? outcome
+						: outcome === undefined
+							? event.isError
+								? "error"
+								: "ok"
+							: null,
 		});
 		stats.pendingVerifyCalls.delete(event.toolCallId);
 	}
