@@ -663,6 +663,8 @@ function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>
 		if (seg.kind === "tool") return true;
 		if (seg.kind === "text" && seg.text.trim().length > 0) return true;
 		if (seg.kind === "error" && seg.text.trim().length > 0) return true;
+		// A round that only reasoned still drew rows, and the receipt closes the turn beneath them.
+		if (seg.kind === "thinking" && (seg.text.trim().length > 0 || seg.notRetained === true)) return true;
 	}
 	return false;
 }
