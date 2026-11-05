@@ -47,7 +47,7 @@ export function workerQuietWords(
  * the same route and how long the slowest took to its first output. Under two such calls the usual time is unknown and
  * the words say so. A pause mid-answer has no such history, so its usual length is always unknown.
  */
-export function workerSilenceForms(
+function workerSilenceForms(
 	progress: Pick<
 		WorkerProgressSnapshot,
 		"phase" | "currentAction" | "awaitingApproval" | "quietSinceMs" | "evidenceAtMs" | "settled"
