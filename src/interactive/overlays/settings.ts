@@ -362,7 +362,7 @@ function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 		input.focused = true;
 		input.onSubmit = (val) => done(val);
 		input.onEscape = () => done();
-		return new SubmenuWrapper(title, input, buildHint([{ key: "Enter", verb: "confirm" }], "back"), note);
+		return new SubmenuWrapper(title, input, buildHint([{ key: "Enter", verb: "confirm" }], "back to list"), note);
 	};
 }
 
@@ -512,7 +512,7 @@ function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBu
 		const wrapper = new SubmenuWrapper(
 			title,
 			input,
-			buildHint([{ key: "Enter", verb: "confirm" }], "back"),
+			buildHint([{ key: "Enter", verb: "confirm" }], "back to list"),
 			numberSettingNote(rule),
 		);
 		input.onSubmit = (val) => {
@@ -557,7 +557,7 @@ function editEnumListSubmenu(title: string, legal: readonly string[]): SettingSu
 		const wrapper = new SubmenuWrapper(
 			title,
 			input,
-			buildHint([{ key: "Enter", verb: "confirm" }], "back"),
+			buildHint([{ key: "Enter", verb: "confirm" }], "back to list"),
 			`Comma-separated, from ${legal.join(", ")}; blank activates none.`,
 		);
 		input.onSubmit = (val) => {
@@ -851,6 +851,9 @@ function scopedModelsSubmenu(
 			"Target entries cycle by target, using its default model when switching targets. Model entries pin one exact target/model reference.",
 		);
 }
+
+/** One printable character with no modifier: what a person typing a word sends, and no key encoding is. */
+const TYPED_CHARACTER = /^[^\p{Cc}\s]$/u;
 
 /** Two pickers in sequence joined into one committed value; Esc at either step cancels. */
 function chainSubmenus(
@@ -1155,7 +1158,7 @@ const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
 		active = new SubmenuWrapper(
 			"Before Clio answers",
 			list,
-			buildHint([{ key: "Enter", verb: "toggle or apply" }], "back"),
+			buildHint([{ key: "Enter", verb: "toggle or apply" }], "back to list"),
 			"Choose which preparation Clio may start before responding.",
 		);
 	};
@@ -1196,7 +1199,7 @@ function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSe
 		const wrapper = new SubmenuWrapper(
 			control.label,
 			input,
-			buildHint([{ key: "Enter", verb: "review" }], "back"),
+			buildHint([{ key: "Enter", verb: "review" }], "back to list"),
 			controlInstructions(control, "settings"),
 		);
 		input.onSubmit = (value) => {
@@ -3171,7 +3174,16 @@ export class SettingsCenter implements Component {
 			this.activateSelectedItem();
 			return;
 		}
-		if (kb.matches(data, "tui.select.cancel")) this.back();
+		if (kb.matches(data, "tui.select.cancel")) {
+			this.back();
+			return;
+		}
+		// Every other list on this surface filters as you type; a letter here that no key owns starts the same filter.
+		if (TYPED_CHARACTER.test(data)) {
+			this.filterDraft = "";
+			this.filterInput.setValue("");
+			this.handleFilterKey(data);
+		}
 	}
 
 	invalidate(): void {
@@ -3216,6 +3228,7 @@ export class SettingsCenter implements Component {
 	escapeVerb(): OverlayEscVerb {
 		if (this.filterDraft !== null) return "cancel filter";
 		if (this.submenuComponent) return "back to list";
+		if (this.filterQuery.length > 0) return "clear filter";
 		if (this.level === "rows" && this.sections().length > 0) return "back to sections";
 		return "close settings";
 	}
@@ -3238,7 +3251,8 @@ export class SettingsCenter implements Component {
 	 */
 	railHint(innerWidth: number): string {
 		const verb = this.escapeVerb();
-		const esc: HintEntry = { key: "Esc", verb, short: verb.split(" ")[0] ?? verb };
+		// The destination keeps its words on a narrow rail; `back` alone would not say which level.
+		const esc: HintEntry = { key: "Esc", verb };
 		const owner = this.keyOwner();
 		if (owner === "submenu") return buildResponsiveHint([], esc)(innerWidth);
 		if (owner === "filter") {
@@ -3498,7 +3512,7 @@ export class SettingsCenter implements Component {
 			this.submenuComponent = new SubmenuWrapper(
 				item.label,
 				list,
-				buildHint([{ key: "Enter", verb: "choose" }], "back"),
+				buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
 				`Now ${formatSettingsValue(item.configPath, item.currentValue)}${timing === null ? "" : ` · a change applies ${timing}`}`,
 			);
 		}
@@ -3543,7 +3557,11 @@ export class SettingsCenter implements Component {
 			this.submenuComponent = null;
 			this.options.requestRender?.();
 		};
-		const wrapper = new SubmenuWrapper("Change not saved", list, buildHint([{ key: "Enter", verb: "choose" }], "back"));
+		const wrapper = new SubmenuWrapper(
+			"Change not saved",
+			list,
+			buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
+		);
 		wrapper.setProblem(error instanceof Error ? error.message : String(error));
 		this.submenuComponent = wrapper;
 		this.options.requestRender?.();
@@ -3611,7 +3629,12 @@ export class SettingsCenter implements Component {
 		})();
 		const affected = [...new Set(plan.leaves.map((leaf) => settingsPathLabel(leaf.path)))];
 		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} · ${plan.impact}`;
-		this.submenuComponent = new SubmenuWrapper(title, list, buildHint([{ key: "Enter", verb: "choose" }], "back"), note);
+		this.submenuComponent = new SubmenuWrapper(
+			title,
+			list,
+			buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
+			note,
+		);
 	}
 
 	private displayValueFor(item: SettingsCenterItem, selected: boolean): { value: string; pending: boolean } {

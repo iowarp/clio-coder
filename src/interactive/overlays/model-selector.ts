@@ -1032,6 +1032,23 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 
 	invalidate(): void {}
 
+	/** While a query is typed, r, R and * type into it, and Esc clears it instead of closing. */
+	railHint(innerWidth: number): string {
+		return this.query.length > 0
+			? buildResponsiveHint(
+					[FILTER_HINT, { key: "Tab", verb: "focus/all" }, { key: "Enter", verb: "use" }],
+					"clear filter",
+				)(innerWidth)
+			: buildResponsiveHint([
+					FILTER_HINT,
+					{ key: "Tab", verb: "focus/all" },
+					{ key: "r", verb: "refresh target", short: "refresh" },
+					{ key: "R", verb: "refresh all" },
+					{ key: "*", verb: "fav" },
+					{ key: "Enter", verb: "use" },
+				])(innerWidth);
+	}
+
 	handleInput(data: string): void {
 		data = localKey(data);
 		if (this.lifecycle.signal.aborted) return;
@@ -1162,14 +1179,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		width: overlayWidth,
 		markerId: "model",
 		title: "Models",
-		footerHint: buildResponsiveHint([
-			FILTER_HINT,
-			{ key: "Tab", verb: "focus/all" },
-			{ key: "r", verb: "refresh target", short: "refresh" },
-			{ key: "R", verb: "refresh all" },
-			{ key: "*", verb: "fav" },
-			{ key: "Enter", verb: "use" },
-		]),
+		footerHint: (innerWidth) => view.railHint(innerWidth),
 	});
 	if (deps.autoRefresh !== false) {
 		view.refresh("all");

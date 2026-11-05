@@ -147,7 +147,7 @@ export interface ListOverlayOptions {
 	/** Start in the list; / enters search, whose letters and arrows belong to the input. */
 	explicitSearch?: boolean;
 	/** Persistent, width-aware scope/mode text, including when the selected tab is empty. */
-	status?: (width: number) => string;
+	status?: (width: number) => string | undefined;
 	/** Actions that do not require a selected row, such as scope or view mode. */
 	globalActions?: Record<string, () => void>;
 	globalHints?: ReadonlyArray<HintEntry>;

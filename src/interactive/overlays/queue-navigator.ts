@@ -38,13 +38,17 @@ export interface QueueNavigatorDeps {
 	entries(): ReadonlyArray<QueuedChatMessage>;
 	/** No run is going to take the queue, so no slot is coming for it (#447). */
 	isHeld?(): boolean;
+	/** A run is live, so sending now has to stop it first. */
+	isRunning?(): boolean;
+	/** Why a run refuses to be interrupted right now; the entry then goes to the head of the next slot. */
+	interruptRefusal?(): string | null;
 	remove(id: string): void;
 	move(id: string, delta: -1 | 1): boolean;
 	/** Flip one entry between the next slot and the end of the turn. */
 	toggleKind(entry: QueuedChatMessage): void;
 	/** Take the entry out of the queue and put its text in the editor. */
 	toEditor(entry: QueuedChatMessage): void;
-	/** Take the entry out of the queue and deliver it now; the rest stay queued. */
+	/** Take the entry out of the queue and deliver it as a fresh prompt, or at the next slot if the run refuses; the rest stay queued. */
 	sendNow(entry: QueuedChatMessage): void;
 	/** Everything back to the editor, the Alt+Q behaviour. */
 	restoreAll(): void;
@@ -155,8 +159,12 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "next slot" : "end of turn"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
 				}),
 			);
+			const notice = this.sendNotice(selected).flatMap((line) =>
+				wrapTextWithAnsi(theme.fg("annotation", line), safeWidth),
+			);
+			rows.push(...notice);
 			const text = selected.text.split("\n").flatMap((line) => wrapTextWithAnsi(theme.fg("body", line), safeWidth));
-			const kept = text.slice(0, Math.max(1, detailBudget - 1));
+			const kept = text.slice(0, Math.max(1, detailBudget - 1 - notice.length));
 			const last = kept.at(-1);
 			rows.push(
 				...(text.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept),
@@ -166,20 +174,37 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		return rows;
 	}
 
+	/** What Enter does to this entry, as the rail says it: only held entries send without a cost. */
+	private sendEntry(entry: QueuedChatMessage | undefined): HintEntry | null {
+		if (entry === undefined || entry.origin !== undefined) return null;
+		if (this.deps.interruptRefusal?.() != null) return { key: "Enter", verb: "send at next slot", short: "next slot" };
+		if (this.deps.isRunning?.() === true) return { key: "Enter", verb: "stop run and send", short: "send now" };
+		return { key: "Enter", verb: "send now" };
+	}
+
+	/** Lines above the message when Enter cannot do what the verb usually means. */
+	private sendNotice(entry: QueuedChatMessage): string[] {
+		if (entry.origin !== undefined) return ["A peer queued this, so it cannot be sent as yours or moved to the editor."];
+		const refusal = this.deps.interruptRefusal?.() ?? null;
+		return refusal === null ? [] : [`The run cannot be stopped: ${refusal}.`];
+	}
+
 	/**
 	 * Send now leads because it is the verb that costs something; a narrowing rail
 	 * drops from the left of the rest, so the arrows go first and the per-message
 	 * verbs last.
 	 */
 	private hintEntries(): HintEntry[] {
+		const selected = this.deps.entries()[this.selected];
+		const send = this.sendEntry(selected);
 		return [
-			{ key: "Enter", verb: "send now" },
+			...(send ? [send] : []),
 			{ key: "↑↓", verb: "select" },
 			{ key: this.deps.restoreAllLabel().split(" · ")[0] ?? "", verb: "all to editor" },
 			{ key: "⇧↑↓", verb: "move" },
 			{ key: "t", verb: "slot" },
 			{ key: "x", verb: "remove" },
-			{ key: "e", verb: "to editor" },
+			...(selected?.origin === undefined ? [{ key: "e", verb: "to editor" }] : []),
 		];
 	}
 
@@ -222,10 +247,12 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		} else if (matchesKey(data, "t")) {
 			this.deps.toggleKind(entry);
 		} else if (matchesKey(data, "e")) {
+			if (entry.origin !== undefined) return;
 			this.deps.toEditor(entry);
 			this.deps.onClose();
 			return;
 		} else if (matchesKey(data, "enter")) {
+			if (entry.origin !== undefined) return;
 			this.deps.sendNow(entry);
 			this.deps.onClose();
 			return;

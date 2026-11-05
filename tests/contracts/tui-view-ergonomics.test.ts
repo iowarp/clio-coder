@@ -51,7 +51,7 @@ test("initial text filters global evidence, appends at the end, and clears at an
 	view.handleInput("\x15");
 	view.handleInput("unfindable");
 	match(plain(view), /List · 0\/2/u);
-	match(plain(view), /Ctrl\+U clears the filter/u);
+	match(plain(view), /Esc clears the filter/u);
 	view.handleInput("\r");
 	strictEqual(view.keyboardScope, "edit");
 	view.handleInput("\x15");
@@ -75,6 +75,9 @@ test("filter persists across preview, back, refresh, and terminal widths", async
 		await settle();
 		match(plain(view, width), /> report/u);
 	}
+	view.handleInput("\x1b");
+	strictEqual(closed(), false);
+	match(plain(view), /List · 2\/2/u);
 	view.handleInput("\x1b");
 	strictEqual(closed(), true);
 });

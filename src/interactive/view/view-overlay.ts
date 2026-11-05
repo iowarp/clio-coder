@@ -101,6 +101,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 	switch (category) {
 		case "transcript":
 			return "Transcript details";
+		case "message-path":
+			return "What happened to your messages";
 		case "accountability":
 			return "Accountability";
 		case "evidence":
@@ -129,6 +131,7 @@ function categoryLabel(category: ViewArtifactCategory): string {
 const VIEW_ARTIFACT_CATEGORY_SET = new Set<ViewArtifactCategory>(VIEW_ARTIFACT_CATEGORIES);
 const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
 	"transcript",
+	"message-path",
 	"task-ledger",
 	"workspace",
 	"protected-artifact",
@@ -378,7 +381,27 @@ function buildArtifactHeaderLines(
 	];
 }
 
-function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
+/** The row's outcome as a glyph that reads without colour, for a category whose rows carry one. */
+function artifactToneMark(tone: ViewArtifact["tone"]): string {
+	const theme = clioTheme();
+	switch (tone) {
+		case "ok":
+			return `${theme.fg("success", GLYPH.ok)} `;
+		case "error":
+			return `${theme.fg("error", GLYPH.error)} `;
+		case "warning":
+			return `${theme.fg("warning", GLYPH.warn)} `;
+		case "muted":
+			return `${theme.fg("annotation", GLYPH.cancelled)} `;
+		case "active":
+			return `${theme.fg("info", GLYPH.queued)} `;
+		default:
+			return "";
+	}
+}
+
+function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, filtered: boolean, innerWidth?: number): string {
+	const listEsc = filtered ? "clear filter" : "close";
 	// One pane at a time needs an explicit Enter and Escape route in the hint;
 	// the generic elider can drop the action in the middle of a long hint.
 	if (innerWidth !== undefined && viewUsesSinglePane(innerWidth - 2)) {
@@ -386,21 +409,23 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 		const tiers =
 			focus === "list"
 				? [
-						"[↑↓] select · [type] filter · [Enter] detail · [Esc] close",
-						"[↑↓] select · [Enter] detail · [Esc] close",
-						"[Enter] detail · [Esc] close",
+						`[↑↓] select · [type] filter · [Enter] detail · [Esc] ${listEsc}`,
+						`[↑↓] select · [Enter] detail · [Esc] ${listEsc}`,
+						`[Enter] detail · [Esc] ${listEsc}`,
 					]
-				: ["[↑↓] scroll · [i] details · [Esc] back", "[i] details · [Esc] back"];
+				: ["[↑↓] scroll · [i] details · [Esc] back to list", "[i] details · [Esc] back to list", "[Esc] back to list"];
 		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);
 	}
 	if (focus === "list") {
-		return buildHint([
-			{ key: "↑↓", verb: "select" },
-			{ key: "←→", verb: "category" },
-			{ key: "type", verb: "filter" },
-			{ key: "Enter", verb: "content" },
-			{ key: "Ctrl+U", verb: "clear filter" },
-		]);
+		return buildHint(
+			[
+				{ key: "↑↓", verb: "select" },
+				{ key: "←→", verb: "category" },
+				{ key: "type", verb: "filter" },
+				{ key: "Enter", verb: "content" },
+			],
+			listEsc,
+		);
 	}
 	return buildHint(
 		[
@@ -413,7 +438,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 			{ key: "i", verb: "info" },
 			{ key: "o", verb: "path" },
 		],
-		"back",
+		"back to list",
 	);
 }
 
@@ -482,7 +507,7 @@ export class ViewOverlayView implements Component {
 	}
 
 	getHint(innerWidth?: number): string {
-		return viewFooterHint(this.focus, !!this.selectedArtifact()?.verify, innerWidth);
+		return viewFooterHint(this.focus, !!this.selectedArtifact()?.verify, this.filterText.length > 0, innerWidth);
 	}
 
 	private filteredArtifacts(): ViewArtifact[] {
@@ -684,7 +709,7 @@ export class ViewOverlayView implements Component {
 				[
 					...lines,
 					theme.fg("annotation", "No matching details."),
-					theme.fg("menuDescription", "Ctrl+U clears the filter."),
+					theme.fg("menuDescription", "Esc clears the filter."),
 					theme.fg("annotation", "Try workspace: or run:"),
 				],
 				width,
@@ -711,7 +736,7 @@ export class ViewOverlayView implements Component {
 			}
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
-			const cursor = `${selectionMark(selected)} `;
+			const cursor = `${selectionMark(selected)} ${artifactToneMark(row.item.tone)}`;
 			const safeTitle = viewArtifactDisplayText(row.item.title);
 			const title = theme.fg("menuOption", safeTitle, selected ? "selected" : "normal");
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
@@ -824,7 +849,8 @@ export class ViewOverlayView implements Component {
 			if (this.focus === "content") {
 				this.focus = "list";
 				this.options.requestRender?.();
-			} else this.options.onClose();
+			} else if (this.filterText.length > 0) this.clearFilter();
+			else this.options.onClose();
 			return;
 		}
 		if (this.focus === "content") {
@@ -836,6 +862,18 @@ export class ViewOverlayView implements Component {
 
 	invalidate(): void {}
 
+	/** The row under the cursor stays selected when it is still listed. */
+	private clearFilter(): void {
+		const selected = this.selectedArtifact();
+		this.filterInput.applyEdit("clear");
+		this.filterText = this.filterInput.getValue();
+		const retainedIndex = selected
+			? this.filteredArtifacts().findIndex((artifact) => artifactKey(artifact) === artifactKey(selected))
+			: -1;
+		if (retainedIndex >= 0) this.selectIndex(retainedIndex);
+		else this.selectInitialFilterMatch();
+	}
+
 	private handleListInput(data: string): boolean {
 		const filtered = this.filteredArtifacts();
 		if (matchesKey(data, "up")) {
@@ -846,25 +884,17 @@ export class ViewOverlayView implements Component {
 			if (filtered.length > 0) this.selectIndex(this.selectedIndex + 1);
 			return true;
 		}
-		const previous = this.filterText;
-		const clearing = matchesKey(data, "ctrl+u");
-		const selected = clearing ? this.selectedArtifact() : undefined;
-		if (clearing) {
-			this.filterInput.applyEdit("clear");
-		} else this.filterInput.handleInput(data);
-		this.filterText = this.filterInput.getValue();
-		if (previous !== this.filterText) {
-			const retainedIndex = selected
-				? this.filteredArtifacts().findIndex((artifact) => artifactKey(artifact) === artifactKey(selected))
-				: -1;
-			if (retainedIndex >= 0) {
-				this.selectIndex(retainedIndex);
-				return true;
-			}
-			this.selectInitialFilterMatch();
+		if (matchesKey(data, "ctrl+u")) {
+			if (this.filterText.length === 0) return false;
+			this.clearFilter();
 			return true;
 		}
-		return false;
+		const previous = this.filterText;
+		this.filterInput.handleInput(data);
+		this.filterText = this.filterInput.getValue();
+		if (previous === this.filterText) return false;
+		this.selectInitialFilterMatch();
+		return true;
 	}
 
 	private handleContentInput(data: string): boolean {

@@ -33,7 +33,7 @@ import {
 	telemetrySessionDirectory,
 } from "../telemetry/index.js";
 import type { JournalSource, SessionSource } from "../telemetry/read-model.js";
-import { accountabilityRecords, sessionJournals } from "../telemetry/read-model.js";
+import { accountabilityRecords, callsReport, sessionJournals, timeline } from "../telemetry/read-model.js";
 import type { SessionMeta } from "./contract.js";
 import type {
 	BashExecutionEntry,
@@ -44,6 +44,8 @@ import type {
 	TaskLedgerGoal,
 	TaskLedgerValidationEvidence,
 } from "./entries.js";
+import type { MessagePathTone } from "./message-path-view.js";
+import { foldMessagePaths } from "./message-path-view.js";
 import type { SessionPromptCompileRecord } from "./prompt-manifest.js";
 import { readPromptCompileManifest } from "./prompt-manifest.js";
 import { foldSessionArtifacts, resolveSessionArtifactPath } from "./session-artifacts.js";
@@ -51,6 +53,7 @@ import { filterEntriesToActivePath } from "./tree/active-path.js";
 
 export type ViewArtifactCategory =
 	| "transcript"
+	| "message-path"
 	| "accountability"
 	| "evidence"
 	| "run"
@@ -91,6 +94,8 @@ export interface ViewArtifact {
 	correlationId?: string;
 	toolName?: string;
 	searchText?: readonly string[];
+	/** How the list row reads at a glance. The title carries the same word for a surface that draws no glyph. */
+	tone?: MessagePathTone;
 	/**
 	 * Set on a protected artifact. Its load renders the protection record and
 	 * never the file, and a client read states this reason instead of bytes.
@@ -112,6 +117,8 @@ export interface ArtifactProviderDeps {
 	dispatch?: Pick<DispatchContract, "listRuns" | "getRun"> | undefined;
 	sessionMeta?: SessionMeta | null | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
+	/** The messages in the live queue; absent where no queue can be read, so a path says only what was last recorded. */
+	queuedMessageIds?: (() => ReadonlySet<string>) | undefined;
 	/**
 	 * Label for a model id in a dispatch body. The terminal fits it to its cell
 	 * budget; a surface without one keeps the full id. Absent means the full id.
@@ -130,6 +137,7 @@ export function viewArtifactDisplayText(text: string): string {
 
 export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"transcript",
+	"message-path",
 	"accountability",
 	"evidence",
 	"run",
@@ -1560,9 +1568,51 @@ export class SafetyAuditArtifactProvider implements ArtifactProvider {
 	}
 }
 
+const MESSAGE_PATH_ARTIFACT_LIMIT = 200;
+
+/** What became of each operator message in this session, newest first, from its journal; no message text is in there. */
+export class MessagePathArtifactProvider implements ArtifactProvider {
+	readonly category = "message-path" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const sessionId = this.deps.sessionMeta?.id;
+		if (!sessionId) return [];
+		// The journal loader reaches run records and dispatch; the /view list loads it only when opened.
+		const { loadSessionTelemetrySourceAsync } = await import("./telemetry-source.js");
+		const source = await loadSessionTelemetrySourceAsync(this.deps.stateDir, sessionId);
+		if (source === null) return [];
+		const now = new Date();
+		const paths = foldMessagePaths(
+			timeline(source, null, { now }),
+			callsReport(source, {}, { now }).calls,
+			this.deps.queuedMessageIds?.(),
+			clockLocal,
+		).slice(0, MESSAGE_PATH_ARTIFACT_LIMIT);
+		const path = telemetryJournalPath(telemetrySessionDirectory(this.deps.stateDir, sessionId));
+		return paths.map((view) => ({
+			id: view.id,
+			category: this.category,
+			title: view.title,
+			timestamp: view.submittedAt,
+			path,
+			sessionId,
+			tone: view.tone,
+			searchText: view.searchText,
+			load: async () => ({
+				format: "text" as const,
+				lines: [view.summary, "", ...view.steps],
+				details: { format: "text" as const, lines: view.record },
+			}),
+		}));
+	}
+}
+
 export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): ArtifactProvider[] {
 	return [
 		{ category: "transcript", list: async () => deps.readTranscript?.() ?? [] },
+		new MessagePathArtifactProvider(deps),
 		new AccountabilityArtifactProvider(deps),
 		new EvidenceArtifactProvider(deps),
 		new RunRecordArtifactProvider(deps),
