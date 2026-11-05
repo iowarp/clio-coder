@@ -71,6 +71,7 @@ const SECOND_WORKER_WORDS = 28;
 
 /** The share of a rail the work beside the phase may take by naming a second worker. */
 const SECOND_WORKER_RAIL_SHARE = 0.6;
+const SECOND_WORKER_MIN_RAIL = 100;
 
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
 function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string | null {
@@ -131,7 +132,12 @@ function isMainActive(status: AgentStatus): boolean {
  * can go in now, which it can unless the turn itself is waiting on this work.
  */
 export function railDetail(facts: LiveWorkFacts, width: number): string | null {
-	const worker = workerSummary(facts, width, Math.floor(width * SECOND_WORKER_RAIL_SHARE));
+	// An 80-column rail cannot hold two workers and the main phase's name and clock, and those come first.
+	const worker = workerSummary(
+		facts,
+		width,
+		width >= SECOND_WORKER_MIN_RAIL ? Math.floor(width * SECOND_WORKER_RAIL_SHARE) : 0,
+	);
 	const background = backgroundSummary(facts, width);
 	if (worker === null && background === null) return null;
 	const waiting = facts.background.some((call) => call.blocksTurn);
