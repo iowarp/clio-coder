@@ -460,6 +460,23 @@ function failureLines(entry: WorkerEntryState, width: number, inspect = false): 
 }
 
 /**
+ * Where a finished run's changes are when Clio did not merge them: a `changed` row alone reads as the checkout, and
+ * the change sits on the worktree's branch until the operator takes it.
+ */
+function keptWorktreeLines(entry: WorkerEntryState, width: number): string[] {
+	const result = entry.result;
+	const task = result?.taskWorktree;
+	if (result === undefined || result.outcome === "canceled" || result.mergeDetail !== undefined) return [];
+	if (task === undefined || !task.kept || task.changedPaths === 0) return [];
+	const files = `${task.changedPaths} changed ${task.changedPaths === 1 ? "file" : "files"}`;
+	return railLines(
+		sanitizeCallTargetText(`${files} on branch ${task.branch} in its worktree, not in your checkout`),
+		"toolMetadata",
+		width,
+	);
+}
+
+/**
  * Who stopped a cancelled run, and what became of its worktree, which nothing else on the card says: a cancel
  * removes a worktree with no work in it and keeps one holding changes, on its branch.
  */
@@ -849,6 +866,7 @@ function helperRow(
 		alignedHeader(entry, width, nowMs, siblings),
 		...(pending && detail.style === "standard" ? [progressLine(entry, width, nowMs, false)] : []),
 		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", width) : []),
+		...keptWorktreeLines(entry, width),
 		...previewRows(
 			[...failureLines(entry, width), ...attemptLines(entry, width)],
 			previewBudget(detail.errorRows, terminalRows),
@@ -1022,6 +1040,7 @@ export function renderWorkerEntryLines(
 		...failure,
 		...(inspect ? [] : cancelLines(entry, safeWidth)),
 		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", safeWidth) : []),
+		...keptWorktreeLines(entry, safeWidth),
 		...(presented ? railLines(presented, "body", safeWidth) : []),
 		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", safeWidth) : []),
 		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", safeWidth) : []),
