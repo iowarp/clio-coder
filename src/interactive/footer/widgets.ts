@@ -361,7 +361,7 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 	const ultraNarrow = width < 48;
 	switch (status.phase) {
 		case "idle":
-			return { glyph: GLYPH.queued, label: "Ready", token: "counter", live: false };
+			return { glyph: GLYPH.queued, label: "Idle", token: "counter", live: false };
 		case "preparing":
 			return { glyph: GLYPH.phaseWaiting, label: "Preparing", token: "harnessAction", live: true };
 		case "waiting_model":
@@ -664,7 +664,48 @@ export function composerPhasePresentation(
 			label = "is waiting for a worker";
 			break;
 		case "stuck":
-			label = `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`;
+			if (status.resumePhase === "tool_running" && status.tool) {
+				// Its own process has gone quiet, which is not the model having no output.
+				return { ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName) };
+			}
+			label = fitRailFacts(
+				[
+					{ text: `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`, keep: 9 },
+					{ text: "may be loading or stuck", keep: 3 },
+					{ text: "Esc cancels", keep: 7 },
+					{ text: "/model switches", keep: 8 },
+				],
+				room,
+			);
+			break;
+		case "cancelling": {
+			if (status.tool) {
+				// Elapsed here is the stop's own, not the call's: how long the process has ignored the request.
+				const stopping = toolActivity(
+					{
+						...status,
+						activeTools: [],
+						tool: {
+							...status.tool,
+							...(status.cancelRequestedAt !== undefined ? { startedAt: status.cancelRequestedAt } : {}),
+						},
+					},
+					room,
+					now,
+					"is stopping",
+					elapsedFrom,
+					undefined,
+				);
+				return { ...phase, ...stopping };
+			}
+			label = fitRailFacts(
+				[
+					{ text: "is cancelling", keep: 9 },
+					{ text: elapsedFrom(status.cancelRequestedAt ?? now), keep: 8 },
+					{ text: "stop requested", keep: 7 },
+				],
+				room,
+			);
 			break;
 		}
 		case "ended": {
@@ -694,6 +735,90 @@ export function composerPhasePresentation(
 	return { ...phase, label };
 }
 
+/** What the route on screen is known to be able to do right now, in the terms the model picker already uses. */
+export interface RouteReadinessFacts {
+	targetId: string;
+	available: boolean;
+	reason: string;
+	health: "healthy" | "degraded" | "unknown" | "down";
+	/** How the last turn on this exact route ended, when this session ran one. */
+	lastStop: TurnSummary["stopReason"] | null;
+}
+
+/**
+ * Idle states readiness or the real blocker. A target that answers a model listing is reachable, nothing more: only a
+ * request this session saw answered says the model is ready, and until then the claim stays that small.
+ */
+export function idleReadinessPresentation(facts: RouteReadinessFacts, width: number): HarnessPhasePresentation {
+	const room = railActivityRoom(width);
+	const quiet = { token: "counter" as const, live: false };
+	if (!facts.available) {
+		const why = facts.reason.trim();
+		return {
+			glyph: GLYPH.warn,
+			token: "warning",
+			live: false,
+			label: fitRailFacts(
+				[
+					{ text: "is unavailable", keep: 9 },
+					{ text: why.length > 0 ? truncateToWidth(why, 36, GLYPH.ellipsis, false) : null, keep: 3 },
+					{ text: "/model switches", keep: 8 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.health === "down") {
+		return {
+			glyph: GLYPH.error,
+			token: "error",
+			live: false,
+			label: fitRailFacts(
+				[
+					{ text: `target ${facts.targetId} is down`, keep: 9 },
+					{ text: "/model switches", keep: 8 },
+					{ text: `clio-coder configure --id ${facts.targetId}`, keep: 2 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.lastStop === "error") {
+		return {
+			glyph: GLYPH.error,
+			token: "warning",
+			live: false,
+			label: fitRailFacts(
+				[
+					{ text: "last request failed", keep: 9 },
+					{ text: "/model switches", keep: 8 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.lastStop !== null && facts.lastStop !== "cancelled" && facts.lastStop !== "aborted") {
+		return { glyph: GLYPH.ok, ...quiet, label: "is ready" };
+	}
+	const known =
+		facts.health === "healthy"
+			? "target reachable"
+			: facts.health === "degraded"
+				? "target degraded"
+				: "readiness unknown";
+	return {
+		glyph: GLYPH.queued,
+		...quiet,
+		label: fitRailFacts(
+			[
+				{ text: known, keep: 9 },
+				{ text: facts.lastStop === null ? "no request yet" : "last request cancelled", keep: 5 },
+			],
+			room,
+		),
+	};
+}
+
 export function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
@@ -709,7 +834,7 @@ export function buildHarnessStatePill(
 	// remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.
 	if (status.phase === "idle") {
-		const idle = theme.fg("counter", `${GLYPH.queued} Ready`);
+		const idle = theme.fg("counter", `${GLYPH.queued} Idle`);
 		return badge ? `${idle} ${theme.fg("annotation", "·")} ${badge}` : idle;
 	}
 	const phase = footerPhasePresentation(status, safeWidth, now);

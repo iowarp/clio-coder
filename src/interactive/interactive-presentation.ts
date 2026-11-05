@@ -48,7 +48,7 @@ import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboa
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
-import { composerPhasePresentation } from "./footer/widgets.js";
+import { composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
@@ -580,7 +580,24 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
-			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
+			const route = deps.getSettings?.().chat;
+			if (status.phase !== "idle") {
+				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model));
+			}
+			const target = deps.providers.list().find((candidate) => candidate.target.id === route?.target);
+			if (!target || !route?.target) return null;
+			const last = lastTurnSummary;
+			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
+			return idleReadinessPresentation(
+				{
+					targetId: route.target,
+					available: target.available,
+					reason: target.reason,
+					health: target.health.status,
+					lastStop: onRoute ? last.stopReason : null,
+				},
+				width,
+			);
 		},
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
