@@ -26,6 +26,8 @@ import { scrollTranscriptPage } from "../layout.js";
 import {
 	buildHint,
 	DEFAULT_SELECT_THEME,
+	fitHintEntries,
+	fitHintEntryList,
 	fitRow,
 	type HintEntry,
 	type OverlayEscVerb,
@@ -65,12 +67,42 @@ const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_INNER_ROWS = 6;
 /** The question region keeps at least this many rows before the options window shrinks. */
 const MIN_QUESTION_ROWS = 3;
+/** At or under this many body rows an option's explanation may give way so every choice stays listed. */
+const COMPACT_BODY_ROWS = 12;
 const MAX_LABEL_COLUMN = 30;
 const MIN_LABEL_COLUMN = 12;
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
-const OTHER_CAPTION = "Other · records exactly what you type";
+const OTHER_CAPTION = "Other · recorded exactly as typed";
 const CURSOR_CELL = renderFakeCursor(" ");
+
+type OptionDetail = "all" | "focused" | "none";
+
+/**
+ * One way to spend the body's rows. The question and its choices are what the
+ * operator acts on, so the rows around them go first: blank spacing, then the
+ * header rows, and on a short terminal explanations before the key legend.
+ */
+interface BodyFit {
+	spacing: boolean;
+	headers: boolean;
+	legend: boolean;
+	detail: OptionDetail;
+}
+
+const FULL_FIT: BodyFit = { spacing: true, headers: true, legend: true, detail: "all" };
+const TIGHT_FIT: BodyFit = { ...FULL_FIT, spacing: false };
+const HEADERLESS_FIT: BodyFit = { ...TIGHT_FIT, headers: false };
+const BODY_FITS: ReadonlyArray<BodyFit> = [FULL_FIT, TIGHT_FIT, HEADERLESS_FIT, { ...HEADERLESS_FIT, legend: false }];
+const COMPACT_BODY_FITS: ReadonlyArray<BodyFit> = [
+	FULL_FIT,
+	TIGHT_FIT,
+	HEADERLESS_FIT,
+	{ ...HEADERLESS_FIT, detail: "focused" },
+	{ ...HEADERLESS_FIT, detail: "none" },
+	{ ...HEADERLESS_FIT, legend: false, detail: "focused" },
+	{ ...HEADERLESS_FIT, legend: false, detail: "none" },
+];
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
@@ -415,6 +447,7 @@ function layoutOptionRows(
 	focusedIndex: number,
 	width: number,
 	recommendedIndex = -1,
+	detail: OptionDetail = "all",
 ): OptionRowLayout {
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
@@ -425,7 +458,7 @@ function layoutOptionRows(
 			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}`;
 			const prefix = focused ? theme.fg("selectedOption", `${GLYPH.cursor} `) : "  ";
 			const labels = wrapTextWithAnsi(label, safeWidth - 2).map((line, at) => `${at === 0 ? prefix : "  "}${line}`);
-			const description = item.description?.trim();
+			const description = detail === "all" || (detail === "focused" && focused) ? item.description?.trim() : undefined;
 			const explanation = description
 				? formatAskUserQuestion(description, Math.max(4, safeWidth - CONTINUATION_INDENT.length)).map(
 						(line) => `${CONTINUATION_INDENT}${theme.base("decisionConsequence", line)}`,
@@ -492,6 +525,10 @@ class AskUserOverlayView implements Component {
 	private questionOverflows = false;
 	private questionRegionRows = 1;
 	private questionTotalRows = 0;
+	/** Cells the rail under this body has for keys; zero until the composer says. */
+	private railRoom = 0;
+	/** Whether the last option layout had to window its list. */
+	private controlWindowed = false;
 	private ledgerExpanded = false;
 	private detailsExpanded = false;
 	private presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION;
@@ -551,6 +588,10 @@ class AskUserOverlayView implements Component {
 	}
 
 	/** What the timer does if it runs out, in the words the option list uses. */
+	setRailRoom(cells: number): void {
+		this.railRoom = Math.max(0, Math.floor(cells));
+	}
+
 	private unattendedOutcome(): string {
 		if (this.presentation.tier === "outward") return "declines this outward step";
 		const withOptions = this.questions.filter(questionHasOptions).length;
@@ -559,6 +600,14 @@ class AskUserOverlayView implements Component {
 			return withOptions > 1 ? "picks the recommended option for each question" : "picks the recommended option";
 		}
 		return "picks each recommended option, or leaves it to Clio's judgment";
+	}
+
+	/** The same outcome for one narrow row: the choice itself when there is only one. */
+	private unattendedOutcomeShort(): string {
+		if (this.presentation.tier === "outward") return "declines";
+		const only = this.questions.length === 1 ? this.questions[0] : undefined;
+		if (only === undefined) return "recommended";
+		return only.options?.[recommendedOptionIndex(only)]?.label ?? "Clio decides";
 	}
 
 	/** The option this question's timeout would take, while a timer is part of the round. */
@@ -575,25 +624,31 @@ class AskUserOverlayView implements Component {
 	 * held line that stays for the rest of the round, so the operator can tell a
 	 * paused timer from one that was never there. Nothing about it implies work.
 	 */
-	private renderCountdown(width: number): string[] {
+	private renderCountdown(width: number, headers: boolean): string[] {
 		const countdown = this.countdown;
 		if (countdown === null) return [];
 		const theme = clioTheme();
 		if (countdown.state() === "held") {
 			const question = this.currentQuestion();
-			const escVerb =
-				this.currentState()?.mode === "text" && question && questionHasOptions(question) ? "Esc goes back" : "Esc closes";
-			return wrapTextWithAnsi(
-				theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · Enter records, ${escVerb}`),
-				width,
-			);
+			const goesBack = this.currentState()?.mode === "text" && question && questionHasOptions(question);
+			const line = headers
+				? `${GLYPH.phaseBlocked} timer held · Enter records, ${goesBack ? "Esc goes back" : "Esc closes"}`
+				: `${GLYPH.phaseBlocked} held · Enter records · ${goesBack ? "Esc back" : "Esc closes"}`;
+			return headers
+				? wrapTextWithAnsi(theme.fg("annotation", line), width)
+				: [fitRow(theme.fg("annotation", line), width)];
 		}
 		const left = countdown.remainingMs();
 		if (left === null) return [];
+		const remaining = formatUnattendedRemaining(left);
+		if (!headers) {
+			const short = `${GLYPH.warn} ${remaining} then ${this.unattendedOutcomeShort()} · key holds`;
+			return [fitRow(theme.fg("warning", short), width)];
+		}
 		return wrapTextWithAnsi(
 			theme.fg(
 				"warning",
-				`${GLYPH.warn} No answer in ${formatUnattendedRemaining(left)} ${this.unattendedOutcome()} and Clio continues. Any key holds.`,
+				`${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} and Clio continues. Any key holds.`,
 			),
 			width,
 		);
@@ -762,49 +817,76 @@ class AskUserOverlayView implements Component {
 		if (this.phase !== "asking") return this.renderWaiting(safeWidth, maxRows);
 		const question = this.currentQuestion();
 		if (!question) return emptyState(clioTheme(), "No questions.", safeWidth);
+		const compact = maxRows <= COMPACT_BODY_ROWS;
+		for (const fit of compact ? COMPACT_BODY_FITS : BODY_FITS) {
+			const attempt = this.composeBody(question, safeWidth, hasMenu, maxRows, fit);
+			if (attempt.fits) return attempt.rows;
+		}
+		// Nothing lists every choice, so the list windows around the focused one.
+		const fallback = compact ? COMPACT_BODY_FITS[COMPACT_BODY_FITS.length - 1] : TIGHT_FIT;
+		return this.composeBody(question, safeWidth, hasMenu, maxRows, fallback ?? TIGHT_FIT).rows;
+	}
 
+	private composeBody(
+		question: AskUserQuestion,
+		width: number,
+		hasMenu: boolean,
+		maxRows: number,
+		fit: BodyFit,
+	): { rows: string[]; fits: boolean } {
 		const theme = clioTheme();
-		const strip = [
-			fitRow(
-				theme.style(
-					"positionCount",
-					this.harnessInterview
-						? `Step ${this.harnessInterview.step}${this.harnessInterview.total === undefined ? "" : ` of ${this.harnessInterview.total}`} · Question ${this.index + 1} of ${this.questions.length}`
-						: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
-					{
-						bold: true,
-					},
-				),
-				safeWidth,
-			),
-			"",
-			...this.renderCountdown(safeWidth),
-			...(hasMenu ? [] : this.renderQuestionStrip(safeWidth)),
-		];
-		const header = this.renderQuestionHeader(question, safeWidth, !hasMenu && this.questions.length > 1);
-		const details = this.renderDecisionContext(safeWidth);
-		const status =
-			this.status.length > 0 ? wrapTextWithAnsi(statusChip(clioTheme(), "warning", this.status), safeWidth) : [];
+		const gap = fit.spacing ? [""] : [];
+		const countdown = this.renderCountdown(width, fit.headers);
+		const strip = fit.headers
+			? [
+					fitRow(
+						theme.style(
+							"positionCount",
+							this.harnessInterview
+								? this.harnessPosition()
+								: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
+							{ bold: true },
+						),
+						width,
+					),
+					...gap,
+					...countdown,
+					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
+				]
+			: [...this.renderCompactPosition(question, width), ...countdown];
+		const header = fit.headers ? this.renderQuestionHeader(question, width, !hasMenu && this.questions.length > 1) : [];
+		const details = this.renderDecisionContext(width);
+		const status = this.status.length > 0 ? wrapTextWithAnsi(statusChip(theme, "warning", this.status), width) : [];
+		const legend = fit.legend ? this.renderKeyLegend(width, fit.headers ? 2 : 1) : [];
 		const body = [
-			...(this.harnessInterview?.intro?.(safeWidth) ?? []),
-			...formatAskUserQuestion(question.question, safeWidth).map((line) => theme.fg("decisionQuestion", line)),
+			...(this.harnessInterview?.intro?.(width) ?? []),
+			...formatAskUserQuestion(question.question, width).map((line) => theme.fg("decisionQuestion", line)),
 		];
 		const fixedTop = [...strip, ...header, ...details];
+		const questionFloor = Math.min(body.length, MIN_QUESTION_ROWS);
 		// The control is sized after the question has claimed its minimum, so a
 		// long option list cannot push a short question off the box.
 		const controlBudget = Math.max(
-			4,
-			maxRows - fixedTop.length - 1 - status.length - Math.min(body.length, MIN_QUESTION_ROWS) - 1,
+			fit.headers ? 4 : 2,
+			maxRows - fixedTop.length - gap.length - legend.length - status.length - questionFloor,
 		);
 		this.optionDetailRows = [];
-		const control = this.renderControlLines(safeWidth, controlBudget);
+		this.controlWindowed = false;
+		const control = this.renderControlLines(width, controlBudget, fit.detail);
+		const movedDetails = this.optionDetailRows.length > 0;
 		body.push(...this.optionDetailRows);
 		const ledgerBudget = Math.max(
 			1,
-			maxRows - fixedTop.length - 1 - control.length - status.length - Math.min(body.length, MIN_QUESTION_ROWS),
+			maxRows -
+				fixedTop.length -
+				gap.length -
+				control.length -
+				legend.length -
+				status.length -
+				Math.min(body.length, MIN_QUESTION_ROWS),
 		);
-		const ledger = this.renderAnswerLedger(safeWidth, ledgerBudget);
-		const fixed = fixedTop.length + 1 + control.length + status.length + ledger.length;
+		const ledger = this.renderAnswerLedger(width, ledgerBudget, fit);
+		const fixed = fixedTop.length + gap.length + control.length + legend.length + status.length + ledger.length;
 
 		const regionRows = Math.max(1, Math.min(body.length, maxRows - fixed));
 		const overflows = body.length > regionRows;
@@ -812,16 +894,53 @@ class AskUserOverlayView implements Component {
 		this.questionTotalRows = body.length;
 		const viewRows = overflows ? Math.max(1, regionRows - 1) : regionRows;
 		this.questionRegionRows = viewRows;
-		this.questionScroll = Math.max(0, Math.min(this.questionScroll, Math.max(0, body.length - viewRows)));
-		const visible = body.slice(this.questionScroll, this.questionScroll + viewRows);
+		// Clamped locally: an attempt with more rows has a lower ceiling than the
+		// layout that wins, and keeping its clamp would strand the last rows.
+		const scroll = Math.max(0, Math.min(this.questionScroll, Math.max(0, body.length - viewRows)));
+		const visible = body.slice(scroll, scroll + viewRows);
 		if (overflows)
-			visible.push(fitRow(clioTheme().fg("annotation", this.scrollIndicator(body.length, viewRows)), safeWidth));
+			visible.push(fitRow(theme.fg("annotation", this.scrollIndicator(scroll, body.length, viewRows)), width));
 
-		return [...fixedTop, ...visible, "", ...control, ...status, ...ledger].slice(0, maxRows);
+		return {
+			rows: [...fixedTop, ...visible, ...gap, ...control, ...legend, ...status, ...ledger].slice(0, maxRows),
+			fits: !this.controlWindowed && !movedDetails && fixed + Math.min(body.length, MIN_QUESTION_ROWS) <= maxRows,
+		};
 	}
 
-	private scrollIndicator(total: number, viewRows: number): string {
-		const above = this.questionScroll;
+	private harnessPosition(): string {
+		const interview = this.harnessInterview;
+		if (!interview) return "";
+		return `Step ${interview.step}${interview.total === undefined ? "" : ` of ${interview.total}`} · Question ${this.index + 1} of ${this.questions.length}`;
+	}
+
+	/** Where the round stands on one row, for a body that has given up its header rows. */
+	private renderCompactPosition(question: AskUserQuestion, width: number): string[] {
+		const theme = clioTheme();
+		const answered = this.states.filter((state) => state.answer.trim().length > 0).length;
+		const parts = this.harnessInterview
+			? [this.harnessPosition()]
+			: [
+					...(this.questions.length > 1 ? [`Q${this.index + 1} of ${this.questions.length}`] : []),
+					...(question.header ? [question.header] : []),
+					...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
+					...(this.questions.length > 1 && answered > 0 ? [`${answered} answered`] : []),
+				];
+		if (parts.length === 0) return [];
+		return [fitRow(theme.style("positionCount", parts.join(" · "), { bold: true }), width)];
+	}
+
+	/** The keys the rail cannot hold, so every control stays on screen when there is a row for it. */
+	private renderKeyLegend(width: number, maxRows: number): string[] {
+		if (this.railRoom <= 0) return [];
+		const entries = this.railEntries();
+		const { kept } = fitHintEntryList(entries, this.railRoom);
+		const dropped = entries.filter((entry) => !kept.includes(entry));
+		if (dropped.length === 0) return [];
+		const text = fitHintEntries(dropped, Math.max(1, width * maxRows - (maxRows - 1) * 8));
+		return wrapTextWithAnsi(clioTheme().fg("keyboardHint", text), width).slice(0, maxRows);
+	}
+
+	private scrollIndicator(above: number, total: number, viewRows: number): string {
 		const below = Math.max(0, total - viewRows - above);
 		const parts: string[] = [];
 		if (above > 0) parts.push(`${GLYPH.up} ${above} more`);
@@ -857,38 +976,61 @@ class AskUserOverlayView implements Component {
 		this.questionScroll = 0;
 	}
 
-	footerHint(): string {
-		if (this.phase !== "asking") return buildHint([]);
+	/** The active control's keys in the order they should give way, without the way out. */
+	private hintEntries(): { entries: HintEntry[]; escVerb: OverlayEscVerb } {
 		const question = this.currentQuestion();
 		const state = this.currentState();
-		if (!question || !state) return buildHint([]);
+		if (this.phase !== "asking" || !question || !state) return { entries: [], escVerb: "close" };
 		const recordAnswer =
 			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
 			"record answer";
-		const scroll: HintEntry[] = this.questionOverflows ? [{ key: "PgUp/PgDn", verb: "scroll" }] : [];
+		const record: HintEntry = { key: "Enter", verb: recordAnswer, short: recordAnswer.split(" ")[0] ?? recordAnswer };
+		const scroll: HintEntry[] = this.questionOverflows ? [{ key: "PgUp/PgDn", verb: "scroll", critical: false }] : [];
 		if (state.mode === "text") {
 			// Esc means two different things depending on what is behind the field.
 			// A question with options has a list to fall back to, so the key goes
 			// back; a question without one has nothing behind it and the key still
 			// leaves the interview. The footer says which one this is.
-			const escapeVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
+			const escVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
 			const entries: HintEntry[] = [];
-			if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question" });
-			entries.push({ key: "Enter", verb: recordAnswer });
-			if (this.deps.tui) entries.push({ key: getKeybindings().getKeys("tui.input.newLine").join("/"), verb: "newline" });
-			return buildHint([...entries, ...scroll], escapeVerb);
+			if (this.deps.tui)
+				entries.push({ key: getKeybindings().getKeys("tui.input.newLine").join("/"), verb: "newline", critical: false });
+			entries.push(...scroll);
+			if (this.questions.length > 1)
+				entries.push({ key: "Tab/Shift+Tab", verb: "question", short: "next", critical: false });
+			entries.push(record);
+			return { entries, escVerb };
 		}
-		const entries: HintEntry[] = [];
-		if (this.questions.length > 1) entries.push({ key: "←/→ or Tab", verb: "question" });
-		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
-		entries.push({ key: "t", verb: "other answer", short: "other" });
-		// Adding text to an option is its own key because `t` once did it
-		// implicitly, and a focused option nobody chose rode along into the answer.
-		entries.push({ key: "n", verb: "note on option", short: "note" });
-		entries.push({ key: "Enter", verb: recordAnswer });
+		const entries: HintEntry[] = [{ key: "?", verb: "details" }];
 		if (this.ledgerEntries().length > 0) entries.push({ key: "a", verb: "answers" });
-		entries.push({ key: "?", verb: "details" });
-		return buildHint([...entries, ...scroll]);
+		entries.push({ key: "n", verb: "note on option", short: "note" });
+		entries.push({ key: "t", verb: "other answer", short: "other" });
+		entries.push(...scroll);
+		if (this.questions.length > 1) entries.push({ key: "←/→", verb: "question" });
+		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
+		entries.push(record);
+		return { entries, escVerb: "close" };
+	}
+
+	footerHint(): string {
+		const { entries, escVerb } = this.hintEntries();
+		return buildHint(entries, escVerb);
+	}
+
+	/** The rail's order: the last entry always survives a narrow rail, and that must be the key that records. */
+	private railEntries(): HintEntry[] {
+		const { entries, escVerb } = this.hintEntries();
+		const record = entries.at(-1);
+		if (!record) return [{ key: "Esc", verb: escVerb }];
+		return [...entries.slice(0, -1), { key: "Esc", verb: escVerb }, record];
+	}
+
+	/** The rail hint for a rail of `cells`; the legend in the body draws what this drops. */
+	railHint(cells: number): string {
+		const entries = this.railEntries();
+		const fitted = fitHintEntries(entries, cells);
+		const withDrag = `${fitted} · drag to select/copy`;
+		return visibleWidth(withDrag) <= cells ? withDrag : fitted;
 	}
 
 	/**
@@ -1051,7 +1193,7 @@ class AskUserOverlayView implements Component {
 	 * one row and wrap to a second when they must; a question that has been
 	 * answered carries a check, the active one carries the cursor.
 	 */
-	private renderQuestionStrip(width: number): string[] {
+	private renderQuestionStrip(width: number, spacing = true): string[] {
 		const theme = clioTheme();
 		if (this.questions.length <= 1) return [];
 		const parts = this.questions.map((question, index) => {
@@ -1067,17 +1209,17 @@ class AskUserOverlayView implements Component {
 		});
 		const round = this.roundsAnswered > 0 ? [theme.fg("annotation", `Round ${this.roundsAnswered + 1}`)] : [];
 		const strip = wrapTextWithAnsi([...round, ...parts].join(dotSep(theme)), width).slice(0, 2);
-		return [...strip, ""];
+		return spacing ? [...strip, ""] : strip;
 	}
 
-	private renderControlLines(width: number, rowBudget: number): string[] {
+	private renderControlLines(width: number, rowBudget: number, detail: OptionDetail = "all"): string[] {
 		this.ensureControl();
 		const state = this.currentState();
 		const question = this.currentQuestion();
 		if (state?.mode === "text" && question) {
 			return [...(this.text?.render(width) ?? [""]), ...this.textPreview(question, state, width)];
 		}
-		return this.renderSelectControl(width, rowBudget);
+		return this.renderSelectControl(width, rowBudget, detail);
 	}
 
 	/** Earlier rounds first, then this round's answered siblings. */
@@ -1103,13 +1245,17 @@ class AskUserOverlayView implements Component {
 	 * options were twenty rows below the sentence they answered. The ledger is
 	 * one dim row under the options until `a` opens it.
 	 */
-	private renderAnswerLedger(width: number, rowBudget: number): string[] {
+	private renderAnswerLedger(width: number, rowBudget: number, fit: BodyFit = FULL_FIT): string[] {
 		const theme = clioTheme();
 		const entries = this.ledgerEntries();
 		if (entries.length === 0) return [];
 		const count = `${entries.length} earlier answer${entries.length === 1 ? "" : "s"}`;
 		// The rail names the key that opens the ledger; the row carries the count.
-		if (!this.ledgerExpanded) return ["", fitRow(theme.fg("annotation", count), width)];
+		if (!this.ledgerExpanded) {
+			// A body without headers counts answers on its position row.
+			if (!fit.headers) return [];
+			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", count), width)];
+		}
 		const rows: string[] = [];
 		for (const entry of entries) {
 			rows.push(
@@ -1131,7 +1277,7 @@ class AskUserOverlayView implements Component {
 		];
 	}
 
-	private renderSelectControl(width: number, rowBudget: number): string[] {
+	private renderSelectControl(width: number, rowBudget: number, detail: OptionDetail): string[] {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		const selectedItem = this.list?.getSelectedItem();
@@ -1141,8 +1287,9 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question));
+		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail);
 		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
+		this.controlWindowed = totalRows > rowBudget;
 		if (totalRows + items.length <= rowBudget) {
 			for (const rows of layout.rows) rows.push("");
 		}
@@ -1544,7 +1691,7 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 			(view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),
-		footerHint: () => `${view.footerHint()} · drag to select/copy`,
+		footerHint: (innerWidth) => view.railHint(Math.max(1, innerWidth - 3)),
 	});
 	const selectionTui = tui as TUI & { useTerminalSelection?: () => () => void };
 	let releaseSelection = selectionTui.useTerminalSelection?.();
