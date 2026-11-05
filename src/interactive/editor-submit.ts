@@ -368,7 +368,11 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const addressee = boardAgent ?? `@${mention.target}`;
 		let running: RunningDispatchRef[] = [];
 		try {
-			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+			running = deps.dispatch.snapshot().running.map((run) => ({
+				runId: run.runId,
+				agentId: run.agentId,
+				...(run.outcomePhase === "queued" ? { queued: true } : {}),
+			}));
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.notify(
@@ -381,6 +385,15 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		// The parser owns addressed syntax even after the last worker exits.
 		// File completion quotes bare filenames that would otherwise match it.
 		const resolution = resolveSteerTarget(mention.target, running);
+		// The dispatch refuses guidance before a run starts, and its refusal names a run id the operator never saw.
+		if (resolution.kind === "match" && resolution.run.queued === true) {
+			deps.notify(
+				"warning",
+				`${resolution.run.agentId} is queued and can take a message once it starts`,
+				`steer:${resolution.run.runId}`,
+			);
+			return "rejected";
+		}
 		if (resolution.kind === "match") {
 			try {
 				deps.dispatch.steer(resolution.run.runId, mention.text);

@@ -151,8 +151,8 @@ export interface EditorChrome {
 	willEnterSteer?: (text: string) => boolean;
 	/** The draft is a command or a shell line, which Enter never queues for the run. */
 	getDraftOperator?: (text: string) => "command" | "shell" | null;
-	/** The running worker a draft's `@target` resolves to, by agent name, or null. */
-	getSteerRecipient?: (token: string) => string | null;
+	/** The worker a draft's `@target` resolves to, by agent name, and whether it still waits for a slot; null when none. */
+	getSteerRecipient?: (token: string) => { agentId: string; queued: boolean } | null;
 	/** Resolved submit binding, formatted for display. */
 	getSubmitKeyLabel?: () => string;
 	/** Resolved multiline binding, formatted for display. */
@@ -382,17 +382,17 @@ export class ClioEditor extends Editor {
 	}
 
 	/** Who this draft goes to if it steers a worker, and whether that worker is still running. */
-	steerTarget(text = this.getText()): { agentId: string; live: boolean } | null {
+	steerTarget(text = this.getText()): { agentId: string; live: boolean; queued: boolean } | null {
 		if (this.boardSteer !== null) {
 			// A slash command or shell line runs as itself, so it never reads as addressed.
 			if (this.chrome.getDraftOperator?.(text)) return null;
-			const live = this.chrome.getSteerRecipient?.(this.boardSteer.runId) ?? null;
-			return { agentId: this.boardSteer.agentId, live: live !== null };
+			const recipient = this.chrome.getSteerRecipient?.(this.boardSteer.runId) ?? null;
+			return { agentId: this.boardSteer.agentId, live: recipient !== null, queued: recipient?.queued === true };
 		}
 		const token = steerDraftToken(text);
 		if (token === null) return null;
-		const live = this.chrome.getSteerRecipient?.(token) ?? null;
-		return live !== null ? { agentId: live, live: true } : null;
+		const recipient = this.chrome.getSteerRecipient?.(token) ?? null;
+		return recipient !== null ? { agentId: recipient.agentId, live: true, queued: recipient.queued } : null;
 	}
 
 	/** The line a submit hands on: a board-addressed draft gets its address back, and anything else passes untouched. */
@@ -572,8 +572,12 @@ export class ClioEditor extends Editor {
 		const steer = this.steerTarget(text);
 		const draftLabel = steer
 			? theme.style(
-					steer.live ? "draftState" : "warning",
-					steer.live ? `STEER ${GLYPH.next} ${steer.agentId}` : `${steer.agentId} ended`,
+					steer.live && !steer.queued ? "draftState" : "warning",
+					!steer.live
+						? `${steer.agentId} ended`
+						: steer.queued
+							? `${steer.agentId} is queued`
+							: `STEER ${GLYPH.next} ${steer.agentId}`,
 					{
 						bold: true,
 					},
@@ -790,7 +794,7 @@ export class ClioEditor extends Editor {
 				: steer
 					? fitHintEntries(
 							[
-								...(steer.live ? [{ key: "Enter", verb: `send to ${steer.agentId}`, short: "send" }] : []),
+								...(steer.live && !steer.queued ? [{ key: "Enter", verb: `send to ${steer.agentId}`, short: "send" }] : []),
 								{ key: "Esc", verb: "cancel steer, keep text", short: "cancel" },
 							],
 							Math.max(1, room - (scroll ? visibleWidth(scroll) + 3 : 0)),
@@ -1060,9 +1064,11 @@ export class ClioEditor extends Editor {
 		if (text.length === 0 && lines[1]) {
 			const addressed = mode === "CONFIRM" ? null : this.steerTarget(text);
 			const prompt = addressed
-				? addressed.live
-					? `Message for ${addressed.agentId}${GLYPH.ellipsis}`
-					: `${addressed.agentId} ended. Esc returns this composer to Clio.`
+				? !addressed.live
+					? `${addressed.agentId} ended. Esc returns this composer to Clio.`
+					: addressed.queued
+						? `${addressed.agentId} is queued and can take a message once it starts.`
+						: `Message for ${addressed.agentId}${GLYPH.ellipsis}`
 				: emptyPromptFor(mode);
 			lines[1] = renderEmptyPrompt(lines[1], safeWidth, theme, prompt);
 		}

@@ -869,9 +869,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getDraftOperator: draftOperator,
 		getSteerRecipient: (token) => {
 			try {
-				const running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+				const running = deps.dispatch.snapshot().running.map((run) => ({
+					runId: run.runId,
+					agentId: run.agentId,
+					...(run.outcomePhase === "queued" ? { queued: true } : {}),
+				}));
 				const resolved = resolveSteerTarget(token, running);
-				return resolved.kind === "match" ? resolved.run.agentId : null;
+				return resolved.kind === "match" ? { agentId: resolved.run.agentId, queued: resolved.run.queued === true } : null;
 			} catch {
 				// The rail repaints every frame; an unreadable fleet just leaves it unlabelled.
 				return null;
