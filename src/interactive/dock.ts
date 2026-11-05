@@ -50,6 +50,8 @@ export interface DockEntry {
 	adaptive?: boolean;
 	/** An approval owns the editor: the rails take the attention tone until it resolves. */
 	approval?: boolean;
+	/** The body states the run's lifecycle itself, so no live-work line joins it (the interview). */
+	ownsStatus?: boolean;
 }
 
 /** Every open menu shares this body height while the terminal has room. */
@@ -78,6 +80,7 @@ export function dockMount(
 	keepComposer: boolean,
 	adaptive = false,
 	approval = false,
+	ownsStatus = false,
 ): DockEntry {
 	const entry: DockEntry = {
 		frame,
@@ -86,6 +89,7 @@ export function dockMount(
 		keepComposer,
 		...(adaptive ? { adaptive } : {}),
 		...(approval ? { approval } : {}),
+		...(ownsStatus ? { ownsStatus } : {}),
 	};
 	entriesFor(tui).push(entry);
 	return entry;

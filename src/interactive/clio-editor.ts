@@ -80,12 +80,22 @@ export interface EditorChrome {
 	getThinkingLabel: () => string;
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
-	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
+	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[]; note?: string };
 	/** `identityCells` is what the rail will spend naming the exact route instead of the short nickname. */
 	getHarnessStatus?: (
 		width: number,
 		identityCells?: number,
-	) => { label: string; glyph: string; token: ClioToken; live: boolean; subject?: string; namesRoute?: boolean } | null;
+	) => {
+		label: string;
+		glyph: string;
+		token: ClioToken;
+		live: boolean;
+		subject?: string;
+		detail?: string;
+		namesRoute?: boolean;
+	} | null;
+	/** What keeps running behind a dock that hides this rail; null at idle. `escVerb` is what the dock's Esc does. */
+	getLiveWorkStrip?: (width: number, escVerb: string | null) => string | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
 	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
@@ -187,6 +197,11 @@ function thinkingRailHint(
 	const glyph = nerdFontEnabled() ? GLYPH.brain : "●";
 	const glyphWidth = visibleWidth(glyph);
 	const graphicalWidth = THINKING_BRAIN_SLOTS * glyphWidth + THINKING_BRAIN_SLOTS - 1;
+	if (thinking.note) {
+		const plain = `think ${level}`;
+		const explained = `${plain} (${thinking.note})`;
+		return theme.fg("thinkingLevel", visibleWidth(explained) <= width ? explained : plain);
+	}
 	if (
 		!thinking.hasLevels ||
 		levels.length === 0 ||
@@ -201,6 +216,11 @@ function thinkingRailHint(
 	return Array.from({ length: THINKING_BRAIN_SLOTS }, (_, index) =>
 		theme.fg(index < count ? activeRole : "thinkingInactive", index < count || nerdFontEnabled() ? glyph : "○"),
 	).join(" ");
+}
+
+/** What the rail says Esc does on this surface, read from the same fitted hint the operator sees. */
+function dockEscVerb(hint: string | undefined): string | null {
+	return /\[Esc\] ([^·]+?)(?: ·|$)/u.exec(hint?.trim() ?? "")?.[1] ?? null;
 }
 
 /** The line the empty composer shows for the mode it is in. */
@@ -493,6 +513,7 @@ export class ClioEditor extends Editor {
 		let activity = "";
 		// The state when no name stands in front of it to read `is writing` with.
 		let stateAlone = "";
+		let detail = "";
 		if (mode === "CONFIRM") {
 			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
@@ -505,6 +526,7 @@ export class ClioEditor extends Editor {
 			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
 			activity = theme.fg(status.token, status.label);
 			stateAlone = theme.fg(status.token, status.label.replace(/^is /u, ""));
+			detail = status.detail ? theme.fg("annotation", status.detail) : "";
 		} else if (mode !== "MESSAGE") {
 			lead = theme.fg("harnessAction", spinner);
 			activity = theme.fg("harnessAction", "is working");
@@ -534,29 +556,46 @@ export class ClioEditor extends Editor {
 			mode === "CONFIRM" ? null : (this.chrome.getWorkspaceRail?.(Math.max(4, Math.floor(width / 2))) ?? null);
 		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
 		const actor = mode === "CONFIRM" ? undefined : status?.subject;
+		const separator = theme.fg("border", " · ");
+		const phrased = (state: string): string => [state, detail].filter(Boolean).join(separator);
 		const named = (who: string, state = activity): string =>
-			[lead, theme.fg("activeModelIdentity", who), state].filter(Boolean).join(" ");
+			[lead, theme.fg("activeModelIdentity", who), phrased(state)].filter(Boolean).join(" ");
 		const pickLabel = (): string => {
-			if (actor !== undefined)
-				return named(
-					truncateToWidth(actor, width < 60 ? 10 : Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
-				);
-			if (workspace !== null) return [lead, workspace, activity].filter(Boolean).join(" ");
 			// Idle and the start of a turn say where the prompt goes, whole. Once the
 			// model answers, what it is doing needs the room and the transcript has the route.
 			const exact = exactRouteLabel(route);
 			const atRouteMoment =
 				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
-			if (exact !== null && atRouteMoment) {
+			if (actor === undefined && workspace === null && exact !== null && atRouteMoment) {
 				const routed = status ? this.chrome.getHarnessStatus?.(width, visibleWidth(lead) + visibleWidth(exact) + 2) : null;
 				const candidate = named(exact, routed && mode !== "PREPARING" ? theme.fg(routed.token, routed.label) : activity);
 				if (visibleWidth(candidate) <= labelRoom) return candidate;
 			}
-			// A name cut to `Judge…` beside a state cut to `target reachab…` says neither,
-			// so the name fits whole or leaves. The bare state is what a narrow rail is for.
-			const short = named(nickname);
-			if (!activity || visibleWidth(short) <= labelRoom) return short;
-			return [lead, stateAlone].filter(Boolean).join(" ");
+			const whole =
+				actor !== undefined
+					? named(
+							truncateToWidth(
+								actor,
+								width < 60 ? 10 : Math.max(4, Math.min(24, Math.floor(width / 3))),
+								GLYPH.ellipsis,
+								false,
+							),
+						)
+					: workspace !== null
+						? [lead, workspace, phrased(activity)].filter(Boolean).join(" ")
+						: named(nickname);
+			if (!activity || visibleWidth(whole) <= labelRoom) return whole;
+			// A name cut to `Judge…` beside a state cut to `target reachab…` says neither, so the name
+			// leaves whole. Facts beside the state then leave from their end, and a quiet state yields
+			// to the work it would otherwise crowd off the rail rather than either being cut mid-word.
+			const facts = status?.detail?.split(" · ").map((fact) => theme.fg("annotation", fact)) ?? [];
+			const quietState = status?.live === false && status.glyph === GLYPH.queued;
+			const candidates = [
+				...facts.map((_, index) => [stateAlone, ...facts.slice(0, facts.length - index)]),
+				...(quietState ? facts.map((_, index) => facts.slice(0, facts.length - index)) : []),
+				[stateAlone],
+			].map((parts) => [lead, parts.join(separator)].join(" "));
+			return candidates.find((candidate) => visibleWidth(candidate) <= labelRoom) ?? candidates.at(-1) ?? whole;
 		};
 		const label = pickLabel();
 		// A draft typed while Clio holds a consumed prompt is accepted and sent in
@@ -615,7 +654,13 @@ export class ClioEditor extends Editor {
 		const context = this.chrome.getContextUsage?.();
 		const cells = width >= 100 ? 10 : 6;
 		const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
-		const usage = context && usageRoom >= cells ? contextRailHint(context, cells, usageRoom, theme) : "";
+		const usageLabel = "ctx ";
+		const usageBar =
+			context && usageRoom >= cells + usageLabel.length
+				? contextRailHint(context, cells, usageRoom - usageLabel.length, theme)
+				: "";
+		// The bar alone is a shape to guess at; the word says what fills it.
+		const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
@@ -667,14 +712,21 @@ export class ClioEditor extends Editor {
 	}
 
 	/** A docked command or menu: its title and keys on the composer's rails, its body between them. */
-	private renderDock(entry: DockEntry, width: number, theme: ClioTheme, rail: EditorRailState): string[] {
+	private renderDock(
+		entry: DockEntry,
+		width: number,
+		theme: ClioTheme,
+		rail: EditorRailState,
+	): { lines: string[]; bodyEnd: number } {
 		const gutter = ClioEditor.DOCK_GUTTER;
 		const contentWidth = Math.max(1, width - gutter * 2);
 		const adaptive = entry.adaptive === true;
 		const bodyRows = adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
 		// The body learns the rail's room first, so a list can draw in its own
-		// rows every key the rail below will have to drop.
-		entry.frame.setRailRoom?.(this.railLabelRoom(width));
+		// rows every key the rail below will have to drop. The rail is the keys'
+		// alone: thinking and context describe the composer, which is not open (F07).
+		const room = this.approvalLabelRoom(width);
+		entry.frame.setRailRoom?.(room);
 		let body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
 		if (adaptive) {
 			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
@@ -687,12 +739,18 @@ export class ClioEditor extends Editor {
 		const title = entry.frame.dockAwaitingInput?.()
 			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
 			: titleText;
-		const hint = entry.frame.dockHint(this.railLabelRoom(width) + 4);
-		return [
+		const hint = entry.frame.dockHint(room + 4);
+		const lines = [
 			this.topRail(width, theme, rail, title),
 			...body.map((row) => padAnsi(`${pad}${row}${pad}`, width)),
-			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : ""),
+			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : "", room),
 		];
+		// The rail this body replaced is the only place the run's phase showed. A
+		// surface that reports its own lifecycle keeps its rows.
+		const bodyEnd = lines.length - 1;
+		if (entry.ownsStatus === true) return { lines, bodyEnd };
+		const strip = this.chrome.getLiveWorkStrip?.(Math.max(1, width - 2), dockEscVerb(hint));
+		return { lines: strip ? [...lines, padAnsi(` ${strip}`, width)] : lines, bodyEnd };
 	}
 
 	/**
@@ -892,9 +950,9 @@ export class ClioEditor extends Editor {
 				now: this.railAnimationTime,
 				...(docked.approval ? { tone: "attentionRail" as const } : {}),
 			};
-			const lines = this.renderDock(docked, safeWidth, theme, rail);
+			const { lines, bodyEnd } = this.renderDock(docked, safeWidth, theme, rail);
 			this.autocompleteRowMap = lines.map(() => -1);
-			return this.paintComposerBody(lines, safeWidth, lines.length - 1, "menuOption");
+			return this.paintComposerBody(lines, safeWidth, bodyEnd, "menuOption");
 		}
 		const lines = super.render(width);
 		if (lines.length === 0) return lines;

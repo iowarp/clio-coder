@@ -1660,7 +1660,7 @@ export interface AskUserViewForTesting {
 	): Promise<AskUserResult>;
 	render(width: number): string[];
 	handleInput(data: string): void;
-	footerHint(): string;
+	footerHint(innerWidth?: number): string;
 	cancel(): void;
 }
 
@@ -1705,6 +1705,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		markerId: "ask-user",
 		// Option-heavy interviews grow toward half the terminal; a short question stays compact.
 		adaptiveHeight: true,
+		// The interview names waiting, sent and between-rounds in its own body.
+		ownsStatus: true,
 		title: () =>
 			view.interviewTitle() ??
 			(view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),

@@ -284,7 +284,7 @@ export function lastTurnDetails(
 		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
 		turn ? reasoningChip(theme, turn.reasoning) : null,
 		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
-			? theme.fg("annotation", `cache ${turn.cacheRead}/${turn.cacheWrite}`)
+			? theme.fg("annotation", `cache read ${turn.cacheRead} · write ${turn.cacheWrite}`)
 			: null,
 	];
 	if (lastTurn.toolCount > 0) {
@@ -609,10 +609,15 @@ export function composerPhasePresentation(
 	width: number,
 	now: number,
 	modelName?: string,
+	/** Room for the words alone, for a surface that draws them without the rail's identity beside them. */
+	labelRoom?: number,
 	identityCells?: number,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = railActivityRoom(width, identityCells);
+	const room = labelRoom ?? railActivityRoom(width, identityCells);
+	// A tool's actor is a short word rather than a model name, and the room it leaves belongs to the command and its time.
+	const actorWidth = visibleWidth(status.tool?.operatorShell === true ? "your shell" : "Clio");
+	const toolRoom = Math.max(room, width - actorWidth - 4 - (width < 60 ? 9 : 14));
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
@@ -653,7 +658,7 @@ export function composerPhasePresentation(
 			);
 			break;
 		case "tool_running": {
-			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName);
+			const activity = toolActivity(status, toolRoom, now, null, elapsedFrom, modelName);
 			return { ...phase, ...activity };
 		}
 		case "tool_blocked":
@@ -671,7 +676,7 @@ export function composerPhasePresentation(
 		case "stuck":
 			if (status.resumePhase === "tool_running" && status.tool) {
 				// Its own process has gone quiet, which is not the model having no output.
-				return { ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName) };
+				return { ...phase, ...toolActivity(status, toolRoom, now, null, elapsedFrom, modelName) };
 			}
 			label = fitRailFacts(
 				[
@@ -695,7 +700,7 @@ export function composerPhasePresentation(
 							...(status.cancelRequestedAt !== undefined ? { startedAt: status.cancelRequestedAt } : {}),
 						},
 					},
-					room,
+					toolRoom,
 					now,
 					"is stopping",
 					elapsedFrom,

@@ -453,7 +453,9 @@ export function renderLaneTitle(
 	const { label, active, meta, tabReaches = false } = options;
 	const width = Math.max(1, options.width);
 	if (!active) {
-		const facts = [tabReaches ? "[Tab]" : "", meta ?? ""].filter(Boolean).join(" · ");
+		const both = [tabReaches ? "[Tab]" : "", meta ?? ""].filter(Boolean).join(" · ");
+		// A short lane keeps the key that reaches it over the note about its rows.
+		const facts = visibleWidth(label) + 4 + visibleWidth(both) <= width || !tabReaches ? both : "[Tab]";
 		return titleRow(theme, `  ${label}`, width, { token: "annotation", ...(facts ? { meta: facts } : {}) });
 	}
 	const title = `${GLYPH.laneOwner} ${label}`;

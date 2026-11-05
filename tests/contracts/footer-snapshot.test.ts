@@ -95,10 +95,10 @@ test("footer totals come from the read model: unknown usage stays partial, never
 			for (const width of [40, 80, 120]) {
 				const rows = panel.view.render(width);
 				const text = rows.map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
-				if (scenario === "never-sent") match(text, /Σ0 · 1 never sent/u);
+				if (scenario === "never-sent") match(text, /(?:0 tok|session 0 tokens) · 1 never sent/u);
 				if (scenario === "golden") {
 					// Two calls have unknown usage, so the total is a lower bound and the cache read is unknown, not 0.
-					match(text, /Σ≥5\.3k \+\? · 1 never sent/u);
+					match(text, /(?:≥5\.3k tok|session at least 5\.3k tokens, some calls unknown) · 1 never sent/u);
 					match(text, /\$0\.01 \+\?/u);
 				}
 				if (scenario === "unbound") match(text, /not available/u);
