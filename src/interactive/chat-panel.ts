@@ -1127,13 +1127,20 @@ function renderTurnUsageLine(
 	if (receipt === "none") return [];
 	const outcome = usage.outcome ?? "Done";
 	const spend = usage.spend;
-	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
-	const retries = usage.retries ? ` · ${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : "";
-	const settled = `${outcome}${coverage}${retries}${receiptDuration(usage)}`;
+	const retries = usage.retries ? `${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : null;
 	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
-		return [`${glyph}${dimLine(settled, Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
+		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
+		const calls = spend?.calls != null && (spend.calls > 1 || retries !== null) ? `${spend.calls} calls` : null;
+		const rowFacts = [
+			`${outcome}${receiptDuration(usage)}`,
+			...(calls !== null || retries !== null ? [[calls, retries].filter(Boolean).join(", ")] : []),
+			...(spend?.coverageNote ? [spend.coverageNote] : []),
+		];
+		return [`${glyph}${dimLine(rowFacts.join(" · "), Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
 	}
+	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
+	const settled = `${outcome}${coverage}${retries === null ? "" : ` · ${retries}`}${receiptDuration(usage)}`;
 	// Detailed states what the turn spent, one fact per field, as the read model
 	// folds the turn with its workers, so the line and the footer agree: the
 	// calls it made, input and output tokens in the compact token format, what

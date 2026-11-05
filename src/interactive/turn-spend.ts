@@ -25,6 +25,8 @@ export interface TurnSpend {
 	cost: string | null;
 	/** The calls that reported no usage or never left, or null when every call reported. */
 	coverage: string | null;
+	/** The same caveat for a one-row receipt, whose full wording lives in the Detailed style and /usage. */
+	coverageNote: string | null;
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -74,6 +76,12 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 		// A turn nothing priced makes no cost claim, so the receipt names none rather than "not measured".
 		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
 		coverage: unknownCalls > 0 || skipped > 0 ? usageCoverageLabel(unknownCalls, skipped) : null,
+		coverageNote:
+			unknownCalls === 0 && skipped === 0
+				? null
+				: unknownCalls === 0
+					? `${skipped} never sent`
+					: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
 	};
 }
 
