@@ -39,7 +39,7 @@ import {
 	sectionRule,
 	type Tone,
 } from "../theme/index.js";
-import { fitIdentityLabel, modelNickname } from "../theme/labels.js";
+import { fitIdentityLabel, fitPathLabel, modelNickname } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import {
@@ -696,8 +696,8 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
-/** The widest stats a row carries, `272K/272K (100.0%) | last 999 tps`. */
-const STATS_RESERVE_WIDTH = 33;
+/** The widest stats a row carries, `272K/272K (100.0%) · last 999 tok/s`. */
+const STATS_RESERVE_WIDTH = 35;
 
 /** Workspace and counts above; notices and active harness facts below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
@@ -725,9 +725,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const flowing = state.throughput !== null && (state.status.phase === "writing" || state.status.phase === "thinking");
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")}`
+			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tok/s")}`
 			: "";
-	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
+	// The row's one separator: a `|` beside the `·` of the workspace read as a table rule with nothing under it (F3).
+	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " · "));
 	const statsCap = Math.floor(w * 0.4);
 	const values = visibleWidth(metrics) <= statsCap ? metrics : counter;
 	// Once a figure shows, the stats column keeps its widest width (and the dirty
@@ -743,7 +744,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? 0
 			: Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), Math.max(4, Math.floor(workspaceWidth * 0.3)));
 	const cwdWidth = git === "" ? workspaceWidth : Math.max(1, workspaceWidth - gitWidth - 3);
-	const cwdLabel = theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth));
+	const cwdLabel = theme.fg("workspacePath", fitPathLabel(clean(state.workspace.cwd), cwdWidth));
 	const workspace =
 		git === ""
 			? cwdLabel
@@ -802,11 +803,13 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		guardian === "reviewing"
 			? memoryOnRail
 				? ""
-				: theme.fg("activity", "mem reviewing")
-			: guardian === "waiting-capacity"
-				? theme.fg("warning", "mem waiting")
+				: theme.fg("activity", "memory reviewing")
+			: // Memory yields the model to the turn on purpose, so its wait is no warning: `mem waiting` in warning ink beside a
+				// retry read as a second fault (N9).
+				guardian === "waiting-capacity"
+				? theme.fg("annotation", "memory waits its turn")
 				: guardian === "unavailable"
-					? theme.fg("unknownValue", "mem unavailable")
+					? theme.fg("unknownValue", "memory unavailable")
 					: "";
 	const facts = [
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",

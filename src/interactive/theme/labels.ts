@@ -26,6 +26,28 @@ export function fitIdentityLabel(value: string, width: number): string {
 }
 
 /**
+ * A path in at most `width` cells, cut at directory boundaries: `~/…/tui-truth-069/project`, then `…/project`. A path
+ * cut inside a name (`~/cli…roject`) named no directory at all (F2). Only a last segment wider than the room alone is
+ * cut, and then through the identity fitter.
+ */
+export function fitPathLabel(value: string, width: number): string {
+	const clean = sanitizeCallTargetText(value);
+	const room = Math.max(0, Math.floor(width));
+	if (visibleWidth(clean) <= room) return clean;
+	const parts = clean.split("/");
+	const root = parts[0] === "~" ? "~/" : parts[0] === "" ? "/" : "";
+	const segments = parts.slice(root === "" ? 0 : 1).filter((part) => part.length > 0);
+	for (let kept = segments.length - 1; kept >= 1; kept -= 1) {
+		const tail = segments.slice(segments.length - kept).join("/");
+		for (const lead of [`${root}…/`, "…/"]) {
+			const candidate = `${lead}${tail}`;
+			if (visibleWidth(candidate) <= room) return candidate;
+		}
+	}
+	return fitIdentityLabel(segments.at(-1) ?? clean, room);
+}
+
+/**
  * A space a wrap never breaks at. It holds a short fact together (`18 lines`,
  * `context 3.2k`, `reasoning 138`), so a row of facts wraps between them, never
  * inside one; {@link releaseSpaces} turns it back into an ordinary space once

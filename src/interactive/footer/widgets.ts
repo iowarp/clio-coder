@@ -208,9 +208,10 @@ export function compactContextUsage(
 	// Neither figure is known yet (the first seconds after launch): show nothing
 	// rather than `?/unknown`.
 	if (used === null) return "";
-	const counts = `${formatFooterTokens(used).toUpperCase()}/${window ? formatFooterTokens(window).toUpperCase() : "unknown"}`;
+	// With no window known the count stands alone in words: `12.9K/unknown` read as a fraction of nothing (F1).
+	if (!window) return theme.fg("counter", `${formatFooterTokens(used).toUpperCase()} in context`);
+	const counts = `${formatFooterTokens(used).toUpperCase()}/${formatFooterTokens(window).toUpperCase()}`;
 	const percent = contextUsagePercent(context);
-	if (!window) return theme.fg("counter", counts);
 	const full = `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
 	if (visibleWidth(full) <= room) return full;
 	// A narrow row keeps the counts and drops the percent, then states the percent
@@ -240,7 +241,7 @@ export function formattedThroughput(
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
 	const parts = [
 		tps > 0
-			? `${theme.fg("metricValue", `${GLYPH.speed}${estimated ? "≈" : ""}${rounded}`)} ${theme.fg("metricUnit", "Tk/s")}`
+			? `${theme.fg("metricValue", `${GLYPH.speed}${estimated ? "≈" : ""}${rounded}`)} ${theme.fg("metricUnit", "tok/s")}`
 			: null,
 		settled?.ttft ? `${theme.fg("fieldName", "ttft")} ${theme.fg("counter", settled.ttft)}` : null,
 	];
@@ -1288,7 +1289,7 @@ export function idleReadinessPresentation(
 	}
 	if (facts.lastStop === "error") {
 		const label = fit(
-			failedTurnFacts({ text: room >= 40 ? "last request failed" : "failed", keep: 9 }, facts.lastFailure),
+			failedTurnFacts({ text: room >= 40 ? "failed its last request" : "failed", keep: 9 }, facts.lastFailure),
 		);
 		return { glyph: GLYPH.error, token: "warning", live: false, label, ...shown() };
 	}
