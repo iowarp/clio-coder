@@ -9,6 +9,7 @@ export interface DispatchSteeringDeps {
 	editor: {
 		getText(): string;
 		setText(text: string): void;
+		markSteerTarget?(run: { runId: string; agentId: string }): void;
 		focused: boolean;
 	};
 	closeOverlay: () => void;
@@ -47,6 +48,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		const draft = deps.editor.getText();
 		deps.closeOverlay();
 		deps.editor.setText(draft.length > 0 ? `${prefix}${draft}` : prefix);
+		deps.editor.markSteerTarget?.({ runId: row.runId, agentId: row.agentId });
 		deps.editor.focused = true;
 		deps.requestRender();
 	};

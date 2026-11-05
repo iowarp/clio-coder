@@ -251,6 +251,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getPermissionInspection: () => editorChrome.getPermissionInspection?.() ?? "none",
 		getTurnPreparation: () => editorChrome.getTurnPreparation?.() ?? "idle",
 		willEnterSteer: (text) => editorChrome.willEnterSteer?.(text) ?? false,
+		getSteerRecipient: (token) => editorChrome.getSteerRecipient?.(token) ?? null,
 		getSubmitKeyLabel: () => editorChrome.getSubmitKeyLabel?.() ?? "Enter",
 		getNewlineKeyLabel: () => editorChrome.getNewlineKeyLabel?.() ?? "Ctrl+J",
 	};

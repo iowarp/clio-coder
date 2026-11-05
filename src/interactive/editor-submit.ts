@@ -20,6 +20,7 @@ import {
 	parseEditorSteerMention,
 	type RunningDispatchRef,
 	resolveSteerTarget,
+	steerDraftToken,
 } from "./editor-steer.js";
 import type { ChatDraft } from "./interactive-slash-runtime.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
@@ -111,6 +112,8 @@ export interface EditorSubmitDeps {
 	askEgg?: import("../tools/ask-user.js").AskUserHandler;
 	onLocalEntry?: (entry: SessionEntry) => void;
 	onLocalBashRunning?: (running: boolean) => void;
+	/** A steer was handed to a worker's queue; the transcript tracks it from here. */
+	onSteerSent?: (run: RunningDispatchRef, text: string) => void;
 	/** Note a harness feature the operator used, for demo guidance; see recordOperatorFeature. */
 	recordFeature?: (feature: string) => void;
 	/** Bring a fullscreen transcript back to its live edge before a local command's block lands. */
@@ -347,6 +350,15 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		};
 	};
 
+	const runningDispatchRefs = (): RunningDispatchRef[] => {
+		try {
+			return deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+		} catch {
+			// Only the bare-address check reads this; without a fleet the line goes on as a prompt.
+			return [];
+		}
+	};
+
 	const submitEditorSteerMention = (mention: { target: string; text: string }): EditorSteerSubmission => {
 		let running: RunningDispatchRef[] = [];
 		try {
@@ -366,6 +378,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		if (resolution.kind === "match") {
 			try {
 				deps.dispatch.steer(resolution.run.runId, mention.text);
+				deps.onSteerSent?.(resolution.run, mention.text);
 				deps.notify(
 					"info",
 					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
@@ -430,6 +443,22 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			}
 			if (runEditorBash(text)) deps.ui.requestRender();
 			return;
+		}
+		// A bare `@run-id` from the board with nothing typed would reach the model as a prompt.
+		const bareToken = steerDraftToken(trimmed);
+		if (bareToken === trimmed.slice(1)) {
+			const running = runningDispatchRefs();
+			const resolved = resolveSteerTarget(bareToken, running);
+			if (resolved.kind === "match") {
+				deps.notify(
+					"info",
+					`Type the guidance for ${resolved.run.agentId} after the address, then Enter`,
+					`steer:${resolved.run.runId}`,
+				);
+				deps.editor.setText(`${literalText.trimEnd()} `);
+				deps.ui.requestRender();
+				return;
+			}
 		}
 		const steerMention = parseEditorSteerMention(trimmed);
 		if (steerMention) {

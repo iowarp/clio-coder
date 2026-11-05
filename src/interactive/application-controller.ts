@@ -106,6 +106,8 @@ export interface ApplicationControllerDeps {
 	explainProtectedExit?: () => void;
 	/** An Esc was absorbed because it followed one that closed a surface; the run is still going. */
 	explainEscapeGuard?: () => void;
+	/** Esc while the draft addresses a worker backs out of the steer and keeps the text. */
+	cancelSteerDraft?: () => boolean;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
 	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
@@ -445,6 +447,10 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			return undefined;
 		}
 		if (isEscapeKey(data) && deps.isAutocompleteVisible?.()) return undefined;
+		if (isEscapeKey(data) && deps.cancelSteerDraft?.()) {
+			lastOwnerEscapeAt = deps.clock.now();
+			return { consume: true };
+		}
 		if (
 			isEscapeKey(data) &&
 			lastOwnerEscapeAt > 0 &&

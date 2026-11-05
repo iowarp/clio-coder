@@ -55,6 +55,7 @@ export interface InteractiveInputRuntimeDeps {
 	hasQueuedMessages?: () => boolean;
 	explainProtectedExit?: () => void;
 	explainEscapeGuard?: () => void;
+	cancelSteerDraft?: () => boolean;
 	hasActiveEditorBash?: () => boolean;
 	explainSearchUnavailable?: () => void;
 	explainThinkingUnavailable?: () => void;
@@ -375,6 +376,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		hasQueuedMessages: () => deps.hasQueuedMessages?.() ?? false,
 		explainProtectedExit: () => deps.explainProtectedExit?.(),
 		explainEscapeGuard: () => deps.explainEscapeGuard?.(),
+		...(deps.cancelSteerDraft ? { cancelSteerDraft: deps.cancelSteerDraft } : {}),
 		...(deps.hasActiveEditorBash ? { hasActiveEditorBash: deps.hasActiveEditorBash } : {}),
 		forwardFocusedInput: (data) => {
 			const active = search();

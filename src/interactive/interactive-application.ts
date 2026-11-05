@@ -92,6 +92,7 @@ import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
+import { createSteerReceipts } from "./steer-receipts.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
@@ -1338,7 +1339,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		listWorkerRuns: () => chatPanel.workerStates(),
 	});
 
+	const steerReceipts = createSteerReceipts({
+		bus: deps.bus,
+		append: (render, isLive) => chatRenderer.mutate(() => chatPanel.appendReplayBlock(render, isLive), "steer-receipt"),
+		requestRender: () => tui.requestRender(),
+	});
 	const editorSubmit = createEditorSubmitController({
+		onSteerSent: (run, text) => steerReceipts.sent(run, text),
 		onLocalEntry: exitSummary.observeLocalEntry,
 		recordFeature,
 		onLocalBashRunning: presentation.setLocalBashRunning,
@@ -1893,6 +1900,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
+		cancelSteerDraft: () => {
+			const agent = editor.dropSteerTarget();
+			if (agent === null) return false;
+			notify(
+				"info",
+				`Steer to ${agent} not sent. ${editor.getText().length > 0 ? "Your text stays as a draft; Enter now sends it to Clio." : ""}`.trim(),
+				"steer:cancelled",
+			);
+			tui.requestRender();
+			return true;
+		},
 		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
@@ -2030,6 +2048,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				peerInbox?.dispose();
 				interactiveSubscriptions.dispose();
 				exitSummary.dispose();
+				steerReceipts.dispose();
 			},
 		},
 		beforeStopUi: (() => {

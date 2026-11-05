@@ -36,6 +36,12 @@ export function parseEditorSteerMention(text: string): EditorSteerMention | null
 	return { target: match[1], text: match[2].trim() };
 }
 
+/** The `@target` a draft opens with, before there is any text after it. */
+export function steerDraftToken(text: string): string | null {
+	const match = /^@(\S+)(?:\s|$)/.exec(text.trimStart());
+	return match?.[1] && isEditorSteerTargetToken(match[1]) ? match[1] : null;
+}
+
 /**
  * Resolve a steer target against the running dispatches: exact agentId match
  * first, then runId prefix. One hit steers; several ask for a runId prefix;

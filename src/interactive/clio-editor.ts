@@ -14,6 +14,7 @@ import type { TurnPreparationPhase } from "../session-control/turn-state.js";
 import { type DockEntry, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
+import { steerDraftToken } from "./editor-steer.js";
 import { type ContextOccupancyFacts, contextRailHint } from "./footer/context-rail.js";
 import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
@@ -116,6 +117,8 @@ export interface EditorChrome {
 	getTurnPreparation?: () => TurnPreparationPhase;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
+	/** The running worker a draft's `@target` resolves to, by agent name, or null. */
+	getSteerRecipient?: (token: string) => string | null;
 	/** Resolved submit binding, formatted for display. */
 	getSubmitKeyLabel?: () => string;
 	/** Resolved multiline binding, formatted for display. */
@@ -290,6 +293,8 @@ export class ClioEditor extends Editor {
 	private restoredDraft = false;
 	/** A restored draft set aside for the command being typed; it returns when the composer empties. */
 	private parkedDraft: string | null = null;
+	/** The run the board addressed this draft to, so the rail can still name it after the run ends. */
+	private boardSteer: { runId: string; agentId: string } | null = null;
 
 	get draftRevision(): number {
 		return this.revision;
@@ -315,6 +320,33 @@ export class ClioEditor extends Editor {
 		const lines = this.getLines();
 		const cursor = this.getCursor();
 		return cursor.line === lines.length - 1 && cursor.col === (lines[cursor.line] ?? "").length;
+	}
+
+	/** Remember which run the board addressed this draft to. */
+	markSteerTarget(run: { runId: string; agentId: string }): void {
+		this.boardSteer = run;
+	}
+
+	/** Who this draft goes to if it steers a worker, and whether that worker is still running. */
+	steerTarget(text = this.getText()): { agentId: string; live: boolean } | null {
+		const token = steerDraftToken(text);
+		if (token === null) return null;
+		const live = this.chrome.getSteerRecipient?.(token) ?? null;
+		if (live !== null) return { agentId: live, live: true };
+		return this.boardSteer?.runId === token ? { agentId: this.boardSteer.agentId, live: false } : null;
+	}
+
+	/**
+	 * Take the worker address off the draft and keep whatever was typed, so
+	 * backing out of a steer costs no text. Returns the worker it was addressed
+	 * to, or null when the draft was not steering anyone.
+	 */
+	dropSteerTarget(): string | null {
+		const text = this.getText();
+		const target = this.steerTarget(text);
+		if (target === null) return null;
+		this.setText(text.trimStart().replace(/^@\S+\s*/u, ""));
+		return target.agentId;
 	}
 
 	/** Rail words for a draft that is not what the composer would normally hold, or empty. */
@@ -481,7 +513,18 @@ export class ClioEditor extends Editor {
 			);
 		const label = [lead, identity, activity].filter(Boolean).join(" ");
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
-		const draftLabel = mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "";
+		const steer = this.steerTarget(text);
+		const draftLabel = steer
+			? theme.style(
+					steer.live ? "draftState" : "warning",
+					steer.live ? `STEER ${GLYPH.next} ${steer.agentId}` : `${steer.agentId} ended`,
+					{
+						bold: true,
+					},
+				)
+			: mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0)
+				? theme.fg("draftState", mode)
+				: "";
 		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
 		const note = this.draftNote(width);
 		let suffix = join([position, draftLabel, note ? theme.fg("draftState", note) : ""]);
@@ -567,6 +610,7 @@ export class ClioEditor extends Editor {
 		const rail = this.railState(mode);
 		const scroll = hiddenLineCount > 0 ? `${GLYPH.down}${hiddenLineCount}` : "";
 		const room = this.railLabelRoom(width);
+		const steer = mode === "CONFIRM" ? null : this.steerTarget(text);
 		const hint =
 			mode === "CONFIRM"
 				? confirmRailHint(
@@ -575,7 +619,15 @@ export class ClioEditor extends Editor {
 						text.length > 0,
 						this.chrome.getPermissionInspection?.() ?? "none",
 					)
-				: "";
+				: steer
+					? fitHintEntries(
+							[
+								...(steer.live ? [{ key: "Enter", verb: `send to ${steer.agentId}`, short: "send" }] : []),
+								{ key: "Esc", verb: "cancel steer, keep text", short: "cancel" },
+							],
+							Math.max(1, room - (scroll ? visibleWidth(scroll) + 3 : 0)),
+						)
+					: "";
 		const right = [scroll ? theme.fg("positionCount", scroll) : "", theme.base("keyboardHint", hint)]
 			.filter(Boolean)
 			.join(theme.fg("border", " · "));
@@ -981,6 +1033,7 @@ export class ClioEditor extends Editor {
 		this.pastedBangOffsets.clear();
 		this.bracketedPasteActive = false;
 		this.restoredDraft = false;
+		this.boardSteer = null;
 		if (text.length === 0 && this.parkedDraft !== null) {
 			const parked = this.parkedDraft;
 			this.parkedDraft = null;
