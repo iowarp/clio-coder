@@ -198,7 +198,11 @@ test("a dispatch card spends the hollow diamond on origin only, never on a trust
 			assertFits(lines, width);
 			assertTokensOnly(lines);
 			const plain = lines.map(stripTerminalSequences).join("\n");
-			match(plain, new RegExp(`(?<!${GLYPH.scoped} )${verdict} by worker prose`, "u"), `${width}: ${verdict} has no glyph`);
+			match(
+				plain,
+				new RegExp(`(?<!${GLYPH.scoped} )${verdict} by worker prose`, "u"),
+				`${width}: ${verdict} has no glyph`,
+			);
 		}
 	}
 });

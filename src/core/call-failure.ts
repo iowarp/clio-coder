@@ -55,7 +55,7 @@ function failureText(error: unknown): string {
  * The wait a refused response names, from `retry-after-ms` or `retry-after` (seconds or an HTTP date). A provider's
  * error text usually drops these headers, and this fetch is the one place every adapter's response passes through.
  */
-export function retryAfterHeaderMs(headers: Pick<Headers, "get">, now = Date.now()): number | null {
+function retryAfterHeaderMs(headers: Pick<Headers, "get">, now = Date.now()): number | null {
 	const exact = Number(headers.get("retry-after-ms"));
 	if (Number.isFinite(exact) && exact > 0) return exact;
 	const value = headers.get("retry-after")?.trim();
