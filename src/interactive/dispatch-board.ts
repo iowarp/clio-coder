@@ -13,7 +13,7 @@ import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.j
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
-import { plainTrustVerdict, trustStateWord } from "../domains/evidence/trust-projection.js";
+import { plainTrustVerdict, trustFailureWords, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
@@ -746,7 +746,11 @@ function dispatchCardBody(
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	// The function phase is orange, while identity, cost and TTFT keep their own roles.
-	const statusStr = `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
+	const failure = completedRunFailure(row);
+	const statusStr =
+		failure !== null
+			? theme.fg("error", `${GLYPH.error} ${presentation.label} · ${failure}`)
+			: `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	const ttft = row.ttft ?? (row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a");
 
@@ -807,7 +811,11 @@ function dispatchCardBody(
 		options.expanded === true || fullTask.length <= 3
 			? fullTask
 			: [...fullTask.slice(0, 2), theme.fg("annotation", "… Enter detail for full task")];
-	const bodyLines = [cardUnitsLine(theme, "status", statusUnits, contentWidth)];
+	const started = runOriginWords(row);
+	const bodyLines = [
+		cardUnitsLine(theme, "status", statusUnits, contentWidth),
+		...(started === null ? [] : [cardUnitsLine(theme, "started", [theme.fg("body", started)], contentWidth)]),
+	];
 	// One current-operation row is useful at a glance; prose and policy expand on demand.
 	if (row.progress) {
 		const doing = progressActionLine(theme, row.progress, contentWidth);
@@ -941,7 +949,11 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		compact: true,
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
-	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
+	const failure = completedRunFailure(row);
+	const glyph =
+		failure !== null
+			? theme.fg("error", GLYPH.error)
+			: theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	// A running row says what the run is doing in the inline card's words: the
 	// island said `running` beside a card that said `starting` (BT-007).
 	// An approval's time left must survive a narrow island, so its words shorten before the row cuts them.
@@ -961,11 +973,15 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 				)
 			: row.status === "enqueued" && row.endpoint !== undefined
 				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
-				: presentation.label;
+				: failure !== null
+					? `done · ${failure}`
+					: presentation.label;
 	const statusStr = theme.fg(
-		row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
-			? "shadowDispatchAction"
-			: presentation.token,
+		failure !== null
+			? "error"
+			: row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
+				? "shadowDispatchAction"
+				: presentation.token,
 		statusLabel,
 	);
 
@@ -1199,8 +1215,32 @@ function firstLine(text: string): string {
 	return sanitizeCallTargetText(line.trim());
 }
 
+/** What marks a run that finished as not to be leaned on, so its row cannot read as a plain success. */
+function completedRunFailure(row: Pick<DispatchBoardRow, "status" | "trust">): string | null {
+	return row.status === "completed" && row.trust !== undefined ? trustFailureWords(row.trust) : null;
+}
+
+/** Who started a run, in words, because the row's glyph only implies it. */
+function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | null {
+	switch (row.requestOrigin) {
+		case "user":
+			return "by you";
+		case "agent":
+			return "by the main agent";
+		case "harness":
+			return "by Clio on your behalf";
+		case "internal":
+			return "by Clio";
+		default:
+			return null;
+	}
+}
+
 /** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
-function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined): string {
+function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
+	const failure = completedRunFailure(row);
+	// A narrow row drops `done`, which the mark already implies, so the worker's name keeps its column.
+	if (failure !== null) return theme.fg("error", `${GLYPH.error} ${width < 80 ? "" : "done · "}${failure}`);
 	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" && tick !== undefined ? { tick } : {}),
 	});
@@ -1330,7 +1370,7 @@ export function runTableRows(
 			const cells: Array<string | TableCell> = [];
 			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 			cells.push(
-				runStatusCell(theme, row, options.tick),
+				runStatusCell(theme, row, options.tick, width),
 				`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 			);
 			if (anyPhase) cells.push("");
@@ -1348,14 +1388,23 @@ export function runTableRows(
 		const cells: Array<string | TableCell> = [];
 		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 		cells.push(
-			runStatusCell(theme, row, options.tick),
+			runStatusCell(theme, row, options.tick, width),
 			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 		);
 		if (anyPhase) cells.push(formatDispatchPhaseCell(row.phase, 14) ?? "");
 		if (anyNode) cells.push(row.node ?? "local");
 		// Unmeasured and not started are different facts, and the cost cell is wide enough to say which.
 		const costCell: TableCell = pending
-			? { text: row.usage.kind === "unavailable" ? USAGE_NOT_MEASURED : USAGE_NO_CALLS, tone: "muted" }
+			? {
+					// A finished run's calls are in the session that ran it, so `no calls yet` would be false here.
+					text:
+						row.usage.kind === "unavailable"
+							? USAGE_NOT_MEASURED
+							: isTerminalStatus(row.status)
+								? "earlier session"
+								: USAGE_NO_CALLS,
+					tone: "muted",
+				}
 			: figure("", usage.cost);
 		cells.push(elapsed, figure(GLYPH.up, usage.prompt), figure(GLYPH.down, usage.output), costCell);
 		if (anyAccount)
