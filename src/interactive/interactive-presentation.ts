@@ -663,6 +663,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const text = composerEditor?.getText() ?? "";
 			// The rail under a draft addressed to a worker already names its Enter and Esc.
 			if (composerEditor?.steerTarget(text)) return "surface";
+			// A stop already asked for owns an empty composer's hint until the work has exited.
+			const stopping =
+				localBashCancelledAt !== null ||
+				(footerDeps.getAgentStatus?.() ?? statusController.current()).phase === "cancelling";
+			if (stopping && text.trim().length === 0) return "stopping";
 			return draftKeyContext(
 				text,
 				deps.chat.isStreaming(),

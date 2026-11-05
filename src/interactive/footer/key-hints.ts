@@ -22,6 +22,7 @@ export type ComposerKeyContext =
 	| "hold-empty"
 	| "shell"
 	| "shell-refused"
+	| "stopping"
 	| `command:${string}`
 	| `run-command:${string}`
 	| `usage:${string}`
@@ -140,6 +141,9 @@ function immediateEntries(context: ComposerKeyContext): string[] {
 			return esc("stops the command");
 		case "shell-refused":
 			return esc("stops what is running, then Enter runs this");
+		case "stopping":
+			// Esc already went in; offering it again read as if the first press had not landed (HS18).
+			return ["Stop sent, waiting for it to exit"];
 		default:
 			return [];
 	}
