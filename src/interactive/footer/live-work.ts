@@ -45,6 +45,8 @@ const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/mod
 const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)\b/u;
 
 function workerElapsed(row: DispatchBoardRow): string | null {
+	// A plan has no run telemetry of its own; its clock is the board row's, from its start.
+	if (row.plan !== undefined) return formatWaitClock(row.elapsedMs);
 	const elapsed = row.telemetry?.activity.elapsed.display;
 	// Whole seconds, as the rail's own phase counts them: tenths beside it read as a different clock.
 	return elapsed && elapsed !== "not available" ? elapsed.replace(/\.\d+(?=s$)/u, "") : null;
