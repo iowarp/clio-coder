@@ -233,6 +233,7 @@ export function createCachedBody(render: (width: number, rows: number) => string
 export class ScrollingBody implements Component, RowBudgetedBody {
 	private offset = 0;
 	private rows = 0;
+	private windowed = false;
 	private readonly lines: CachedBody;
 	private memo: { all: string[]; offset: number; rows: number; visible: string[] } | null = null;
 
@@ -247,6 +248,11 @@ export class ScrollingBody implements Component, RowBudgetedBody {
 	/** The data behind the lines changed; the next render rebuilds them. */
 	touch(): void {
 		this.lines.touch();
+	}
+
+	/** Whether the last render had more than it could show, so the scroll keys move something. */
+	overflows(): boolean {
+		return this.windowed;
 	}
 
 	setBodyRows(rows: number): void {
@@ -279,8 +285,10 @@ export class ScrollingBody implements Component, RowBudgetedBody {
 		if (page === null || all.length <= page + 1) {
 			// Everything fits in the granted rows, so no row is owed to a position.
 			this.offset = 0;
+			this.windowed = false;
 			return all;
 		}
+		this.windowed = true;
 		const { window, start, position } = windowRows(all, this.offset, page);
 		this.offset = start;
 		const memo = this.memo;

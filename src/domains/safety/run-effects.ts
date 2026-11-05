@@ -119,6 +119,8 @@ interface PendingEffects {
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
+	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
+	outcome: "ok" | "error" | "blocked" | null;
 }
 
 /**
@@ -181,7 +183,7 @@ function commandOf(args: Record<string, unknown> | undefined): string | null {
 	return typeof command === "string" && command.length > 0 ? command : null;
 }
 
-function mutationTargets(toolName: string, args: Record<string, unknown> | undefined): string[] {
+export function mutationTargets(toolName: string, args: Record<string, unknown> | undefined): string[] {
 	if (toolName !== ToolNames.Bash) return toolMutationPaths(toolName, args);
 	const command = commandOf(args);
 	if (command === null) return [];
@@ -193,7 +195,7 @@ function mutationTargets(toolName: string, args: Record<string, unknown> | undef
  * verification tool carries the same identity under both scopes: the scope only
  * widens which bash spellings are recognized as a check at all.
  */
-function validationCommandOf(
+export function validationCommandOf(
 	toolName: string,
 	args: Record<string, unknown> | undefined,
 	scope: ValidationCommandScope,
@@ -246,23 +248,28 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
+				outcome: null,
 			});
 		},
 		finish(toolCallId, failed) {
 			const effects = pending.get(toolCallId);
 			pending.delete(toolCallId);
 			if (effects === undefined) return;
-			// A pass before a later mutation cannot settle the final tree.
-			if (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null)) {
+			// A pass before a later mutation cannot settle the final tree. A refused
+			// call never reached its tool, so it changed nothing and leaves passes
+			// standing. A failed call that really ran may have partly written.
+			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
+			if (!refused && (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null))) {
 				mutationRevision += 1;
 				for (const [name, passed] of validationOutcomes) if (passed) validationOutcomes.delete(name);
 			}
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
-			const checkOutcome = checkingCalls.get(toolCallId) ?? null;
 			if (
 				effects.validationName !== null &&
-				(failed ? checkOutcome === "error" : checkOutcome !== "blocked" && effects.mutationRevision === mutationRevision)
+				(failed
+					? effects.outcome === "error"
+					: effects.outcome !== "blocked" && effects.mutationRevision === mutationRevision)
 			)
 				validationOutcomes.set(effects.validationName, !failed);
 			if (failed) {
@@ -288,6 +295,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (effects.tool === ToolNames.Verify) verificationCommands.add("tool:verify");
 		},
 		checkOutcome(toolCallId, outcome) {
+			const effects = pending.get(toolCallId);
+			if (effects !== undefined) effects.outcome = outcome;
 			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
 		},
 		snapshot() {

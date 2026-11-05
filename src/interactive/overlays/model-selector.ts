@@ -21,6 +21,7 @@ import {
 	newerModelNotice,
 	resolveRuntimeTarget,
 	supportsAgentRoleTools,
+	thinkingEffectNote,
 } from "../../domains/providers/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { fuzzyFilter, getKeybindings, Input, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -164,6 +165,8 @@ export interface ModelRow {
 	caps: CapabilityFlags;
 	capabilityDecisions?: RuntimeCapabilityDecision;
 	thinking?: string;
+	/** Why this model runs another level than the one asked for. */
+	thinkingNote?: string | null;
 	streaming?: boolean;
 	diagnostics?: RuntimeResolutionDiagnostic[];
 	badges: string;
@@ -226,6 +229,7 @@ interface OverlayRuntimeResolution {
 	capabilities: CapabilityFlags;
 	capabilityDecisions: RuntimeCapabilityDecision;
 	thinking: string;
+	thinkingNote: string | null;
 	streaming: boolean;
 }
 
@@ -252,6 +256,7 @@ function resolveOverlayRuntimeTarget(input: {
 			capabilities: resolution.target.capabilities,
 			capabilityDecisions: resolution.target.capabilityDecisions,
 			thinking: resolution.target.modelRuntime.thinking.display,
+			thinkingNote: thinkingEffectNote(resolution.target.modelRuntime.thinking),
 			streaming: resolution.target.capabilityDecisions.streaming,
 		};
 	}
@@ -263,6 +268,7 @@ function resolveOverlayRuntimeTarget(input: {
 		capabilities,
 		capabilityDecisions: decisions,
 		thinking: "unresolved",
+		thinkingNote: null,
 		streaming: decisions.streaming,
 	};
 }
@@ -402,6 +408,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				caps: rowCaps,
 				capabilityDecisions: decisions,
 				thinking: resolution?.thinking ?? "unresolved",
+				thinkingNote: resolution?.thinkingNote ?? null,
 				streaming: decisions.streaming,
 				diagnostics: resolution?.diagnostics ?? [
 					{ severity: "error", code: "model-not-configured", message: `target '${target.id}' has no model configured` },
@@ -462,6 +469,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				caps: rowCaps,
 				capabilityDecisions: decisions,
 				thinking: resolution.thinking,
+				thinkingNote: resolution.thinkingNote,
 				streaming: resolution.streaming,
 				diagnostics: resolution.diagnostics,
 				badges,
@@ -650,14 +658,15 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		row.runtimeName,
 		row.apiFamily,
 		`max output ${row.maxTokens}`,
-		`thinking ${row.thinking ?? "-"}`,
+		`thinking ${row.thinking ?? "-"}${row.thinkingNote ? ` (${row.thinkingNote}, your setting is kept)` : ""}`,
 		`streaming ${row.streaming === false ? "no" : "yes"}`,
 		`image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"}`,
 		capabilityNames(row.caps),
 	].filter((fact): fact is string => fact !== null);
 	// Severity colors the way the targets hub colors it, through the shared mapping.
+	// The thinking fact above already says what runs and why, so its codes do not repeat it in jargon.
 	const diagnostics = (row.diagnostics ?? [])
-		.filter((entry) => entry.severity !== "info")
+		.filter((entry) => entry.severity !== "info" && !entry.code.startsWith("thinking-"))
 		.slice(0, 2)
 		.map((entry) => {
 			const token = diagnosticSeverityToken(entry.severity);
@@ -668,7 +677,18 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		})
 		.flatMap((line) => wrapTextWithAnsi(line, width).slice(0, 1));
 	const factLines = wrapTextWithAnsi(facts.map((fact) => chip(theme, fact, "muted")).join(dotSep(theme)), width);
-	const factBudget = Math.max(1, Math.min(factLines.length, maxRows - 1 - diagnostics.length));
+	// A route that cannot answer says what to do about it before any fact about the route.
+	const unreachable = !row.available || healthStatus(row) === "error";
+	const next = unreachable
+		? wrapTextWithAnsi(
+				theme.fg(
+					"warning",
+					`next: pick a healthy route, or r to recheck this one. Using it fails every turn until it answers. Fix it with clio-coder configure --id ${row.target}`,
+				),
+				width,
+			)
+		: [];
+	const factBudget = Math.max(1, Math.min(factLines.length, maxRows - 1 - next.length - diagnostics.length));
 	const kept = factLines.slice(0, factBudget);
 	const last = kept.at(-1);
 	if (factLines.length > kept.length && last !== undefined) kept[kept.length - 1] = `${last}${GLYPH.ellipsis}`;
@@ -676,12 +696,13 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		chipRow(
 			theme,
 			[
-				theme.fg("annotation", `${state} ${ref}`),
 				statusChip(theme, healthStatus(row), availability),
+				theme.fg("annotation", `${state} ${ref}`),
 				chip(theme, `auth ${row.authText}`, "muted"),
 			],
 			width,
 		),
+		...next,
 		...kept,
 		...diagnostics,
 	];
@@ -814,7 +835,10 @@ function renderModelOverlayLines(input: {
 						end: position?.end ?? filtered.length,
 						total: filtered.length,
 						unit: "models",
-						keys: hidden > 0 ? [`Tab shows all ${allMatches.length}`] : [],
+						keys: [
+							...(position !== null ? ["PgUp/PgDn page"] : []),
+							...(hidden > 0 ? [`Tab shows all ${allMatches.length}`] : []),
+						],
 					},
 					width,
 				),
@@ -1024,6 +1048,14 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		}
 		if (kb.matches(data, "tui.select.down")) {
 			this.move(1);
+			return;
+		}
+		if (kb.matches(data, "tui.select.pageUp") || kb.matches(data, "tui.select.pageDown")) {
+			this.selectionError = null;
+			const count = this.filteredRows().length;
+			const page = Math.max(MODEL_MIN_VISIBLE_ROWS, this.bodyRows - MODEL_CHROME_ROWS);
+			const next = this.selectedIndex + (kb.matches(data, "tui.select.pageDown") ? page : -page);
+			this.selectedIndex = Math.max(0, Math.min(next, count - 1));
 			return;
 		}
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {

@@ -1,10 +1,11 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
-import { taskBoardCounts } from "../../domains/session/task-board.js";
+import { taskBoardCounts, unverifiedTaskChecks } from "../../domains/session/task-board.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { finiteNonNegative } from "../context-bar.js";
@@ -308,7 +309,8 @@ export function taskBoardValue(theme: ClioTheme, board: TaskBoardSnapshot): stri
 	const counts = taskBoardCounts(board);
 	const progress = theme.fg(counts.open > 0 ? "counter" : "success", `${counts.completed}/${counts.total} done`);
 	const blocked = counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null;
-	return joinChips(theme, [progress, blocked]);
+	const unverified = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
+	return joinChips(theme, [progress, blocked, unverified > 0 ? theme.fg("warning", `${unverified} unverified`) : null]);
 }
 
 /** The board's current focus: the single active task, glyph-led like a worker row. */
@@ -316,6 +318,26 @@ export function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): stri
 	const active = board.tasks.find((task) => task.status === "active");
 	if (!active) return null;
 	return `${theme.fg("activity", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("counter", active.title)}`;
+}
+
+/** The active task on the composer rail: its id and as much of its title as the leftover room holds. */
+export function activeTaskRail(
+	theme: ClioTheme,
+	board: TaskBoardSnapshot,
+	room: number,
+	running: boolean,
+): string | null {
+	const active = board.tasks.find((task) => task.status === "active");
+	if (!active) return null;
+	const lead = `${GLYPH.running} ${active.id} `;
+	const title = truncateToWidth(
+		sanitizeCallTargetText(active.title),
+		Math.max(1, room - visibleWidth(lead)),
+		GLYPH.ellipsis,
+		false,
+	);
+	// Active on the board is not running: with the agent stopped the task keeps its place and loses the live ink.
+	return `${theme.fg(running ? "activity" : "annotation", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("menuDescription", title)}`;
 }
 
 /**

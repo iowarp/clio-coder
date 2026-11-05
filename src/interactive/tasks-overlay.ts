@@ -1,10 +1,16 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import type { SessionArtifact } from "../domains/session/session-artifacts.js";
 import type { SessionTaskHistoryBoard, TaskBoardSnapshot, TaskBoardTask } from "../domains/session/task-board.js";
-import { taskBoardCounts, unverifiedTaskChecks } from "../domains/session/task-board.js";
+import {
+	observedTaskChecks,
+	taskBoardCounts,
+	taskCompletionStanding,
+	unverifiedTaskChecks,
+} from "../domains/session/task-board.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { clockLocal } from "./format-time.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import type { ClioToken } from "./theme/index.js";
@@ -38,44 +44,28 @@ function muted(text: string): string {
 	return clioTheme().fg("menuOption", text);
 }
 
-function firstUsefulToken(values: ReadonlyArray<string>): string | null {
-	for (const value of values) {
-		const token = value.trim();
-		if (token.length > 0) return token;
-	}
-	return null;
-}
-
-function taskLedgerProofRef(board: TaskBoardSnapshot): string {
-	const runToken = firstUsefulToken(board.activeRunIds);
-	if (runToken) return `task-ledger:${runToken}`;
-	const activeTask = board.tasks.find((task) => task.status === "active" && task.id.trim().length > 0);
-	if (activeTask) return `task-ledger:${activeTask.id.trim()}`;
-	const taskToken = firstUsefulToken(board.tasks.map((task) => task.id));
-	return taskToken ? `task-ledger:${taskToken}` : "task-ledger";
-}
-
 function taskOriginLabel(task: TaskBoardTask): string {
 	if (task.origin === "user") return `operator ${task.userTaskId ?? "unlinked"}`;
 	return "agent";
 }
 
-// The one audit anchor for the board: `proof task-ledger:<token>`. The per-run
-// `dispatch:`/`evidence:` derivations were pure string echoes of the run id, so
-// the in-flight run ids render once, in their own header line, instead.
-function formatTaskProofLine(board: TaskBoardSnapshot, width: number): string {
-	return fitRow(`${SECTION_GUTTER}${dim("proof")} ${muted(taskLedgerProofRef(board))}`, width);
+/**
+ * The status word renders beside the glyph so state never rests on shape or
+ * color alone (NO_COLOR, screen readers). A done task only keeps the success
+ * ink when a check backs it: a note alone is quiet, and an unverified one warns.
+ */
+function taskPresentation(task: TaskBoardTask): { glyph: string; token: ClioToken; label: string } {
+	const base = STATUS_PRESENTATION[task.status];
+	const standing = taskCompletionStanding(task);
+	if (standing === "unverified") return { ...base, glyph: GLYPH.phaseBlocked, token: "warning" };
+	if (standing === "claim only") return { ...base, token: "annotation" };
+	return base;
 }
 
 function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string {
 	const theme = clioTheme();
-	const unverified = unverifiedTaskChecks(task);
-	// The status word renders beside the glyph so state never rests on shape or
-	// color alone (NO_COLOR, screen readers). An unverified completion keeps its
-	// "done" word and gains the warning glyph plus the trailing "unverified".
-	const presentation = unverified
-		? { glyph: GLYPH.phaseBlocked, token: "warning" as const, label: STATUS_PRESENTATION[task.status].label }
-		: STATUS_PRESENTATION[task.status];
+	const standing = taskCompletionStanding(task);
+	const presentation = taskPresentation(task);
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	const title = selected
 		? selectionLabel(true, task.title)
@@ -84,7 +74,7 @@ function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string
 			: muted(task.title);
 	const cursor = selected === undefined ? "" : `${selectionMark(selected)} `;
 	return fitRow(
-		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${presentation.label} · ${taskOriginLabel(task)}${unverified ? " · unverified" : ""}`)}`,
+		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${presentation.label} · ${taskOriginLabel(task)}${standing ? ` · ${standing}` : ""}`)}`,
 		width,
 	);
 }
@@ -97,27 +87,39 @@ function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
 	);
 }
 
+/** What a tool recorded, before what the agent said: an outcome and when Clio saw it. */
+function observedCheckRows(task: TaskBoardTask, width: number): string[] {
+	const theme = clioTheme();
+	const { passed, failed } = observedTaskChecks(task);
+	const facts = [
+		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${clockLocal(check.observedAt)}`)),
+		...passed.map((check) => theme.fg("success", `${check.name} passed at ${clockLocal(check.observedAt)}`)),
+	];
+	return facts.flatMap((fact) => wrapTaskProse(`       ${dim("observed")} `, fact, width));
+}
+
 function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	const theme = clioTheme();
 	if (task.status === "completed") {
-		const rows: string[] = [];
+		const rows = observedCheckRows(task, width);
+		const unverified = unverifiedTaskChecks(task);
+		// A failed check already reads on its own observed row with its time.
+		if (unverified && unverified.noRecordedPass.length > 0) {
+			const owed = unverified.noRecordedPass.map((check) => `${check} has no recorded pass`).join("; ");
+			rows.push(...wrapTaskProse(`       ${theme.fg("warning", "unverified")} `, theme.fg("warning", owed), width));
+		}
+		if (!unverified && rows.length === 0)
+			rows.push(...wrapTaskProse(`       ${dim("observed")} `, dim("no check on record"), width));
 		// The completion claim already carries any run id it mentions, so no derived
 		// `evidence:<runId>` suffix is appended; it would repeat that id on one line.
 		if (task.evidence) rows.push(...wrapTaskProse(`       ${dim("completion claim")} `, muted(task.evidence), width));
-		const unverified = unverifiedTaskChecks(task);
-		if (unverified) {
-			const checks = [
-				...unverified.failed.map((check) => `${check} failed`),
-				...unverified.noRecordedPass.map((check) => `${check} has no recorded pass`),
-			];
-			rows.push(
-				...wrapTaskProse(`       ${theme.fg("warning", "unverified")} `, theme.fg("warning", checks.join("; ")), width),
-			);
-		}
 		return rows;
 	}
 	if (task.status === "blocked" && task.reason) {
-		return wrapTaskProse(`       ${dim("blocked")} `, theme.fg("warning", task.reason), width);
+		return [
+			...wrapTaskProse(`       ${dim("blocked")} `, theme.fg("warning", task.reason), width),
+			...observedCheckRows(task, width),
+		];
 	}
 	if (task.status === "cancelled" && task.reason) {
 		return wrapTaskProse(`       ${dim("dropped")} `, muted(task.reason), width);
@@ -166,7 +168,11 @@ function formatTasksOverlayBodyLines(
 		};
 	}
 	const counts = taskBoardCounts(board);
-	const unverifiedCount = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
+	const standingCount = (standing: ReturnType<typeof taskCompletionStanding>): number =>
+		board.tasks.filter((task) => taskCompletionStanding(task) === standing).length;
+	const unverifiedCount = standingCount("unverified");
+	const checkedCount = standingCount("checked");
+	const claimCount = standingCount("claim only");
 	const chips = [
 		theme.fg(
 			counts.open > 0 || unverifiedCount > 0 ? "menuDescription" : "success",
@@ -176,13 +182,14 @@ function formatTasksOverlayBodyLines(
 		counts.active > 0 ? theme.fg("activity", `${counts.active} active`) : null,
 		counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null,
 		counts.cancelled > 0 ? dim(`${counts.cancelled} dropped`) : null,
+		checkedCount > 0 ? theme.fg("success", `${checkedCount} checked`) : null,
+		claimCount > 0 ? dim(`${claimCount} claim only`) : null,
 	].filter((chip): chip is string => chip !== null);
 	const lines: string[] = [
 		sectionHeading("Agent board", width),
 		fitRow(`${SECTION_GUTTER}${theme.fg("sectionHeading", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`, width),
-		formatTaskProofLine(board, width),
 	];
-	// The in-flight run ids render once, right under the proof anchor: full ids
+	// The in-flight run ids render once, right under the title: full ids
 	// in muted, fitted so overflow drops whole ids behind a dim ellipsis.
 	const activeRuns = board.activeRunIds.map((runId) => runId.trim()).filter((runId) => runId.length > 0);
 	if (activeRuns.length > 0) {
@@ -322,12 +329,11 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	if (historyRows.length === 0) lines.push(...emptyRows(dim("No terminal tasks from prior boards."), width));
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
-		const presentation = unverifiedTaskChecks(row.task)
-			? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
-			: STATUS_PRESENTATION[row.task.status];
+		const presentation = taskPresentation(row.task);
+		const standing = taskCompletionStanding(row.task);
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(`${row.board.boardId}:${row.task.id}`)} ${muted(row.task.title)} ${dim(`· ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`· ${presentation.label}${standing ? ` · ${standing}` : ""} · ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
 				width,
 			),
 			...taskReceiptRows(row.task, width),
@@ -547,19 +553,24 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 	}
 
 	footerHint(): string {
-		return this.addInput
-			? buildHint([{ key: "Enter", verb: "add" }], "back")
-			: buildHint([
-					{ key: "↑↓", verb: "select" },
-					...(this.windowRows > 0 ? [{ key: "PgUp/PgDn", verb: "page" }] : []),
-					{ key: "Tab", verb: "section" },
-					{ key: "Enter", verb: "view" },
-					{ key: "a", verb: "add" },
-					{ key: "h", verb: "hand" },
-					{ key: "d", verb: "done" },
-					{ key: "x", verb: "drop" },
-					{ key: "r", verb: "refresh" },
-				]);
+		if (this.addInput) return buildHint([{ key: "Enter", verb: "add" }], "back");
+		// Only the keys the selected row answers: Enter opens an artifact, and h, d and x act on operator tasks.
+		const selected = selectableRows(this.state())[this.selectedIndex];
+		return buildHint([
+			{ key: "↑↓", verb: "select" },
+			...(this.windowRows > 0 ? [{ key: "PgUp/PgDn", verb: "page" }] : []),
+			{ key: "Tab", verb: "section" },
+			...(selected?.kind === "artifact" && this.options.onOpenArtifact ? [{ key: "Enter", verb: "view" }] : []),
+			{ key: "a", verb: "add" },
+			...(selected?.kind === "user"
+				? [
+						{ key: "h", verb: "hand" },
+						{ key: "d", verb: "done" },
+						{ key: "x", verb: "drop" },
+					]
+				: []),
+			{ key: "r", verb: "refresh" },
+		]);
 	}
 
 	private state(): CompositeTasksOverlayState {

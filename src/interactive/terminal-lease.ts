@@ -245,6 +245,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getLiveWorkStrip: (width, escVerb) => editorChrome.getLiveWorkStrip?.(width, escVerb) ?? null,
 		getWorkspaceRail: (width) => editorChrome.getWorkspaceRail?.(width) ?? null,
 		getLoopRail: (width) => editorChrome.getLoopRail?.(width) ?? null,
+		getTaskRail: (room) => editorChrome.getTaskRail?.(room) ?? null,
 		getContextUsage: () => editorChrome.getContextUsage?.(),
 		getOutputStyle: () => editorChrome.getOutputStyle?.() ?? settings.interface.outputDetail,
 		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,
