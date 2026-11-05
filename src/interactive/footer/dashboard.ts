@@ -14,6 +14,7 @@ import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { getKeybindings, Text } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
+import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { FooterPanel } from "../footer-panel.js";
 import { dispatchSegment } from "../footer-panel.js";
@@ -94,6 +95,8 @@ export interface FooterDashboardDeps {
 	getExtensionStats?: () => { active: number; installed: number };
 	getContextState?: () => ContextState;
 	getNotifications?: () => ReadonlyArray<Notification>;
+	/** Side-agent model calls in flight; the rail names them, and the footer stops repeating them. */
+	getBackgroundCalls?: () => ReadonlyArray<BackgroundCall>;
 	/** Who answers the keyboard right now; the hint row follows it. Absent reads as the idle composer. */
 	getKeyContext?: () => ComposerKeyContext;
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
@@ -117,6 +120,7 @@ export interface FooterDashboardRenderState {
 	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
 	demo?: boolean;
 	keyContext?: ComposerKeyContext;
+	background?: ReadonlyArray<BackgroundCall>;
 	welcomeVisible?: boolean;
 	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
@@ -345,6 +349,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			},
 			demo: settings?.interface.demo !== false,
 			...(keyContext ? { keyContext } : {}),
+			background: deps.getBackgroundCalls?.() ?? [],
 			welcomeVisible: deps.getWelcomeVisible?.() === true,
 			demoHint: demoHints({
 				enabled: settings?.interface.demo === true && deps.getWelcomeVisible?.() !== true,

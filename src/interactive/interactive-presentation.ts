@@ -28,6 +28,7 @@ import { parseSlashCommand } from "../session-control/slash-commands.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
+import { createBackgroundCallTracker } from "./background-calls.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
 import type { CoalescingChatRenderer } from "./chat-renderer.js";
@@ -47,7 +48,7 @@ import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
-import { type LiveWorkFacts, liveWorkStrip } from "./footer/live-work.js";
+import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
 import { composerPhasePresentation } from "./footer/widgets.js";
@@ -67,7 +68,7 @@ import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { createDropAlerts } from "./telemetry-drops.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
-import { clioTheme } from "./theme/index.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
 import { modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
@@ -423,6 +424,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return { tokensPerSecond: outputTokens / (durationMs / 1000), outputTokens, estimated, durationMs };
 	};
 	let footer: FooterDashboardPanel;
+	const backgroundCalls = createBackgroundCallTracker(deps.bus, () => {
+		footer?.refresh();
+		requestRender();
+	});
 	const notifications = factories.createNotificationCenter({
 		onChange: () => {
 			footer?.refresh();
@@ -523,6 +528,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
+		getBackgroundCalls: () => backgroundCalls.active(),
 		getKeyContext: () => {
 			if (dockTop(deps.tui) !== null || composerEditor?.isShowingAutocomplete()) return "surface";
 			if (deps.chat.isStreaming()) return "steer";
@@ -572,6 +578,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		actor: modelNickname(deps.getSettings?.().chat?.model),
 		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
 		workers: dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row)),
+		background: backgroundCalls.active(),
 		workerActivity: (row) =>
 			row.progress ? workerActivityWords(row.progress) : dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
@@ -586,7 +593,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
-			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
+			const detail = railDetail(currentLiveWork(), width);
+			if (status.phase === "idle")
+				return detail ? { glyph: GLYPH.queued, label: "is ready", token: "counter", live: false, detail } : null;
+			return { ...composerPhasePresentation(status, width, Date.now()), ...(detail ? { detail } : {}) };
 		},
 		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
 		...(deps.workspaceSurfaces
@@ -852,6 +862,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const statusActive =
 				!["idle", "ended"].includes(statusController.current().phase) ||
 				localBashStartedAt !== null ||
+				backgroundCalls.active().length > 0 ||
 				dispatchBoardStore.rows().some((row) => row.status === "running");
 			if (deps.chat.isStreaming() || statusActive || loopSnapshot.some((job) => job.nextDueAt !== null)) {
 				footer.refresh();
@@ -890,6 +901,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		if (dropCheck) clearTimeout(dropCheck);
 		contextActivityStore.unsubscribe();
 		unsubscribeLoops?.();
+		backgroundCalls.dispose();
 		dispatchBoardStore.unsubscribe();
 		unbindRunReaders();
 	};

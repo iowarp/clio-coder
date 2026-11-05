@@ -10,10 +10,12 @@
 
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
 import type { ClioTheme } from "../theme/index.js";
 import { formatCompactMs, GLYPH } from "../theme/index.js";
+import { modelNickname } from "../theme/labels.js";
 import { composerPhasePresentation } from "./widgets.js";
 
 export interface LiveWorkFacts {
@@ -24,6 +26,8 @@ export interface LiveWorkFacts {
 	workers: ReadonlyArray<DispatchBoardRow>;
 	/** How the worker's current action reads on the fleet dock. */
 	workerActivity: (row: DispatchBoardRow) => string;
+	/** Side-agent model calls in flight, from their journaled start to their settle. */
+	background: ReadonlyArray<BackgroundCall>;
 	now: number;
 }
 
@@ -50,6 +54,38 @@ export function workerSummary(facts: LiveWorkFacts): string | null {
 	const elapsed = workerElapsed(first);
 	const others = facts.workers.length - 1;
 	return [`${name} ${doing}`, elapsed, others > 0 ? `+${others} more` : null].filter(Boolean).join(" · ");
+}
+
+/** `memory review on Qwopus3.8 · 3s`, shedding the route first when the room is short. */
+function backgroundSummary(facts: LiveWorkFacts, width: number): string | null {
+	const call = facts.background[0];
+	if (call === undefined) return null;
+	const elapsed = formatCompactMs(Math.max(0, facts.now - call.startedAt));
+	const others = facts.background.length - 1;
+	return [
+		width >= 60 ? `${call.purpose} on ${modelNickname(call.model)}` : call.purpose,
+		elapsed,
+		others > 0 ? `+${others} more` : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
+function isMainActive(status: AgentStatus): boolean {
+	return status.phase !== "idle" && status.phase !== "ended";
+}
+
+/**
+ * What runs beside the main phase, for the rail to say after it. A finished turn
+ * keeps reading finished; this only adds what is still going and whether a prompt
+ * can go in now, which it can unless the turn itself is waiting on this work.
+ */
+export function railDetail(facts: LiveWorkFacts, width: number): string | null {
+	const background = backgroundSummary(facts, width);
+	if (background === null) return null;
+	const waiting = facts.background.some((call) => call.blocksTurn);
+	const consequence = waiting ? "the turn waits" : isMainActive(facts.status) ? null : "you can send";
+	return [background, width >= 60 ? consequence : null].filter(Boolean).join(" · ");
 }
 
 /** What Esc does in this view, and that it does not reach the run. */
@@ -79,8 +115,8 @@ export function liveWorkStrip(
 	escVerb: string | null,
 ): string | null {
 	const room = Math.max(1, width);
-	const mainActive = facts.status.phase !== "idle" && facts.status.phase !== "ended";
-	const workers = workerSummary(facts);
+	const mainActive = isMainActive(facts.status);
+	const workers = [workerSummary(facts), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
 	const dot = theme.fg("border", " · ");
 	const note = escapeNote(escVerb, mainActive ? "the run" : facts.workers.length > 1 ? "work" : "the worker");

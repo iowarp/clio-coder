@@ -37,7 +37,7 @@ import {
 	sectionRule,
 	type Tone,
 } from "../theme/index.js";
-import { fitIdentityLabel } from "../theme/labels.js";
+import { fitIdentityLabel, modelNickname } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
@@ -122,6 +122,12 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 						`${GLYPH.phaseCompact} ${clean(contextWork.message)}`,
 					)
 				: null,
+			...(state.background ?? []).map((call) =>
+				theme.fg(
+					"activity",
+					`${call.purpose} on ${modelNickname(call.model)} · ${formatCompactMs(state.now - call.startedAt)}`,
+				),
+			),
 			streaming ? formattedThroughput(theme, state.throughput, undefined) : null,
 			streaming ? liveTokenValue(theme, state.throughput, state.telemetry, state.context.used) : null,
 			!streaming && lastTurn ? labelled("last turn", lastTurnOutcome(theme, lastTurn)) : null,
@@ -700,9 +706,13 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	// Idle and off say nothing: the line names memory only while it works or cannot.
 	const guardian = state.session.memoryIntervention?.guardian;
+	// The rail names a memory call from its first moment, with route and elapsed.
+	const memoryOnRail = (state.background ?? []).some((call) => call.purpose === "memory review");
 	const memoryFact =
 		guardian === "reviewing"
-			? theme.fg("activity", "mem reviewing")
+			? memoryOnRail
+				? ""
+				: theme.fg("activity", "mem reviewing")
 			: guardian === "waiting-capacity"
 				? theme.fg("warning", "mem waiting")
 				: guardian === "unavailable"

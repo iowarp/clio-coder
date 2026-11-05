@@ -80,7 +80,9 @@ export interface EditorChrome {
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
-	getHarnessStatus?: (width: number) => { label: string; glyph: string; token: ClioToken; live: boolean } | null;
+	getHarnessStatus?: (
+		width: number,
+	) => { label: string; glyph: string; token: ClioToken; live: boolean; detail?: string } | null;
 	/** What keeps running behind a dock that hides this rail; null at idle. `escVerb` is what the dock's Esc does. */
 	getLiveWorkStrip?: (width: number, escVerb: string | null) => string | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
@@ -431,6 +433,7 @@ export class ClioEditor extends Editor {
 		const spinner = GLYPH.running;
 		let lead = "";
 		let activity = "";
+		let detail = "";
 		if (mode === "CONFIRM") {
 			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
@@ -440,6 +443,7 @@ export class ClioEditor extends Editor {
 		} else if (status) {
 			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
 			activity = theme.fg(status.token, status.label);
+			detail = status.detail ? theme.fg("annotation", status.detail) : "";
 		} else if (mode !== "MESSAGE") {
 			lead = theme.fg("harnessAction", spinner);
 			activity = theme.fg("harnessAction", "is working");
@@ -457,10 +461,11 @@ export class ClioEditor extends Editor {
 			);
 		// The state outranks the identity: a narrow rail keeps `● running a command`
 		// rather than cutting `Judge-model is runnin…` and losing what it is doing.
-		const whole = [lead, identity, activity].filter(Boolean).join(" ");
+		const phrase = [activity, detail].filter(Boolean).join(theme.fg("border", " · "));
+		const whole = [lead, identity, phrase].filter(Boolean).join(" ");
 		const label =
 			activity && visibleWidth(whole) > this.railLabelRoom(width) - (rail.yolo ? 7 : 0)
-				? [lead, activity.replace("is ", "")].filter(Boolean).join(" ")
+				? [lead, phrase.replace("is ", "")].filter(Boolean).join(" ")
 				: whole;
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const draftLabel = mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "";
