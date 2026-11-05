@@ -840,7 +840,7 @@ function operatorGrantRows(
  * glyph hangs off the right of the header line so the tool name + args read
  * left-to-right without extra punctuation.
  */
-type HeaderStatus = "forming" | "ready" | "running" | "ok" | "error" | undefined;
+type HeaderStatus = "forming" | "ready" | "running" | "ok" | "cancelled" | "error" | undefined;
 
 /** Keeps a refusal reason to one scannable clause on the status tail. */
 const BLOCK_REASON_LIMIT = 72;
@@ -883,6 +883,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	const duration = optionalCompactMs(meta.durationMs);
 	const durationSuffix = duration ? toolMeta(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
+	if (status === "cancelled") return ` ${toolMeta(GLYPH.cancelled)}${durationSuffix}`;
 	// A blocked row says `blocked` as its verb; an aborted or orphaned one names
 	// its outcome here. The exit status is a fact on the row, never a suffix.
 	const outcomeSuffix = meta.outcome !== undefined && meta.outcome !== "blocked" ? toolMeta(` ${meta.outcome}`) : "";
@@ -1167,7 +1168,7 @@ function sublineParts(
 		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}`;
 		return { lead, tail: statusGlyph(status, meta) };
 	}
-	const settled = status === "ok" || status === "error";
+	const settled = status === "ok" || status === "cancelled" || status === "error";
 	const notRun = didNotRun(finished);
 	// A change the tool refused or failed to apply never landed, so the row
 	// must not read "edited" beside its error glyph.
@@ -1762,13 +1763,21 @@ function renderResultBlock(
 	return renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts));
 }
 
+/** A question the operator dismissed finished cleanly, but nothing was answered, so its mark is not a success. */
+function settledStatus(finished: ToolExecutionFinished): HeaderStatus {
+	if (finished.isError) return "error";
+	return resolveRow(finished).spec.class === "interaction" && detailsOf(finished.result)?.cancelled === true
+		? "cancelled"
+		: "ok";
+}
+
 function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): HeaderStatus {
 	// Discriminate on `result` rather than `isError`: only `ToolExecutionFinished`
 	// carries a `result` field, so a `ToolExecutionStart` with a stray
 	// `isError: false` (e.g. from a future event-shape change) cannot trip the
 	// finished path. `result` is the type's load-bearing field.
 	if (!("result" in call)) return call.phase ?? "running";
-	return call.isError ? "error" : "ok";
+	return settledStatus(call);
 }
 
 /** Live previews keep the phase beside the target even when arguments grow. */
@@ -1836,7 +1845,7 @@ export function renderToolExecution(
 ): string[] {
 	const finished = presentedCall(wire);
 	if (isChainCall(finished)) return renderChainExecution(finished, width, opts);
-	const status: HeaderStatus = finished.isError ? "error" : "ok";
+	const status = settledStatus(finished);
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
 		outcome: finished.outcome,
@@ -1900,7 +1909,7 @@ export function renderToolResultOnly(
 	if (!opts.unbounded && opts.detail) return renderToolPreview(wire, width, opts.detail, opts);
 	const finished = presentedCall({ ...wire, args: undefined });
 	if (isChainCall(finished)) return renderChainExecution(finished, width, opts);
-	const status: HeaderStatus = finished.isError ? "error" : "ok";
+	const status = settledStatus(finished);
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
 		outcome: finished.outcome,
@@ -2415,7 +2424,7 @@ function chainSublineParts(
 	status: HeaderStatus,
 	meta: StatusMeta,
 ): SublineParts {
-	const settled = status === "ok" || status === "error";
+	const settled = status === "ok" || status === "cancelled" || status === "error";
 	const verb =
 		status === "forming" || status === "ready"
 			? sanitizeCallTargetText(call.toolName)
@@ -2586,7 +2595,7 @@ function renderChainPreview(
 
 /** A gateway chain, unbounded: its row, one row per step, then each step's full output as its own block. */
 function renderChainExecution(finished: ToolExecutionFinished, width: number, opts: ToolBodyRenderOptions): string[] {
-	const status: HeaderStatus = finished.isError ? "error" : "ok";
+	const status = settledStatus(finished);
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
 		outcome: finished.outcome,

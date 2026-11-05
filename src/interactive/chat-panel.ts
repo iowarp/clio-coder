@@ -36,6 +36,7 @@ import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-loop.js";
 import {
 	classifyTurnEnding,
+	endedOnCancelledInterview,
 	extractText,
 	isSelfExplainingAbort,
 	type TurnEnding,
@@ -2135,7 +2136,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 									? "Output limit"
 									: ending?.kind === "no_answer"
 										? "No answer"
-										: "Done"),
+										: endedOnCancelledInterview(messages)
+											? "Cancelled"
+											: "Done"),
 				};
 				trackReceipt(target);
 			}

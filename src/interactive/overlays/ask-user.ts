@@ -77,6 +77,9 @@ const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
 const OTHER_CAPTION = "Other · recorded exactly as typed";
 const OTHER_POINTER = "[t] type an answer";
+/** With no legend row at all, the Other row is the last place the option keys can be named. */
+const OTHER_POINTER_ALL_KEYS = "[t] · [n] note · [?] info";
+const OTHER_ROW_ALL_KEYS_MIN_WIDTH = 36;
 const CURSOR_CELL = renderFakeCursor(" ");
 
 type OptionDetail = "all" | "focused" | "none";
@@ -451,7 +454,7 @@ function layoutOptionRows(
 	width: number,
 	recommendedIndex = -1,
 	detail: OptionDetail = "all",
-	pointToOther = false,
+	otherPointer: string | null = null,
 ): OptionRowLayout {
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
@@ -460,7 +463,7 @@ function layoutOptionRows(
 			const focused = index === focusedIndex;
 			const tag = index === recommendedIndex ? ` ${theme.fg("annotation", "recommended")}` : "";
 			// The free-text key, on the row it belongs to, when neither rail nor legend has room for it.
-			const pointer = pointToOther && item.value === "other" ? ` ${theme.fg("keyboardHint", OTHER_POINTER)}` : "";
+			const pointer = otherPointer !== null && item.value === "other" ? ` ${theme.fg("keyboardHint", otherPointer)}` : "";
 			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}${pointer}`;
 			const prefix = focused ? theme.fg("selectedOption", `${GLYPH.cursor} `) : "  ";
 			const labels = wrapTextWithAnsi(label, safeWidth - 2).map((line, at) => `${at === 0 ? prefix : "  "}${line}`);
@@ -646,8 +649,8 @@ class AskUserOverlayView implements Component {
 			const question = this.currentQuestion();
 			const goesBack = this.currentState()?.mode === "text" && question && questionHasOptions(question);
 			const line = headers
-				? `${GLYPH.phaseBlocked} timer held · Enter records, ${goesBack ? "Esc goes back" : "Esc closes"}`
-				: `${GLYPH.phaseBlocked} held · Enter records · ${goesBack ? "Esc back" : "Esc closes"}`;
+				? `${GLYPH.phaseBlocked} timer held · Enter records, ${goesBack ? "Esc goes back" : "Esc cancels"}`
+				: `${GLYPH.phaseBlocked} held · Enter records · ${goesBack ? "Esc back" : "Esc cancels"}`;
 			return headers
 				? wrapTextWithAnsi(theme.fg("annotation", line), width)
 				: [fitRow(theme.fg("annotation", line), width)];
@@ -865,7 +868,11 @@ class AskUserOverlayView implements Component {
 		const moveKey = this.moveKey();
 		// The legend writes `[Tab/Shift+Tab]`, so the text field's key is matched by its start.
 		const pointToMove = moveKey !== null && !named.includes(moveKey.replace(/\]$/u, ""));
-		const pointToOther = !named.includes("[t]");
+		const otherPointer = named.includes("[t]")
+			? null
+			: !named.includes("[n]") && !named.includes("[?]") && width >= OTHER_ROW_ALL_KEYS_MIN_WIDTH
+				? OTHER_POINTER_ALL_KEYS
+				: OTHER_POINTER;
 		const strip = fit.headers
 			? [
 					fitRow(
@@ -900,7 +907,7 @@ class AskUserOverlayView implements Component {
 		);
 		this.optionDetailRows = [];
 		this.controlWindowed = false;
-		const control = this.renderControlLines(width, controlBudget, fit.detail, pointToOther);
+		const control = this.renderControlLines(width, controlBudget, fit.detail, otherPointer);
 		const movedDetails = this.optionDetailRows.length > 0;
 		body.push(...this.optionDetailRows);
 		const ledgerBudget = Math.max(
@@ -975,7 +982,12 @@ class AskUserOverlayView implements Component {
 		if (this.railRoom <= 0) return [];
 		const entries = this.railEntries();
 		const kept = this.railKept(entries, this.railRoom);
-		const dropped = entries.filter((entry) => !kept.includes(entry));
+		// The fit keeps entries from the end, so the keys with another home give way first:
+		// the question's position row can point at the move key, and the count stands in for `a`.
+		const givesWayFirst = (entry: HintEntry): boolean => entry.key === "←/→" || entry.key === "a";
+		const dropped = entries
+			.filter((entry) => !kept.includes(entry))
+			.sort((left, right) => Number(givesWayFirst(right)) - Number(givesWayFirst(left)));
 		if (dropped.length === 0) return [];
 		const text = fitHintEntries(dropped, Math.max(1, width * maxRows - (maxRows - 1) * 8));
 		return wrapTextWithAnsi(clioTheme().fg("keyboardHint", text), width).slice(0, maxRows);
@@ -1021,18 +1033,23 @@ class AskUserOverlayView implements Component {
 	private hintEntries(): { entries: HintEntry[]; escVerb: OverlayEscVerb } {
 		const question = this.currentQuestion();
 		const state = this.currentState();
-		if (this.phase !== "asking" || !question || !state) return { entries: [], escVerb: "close" };
+		// Esc here is a decision, not a dismissal: the model is told and the turn ends.
+		if (this.phase !== "asking" || !question || !state) return { entries: [], escVerb: "cancel" };
 		const recordAnswer =
 			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
 			"record answer";
-		const record: HintEntry = { key: "Enter", verb: recordAnswer, short: recordAnswer.split(" ")[0] ?? recordAnswer };
+		// Back on an answered question, Enter swaps the answer rather than adding one.
+		const record: HintEntry =
+			state.answer.trim().length > 0
+				? { key: "Enter", verb: "replace answer", short: "replace" }
+				: { key: "Enter", verb: recordAnswer, short: recordAnswer.split(" ")[0] ?? recordAnswer };
 		const scroll: HintEntry[] = this.questionOverflows ? [{ key: "PgUp/PgDn", verb: "scroll", critical: false }] : [];
 		if (state.mode === "text") {
 			// Esc means two different things depending on what is behind the field.
 			// A question with options has a list to fall back to, so the key goes
 			// back; a question without one has nothing behind it and the key still
 			// leaves the interview. The footer says which one this is.
-			const escVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
+			const escVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "cancel";
 			const entries: HintEntry[] = [];
 			if (this.deps.tui)
 				entries.push({
@@ -1047,7 +1064,10 @@ class AskUserOverlayView implements Component {
 			return { entries, escVerb };
 		}
 		const entries: HintEntry[] = [{ key: "?", verb: "details" }];
-		if (this.ledgerEntries().length > 0) entries.push({ key: "a", verb: "answers" });
+		if (this.ledgerEntries().length > 0)
+			entries.push(
+				this.ledgerExpanded ? { key: "a", verb: "hide answers", short: "hide" } : { key: "a", verb: "answers" },
+			);
 		if (question.fixedChoices !== true) {
 			entries.push({ key: "n", verb: "note on option", short: "note" });
 			entries.push({ key: "t", verb: "other answer", short: "other" });
@@ -1056,7 +1076,7 @@ class AskUserOverlayView implements Component {
 		if (this.questions.length > 1) entries.push({ key: "←/→", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
 		entries.push(record);
-		return { entries, escVerb: "close" };
+		return { entries, escVerb: "cancel" };
 	}
 
 	footerHint(): string {
@@ -1269,7 +1289,7 @@ class AskUserOverlayView implements Component {
 		width: number,
 		rowBudget: number,
 		detail: OptionDetail = "all",
-		pointToOther = false,
+		otherPointer: string | null = null,
 	): string[] {
 		this.ensureControl();
 		const state = this.currentState();
@@ -1277,7 +1297,7 @@ class AskUserOverlayView implements Component {
 		if (state?.mode === "text" && question) {
 			return [...(this.text?.render(width) ?? [""]), ...this.textPreview(question, state, width)];
 		}
-		return this.renderSelectControl(width, rowBudget, detail, pointToOther);
+		return this.renderSelectControl(width, rowBudget, detail, otherPointer);
 	}
 
 	/** Earlier rounds first, then this round's answered siblings. */
@@ -1324,7 +1344,9 @@ class AskUserOverlayView implements Component {
 				),
 			);
 		}
-		const head = ["", sectionRule(theme, width, "Answers", { meta: count })];
+		// Earlier rounds are settled, so only this round's answers can still be changed.
+		const canGoBack = this.questions.length > 1 && entries.some((entry) => entry.label.startsWith("Q"));
+		const head = ["", sectionRule(theme, width, "Answers", { meta: canGoBack ? `${count} · [←/→] change one` : count })];
 		const budget = Math.max(1, rowBudget - head.length);
 		if (rows.length <= budget) return [...head, ...rows];
 		const kept = rows.slice(0, Math.max(0, budget - 1));
@@ -1335,7 +1357,12 @@ class AskUserOverlayView implements Component {
 		];
 	}
 
-	private renderSelectControl(width: number, rowBudget: number, detail: OptionDetail, pointToOther: boolean): string[] {
+	private renderSelectControl(
+		width: number,
+		rowBudget: number,
+		detail: OptionDetail,
+		otherPointer: string | null,
+	): string[] {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		const selectedItem = this.list?.getSelectedItem();
@@ -1345,7 +1372,7 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail, pointToOther);
+		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail, otherPointer);
 		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
 		this.controlWindowed = totalRows > rowBudget;
 		if (totalRows + items.length <= rowBudget) {
@@ -1362,7 +1389,7 @@ class AskUserOverlayView implements Component {
 				width,
 			);
 		}
-		const otherIndex = pointToOther ? items.findIndex((item) => item.value === "other") : -1;
+		const otherIndex = otherPointer !== null ? items.findIndex((item) => item.value === "other") : -1;
 		return windowOptionRows(layout, focusedIndex, rowBudget, width, otherIndex);
 	}
 
