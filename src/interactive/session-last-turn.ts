@@ -20,6 +20,8 @@ import { type ResponseModelIdObservation, responseModelIdObservationFromRecord }
 import { rawDurationMs } from "../core/timers.js";
 import type { MessageEntry, SessionEntry, SessionUsageDefaults } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import type { AgentMessage } from "../engine/types.js";
+import { classifyTurnEnding } from "../session-control/chat-loop-messages.js";
 import type { TurnStopReason, TurnSummary } from "./status/index.js";
 
 function payloadRecord(value: unknown): Record<string, unknown> | null {
@@ -117,6 +119,7 @@ export function lastTurnSummaryFromLedger(
 	if (!turn || turn.rows.length === 0) return null;
 
 	let sawAssistant = false;
+	const settled: AgentMessage[] = [];
 	let stopReason: TurnStopReason = "stop";
 	let toolCount = 0;
 	let toolErrorCount = 0;
@@ -133,11 +136,14 @@ export function lastTurnSummaryFromLedger(
 		// when the branch was left contributes nothing here either.
 		if (row.role === "tool_result") {
 			toolCount += 1;
-			if (record?.isError === true || record?.error === true) toolErrorCount += 1;
+			const failed = record?.isError === true || record?.error === true;
+			if (failed) toolErrorCount += 1;
+			settled.push({ role: "toolResult", toolName: record?.toolName, isError: failed } as unknown as AgentMessage);
 			continue;
 		}
 		if (row.role !== "assistant" || !record) continue;
 		sawAssistant = true;
+		settled.push({ role: "assistant", ...record } as unknown as AgentMessage);
 		const reason = stopReasonOf(record.stopReason);
 		if (reason && reason !== "stop") stopReason = reason;
 		targetId = targetId ?? nonEmptyString(record, "provider", "api");
@@ -145,6 +151,8 @@ export function lastTurnSummaryFromLedger(
 		responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
 	}
 	if (!sawAssistant) return null;
+	if ((stopReason === "stop" || stopReason === "toolUse") && classifyTurnEnding(settled)?.kind === "no_answer")
+		stopReason = "no_answer";
 
 	const lastRow = turn.rows[turn.rows.length - 1];
 	return {

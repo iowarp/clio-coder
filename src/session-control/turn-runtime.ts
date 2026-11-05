@@ -75,10 +75,12 @@ import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js"
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
+import type { ChatNoticeEvent } from "./chat-loop.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
 	backendCacheVerdict,
+	classifyTurnEnding,
 	estimatedUsageForInterruptedTurn,
 	extractText,
 	extractThinking,
@@ -86,6 +88,9 @@ import {
 	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
 	sumRunUsage,
+	TOOL_MARKUP_REPROMPT,
+	TOOL_MARKUP_REPROMPT_NOTICE,
+	TOOL_MARKUP_REPROMPT_NOTICE_KEY,
 	terminalFailureFromAssistantMessage,
 	toolNamesFromAgentState,
 	toolResultSummary,
@@ -293,7 +298,7 @@ export interface TurnRuntimeDeps {
 	 */
 	admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	emit: (event: AgentEvent | AssistantDeltaEvent) => void;
-	emitNotice: (text: string) => void;
+	emitNotice: (text: string, level?: ChatNoticeEvent["level"], key?: string) => void;
 	/** Transport advisories belong in the footer, separate from conversation. */
 	emitFooterNotice: (level: "info" | "warning", text: string, key: string) => void;
 	/** Tool-call id to its `performance.now()` start mark; spans only, never an instant. */
@@ -1449,6 +1454,24 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
 			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
+				return { action: "continue" };
+			}
+			// A call the model only wrote out never ran. One more round through normal admission lets it make the call or
+			// say what it did, and Clio never parses or runs the markup itself. A guard's lock already told it tools are off.
+			const noAnswer = turn.message.stopReason === "stop" ? classifyTurnEnding([turn.message]) : null;
+			if (
+				noAnswer?.kind === "no_answer" &&
+				(noAnswer.cause === "tool_call_in_reasoning" || noAnswer.cause === "tool_call_as_text") &&
+				currentRun() &&
+				state.activeInterruptReason === null &&
+				!state.synthesisToolLock &&
+				!state.toolBudgetLock &&
+				state.activeUserTurnId !== null &&
+				state.toolMarkupRepromptTurnId !== state.activeUserTurnId
+			) {
+				state.toolMarkupRepromptTurnId = state.activeUserTurnId;
+				requiredToolReminder = TOOL_MARKUP_REPROMPT;
+				deps.emitNotice(TOOL_MARKUP_REPROMPT_NOTICE, "warning", TOOL_MARKUP_REPROMPT_NOTICE_KEY);
 				return { action: "continue" };
 			}
 			const terminal = pendingTerminalToolResult;

@@ -28,6 +28,7 @@ import type {
 	LoopBlockedPayload,
 	ToolBudgetExceededPayload,
 } from "../core/telemetry/live-events.js";
+import { stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import { dispatchMutatedParentWorkspace } from "../domains/dispatch/workspace-mutation.js";
@@ -41,6 +42,8 @@ import { resolveReadPath } from "../tools/path-utils.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import { resolveVerifyCall } from "../tools/verify/resolve.js";
 import type { AgentMessage } from "./types.js";
+
+export { stripDeadToolCallMarkup };
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
 
@@ -350,32 +353,6 @@ function workerDeliveryOnlyDirective(limit: number, deliveryTools: ReadonlyArray
 		`Only read and ${deliveryTools.join("/")} are admitted now. Write what you have with ` +
 		`${deliveryTools.join(" or ")} and finish. Do not substitute ${disallowedToolsText(deliveryTools)}.`
 	);
-}
-
-/**
- * Dead tool-call markup a model can emit as plain text once tool_choice is
- * forced to none: the chat template's call syntax arrives as prose because the
- * runtime no longer parses it into a structured call. Measured on a local model
- * target, roughly one locked turn in three answered the forced text-only round
- * this way. Complete blocks are stripped wherever they appear; unterminated
- * trailing blocks (a length stop mid-markup) are stripped only when followed
- * by a call body (`<function=` or a JSON opener), so prose that merely quotes
- * the "<tool_call>" phrase survives.
- */
-const DEAD_TOOL_CALL_MARKUP_PATTERNS: ReadonlyArray<RegExp> = [
-	/<tool_call>[\s\S]*?<\/tool_call>/gi,
-	/<function=[\w.-]+>[\s\S]*?<\/function>/gi,
-	/<tool_call>\s*(?:<function=|[{[])[\s\S]*$/i,
-	/<function=[\w.-]+>[\s\S]*$/i,
-];
-
-/** Strip dead tool-call markup from locked-turn text; trims only when something was stripped. */
-export function stripDeadToolCallMarkup(text: string): string {
-	let out = text;
-	for (const pattern of DEAD_TOOL_CALL_MARKUP_PATTERNS) {
-		out = out.replace(pattern, "");
-	}
-	return out === text ? text : out.trim();
 }
 
 /**

@@ -46,7 +46,11 @@ import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
-import { messageCallSpends } from "../../session-control/chat-loop-messages.js";
+import {
+	classifyTurnEnding,
+	messageCallSpends,
+	turnNoAnswerSentence,
+} from "../../session-control/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
@@ -163,6 +167,10 @@ interface HeadlessMainAgentResult {
 	abortReason: string | null;
 	/** Most recent transcript notice; failure detail when the turn never answered. */
 	lastNotice: string | null;
+	/** Why the last run ended without an answer, when it did. */
+	noAnswer: string | null;
+	/** The last run did real tool work and wrote no closing message, which is not a provider that went silent. */
+	endedQuietly: boolean;
 	/**
 	 * The chat loop refused the turn before any request (an admission notice):
 	 * no target, no model, a context window it cannot fit, an image the route
@@ -310,11 +318,21 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		}
 		return { ...current, lastNotice: text };
 	}
+	if (event.type === "agent_end") {
+		const ending = classifyTurnEnding(Array.isArray(event.messages) ? event.messages : []);
+		return {
+			...current,
+			noAnswer: ending?.kind === "no_answer" ? turnNoAnswerSentence(ending) : null,
+			endedQuietly: ending?.kind === "quiet",
+		};
+	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
 	if (message?.role !== "assistant") return current;
 	current = {
 		...current,
+		noAnswer: null,
+		endedQuietly: false,
 		outputExhausted: message.stopReason === "length",
 		sawTerminatingToolResult: false,
 		admissionRefused: false,
@@ -787,6 +805,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminatingToolText: "",
 		abortReason: null,
 		lastNotice: null,
+		noAnswer: null,
+		endedQuietly: false,
 		admissionRefused: false,
 	};
 	const runStats: HeadlessMainAgentRunStats = {
@@ -1121,8 +1141,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 		if (mode === "text" && result.text.length > 0) stdoutMessage = settledAnswer(result.text);
+	} else if (result.noAnswer !== null) {
+		// Earlier chatter or a line of markup is not the answer the caller asked for, whatever it reads like.
+		const failureMessage = `clio-coder run: the turn ended without an answer. ${result.noAnswer}`;
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
+		stderrMessage = failureMessage;
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
-		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
+		const failureMessage = result.endedQuietly
+			? "clio-coder run: the turn's tools ran but the model wrote no closing message, so there is no answer to print"
+			: "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else {

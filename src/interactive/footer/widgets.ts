@@ -215,7 +215,8 @@ export function compactContextUsage(
 function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
 	if (reason === "error") return { glyph: GLYPH.error, token: "error" };
 	if (reason === "aborted" || reason === "cancelled") return { glyph: GLYPH.cancelled, token: "annotation" };
-	if (reason === "length" || reason === "generation_guard") return { glyph: GLYPH.warn, token: "warning" };
+	if (reason === "length" || reason === "generation_guard" || reason === "no_answer")
+		return { glyph: GLYPH.warn, token: "warning" };
 	return { glyph: GLYPH.ok, token: "success" };
 }
 
@@ -455,6 +456,7 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 			if (stop === "aborted" || stop === "cancelled")
 				return { glyph: GLYPH.cancelled, label: "Cancelled", token: "counter", live: false };
 			if (stop === "length") return { glyph: GLYPH.warn, label: "Output limit", token: "warning", live: false };
+			if (stop === "no_answer") return { glyph: GLYPH.warn, label: "No answer", token: "warning", live: false };
 			return { glyph: GLYPH.ok, label: "Done", token: "success", live: false };
 		}
 	}
@@ -932,6 +934,20 @@ export function composerPhasePresentation(
 		);
 		return { ...phase, ...stage, namesRoute: stage.subject === undefined };
 	}
+	if (
+		status.toolMarkupRepromptSince !== undefined &&
+		(status.phase === "waiting_model" || status.phase === "thinking" || status.phase === "writing")
+	) {
+		const label = fitRailFacts(
+			[
+				{ text: room >= 60 ? "wrote its call as text, asked once to make it" : "asked to redo its call", keep: 9 },
+				{ text: elapsedFrom(status.toolMarkupRepromptSince), keep: 8 },
+				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
+			],
+			room,
+		);
+		return { ...phase, label, namesRoute: false };
+	}
 	let label: string;
 	switch (status.phase) {
 		case "idle":
@@ -1069,7 +1085,15 @@ export function composerPhasePresentation(
 								? short
 									? "output limit"
 									: "reached the output limit"
-								: "finished";
+								: stop === "no_answer"
+									? fitRailFacts(
+											[
+												{ text: "gave no answer", keep: 9 },
+												{ ...MODEL_SWITCHES, keep: 8 },
+											],
+											room,
+										)
+									: "finished";
 			break;
 		}
 	}
@@ -1146,6 +1170,20 @@ export function idleReadinessPresentation(
 			label: fitRailFacts(
 				[
 					{ text: "last request failed", keep: 9 },
+					{ ...MODEL_SWITCHES, keep: 8 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.lastStop === "no_answer") {
+		return {
+			glyph: GLYPH.warn,
+			...quiet,
+			token: "warning",
+			label: fitRailFacts(
+				[
+					{ text: "last turn gave no answer", short: "no answer", keep: 9 },
 					{ ...MODEL_SWITCHES, keep: 8 },
 				],
 				room,

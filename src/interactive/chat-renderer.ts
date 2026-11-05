@@ -935,6 +935,12 @@ function replayEntries(
 				}
 				if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
+					// The settlement reads the run's work as it did live.
+					runAssistantMessages.push({
+						role: "toolResult",
+						toolName: result.name,
+						isError: result.isError,
+					} as unknown as AgentMessage);
 					const resultSummary = replayResultSummary(result);
 					const evictedReason = workingSet.evicted.get(entry.turnId)?.reason;
 					const fallbackId = result.id ?? pendingToolIds.pop() ?? null;

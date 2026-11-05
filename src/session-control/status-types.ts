@@ -39,7 +39,15 @@ export type { RetryWaitCause } from "../domains/session/retry.js";
 
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
-export type TurnStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "cancelled" | "generation_guard";
+export type TurnStopReason =
+	| "stop"
+	| "length"
+	| "toolUse"
+	| "error"
+	| "aborted"
+	| "cancelled"
+	| "generation_guard"
+	| "no_answer";
 export type ReasoningTokenProvenance = "provider" | "estimated" | "mixed";
 
 export interface RetryOverlay {
@@ -163,6 +171,8 @@ export interface AgentStatus {
 	summary?: TurnSummary | undefined;
 	/** Usage settled so far in the active run. Reset by `agent_start`. */
 	runTally?: RunTally | undefined;
+	/** Epoch ms Clio asked the model again because it only wrote out a tool call; cleared when that reply settles. */
+	toolMarkupRepromptSince?: number | undefined;
 	/** Closed spans this turn spent on an operator-owned wait: an open approval card or interview. */
 	humanWaitMs?: number | undefined;
 	/** Epoch ms the operator-owned wait now open began. */
