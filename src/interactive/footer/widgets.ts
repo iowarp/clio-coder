@@ -841,7 +841,7 @@ function retryRailLabel(
 	const waiting = onWait
 		? room >= 40
 			? `is waiting to retry${count === null ? "" : ` (${count})`}`
-			: (count ?? "waiting")
+			: (count ?? "will retry")
 		: attempts;
 	const left = retry?.dueAt !== undefined ? formatStatedWait(Math.max(0, retry.dueAt - now)) : null;
 	const asked =
@@ -863,15 +863,20 @@ function retryRailLabel(
 	return fitRailFacts(
 		[
 			{ text: waiting, keep: 9 },
-			{ ...retryCauseFact(retry, now, server), keep: 6 },
+			// What the server said is the state here; whose wait it is comes after it.
+			{ ...retryCauseFact(retry, now, server), keep: 7 },
 			{
 				// What the server said outranks the long form of the countdown beside it.
 				text: left === null ? null : retry?.cause !== undefined && room < 90 ? `in ${left}` : `next attempt in ${left}`,
 				...(left === null ? {} : { short: `in ${left}` }),
 				keep: 8,
 			},
-			// Whose wait this is outranks what the provider called its state: a long countdown has to say it is not Clio's choice.
-			{ text: asked === null ? null : `provider asked for ${asked}`, short: "provider asked", keep: 7 },
+			// Whose wait this is, after what the server said: a long countdown has to say it is not Clio's choice.
+			{
+				text: asked === null ? null : `provider asked for ${asked}`,
+				short: "provider asked",
+				keep: retry?.cause !== undefined ? 6 : 7,
+			},
 			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 			// The whole words or none: the short form would cost a name the rail is sized to keep.
 			{ text: MODEL_MOVES.text, keep: 5 },
@@ -985,8 +990,10 @@ function toolActivity(
 	const full = verb ?? activity?.verb ?? "is running";
 	// The way out is owed its cells from the start, and the name of what is running gives them up.
 	const wayOut = verb === null ? 6 : 0;
-	const lead = room - wayOut >= 24 ? full : full.replace(/^is /u, "");
-	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9 - wayOut));
+	// Who is acting is part of the claim: the command's text gives up cells for the subject before the subject goes.
+	const subjectCells = slot !== undefined && room >= 30 ? visibleWidth(subject) + 1 : 0;
+	const lead = room - wayOut - subjectCells >= 24 ? full : full.replace(/^is /u, "");
+	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9 - wayOut - subjectCells));
 	const phrase =
 		object === null || span === null
 			? verb !== null

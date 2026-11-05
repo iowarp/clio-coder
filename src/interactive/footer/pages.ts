@@ -807,7 +807,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: // Memory yields the model to the turn on purpose, so its wait is no warning: `mem waiting` in warning ink beside a
 				// retry read as a second fault (N9).
 				guardian === "waiting-capacity"
-				? theme.fg("annotation", "memory waits its turn")
+				? theme.fg("annotation", w >= 80 ? "memory waits its turn" : "memory waits")
 				: guardian === "unavailable"
 					? theme.fg("unknownValue", "memory unavailable")
 					: "";
