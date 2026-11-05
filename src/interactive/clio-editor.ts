@@ -30,7 +30,7 @@ import {
 	rule,
 	withThemeContext,
 } from "./theme/index.js";
-import { modelNickname, type TargetIdentity } from "./theme/labels.js";
+import { exactRouteLabel, modelNickname, type TargetIdentity } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 
@@ -81,9 +81,11 @@ export interface EditorChrome {
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
+	/** `identityCells` is what the rail will spend naming the exact route instead of the short nickname. */
 	getHarnessStatus?: (
 		width: number,
-	) => { label: string; glyph: string; token: ClioToken; live: boolean; subject?: string } | null;
+		identityCells?: number,
+	) => { label: string; glyph: string; token: ClioToken; live: boolean; subject?: string; namesRoute?: boolean } | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
 	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
@@ -489,39 +491,25 @@ export class ClioEditor extends Editor {
 		const spinner = GLYPH.running;
 		let lead = "";
 		let activity = "";
+		// The state when no name stands in front of it to read `is writing` with.
+		let stateAlone = "";
 		if (mode === "CONFIRM") {
 			lead = theme.fg("attentionRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true));
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
+			stateAlone = activity;
 		} else if (mode === "PREPARING" || mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
 			activity = theme.fg("harnessAction", mode === "PREPARING" ? "is preparing" : "is compacting context");
+			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? "preparing" : "compacting context");
 		} else if (status) {
 			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
 			activity = theme.fg(status.token, status.label);
+			stateAlone = theme.fg(status.token, status.label.replace(/^is /u, ""));
 		} else if (mode !== "MESSAGE") {
 			lead = theme.fg("harnessAction", spinner);
 			activity = theme.fg("harnessAction", "is working");
+			stateAlone = theme.fg("harnessAction", "working");
 		}
-		const route = this.chrome.getModelLabel();
-		const nickname = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
-		// The approval cue keeps the rail; a workspace replaces only the identity segment.
-		const workspace =
-			mode === "CONFIRM" ? null : (this.chrome.getWorkspaceRail?.(Math.max(4, Math.floor(width / 2))) ?? null);
-		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
-		const actor = mode === "CONFIRM" ? undefined : status?.subject;
-		const identity =
-			(actor === undefined ? workspace : null) ??
-			theme.fg(
-				"activeModelIdentity",
-				// A narrow rail keeps the state and gives way on who: the footer and /model still name the route.
-				truncateToWidth(
-					actor ?? nickname,
-					width < 60 ? (actor !== undefined ? 10 : 6) : Math.max(4, Math.min(24, Math.floor(width / 3))),
-					GLYPH.ellipsis,
-					false,
-				),
-			);
-		const label = [lead, identity, activity].filter(Boolean).join(" ");
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const steer = this.steerTarget(text);
 		const draftLabel = steer
@@ -538,6 +526,39 @@ export class ClioEditor extends Editor {
 		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
 		const note = this.draftNote(width);
 		let suffix = join([position, draftLabel, note ? theme.fg("draftState", note) : ""]);
+		const labelRoom = this.railLabelRoom(width) - (rail.yolo ? 7 : 0) - (suffix ? visibleWidth(suffix) + 3 : 0);
+		const route = this.chrome.getModelLabel();
+		const nickname = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
+		// The approval cue keeps the rail; a workspace replaces only the identity segment.
+		const workspace =
+			mode === "CONFIRM" ? null : (this.chrome.getWorkspaceRail?.(Math.max(4, Math.floor(width / 2))) ?? null);
+		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
+		const actor = mode === "CONFIRM" ? undefined : status?.subject;
+		const named = (who: string, state = activity): string =>
+			[lead, theme.fg("activeModelIdentity", who), state].filter(Boolean).join(" ");
+		const pickLabel = (): string => {
+			if (actor !== undefined)
+				return named(
+					truncateToWidth(actor, width < 60 ? 10 : Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
+				);
+			if (workspace !== null) return [lead, workspace, activity].filter(Boolean).join(" ");
+			// Idle and the start of a turn say where the prompt goes, whole. Once the
+			// model answers, what it is doing needs the room and the transcript has the route.
+			const exact = exactRouteLabel(route);
+			const atRouteMoment =
+				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
+			if (exact !== null && atRouteMoment) {
+				const routed = status ? this.chrome.getHarnessStatus?.(width, visibleWidth(exact) + 2) : null;
+				const candidate = named(exact, routed && mode !== "PREPARING" ? theme.fg(routed.token, routed.label) : activity);
+				if (visibleWidth(candidate) <= labelRoom) return candidate;
+			}
+			// A name cut to `Judge…` beside a state cut to `target reachab…` says neither,
+			// so the name fits whole or leaves. The bare state is what a narrow rail is for.
+			const short = named(nickname);
+			if (!activity || visibleWidth(short) <= labelRoom) return short;
+			return [lead, stateAlone].filter(Boolean).join(" ");
+		};
+		const label = pickLabel();
 		// A draft typed while Clio holds a consumed prompt is accepted and sent in
 		// order once preparation or compaction ends, so the rail says what Enter
 		// does. The mode's own words outrank it on a narrow rail.

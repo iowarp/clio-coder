@@ -345,6 +345,8 @@ type HarnessPhasePresentation = {
 	live: boolean;
 	/** Who is acting, when that is not the model the rail names by default. */
 	subject?: string;
+	/** The moment a person checks where the turn is going: idle, and before the model has answered. */
+	namesRoute?: boolean;
 };
 
 function shortToolLabel(status: AgentStatus, width: number): string {
@@ -449,8 +451,9 @@ const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 };
 
 /** Room for the activity phrase on the composer rail, after its stretch, lead glyph and a short model name. */
-function railActivityRoom(width: number): number {
-	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - (width < 60 ? 9 : 14));
+/** `identityCells` is what the rail spends naming who acts, the short nickname unless a caller knows better. */
+function railActivityRoom(width: number, identityCells: number = width < 60 ? 9 : 14): number {
+	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - identityCells);
 }
 
 /** Facts in reading order, each with its priority. The lowest priorities leave first and the order never changes. */
@@ -606,9 +609,10 @@ export function composerPhasePresentation(
 	width: number,
 	now: number,
 	modelName?: string,
+	identityCells?: number,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = railActivityRoom(width);
+	const room = railActivityRoom(width, identityCells);
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
@@ -750,8 +754,12 @@ export interface RouteReadinessFacts {
  * Idle states readiness or the real blocker. A target that answers a model listing is reachable, nothing more: only a
  * request this session saw answered says the model is ready, and until then the claim stays that small.
  */
-export function idleReadinessPresentation(facts: RouteReadinessFacts, width: number): HarnessPhasePresentation {
-	const room = railActivityRoom(width);
+export function idleReadinessPresentation(
+	facts: RouteReadinessFacts,
+	width: number,
+	identityCells?: number,
+): HarnessPhasePresentation {
+	const room = railActivityRoom(width, identityCells);
 	const quiet = { token: "counter" as const, live: false };
 	if (!facts.available) {
 		const why = facts.reason.trim();

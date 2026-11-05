@@ -573,31 +573,41 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getModelLabel: () => {
-			const current = deps.getSettings?.();
+			const route = deps.getSettings?.().chat;
+			// A route with no model of its own runs on its target's default, which the rail has to name.
+			const modelId =
+				route?.model ?? deps.providers.list().find((entry) => entry.target.id === route?.target)?.target.defaultModel;
 			// Keep raw fields separate through the terminal-lease proxy until render knows its width.
-			return { targetId: current?.chat?.target, modelId: current?.chat?.model };
+			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width) => {
+		getHarnessStatus: (width, identityCells) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
-				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model));
+				return {
+					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), identityCells),
+					namesRoute: status.phase === "preparing" || status.phase === "waiting_model" || status.phase === "ended",
+				};
 			}
 			const target = deps.providers.list().find((candidate) => candidate.target.id === route?.target);
 			if (!target || !route?.target) return null;
 			const last = lastTurnSummary;
 			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
-			return idleReadinessPresentation(
-				{
-					targetId: route.target,
-					available: target.available,
-					reason: target.reason,
-					health: target.health.status,
-					lastStop: onRoute ? last.stopReason : null,
-				},
-				width,
-			);
+			return {
+				...idleReadinessPresentation(
+					{
+						targetId: route.target,
+						available: target.available,
+						reason: target.reason,
+						health: target.health.status,
+						lastStop: onRoute ? last.stopReason : null,
+					},
+					width,
+					identityCells,
+				),
+				namesRoute: true,
+			};
 		},
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
