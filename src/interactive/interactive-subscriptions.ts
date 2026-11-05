@@ -151,7 +151,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		if (workerAskedByModel(entry) || entry.helper === true || payload.outcome === "canceled") return;
 		const why = workerFailureHeadline(payload.outcomeDetail);
 		const text = sanitizeCallTargetText(
-			`${payload.agentId} ${plainOutcomeLabel(payload.outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${payload.agentId}`,
+			`${payload.agentId} ${plainOutcomeLabel(payload.outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${payload.runId}`,
 		);
 		const hold = setTimeout(() => {
 			heldRunFailures.delete(entry.assignmentId);

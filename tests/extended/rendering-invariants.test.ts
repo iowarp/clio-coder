@@ -1435,7 +1435,7 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	})).get("helper-task");
 	ok(replayed);
 	const done = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
-	match(done, new RegExp(`^${GLYPH.subProcess} scout ✓ +—  Explore the source architecture`, "u"));
+	match(done, new RegExp(`^${GLYPH.subProcess} scout ✓ done +—  Explore the source architecture`, "u"));
 	doesNotMatch(done, /full findings|\n/u);
 	const expanded = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, { unbounded: true }).join("\n"));
 	match(expanded, /full findings/);
@@ -1449,7 +1449,7 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 
 	replayed.result = { outcome: "failed", failureMessage: "Invalid helper result" };
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
-	match(failed, new RegExp(`^${GLYPH.subProcess} scout ✗ +—  Explore the source architecture`, "u"));
+	match(failed, new RegExp(`^${GLYPH.subProcess} scout ✗ failed +—  Explore the source architecture`, "u"));
 	match(failed, /\n {2}│ ✗ Invalid helper result/u);
 });
 

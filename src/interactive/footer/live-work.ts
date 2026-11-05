@@ -213,7 +213,9 @@ export function liveWorkStrip(
 			: facts.workers.length > 1
 				? "work"
 				: facts.workers.length === 1
-					? "the worker"
+					? facts.workers[0]?.plan !== undefined
+						? "the plan"
+						: "the worker"
 					: "it",
 	);
 	const quiet = (text: string): string => theme.fg("annotation", text);
