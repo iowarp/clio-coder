@@ -1063,7 +1063,7 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus, or
 	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const scheduled = /^job (\S+) (\S+)$/u.exec(origin ?? "");
 	if (scheduled !== null) {
-		const header = `${GLYPH.scheduled} Scheduled loop · ${sanitizeCallTargetText(scheduled[1] ?? "")}`;
+		const header = `${GLYPH.scheduled} Scheduled loop · /loop status`;
 		return [
 			...wrapTextWithAnsi(clioTheme().fg("annotation", header), width),
 			...hangProseLines(

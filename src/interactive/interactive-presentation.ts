@@ -727,7 +727,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const status = deps.providers.list().find((candidate) => candidate.target.id === current?.chat?.target);
 			const asked = current?.chat?.thinkingLevel ?? "off";
 			if (status?.health.status === "unknown" && status.discoveredModelsSource !== "runtime" && asked !== "off") {
-				return { label: asked, hasLevels: false, note: "not checked yet" };
+				return { label: asked, hasLevels: false };
 			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
