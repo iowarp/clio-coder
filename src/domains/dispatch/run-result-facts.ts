@@ -168,10 +168,11 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 	};
 }
 
+/** The headline of a tool error: its first sentence, before any output it quotes, which `/view` keeps whole. */
 const firstSentence = (text: string): string => {
 	const stripped = text.replace(/^verify:\s*/u, "").trim();
-	const end = stripped.search(/\.(\s|$)/u);
-	return clip(end > 0 ? stripped.slice(0, end) : stripped, 160);
+	const end = stripped.search(/\.(\s|$)|:\s|\n/u);
+	return clip(end > 0 ? stripped.slice(0, end) : stripped, 120);
 };
 
 /**
