@@ -501,7 +501,10 @@ function packageDetail(
 			...chipRows(theme, actionKeyChips(theme, actions), width),
 			...noteRows(theme, actions.reasons, width),
 		],
+		// What the package is comes before how it is filed: the description is the
+		// first thing a reader looking at an unfamiliar name needs.
 		rest: [
+			...proseRows(record.description, width),
 			...chipRows(
 				theme,
 				[`${keyCap(theme, "b")} ${theme.fg("annotation", "shows loaded components in Installed")}`],
@@ -510,7 +513,6 @@ function packageDetail(
 			"",
 			...factRows(theme, facts, width, FACT_OPTIONS),
 			...notes.map((note) => theme.fg("annotation", note)),
-			...proseRows(record.description, width),
 		],
 	};
 }
