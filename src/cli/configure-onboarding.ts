@@ -85,6 +85,7 @@ import {
 	setWorkerDefaultPointer,
 	setWorkerProfilePointer,
 	targetApiKeyRef,
+	targetUrlProblem,
 } from "./configure-target.js";
 import type { DetectedChatRoute } from "./detect-chat-routes.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
@@ -432,7 +433,11 @@ const URL_STEP: Step = {
 			backLabel: "back",
 			clearOnExit: true,
 			validate: (value) =>
-				value.length === 0 ? (gateway ? `the ${gateway.label} is required` : "a URL is required for this runtime") : null,
+				value.length === 0
+					? gateway
+						? `the ${gateway.label} is required`
+						: "a URL is required for this runtime"
+					: targetUrlProblem(value),
 			input: wizard.input,
 			output: wizard.output,
 		});
@@ -1378,6 +1383,12 @@ function cancel(
 
 async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promise<void>): Promise<number> {
 	const runtime = answers.runtime;
+	// The id was derived when the runtime was chosen; another window can have taken it since.
+	if (answers.mode !== "edit" && answers.runtime && answers.targetId !== undefined) {
+		const taken = readSettings().targets;
+		if (taken.some((target) => target.id === answers.targetId))
+			answers.targetId = deriveTargetId(answers.runtime.id, taken);
+	}
 	const targetId = answers.targetId;
 	if (!runtime || targetId === undefined)
 		return cancel(wizard.presenter, answers, { advise: wizard.host === undefined });

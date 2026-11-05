@@ -59,6 +59,30 @@ function trimTrailing(url: string): string {
 	return url.endsWith("/") && url.length > 1 ? url.slice(0, -1) : url;
 }
 
+/**
+ * What is wrong with a URL as typed, or null when it can be probed. Without this
+ * a typo reached the probe and read as a dead server, because `not a url` becomes
+ * `http://not a url` and every later failure looks like the network's fault.
+ */
+export function targetUrlProblem(input: string): string | null {
+	const trimmed = input.trim();
+	if (trimmed.length === 0) return null;
+	if (/\s/u.test(trimmed)) return `"${trimmed}" has a space in it; a URL looks like http://host:port`;
+	const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed);
+	if (!hasScheme && /^[a-z][a-z0-9+.-]*:\/?$/iu.test(trimmed)) return `"${trimmed}" has a scheme but no host`;
+	let parsed: URL;
+	try {
+		parsed = new URL(hasScheme ? trimmed : `http://${trimmed}`);
+	} catch {
+		return `"${trimmed}" is not a URL; a URL looks like http://host:port`;
+	}
+	if (!/^(?:https?|wss?):$/u.test(parsed.protocol)) {
+		return `${parsed.protocol.replace(/:$/u, "")} is not supported here; use http or https`;
+	}
+	if (parsed.hostname.length === 0) return `"${trimmed}" has no host; a URL looks like http://host:port`;
+	return null;
+}
+
 export function normalizeUrl(input: string, runtimeId: string): string {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return defaultUrlFor(runtimeId);
