@@ -23,11 +23,10 @@ import {
 	STALLED_RUN_HEADLINE,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
-import {
-	summarizeTrustStatus,
-	trustStateWord,
-	validationClause,
-} from "../../domains/evidence/trust-projection.js";
+import type { TrustSummaryProjection } from "../../domains/evidence/trust-projection.js";
+import { trustStateWord, trustVerdict, validationClause } from "../../domains/evidence/trust-projection.js";
+import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
+import { TRUST_STATUS_AXES } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -215,11 +214,26 @@ function cardPrefix(entry: WorkerEntryState): string {
 	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
+/** The verdict and axis states the shared caveat reads; an axis a partial record leaves out reads as unknown. */
+function trustVerdictOf(trust: CanonicalTrustStatus): Pick<TrustSummaryProjection, "verdict" | "axes"> {
+	const partial = trust as Partial<CanonicalTrustStatus>;
+	const filled = Object.fromEntries(
+		TRUST_STATUS_AXES.map((axis) => [axis, partial[axis] ?? { state: "unknown" }]),
+	) as unknown as CanonicalTrustStatus;
+	return {
+		verdict: trustVerdict(filled),
+		axes: Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [axis, filled[axis].state])) as Record<
+			(typeof TRUST_STATUS_AXES)[number],
+			string
+		>,
+	};
+}
+
 /** The shared caveat on a clean exit, so this card and the Fleet Runs row never disagree about how a run ended. */
 function settledCaveat(result: WorkerRunResultSummary): CompletedRunCaveat | null {
 	if (result.outcome !== "succeeded") return null;
 	return completedRunCaveat({
-		...(result.trust !== undefined ? { trust: summarizeTrustStatus(result.trust) } : {}),
+		...(result.trust !== undefined ? { trust: trustVerdictOf(result.trust) } : {}),
 		...(result.contract !== undefined ? { contract: result.contract } : {}),
 		...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
 		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),

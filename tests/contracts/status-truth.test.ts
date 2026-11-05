@@ -1896,7 +1896,7 @@ test("an opened Fleet Runs detail keeps its trust row on screen and says how man
 	const text = open.join("\n");
 	match(text, /trust\s+✗ not trusted/u);
 	match(text, /completion not recorded/u);
-	match(text, /run 3 of 12 · 11 hidden while the detail is open/u);
+	match(text, /3 of 12 runs · 11 hidden while the detail is open/u);
 	ok(
 		open.some((line) => line.includes("❯")),
 		"the selected run stays listed",
