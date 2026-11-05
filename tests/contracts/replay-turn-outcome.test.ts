@@ -835,8 +835,8 @@ test("an operator /run resumes with its command above its card, the spend its li
 	rehydrateChatPanelFromTurns(replayed, entries, { readWorkerRunResult: () => receipt });
 	const plain = (panel: ReturnType<typeof createChatPanel>) => panel.render(100).map(stripTerminalSequences).join("\n");
 	assert.match(plain(replayed), /^▌ \/run documenter --target blade/u);
-	assert.match(plain(replayed), /context 6,200/u);
-	assert.match(plain(replayed), /18,200 tokens processed/u);
+	assert.match(plain(replayed), /0 tool calls · 18,200 tokens/u);
+	assert.match(plain(replayed), /18,200 tokens/u);
 	assert.equal(plain(replayed), plain(live));
 	// Detailed lists the calls the run made, oldest first, on /resume as it did live.
 	style = "detailed";
