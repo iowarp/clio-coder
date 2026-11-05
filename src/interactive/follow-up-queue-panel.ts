@@ -1,5 +1,5 @@
 import type { Component } from "../engine/tui.js";
-import { truncateToWidth } from "../engine/tui.js";
+import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { QueuedChatMessage } from "../session-control/chat-loop.js";
 import { formatQueueAge, queueEntryMarks, queueSlotWord } from "./overlays/queue-navigator.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
@@ -14,6 +14,8 @@ export interface FollowUpQueuePanelOptions {
 	getDequeueKey?: () => string | undefined;
 	getNavigateKey?: () => string | undefined;
 	getSendNowKey?: () => string | undefined;
+	/** The overlay holding the keyboard, `closed` when the composer has it. */
+	getOverlayState?: () => string;
 	now?: () => number;
 }
 
@@ -25,9 +27,20 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 	let cachedLines: string[] = [];
 
 	const render = (width: number): string[] => {
-		const key = [skinEpoch(), options.getDequeueKey?.(), options.getNavigateKey?.(), options.getSendNowKey?.()].join("|");
+		const overlay = options.getOverlayState?.() ?? "closed";
+		const now = (options.now ?? Date.now)();
+		// The waits are part of the key: a cache over the last queue change froze them at the age they had then.
+		const key = [
+			skinEpoch(),
+			overlay,
+			options.getDequeueKey?.(),
+			options.getNavigateKey?.(),
+			options.getSendNowKey?.(),
+			...messages.map((message) => formatQueueAge(now - message.enqueuedAt)),
+		].join("|");
 		if (!dirty && cachedWidth === width && cachedKey === key) return cachedLines;
-		if (messages.length === 0) {
+		// The navigator is this list with its keys, so the dock would only repeat it.
+		if (messages.length === 0 || overlay === "queue-navigator") {
 			cachedLines = [];
 			cachedWidth = width;
 			cachedKey = key;
@@ -37,7 +50,6 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 
 		const theme = clioTheme();
 		const bodyWidth = Math.max(12, width - 4);
-		const now = (options.now ?? Date.now)();
 		const lines: string[] = [];
 		for (const message of messages) {
 			const slot = queueSlotWord(message);
@@ -58,14 +70,23 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 			);
 			lines.push(`${marker} ${theme.fg("body", preview)} ${theme.fg("annotation", age)}`);
 		}
-		const hints: string[] = [];
-		const navigate = options.getNavigateKey?.();
-		if (navigate && navigate.length > 0) hints.push(`[${navigate}] navigate`);
-		const sendNow = options.getSendNowKey?.();
-		if (sendNow && sendNow.length > 0) hints.push(`[${sendNow}] send now`);
-		const dequeue = options.getDequeueKey?.();
-		hints.push(`[${dequeue && dequeue.length > 0 ? dequeue : "see /help"}] restore to editor`);
-		lines.push(theme.fg("annotation", hints.join(" · ")));
+		// These are composer keys, so they say nothing while an overlay owns the keyboard.
+		if (overlay === "closed") {
+			const hintRow = (spell: (label: string) => string): string => {
+				const hints: string[] = [];
+				const navigate = options.getNavigateKey?.();
+				if (navigate && navigate.length > 0) hints.push(`[${spell(navigate)}] navigate`);
+				const sendNow = options.getSendNowKey?.();
+				if (sendNow && sendNow.length > 0) hints.push(`[${spell(sendNow)}] send now`);
+				const dequeue = options.getDequeueKey?.();
+				hints.push(`[${dequeue && dequeue.length > 0 ? spell(dequeue) : "see /help"}] restore to editor`);
+				return hints.join(" · ");
+			};
+			// A narrow dock keeps every verb by giving up the second spelling of each key.
+			const full = hintRow((label) => label);
+			const row = visibleWidth(full) <= bodyWidth ? full : hintRow((label) => label.split(" · ")[0] ?? label);
+			lines.push(truncateToWidth(theme.fg("annotation", row), bodyWidth, "…", false));
+		}
 
 		cachedLines = frame(theme, "Steering Queue", lines, bodyWidth + 4);
 		cachedWidth = width;

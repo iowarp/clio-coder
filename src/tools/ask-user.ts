@@ -43,6 +43,11 @@ export interface AskUserQuestion {
 	 * which does not carry it, so a model question always opens on its first option.
 	 */
 	defaultOption?: number;
+	/**
+	 * The options are the whole answer: no Other row, typed answer or note. Harness
+	 * callers only, for a choice whose code reads the picked label and nothing else.
+	 */
+	fixedChoices?: boolean;
 }
 
 export interface AskUserAnswer {

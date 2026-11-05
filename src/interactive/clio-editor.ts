@@ -383,7 +383,11 @@ export class ClioEditor extends Editor {
 	/** Rail words for a draft that is not what the composer would normally hold, or empty. */
 	private draftNote(width: number): string {
 		if (this.parkedDraft !== null) return width >= 80 ? "DRAFT KEPT · back after this command" : "DRAFT KEPT";
-		if (this.restoredDraft) return width >= 80 ? "RESTORED · Enter sends · / keeps it aside" : "RESTORED";
+		// Enter queues during a run, and the STEER or FOLLOW-UP beside this note already says so.
+		if (this.restoredDraft) {
+			if (width < 80) return "RESTORED";
+			return this.chrome.isStreaming?.() === true ? "RESTORED · / keeps it aside" : "RESTORED · Enter sends · / keeps it aside";
+		}
 		return "";
 	}
 

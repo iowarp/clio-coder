@@ -25,7 +25,7 @@ import {
 import type { ChatDraft } from "./interactive-slash-runtime.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 
-export const RESTORED_DRAFT_NOTICE = "Back in the composer. Enter sends it; a / or ! command first keeps it aside.";
+export const RESTORED_DRAFT_NOTICE = "Back in the composer, not sent. A / or ! command first keeps it aside.";
 
 /** Existing bash TERM-to-KILL grace (5s), plus settlement and session append. */
 export const EDITOR_BASH_SHUTDOWN_MS = 6000;

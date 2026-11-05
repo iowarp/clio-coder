@@ -10,8 +10,27 @@
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { QueuedChatMessage } from "../../session-control/chat-loop.js";
-import { buildHint, centeredWindow, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
-import { chip, chipRow, clioTheme, emptyState, GLYPH, positionRow, sectionRule, selectionRow } from "../theme/index.js";
+import {
+	buildHint,
+	centeredWindow,
+	fitHintEntryList,
+	type HintEntry,
+	type RailAwareBody,
+	type RowBudgetedBody,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
+import {
+	chip,
+	chipRow,
+	chipRows,
+	clioTheme,
+	emptyState,
+	GLYPH,
+	keyCap,
+	positionRow,
+	sectionRule,
+	selectionRow,
+} from "../theme/index.js";
 
 export const QUEUE_NAVIGATOR_OVERLAY_WIDTH = 88;
 
@@ -71,14 +90,19 @@ const QUEUE_MIN_LIST_ROWS = 3;
  * that interrupts. The message under the cursor is written out under a rule,
  * and the list windows itself so both fit the dock.
  */
-class QueueNavigatorBody implements Component, RowBudgetedBody {
+class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 	private selected = 0;
 	private rows = 0;
+	private railRoom = 0;
 
 	constructor(private readonly deps: QueueNavigatorDeps) {}
 
 	setBodyRows(rows: number): void {
 		this.rows = Math.max(0, Math.floor(rows));
+	}
+
+	setRailRoom(cells: number): void {
+		this.railRoom = Math.max(0, Math.floor(cells));
 	}
 
 	render(width: number): string[] {
@@ -94,7 +118,14 @@ class QueueNavigatorBody implements Component, RowBudgetedBody {
 			const slot = queueSlotWord(entry);
 			return chip(theme, `${slot}${queueEntryMarks(entry)}`, slot === "steer" ? "action" : "neutral");
 		};
-		const listBudget = this.rows > 0 ? Math.max(QUEUE_MIN_LIST_ROWS, this.rows - QUEUE_DETAIL_ROWS) : entries.length;
+		// The verbs the rail cannot carry at this width, so reorder and restore stay findable at 60 columns.
+		const keyRows = chipRows(
+			theme,
+			this.droppedKeys().map((entry) => `${keyCap(theme, entry.key)} ${theme.fg("menuDescription", entry.verb)}`),
+			safeWidth,
+		);
+		const bodyRows = this.rows > 0 ? Math.max(1, this.rows - keyRows.length) : 0;
+		const listBudget = bodyRows > 0 ? Math.max(QUEUE_MIN_LIST_ROWS, bodyRows - QUEUE_DETAIL_ROWS) : entries.length;
 		const visible = Math.min(entries.length, listBudget);
 		const windowed = visible < entries.length;
 		const [start, end] = centeredWindow(entries.length, this.selected, windowed ? Math.max(1, visible - 1) : visible);
@@ -115,7 +146,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody {
 			rows.push(positionRow(theme, { start: start + 1, end, total: entries.length, unit: "messages" }, safeWidth));
 		const selected = entries[this.selected];
 		if (selected) {
-			const detailBudget = this.rows > 0 ? Math.max(2, this.rows - rows.length) : QUEUE_DETAIL_ROWS;
+			const detailBudget = bodyRows > 0 ? Math.max(2, bodyRows - rows.length) : QUEUE_DETAIL_ROWS;
 			const slot = queueSlotWord(selected);
 			rows.push(
 				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
@@ -129,20 +160,37 @@ class QueueNavigatorBody implements Component, RowBudgetedBody {
 				...(text.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept),
 			);
 		}
+		rows.push(...keyRows);
 		return rows;
+	}
+
+	/**
+	 * Send now leads because it is the verb that costs something; a narrowing rail
+	 * drops from the left of the rest, so the arrows go first and the per-message
+	 * verbs last.
+	 */
+	private hintEntries(): HintEntry[] {
+		return [
+			{ key: "Enter", verb: "send now" },
+			{ key: "↑↓", verb: "select" },
+			{ key: this.deps.restoreAllLabel().split(" · ")[0] ?? "", verb: "all to editor" },
+			{ key: "⇧↑↓", verb: "move" },
+			{ key: "t", verb: "slot" },
+			{ key: "x", verb: "remove" },
+			{ key: "e", verb: "to editor" },
+		];
+	}
+
+	private droppedKeys(): HintEntry[] {
+		if (this.railRoom <= 0) return [];
+		const all = [...this.hintEntries(), { key: "Esc", verb: "close" }];
+		const { kept } = fitHintEntryList(all, this.railRoom);
+		return all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
 	}
 
 	footerHint(): string {
 		if (this.deps.entries().length === 0) return buildHint([]);
-		return buildHint([
-			{ key: "↑↓", verb: "select" },
-			{ key: "⇧↑↓", verb: "move" },
-			{ key: "e", verb: "to editor" },
-			{ key: "x", verb: "remove" },
-			{ key: "t", verb: "slot" },
-			{ key: "Enter", verb: "send now" },
-			{ key: this.deps.restoreAllLabel(), verb: "all to editor" },
-		]);
+		return buildHint(this.hintEntries());
 	}
 
 	handleInput(data: string): void {
