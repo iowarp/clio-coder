@@ -182,7 +182,9 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 			// keeps the one that says the runtime failed. A runtime that was never
 			// started on a copy that is not enabled follows from the state and is not
 			// a chip of its own, and an enabled copy that runs says only that it runs.
-			const runtimeChip = hasRuntime && (runtime !== undefined || state === "eligible");
+			// A copy Clio refuses to load shows that refusal alone, unless its runtime failed on top of it.
+			const runtimeChip =
+				hasRuntime && (state === "eligible" ? true : runtime !== undefined && runtime.state === "failed");
 			const stateChips = (theme: ReturnType<typeof clioTheme>): string[] =>
 				[
 					...(runtimeChip && state === "eligible" ? [] : [[stateStatus(state), stateWords(state)] as const]),
@@ -195,7 +197,12 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 				return stateChips(theme).join(theme.fg("divider", " · "));
 			};
 			/** What the operator can do about this copy now, said once under its state. */
+			const drifted = ext.diagnostics.some((diagnostic) => /drift/u.test(diagnostic.message));
 			const next = (): string | undefined => {
+				if (drifted)
+					return `Its files changed after it was installed, so Clio will not run it. Reinstall it from its source with clio-coder extensions install <path> --${ext.scope === "dev" ? "user" : ext.scope} --force, or remove it.`;
+				if (state === "disabled")
+					return `Disabled. clio-coder extensions enable ${ext.id} --${ext.scope} turns it back on.`;
 				if (!hasRuntime || state !== "eligible") return undefined;
 				if (runtimeWord === "not started")
 					return operator ? "Not started in this session yet. Press r to start installed extensions now." : undefined;
@@ -239,7 +246,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 						use.push({ label: "New session", value: reason, tone: "warning" });
 					for (const diagnostic of ext.diagnostics)
 						use.push({
-							label: diagnostic.type,
+							label: diagnostic.type === "error" ? "Problem" : "Note",
 							value: statusChip(theme, diagnostic.type, sanitizeCallTargetText(diagnostic.message)),
 						});
 

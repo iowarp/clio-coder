@@ -3449,7 +3449,17 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 						dispatchSlashCommand(command, ctx);
 						return;
 					}
-					ctx.notice("error", `/${command.token} failed: ${error instanceof Error ? error.message : String(error)}`);
+					// What failed, whether the extension survived it, and the next step. A
+					// runtime that rethrows keeps its own "Error:" prefix; one is enough.
+					const raw = (error instanceof Error ? error.message : String(error)).replace(/^Error:\s*/u, "");
+					const reason = raw.startsWith(`/${command.token} is not an available`) ? "it is not available now" : raw;
+					const owner = row.extensionId;
+					const state = runtime.entries().find((entry) => entry.id === owner)?.state;
+					const next =
+						state === "ready"
+							? `${owner} is still running; correct the command and run it again.`
+							: `${owner} is ${state ?? "not running"}; /extensions shows why and r restarts it.`;
+					ctx.notice("error", `/${command.token} failed: ${reason}. ${next}`);
 				}
 			});
 			return "accepted";

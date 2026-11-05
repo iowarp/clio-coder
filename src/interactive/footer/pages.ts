@@ -834,7 +834,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	// A narrow footer drops its idle hint row, but never the silence note that row exists to carry (HS16).
 	if (narrow && !urgent && !notice && !feedback && !facts && silenceNote === null) return [firstRow];
 	const alone = urgent !== null || silenceNote !== null || !tail;
-	const tailWidth = alone ? 0 : Math.min(Math.floor(w * 0.4), visibleWidth(tail));
+	// A wide footer gives its facts half the row, so two extension statuses both fit beside the key hints.
+	const tailWidth = alone ? 0 : Math.min(Math.floor(w * (w >= 100 ? 0.5 : 0.4)), visibleWidth(tail));
 	const room = alone ? w : w - tailWidth - 3;
 	// The controls that answer this moment. A notice has its own row above them, so it never takes their place.
 	const controls = urgent

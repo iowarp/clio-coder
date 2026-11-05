@@ -756,6 +756,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				leave: () => {
 					operatorExtensions.leaveWorkspace();
 				},
+				otherStatuses: () =>
+					operatorExtensions.entries().flatMap((entry) => (entry.status ? [{ id: entry.id, status: entry.status }] : [])),
 
 				focusBoard: (extensionId, title, view) => {
 					if (!ambientSurfaces?.focusRegion(extensionId, title, view, "board"))
@@ -817,7 +819,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			overlayLifecycle?.getState() === "permission-confirm"
 				? []
 				: (operatorExtensions?.entries() ?? []).flatMap((entry) =>
-						entry.status ? [`${entry.id}: ${entry.status.text}`] : [],
+						entry.status ? [`${extensionOwnerLabel(entry.id)}: ${entry.status.text}`] : [],
 					),
 		getShutdownArmed: () => shutdownArmed,
 		isAwaitingApproval: () => overlayLifecycle?.getState() === "permission-confirm",

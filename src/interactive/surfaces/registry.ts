@@ -56,6 +56,11 @@ export interface WorkspaceSurfaceDeps {
 	/** Open the board in the pressable panel; absent where no such panel exists. */
 	focusBoard?(extensionId: string, title: string, view: () => View | undefined): void;
 	leave(): void;
+	/**
+	 * Statuses from runtimes outside the surface model (api 1), so the footer is
+	 * the one place every running extension's status is read.
+	 */
+	otherStatuses?(): ReadonlyArray<{ id: string; status: ExtensionStatus }>;
 }
 
 /** The leader suffix that leaves an active workspace; built-in suffixes never use it. */
@@ -269,13 +274,23 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			);
 		},
 		statusFacts(width) {
-			return memo("status", String(width), () => {
+			const modelIds = new Set(deps.model.ids());
+			const others = (deps.otherStatuses?.() ?? []).filter((entry) => !modelIds.has(entry.id));
+			const othersKey = others
+				.map((entry) => `${entry.id}\u0000${entry.status.tone ?? ""}\u0000${entry.status.text}`)
+				.join("\u0001");
+			return memo("status", `${width}:${othersKey}`, () => {
 				const theme = clioTheme();
-				// The footer gives its facts up to two fifths of the row; one status may use all of it.
-				const room = Math.max(12, Math.floor(width * 0.4));
-				return deps.model.ids().flatMap((id) => {
-					const status = deps.model.entry(id)?.status;
-					if (!status) return [];
+				// The footer gives its facts up to half the row when wide; one status may use all of it.
+				const room = Math.max(12, Math.floor(width * (width >= 100 ? 0.5 : 0.4)));
+				const statuses = [
+					...deps.model.ids().flatMap((id) => {
+						const status = deps.model.entry(id)?.status;
+						return status ? [{ id, status }] : [];
+					}),
+					...others,
+				];
+				return statuses.flatMap(({ id, status }) => {
 					const { owner, text } = ownedStatus(extensionOwnerLabel(id), status.text);
 					const label = `${owner}: `;
 					const body = truncateToWidth(text, Math.max(4, room - visibleWidth(label)), GLYPH.ellipsis, false);
