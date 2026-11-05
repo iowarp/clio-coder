@@ -62,6 +62,18 @@ function nonZero(quantity: Quantity): boolean {
  * only this: a bound such as `≥~12.9k +?` is true but unreadable on that row, and an estimate of a call that reported
  * nothing is not usage. Detailed and /usage keep the bounds.
  */
+/** What a receipt says when no call of the turn measured anything, the footer's words for the same fact. */
+export const USAGE_NOT_MEASURED_NOTE = "usage not measured (/usage)";
+
+/**
+ * A compact figure without its `+?`: `≥` already says it is a lower bound, and the line ends on how many calls had no
+ * usage data, once (F4). A figure nothing reported is `not measured`, never `?`.
+ */
+function compactFigure(quantity: Quantity): string {
+	const figure = renderCompactCount(quantity.fact).replace(/ \+\?$/u, "");
+	return figure === "?" ? "not measured" : figure;
+}
+
 export function measuredCount(quantity: Quantity): string | null {
 	const fact = quantity.fact;
 	if ("kind" in fact) return fact.kind === "measured" ? formatFooterTokens(fact.value) : null;
@@ -110,19 +122,19 @@ export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?:
 	const neverSentNote = skipped > 0 ? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent` : null;
 	return {
 		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,
-		input: renderCompactCount(input.fact),
-		output: renderCompactCount(output.fact),
-		cacheRead: nonZero(cacheRead) ? renderCompactCount(cacheRead.fact) : null,
-		cacheWrite: nonZero(cacheWrite) ? renderCompactCount(cacheWrite.fact) : null,
+		input: compactFigure(input),
+		output: compactFigure(output),
+		cacheRead: nonZero(cacheRead) ? compactFigure(cacheRead) : null,
+		cacheWrite: nonZero(cacheWrite) ? compactFigure(cacheWrite) : null,
 		reasoning: reasoningFromQuantity(reasoning),
 		// A turn nothing priced makes no cost claim, so the receipt names none rather than "not measured".
 		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
 		coverage: unknownCalls > 0 || skipped > 0 ? usageCoverageLabel(unknownCalls, skipped) : null,
-		// `usage unknown` only when no call measured anything; a call cancelled in its first-token wait is one of those.
+		// `usage not measured` only when no call measured anything; a call cancelled in its first-token wait is one of those.
 		coverageNote:
 			tokens !== null || (unknownCalls === 0 && !contributed(input) && !contributed(output))
 				? neverSentNote
-				: "usage unknown (/usage)",
+				: USAGE_NOT_MEASURED_NOTE,
 		tokens,
 		cached: measuredCached(cacheRead),
 		...(answeringCallId === undefined ? {} : { answer: answerSpend(view, turnId, answeringCallId) }),
