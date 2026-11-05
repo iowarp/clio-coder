@@ -39,6 +39,8 @@ export interface OpenModelScopeOverlayDeps {
 	turnEffect?: () => string | null;
 	/** What the swap costs the session's history, when it costs anything. Sized once: choosing does not change it. */
 	switchCost?: string | null;
+	/** Whether the model is loaded where it would run, as the picker showed it, so the choice is made knowing the wait. */
+	residency?: string | null;
 }
 
 /** The swap as the operator typed it, for the dialog title. */
@@ -97,6 +99,7 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 			const text = deps.turnEffect?.();
 			return [
 				...(text ? [...wrapTextWithAnsi(theme.fg("accent", text), room), ""] : []),
+				...(deps.residency ? [...wrapTextWithAnsi(theme.fg("annotation", deps.residency), room), ""] : []),
 				...(deps.switchCost ? [...wrapTextWithAnsi(theme.fg("annotation", deps.switchCost), room), ""] : []),
 			];
 		},
