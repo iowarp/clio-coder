@@ -439,6 +439,8 @@ type TranscriptEntry =
 	| {
 			role: "assistant";
 			models?: string[];
+			/** The turn's first model is the one the turn before it ended on, so its row would repeat it. */
+			sameModelAsBefore?: boolean;
 			segments: AssistantSegment[];
 			reasoningRenders?: Map<number, ThinkingRender>;
 			/**
@@ -1622,8 +1624,11 @@ function renderEntryLines(
 		return [];
 	}
 	const blocks: TurnBlock[] = [];
-	if (entry.models?.length)
-		blocks.push({ kind: "prose", lines: renderNoticeRow(`[model] ${entry.models.join(" → ")}`, "info", width) });
+	// The model row says which model answered when that changed: the first turn,
+	// a switch, or a failover inside the turn. Repeating it on every turn cost a
+	// row per answer and said nothing new.
+	if (entry.models?.length && !(entry.models.length === 1 && entry.sameModelAsBefore === true))
+		blocks.push({ kind: "prose", lines: renderNoticeRow(`Model ${entry.models.join(" → ")}`, "info", width) });
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${skinEpoch()}`;
 	// Reasoning stays between the prose and actions that surround it, one block
@@ -2414,6 +2419,20 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		transcript.push(entry);
 	};
 
+	const attachModel = (assistant: Extract<TranscriptEntry, { role: "assistant" }>, model: string | null): void => {
+		if (model === null || assistant.models?.includes(model)) return;
+		if (assistant.models === undefined) {
+			const at = transcript.lastIndexOf(assistant);
+			let before: string | undefined;
+			for (let index = (at < 0 ? transcript.length : at) - 1; index >= 0 && before === undefined; index -= 1) {
+				const prior = transcript[index];
+				if (prior?.role === "assistant") before = prior.models?.at(-1);
+			}
+			assistant.sameModelAsBefore = before === model;
+		}
+		assistant.models ??= [];
+		assistant.models.push(model);
+	};
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
 		if (last && last.role === "assistant") {
@@ -3239,10 +3258,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (typeof respondedModel === "string" && respondedModel.length > 0)
 					requestingModel = modelNickname(respondedModel);
 				const model = assistantModelLabel(event.message, messageTarget());
-				if (model !== null && !assistant.models?.includes(model)) {
-					assistant.models ??= [];
-					assistant.models.push(model);
-				}
+				attachModel(assistant, model);
 				assistant.messageStartSegmentIndex = assistant.segments.length;
 				markDirty();
 				return;
@@ -3435,10 +3451,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// message_end rewrites exactly one entry: the assistant it lands on.
 				invalidateEntryCache(assistant);
 				const model = assistantModelLabel(event.message, messageTarget());
-				if (model !== null && !assistant.models?.includes(model)) {
-					assistant.models ??= [];
-					assistant.models.push(model);
-				}
+				attachModel(assistant, model);
 				// Until its run ends, an entry's receipt reads the turn so far.
 				if (reports) {
 					assistant.turnUsage = runTurnId === undefined ? {} : { turnId: runTurnId };
