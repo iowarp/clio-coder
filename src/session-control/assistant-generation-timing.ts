@@ -19,6 +19,14 @@ type TimingEvent = {
  */
 const MIN_DECODE_WINDOW_MS = 250;
 
+/**
+ * A rate is shown only when the tokens it divides arrived over at least this much generation time. One burst after a
+ * silent wait, or a short reply a fast route returns at once, lands within tens of milliseconds and measures the
+ * delivery, not the model, so `2196 tps` says nothing an operator can use. A real 96-token reply that streamed for
+ * 994 ms is a rate worth showing, which is why the window is not a full second. Below it the figure is left out.
+ */
+export const RATE_MIN_WINDOW_MS = 500;
+
 /** Monotonic generation spans; tool waits and each call's prefill stay outside Tk/s. */
 export function createAssistantGenerationTiming() {
 	let startedAt: number | null = null;

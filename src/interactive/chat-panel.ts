@@ -1266,8 +1266,8 @@ function renderTurnUsageLine(
 			spend?.calls != null && (spend.calls > 1 || retries !== null || moved !== null)
 				? renderCalls(String(spend.calls), "call")
 				: null;
-		// A call moved away from has no amounts of its own, so a sum over it is all `≥` and `+?`. The row states the
-		// answering call beside the move, and Detailed keeps the sum.
+		// A call moved away from has no amounts of its own. The row states the answering call beside the move, and
+		// Detailed keeps the sum.
 		const stated = moved !== null ? spend?.answer : spend;
 		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
 		const rowFacts = [
@@ -1280,7 +1280,7 @@ function renderTurnUsageLine(
 			spend?.coverageNote ?? null,
 			stated?.tokens ?? null,
 			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
-			stated?.cacheRead != null && stated.cacheRead !== "?" ? `cached ${stated.cacheRead}` : null,
+			stated?.cached != null ? `cached ${stated.cached}` : null,
 		]) {
 			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
 		}

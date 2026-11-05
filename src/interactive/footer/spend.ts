@@ -3,6 +3,7 @@ import { factRef } from "../../core/telemetry/dto.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
+import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import { type ReasoningUsageView, reasoningFromQuantity } from "../status/reasoning.js";
 
 /**
@@ -26,7 +27,7 @@ export interface FooterSpend {
 }
 /**
  * Output over the call's generation time (first token to settle) and its TTFT (send to first token), both journaled
- * facts of one call (#434). The rate is null unless both facts are known and the generation took time.
+ * facts of one call (#434). The rate is null unless both facts are known and the generation lasted RATE_MIN_WINDOW_MS.
  */
 export interface FooterSpeed {
 	tokensPerSecond: number | null;
@@ -61,7 +62,8 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 	const generation = knownValue(call.timing.modelTime);
 	const ttft = knownValue(call.timing.ttft);
 	return {
-		tokensPerSecond: output && generation && generation.value > 0 ? output.value / (generation.value / 1000) : null,
+		tokensPerSecond:
+			output && generation && generation.value >= RATE_MIN_WINDOW_MS ? output.value / (generation.value / 1000) : null,
 		estimated: output?.estimated === true || generation?.estimated === true,
 		ttft: ttft ? call.timing.ttft.display : null,
 		targetId: call.target.targetId,

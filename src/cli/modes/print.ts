@@ -49,6 +49,8 @@ import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js
 import {
 	classifyTurnEnding,
 	messageCallSpends,
+	proseBeforeWrittenCalls,
+	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
@@ -171,6 +173,8 @@ interface HeadlessMainAgentResult {
 	noAnswer: string | null;
 	/** The last run did real tool work and wrote no closing message, which is not a provider that went silent. */
 	endedQuietly: boolean;
+	/** The answer stands, but the calls it ended on were only written out and never ran. */
+	callsNotRun: string | null;
 	/**
 	 * The chat loop refused the turn before any request (an admission notice):
 	 * no target, no model, a context window it cannot fit, an image the route
@@ -319,11 +323,17 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		return { ...current, lastNotice: text };
 	}
 	if (event.type === "agent_end") {
-		const ending = classifyTurnEnding(Array.isArray(event.messages) ? event.messages : []);
+		const messages = Array.isArray(event.messages) ? event.messages : [];
+		const ending = classifyTurnEnding(messages);
+		const last = [...messages].reverse().find((message) => message?.role === "assistant");
 		return {
 			...current,
 			noAnswer: ending?.kind === "no_answer" ? turnNoAnswerSentence(ending) : null,
 			endedQuietly: ending?.kind === "quiet",
+			// The written calls are stated on stderr, so the printed answer is the prose before them, as the TUI shows it.
+			...(ending?.kind === "call_not_run"
+				? { callsNotRun: turnCallsNotRunSentence(ending), text: proseBeforeWrittenCalls(last, current.text).trimEnd() }
+				: { callsNotRun: null }),
 		};
 	}
 	if (event.type !== "message_end") return current;
@@ -333,6 +343,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		...current,
 		noAnswer: null,
 		endedQuietly: false,
+		callsNotRun: null,
 		outputExhausted: message.stopReason === "length",
 		sawTerminatingToolResult: false,
 		admissionRefused: false,
@@ -807,6 +818,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		lastNotice: null,
 		noAnswer: null,
 		endedQuietly: false,
+		callsNotRun: null,
 		admissionRefused: false,
 	};
 	const runStats: HeadlessMainAgentRunStats = {
@@ -1190,6 +1202,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			const answer =
 				result.sawTerminatingToolResult && result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
 			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
+		}
+		// The answer stands, so the run still succeeds; the caller still learns that its last calls never ran.
+		if (result.callsNotRun !== null && !result.sawTerminatingToolResult) {
+			stderrMessage = [stderrMessage, `clio-coder run: ${result.callsNotRun}`].filter(Boolean).join("\n");
 		}
 	}
 	const exitCode = terminal.exitCode;

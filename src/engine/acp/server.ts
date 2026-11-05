@@ -109,7 +109,12 @@ import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
-import { classifyTurnEnding, turnNoAnswerSentence } from "../../session-control/chat-loop-messages.js";
+import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
+import {
+	classifyTurnEnding,
+	turnCallsNotRunSentence,
+	turnNoAnswerSentence,
+} from "../../session-control/chat-loop-messages.js";
 import {
 	clampThinkingLevel,
 	replayCurrentSession,
@@ -1963,15 +1968,19 @@ function handleChatEvent(
 		if (last !== undefined) applyStopReason(active, last);
 		// ACP has no stop reason for this, so end_turn stands and the client reads why as a notice.
 		const ending = classifyTurnEnding(messages as ReadonlyArray<AgentMessage>);
-		if (ending?.kind === "no_answer") {
+		// The answer of a `call_not_run` turn already streamed and stands; the notice states only the calls it ended on.
+		const notice =
+			ending?.kind === "no_answer"
+				? `The turn ended without an answer. ${turnNoAnswerSentence(ending)}`
+				: ending?.kind === "call_not_run"
+					? `\n\n${turnCallsNotRunSentence(ending)}`
+					: null;
+		if (notice !== null) {
 			sendUpdate(
 				transport,
 				sessionId,
 				active,
-				{
-					sessionUpdate: "agent_message_chunk",
-					content: textContent(`The turn ended without an answer. ${turnNoAnswerSentence(ending)}\n`),
-				},
+				{ sessionUpdate: "agent_message_chunk", content: textContent(`${notice}\n`) },
 				{ ...ORCHESTRATOR_UPDATE_META, [ACP_NOTICE_META_KEY]: { level: "warning" } },
 			);
 		}
@@ -7324,7 +7333,8 @@ function promptResponse(
 			[ACP_TURN_META_KEY]: {
 				...(active.model ? { model: active.model } : {}),
 				...(active.ttftMs !== undefined ? { ttftMs: active.ttftMs } : {}),
-				...(active.generationMs && active.timedOutputTokens
+				// A rate over less than RATE_MIN_WINDOW_MS of generation measured the delivery, not the model, so it is left out.
+				...(active.generationMs !== undefined && active.generationMs >= RATE_MIN_WINDOW_MS && active.timedOutputTokens
 					? { outputTokensPerSecond: active.timedOutputTokens / (active.generationMs / 1000) }
 					: {}),
 			},
