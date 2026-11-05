@@ -13,12 +13,14 @@ import {
 	classifyRecoveryFailure,
 	createRetryCountdown,
 	failureRetryAfterMs,
+	formatStatedWait,
 	isRateLimitErrorMessage,
 	isRetryableRecoveryFailure,
 	RATE_LIMIT_WAIT_BUDGET_MS,
 	type RetryWaitCause,
 	recoveryRetryDelayMs,
 	retryWaitCause,
+	statedRetryWaitMs,
 } from "../domains/session/retry.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
 import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
@@ -43,8 +45,12 @@ export interface RetryStatusPayload {
 	errorMessage?: string;
 	delayMs?: number;
 	seconds?: number;
-	/** The wait the provider itself named, which `delayMs` honours up to the configured ceiling. */
+	/** The wait the provider itself named, which `delayMs` sits out in full. */
 	retryAfterMs?: number;
+	/** The chain stopped without another attempt, because `retryAfterMs` would take it past this much waiting. */
+	waitBudgetMs?: number;
+	/** What the chain had already waited when it stopped on `waitBudgetMs`. */
+	waitedMs?: number;
 	/** What the refusal this wait answers said the target is waiting on. */
 	cause?: RetryWaitCause;
 }
@@ -185,7 +191,10 @@ export function recoveryAttemptHasOutput(messages: ReadonlyArray<AgentMessage>):
 export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 	const { state, persistence, context } = deps;
 	let retryCountdown: RetryCountdownHandle | null = null;
+	/** Every request this chain has sent again, which the rail and the receipt count. */
 	let chainAttempt = 0;
+	/** Those Clio chose to send on its own backoff, which `maxRetries` limits. A wait the provider stated spends none. */
+	let chainOwnRetries = 0;
 	let chainWaitedMs = 0;
 	let attemptStart = 0;
 	let refreshingAuth = false;
@@ -260,13 +269,19 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		deps.isYolo?.() === true && isRateLimitErrorMessage(errorMessage);
 	const waitsOutRateLimit = (failure: RecoveryFailure): boolean =>
 		failure.kind === "terminal-provider" && waitsOutRateLimitMessage(failure.message);
-	const retryableFailure = (failure: RecoveryFailure): boolean =>
-		isRetryableRecoveryFailure(failure) || waitsOutRateLimit(failure);
-	// A rate limit at yolo is bounded by time spent waiting, everything else by attempts.
-	const mayAttempt = (attempt: number, errorMessage: string | null | undefined): boolean =>
-		waitsOutRateLimitMessage(errorMessage)
+	// A stated wait is worth sitting out in every mode, whatever the failure's own class would have said about retrying.
+	const retryableFailure = (failure: RecoveryFailure, message?: unknown): boolean =>
+		isRetryableRecoveryFailure(failure) ||
+		waitsOutRateLimit(failure) ||
+		(failure.kind === "terminal-provider" && statedRetryWaitMs(message, failure.message) !== null);
+	/** Whether the next attempt can happen at all: a stated wait spends the chain's time, anything else its attempts. */
+	const mayAttempt = (attempt: number, errorMessage: string | null | undefined, message?: unknown): boolean => {
+		if (statedRetryWaitMs(message, errorMessage) !== null) return true;
+		return waitsOutRateLimitMessage(errorMessage)
 			? chainWaitedMs < RATE_LIMIT_WAIT_BUDGET_MS
 			: attempt <= deps.retrySettings().maxRetries;
+	};
+	const pastWaitBudget = (statedMs: number): boolean => chainWaitedMs + statedMs > RATE_LIMIT_WAIT_BUDGET_MS;
 	const refreshesAuth = (agentRuntime: AgentRuntime): boolean => {
 		const rejected = agentRuntime.lastAuthResolution;
 		return deps.auth !== undefined && rejected?.source === "stored-oauth" && rejected.apiKey !== undefined;
@@ -290,8 +305,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			return openForecast;
 		}
 		const settings = deps.retrySettings();
-		if (!settings.enabled || settings.maxRetries <= 0 || !retryableFailure(classified)) return null;
-		if (!mayAttempt(chainAttempt + 1, failure.errorMessage)) return null;
+		if (!settings.enabled || settings.maxRetries <= 0 || !retryableFailure(classified, message)) return null;
+		const statedMs = statedRetryWaitMs(message, failure.errorMessage);
+		if (statedMs !== null && pastWaitBudget(statedMs)) return null;
+		if (!mayAttempt(chainOwnRetries + 1, failure.errorMessage, message)) return null;
 		openForecast = { attempt: chainAttempt + 1, maxAttempts: Math.max(chainAttempt + 1, settings.maxRetries) };
 		return openForecast;
 	};
@@ -487,28 +504,53 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				...(retryAfterMs === null ? {} : { retryAfterMs }),
 			};
 		};
-		if (agentRuntime.runtimeId === "litellm" && !retryable(classified)) {
+		if (agentRuntime.runtimeId === "litellm" && !retryable(classified, initialFailure.message)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
 			return true;
 		}
 		const settings = deps.retrySettings();
 		if (!settings.enabled || settings.maxRetries <= 0) return false;
-		if (!retryable(classified)) return false;
+		if (!retryable(classified, initialFailure.message)) return false;
 
 		let failure = initialFailure;
 		chainWaitedMs = 0;
-		for (let attempt = 1; mayAttempt(attempt, failure.errorMessage); attempt += 1) {
+		chainAttempt = 0;
+		chainOwnRetries = 0;
+		while (mayAttempt(chainOwnRetries + 1, failure.errorMessage, failure.message)) {
 			ensureFailureVisibleAndPersisted(failure);
-			chainAttempt = attempt;
 			pruneFailedAssistantFromContext(agentRuntime.agent);
 
-			const backoffMs = recoveryRetryDelayMs(attempt, settings, classified);
+			const statedMs = statedRetryWaitMs(failure.message, failure.errorMessage);
+			if (statedMs !== null && pastWaitBudget(statedMs)) {
+				recordRetryStatus({
+					phase: "exhausted",
+					attempt: chainAttempt,
+					maxAttempts: Math.max(chainAttempt, settings.maxRetries),
+					errorMessage: failure.errorMessage,
+					retryAfterMs: statedMs,
+					waitBudgetMs: RATE_LIMIT_WAIT_BUDGET_MS,
+					waitedMs: chainWaitedMs,
+				});
+				state.turnStop = {
+					cause: "wait_past_budget",
+					reason: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} Clio waits on one request`,
+					retryAfterMs: statedMs,
+				};
+				return true;
+			}
+			chainAttempt += 1;
+			const attempt = chainAttempt;
+			const backoffMs = recoveryRetryDelayMs(chainOwnRetries + 1, settings, classified);
+			// Going back when told to is not the retry a count limits.
+			if (statedMs === null) chainOwnRetries += 1;
 			const retryAfterMs = failureRetryAfterMs(failure.message, failure.errorMessage);
-			const askedMs = Math.max(backoffMs, retryAfterMs ?? 0);
-			// Attended, a named wait is honoured up to the configured ceiling; only a rate limit at yolo sits out more.
-			const delayMs = waitsOutRateLimitMessage(failure.errorMessage)
-				? Math.min(askedMs, RATE_LIMIT_WAIT_BUDGET_MS - chainWaitedMs)
-				: Math.min(askedMs, Math.max(backoffMs, settings.maxDelayMs));
+			// `chat.retry.maxDelayMs` limits Clio's own backoff. It has no say over a wait the provider stated.
+			const delayMs =
+				statedMs !== null
+					? Math.max(backoffMs, statedMs)
+					: waitsOutRateLimitMessage(failure.errorMessage)
+						? Math.min(backoffMs, RATE_LIMIT_WAIT_BUDGET_MS - chainWaitedMs)
+						: backoffMs;
 			chainWaitedMs += delayMs;
 			const maxAttempts = Math.max(attempt, settings.maxRetries);
 			const cause = retryWaitCause(classified);
@@ -563,7 +605,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				if (classified.kind === "auth") {
 					if (await retryAuth({ stopReason: "error", errorMessage: message })) return true;
 				}
-				if (!retryable(classified) || !mayAttempt(attempt + 1, message)) {
+				if (!retryable(classified) || !mayAttempt(chainOwnRetries + 1, message)) {
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt,
@@ -603,7 +645,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			ensureFailureVisibleAndPersisted(nextFailure);
 			classified = classify(nextFailure, agentRuntime.agent.state.messages.slice(attemptStart));
 			if (classified.kind === "auth" && (await retryAuth(nextFailure))) return true;
-			if (!retryable(classified)) {
+			if (!retryable(classified, nextFailure.message)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}
@@ -612,8 +654,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 
 		recordRetryStatus({
 			phase: "exhausted",
-			attempt: settings.maxRetries,
-			maxAttempts: settings.maxRetries,
+			attempt: chainAttempt,
+			maxAttempts: Math.max(chainAttempt, settings.maxRetries),
 			errorMessage: failure.errorMessage,
 		});
 		recordRetriesExhausted(failure.errorMessage, failure.message);
@@ -626,6 +668,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			return await runLadder(...args);
 		} finally {
 			chainAttempt = 0;
+			chainOwnRetries = 0;
 			chainWaitedMs = 0;
 			refreshingAuth = false;
 		}

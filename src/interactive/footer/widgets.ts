@@ -6,6 +6,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
+import { formatStatedWait } from "../../domains/session/retry.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { taskBoardCounts, unverifiedTaskChecks } from "../../domains/session/task-board.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
@@ -658,10 +659,6 @@ function wholeSeconds(ms: number): string {
 }
 
 /** Whole seconds, the way a countdown reads: a wait never shows as over before it is. */
-function remainingSeconds(dueAt: number, now: number): number {
-	return Math.max(0, Math.ceil((dueAt - now) / 1000));
-}
-
 /** What the target said it is waiting on, in its own terms. A wait it named nothing about states nothing here. */
 function retryCauseFact(retry: RetryOverlay | undefined, now: number): Omit<RailFact, "keep"> {
 	switch (retry?.cause) {
@@ -709,21 +706,33 @@ function retryRailLabel(
 			room,
 		);
 	}
-	const left = retry?.dueAt !== undefined ? remainingSeconds(retry.dueAt, now) : null;
+	const left = retry?.dueAt !== undefined ? formatStatedWait(Math.max(0, retry.dueAt - now)) : null;
+	const asked =
+		retry?.retryAfterMs !== undefined && retry.retryAfterMs > 0 ? formatStatedWait(retry.retryAfterMs) : null;
+	// A narrow rail says whose wait it is in the countdown's own words, which leaves the cells to spell out the way out.
+	if (asked !== null && left !== null && room < 70) {
+		return fitRailFacts(
+			[
+				{ text: attempts, keep: 9 },
+				{ text: `provider wait ${left}`, short: `in ${left}`, keep: 8 },
+				{ ...retryCauseFact(retry, now), keep: 6 },
+				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
+			],
+			room,
+		);
+	}
 	return fitRailFacts(
 		[
 			{ text: attempts, keep: 9 },
 			{ ...retryCauseFact(retry, now), keep: 6 },
 			{
 				// What the target said outranks the long form of the countdown beside it.
-				text: left === null ? null : retry?.cause !== undefined && room < 90 ? `in ${left}s` : `next attempt in ${left}s`,
-				...(left === null ? {} : { short: `in ${left}s` }),
+				text: left === null ? null : retry?.cause !== undefined && room < 90 ? `in ${left}` : `next attempt in ${left}`,
+				...(left === null ? {} : { short: `in ${left}` }),
 				keep: 8,
 			},
-			{
-				text: retry?.retryAfterMs !== undefined ? `provider asked for ${Math.ceil(retry.retryAfterMs / 1000)}s` : null,
-				keep: 2,
-			},
+			// Whose wait this is outranks what the target called its state: a long countdown has to say it is not Clio's choice.
+			{ text: asked === null ? null : `provider asked for ${asked}`, short: "provider asked", keep: 7 },
 			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 		],
 		room,

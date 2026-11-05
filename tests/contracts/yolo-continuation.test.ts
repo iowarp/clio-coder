@@ -316,7 +316,7 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			[60_000, 300_000, 900_000, 900_000],
 		);
 		strictEqual(turnContinuationDelayMs(1, 600_000), 600_000);
-		strictEqual(turnContinuationDelayMs(1, 10 * 3_600_000), 3_600_000);
+		strictEqual(turnContinuationDelayMs(1, 10 * 3_600_000), 10 * 3_600_000);
 		strictEqual(turnContinuationDelayMs(3, 1000), 900_000);
 	});
 });

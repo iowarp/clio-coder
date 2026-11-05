@@ -71,7 +71,8 @@ export const JOB_FAILED_POLL_WAKE = 5;
 const TURN_CONTINUATION_FAILURE_DELAYS_MS = [60_000, 300_000, 900_000] as const;
 export function turnContinuationDelayMs(attempt: number, retryAfterMs?: number): number {
 	const index = Math.min(Math.max(1, attempt), TURN_CONTINUATION_FAILURE_DELAYS_MS.length) - 1;
-	return Math.max(TURN_CONTINUATION_FAILURE_DELAYS_MS[index] ?? 0, Math.min(retryAfterMs ?? 0, 3_600_000));
+	// A stated wait is never cut short, or the continuation would go back to the provider before the time it named.
+	return Math.max(TURN_CONTINUATION_FAILURE_DELAYS_MS[index] ?? 0, retryAfterMs ?? 0);
 }
 export type JobEndReason = "count" | "condition" | "stopped" | "canceled" | "deadline" | "failure";
 export interface JobEvidence {
