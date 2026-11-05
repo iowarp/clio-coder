@@ -1,4 +1,5 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import { renderCalls } from "../../core/telemetry/render.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
@@ -420,7 +421,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	if (!inspect) {
 		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
-		if (calls !== undefined) metrics.push(`${calls} tool calls`);
+		if (calls !== undefined) metrics.push(renderCalls(calls));
 		const figure = tokens === undefined ? null : compactQuantity(tokens);
 		if (figure !== null) metrics.push(`${figure} tokens`);
 		return metrics;
@@ -428,7 +429,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	if (tokens !== undefined) metrics.push(`${tokens} tokens processed`);
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
-	if (calls !== undefined) metrics.push(`${calls} tool calls`);
+	if (calls !== undefined) metrics.push(renderCalls(calls));
 	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
@@ -591,7 +592,7 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const facts = [
 		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
 		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
-		...(calls === undefined ? [] : [`${calls} calls`]),
+		...(calls === undefined ? [] : [renderCalls(calls, "call")]),
 	];
 	// The elapsed time is the line's live signal, so a narrow row cuts the
 	// action's text and then drops the spend, never the clock.

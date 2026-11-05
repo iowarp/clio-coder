@@ -138,7 +138,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 		requestRender: noop,
 		notify: (_level, text) => footer.push(text),
 		dismissNotification: noop,
-		dismissHelperNotifications: () => {
+		supersedeWorkNotifications: () => {
 			helperDismissals += 1;
 		},
 		appendTranscriptNotice: noop,

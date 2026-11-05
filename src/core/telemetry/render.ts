@@ -193,6 +193,11 @@ function renderScalar(value: number, as: Scalar): string {
 }
 
 /** One fact. Estimates name their method (R3); unknown and absent keep their reason (R1, R10). */
+/** A rendered count with its noun, which agrees with a display of 1 and a bound of `≥1` alike. */
+export function renderCalls(display: string, noun = "tool call"): string {
+	return `${display} ${display.replace(/^\D+/u, "") === "1" ? noun : `${noun}s`}`;
+}
+
 export function renderFact(fact: Fact<number>, as: Scalar = "count"): string {
 	switch (fact.kind) {
 		case "measured":
