@@ -159,7 +159,10 @@ export interface OutOfTurnRoute {
 
 /** `target/model`, plus the provider's own claim when it names a different model than was asked for. */
 export function outOfTurnRouteLabel(route: OutOfTurnRoute): string {
-	const asked = `${route.targetId}/${route.wireModelId}`;
+	// A gateway's model id often already starts with the target, and naming it twice says nothing more.
+	const asked = route.wireModelId.startsWith(`${route.targetId}/`)
+		? route.wireModelId
+		: `${route.targetId}/${route.wireModelId}`;
 	return route.reportedModel !== undefined && route.reportedModel !== route.wireModelId
 		? `${asked} (provider reports ${route.reportedModel})`
 		: asked;
