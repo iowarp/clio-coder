@@ -60,6 +60,8 @@ export interface TelemetryRunSummary {
 	status: "enqueued" | "running" | "completed" | "failed" | "aborted" | "dead" | "stale" | "cancelling" | "retrying";
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
+	/** Who asked for the work a failover attempt continues. Display only. */
+	rootRequestOrigin?: DispatchRequestOrigin;
 	endpoint?: { key: string; label: string; limit: number };
 	taskSummary?: string;
 	budget?: RunToolBudgetEnvelope;

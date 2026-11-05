@@ -16,7 +16,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Value } from "typebox/value";
@@ -142,7 +142,21 @@ export function listFleetRuns(limit = MAX_FLEET_RUN_SCAN): FleetRunRecord[] {
 	const records: FleetRunRecord[] = [];
 	// Filter before capping: every root keeps an `.events.ndjson` journal beside
 	// its record, and those entries must not spend the scan budget.
-	const names = entries.filter((name) => name.endsWith(".json")).slice(0, MAX_FLEET_RUN_SCAN);
+	const dir = join(clioStateDir(), "fleet-runs");
+	const modifiedAt = (name: string): number => {
+		try {
+			return statSync(join(dir, name)).mtimeMs;
+		} catch {
+			return 0;
+		}
+	};
+	// Ids are random, so the cap keeps the newest rather than whichever sort first.
+	const names = entries
+		.filter((name) => name.endsWith(".json"))
+		.map((name) => ({ name, at: modifiedAt(name) }))
+		.sort((a, b) => b.at - a.at)
+		.slice(0, MAX_FLEET_RUN_SCAN)
+		.map((entry) => entry.name);
 	for (const name of names) {
 		const record = readFleetRun(name.slice(0, -".json".length));
 		if (record !== null) records.push(record);
@@ -285,6 +299,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				executionRole: input.executionRole,
 				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),
 				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
+				...(input.rootRequestOrigin !== undefined ? { rootRequestOrigin: input.rootRequestOrigin } : {}),
 				task: input.task,
 				...(input.projection !== undefined ? { projection: structuredClone(input.projection) } : {}),
 				...(input.budget !== undefined ? { budget: structuredClone(input.budget) } : {}),

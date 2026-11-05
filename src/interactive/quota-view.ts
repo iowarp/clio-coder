@@ -298,7 +298,7 @@ const RECORDED_OUTCOME: Record<RunOutcome, { status: DispatchBoardStatus; label?
 	failed: { status: "failed" },
 	timed_out: { status: "failed", label: "timed out" },
 	stalled: { status: "stale", label: "stalled" },
-	canceled: { status: "aborted", label: "canceled" },
+	canceled: { status: "aborted", label: "cancelled" },
 	denied_by_policy: { status: "failed", label: "denied by policy" },
 	spawn_failed: { status: "failed", label: "spawn failed" },
 };
