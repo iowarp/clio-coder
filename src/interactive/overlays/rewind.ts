@@ -15,7 +15,7 @@ import type {
 	WorkspaceSnapshotRecord,
 } from "../../domains/workspace-snapshots/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { displaySafe } from "../display-safe.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import {
@@ -44,6 +44,9 @@ import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListO
 
 export const REWIND_EMPTY =
 	"No workspace snapshots in this session yet. Clio takes one before it first changes files in a turn and before every destructive command, in a Git work tree with safety.snapshots on.";
+
+export const REWIND_TURN_RUNNING =
+	"Clio is working, so nothing restores now. Wait for the turn to finish, or close this and stop it.";
 
 /** Differences from the work tree: still counting, counted, or not countable. */
 export type RewindCounts = "pending" | SnapshotDifferences;
@@ -89,7 +92,11 @@ const DETAIL_LIST_SHOWN = 12;
  * list that spans days carries the date too, so two snapshots an hour apart on
  * different days never read as one hour apart.
  */
-function rewindListItems(raw: ReadonlyArray<WorkspaceSnapshotRecord>, counts: RewindCounts): ListOverlayItem[] {
+function rewindListItems(
+	raw: ReadonlyArray<WorkspaceSnapshotRecord>,
+	counts: RewindCounts,
+	turnRunning: () => boolean,
+): ListOverlayItem[] {
 	// Reasons, tool names, skipped paths and stash messages are text from the
 	// work tree; they are neutralized once here.
 	const records = displaySafe(raw);
@@ -131,18 +138,20 @@ function rewindListItems(raw: ReadonlyArray<WorkspaceSnapshotRecord>, counts: Re
 					head: [
 						titleRow(theme, `Snapshot #${record.n}`, width, { meta: `${dateLocal(record.at)} ${clockLocal(record.at)}` }),
 						...chipRows(theme, [differenceChip(record.n, counts), chip(theme, what, "muted")], width),
-						...choiceRows(
-							theme,
-							[
-								{
-									key: "Enter",
-									verb: "preview rewind",
-									consequence: "shows what restoring this snapshot would change; nothing is written until you confirm",
-									tone: "action",
-								},
-							],
-							width,
-						),
+						...(turnRunning()
+							? []
+							: choiceRows(
+									theme,
+									[
+										{
+											key: "Enter",
+											verb: "preview rewind",
+											consequence: "shows what restoring this snapshot would change; nothing is written until you confirm",
+											tone: "action",
+										},
+									],
+									width,
+								)),
 					],
 					rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS)],
 				};
@@ -153,6 +162,8 @@ function rewindListItems(raw: ReadonlyArray<WorkspaceSnapshotRecord>, counts: Re
 
 export interface OpenRewindListOptions {
 	records: ReadonlyArray<WorkspaceSnapshotRecord>;
+	/** A turn may still change these files, so the list reads but offers no restore while it runs. */
+	turnRunning?: () => boolean;
 	onSelect: (n: number) => void;
 	onClose: () => void;
 }
@@ -162,21 +173,28 @@ export interface RewindListHandle extends ListOverlayHandle {
 }
 
 export function openRewindListOverlay(tui: TUI, options: OpenRewindListOptions): RewindListHandle {
+	const turnRunning = options.turnRunning ?? ((): boolean => false);
 	const handle = openListOverlay(tui, {
 		markerId: "rewind",
 		title: "Rewind workspace files",
-		items: rewindListItems(options.records, "pending"),
+		items: rewindListItems(options.records, "pending", turnRunning),
 		layout: "split",
 		unit: "snapshots",
 		emptyMessage: REWIND_EMPTY,
-		hints: [{ key: "Enter", verb: "preview rewind", short: "preview", critical: true }],
+		hints: () => (turnRunning() ? [] : [{ key: "Enter", verb: "preview rewind", short: "preview", critical: true }]),
 		leadWithHints: true,
+		status: (width) => {
+			if (!turnRunning() || options.records.length === 0) return undefined;
+			const text = `${GLYPH.warn} ${REWIND_TURN_RUNNING}`;
+			const fitted = visibleWidth(text) <= width ? text : `${GLYPH.warn} Clio is working, so nothing restores now.`;
+			return clioTheme().fg("warning", truncateToWidth(fitted, width, GLYPH.ellipsis));
+		},
 		onSelect: (item) => options.onSelect(Number(item.id)),
 		onClose: options.onClose,
 	});
 	return Object.assign(handle, {
 		setCounts(counts: RewindCounts): void {
-			handle.setItems(rewindListItems(options.records, counts));
+			handle.setItems(rewindListItems(options.records, counts, turnRunning));
 		},
 	});
 }

@@ -66,6 +66,7 @@ import {
 	formatRewindOutcome,
 	openRewindConfirmOverlay,
 	openRewindListOverlay,
+	REWIND_TURN_RUNNING,
 	type RewindListHandle,
 } from "./overlays/rewind.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
@@ -400,6 +401,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "rewind";
 		const list = openRewindListOverlay(deps.tui, {
 			records,
+			turnRunning: () => deps.isTurnInFlight?.() === true,
 			onSelect: (n) => previewRewind(snapshots, n, list),
 			onClose: deps.closeOverlay,
 		});
@@ -415,13 +417,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	/** Files are only written while no turn runs: a turn in flight is about to change them again. */
 	const turnBlocksRewind = (): boolean => {
 		if (deps.isTurnInFlight?.() !== true) return false;
-		deps.notify("warning", "Wait for the turn to finish, or stop it, before /rewind restores files.", "rewind:turn");
+		deps.notify("warning", REWIND_TURN_RUNNING, "rewind:turn");
 		return true;
 	};
 
 	let rewindPreviewing = false;
 	const previewRewind = (snapshots: WorkspaceSnapshots, n: number, list: RewindListHandle): void => {
-		if (rewindPreviewing || turnBlocksRewind()) return;
+		// The list's status row says why while a turn runs and its rail offers no Enter; a footer notice would outlive the turn.
+		if (rewindPreviewing || deps.isTurnInFlight?.() === true) return;
 		const record = snapshots.list().find((candidate) => candidate.n === n);
 		if (record === undefined) return;
 		rewindPreviewing = true;
@@ -539,6 +542,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				readSessionEntries: deps.readSessionEntries,
 				readTranscript: deps.readTranscript,
 				formatModelId: abbreviateModelId,
+				...(deps.queueNavigator
+					? {
+							queuedMessageIds: () => new Set(deps.queueNavigator?.chat.queueEntries().map((entry) => entry.id)),
+						}
+					: {}),
 			}),
 			...(initialFilter ? { initialFilter } : {}),
 			notice: deps.notify,
@@ -548,11 +556,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	const toggleDispatchBoard = (): void => {
-				...(deps.queueNavigator
-					? {
-							queuedMessageIds: () => new Set(deps.queueNavigator?.chat.queueEntries().map((entry) => entry.id)),
-						}
-					: {}),
 		if (deps.transitions.state === "dispatch-board") {
 			deps.closeOverlay();
 			return;
@@ -851,11 +854,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.handle = openQueueNavigatorFactory(deps.tui, {
 			entries: () => queue.chat.queueEntries(),
 			isHeld: () => !queue.chat.isStreaming() && queue.chat.turnPreparation().phase === "idle",
+			isRunning: () => queue.chat.isStreaming(),
+			interruptRefusal: () => queue.chat.interruptRefusal(),
 			remove: (id) => void queue.chat.removeQueuedEntry(id),
 			move: (id, delta) => queue.chat.moveQueuedEntry(id, delta),
 			toggleKind: (entry) => void queue.chat.setQueuedEntryKind(entry.id, entry.kind === "steer" ? "follow-up" : "steer"),
-			isRunning: () => queue.chat.isStreaming(),
-			interruptRefusal: () => queue.chat.interruptRefusal(),
 			toEditor: (entry) => queue.toEditor(entry),
 			sendNow: (entry) => queue.sendNow(entry),
 			restoreAll: () => queue.restoreAll(),
