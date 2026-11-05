@@ -67,7 +67,11 @@ test("/btw answers while a turn is streaming and leaves the turn's history alone
 		for (let i = 0; i < 1000 && !loop.isStreaming(); i++) await new Promise((resolve) => setImmediate(resolve));
 		assert.equal(loop.isStreaming(), true);
 		const before = [...live];
-		assert.deepEqual(await loop.askSideQuestion("which file?"), { status: "answered", text: "beside the turn" });
+		assert.deepEqual(await loop.askSideQuestion("which file?"), {
+			status: "answered",
+			text: "beside the turn",
+			route: { targetId: "default", wireModelId: "gpt-4o" },
+		});
 		assert.ok(sent);
 		assert.notEqual(sent, live, "the round reads a snapshot, not the live list");
 		assert.deepEqual(live, before);
