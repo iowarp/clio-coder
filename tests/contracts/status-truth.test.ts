@@ -1,6 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { type TestContext, test } from "node:test";
 import { setImmediate as nextLoop } from "node:timers/promises";
+import type { JobRecord } from "../../src/core/job-types.js";
 import {
 	applyModelAdmission,
 	type ModelAdmissionEvent,
@@ -53,10 +54,12 @@ import {
 	providerFailureRailFacts,
 } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
+import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
+import { loopTransitionNotices } from "../../src/session-control/loop-command.js";
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
@@ -66,6 +69,7 @@ import {
 import type { RetryStatusPayload, TurnRecoveryDeps } from "../../src/session-control/turn-recovery.js";
 import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
+import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 
 const STUCK_AFTER_MS = 180_000;
@@ -1635,4 +1639,60 @@ test("a write refused beside a lint that changed nothing is a blocked change, an
 	strictEqual(blockedWriteAttempts(stats, classify, 0), 1);
 	strictEqual(blockedWriteAttempts(stats, classify, 2), null);
 	strictEqual(blockedWriteAttempts(stats, classify), null);
+});
+
+test("a recorded validation failure reads as failed on the card and keeps its source in the detail view", () => {
+	const trust = {
+		artifactIntegrity: { state: "verified", authority: { kind: "host", id: "run-seal" }, artifacts: [] },
+		validationGrounding: { state: "failed", authority: { kind: "host", id: "result-quality" }, artifacts: [] },
+	} as unknown as NonNullable<NonNullable<WorkerEntryState["result"]>["trust"]>;
+	const entry: WorkerEntryState = {
+		assignmentId: "run-1",
+		runId: "run-1",
+		origin: "user",
+		agentId: "coder",
+		runtime: { kind: "clio", targetId: "mock", wireModelId: "mock/model" },
+		text: "",
+		droppedLines: 0,
+		tools: [],
+		attempts: [],
+		pending: false,
+		result: { outcome: "succeeded", durationMs: 21000, trust },
+	};
+	const rows = (options: { unbounded?: boolean }): string =>
+		renderWorkerEntryLines(entry, 76, options).map(stripTerminalSequences).join("\n");
+	match(rows({}), /validation failed/u);
+	doesNotMatch(rows({}), /recorded validation failed/u);
+	match(rows({ unbounded: true }), /quality recorded validation failed/u);
+});
+
+test("a loop's result notices name its task and leave the job id to the line that needs one to type", () => {
+	const job = {
+		id: "job-4f5ae5f1-0000-0000-0000-000000000000",
+		revision: 2,
+		state: "terminal",
+		reason: "count",
+		starts: 2,
+		delivery: null,
+		active: null,
+		pending: null,
+		cancelRequested: false,
+		history: [],
+		persistenceError: null,
+		pendingReason: null,
+		spec: { runner: { kind: "main", prompt: "check the build" } },
+	} as unknown as JobRecord;
+	const previous = {
+		revision: 1,
+		state: "active",
+		complete: false,
+		reason: null,
+		deliveryId: null,
+		deliveryState: null,
+		persistenceError: null,
+	} as const;
+	const [finished] = loopTransitionNotices(previous, job);
+	strictEqual(finished?.text, 'loop "check the build" finished: 2 runs done');
+	const [paused] = loopTransitionNotices(previous, { ...job, state: "paused", reason: null });
+	strictEqual(paused?.text, `loop "check the build" is paused. /loop resume ${job.id} restarts its schedule`);
 });

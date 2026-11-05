@@ -470,6 +470,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const reasoningRoutes = new Set<string>();
 	const routeKey = (target: string | null | undefined, model: string | null | undefined): string =>
 		`${target ?? ""}#${model ?? ""}`;
+	/** Route and asked level pairs a turn already ran under, so a level the route cannot honor is news once. */
+	const thinkingNotesDelivered = new Set<string>();
+	const thinkingNoteKey = (): string => {
+		const chat = deps.getSettings?.()?.chat;
+		return `${routeKey(chat?.target, chat?.model)}#${chat?.thinkingLevel ?? "off"}`;
+	};
 	const recordReasoningRoute = (event: ChatLoopEvent): void => {
 		if (event.type !== "thinking_delta" || event.delta.length === 0) return;
 		const current = deps.getSettings?.();
@@ -480,7 +486,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	const recordChatEvent = (event: ChatLoopEvent): void => {
 		generationTiming.record(event, now());
-		if (event.type === "agent_start") liveGeneration = true;
+		if (event.type === "agent_start") {
+			liveGeneration = true;
+			thinkingNotesDelivered.add(thinkingNoteKey());
+		}
 		if (event.type === "agent_end") liveGeneration = false;
 		recordReasoningRoute(event);
 	};
@@ -823,6 +832,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
 				...(note !== null ? { note } : {}),
+				// A route with no thinking control has no setting to read. The rail speaks up only while a level
+				// the operator chose is news: the default is nobody's request, and a turn under it ends the news.
+				...(thinking?.mechanism === "none" &&
+				(note === null || asked === DEFAULT_SETTINGS.chat.thinkingLevel || thinkingNotesDelivered.has(thinkingNoteKey()))
+					? { quiet: true }
+					: {}),
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",

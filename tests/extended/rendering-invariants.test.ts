@@ -607,7 +607,7 @@ describe("worker rendering invariants", () => {
 			);
 			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
 			match(plain, /execution ok/u);
-			match(plain, /quality recorded validation failed/u);
+			match(plain, /(?<!recorded )validation failed/u);
 			doesNotMatch(plain, /Ctrl\+O/u);
 		}
 	});

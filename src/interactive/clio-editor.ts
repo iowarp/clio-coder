@@ -85,7 +85,14 @@ export interface EditorChrome {
 	getTaskRail?: (room: number) => string | null;
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
-	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[]; note?: string };
+	getThinking?: () => {
+		label: string;
+		hasLevels: boolean;
+		supportedLevels?: readonly string[];
+		note?: string;
+		/** The rail has nothing worth a permanent slot to say about this route right now. */
+		quiet?: boolean;
+	};
 	/** `identityCells` is what the rail will spend naming the exact route instead of the short nickname. */
 	getHarnessStatus?: (
 		width: number,
@@ -205,6 +212,7 @@ function thinkingRailHint(
 	thinking: ReturnType<NonNullable<EditorChrome["getThinking"]>>,
 	width: number,
 ): string {
+	if (thinking.quiet) return "";
 	const level = thinking.label;
 	const levels = thinking.supportedLevels ?? [];
 	const count = Object.hasOwn(THINKING_BRAINS, level) ? THINKING_BRAINS[level] : undefined;

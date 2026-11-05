@@ -966,16 +966,32 @@ class AskUserOverlayView implements Component {
 		// the header, which the question under it already explains.
 		const count =
 			this.questions.length > 1 && answered > 0 ? `${answered} answered` : earlier > 0 ? `${earlier} earlier` : null;
-		const ledger = count === null ? null : `${count}${pointToLedger && earlier > 0 ? " [a]" : ""}`;
-		const parts = this.harnessInterview
-			? [this.harnessPosition(), ...(moveKey === null ? [] : [moveKey])]
-			: [
-					...(this.questions.length > 1 ? [`Q${this.index + 1} of ${this.questions.length}`] : []),
-					...(moveKey === null ? [] : [moveKey]),
-					...(ledger === null ? [] : [ledger]),
-					...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
-					...(question.header ? [question.header] : []),
-				];
+		const pointer = pointToLedger && earlier > 0 ? " [a]" : "";
+		const ledger = count === null ? null : `${count}${pointer}`;
+		const move = moveKey === null ? [] : [moveKey];
+		// Esc ends the turn and keeps what is recorded. A box too short for the ledger row says so here.
+		const kept = this.history.length + (this.questions.length > 1 ? answered : 0);
+		const escKeeps = kept > 0 && this.hintEntries().escVerb === "cancel" ? kept : 0;
+		const keepsWhole = `Esc keeps ${escKeeps === 1 ? "it" : "them"}`;
+		const keepsNamed = `Esc keeps answer${escKeeps === 1 ? "" : "s"}${pointer}`;
+		const fits = (parts: string[]): boolean => visibleWidth(parts.join(" · ")) <= width;
+		const position = this.questions.length > 1 ? `Q${this.index + 1} of ${this.questions.length}` : null;
+		const shortPosition = this.questions.length > 1 ? [`Q${this.index + 1}/${this.questions.length}`] : [];
+		let parts: string[];
+		if (this.harnessInterview) {
+			parts = [this.harnessPosition(), ...move];
+			if (escKeeps > 0 && fits([...parts, keepsNamed])) parts.push(keepsNamed);
+		} else {
+			const full = [...(position === null ? [] : [position]), ...move, ...(ledger === null ? [] : [ledger])];
+			if (escKeeps > 0) full.push(keepsWhole);
+			parts = escKeeps > 0 && !fits(full) ? [...shortPosition, ...move, keepsNamed] : full;
+			// What the question under the row already explains fits whole or gives way.
+			const optional = [
+				...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
+				...(question.header ? [question.header] : []),
+			];
+			for (const part of optional) if (fits([...parts, part])) parts.push(part);
+		}
 		if (parts.length === 0) return [];
 		return [fitRow(theme.style("positionCount", parts.join(" · "), { bold: true }), width)];
 	}
