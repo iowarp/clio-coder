@@ -82,6 +82,21 @@ function outcomes(snapshot: ExitSummarySnapshot): string {
 	return [...counts].map(([outcome, n]) => `${count(n)} ${outcome}`).join(" · ");
 }
 
+/**
+ * The closing line for a visit with no conversation: a launch that sent nothing,
+ * or one that only ran a fleet plan. There is no session a resume line could
+ * name, so it says that rather than leaving the exit silent.
+ */
+export function renderExitWithoutConversation(
+	preference: ExitSummaryStyle,
+	outputStyle: OutputStyle,
+	tty: boolean,
+): string[] {
+	if (resolveExitSummaryStyle(preference, outputStyle) === "off") return [];
+	const line = "Clio Coder · no conversation this visit, so there is nothing to resume.";
+	return [tty ? clioTheme().fg("annotation", line) : line];
+}
+
 /** Pure formatting: no ledger readers, filesystem work, or provider calls on exit. */
 export function renderExitSummary(
 	snapshot: ExitSummarySnapshot | null,

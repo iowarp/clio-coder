@@ -65,7 +65,7 @@ import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS, RESTORED_DRAFT_NOTICE } from "./editor-submit.js";
-import { renderExitSummary } from "./exit-summary.js";
+import { renderExitSummary, renderExitWithoutConversation } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
 import { createExtensionDevSession, type ExtensionDevSession } from "./extension-dev-session.js";
 import { createInteractiveDesktopNotifications } from "./footer/notifications.js";
@@ -2047,14 +2047,22 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
 		onCleanExit: () => {
 			const ui = deps.getSettings?.().interface;
-			const lines = renderExitSummary(
-				exitSummary.snapshot(),
-				ui?.exitSummary ?? "auto",
-				process.stdout.columns ?? 80,
-				process.stdout.isTTY === true,
-				ui?.outputDetail ?? "standard",
-				process.stdout.rows ?? 48,
-			);
+			const snapshot = exitSummary.snapshot();
+			const lines =
+				snapshot === null
+					? renderExitWithoutConversation(
+							ui?.exitSummary ?? "auto",
+							ui?.outputDetail ?? "standard",
+							process.stdout.isTTY === true,
+						)
+					: renderExitSummary(
+							snapshot,
+							ui?.exitSummary ?? "auto",
+							process.stdout.columns ?? 80,
+							process.stdout.isTTY === true,
+							ui?.outputDetail ?? "standard",
+							process.stdout.rows ?? 48,
+						);
 			if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
 		},
 		onShutdown: async () => {

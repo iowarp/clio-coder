@@ -156,6 +156,15 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	let baseTurns = deps.getTurns() ?? 0;
 	let priorTurns = 0;
 	let hasModelTurn = deps.session?.current()?.hasModelTurn === true;
+	/**
+	 * The session this visit reopened rather than started. A live session's meta
+	 * never carries `hasModelTurn` (only the history scan fills it in), so without
+	 * this a resumed session looked empty until a new turn ran, and quitting
+	 * printed no resume line for a session that plainly had one. A session already
+	 * current when the collector starts is one too: a fresh launch creates its
+	 * session on the first prompt.
+	 */
+	let reopenedSessionId = deps.session?.current()?.id ?? null;
 	let compactions = 0;
 	const models = new Map<string, { target: string; model: string }>();
 	const files = new Map<string, number>();
@@ -240,11 +249,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			}
 			internalGit.set(id, entry);
 		}),
-		deps.bus.subscribe("session.reattached", () => {
+		deps.bus.subscribe("session.reattached", ({ sessionId }) => {
 			baseTurns = deps.getTurns() ?? 0;
 			hasModelTurn ||= deps.session?.current()?.hasModelTurn === true;
+			reopenedSessionId = sessionId;
 		}),
 		deps.bus.subscribe("session.parked", () => {
+			reopenedSessionId = null;
 			priorTurns += Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
 			baseTurns = deps.getTurns() ?? 0;
 		}),
@@ -371,7 +382,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		},
 		snapshot(): ExitSummarySnapshot | null {
 			const session = deps.session?.current();
-			if (!session || !hasModelTurn) return null;
+			if (!session || (!hasModelTurn && reopenedSessionId !== session.id)) return null;
 			let gitHooks: ReadonlyArray<{ path: string; kind: string; key?: string }> = [];
 			try {
 				gitHooks = (deps.gitHookChanges?.() ?? []).map((change) => ({
