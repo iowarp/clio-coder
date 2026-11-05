@@ -22,6 +22,7 @@ import {
 	PERMISSION_TERMS_KEY,
 	type PermissionInspectionHint,
 	type PermissionTermsHint,
+	permissionEscapeVerb,
 	permissionHintEntries,
 } from "./permission-hint.js";
 import { renderToolArguments } from "./renderers/tool-execution.js";
@@ -221,7 +222,7 @@ function workerGrantAuthority(view: ApprovalRequestView): string | null {
 	const grant = view.workerGrant;
 	if (grant === undefined) {
 		return view.origin.kind === "worker"
-			? "yours alone. fleet.permissions.mode escalate asks you, not the main agent."
+			? "yours alone. Worker approvals are set to Ask me, so the main agent cannot answer this for you."
 			: null;
 	}
 	if (grant.authority === "operator") {
@@ -509,6 +510,7 @@ function permissionFacts(
 	advisory: string,
 	countdown: CardCountdown,
 	hasDraft: boolean,
+	terms = false,
 ): PermissionFactRows {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const identity = identityRow(theme, view, presentation, width);
@@ -560,18 +562,20 @@ function permissionFacts(
 	// past the screen reads what happens if they keep walking.
 	const timer: string[] = [];
 	const answer = hasDraft ? "Backspace clears your draft, then Enter allows" : "Enter allows";
+	// The terms fold is a layer of its own, so Esc folds it before it can deny.
+	const escWords = terms ? "Esc hides the terms" : "Esc denies";
 	const after =
 		view.workerFallback === "fail"
 			? "denies this call and fails the worker run"
 			: "denies this call; the worker carries on without it";
 	if (countdown === "held") {
 		timer.push(
-			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, Esc denies`), width),
+			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, ${escWords}`), width),
 		);
 	} else if (isWorkerWindow(countdown)) {
 		const left = formatUnattendedRemaining(countdown.remainingMs);
 		const sentence = countdown.held
-			? `${GLYPH.phaseBlocked} Timer held. No answer in ${left} ${after}. ${answer}, Esc denies.`
+			? `${GLYPH.phaseBlocked} Timer held. No answer in ${left} ${after}. ${answer}, ${escWords}.`
 			: `${GLYPH.warn} No answer in ${left} ${after}. Any key holds the card.`;
 		const tone = !countdown.held || countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation";
 		timer.push(...wrapTextWithAnsi(theme.fg(tone, sentence), width));
@@ -662,7 +666,7 @@ function permissionCardSections(
 	const theme = clioTheme();
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
-	const parts = permissionFacts(theme, view, presentation, content, advisory, countdown, hasDraft);
+	const parts = permissionFacts(theme, view, presentation, content, advisory, countdown, hasDraft, terms);
 	const facts = parts.lines;
 	const identityRows = identityRow(theme, view, presentation, content).rows.length;
 	const timerClause = compactCountdownClause(view, countdown);
@@ -673,7 +677,12 @@ function permissionCardSections(
 			...view.artifact.text.split(/\r?\n/u).flatMap((line) => wrapArtifactLine(line, content)),
 		);
 	}
-	const choices = permissionChoices(view, presentation, hasDraft, mainTurn);
+	// With the terms open Esc folds them, so the row says that rather than promising a denial the key will not make.
+	const choices = permissionChoices(view, presentation, hasDraft, mainTurn).map((choice) =>
+		terms && choice.key === "Esc"
+			? { key: "Esc", verb: permissionEscapeVerb("closed", "open"), consequence: "back to the card; Esc there denies" }
+			: choice,
+	);
 	const bareChoices = bareChoiceRows(theme, choices, content, hasDraft);
 	const full = choiceRows(theme, choices, content);
 	// A short dock (a draft under the card, a 24-row terminal) may not hold the

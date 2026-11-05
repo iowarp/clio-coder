@@ -76,6 +76,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
+import { backOutOneLayer, type EscapeLayers, innermostEscapeLayer } from "../escape-layers.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import {
@@ -84,7 +85,6 @@ import {
 	centeredWindow,
 	fitRows,
 	type HintEntry,
-	type OverlayEscVerb,
 	type RowBudgetedBody,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
@@ -3032,14 +3032,23 @@ function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
 	return typeof (child as Partial<RowBudgetedBody>).setBodyRows === "function";
 }
 
-/** `9 settings`, or `3 connections` for the targets table, where the rows are not settings. */
-function sectionCount(section: SettingsCenterSection): string {
+/**
+ * `9 settings`, or `3 connections` for the targets table, where the rows are not
+ * settings. Under a filter the section holds only its matching rows, so the size
+ * comes from the whole section and the matches are counted beside it: a search
+ * for "Add a target" used to say `0 connections` over a table that had two.
+ */
+function sectionCount(section: SettingsCenterSection, whole: SettingsCenterSection = section): string {
+	const matches = section.items.filter((item) => item.presentationKind !== "group-header").length;
+	const filtered = whole !== section;
 	if (section.id === "targets") {
-		const count = section.items.filter((item) => item.targetConsole !== undefined).length;
-		return `${count} ${count === 1 ? "connection" : "connections"}`;
+		const count = whole.items.filter((item) => item.targetConsole !== undefined).length;
+		const size = `${count} ${count === 1 ? "connection" : "connections"}`;
+		return filtered ? `${size} · ${matches} ${matches === 1 ? "match" : "matches"}` : size;
 	}
-	const count = section.items.filter((item) => item.presentationKind !== "group-header").length;
-	return `${count} ${count === 1 ? "setting" : "settings"}`;
+	const count = whole.items.filter((item) => item.presentationKind !== "group-header").length;
+	const noun = count === 1 ? "setting" : "settings";
+	return filtered ? `${matches} of ${count} ${noun}` : `${count} ${noun}`;
 }
 
 export class SettingsCenter implements Component {
@@ -3234,52 +3243,62 @@ export class SettingsCenter implements Component {
 	}
 
 	/**
-	 * One level up, at every width: cancel the filter editor, then the open
-	 * submenu, then the rows page, and only from the section list does Esc close
-	 * Settings. A pending Space preview is part of the row context, so leaving
-	 * rows discards it rather than costing an extra press.
+	 * One level up, at every width, by the shared Esc rule: cancel the filter
+	 * editor, then the open submenu, then the filter, then the rows page, and
+	 * only from the section list does Esc close Settings. A pending Space preview
+	 * is part of the row context, so leaving rows discards it rather than costing
+	 * an extra press. The rail reads its Esc word from this same list.
 	 */
-	private back(): void {
-		if (this.filterDraft !== null) {
-			this.filterDraft = null;
-			this.options.requestRender?.();
-			return;
-		}
-		if (this.submenuComponent) {
-			// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
-			const submenu = this.submenuComponent;
-			if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
-			this.submenuComponent = null;
+	private escapeLayers(): EscapeLayers {
+		const submenu = this.submenuComponent;
+		const done = (): void => {
 			this.pendingValue = null;
 			this.options.requestRender?.();
-			return;
-		}
-		if (this.filterQuery.length > 0) {
-			this.filterQuery = "";
-			this.pendingValue = null;
-			this.normalizeSelection();
-			this.options.requestRender?.();
-			return;
-		}
-		if (this.level === "rows" && this.sections().length > 0) {
-			this.level = "sections";
-			this.pendingValue = null;
-			this.options.requestRender?.();
-			return;
-		}
-		this.options.onCancel();
+		};
+		return [
+			this.filterDraft !== null && {
+				verb: "cancel filter",
+				back: () => {
+					this.filterDraft = null;
+					this.options.requestRender?.();
+				},
+			},
+			submenu !== null && {
+				verb: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "back to list",
+				back: () => {
+					// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
+					if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
+					this.submenuComponent = null;
+					done();
+				},
+			},
+			this.filterQuery.length > 0 && {
+				verb: "clear filter",
+				back: () => {
+					this.filterQuery = "";
+					this.normalizeSelection();
+					done();
+				},
+			},
+			this.level === "rows" &&
+				this.sections().length > 0 && {
+					verb: "back to sections",
+					back: () => {
+						this.level = "sections";
+						done();
+					},
+				},
+			{ verb: "close settings", back: () => this.options.onCancel() },
+		];
 	}
 
-	/** What the next Esc does, in the words the rail shows; the same order as `back`. */
-	escapeVerb(): OverlayEscVerb {
-		if (this.filterDraft !== null) return "cancel filter";
-		if (this.submenuComponent)
-			return this.submenuComponent instanceof SubmenuWrapper && this.submenuComponent.editsText
-				? "back, keeps draft"
-				: "back to list";
-		if (this.filterQuery.length > 0) return "clear filter";
-		if (this.level === "rows" && this.sections().length > 0) return "back to sections";
-		return "close settings";
+	private back(): void {
+		backOutOneLayer(this.escapeLayers());
+	}
+
+	/** What the next Esc does, in the words the rail shows. */
+	escapeVerb(): string {
+		return innermostEscapeLayer(this.escapeLayers())?.verb ?? "close settings";
 	}
 
 	private depth(): SettingsNavigationDepth {
@@ -3411,6 +3430,13 @@ export class SettingsCenter implements Component {
 			kept.push(item);
 		}
 		return kept;
+	}
+
+	/** The section's size, measured on the whole section when a filter has narrowed it. */
+	private sectionCount(section: SettingsCenterSection): string {
+		if (this.effectiveFilterQuery().length === 0) return sectionCount(section);
+		const whole = buildSettingsSections(this.items, this.shortcuts).find((entry) => entry.id === section.id);
+		return sectionCount(section, whole ?? section);
 	}
 
 	private currentSection(): SettingsCenterSection | null {
@@ -3727,7 +3753,7 @@ export class SettingsCenter implements Component {
 			sectionLabel: section.label,
 			sectionDescription: SETTINGS_SECTION_DESCRIPTIONS[section.id],
 			position: `${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
-			counts: { label: sectionCount(section), changed: selectable.filter((entry) => isModified(entry)).length },
+			counts: { label: this.sectionCount(section), changed: selectable.filter((entry) => isModified(entry)).length },
 			item,
 			...(fullValue === null ? {} : { fullValue }),
 			origin,
@@ -3942,7 +3968,7 @@ export class SettingsCenter implements Component {
 		const section = this.currentSection();
 		if (!section) return fitRows([], width, height);
 		const changed = section.items.filter((item) => isModified(item)).length;
-		const meta = changed > 0 ? `${GLYPH.scoped} ${changed} changed` : sectionCount(section);
+		const meta = changed > 0 ? `${GLYPH.scoped} ${changed} changed` : this.sectionCount(section);
 		const owner = this.keyOwner();
 		const title = renderLaneTitle(theme, {
 			label: section.label,

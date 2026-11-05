@@ -28,7 +28,10 @@ export async function runBrowserConfigure(
 	const instructions = (text: string) =>
 		clean(text)
 			.replaceAll("press Escape", "choose Back")
-			.replaceAll("Escape goes back.", "Back returns to the previous step.");
+			.replaceAll(
+				"Escape goes back a step, and from the first step leaves without saving.",
+				"Back returns to the previous step.",
+			);
 	const headings = (heading: string | readonly string[] | undefined) =>
 		(typeof heading === "string" ? [heading] : [...(heading ?? [])]).map(clean).filter((line) => line.trim() !== "");
 	const cancel = () => {

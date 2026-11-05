@@ -1,3 +1,5 @@
+import type { EscapeLayers } from "./escape-layers.js";
+import { escapeHintEntry, innermostEscapeLayer } from "./escape-layers.js";
 import type { HintEntry } from "./overlay-frame.js";
 
 /**
@@ -69,7 +71,14 @@ export function permissionHintEntries(
 		// The terms key is inert while the mutation is open, so the rail does not offer it then.
 		...(terms === undefined || inspection === "open"
 			? []
-			: [{ key: PERMISSION_TERMS_KEY, verb: terms === "open" ? "hide terms" : "terms", short: "terms", critical: false }]),
+			: [
+					{
+						key: PERMISSION_TERMS_KEY,
+						verb: terms === "open" ? "hide terms" : "terms",
+						short: terms === "open" ? "hide terms" : "terms",
+						critical: false,
+					},
+				]),
 		// A card taller than its rows scrolls (BT-005). The open mutation names the
 		// same keys itself below.
 		...(scrollable && inspection !== "open" ? [{ key: "↑↓", verb: "scroll", critical: false }] : []),
@@ -80,10 +89,44 @@ export function permissionHintEntries(
 				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect details", short: "inspect", critical: false }]),
 		{ key: PERMISSION_STOP_KEY, verb: stopVerb, short: "stop", critical: true },
 		// With a draft, deny and stop are the only immediate answers, so Esc
-		// outranks the narrowing that would otherwise drop it first. With the
-		// details open, Esc hides them and the card says so; deny is one more Esc.
-		inspection === "open"
-			? { key: "Esc", verb: "hide details", short: "hide", critical: true }
-			: { key: "Esc", verb: "deny", critical: composerHasDraft },
+		// outranks the narrowing that would otherwise drop it first. With a view
+		// open, Esc closes it and the rail says so; deny is one more Esc.
+		escapeHintEntry(
+			permissionEscapeLayers(inspection, terms ?? "closed", NO_ACTIONS),
+			// An open view names its own way out in its rule, so on a narrow rail the answer keys outrank it.
+			inspection === "open" || terms === "open" ? false : composerHasDraft,
+		) ?? { key: "Esc", verb: "deny" },
 	];
+}
+
+/** What the card's Esc backs out of, in the order it does: details, then terms, then the call itself. */
+export interface PermissionEscapeActions {
+	hideDetails(): void;
+	hideTerms(): void;
+	deny(): void;
+}
+
+const NO_ACTIONS: PermissionEscapeActions = { hideDetails: () => {}, hideTerms: () => {}, deny: () => {} };
+
+/**
+ * The card's layers for the shared Esc rule. Reading the change or the terms is
+ * not an answer, so Esc closes those views first and the card is as it was; only
+ * from the card itself does Esc deny, and every surface that names the key reads
+ * its word from here: the rail, the choice rows and the held-timer line.
+ */
+export function permissionEscapeLayers(
+	inspection: PermissionInspectionHint,
+	terms: PermissionTermsHint,
+	actions: PermissionEscapeActions,
+): EscapeLayers {
+	return [
+		inspection === "open" && { verb: "hide details", short: "hide", back: actions.hideDetails },
+		terms === "open" && { verb: "hide terms", back: actions.hideTerms },
+		{ verb: "deny", back: actions.deny },
+	];
+}
+
+/** The word the card's Esc carries right now. */
+export function permissionEscapeVerb(inspection: PermissionInspectionHint, terms: PermissionTermsHint): string {
+	return innermostEscapeLayer(permissionEscapeLayers(inspection, terms, NO_ACTIONS))?.verb ?? "deny";
 }

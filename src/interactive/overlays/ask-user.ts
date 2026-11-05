@@ -23,16 +23,15 @@ import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/
 import { cancelledAskUserResult, recommendedOptionIndex, unavailableAskUserResult } from "../../tools/ask-user.js";
 import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { dockGrowthRows } from "../dock.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry, innermostEscapeLayer } from "../escape-layers.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
 import { scrollTranscriptPage } from "../layout.js";
 import {
-	buildHint,
 	DEFAULT_SELECT_THEME,
 	fitHintEntries,
 	fitHintEntryList,
 	fitRow,
 	type HintEntry,
-	type OverlayEscVerb,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
 import {
@@ -128,6 +127,11 @@ export interface AskUserRoundOptions {
 	 * first (#421). Only a model's ask_user round carries it.
 	 */
 	unattended?: { windowMs: number; timers?: UnattendedTimers };
+	/**
+	 * A choice the operator's own action raised (send now, a settings switch),
+	 * not the model's interview: the card says confirm, and Esc cancels the action.
+	 */
+	confirmation?: boolean;
 }
 
 export interface AskUserOverlaySession extends OverlayHandle {
@@ -552,6 +556,7 @@ class AskUserOverlayView implements Component {
 	/** performance.now() before which input other than Esc is dropped. */
 	private inputGuardUntil = 0;
 	private harnessInterview: ToolInvokeOptions["harnessInterview"];
+	private confirmation = false;
 	/** The round's unattended countdown, while one runs or until the operator holds it. */
 	private countdown: UnattendedCountdown | null = null;
 
@@ -572,6 +577,7 @@ class AskUserOverlayView implements Component {
 		this.questions = [...questions];
 		this.presentation = presentation;
 		this.harnessInterview = round?.harnessInterview;
+		this.confirmation = round?.confirmation === true;
 		this.states = this.questions.map((question, index) =>
 			createQuestionState(question, this.harnessInterview?.initial?.[index]),
 		);
@@ -646,11 +652,10 @@ class AskUserOverlayView implements Component {
 		if (countdown === null) return [];
 		const theme = clioTheme();
 		if (countdown.state() === "held") {
-			const question = this.currentQuestion();
-			const goesBack = this.currentState()?.mode === "text" && question && questionHasOptions(question);
+			const esc = innermostEscapeLayer(this.escapeLayers());
 			const line = headers
-				? `${GLYPH.phaseBlocked} timer held · Enter records, ${goesBack ? "Esc goes back" : "Esc cancels"}`
-				: `${GLYPH.phaseBlocked} held · Enter records · ${goesBack ? "Esc back" : "Esc cancels"}`;
+				? `${GLYPH.phaseBlocked} timer held · Enter: record · Esc: ${esc?.verb ?? "cancel interview"}`
+				: `${GLYPH.phaseBlocked} held · Enter: record · Esc: ${esc?.short ?? esc?.verb ?? "cancel"}`;
 			return headers
 				? wrapTextWithAnsi(theme.fg("annotation", line), width)
 				: [fitRow(theme.fg("annotation", line), width)];
@@ -703,7 +708,7 @@ class AskUserOverlayView implements Component {
 	}
 
 	interviewTitle(): string | undefined {
-		return this.harnessInterview?.title;
+		return this.harnessInterview?.title ?? (this.confirmation && this.phase === "asking" ? "Confirm" : undefined);
 	}
 
 	decisionTone(): ClioToken {
@@ -738,6 +743,12 @@ class AskUserOverlayView implements Component {
 		const state = this.currentState();
 		if (!question || !state) return;
 		if (performance.now() < this.inputGuardUntil && !matchesKey(data, "escape")) return;
+		// One layer per press, by the shared rule: the rail word is read from the same list.
+		if (matchesKey(data, "escape")) {
+			backOutOneLayer(this.escapeLayers());
+			this.deps.requestRender();
+			return;
+		}
 
 		// Scrolling the question must not cost the operator their place in the
 		// options, so the region has keys of its own that neither control claims.
@@ -764,10 +775,6 @@ class AskUserOverlayView implements Component {
 		}
 
 		if (state.mode === "text") {
-			if (matchesKey(data, "escape")) {
-				this.escapeFromTextInput(question, state);
-				return;
-			}
 			this.text?.handleInput(data);
 			return;
 		}
@@ -971,9 +978,9 @@ class AskUserOverlayView implements Component {
 		const move = moveKey === null ? [] : [moveKey];
 		// Esc ends the turn and keeps what is recorded. A box too short for the ledger row says so here.
 		const kept = this.history.length + (this.questions.length > 1 ? answered : 0);
-		const escKeeps = kept > 0 && this.hintEntries().escVerb === "cancel" ? kept : 0;
-		const keepsWhole = `Esc keeps ${escKeeps === 1 ? "it" : "them"}`;
-		const keepsNamed = `Esc keeps answer${escKeeps === 1 ? "" : "s"}${pointer}`;
+		const escKeeps = kept > 0 && this.escapeAtRoot() ? kept : 0;
+		const keepsWhole = "kept if you cancel";
+		const keepsNamed = `answer${escKeeps === 1 ? "" : "s"} kept if you cancel${pointer}`;
 		const fits = (parts: string[]): boolean => visibleWidth(parts.join(" · ")) <= width;
 		const position = this.questions.length > 1 ? `Q${this.index + 1} of ${this.questions.length}` : null;
 		const shortPosition = this.questions.length > 1 ? [`Q${this.index + 1}/${this.questions.length}`] : [];
@@ -1061,11 +1068,73 @@ class AskUserOverlayView implements Component {
 	}
 
 	/** The active control's keys in the order they should give way, without the way out. */
-	private hintEntries(): { entries: HintEntry[]; escVerb: OverlayEscVerb } {
+	/**
+	 * What Esc backs out of, innermost first. A view opened on the card (details,
+	 * the answers so far) folds; a text field goes back to the options it was
+	 * opened from, or drops its typed draft when the question has no options; and
+	 * only from the card itself does Esc cancel the interview, which is a decision:
+	 * the model is told and the turn ends, with recorded answers kept.
+	 */
+	private escapeLayers(): EscapeLayers {
 		const question = this.currentQuestion();
 		const state = this.currentState();
-		// Esc here is a decision, not a dismissal: the model is told and the turn ends.
-		if (this.phase !== "asking" || !question || !state) return { entries: [], escVerb: "cancel" };
+		const cancel = {
+			verb: this.confirmation ? "cancel" : "cancel interview",
+			short: "cancel",
+			back: () => (this.phase === "asking" ? this.cancel() : this.deps.onCancel()),
+		};
+		if (this.phase !== "asking" || !question || !state) return [cancel];
+		const text = state.mode === "text";
+		const typed = text ? (this.text?.getText() ?? state.inputValue) : "";
+		return [
+			text &&
+				questionHasOptions(question) && {
+					// The draft is dropped (#260 keeps Esc the discard gesture), so the words say so.
+					verb: "discard text, back to options",
+					short: "discard text",
+					back: () => this.escapeFromTextInput(question, state),
+				},
+			text &&
+				!questionHasOptions(question) &&
+				typed.length > 0 && {
+					verb: "clear your answer",
+					short: "clear",
+					back: () => {
+						this.text?.setText("");
+						state.inputValue = "";
+						this.status = "";
+					},
+				},
+			!text &&
+				this.detailsExpanded && {
+					verb: "hide details",
+					short: "hide",
+					back: () => {
+						this.detailsExpanded = false;
+					},
+				},
+			!text &&
+				this.ledgerExpanded && {
+					verb: "hide answers",
+					short: "hide",
+					back: () => {
+						this.ledgerExpanded = false;
+					},
+				},
+			cancel,
+		];
+	}
+
+	/** Whether the next Esc cancels the interview rather than closing a layer on it. */
+	private escapeAtRoot(): boolean {
+		return this.escapeLayers().findIndex((layer) => layer) === this.escapeLayers().length - 1;
+	}
+
+	private hintEntries(): { entries: HintEntry[]; esc: HintEntry } {
+		const question = this.currentQuestion();
+		const state = this.currentState();
+		const esc = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: "cancel interview", short: "cancel" };
+		if (this.phase !== "asking" || !question || !state) return { entries: [], esc };
 		const recordAnswer =
 			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
 			"record answer";
@@ -1076,11 +1145,6 @@ class AskUserOverlayView implements Component {
 				: { key: "Enter", verb: recordAnswer, short: recordAnswer.split(" ")[0] ?? recordAnswer };
 		const scroll: HintEntry[] = this.questionOverflows ? [{ key: "PgUp/PgDn", verb: "scroll", critical: false }] : [];
 		if (state.mode === "text") {
-			// Esc means two different things depending on what is behind the field.
-			// A question with options has a list to fall back to, so the key goes
-			// back; a question without one has nothing behind it and the key still
-			// leaves the interview. The footer says which one this is.
-			const escVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "cancel";
 			const entries: HintEntry[] = [];
 			if (this.deps.tui)
 				entries.push({
@@ -1089,10 +1153,9 @@ class AskUserOverlayView implements Component {
 					critical: false,
 				});
 			entries.push(...scroll);
-			if (this.questions.length > 1)
-				entries.push({ key: "Tab/Shift+Tab", verb: "question", short: "next", critical: false });
+			if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question", critical: false });
 			entries.push(record);
-			return { entries, escVerb };
+			return { entries, esc };
 		}
 		const entries: HintEntry[] = [{ key: "?", verb: "details" }];
 		if (this.ledgerEntries().length > 0)
@@ -1107,20 +1170,20 @@ class AskUserOverlayView implements Component {
 		if (this.questions.length > 1) entries.push({ key: "←/→", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
 		entries.push(record);
-		return { entries, escVerb: "cancel" };
+		return { entries, esc };
 	}
 
 	footerHint(): string {
-		const { entries, escVerb } = this.hintEntries();
-		return buildHint(entries, escVerb);
+		const { entries, esc } = this.hintEntries();
+		return fitHintEntries([...entries, esc], Number.POSITIVE_INFINITY);
 	}
 
 	/** The rail's order: the verb that records leads, and the way out closes it. */
 	private railEntries(): HintEntry[] {
-		const { entries, escVerb } = this.hintEntries();
+		const { entries, esc } = this.hintEntries();
 		const record = entries.at(-1);
-		if (!record) return [{ key: "Esc", verb: escVerb }];
-		return [record, ...entries.slice(0, -1), { key: "Esc", verb: escVerb }];
+		if (!record) return [esc];
+		return [record, ...entries.slice(0, -1), esc];
 	}
 
 	/** The shared rule lets the way out stand last, but a rail with room for one key here keeps the key that records. */
@@ -1278,7 +1341,7 @@ class AskUserOverlayView implements Component {
 	 */
 	private renderQuestionHeader(question: AskUserQuestion, width: number, stripNamesIt = false): string[] {
 		const theme = clioTheme();
-		const parts: string[] = [theme.fg("pendingAnswer", "Clio asks you")];
+		const parts: string[] = [theme.fg("pendingAnswer", this.confirmation ? "Confirm" : "Clio asks you")];
 		// The strip above already carries the active question's name with the
 		// cursor on it; the header repeats it only when there is no strip.
 		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, question.header));
@@ -1364,7 +1427,7 @@ class AskUserOverlayView implements Component {
 			// A body without headers counts answers on its position row.
 			if (!fit.headers) return [];
 			// Said before the key is pressed, because Esc ends the turn and an operator should not have to guess at the rest.
-			const esc = this.hintEntries().escVerb === "cancel" ? ` · Esc keeps ${entries.length === 1 ? "it" : "them"}` : "";
+			const esc = this.escapeAtRoot() ? " · kept if you cancel" : "";
 			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", `${count}${esc}`), width)];
 		}
 		const rows: string[] = [];
@@ -1453,7 +1516,9 @@ class AskUserOverlayView implements Component {
 	private submitText(question: AskUserQuestion, state: QuestionState, value: string): void {
 		const answer = value.trim();
 		if (answer.length === 0) {
-			this.status = "Enter an answer or press Esc to cancel.";
+			// The empty field is the card's own layer here, so the rail's Esc word is the one to repeat.
+			const esc = innermostEscapeLayer(this.escapeLayers());
+			this.status = `Type an answer before Enter, or press Esc to ${esc?.verb ?? "cancel interview"}.`;
 			this.deps.requestRender();
 			return;
 		}
