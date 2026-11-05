@@ -466,10 +466,23 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let telemetrySnapshot = deps.telemetry.snapshot();
 	const generationTiming = createAssistantGenerationTiming();
 	let liveGeneration = false;
+	/** Routes that streamed reasoning this session, which the thinking rail then cannot deny. */
+	const reasoningRoutes = new Set<string>();
+	const routeKey = (target: string | null | undefined, model: string | null | undefined): string =>
+		`${target ?? ""}#${model ?? ""}`;
+	const recordReasoningRoute = (event: ChatLoopEvent): void => {
+		if (event.type !== "thinking_delta" || event.delta.length === 0) return;
+		const current = deps.getSettings?.();
+		const key = routeKey(current?.chat?.target, current?.chat?.model);
+		if (reasoningRoutes.has(key)) return;
+		reasoningRoutes.add(key);
+		deps.tui.requestRender();
+	};
 	const recordChatEvent = (event: ChatLoopEvent): void => {
 		generationTiming.record(event, now());
 		if (event.type === "agent_start") liveGeneration = true;
 		if (event.type === "agent_end") liveGeneration = false;
+		recordReasoningRoute(event);
 	};
 	const currentLiveThroughput = (): TokenThroughputSnapshot | null => {
 		if (!liveGeneration) return null;
@@ -686,18 +699,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});
-	/** Routes that streamed reasoning this session, which the thinking rail then cannot deny. */
-	const reasoningRoutes = new Set<string>();
-	const routeKey = (target: string | null | undefined, model: string | null | undefined): string =>
-		`${target ?? ""}#${model ?? ""}`;
-	const unsubscribeReasoning = deps.chat.onEvent((event) => {
-		if (event.type !== "thinking_delta" || event.delta.length === 0) return;
-		const current = deps.getSettings?.();
-		const key = routeKey(current?.chat?.target, current?.chat?.model);
-		if (reasoningRoutes.has(key)) return;
-		reasoningRoutes.add(key);
-		deps.tui.requestRender();
-	});
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getTaskRail: (room) => {
@@ -802,10 +803,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			// Before the first probe answers, a local or gateway route's capabilities are guesses: `model has no thinking` showed
 			// on the first frame of a route about to say `think on`. Until then the rail says what was asked for and no more.
-			const status = deps.providers.list().find((candidate) => candidate.target.id === current?.chat?.target);
 			const asked = current?.chat?.thinkingLevel ?? "off";
-			if (status?.health.status === "unknown" && status.discoveredModelsSource !== "runtime" && asked !== "off") {
-				return { label: asked, hasLevels: false };
+			if (asked !== "off") {
+				const status = deps.providers.list().find((candidate) => candidate.target.id === current?.chat?.target);
+				if (status?.health.status === "unknown" && status.discoveredModelsSource !== "runtime") {
+					return { label: asked, hasLevels: false };
+				}
 			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
@@ -1101,7 +1104,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		banner.dispose();
 		footer.dispose();
 		unsubscribeProjection();
-		unsubscribeReasoning();
 		for (const off of unsubscribeTelemetry) off();
 		if (dropCheck) clearTimeout(dropCheck);
 		contextActivityStore.unsubscribe();
