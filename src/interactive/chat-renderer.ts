@@ -677,8 +677,9 @@ function renderReminderMessageEntry(entry: CustomEntry, width: number): string[]
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
-	const target = entry.target ? `${entry.target}/` : "";
-	return renderNoticeRow(`[model] ${target}${entry.provider}/${entry.modelId}`, "info", width);
+	// The same spelling as the line a reply carries and the rail: the provider is only the wire protocol.
+	const route = entry.target ? `${entry.target} · ${entry.modelId}` : `${entry.provider}/${entry.modelId}`;
+	return renderNoticeRow(`[model] ${route}`, "info", width);
 }
 
 function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {
@@ -745,6 +746,7 @@ function replayEntries(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions,
 ): void {
+	chatPanel.replayRoute?.(options.routeTarget ?? null);
 	const pendingToolIds: string[] = [];
 	let runAssistantMessages: AgentMessage[] = [];
 	// What the live receipt measured, recovered from the ledger: the run's
@@ -995,6 +997,7 @@ function replayEntries(
 					);
 				break;
 			case "modelChange":
+				if (entry.target) chatPanel.replayRoute?.(entry.target);
 				chatPanel.appendReplayBlock((width) => renderModelChangeEntry(entry, width));
 				break;
 			case "thinkingLevelChange":

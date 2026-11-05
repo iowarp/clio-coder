@@ -627,7 +627,7 @@ export function composerPhasePresentation(
 		const from = status.waitingSince ?? status.since;
 		return fitRailFacts(
 			[
-				{ text: room >= 50 ? "is waiting for a response" : room >= 24 ? "is waiting" : "waiting", keep: 9 },
+				{ text: room >= 50 ? "is waiting for a response" : "is waiting", keep: 9 },
 				{ text: elapsedFrom(from), keep: 8 },
 				...modelWaitFacts(status, room, now, from),
 			],

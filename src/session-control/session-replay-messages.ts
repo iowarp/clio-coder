@@ -42,6 +42,8 @@ const MAX_REPLAY_TEXT_CHARS = 20_000;
  * Options for the rehydrate helper used by /resume and /fork.
  */
 export interface RehydrateChatPanelOptions {
+	/** The target the session opened on, until the ledger records a route change. */
+	routeTarget?: string;
 	/** Unprojected ledger for verifying historical skill receipts after eviction projection. */
 	skillContextEntries?: ReadonlyArray<SessionEntry>;
 	/**
