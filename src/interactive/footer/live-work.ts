@@ -17,12 +17,14 @@ import type { AgentStatus } from "../status/index.js";
 import type { ClioTheme } from "../theme/index.js";
 import { formatCompactMs, formatWaitClock, GLYPH } from "../theme/index.js";
 import { modelNickname } from "../theme/labels.js";
-import { composerPhasePresentation } from "./widgets.js";
+import { type CompactionRailFacts, composerPhasePresentation } from "./widgets.js";
 
 export interface LiveWorkFacts {
 	/** The name the composer rail gives the main agent. */
 	actor: string;
 	status: AgentStatus;
+	/** The running compaction's stage and start, which the rail reads too; null or absent when none runs. */
+	compaction?: CompactionRailFacts | null;
 	/** Active fleet runs, helpers excluded; only the first is named. */
 	workers: ReadonlyArray<DispatchBoardRow>;
 	/** How the worker's current action reads on the fleet dock, in the columns its row leaves it. */
@@ -221,7 +223,17 @@ export function liveWorkStrip(
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
 	let candidates: string[];
 	if (mainActive) {
-		const phase = composerPhasePresentation(facts.status, room, facts.now);
+		const compaction = facts.compaction ?? null;
+		const phase = composerPhasePresentation(
+			facts.status,
+			room,
+			facts.now,
+			facts.actor,
+			undefined,
+			0,
+			undefined,
+			compaction,
+		);
 		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
 		const clockFor = (text: string): string | null => {
@@ -230,7 +242,9 @@ export function liveWorkStrip(
 		};
 		const label = railFree(phase.label);
 		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
-		const looseLabel = railFree(composerPhasePresentation(facts.status, room, facts.now, undefined, room - 2).label);
+		const looseLabel = railFree(
+			composerPhasePresentation(facts.status, room, facts.now, facts.actor, room - 2, 0, undefined, compaction).label,
+		);
 		const clocked = (text: string): string => {
 			const elapsed = clockFor(text);
 			return `${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
