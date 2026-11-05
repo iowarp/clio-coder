@@ -282,7 +282,7 @@ export function lastTurnDetails(
 		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
 		turn ? reasoningChip(theme, turn.reasoning) : null,
 		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
-			? theme.fg("annotation", `cache ${turn.cacheRead}/${turn.cacheWrite}`)
+			? theme.fg("annotation", `cache read ${turn.cacheRead} · write ${turn.cacheWrite}`)
 			: null,
 	];
 	if (lastTurn.toolCount > 0) {

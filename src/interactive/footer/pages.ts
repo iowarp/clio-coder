@@ -107,6 +107,16 @@ function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProv
 	];
 }
 
+/** `≥~888.9k +?` in words: a lower bound, estimated in part, with calls that reported nothing. */
+function sessionTokens(display: string, width: number): string {
+	const partial = display.endsWith(" +?");
+	const figure = partial ? display.slice(0, -3) : display;
+	// Cost and never-sent share this row, so a narrow page keeps the figure and `tok`; `≥` still says it is a floor.
+	if (width < 60) return `${figure} tok`;
+	const worded = figure.replace(/^≥~?/u, (mark) => (mark.endsWith("~") ? "at least ~" : "at least "));
+	return `session ${worded} tokens${partial ? ", some calls unknown" : ""}`;
+}
+
 function activityPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
@@ -138,7 +148,6 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	);
 	const tools = meaningfulToolTally(state.agent.toolTally);
 	const board = state.agent.taskBoard;
-	// The Σ names the whole session; a label before it cost the cost its place at 40 columns.
 	const spend = state.telemetry;
 	const session = chipRow(
 		theme,
@@ -150,7 +159,10 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 					: [
 							spend.tokens === null && spend.neverSent === null
 								? null
-								: theme.fg("counter", `Σ${spend.tokens ?? "0"}${spend.neverSent ? ` · ${spend.neverSent}` : ""}`),
+								: theme.fg(
+										"counter",
+										`${sessionTokens(spend.tokens ?? "0", width)}${spend.neverSent ? ` · ${spend.neverSent}` : ""}`,
+									),
 							spend.cost === null ? null : theme.fg("counter", spend.cost),
 						]),
 			board && board.tasks.length > 0 ? labelled("tasks", taskBoardValue(theme, board)) : null,

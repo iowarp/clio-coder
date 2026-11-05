@@ -3705,7 +3705,11 @@ export class SettingsCenter implements Component {
 	private renderSectionLane(width: number, height: number): string[] {
 		const theme = clioTheme();
 		const rows = this.sectionCatalogRows();
-		const header = theme.style("groupHeading", "Sections", { bold: true });
+		// The lane has room only for `◇1` beside a label, so the word that says what it counts sits above it (F13).
+		const anyChanged = !this.effectiveFilterQuery().length && rows.some((row) => row.badge !== undefined);
+		const header = `${theme.style("groupHeading", "Sections", { bold: true })}${
+			anyChanged ? theme.fg("changedValue", `  ${GLYPH.scoped} changed`) : ""
+		}`;
 		const selectedLine = Math.max(
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
@@ -3719,7 +3723,7 @@ export class SettingsCenter implements Component {
 	 * The current section stays highlighted whichever lane holds the cursor, so
 	 * the rows on the right always say which section they belong to.
 	 */
-	private sectionCatalogRows(): Array<SectionLaneRow & { sectionId: SettingsSectionId }> {
+	private sectionCatalogRows(wordedBadge = false): Array<SectionLaneRow & { sectionId: SettingsSectionId }> {
 		const theme = clioTheme();
 		const filtering = this.effectiveFilterQuery().length > 0;
 		return this.sections().map((section) => {
@@ -3729,7 +3733,7 @@ export class SettingsCenter implements Component {
 			const badge = filtering
 				? theme.fg("positionCount", `${matchCount}`)
 				: modifiedCount > 0 && section.id !== "recent"
-					? theme.fg("changedValue", `${GLYPH.scoped}${modifiedCount}`)
+					? theme.fg("changedValue", `${GLYPH.scoped}${modifiedCount}${wordedBadge ? " changed" : ""}`)
 					: undefined;
 			return {
 				sectionId: section.id,
@@ -3854,7 +3858,7 @@ export class SettingsCenter implements Component {
 	}
 
 	private renderSectionsPage(width: number, height: number): string[] {
-		const rows = this.sectionCatalogRows();
+		const rows = this.sectionCatalogRows(true);
 		const selectedLine = Math.max(
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),

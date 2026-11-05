@@ -79,7 +79,7 @@ export interface EditorChrome {
 	getThinkingLabel: () => string;
 	/** Session-scoped loop status from the cached job feed, fitted to the composer rail. */
 	getLoopRail?: (width: number) => string | null;
-	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
+	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[]; note?: string };
 	getHarnessStatus?: (
 		width: number,
 	) => { label: string; glyph: string; token: ClioToken; live: boolean; detail?: string } | null;
@@ -184,6 +184,11 @@ function thinkingRailHint(
 	const glyph = nerdFontEnabled() ? GLYPH.brain : "●";
 	const glyphWidth = visibleWidth(glyph);
 	const graphicalWidth = THINKING_BRAIN_SLOTS * glyphWidth + THINKING_BRAIN_SLOTS - 1;
+	if (thinking.note) {
+		const plain = `think ${level}`;
+		const explained = `${plain} (${thinking.note})`;
+		return theme.fg("thinkingLevel", visibleWidth(explained) <= width ? explained : plain);
+	}
 	if (
 		!thinking.hasLevels ||
 		levels.length === 0 ||
@@ -527,7 +532,13 @@ export class ClioEditor extends Editor {
 		const context = this.chrome.getContextUsage?.();
 		const cells = width >= 100 ? 10 : 6;
 		const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
-		const usage = context && usageRoom >= cells ? contextRailHint(context, cells, usageRoom, theme) : "";
+		const usageLabel = "ctx ";
+		const usageBar =
+			context && usageRoom >= cells + usageLabel.length
+				? contextRailHint(context, cells, usageRoom - usageLabel.length, theme)
+				: "";
+		// The bar alone is a shape to guess at; the word says what fills it.
+		const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
 		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;

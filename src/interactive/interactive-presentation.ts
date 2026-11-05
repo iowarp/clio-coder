@@ -629,15 +629,25 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.model,
 				current?.chat?.thinkingLevel ?? "off",
 			)?.thinking;
+			// The rail states what the model will do. A setting the model cannot honor
+			// says so in words, where `low→off` left the reader to decode the arrow (F13).
+			const coerced = thinking !== undefined && thinking.configuredLevel !== thinking.effectiveLevel;
 			return {
-				label:
-					thinking && thinking.configuredLevel !== thinking.effectiveLevel
-						? `${thinking.configuredLevel}→${thinking.display}`
-						: thinking?.mechanism === "none"
-							? "unavailable"
-							: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
+				label: coerced
+					? thinking.display
+					: thinking?.mechanism === "none"
+						? "unavailable"
+						: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
+				...(coerced
+					? {
+							note:
+								thinking.mechanism === "none"
+									? "model has no thinking"
+									: `${thinking.configuredLevel} runs as ${thinking.display}`,
+						}
+					: {}),
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
