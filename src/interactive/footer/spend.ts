@@ -15,6 +15,11 @@ import { measuredCount } from "../turn-spend.js";
 export interface FooterSpend {
 	/** Whole-session tokens, compact; null before the session made any call. */
 	tokens: string | null;
+	/**
+	 * The measured part of the whole-session tokens, or null when no call measured any. The footer states only this, as
+	 * the receipt and the turn row do; the bound with its unknown calls stays in Detailed and /usage.
+	 */
+	measuredTokens: string | null;
 	/** Whole-session cost; null before anything could be charged. */
 	cost: string | null;
 	/** Calls that never reached a provider, or null when there are none. */
@@ -102,6 +107,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 	const spend: FooterTelemetry = {
 		kind: "ready",
 		tokens: contributed(session.totals.tokens) ? renderCompactCount(session.totals.tokens.fact) : null,
+		measuredTokens: contributed(session.totals.tokens) ? measuredCount(session.totals.tokens) : null,
 		cost: contributed(session.totals.usd) ? session.totals.usd.display : null,
 		neverSent:
 			contributed(neverSent) && !zero(neverSent) && !("kind" in neverSent.fact)

@@ -79,6 +79,14 @@ export function routeAppliedNoticeKey(target: string | null | undefined, model: 
 	return `route-applied:${target ?? ""}/${model ?? ""}`;
 }
 
+/**
+ * Keys of the notices that report a request about one run or plan as still in progress: a cancel, a steer. The
+ * subject's outcome retires them all at once, whichever surface raised them, so none outlives what it describes.
+ */
+export function progressNoticeKeys(subject: string): string[] {
+	return [`dispatch-board:cancel:${subject}`, `dispatch-board:steer:${subject}`, `steer:${subject}`];
+}
+
 /** The ended warnings and errors the dashboard can still show. */
 const ENDED_NOTICE_LIMIT = 4;
 

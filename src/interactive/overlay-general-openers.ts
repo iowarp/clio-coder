@@ -51,6 +51,7 @@ import {
 	renderFleetPlanCard,
 } from "./dispatch-board.js";
 import type { FleetPlanRuns } from "./fleet-plan-runs.js";
+import { progressNoticeKeys } from "./footer/notifications.js";
 import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
@@ -711,7 +712,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	// The fleet this session started and has not seen settle. Launch returns at
 	// once so the session stays usable, which made a running fleet easy to read
 	// as finished; a second start is refused while one runs (Portus v3).
-	let fleetInFlight: { name: string; fleetRootId: string } | null = null;
+	let fleetInFlight: { name: string } | null = null;
 
 	const startFleetRun = (
 		name: string,
@@ -721,8 +722,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (deps.transitions.state !== "closed") return;
 		if (fleetInFlight !== null) {
 			deps.notify(
-				"warning",
-				`fleet ${fleetInFlight.name} (root=${fleetInFlight.fleetRootId}) is still running; /fleet run is refused until it settles. clio-coder fleet events ${fleetInFlight.fleetRootId} --follow shows its progress`,
+				"info",
+				`fleet ${fleetInFlight.name} is still running; start another once it settles · /fleet`,
 				"fleet-run:in-flight",
 			);
 			return;
@@ -813,11 +814,13 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			},
 			onNotice: (text) => deps.stderr(`fleet ${preview.name}: ${text}\n`),
 		};
-		fleetInFlight = { name: preview.name, fleetRootId };
+		fleetInFlight = { name: preview.name };
 		void run(args)
 			.then((outcome) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
+				// A stop asked for from the board, and a refusal that said this plan runs, are over once it settles.
+				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
 				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
 				if (plan?.state === "cancelled") {
@@ -838,6 +841,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.catch((error: unknown) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
+				// A stop asked for from the board, and a refusal that said this plan runs, are over once it settles.
+				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const failed = deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
 				if (failed?.state === "cancelled") {
 					deps.stderr(`${renderFleetPlanCard(failed, deps.terminal.columns).join("\n")}\n`);

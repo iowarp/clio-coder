@@ -121,14 +121,14 @@ function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProv
 	];
 }
 
-/** `≥~888.9k +?` in words: a lower bound, estimated in part, with calls that reported nothing. */
-function sessionTokens(display: string, width: number): string {
-	const partial = display.endsWith(" +?");
-	const figure = partial ? display.slice(0, -3) : display;
-	// Cost and never-sent share this row, so a narrow page keeps the figure and `tok`; `≥` still says it is a floor.
-	if (width < 60) return `${figure} tok`;
-	const worded = figure.replace(/^≥~?/u, (mark) => (mark.endsWith("~") ? "at least ~" : "at least "));
-	return `session ${worded} tokens${partial ? ", some calls unknown" : ""}`;
+/**
+ * The session's measured tokens. A bound such as `≥~13.1k +?` is true but unreadable on this row, so the footer states
+ * what was measured, as the receipt and the turn row do, and points at /usage when nothing was.
+ */
+function sessionTokens(theme: ClioTheme, measured: string | null, width: number): string {
+	if (measured === null) return theme.fg("annotation", width < 60 ? "usage unknown" : "session usage unknown (/usage)");
+	// Cost and never-sent share this row, so a narrow page keeps the figure and `tok`.
+	return theme.fg("counter", width < 60 ? `${measured} tok` : `session ${measured} tokens`);
 }
 
 /** A settled rate says which call it belongs to; beside `last turn` it read as a live figure. */
@@ -182,7 +182,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 					: [
 							spend.tokens === null && spend.neverSent === null
 								? null
-								: theme.fg("counter", sessionTokens(spend.tokens ?? "0", width)),
+								: sessionTokens(theme, spend.tokens === null ? "0" : spend.measuredTokens, width),
 							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
 							spend.cost === null ? null : theme.fg("counter", spend.cost),
 						]),
@@ -460,7 +460,12 @@ function sessionSpendChips(telemetry: FooterTelemetry): string[] {
 	if (telemetry.kind === "unavailable") return [theme.fg("unknownValue", "spend not available")];
 	if (telemetry.kind === "reading") return [theme.fg("unknownValue", "reading the call journal")];
 	return [
-		labelled("session", `${theme.fg("metricValue", telemetry.tokens ?? "0")} ${theme.fg("metricUnit", "tokens")}`),
+		labelled(
+			"session",
+			telemetry.tokens !== null && telemetry.measuredTokens === null
+				? theme.fg("unknownValue", "usage unknown (/usage)")
+				: `${theme.fg("metricValue", telemetry.measuredTokens ?? "0")} ${theme.fg("metricUnit", "tokens")}`,
+		),
 		theme.fg("metricValue", telemetry.cost ?? "nothing charged yet"),
 		...(telemetry.neverSent ? [theme.fg("warning", telemetry.neverSent)] : []),
 	];

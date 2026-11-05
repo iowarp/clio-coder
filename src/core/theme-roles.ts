@@ -141,7 +141,7 @@ export const STRUCTURAL_ROLES = {
 	activityLow: "cyanSupporting",
 	activityMedium: "cyanReading",
 	activityHigh: "cyanFocal",
-	meterFree: "border",
+	meterFree: "meterTrack",
 	meterReserve: "divider",
 	meterSystem: "cyanSupporting",
 	syntaxKeyword: "orangeFocal",

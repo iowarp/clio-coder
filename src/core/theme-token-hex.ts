@@ -175,6 +175,12 @@ export const TERMINAL_PALETTE = {
 		["#526762", 240],
 		["#a4abb0", 248],
 	],
+	// A meter's empty cells say how much is left, so the track holds 3:1 where a frame holds 2:1.
+	meterTrack: [
+		["#737a80", 243],
+		["#5d736d", 242],
+		["#7f878d", 244],
+	],
 	divider: [
 		["#737a80", 243],
 		["#3f524d", 239],

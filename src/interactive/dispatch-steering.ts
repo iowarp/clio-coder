@@ -5,7 +5,8 @@ import {
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
 
-export type DispatchSteeringNoticeLevel = "info" | "warning" | "error";
+// A refusal answers one keypress and describes no standing condition, so it is info and expires on its own.
+export type DispatchSteeringNoticeLevel = "info" | "error";
 
 export interface DispatchSteeringDeps {
 	getSelectedRow: () => DispatchBoardRow | null | undefined;
@@ -32,12 +33,12 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 	const steerSelectedDispatch = (): void => {
 		const row = deps.getSelectedRow();
 		if (!row) {
-			deps.notify("warning", "no fleet run is selected", "dispatch-board:steer");
+			deps.notify("info", "no fleet run is selected", "dispatch-board:steer");
 			return;
 		}
 		if (row.runtimeKind === "acp-delegation" || row.runtimeKind === "subprocess") {
 			deps.notify(
-				"warning",
+				"info",
 				`${row.agentId} runs on ${row.runtimeId} (${row.runtimeKind}) and cannot accept live steering`,
 				`dispatch-board:steer:${row.runId}`,
 			);
@@ -45,7 +46,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		}
 		if (!isDispatchBoardRowSteerable(row)) {
 			deps.notify(
-				"warning",
+				"info",
 				row.status === "enqueued"
 					? `${row.agentId} is queued and can take a message once it starts`
 					: `${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
@@ -70,7 +71,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 	const cancelSelectedDispatch = (): void => {
 		const row = deps.getSelectedRow();
 		if (!row) {
-			deps.notify("warning", "no fleet run is selected", "dispatch-board:cancel");
+			deps.notify("info", "no fleet run is selected", "dispatch-board:cancel");
 			return;
 		}
 		if (row.plan !== undefined) {
@@ -78,12 +79,12 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 			return;
 		}
 		if (row.status === "cancelling") {
-			deps.notify("info", `cancellation is already in progress for ${row.runId}`, `dispatch-board:cancel:${row.runId}`);
+			deps.notify("info", `cancellation is already in progress for ${row.agentId}`, `dispatch-board:cancel:${row.runId}`);
 			return;
 		}
 		if (!isDispatchBoardRowCancellable(row)) {
 			deps.notify(
-				"warning",
+				"info",
 				`${row.agentId} has already settled (${dispatchStatusPresentation(row.status).label}), so there is nothing to cancel`,
 				`dispatch-board:cancel:${row.runId}`,
 			);
@@ -91,14 +92,10 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		}
 		try {
 			deps.abortDispatch(row.runId);
-			deps.notify(
-				"info",
-				`cancellation requested for ${row.agentId} (${row.runId})`,
-				`dispatch-board:cancel:${row.runId}`,
-			);
+			deps.notify("info", `cancellation requested for ${row.agentId}`, `dispatch-board:cancel:${row.runId}`);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			deps.notify("error", `could not cancel ${row.runId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
+			deps.notify("error", `could not cancel ${row.agentId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
 		}
 	};
 
@@ -126,9 +123,9 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 				// A durable plan with no recorded end may still run in another Clio, or its process is gone; neither is
 				// this session's to stop, and saying it settled would be false.
 				deps.notify(
-					"warning",
+					"info",
 					plan.state === "unsettled"
-						? `plan ${plan.name} has no recorded end and was not started in this session, so this session cannot stop it · clio-coder fleet events ${plan.rootId}`
+						? `plan ${plan.name} has no recorded end and was not started in this session, so this session cannot stop it`
 						: `plan ${plan.name} cannot be stopped from this session`,
 					key,
 				);

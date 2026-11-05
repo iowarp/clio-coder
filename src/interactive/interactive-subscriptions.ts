@@ -18,7 +18,7 @@ import {
 	workerAskedByModel,
 } from "../session-control/worker-stream.js";
 import { showsContextResult } from "./context-operation-view.js";
-import type { NoticeSupersedeScope } from "./footer/notifications.js";
+import { type NoticeSupersedeScope, progressNoticeKeys } from "./footer/notifications.js";
 import {
 	type WorkerRunEntryFields,
 	type WorkerSettledFields,
@@ -162,9 +162,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	};
 	/** A request about a run is over when the run is: `cancellation requested` must not outlive it (NO06). */
 	const settleRunNotices = (runId: string): void => {
-		deps.dismissNotice?.(`dispatch-board:cancel:${runId}`);
-		deps.dismissNotice?.(`dispatch-board:steer:${runId}`);
-		deps.dismissNotice?.(`steer:${runId}`);
+		for (const key of progressNoticeKeys(runId)) deps.dismissNotice?.(key);
 	};
 	const repaint = (): void => {
 		deps.refreshFooter();
