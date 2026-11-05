@@ -3246,6 +3246,9 @@ export class SettingsCenter implements Component {
 			return;
 		}
 		if (this.submenuComponent) {
+			// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
+			const submenu = this.submenuComponent;
+			if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
 			this.submenuComponent = null;
 			this.pendingValue = null;
 			this.options.requestRender?.();
@@ -3270,7 +3273,10 @@ export class SettingsCenter implements Component {
 	/** What the next Esc does, in the words the rail shows; the same order as `back`. */
 	escapeVerb(): OverlayEscVerb {
 		if (this.filterDraft !== null) return "cancel filter";
-		if (this.submenuComponent) return "back to list";
+		if (this.submenuComponent)
+			return this.submenuComponent instanceof SubmenuWrapper && this.submenuComponent.editsText
+				? "back, keeps draft"
+				: "back to list";
 		if (this.filterQuery.length > 0) return "clear filter";
 		if (this.level === "rows" && this.sections().length > 0) return "back to sections";
 		return "close settings";
