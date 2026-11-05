@@ -432,6 +432,8 @@ export interface RunEnvelope {
 	executionRole: ExecutionRole;
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
+	/** Who asked for the work this attempt continues. Display only: policy reads requestOrigin. */
+	rootRequestOrigin?: DispatchRequestOrigin;
 	task: string;
 	/** Immutable recipe policy, invocation request, effective phase, and admission reasons. */
 	budget?: RunToolBudgetEnvelope;

@@ -462,12 +462,11 @@ function renderHintEntries(entries: ReadonlyArray<HintEntry>, short: boolean): s
 
 /**
  * Fit a hint to `maxWidth` by, in order: using every full label; using every
- * short label; dropping droppable entries left to right; and only then dropping
- * critical ones left to right, always keeping the last.
- *
- * Left to right is the useful direction because `buildHint` puts navigation
- * first and the commit action and Esc last, so the entries a reader can guess
- * go before the ones they cannot.
+ * short label; then keeping what a narrow rail is for. The commit key leads, the
+ * way out follows it, and droppable entries take what room is left, the rightmost
+ * first because `buildHint` lists the guessable navigation keys on the left.
+ * Critical entries go only when they cannot fit together, left to right, so the
+ * way out is the last thing standing.
  */
 export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: number): string {
 	if (entries.length === 0) return "";
@@ -476,10 +475,10 @@ export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: numb
 }
 
 /**
- * The entries a rail of `maxWidth` keeps, and whether it keeps them in their
- * short spelling. A body that must show every key the rail cannot draws the
- * complement, so the rail and the body are fitted by the same rule and never
- * disagree about which key went where.
+ * The entries a rail of `maxWidth` keeps, in the order it draws them, and whether
+ * it keeps them in their short spelling. A body that must show every key the rail
+ * cannot draws the complement, so the rail and the body are fitted by the same
+ * rule and never disagree about which key went where.
  */
 export function fitHintEntryList(
 	entries: ReadonlyArray<HintEntry>,
@@ -489,20 +488,21 @@ export function fitHintEntryList(
 	for (const short of [false, true]) {
 		if (visibleWidth(renderHintEntries(entries, short)) <= maxWidth) return { kept: [...entries], short };
 	}
-	// Droppable entries go first, left to right, then critical ones by the same
-	// rule. The only positional invariant left is that one entry always survives,
-	// so a footer never renders empty; which one that is falls out of the
-	// classification rather than out of where the caller happened to list it.
-	const kept = [...entries];
-	for (const criticalPass of [false, true]) {
-		while (kept.length > 1) {
-			const index = kept.findIndex((entry) => criticalPass || !isCriticalEntry(entry));
-			if (index === -1) break;
-			kept.splice(index, 1);
-			if (visibleWidth(renderHintEntries(kept, true)) <= maxWidth) return { kept, short: true };
-		}
+	const fits = (list: ReadonlyArray<HintEntry>): boolean => visibleWidth(renderHintEntries(list, true)) <= maxWidth;
+	const isEsc = (entry: HintEntry): boolean => canonicalizeKey(entry.key) === "Esc";
+	const critical = entries.filter(isCriticalEntry);
+	const required = [...critical.filter((entry) => !isEsc(entry)), ...critical.filter(isEsc)];
+	while (required.length > 1 && !fits(required)) required.shift();
+	const extras: HintEntry[] = [];
+	for (const entry of [...entries].reverse()) {
+		if (isCriticalEntry(entry)) continue;
+		// The first that does not fit ends it, so a short key listed earlier never outlives a later one (the terms key).
+		if (!fits([...required, entry, ...extras])) break;
+		extras.unshift(entry);
 	}
-	return { kept, short: true };
+	const kept = [...required, ...extras];
+	// One entry always survives, so a footer never renders empty.
+	return { kept: kept.length > 0 ? kept : [entries.at(-1) as HintEntry], short: true };
 }
 
 /**
@@ -910,6 +910,8 @@ export function showClioOverlayFrame(
 		adaptiveHeight?: boolean;
 		/** Only unanswered decisions receive the small attention cue. */
 		awaitingInput?: boolean | (() => boolean);
+		/** The body states the run's lifecycle itself, so no live-work line joins it. */
+		ownsStatus?: boolean;
 	},
 ): OverlayHandle {
 	const {
@@ -922,10 +924,18 @@ export function showClioOverlayFrame(
 		adaptiveHeight,
 		awaitingInput,
 		approval,
+		ownsStatus,
 		...overlayOptions
 	} = options;
 	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false, awaitingInput);
-	const entry = dockMount(tui, frame, keepComposer === true, adaptiveHeight === true, approval === true);
+	const entry = dockMount(
+		tui,
+		frame,
+		keepComposer === true,
+		adaptiveHeight === true,
+		approval === true,
+		ownsStatus === true,
+	);
 	// The engine keeps this overlay for focus and input routing only. It paints
 	// nothing: the composer draws the frame inline, in normal flow, so the
 	// transcript keeps its rows and its mouse selection.

@@ -26,7 +26,9 @@ import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
+import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
+import { createBackgroundCallTracker } from "./background-calls.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
 import type { CoalescingChatRenderer } from "./chat-renderer.js";
@@ -37,15 +39,17 @@ import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
 import { admissionHint } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
-import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
+import { createDispatchBoardStore, createDispatchBoardView, dispatchStatusPresentation } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFleetDock } from "./fleet-dock.js";
+import { readDurableFleetPlans } from "./fleet-plan-history.js";
 import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
+import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
 import { composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
@@ -65,9 +69,11 @@ import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { createDropAlerts } from "./telemetry-drops.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
 import { modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
+import { workerActivityWords } from "./worker-activity.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 /** How long one `/skill <name>` listing serves later keystrokes. */
@@ -181,7 +187,7 @@ export interface InteractivePresentation {
 	contextActivityStore: ContextActivityStore;
 	footer: FooterDashboardPanel;
 	notifications: NotificationCenter;
-	notify(level: InteractiveNoticeLevel, text: string, key?: string): void;
+	notify(level: InteractiveNoticeLevel, text: string, key?: string, ttlMs?: number): void;
 	dismissContextBootstrapNotices(): void;
 	announceTaskMemorySeedOffer(): void;
 	collapseWelcomeDashboard(): void;
@@ -398,7 +404,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		dispatchSnapshot: () => deps.dispatch.snapshot(),
 		readRunResult: (runId) => readWorkerRunResultFacts(runId),
 	});
-	const dispatchBoardStore = factories.createDispatchBoardStore(deps.telemetry);
+	const dispatchBoardStore = factories.createDispatchBoardStore(deps.telemetry, () =>
+		readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
 	const footerToolCounts = new Map<string, number>();
@@ -424,14 +432,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return { tokensPerSecond: outputTokens / (durationMs / 1000), outputTokens, estimated, durationMs };
 	};
 	let footer: FooterDashboardPanel;
+	const backgroundCalls = createBackgroundCallTracker(deps.bus, () => {
+		footer?.refresh();
+		requestRender();
+	});
 	const notifications = factories.createNotificationCenter({
 		onChange: () => {
 			footer?.refresh();
 			requestRender();
 		},
 	});
-	const notify = (level: InteractiveNoticeLevel, text: string, key?: string): void => {
-		notifications.add(key ? { level, text, key } : { level, text });
+	const notify = (level: InteractiveNoticeLevel, text: string, key?: string, ttlMs?: number): void => {
+		notifications.add({ level, text, ...(key ? { key } : {}), ...(ttlMs === undefined ? {} : { ttlMs }) });
 	};
 	const dismissContextBootstrapNotices = (): void => {
 		for (const notice of notifications.list()) {
@@ -455,6 +467,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 
 	let localBashStartedAt: number | null = null;
+	// The footer composes once before the editor exists; until then no list can be open.
+	let composerEditor: ClioEditor | null = null;
 	let localBashCommand: string | null = null;
 	let localBashCancelledAt: number | null = null;
 	const footerDeps: FooterDashboardDeps = {
@@ -533,6 +547,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
+		getBackgroundCalls: () => backgroundCalls.active(),
+		getKeyContext: () => {
+			if (dockTop(deps.tui) !== null || composerEditor?.isShowingAutocomplete()) return "surface";
+			if (deps.chat.isStreaming()) return "steer";
+			if (deps.chat.turnPreparation().phase !== "idle") return "hold";
+			return localBashStartedAt !== null ? "shell" : "send";
+		},
 		get dismissKeyLabel() {
 			return keybindings.actionLabel("clio-coder.notifications.dismiss");
 		},
@@ -572,6 +593,15 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	unsubscribeTelemetry.push(deps.telemetry.read?.subscribe("health", checkDrops) ?? (() => {}));
 
+	const currentLiveWork = (): LiveWorkFacts => ({
+		actor: modelNickname(deps.getSettings?.().chat?.model),
+		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
+		workers: dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row)),
+		background: backgroundCalls.active(),
+		workerActivity: (row) =>
+			row.progress ? workerActivityWords(row.progress) : dispatchStatusPresentation(row.status).label,
+		now: Date.now(),
+	});
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getModelLabel: () => {
@@ -582,15 +612,21 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
+			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
-				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), reserved);
+				return {
+					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model), undefined, reserved),
+					...(detail ? { detail } : {}),
+				};
 			}
 			const target = deps.providers.list().find((candidate) => candidate.target.id === route?.target);
-			if (!target || !route?.target) return null;
+			if (!target || !route?.target) {
+				return detail ? { glyph: GLYPH.queued, label: "is idle", token: "counter", live: false, detail } : null;
+			}
 			const last = lastTurnSummary;
 			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
-			return idleReadinessPresentation(
+			const readiness = idleReadinessPresentation(
 				{
 					targetId: route.target,
 					available: target.available,
@@ -601,7 +637,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				width,
 				reserved,
 			);
+			if (!detail) return readiness;
+			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
+			const quiet = readiness.glyph === GLYPH.queued && target.health.status === "healthy";
+			return { ...readiness, ...(quiet ? { label: "is idle" } : {}), detail };
 		},
+		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
 			: {}),
@@ -632,15 +673,25 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.model,
 				current?.chat?.thinkingLevel ?? "off",
 			)?.thinking;
+			// The rail states what the model will do. A setting the model cannot honor
+			// says so in words, where `low→off` left the reader to decode the arrow (F13).
+			const coerced = thinking !== undefined && thinking.configuredLevel !== thinking.effectiveLevel;
 			return {
-				label:
-					thinking && thinking.configuredLevel !== thinking.effectiveLevel
-						? `${thinking.configuredLevel}→${thinking.display}`
-						: thinking?.mechanism === "none"
-							? "unavailable"
-							: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
+				label: coerced
+					? thinking.display
+					: thinking?.mechanism === "none"
+						? "unavailable"
+						: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
+				...(coerced
+					? {
+							note:
+								thinking.mechanism === "none"
+									? "model has no thinking"
+									: `${thinking.configuredLevel} runs as ${thinking.display}`,
+						}
+					: {}),
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
@@ -665,6 +716,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Ctrl+J"),
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
+	composerEditor = editor;
 	const readSettingState = () => ({
 		thinking: editorChrome.getThinkingLabel(),
 		output: editorChrome.getOutputStyle?.() ?? "standard",
@@ -874,6 +926,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const statusActive =
 				!["idle", "ended"].includes(statusController.current().phase) ||
 				localBashStartedAt !== null ||
+				backgroundCalls.active().length > 0 ||
 				dispatchBoardStore.rows().some((row) => row.status === "running");
 			if (deps.chat.isStreaming() || statusActive || loopSnapshot.some((job) => job.nextDueAt !== null)) {
 				footer.refresh();
@@ -912,6 +965,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		if (dropCheck) clearTimeout(dropCheck);
 		contextActivityStore.unsubscribe();
 		unsubscribeLoops?.();
+		backgroundCalls.dispose();
 		dispatchBoardStore.unsubscribe();
 		unbindRunReaders();
 	};

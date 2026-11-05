@@ -137,7 +137,17 @@ export function keyCap(theme: ClioTheme, key: string, role: SemanticRole = "deci
 /** Chips on one row, joined by the quiet middot, clipped to `width`. */
 export function chipRow(theme: ClioTheme, chips: ReadonlyArray<string | null | undefined>, width: number): string {
 	const present = chips.filter((part): part is string => typeof part === "string" && part.length > 0);
-	return clip(present.join(dotSep(theme)), width);
+	const separator = dotSep(theme);
+	const whole = present.join(separator);
+	if (visibleWidth(whole) <= width) return whole;
+	// A chip cut mid-word reads as a different fact, so the row gives up whole chips
+	// from its end and marks that it did. Chips that arrived joined count one by one.
+	const pieces = whole.split(separator);
+	for (let kept = pieces.length - 1; kept >= 1; kept--) {
+		const row = [...pieces.slice(0, kept), GLYPH.ellipsis].join(separator);
+		if (visibleWidth(row) <= width) return row;
+	}
+	return clip(pieces[0] ?? "", width);
 }
 
 /**

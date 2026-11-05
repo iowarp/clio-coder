@@ -26,10 +26,10 @@ index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71
          const previous = this.input.getValue();
          this.input.handleInput(data);
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb65dd140fe 100644
+index 7e6a8bc120ec687d4a647afff50d81fde6d5f23a..b98b2c14ac97c8e43ca0820bd78af2c288ec4e32 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
-@@ -98,6 +98,7 @@ export declare class Editor implements Component, Focusable {
+@@ -100,6 +100,7 @@ export declare class Editor implements Component, Focusable {
      protected renderBottomBorder(width: number, hiddenLineCount: number): string;
      render(width: number): string[];
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
@@ -38,10 +38,10 @@ index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb6
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 56956760b6c31aedb2ca6df160256140e5af2fef..fe98784aed9660d8fc557e8b3f6682a0193d29c0 100644
+index ab247ab4b835d4e200ac0829fde0957474963030..30fdf441543f5619a571dd825d21a8cf5511f3f9 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -545,6 +545,18 @@ export class Editor {
+@@ -549,6 +549,18 @@ export class Editor {
              this.updateAutocomplete();
          return { handled: true, focus: true };
      }
@@ -104,7 +104,7 @@ index a27023e070788d2f143b77743eef1c8a5ad0de58..1c8341115ccc621b5a916bf2bb96da1a
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index d0f203ab61aa753ca124bfe7806cd927436a390b..15ba50e9c8080436bc10772156dc3a584f9bcb91 100644
+index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..2592daf00852afb9a57d2fa78e84c3377d8b7bbe 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
 @@ -109,11 +109,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
@@ -126,10 +126,10 @@ index d0f203ab61aa753ca124bfe7806cd927436a390b..15ba50e9c8080436bc10772156dc3a58
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 043d2c7952af7908b7cbb576f47d2bc18adada22..bbfce45bd6462f1b2206ea3078b0f54962fd3823 100644
+index cd41095edc02c3b6b9dc622414fd4942d095d0f6..61ffb093f8cff281cc671d5c68108f2509f35e1a 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -324,6 +324,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -325,6 +325,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -144,7 +144,7 @@ index 043d2c7952af7908b7cbb576f47d2bc18adada22..bbfce45bd6462f1b2206ea3078b0f549
          if (this.activeSearch) {
              this.closeSearch();
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a7483aa3411e 100644
+index e00273ab6b20f916256aea3ddae374a88641e2ed..68bfcc358a49138755b6aa3531abd5212105ec07 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
 @@ -3,7 +3,8 @@ import * as os from "node:os";
@@ -154,10 +154,10 @@ index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a748
 -import { visibleWidth } from "./utils.js";
 +import { normalizeTerminalOutput, visibleWidth } from "./utils.js";
 +const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+ /** OSC 133 prompt markers at the start of a rendered line. Fullscreen uses them for prompt navigation. */
+ const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
  const KITTY_SEQUENCE_PREFIX = "\x1b_G";
- const MAX_RENDER_WRITE_CHARS = 1024 * 1024;
- /**
-@@ -107,6 +108,61 @@ export class TuiMainScreen extends TuiBase {
+@@ -109,6 +110,61 @@ export class TuiMainScreen extends TuiBase {
      hardwareCursorRow = 0;
      maxLinesRendered = 0;
      previousViewportTop = 0;
@@ -219,7 +219,7 @@ index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a748
      captureRenderState() {
          return {
              previousLines: [...this.previousLines],
-@@ -129,6 +185,7 @@ export class TuiMainScreen extends TuiBase {
+@@ -131,6 +187,7 @@ export class TuiMainScreen extends TuiBase {
          this.previousViewportTop = state.previousViewportTop;
      }
      resetRenderState() {
@@ -227,7 +227,7 @@ index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a748
          this.previousLines = [];
          this.previousWidth = -1;
          this.previousHeight = -1;
-@@ -151,8 +208,8 @@ export class TuiMainScreen extends TuiBase {
+@@ -153,8 +210,8 @@ export class TuiMainScreen extends TuiBase {
      }
      collectKittyImageIds(lines) {
          const ids = new Set();
@@ -238,7 +238,7 @@ index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a748
                  ids.add(id);
              }
          }
-@@ -183,7 +240,7 @@ export class TuiMainScreen extends TuiBase {
+@@ -185,7 +242,7 @@ export class TuiMainScreen extends TuiBase {
          let expandedFirstChanged = firstChanged;
          let expandedLastChanged = lastChanged;
          const expandForLines = (lines) => {
@@ -247,32 +247,3 @@ index 88eca823778ee1d70143bd94588437021f856333..aa68458082c89deaba1785ebef84a748
                  if (extractKittyImageIds(lines[i]).length === 0)
                      continue;
                  const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
-diff --git a/dist/utils.js b/dist/utils.js
-index 946da9df9f098c55272410a78e31363623fdc219..cfac4215d0c9e9731b2f5f0429ceafa53d6905fc 100644
---- a/dist/utils.js
-+++ b/dist/utils.js
-@@ -856,7 +856,9 @@ function wrapSingleLine(line, width) {
-     let currentVisibleLength = 0;
-     for (const token of tokens) {
-         const tokenVisibleLength = visibleWidth(token);
--        const isWhitespace = token.trim() === "";
-+        // Clio patch: a whitespace token can carry the closing codes of the styled
-+        // word before it, so it is whitespace when its visible text is.
-+        const isWhitespace = stripTerminalSequences(token).trim() === "";
-         // Token itself is too long - break it character by character
-         if (tokenVisibleLength > width && !isWhitespace) {
-             if (currentLine) {
-@@ -889,9 +891,12 @@ function wrapSingleLine(line, width) {
-             }
-             wrapped.push(lineToWrap);
-             if (isWhitespace) {
--                // Don't start new line with whitespace
-+                // Don't start new line with whitespace. Apply the codes it carries
-+                // first, so a style the previous word closed stays closed.
-+                updateTrackerFromText(token, tracker);
-                 currentLine = tracker.getActiveCodes();
-                 currentVisibleLength = 0;
-+                continue;
-             }
-             else {
-                 currentLine = tracker.getActiveCodes() + token;

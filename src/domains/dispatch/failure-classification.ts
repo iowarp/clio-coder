@@ -32,6 +32,24 @@ export type FailureClass =
 	| "worker-runtime"
 	| "internal";
 
+const FAILURE_CLASS_WORDS: Partial<Record<FailureClass, string>> = {
+	"model-quality": "the model gave no usable result",
+	"provider-refusal": "the provider refused the request",
+	"target-auth": "the provider rejected its credentials",
+	"target-rate-limit": "the provider rate-limited it",
+	"target-transient": "the provider was unavailable",
+	capacity: "the route ran out of capacity",
+	"node-channel": "its node stopped answering",
+	"node-version": "its node runs an incompatible version",
+	"node-resource": "its node ran out of resources",
+	"worker-runtime": "the worker failed to run",
+};
+
+/** Why a route was left, in the operator's words; an unmapped reason passes through as it was recorded. */
+export function failureClassWords(failureClass: string): string {
+	return FAILURE_CLASS_WORDS[failureClass as FailureClass] ?? failureClass;
+}
+
 export type RoutePart = "agent" | "target" | "model" | "node" | "runtime";
 
 export interface RetryDecision {

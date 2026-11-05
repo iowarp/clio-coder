@@ -1483,7 +1483,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	overlayLifecycle = createOverlayLifecycle({
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
-		getDispatchRows: () => dispatchBoardStore.rows(),
+		getDispatchRows: () => dispatchBoardStore.workerRows(),
 		app: { ...deps, ...settingActions },
 		tui,
 		footer,
@@ -1582,6 +1582,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			editor.setLiteralText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
 		}
 		chatRenderer.flush();
+		notifications.dismiss("keyboard:escape");
 		deps.chat.cancel();
 		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
 		footer.refresh();
@@ -1773,6 +1774,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		dismissNotice: (key) => {
+			notifications.dismiss(key);
+		},
 		getSessionId: () => deps.chat.getSessionId(),
 		contextResult: (operation) => {
 			chatRenderer.mutate(
@@ -1912,7 +1916,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			notifications.add({
 				level: "info",
 				key: "keyboard:escape",
-				text: "That Esc closed a panel, so the run is still going. Esc again in a moment cancels it.",
+				text: editorSubmit.hasActiveEditorBash()
+					? "Command still going · Esc again stops it"
+					: "Run still going · Esc again cancels",
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),

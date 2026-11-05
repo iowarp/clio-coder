@@ -151,7 +151,7 @@ const FINISHED_VERBS: Readonly<Record<string, string>> = {
 	searching: "searched",
 	finding: "found",
 	fetching: "fetched",
-	verifying: "verified",
+	verifying: "checked",
 	navigating: "navigated",
 	inspecting: "inspected",
 	monitoring: "monitored",
@@ -247,7 +247,7 @@ function verdictText(paint: BoardPaint, card: WorkerCard): string {
 	if (record.outcome === "succeeded") {
 		parts.push(card.toolCalls === 0 ? paint.fg("toolMetadata", "◌ ran no tools") : paint.fg("success", "✓ succeeded"));
 	} else if (record.outcome === "canceled") {
-		parts.push(paint.fg("toolMetadata", "⊘ canceled"));
+		parts.push(paint.fg("toolMetadata", "⊘ cancelled"));
 	} else {
 		parts.push(paint.fg("error", `✗ ${clean(record.outcomeCode ?? record.outcome)}`));
 	}

@@ -1,3 +1,4 @@
+import { colorDisabled } from "../core/terminal-preferences.js";
 import { visibleWidth } from "../engine/tui.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme, padAnsi } from "./theme/index.js";
@@ -13,6 +14,8 @@ export const ACTIVITY_SPAN_DAYS = 182;
 const DAY_MS = 86_400_000;
 const CELL = "■";
 const LEVEL_TOKENS: ReadonlyArray<ClioToken> = ["meterFree", "activityLow", "activityMedium", "activityHigh"];
+/** With colour off the hue is gone, so the cell's shape has to carry the level (F18). */
+const LEVEL_CELLS_MONOCHROME: ReadonlyArray<string> = ["·", "░", "▒", "█"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** `YYYY-MM-DD` in local time. */
@@ -55,6 +58,9 @@ export function renderActivityHeatmap(
 	caption = "",
 ): string[] {
 	const theme = clioTheme();
+	const monochrome = colorDisabled();
+	const levelCell = (index: number): string =>
+		theme.fg(LEVEL_TOKENS[index] ?? "border", monochrome ? (LEVEL_CELLS_MONOCHROME[index] ?? CELL) : CELL);
 	const gutter = 4;
 	const weeks = Math.max(4, Math.min(Math.ceil(ACTIVITY_SPAN_DAYS / 7), Math.floor((contentWidth - gutter) / 2)));
 	const today = new Date(now);
@@ -89,11 +95,11 @@ export function renderActivityHeatmap(
 				continue;
 			}
 			const count = days.get(dayKey(time)) ?? 0;
-			cells += `${theme.fg(LEVEL_TOKENS[level(count, max)] ?? "border", CELL)} `;
+			cells += `${levelCell(level(count, max))} `;
 		}
 		lines.push(`${padAnsi(theme.fg("body", rowLabels[row] ?? ""), gutter)}${cells.trimEnd()}`);
 	}
-	const legend = LEVEL_TOKENS.map((token) => theme.fg(token, CELL)).join(" ");
+	const legend = LEVEL_TOKENS.map((_, index) => levelCell(index)).join(" ");
 	const captionText = caption.length > 0 ? ` ${theme.fg("annotation", `· ${caption}`)}` : "";
 	lines.push(`${" ".repeat(gutter)}${theme.fg("body", "Less")} ${legend} ${theme.fg("body", "More")}${captionText}`);
 	return lines.map((line) => (visibleWidth(line) > contentWidth ? padAnsi(line, contentWidth) : line));

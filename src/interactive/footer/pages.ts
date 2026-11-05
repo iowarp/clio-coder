@@ -37,7 +37,7 @@ import {
 	sectionRule,
 	type Tone,
 } from "../theme/index.js";
-import { fitIdentityLabel } from "../theme/labels.js";
+import { fitIdentityLabel, modelNickname } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
@@ -55,6 +55,11 @@ import {
 	taskBoardValue,
 	zipColumns,
 } from "./widgets.js";
+
+/** A plan row stands for a whole fleet plan, and a finished one can predate this process. Neither is a worker. */
+function workerRowsOf(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<DispatchBoardRow> {
+	return rows.filter((row) => row.plan === undefined);
+}
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
@@ -107,6 +112,22 @@ function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProv
 	];
 }
 
+/** `≥~888.9k +?` in words: a lower bound, estimated in part, with calls that reported nothing. */
+function sessionTokens(display: string, width: number): string {
+	const partial = display.endsWith(" +?");
+	const figure = partial ? display.slice(0, -3) : display;
+	// Cost and never-sent share this row, so a narrow page keeps the figure and `tok`; `≥` still says it is a floor.
+	if (width < 60) return `${figure} tok`;
+	const worded = figure.replace(/^≥~?/u, (mark) => (mark.endsWith("~") ? "at least ~" : "at least "));
+	return `session ${worded} tokens${partial ? ", some calls unknown" : ""}`;
+}
+
+/** A settled rate says which call it belongs to; beside `last turn` it read as a live figure. */
+function lastCallThroughput(state: FooterDashboardRenderState): string | null {
+	const figures = formattedThroughput(clioTheme(), state.throughput, state.telemetry);
+	return figures === null ? null : labelled("last call", figures);
+}
+
 function activityPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
@@ -122,17 +143,22 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 						`${GLYPH.phaseCompact} ${clean(contextWork.message)}`,
 					)
 				: null,
+			...(state.background ?? []).map((call) =>
+				theme.fg(
+					"activity",
+					`${call.purpose} on ${modelNickname(call.model)} · ${formatCompactMs(state.now - call.startedAt)}`,
+				),
+			),
 			streaming ? formattedThroughput(theme, state.throughput, undefined) : null,
 			streaming ? liveTokenValue(theme, state.throughput, state.telemetry, state.context.used) : null,
 			!streaming && lastTurn ? labelled("last turn", lastTurnOutcome(theme, lastTurn)) : null,
 			!streaming && lastTurn ? lastTurnDetails(theme, lastTurn, state.telemetry) : null,
-			!streaming ? formattedThroughput(theme, state.throughput, state.telemetry) : null,
+			!streaming ? lastCallThroughput(state) : null,
 		],
 		width,
 	);
 	const tools = meaningfulToolTally(state.agent.toolTally);
 	const board = state.agent.taskBoard;
-	// The Σ names the whole session; a label before it cost the cost its place at 40 columns.
 	const spend = state.telemetry;
 	const session = chipRow(
 		theme,
@@ -144,7 +170,8 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 					: [
 							spend.tokens === null && spend.neverSent === null
 								? null
-								: theme.fg("counter", `Σ${spend.tokens ?? "0"}${spend.neverSent ? ` · ${spend.neverSent}` : ""}`),
+								: theme.fg("counter", sessionTokens(spend.tokens ?? "0", width)),
+							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
 							spend.cost === null ? null : theme.fg("counter", spend.cost),
 						]),
 			board && board.tasks.length > 0 ? labelled("tasks", taskBoardValue(theme, board)) : null,
@@ -153,7 +180,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		],
 		width,
 	);
-	const rows = state.dispatchRows;
+	const rows = workerRowsOf(state.dispatchRows);
 	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const done = rows.filter((row) => row.status === "completed");
 	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status));
@@ -433,9 +460,10 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const resource = state.resources;
 	const capacity = state.agent.localCapacity;
 	const memory = state.session.memoryIntervention;
-	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
-	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
-	const failed = state.dispatchRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
+	const workerRows = workerRowsOf(state.dispatchRows);
+	const active = workerRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const completed = workerRows.filter((row) => row.status === "completed").length;
+	const failed = workerRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
 	const toolCalls = Object.values(state.toolCounts.tools).reduce((a, b) => a + b, 0);
 	const value = (text: string): string =>
 		theme.fg(
@@ -620,8 +648,8 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
-/** The widest stats a row carries, `272K/272K (100.0%) | 999 tps`. */
-const STATS_RESERVE_WIDTH = 28;
+/** The widest stats a row carries, `272K/272K (100.0%) | last 999 tps`. */
+const STATS_RESERVE_WIDTH = 33;
 
 /** Workspace and counts above; notices and active harness facts below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
@@ -636,9 +664,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const settled = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
 	const rate = state.throughput ? state.throughput.tokensPerSecond : settled?.tokensPerSecond;
 	const estimated = state.throughput ? state.throughput.estimated === true : settled?.estimated === true;
+	// A rate is live only while tokens are arriving; during a tool the turn's figure is as historical as a settled call's (HF03).
+	const flowing = state.throughput !== null && (state.status.phase === "writing" || state.status.phase === "thinking");
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")
+			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")}`
 			: "";
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
 	const statsCap = Math.floor(w * 0.4);
@@ -672,10 +702,20 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		state.notices.filter((notice) => notice.presentation === "setting"),
 		state.now,
 	);
-	const notice = topNotification(
-		state.notices.filter((entry) => entry.presentation !== "setting"),
-		state.now,
+	const keyContext = state.keyContext ?? "send";
+	const surfaceOwnsKeys = keyContext === "surface";
+	// The keys that answer this moment, which a tip must not cover and a notice may.
+	const immediateKeys = keyContext === "steer" || keyContext === "hold" || keyContext === "shell";
+	// A tip is teaching for the idle composer. Under a card or an overlay, or while
+	// a run holds the keys, the slot stays with what applies; a real notice still shows.
+	const liveNotices = state.notices.filter(
+		(entry) =>
+			entry.presentation !== "setting" && !((surfaceOwnsKeys || immediateKeys) && entry.text.startsWith("tip: ")),
 	);
+	const notice = topNotification(liveNotices, state.now);
+	const otherNotices = notice
+		? liveNotices.filter((entry) => entry !== notice && (entry.expiresAt === null || entry.expiresAt > state.now)).length
+		: 0;
 	const key =
 		getKeybindings()
 			.getKeys("clio-coder.status.toggle")
@@ -691,14 +731,19 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
 			: null;
-	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const workers = workerRowsOf(state.dispatchRows).filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const plans = state.dispatchRows.filter((row) => row.plan !== undefined && row.status === "running").length;
 	const skills = state.session.activeSkills ?? [];
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	// Idle and off say nothing: the line names memory only while it works or cannot.
 	const guardian = state.session.memoryIntervention?.guardian;
+	// The rail names a memory call from its first moment, with route and elapsed.
+	const memoryOnRail = (state.background ?? []).some((call) => call.purpose === "memory review");
 	const memoryFact =
 		guardian === "reviewing"
-			? theme.fg("activity", "mem reviewing")
+			? memoryOnRail
+				? ""
+				: theme.fg("activity", "mem reviewing")
 			: guardian === "waiting-capacity"
 				? theme.fg("warning", "mem waiting")
 				: guardian === "unavailable"
@@ -708,6 +753,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
+		plans ? theme.fg("activity", `${plans} ${plans === 1 ? "plan" : "plans"}`) : "",
 		memoryFact,
 		skills.length
 			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
@@ -733,25 +779,29 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
 			: feedback
 				? theme.fg("changedValue", clean(feedback.text))
-				: state.demoHint && !state.welcomeVisible
-					? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-					: theme.fg(
-							"keyboardHint",
-							state.welcomeVisible
-								? ""
-								: ((state.demo !== false ? footerKeyHint(state.now, narrow, room) : null) ?? `${key} Dashboard`),
-						);
+				: surfaceOwnsKeys
+					? ""
+					: state.demoHint && !state.welcomeVisible && !immediateKeys
+						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
+						: theme.fg(
+								"keyboardHint",
+								state.welcomeVisible
+									? ""
+									: ((state.demo !== false ? footerKeyHint(state.now, narrow, room, keyContext) : null) ?? `${key} Dashboard`),
+							);
 	// One line flattens a multi-line notice and cuts the end, which is where a
 	// remediation command sits. Name the key that opens the dashboard, whose
 	// notice panel wraps the full text.
-	const more = theme.fg("keyboardHint", ` ${key} more`);
+	const more = theme.fg("keyboardHint", ` ${key} ${otherNotices > 0 ? `+${otherNotices} more` : "more"}`);
 	// A narrow row keeps the notice itself; the hint only rides along when
 	// the notice keeps enough room to stay readable.
 	const clipped =
 		room - visibleWidth(more) >= 24 &&
 		!urgent &&
 		notice !== undefined &&
-		(notice.text.includes("\n") || visibleWidth(`${notificationGlyph(notice.level)} ${clean(notice.text)}`) > room);
+		(otherNotices > 0 ||
+			notice.text.includes("\n") ||
+			visibleWidth(`${notificationGlyph(notice.level)} ${clean(notice.text)}`) > room);
 	const line = clipped ? `${fit(message, Math.max(1, room - visibleWidth(more)))}${more}` : message;
 	if (alone) return [firstRow, fit(line)];
 	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];

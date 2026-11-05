@@ -605,6 +605,8 @@ export interface DispatchRunIdentity {
 	task?: string | undefined;
 	agentAudience?: AgentAudience | undefined;
 	requestOrigin?: DispatchRequestOrigin | undefined;
+	/** Who asked for the work a failover attempt continues. Display only: policy reads requestOrigin. */
+	rootRequestOrigin?: DispatchRequestOrigin | undefined;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
@@ -649,6 +651,8 @@ export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
 	assignmentId: string;
 	/** 0 on the first attempt, incremented once per retry. */
 	attempt: number;
+	/** Set when routing moved this run off the route it would have used, so the operator can be told. */
+	routeMove?: { fromTargetId: string; fromModelId: string; reason: string } | undefined;
 	/**
 	 * Tool call whose execution spawned this run. Present only on agent-origin
 	 * runs whose caller knew its own call id, which is what lets a transcript

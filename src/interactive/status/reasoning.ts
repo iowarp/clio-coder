@@ -58,13 +58,14 @@ export function compactReasoningTokens(value: number): string {
 }
 
 /**
- * `r123` for a provider-attested count, `r≈123` for anything Clio inferred.
- * A provider-measured zero is shown as `r0`; an unmeasured turn has no chip (#434).
+ * `reasoning 123` for a provider-attested count, `reasoning ≈123` for anything
+ * Clio inferred. A provider-measured zero is shown as `reasoning 0`; an unmeasured
+ * turn has no chip (#434).
  */
 export function formatReasoningChip(
 	view: ReasoningUsageView,
 	format: (value: number) => string = compactReasoningTokens,
 ): string | null {
 	if (view.provenance === "unmeasured" || (view.tokens <= 0 && view.provenance !== "provider")) return null;
-	return `r${view.provenance === "provider" ? "" : "≈"}${format(view.tokens)}`;
+	return `reasoning ${view.provenance === "provider" ? "" : "≈"}${format(view.tokens)}`;
 }

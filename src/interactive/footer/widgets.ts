@@ -285,7 +285,7 @@ export function lastTurnDetails(
 		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
 		turn ? reasoningChip(theme, turn.reasoning) : null,
 		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
-			? theme.fg("annotation", `cache ${turn.cacheRead}/${turn.cacheWrite}`)
+			? theme.fg("annotation", `cache read ${turn.cacheRead} · write ${turn.cacheWrite}`)
 			: null,
 	];
 	if (lastTurn.toolCount > 0) {
@@ -646,12 +646,14 @@ export function composerPhasePresentation(
 	width: number,
 	now: number,
 	modelName?: string,
+	/** Room for the words alone, for a surface that draws them without the rail's identity beside them. */
+	labelRoom?: number,
 	reserved = 0,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = railActivityRoom(width, reserved);
+	const room = labelRoom ?? railActivityRoom(width, reserved);
 	// A tool's actor is part of the claim, so its rail holds room for the name instead of letting it yield.
-	const toolRoom = railActivityRoom(width, reserved, (status.tool?.operatorShell === true ? 10 : 4) + 1);
+	const toolRoom = labelRoom ?? railActivityRoom(width, reserved, (status.tool?.operatorShell === true ? 10 : 4) + 1);
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
@@ -750,7 +752,7 @@ export function composerPhasePresentation(
 							...(status.cancelRequestedAt !== undefined ? { startedAt: status.cancelRequestedAt } : {}),
 						},
 					},
-					room,
+					toolRoom,
 					now,
 					"is stopping",
 					elapsedFrom,

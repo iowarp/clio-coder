@@ -19,7 +19,8 @@ export interface FleetPlanRunView {
 	name: string;
 	startedAtMs: number;
 	finishedAtMs: number | null;
-	state: "running" | "passed" | "failed";
+	/** Unsettled is a durable root with no recorded end: its process may be gone or may still be running elsewhere. */
+	state: "running" | "passed" | "failed" | "unsettled";
 	steps: ReadonlyArray<FleetPlanStepView>;
 	requiredStepCount: number;
 	succeededStepCount: number;
@@ -42,19 +43,23 @@ function settledDetail(outcome: FleetRunStepOutcome): string | undefined {
 	const record = outcome.codeStep;
 	if (record !== undefined) {
 		const exit = record.timedOut ? "timed out" : `exit ${record.exitCode}`;
-		return `${exit} · ${record.durationMs}ms`;
+		return `${exit} · ${record.durationMs < 1000 ? `${record.durationMs}ms` : `${(record.durationMs / 1000).toFixed(1)}s`}`;
 	}
 	return outcome.failureReason;
 }
 
 /**
- * Session record of the plans `/fleet run` started. A code step makes no worker
- * run, so the telemetry behind the Fleet Runs board never hears of it and the
- * board said `No fleet runs yet` right after a plan ran. The plan's own callbacks
- * are the only witnesses, so they are what this folds.
+ * The plans behind the Fleet Runs board. A code step makes no worker run, so the
+ * telemetry behind the board never hears of it and the board said `No fleet runs
+ * yet` right after a plan ran. A plan's own callbacks are the witnesses while it
+ * runs here; the durable root records answer for every plan before this process.
  */
-export function createFleetPlanRuns(now: () => number = Date.now): FleetPlanRuns {
+export function createFleetPlanRuns(
+	now: () => number = Date.now,
+	readDurable: () => ReadonlyArray<FleetPlanRunView> = () => [],
+): FleetPlanRuns {
 	const plans = new Map<string, FleetPlanRunView>();
+	let hydrated = false;
 	const update = (rootId: string, change: (plan: FleetPlanRunView) => FleetPlanRunView): FleetPlanRunView | null => {
 		const plan = plans.get(rootId);
 		if (plan === undefined) return null;
@@ -116,6 +121,14 @@ export function createFleetPlanRuns(now: () => number = Date.now): FleetPlanRuns
 		fail(rootId, message) {
 			return update(rootId, (plan) => ({ ...plan, finishedAtMs: now(), state: "failed", failure: message }));
 		},
-		runs: () => [...plans.values()],
+		runs() {
+			// Read once, on first use: the record of a plan this session starts comes
+			// from its callbacks, which always outrank what the disk said earlier.
+			if (!hydrated) {
+				hydrated = true;
+				for (const plan of readDurable()) if (!plans.has(plan.rootId)) plans.set(plan.rootId, plan);
+			}
+			return [...plans.values()];
+		},
 	};
 }

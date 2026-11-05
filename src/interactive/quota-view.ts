@@ -19,7 +19,7 @@ import {
 } from "./dispatch-board.js";
 import type { ClioToken, TableCell, Tone } from "./theme/index.js";
 import {
-	chipRow,
+	chipRows,
 	clioTheme,
 	emptyState,
 	GLYPH,
@@ -298,7 +298,7 @@ const RECORDED_OUTCOME: Record<RunOutcome, { status: DispatchBoardStatus; label?
 	failed: { status: "failed" },
 	timed_out: { status: "failed", label: "timed out" },
 	stalled: { status: "stale", label: "stalled" },
-	canceled: { status: "aborted", label: "canceled" },
+	canceled: { status: "aborted", label: "cancelled" },
 	denied_by_policy: { status: "failed", label: "denied by policy" },
 	spawn_failed: { status: "failed", label: "spawn failed" },
 };
@@ -354,8 +354,8 @@ export function renderWorkerUsage(
 		const accounts = new Map<string, string>();
 		for (const row of rows) accounts.set(row.runtimeId, clean(workerQuotaLabel(row, snapshots)));
 		out.push(
-			...[...accounts].map(([runtime, label]) =>
-				chipRow(theme, [theme.fg("annotation", runtime), theme.fg("body", label)], safe),
+			...[...accounts].flatMap(([runtime, label]) =>
+				chipRows(theme, [theme.fg("annotation", runtime), theme.fg("body", label)], safe),
 			),
 		);
 	}
