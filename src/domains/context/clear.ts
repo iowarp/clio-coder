@@ -1,8 +1,8 @@
 import { existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
 
 import type { BootstrapIo } from "./bootstrap.js";
 import { coordinateCodewikiExclusive } from "./codewiki/coordinator.js";
+import { ACCUMULATED_CONTEXT_PATHS, contextPathIn, PRESERVED_CONTEXT_PATHS } from "./reset-paths.js";
 
 export interface RunContextClearInput {
 	signal?: AbortSignal;
@@ -21,36 +21,11 @@ export interface RunContextClearResult {
 	preservedExisting?: string[];
 }
 
-const ACCUMULATED_CONTEXT_PATHS = [
-	".clio-coder/codemap.json",
-	".clio-coder/codewiki.json",
-	".clio-coder/state.json",
-	".clio-coder/handoffs",
-	".clio-coder/proposals",
-] as const;
-/**
- * Kept, and said to be kept. `.clio-coder/wiki` is Clio-written rather than
- * operator-authored, so it does not belong with the handbooks and the overlay
- * directories on merit; it is listed because the reset reports exactly two
- * categories and a reader takes anything absent from both to be gone. It is the
- * most expensive artifact in `.clio-coder` (one model dispatch per page), and leaving
- * it unnamed made a reset look like it had discarded a wiki it had not touched.
- */
-const PRESERVED_CONTEXT_PATHS = [
-	"CLIO-CODER.md",
-	"CLIO-CODER.override.md",
-	".clio-coder/agents",
-	".clio-coder/skills",
-	".clio-coder/wiki",
-] as const;
-
 function out(io: BootstrapIo | undefined, message: string): void {
 	io?.stdout(message);
 }
 
-function relativeContextPath(cwd: string, relPath: string): string {
-	return join(cwd, ...relPath.split("/"));
-}
+const relativeContextPath = contextPathIn;
 
 function removeIfPresent(cwd: string, relPath: string, removed: string[]): void {
 	const absPath = relativeContextPath(cwd, relPath);
