@@ -183,7 +183,7 @@ function commandOf(args: Record<string, unknown> | undefined): string | null {
 	return typeof command === "string" && command.length > 0 ? command : null;
 }
 
-function mutationTargets(toolName: string, args: Record<string, unknown> | undefined): string[] {
+export function mutationTargets(toolName: string, args: Record<string, unknown> | undefined): string[] {
 	if (toolName !== ToolNames.Bash) return toolMutationPaths(toolName, args);
 	const command = commandOf(args);
 	if (command === null) return [];
@@ -195,7 +195,7 @@ function mutationTargets(toolName: string, args: Record<string, unknown> | undef
  * verification tool carries the same identity under both scopes: the scope only
  * widens which bash spellings are recognized as a check at all.
  */
-function validationCommandOf(
+export function validationCommandOf(
 	toolName: string,
 	args: Record<string, unknown> | undefined,
 	scope: ValidationCommandScope,

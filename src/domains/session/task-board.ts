@@ -63,6 +63,36 @@ export interface TaskBoardCounts {
 	open: number;
 }
 
+/** A check Clio saw finish, as opposed to what a completion note says about it. */
+export interface ObservedCheck {
+	name: string;
+	/** The package script or verifier id this ran, when it ran in the workspace root. */
+	check?: string;
+	passed: boolean;
+	observedAt: string;
+}
+
+/** How a completed task stands: a check backs it, nothing but its note does, or a check is failed or owed. */
+export type TaskCompletionStanding = "checked" | "claim only" | "unverified";
+
+/** The checks observed behind a task, for reading apart from its note. */
+export function observedTaskChecks(task: TaskBoardTask): { passed: ObservedCheck[]; failed: ObservedCheck[] } {
+	const passed: ObservedCheck[] = [];
+	const failed: ObservedCheck[] = [];
+	for (const row of task.requiredValidationEvidence ?? []) {
+		if (!row.observedAt || (row.status !== "passed" && row.status !== "failed")) continue;
+		const item = { name: row.command ?? row.description, passed: row.status === "passed", observedAt: row.observedAt };
+		(item.passed ? passed : failed).push(item);
+	}
+	return { passed, failed };
+}
+
+export function taskCompletionStanding(task: TaskBoardTask): TaskCompletionStanding | null {
+	if (task.status !== "completed") return null;
+	if (unverifiedTaskChecks(task)) return "unverified";
+	return observedTaskChecks(task).passed.length > 0 ? "checked" : "claim only";
+}
+
 /** A completed row can describe delivered work while its required checks remain open. */
 export function unverifiedTaskChecks(task: TaskBoardTask): { failed: string[]; noRecordedPass: string[] } | null {
 	if (task.status !== "completed") return null;
@@ -125,6 +155,8 @@ export interface TaskBoardStoreDeps {
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** Persist one full-snapshot taskLedger entry. Absent means in-memory only. */
 	appendEntry?: (entry: TaskLedgerEntryFields) => void;
+	/** The checks standing behind a task on the session path, stamped on it as it closes or blocks. */
+	observeChecks?: (boardId: string, taskId: string) => ReadonlyArray<ObservedCheck>;
 	/** Stable board-id source; injectable for deterministic contract tests. */
 	createBoardId?: () => string;
 	now?: () => Date;
@@ -401,6 +433,7 @@ function normalizeTitles(titles: ReadonlyArray<string>): string[] {
 function applyMutation(
 	board: TaskBoardSnapshot | null,
 	mutation: TaskBoardMutation,
+	observed: ReadonlyArray<ObservedCheck> = [],
 ): { board: TaskBoardSnapshot; notes: string[] } | { error: string } {
 	if (
 		(mutation.op === "plan" || mutation.op === "add") &&
@@ -531,25 +564,62 @@ function applyMutation(
 			}
 			return task;
 		}
-		return applyStatusMutation(task, mutation);
+		return applyStatusMutation(task, mutation, observed);
 	});
 	return { board: { ...board, tasks }, notes };
+}
+
+/**
+ * Record what was observed at the moment a task closes or blocks. An acceptance
+ * declaration takes the result of the check it names; anything else gets its own
+ * row. Rows stay apart from the note, so the ledger keeps claim and check separate.
+ */
+function withObservedChecks(task: TaskBoardTask, observed: ReadonlyArray<ObservedCheck>): TaskBoardTask {
+	const declared = task.requiredValidationEvidence ?? [];
+	const prefix = `${task.id}.observed.`;
+	const answered = new Set<ObservedCheck>();
+	const rows = declared
+		.filter((row) => !row.id.startsWith(prefix))
+		.map((row) => {
+			const match = observed.find((item) => item.check !== undefined && item.check === row.command);
+			if (!match || !row.id.startsWith(`${task.id}.acceptance.`)) return row;
+			answered.add(match);
+			return { ...row, status: match.passed ? ("passed" as const) : ("failed" as const), observedAt: match.observedAt };
+		});
+	observed
+		.filter((item) => !answered.has(item))
+		.forEach((item, index) => {
+			rows.push({
+				id: `${prefix}${index}`,
+				description: item.name,
+				command: item.name,
+				status: item.passed ? "passed" : "failed",
+				observedAt: item.observedAt,
+			});
+		});
+	if (rows.length === 0) return task;
+	return { ...task, requiredValidationEvidence: rows };
 }
 
 function applyStatusMutation(
 	task: TaskBoardTask,
 	mutation: Extract<TaskBoardMutation, { op: "start" | "done" | "block" | "drop" }>,
+	observed: ReadonlyArray<ObservedCheck>,
 ): TaskBoardTask {
 	switch (mutation.op) {
 		case "start":
 			return { ...task, status: "active" };
 		case "done": {
-			const done: TaskBoardTask = { ...task, status: "completed", evidence: mutation.evidence.trim() };
+			const done: TaskBoardTask = {
+				...withObservedChecks(task, observed),
+				status: "completed",
+				evidence: mutation.evidence.trim(),
+			};
 			delete done.reason;
 			return done;
 		}
 		case "block":
-			return { ...task, status: "blocked", reason: mutation.reason.trim() };
+			return { ...withObservedChecks(task, observed), status: "blocked", reason: mutation.reason.trim() };
 		case "drop": {
 			const dropped: TaskBoardTask = { ...task, status: "cancelled" };
 			if (mutation.reason?.trim()) dropped.reason = mutation.reason.trim();
@@ -572,6 +642,16 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 			board = deps.readEntries ? foldTaskBoard(deps.readEntries()) : null;
 		} catch {
 			board = null;
+		}
+	};
+
+	const checksFor = (current: TaskBoardSnapshot | null, mutation: TaskBoardMutation): ReadonlyArray<ObservedCheck> => {
+		if (!current || !deps.observeChecks || (mutation.op !== "done" && mutation.op !== "block")) return [];
+		try {
+			return deps.observeChecks(current.boardId, mutation.id);
+		} catch {
+			// A failed fold costs the observation, and the task then reads as a claim only.
+			return [];
 		}
 	};
 
@@ -610,7 +690,7 @@ export function createTaskBoardStore(deps: TaskBoardStoreDeps = {}): TaskBoardSt
 		},
 		apply(mutation: TaskBoardMutation): TaskBoardMutationResult {
 			syncToSession();
-			const result = applyMutation(board, mutation);
+			const result = applyMutation(board, mutation, checksFor(board, mutation));
 			if ("error" in result) return { ok: false, message: result.error };
 			const needsBoardId = mutation.op === "plan" || result.board.boardId.length === 0;
 			const nextBoard = needsBoardId ? { ...result.board, boardId: deps.createBoardId?.() ?? randomUUID() } : result.board;

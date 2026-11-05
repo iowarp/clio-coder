@@ -264,6 +264,7 @@ import {
 } from "../domains/safety/index.js";
 import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { createInternalGitPolicy } from "../domains/safety/internal-git-policy.js";
+import { standingChecks } from "../domains/safety/observed-checks.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	createProtectedArtifactsRegistration,
@@ -3390,17 +3391,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// keeps a /resume from picking up whichever branch happened to write its
 	// taskLedger entry last in file order; readEntries here used to skip that
 	// filter entirely (issue #94).
+	const activePathEntries = (): ReadonlyArray<unknown> => {
+		const meta = session?.current();
+		if (!session || !meta) return [];
+		const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+		return filterEntriesToActivePath(session.readEntries(), leafTurnId);
+	};
 	const taskBoard = createTaskBoardStore({
 		getSessionId: () => session?.current()?.id ?? null,
-		readEntries: () => {
-			const meta = session?.current();
-			if (!session || !meta) return [];
-			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
-			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
-		},
+		readEntries: activePathEntries,
 		appendEntry: (entry) => {
 			session?.appendEntry(entry);
 		},
+		observeChecks: (boardId, taskId) => standingChecks(activePathEntries(), boardId, taskId, process.cwd()),
 	});
 	// Prime the projection once at composition. Interactive repaint paths use
 	// cachedSnapshot() below, so a first paint can never become a ledger read.

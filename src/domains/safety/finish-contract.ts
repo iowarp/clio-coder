@@ -350,7 +350,7 @@ function acceptanceCheckPassed(
  * on the recorded name would never see that evidence and would keep demanding
  * validation the model already ran. Result entries keep their own ids.
  */
-function capabilityEntries(recent: ReadonlyArray<unknown>): unknown[] {
+export function capabilityEntries(recent: ReadonlyArray<unknown>): unknown[] {
 	return expandChainMessages(recent).map((entry) => {
 		const record = asRecord(entry);
 		if (record?.kind !== "message" || record.role !== "tool_call") return entry;
@@ -740,7 +740,7 @@ function successfulToolResultId(entry: unknown): string | null {
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
 }
 
-function dispatchRunRecordEvidence(
+export function dispatchRunRecordEvidence(
 	entry: unknown,
 	candidate: ToolCallEvidenceCandidate | undefined,
 ): FinishContractEvidence | null {
@@ -1030,7 +1030,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /** Exact check ids, never substring matches against rendered evidence summaries. */
-function validationCheckId(command: string): string | undefined {
+export function validationCheckId(command: string): string | undefined {
 	return (
 		/^(?:npm|pnpm|yarn|bun) (?:run )?([a-z0-9][a-z0-9._:-]*)$/.exec(command)?.[1] ??
 		/^verify ([a-z0-9][a-z0-9._:-]*)$/.exec(command)?.[1]
