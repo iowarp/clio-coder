@@ -461,6 +461,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		deps.onClose();
 	};
 
+	const toldNotInstalled = new Set<string>();
 	/** Enter: open what this row contains. A package opens its members, never its own tab. */
 	const open = (item: ListOverlayItem): void => {
 		const subject = selected(item);
@@ -469,10 +470,16 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			const here = subject.record.copies.find((copy) => copy.scope === view.scope) ?? subject.record.copies[0];
 			if (!here) {
 				handle.openDetail();
-				deps.notice(
-					"info",
-					`${subject.record.ref} is not installed here; its catalog hints describe what it says it contains.`,
-				);
+				// Said once per package while the Library is open: a second Enter on the
+				// same row repeated the same line into the transcript and told nothing new.
+				if (!toldNotInstalled.has(subject.record.ref)) {
+					toldNotInstalled.add(subject.record.ref);
+					const next = libraryRowActions(subject, view).install ? " Press i to review an install." : "";
+					deps.notice(
+						"info",
+						`${subject.record.ref} is not installed here; its catalog hints describe what it says it contains.${next}`,
+					);
+				}
 				return;
 			}
 			view.member = { ref: subject.record.ref, scope: here.scope };

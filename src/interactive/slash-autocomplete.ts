@@ -609,7 +609,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					value: row.invocation,
 					label: row.invocation,
 					description: compactDescription(`extension (${row.scope}): ${row.description}`) ?? row.description,
-					effectDescription: `${row.description}. Runs installed operator extension code; output is local to you.`,
+					effectDescription: `${row.description.replace(/[.\s]+$/u, "")}. Runs installed operator extension code; output is local to you.`,
 					path: `/${row.invocation}`,
 					nextAction: row.available
 						? "Tab or Enter completes the name; add any arguments it expects."

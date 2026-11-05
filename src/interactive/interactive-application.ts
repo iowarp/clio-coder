@@ -94,7 +94,12 @@ import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { createSteerReceipts } from "./steer-receipts.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
-import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.js";
+import {
+	ambientDrawingPlace,
+	createAmbientSurfaces,
+	hasExtensionDrawing,
+	opensOwnSurface,
+} from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import { renderView } from "./surfaces/view-renderer.js";
@@ -1180,11 +1185,24 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				operatorExtensions
 					?.entries()
 					.some((entry) => entry.id === id && entry.state === "ready" && entry.generation === generation) ?? false;
-			if (!valid()) return;
-			// Surface events and persistent entries already draw api 2 results.
+			if (!valid()) {
+				slashRuntime.context.notice(
+					"warn",
+					`/${invocation}: extension ${id ?? invocation} reloaded before its result arrived, so nothing was shown. Run it again.`,
+				);
+				return;
+			}
+			// An operator who typed the command is owed a visible answer. Surface events
+			// and persistent entries draw api 2 results, but a footer status or band can
+			// change by nothing, or not at all, so the text still reaches the transcript
+			// unless the result opened something of its own.
 			if (output.api === 2) {
-				if (output.text && !hasExtensionDrawing(output))
+				if (output.text && !opensOwnSurface(output))
 					slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
+				else if (!output.text && !hasExtensionDrawing(output))
+					slashRuntime.context.notice("info", `/${invocation} ran and returned nothing to show.`);
+				else if (!output.text && !opensOwnSurface(output))
+					slashRuntime.context.notice("info", `/${invocation} ran; its result is in ${ambientDrawingPlace(output)}.`);
 				return;
 			}
 			if (

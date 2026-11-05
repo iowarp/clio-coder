@@ -48,7 +48,7 @@ function consentQuestion(request: DevConsentRequest): string {
 	return [
 		intro,
 		`Folder: ${request.source}`,
-		...envelopeLines(request.envelope).map((line) => `  ${line}`),
+		...envelopeLines(request.envelope, request.id).map((line) => `  ${line}`),
 		"Approval lasts for this session. A later save that stays within it reloads without asking.",
 		ENVELOPE_SEAT_BELT,
 	].join("\n");
