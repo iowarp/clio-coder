@@ -10,9 +10,11 @@ import {
 	Input,
 	matchesKey,
 	type OverlayHandle,
+	renderFakeCursor,
 	type SelectItem,
 	SelectList,
 	type TUI,
+	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
@@ -67,6 +69,8 @@ const MAX_LABEL_COLUMN = 30;
 const MIN_LABEL_COLUMN = 12;
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
+const OTHER_CAPTION = "Other · records exactly what you type";
+const CURSOR_CELL = renderFakeCursor(" ");
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
@@ -106,6 +110,8 @@ interface QuestionState {
 	mode: Mode;
 	selected: Set<number>;
 	committedSelected: Set<number>;
+	/** The choices as they stood when the text field opened; Esc from the field puts them back. */
+	selectedBeforeText: Set<number> | null;
 	customAnswer: string;
 	inputValue: string;
 	answer: string;
@@ -145,6 +151,7 @@ function createQuestionState(
 		mode: initialMode(question),
 		selected: new Set(initial?.selected),
 		committedSelected: new Set(initial?.selected),
+		selectedBeforeText: null,
 		customAnswer: "",
 		inputValue: initial?.text ?? "",
 		answer: "",
@@ -324,6 +331,19 @@ class AnswerEditor extends Editor {
 	protected override renderTopBorder(width: number): string {
 		const theme = clioTheme();
 		return fitRow(theme.fg("annotation", this.caption), width);
+	}
+
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		if (this.getText().length > 0) return lines;
+		// The dock trims trailing blank rows and an empty field's row reads as blank,
+		// which took the cursor with it, so the field keeps a visible placeholder.
+		const row = lines[1];
+		const at = row?.indexOf(CURSOR_CELL) ?? -1;
+		if (row === undefined || at < 0) return lines;
+		const start = row.slice(0, at + CURSOR_CELL.length);
+		lines[1] = `${start}${clioTheme().fg("inputPlaceholder", truncateToWidth("type here", Math.max(0, width - 1), "", false))}`;
+		return lines;
 	}
 
 	protected override renderBottomBorder(width: number, hiddenLineCount: number): string {
@@ -640,11 +660,15 @@ class AskUserOverlayView implements Component {
 			return;
 		}
 		if (question.multi_select === true && (matchesKey(data, "enter") || data === "\n")) {
-			this.commitMultiSelectOrOpenOther(state);
+			this.commitMultiSelectOrOpenOther(question, state);
 			return;
 		}
-		if (this.isAddTextKey(data)) {
-			this.chooseFocusedAndOpenText(question, state);
+		if (matchesKey(data, "t")) {
+			this.openOtherField(question, state);
+			return;
+		}
+		if (matchesKey(data, "n")) {
+			this.openNoteField(question, state);
 			return;
 		}
 		if (data === "a" && this.ledgerEntries().length > 0) {
@@ -821,9 +845,10 @@ class AskUserOverlayView implements Component {
 		const entries: HintEntry[] = [];
 		if (this.questions.length > 1) entries.push({ key: "←/→ or Tab", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
-		// `t` is on every select footer because the operator cannot tell from a
-		// label whether the option needs a figure attached until they read it.
-		entries.push({ key: "t", verb: "add text", short: "text" });
+		entries.push({ key: "t", verb: "other answer", short: "other" });
+		// Adding text to an option is its own key because `t` once did it
+		// implicitly, and a focused option nobody chose rode along into the answer.
+		entries.push({ key: "n", verb: "note on option", short: "note" });
 		entries.push({ key: "Enter", verb: recordAnswer });
 		if (this.ledgerEntries().length > 0) entries.push({ key: "a", verb: "answers" });
 		entries.push({ key: "?", verb: "details" });
@@ -909,34 +934,59 @@ class AskUserOverlayView implements Component {
 	}
 
 	/**
-	 * The key that adds typed text to the option under the cursor.
-	 *
-	 * Choosing an option used to be the whole answer, so a model that offered
-	 * "Exact number - I'll type it" gave the operator a label and nowhere to put
-	 * the number; the interview then spent two of its four rounds asking for the
-	 * figures again (issue #228). The list itself only reads the arrows, Enter,
-	 * and Esc, so a letter is free here.
+	 * `t`: the answer is what the operator types and nothing else. A single choice
+	 * drops whatever was chosen, focus never selects, and only boxes the operator
+	 * checked themselves stay with a multi-select answer.
 	 */
-	private isAddTextKey(data: string): boolean {
-		return matchesKey(data, "t");
+	private openOtherField(question: AskUserQuestion, state: QuestionState): void {
+		this.rememberSelection(state);
+		if (question.multi_select !== true) state.selected = new Set();
+		this.openTextInput();
 	}
 
 	/**
-	 * Take the focused option and open the text field for it, without committing.
-	 * Submitting the text records the label and the text together.
+	 * `n`, or Enter on an option whose label says the operator will type: the
+	 * focused option and the text are recorded together, and the field shows the
+	 * composed answer before Enter. Choosing an option used to be the whole answer,
+	 * so a model that offered "Exact number - I'll type it" gave the operator a
+	 * label and nowhere to put the number (issue #228).
 	 */
-	private chooseFocusedAndOpenText(question: AskUserQuestion, state: QuestionState): void {
+	private openNoteField(question: AskUserQuestion, state: QuestionState): void {
 		const current = this.list?.getSelectedItem();
 		const optionIndex = current && current.value !== "other" ? optionIndexFromValue(current.value) : null;
-		let label: string | undefined;
-		if (optionIndex === null && !question.multi_select) state.selected = new Set();
-		if (optionIndex !== null) {
-			if (question.multi_select === true) state.selected.add(optionIndex);
-			else state.selected = new Set<number>([optionIndex]);
-			state.focusedValue = `option:${optionIndex}`;
-			label = question.options?.[optionIndex]?.label;
+		if (optionIndex === null) {
+			this.openOtherField(question, state);
+			return;
 		}
-		this.openTextInput(label ? `Your answer, with "${label}"` : "Your answer");
+		this.rememberSelection(state);
+		if (question.multi_select === true) state.selected.add(optionIndex);
+		else state.selected = new Set<number>([optionIndex]);
+		state.focusedValue = `option:${optionIndex}`;
+		this.openTextInput();
+	}
+
+	private rememberSelection(state: QuestionState): void {
+		state.selectedBeforeText = new Set(state.selected);
+	}
+
+	/** What the field is for, read from the choices that will be recorded with it. */
+	private textCaption(question: AskUserQuestion, state: QuestionState): string {
+		if (!questionHasOptions(question)) return "Your answer";
+		const labels = selectedOptionLabels(question, state.selected);
+		return labels.length > 0 ? `Your answer, with ${labels.map((label) => `"${label}"`).join(", ")}` : OTHER_CAPTION;
+	}
+
+	/** The composed answer under the field, because Enter records more than the field holds. */
+	private textPreview(question: AskUserQuestion, state: QuestionState, width: number): string[] {
+		if (!questionHasOptions(question) || state.selected.size === 0) return [];
+		const typed = this.text?.getText().trim() ?? "";
+		const answer = answerText(question, state.selected, typed).replace(/\s*\n\s*/g, " ");
+		const theme = clioTheme();
+		return wrapLabeledValue(
+			`${theme.fg("annotation", "Records:")} `,
+			theme.fg("decisionExplanation", answer),
+			width,
+		).slice(0, 2);
 	}
 
 	/**
@@ -987,7 +1037,10 @@ class AskUserOverlayView implements Component {
 	private renderControlLines(width: number, rowBudget: number): string[] {
 		this.ensureControl();
 		const state = this.currentState();
-		if (state?.mode === "text") return this.text?.render(width) ?? [""];
+		const question = this.currentQuestion();
+		if (state?.mode === "text" && question) {
+			return [...(this.text?.render(width) ?? [""]), ...this.textPreview(question, state, width)];
+		}
 		return this.renderSelectControl(width, rowBudget);
 	}
 
@@ -1075,7 +1128,7 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		if (!question || !state) return;
-		if (state.mode === "text" && !this.text) this.rebuildTextInput(question, state, "Your answer");
+		if (state.mode === "text" && !this.text) this.rebuildTextInput(question, state);
 		if (state.mode === "select" && !this.list) this.rebuildSelectList(question, state);
 	}
 
@@ -1087,7 +1140,7 @@ class AskUserOverlayView implements Component {
 			this.list = null;
 			return;
 		}
-		if (state.mode === "text") this.rebuildTextInput(question, state, "Your answer");
+		if (state.mode === "text") this.rebuildTextInput(question, state);
 		else this.rebuildSelectList(question, state);
 	}
 
@@ -1117,8 +1170,11 @@ class AskUserOverlayView implements Component {
 		this.finishIfCompleteOrAdvance();
 	}
 
-	private rebuildTextInput(question: AskUserQuestion, state: QuestionState, caption: string): void {
-		const initial = state.inputValue || state.customAnswer || state.answer;
+	private rebuildTextInput(question: AskUserQuestion, state: QuestionState): void {
+		// A question with options keeps its typed text only: prefilling the recorded
+		// answer would type a chosen label into the field as if the operator had.
+		const initial = state.inputValue || state.customAnswer || (questionHasOptions(question) ? "" : state.answer);
+		const caption = this.textCaption(question, state);
 		if (this.deps.tui) {
 			const editor = new AnswerEditor(this.deps.tui);
 			editor.caption = caption;
@@ -1142,8 +1198,7 @@ class AskUserOverlayView implements Component {
 		});
 		activeList.onSelect = (item) => {
 			if (item.value === "other") {
-				if (!question.multi_select) state.selected = new Set();
-				this.openTextInput("Your answer");
+				this.openOtherField(question, state);
 				return;
 			}
 			const optionIndex = optionIndexFromValue(item.value);
@@ -1154,7 +1209,7 @@ class AskUserOverlayView implements Component {
 			}
 			const label = question.options?.[optionIndex]?.label ?? item.label;
 			if (optionAsksForText(label)) {
-				this.chooseFocusedAndOpenText(question, state);
+				this.openNoteField(question, state);
 				return;
 			}
 			state.selected = new Set<number>([optionIndex]);
@@ -1221,7 +1276,8 @@ class AskUserOverlayView implements Component {
 			return;
 		}
 		state.inputValue = "";
-		state.selected = new Set(state.committedSelected);
+		state.selected = new Set(state.selectedBeforeText ?? state.committedSelected);
+		state.selectedBeforeText = null;
 		state.mode = "select";
 		this.status = "";
 		this.rebuildSelectList(question, state);
@@ -1249,14 +1305,14 @@ class AskUserOverlayView implements Component {
 		state.mode = "select";
 	}
 
-	private openTextInput(caption: string): void {
+	private openTextInput(): void {
 		const state = this.currentState();
 		const question = this.currentQuestion();
 		if (!state || !question) return;
 		this.syncActiveControl();
 		state.mode = "text";
 		this.status = "";
-		this.rebuildTextInput(question, state, caption);
+		this.rebuildTextInput(question, state);
 		this.deps.requestRender();
 	}
 
@@ -1264,7 +1320,7 @@ class AskUserOverlayView implements Component {
 		const current = this.list?.getSelectedItem();
 		if (!current) return;
 		if (current.value === "other") {
-			this.openTextInput("Your answer");
+			this.openOtherField(question, state);
 			return;
 		}
 		const optionIndex = optionIndexFromValue(current.value);
@@ -1281,10 +1337,10 @@ class AskUserOverlayView implements Component {
 		this.deps.requestRender();
 	}
 
-	private commitMultiSelectOrOpenOther(state: QuestionState): void {
+	private commitMultiSelectOrOpenOther(question: AskUserQuestion, state: QuestionState): void {
 		const current = this.list?.getSelectedItem();
 		if (current?.value === "other") {
-			this.openTextInput("Your answer");
+			this.openOtherField(question, state);
 			return;
 		}
 		const optionIndex = current ? optionIndexFromValue(current.value) : null;
@@ -1312,7 +1368,10 @@ class AskUserOverlayView implements Component {
 	private finishIfCompleteOrAdvance(): void {
 		this.syncActiveControl();
 		const current = this.currentState();
-		if (current) current.committedSelected = new Set(current.selected);
+		if (current) {
+			current.committedSelected = new Set(current.selected);
+			current.selectedBeforeText = null;
+		}
 		if (this.allAnswered()) {
 			this.finish({ answers: this.answers() });
 			return;
