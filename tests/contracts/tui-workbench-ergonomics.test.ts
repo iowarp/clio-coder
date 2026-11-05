@@ -378,8 +378,9 @@ for (const width of widths) {
 		board.toggleDetail();
 		const full = board.render(width);
 		bounded(full, width);
-		assert.ok(full.length > folded.length);
-		for (const clause of row.trust.text.split("; ")) assert.ok(words(full).includes(clause), clause);
+		// An ordinary sealed run's axes only restate its verdict, so they stay with the receipt even on Enter.
+		assert.match(words(full), /unverified: no checks observed/u);
+		assert.doesNotMatch(words(full), /independently reviewed|context recorded/u);
 		assert.deepEqual(row, original);
 		board.toggleDetail();
 		row.trust = {

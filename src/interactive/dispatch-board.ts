@@ -60,7 +60,7 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { USAGE_NOT_MEASURED, usageLineCoverage } from "./usage-words.js";
+import { USAGE_NOT_MEASURED, usageFigure, usageLineCoverage, usageSaysNothing } from "./usage-words.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
@@ -135,6 +135,8 @@ export interface DispatchBoardRow {
 	completion?: { toolCalls?: number; refusedCalls?: number; contract?: string };
 	/** Read back from the run ledger because it settled before this Clio process started (J2-F16). */
 	earlier?: true;
+	/** When the run settled, or started while it has not; what the board orders settled runs by, newest first. */
+	settledAtMs?: number;
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
 	/** Assignment retry attempts observed on the assignment event stream. */
@@ -401,7 +403,7 @@ export function dispatchStatusPresentation(
 			return { glyph: GLYPH.error, label: compact ? "fail" : "failed", token: "error" };
 		case "dead":
 			// The watchdog stopped a worker whose heartbeat went silent: the inline card's words, not the ledger's.
-			return { glyph: GLYPH.error, label: "stalled", token: "error" };
+			return { glyph: GLYPH.error, label: "stopped responding", token: "error" };
 		case "aborted":
 			return { glyph: GLYPH.cancelled, label: "cancelled", token: "annotation" };
 		case "stale":
@@ -624,22 +626,27 @@ function progressAnswerLines(
 	return body.map((row, index) => `${index === 0 ? cardKvKey(theme, "answer") : " ".repeat(gutter)}${row}`);
 }
 
-/** Compact ordinary unvalidated completions; preserve all exceptional facts and expanded provenance. */
+/** Axis states a reader must see spelled out, because the verdict's words alone do not carry them. */
+const EXCEPTIONAL_TRUST_STATES: ReadonlySet<string> = new Set([
+	"failed",
+	"unknown",
+	"ungrounded",
+	"invalid",
+	"inconclusive",
+	"not_independent",
+]);
+
+/**
+ * The run's verdict in plain words. Under it the axis record shows only when an axis is out of the ordinary (unknown,
+ * failed, inferred), folded or open: an ordinary sealed run's axes only restate the verdict in the receipt's
+ * vocabulary, so for it they stay in /view.
+ */
 function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: number, expanded: boolean): string[] {
-	const gutter = CARD_KV_KEY_WIDTH + 1;
-	const valueWidth = Math.max(1, contentWidth - gutter);
 	const axes = row.trust?.axes;
-	// Only the ordinary sealed, mediated completion without validation/review
-	// folds. Unknown, failed, inferred or exceptional provenance stays explicit.
-	const compact =
-		!expanded &&
-		isTerminalStatus(row.status) &&
-		row.trust?.verdict === "unverified" &&
-		axes?.artifactIntegrity === "verified" &&
-		axes.validationGrounding === "absent" &&
-		axes.independentReview === "absent" &&
-		axes.contextProvenance === "recorded" &&
-		axes.completionEvidence === "absent";
+	const ordinary =
+		axes !== undefined &&
+		axes.artifactIntegrity === "verified" &&
+		Object.values(axes).every((state) => !EXCEPTIONAL_TRUST_STATES.has(String(state)));
 	const host = row.hostVerification === undefined ? "" : ` · ${theme.fg("body", `host checks ${row.hostVerification}`)}`;
 	if (row.trust === undefined) {
 		const unread = theme.fg(
@@ -673,9 +680,6 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		trustVerdictToken(row.trust.verdict),
 		`${trustVerdictMark(row.trust.verdict)}${plainTrustVerdict(row.trust)}`,
 	);
-	const detail = compact
-		? []
-		: wrapTextWithAnsi(theme.fg("annotation", row.trust.text), valueWidth).map((line) => `${" ".repeat(gutter)}${line}`);
 	// A failed validation names its validator and evidence right under the verdict, so a passing answer above it
 	// never reads as a contradiction.
 	const why =
@@ -687,6 +691,12 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 					`${theme.fg("body", row.validationFailure)}${theme.fg("annotation", ` · /view dispatch:${row.runId}`)}`,
 					contentWidth,
 				);
+	const valueWidth = Math.max(1, contentWidth - CARD_KV_KEY_WIDTH - 1);
+	const detail = ordinary
+		? []
+		: wrapTextWithAnsi(theme.fg("annotation", row.trust.text), valueWidth).map(
+				(line) => `${" ".repeat(CARD_KV_KEY_WIDTH + 1)}${line}`,
+			);
 	return [...cardWrappedValueLines(theme, "trust", `${verdict}${host}`, contentWidth), ...why, ...detail];
 }
 
@@ -887,12 +897,11 @@ function dispatchCardBody(
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
 	const targetKey = cardKvKey(theme, "target");
-	// The route is the target and model; the transport family is a record detail Enter adds.
+	// The route is the target and model. Enter adds how the worker reached it only when that is not the ordinary model
+	// call, because `http runtime` is a transport name that tells a person nothing they can act on.
 	const routeLabel = formatTargetLabel(row.targetId, row.wireModelId, { abbreviate: false });
-	const route =
-		options.expanded === true
-			? `${routeLabel}${dotSep(theme)}${sanitizeCallTargetText(String(row.runtimeKind))} runtime`
-			: routeLabel;
+	const reach = RUNTIME_REACH_WORDS[row.runtimeKind];
+	const route = options.expanded === true && reach !== undefined ? `${routeLabel}${dotSep(theme)}${reach}` : routeLabel;
 	const targetLine = `${targetKey}${theme.fg("footerIdentity", fitIdentityLabel(route, Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
 	// Fleet facts: node placement (absent means local), gate role badge, and
 	// reroute lineage. Whole units so overflow drops a fact, never clips one.
@@ -918,13 +927,10 @@ function dispatchCardBody(
 		...(firstOutput === null ? [] : [theme.fg("body", firstOutput)]),
 		...(cost === "—" ? [] : [theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)]),
 	];
-	const context = row.telemetry?.activity.contextTokens;
-	const contextFigure = context
-		? options.expanded === true
-			? context.display
-			: compactQuantity(context.display)
-		: null;
-	const contextUnit = contextFigure ? theme.fg("body", `ctx ${contextFigure}`) : null;
+	// Context occupancy is a figure like the others: a lower bound keeps its mark, and one nothing measured is left out,
+	// since the line's own coverage unit already says calls went unreported.
+	const contextFigure = usageFigure(row.telemetry?.activity.contextTokens);
+	const contextUnit = usageSaysNothing(contextFigure) ? null : theme.fg("body", `context ${contextFigure}`);
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
@@ -1090,6 +1096,13 @@ function dispatchCardBody(
 	}
 	return bodyLines;
 }
+
+/** How a worker reached its model, in words, for the runtimes that are not an ordinary model call. */
+const RUNTIME_REACH_WORDS: Partial<Record<RunKind, string>> = {
+	sdk: "through an agent SDK",
+	subprocess: "as a command-line agent",
+	"acp-delegation": "delegated to an ACP agent",
+};
 
 /** The route as the run's detail card words it, so the dock and the board never name one route two ways. */
 function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">): string {
@@ -1296,6 +1309,7 @@ function councilMemberView(
 		status: { ...presentation },
 		tailText: sanitizeCallTargetText(councilMemberTail(row)),
 		droppedLines: row.progress?.droppedLines ?? 0,
+		...(isTerminalStatus(row.status) ? { settled: true } : {}),
 	};
 }
 
@@ -1359,6 +1373,7 @@ function foldCouncilGroup(
 		round,
 		elapsed: formatCompactMs(elapsedMs),
 		...(selectedInGroup !== undefined ? { selectedRunId: selectedInGroup } : {}),
+		...(rows.length > 0 && rows.every((row) => row.earlier === true) ? { earlier: true as const } : {}),
 	};
 }
 
@@ -1395,6 +1410,22 @@ export function dispatchBoardItems(
 		items.push({ kind: "council", group: foldCouncilGroup(group, byGroup.get(group) ?? [row], selectedRunId) });
 	}
 	return items;
+}
+
+function itemFromEarlierSession(item: DispatchBoardItem): boolean {
+	return item.kind === "run" ? item.row.earlier === true : item.group.earlier === true;
+}
+
+/** The rule over the runs an earlier Clio recorded: dim, named and counted, so it reads without colour too. */
+function earlierSessionsRule(theme: ClioTheme, count: number, width: number): string {
+	const rule = GLYPH.innerDivider;
+	const text = truncateToWidth(
+		`${rule}${rule} earlier sessions · ${count} run${count === 1 ? "" : "s"} `,
+		width,
+		GLYPH.ellipsis,
+		false,
+	);
+	return theme.fg("annotation", `${text}${rule.repeat(Math.max(0, width - visibleWidth(text)))}`);
 }
 
 /** Use the same folded, sorted council projection for focus as for visible cards. */
@@ -1480,7 +1511,7 @@ function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | 
 	}
 }
 
-const NARROW_STATUS_WIDTH = 60;
+const NARROW_STATUS_WIDTH = 100;
 const COMPACT_CAVEAT_WORD: Readonly<Record<CompletedRunCaveat["kind"], string>> = {
 	against: "failed",
 	refused: "done",
@@ -1494,7 +1525,7 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 	// column stays narrow enough that the task beside it still reads.
 	if (failure !== null) {
 		const mark = completedRunMark(failure);
-		// Below sixty columns the cell keeps the worker card header's one word, so the agent column survives; the
+		// Below a hundred columns the cell keeps the worker card header's one word, so the agent column survives; the
 		// detail under the table states the caveat whole.
 		const words =
 			width >= NARROW_STATUS_WIDTH
@@ -1789,7 +1820,14 @@ function formatDispatchBoardBody(
 		.slice(items.length)
 		.map((line) => line.trim())
 		.join(" ");
-	const notes = columnNote.length === 0 ? [] : [truncateToWidth(columnNote, width, GLYPH.ellipsis, false)];
+	// On a short board the note would cost the selected run's status row, which says more than which columns left.
+	const notes =
+		columnNote.length === 0 || budget < 10 ? [] : [truncateToWidth(columnNote, width, GLYPH.ellipsis, false)];
+	// What an earlier Clio recorded sits under its own rule, so a row from before this process never passes for one
+	// of its own at a glance, at any width or without colour.
+	const firstEarlier = items.findIndex(itemFromEarlierSession);
+	const earlierCount = firstEarlier < 0 ? 0 : items.length - firstEarlier;
+	const dividerRows = firstEarlier < 0 ? 0 : 1;
 	const item = items[selectedIndex];
 	const detail =
 		item === undefined
@@ -1819,15 +1857,29 @@ function formatDispatchBoardBody(
 	// An open detail leaves the table what its body and rule do not need, and
 	// never less than the selected row. A table that cannot show every run
 	// spends one more row on the position row that counts the rest.
-	const detailRows = (detail === null ? 0 : detail.body.length + 1) + notes.length;
+	const detailRows = (detail === null ? 0 : detail.body.length + 1) + notes.length + dividerRows;
 	const tableBudget = detailExpanded
 		? table.length + detailRows <= budget
 			? table.length
 			: Math.max(1, Math.min(table.length - 1, budget - detailRows - 1))
-		: Math.min(table.length, Math.max(3, Math.floor(budget / 2)));
+		: Math.min(
+				table.length,
+				Math.max(
+					1,
+					Math.min(
+						Math.max(3, Math.floor(budget / 2) - dividerRows),
+						// The selected run keeps its rule, its first rows and the pointer to the rest, however short the board.
+						budget - dividerRows - notes.length - 1 - (detail === null ? 0 : Math.min(2, detail.body.length) + 2),
+					),
+				),
+			);
 	const [start] = centeredWindow(table.length, selectedIndex, tableBudget);
 	const { window, position } = windowRows(table, start, tableBudget);
 	const lines = [...window];
+	// The rule sits above the first earlier row in view, or tops the window when every row in view is earlier.
+	if (firstEarlier >= 0 && firstEarlier < start + window.length) {
+		lines.splice(Math.max(0, firstEarlier - start), 0, earlierSessionsRule(theme, earlierCount, width));
+	}
 	if (position) {
 		// One wording at every width and in both views; an open detail adds only how many runs it is hiding.
 		const hidden = position.total - (position.end - position.start + 1);
@@ -2024,6 +2076,10 @@ export function createDispatchBoardView(
 			normalizeSelection(rows());
 		},
 		toggleDetail(): void {
+			// A council or plan already shows everything it has, and its hint offers no Enter; a silent toggle there
+			// opened the next run's detail the moment the cursor moved onto it.
+			const row = normalizeSelection(rows());
+			if (row === null || row.council !== undefined || row.plan !== undefined) return;
 			expanded = !expanded;
 		},
 		detailExpanded(): boolean {
@@ -2071,6 +2127,15 @@ function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
 		: `+ ${states} · /fleet`;
 }
 
+/**
+ * A run the operator's fleet surfaces show. Helper runs are Clio's own and stay off them, but a council member runs in
+ * the helper audience while answering the operator's own /council question, so it counts: without it a running
+ * council left the dock and the rail empty.
+ */
+export function isOperatorFleetRun(row: Pick<DispatchBoardRow, "agentAudience" | "council">): boolean {
+	return row.council !== undefined || !isHelperRun(row);
+}
+
 export function formatTaskIslandLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	maxRows = 4,
@@ -2079,7 +2144,7 @@ export function formatTaskIslandLines(
 ): string[] {
 	// Councils are folded before the row cap, so a five-member council costs the
 	// island one card and never crowds out the runs beside it.
-	const items = dispatchBoardItems(rows.filter((row) => !isHelperRun(row)));
+	const items = dispatchBoardItems(rows.filter(isOperatorFleetRun));
 	const visibleItems = items.slice(0, Math.max(1, maxRows));
 	const body: string[] = [];
 
@@ -2111,6 +2176,40 @@ export function formatTaskIslandLines(
 	// (or are fixed-width dividers/empty-state lines). The canonical frame re-pads
 	// each row ANSI-aware, so passing the styled lines through is safe.
 	return frame(clioTheme(), "Fleet Runs", body, contentWidth + 4);
+}
+
+/**
+ * The fleet dock on a short terminal: one row per run, at most two, then what the rest are doing, then where the
+ * controls are. The full card there repeated the inline worker card sitting just above it and pushed the transcript
+ * off a 24-row screen; this keeps what the dock alone gives, a run that stays in view after its card scrolls away.
+ */
+export function formatFleetDockRows(
+	rows: ReadonlyArray<DispatchBoardRow>,
+	width: number,
+	quota: QuotaProviders = [],
+	maxRuns = 2,
+): string[] {
+	const theme = clioTheme();
+	const items = dispatchBoardItems(rows.filter(isOperatorFleetRun));
+	if (items.length === 0) return [];
+	const room = Math.max(1, width - 2);
+	const shown = items.slice(0, Math.max(1, maxRuns));
+	const lines = shown.map((item) => {
+		const head =
+			item.kind === "council"
+				? councilIslandLines(theme, item.group, room)[0]
+				: renderTaskIslandRow(item.row, room, quota)[0];
+		return `  ${truncateToWidth((head ?? "").trimEnd(), room, GLYPH.ellipsis, false)}`;
+	});
+	const hidden = items.slice(shown.length);
+	const steerable = items.some((item) => item.kind === "run" && isDispatchBoardRowSteerable(item.row));
+	const pointer = steerable ? "/fleet to steer or stop" : "/fleet to stop or inspect";
+	const tail = hidden.length > 0 ? `${hiddenRunsSummary(hidden).replace(/ · \/fleet$/u, "")} · ${pointer}` : pointer;
+	const last = lines.length - 1;
+	const joined = `${lines[last]}${dotSep(theme)}${theme.fg("annotation", tail)}`;
+	if (hidden.length === 0 && visibleWidth(joined) <= width) lines[last] = joined;
+	else lines.push(`  ${theme.fg("annotation", truncateToWidth(tail, room, GLYPH.ellipsis, false))}`);
+	return lines;
 }
 
 function parseOptionalDetail(value: unknown): string | null {
@@ -2178,6 +2277,7 @@ function toRow(
 		...(entry.budget !== undefined ? { budget: entry.budget } : {}),
 		status: entry.status,
 		elapsedMs: entry.durationMs ?? Math.max(0, (entry.finishedAtMs ?? now) - entry.startedAtMs),
+		settledAtMs: entry.finishedAtMs ?? entry.startedAtMs,
 		usage,
 		ttft,
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
@@ -2274,11 +2374,27 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 		taskSummary: planProgressText(plan),
 		status: FLEET_PLAN_ROW_STATUS[plan.state],
 		elapsedMs: (plan.finishedAtMs ?? now) - plan.startedAtMs,
+		settledAtMs: plan.finishedAtMs ?? plan.startedAtMs,
+		...(plan.earlier === true ? { earlier: true as const } : {}),
 		usage: UNAVAILABLE,
 		ttft: null,
 		lastContextTokens: null,
 		plan,
 	};
+}
+
+/**
+ * The board's one order: runs still going first, in the order a person acts on them, then settled runs newest first
+ * whatever their outcome. Opening the board puts the cursor on the first row, so that row is the run the operator
+ * most likely came for; ordering settled runs by outcome put an old failure above the run that just finished.
+ */
+export function boardOrder(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
+	const live = (row: DispatchBoardRow): boolean => !isTerminalStatus(row.status);
+	return [...rows].sort((a, b) => {
+		if (live(a) !== live(b)) return live(a) ? -1 : 1;
+		if (live(a)) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (b.settledAtMs ?? 0) - (a.settledAtMs ?? 0);
+		return (b.settledAtMs ?? 0) - (a.settledAtMs ?? 0);
+	});
 }
 
 /** The board keeps display order and reads every run fact from telemetry; tokens and cost from its read model. */
@@ -2352,14 +2468,12 @@ export function createDispatchBoardStore(
 		rows() {
 			const planRows = plans.runs().map((plan) => fleetPlanRow(plan, Date.now()));
 			const earlier = historyRows();
-			if (planRows.length === 0 && earlier.length === 0) return projectRows(false);
-			const finishedAt = (row: DispatchBoardRow): number =>
-				row.plan !== undefined ? (row.plan.finishedAtMs ?? Date.now()) : Date.now() - row.elapsedMs;
-			// Earlier rows follow this process's own, newest first as the ledger read sorted them.
-			const current = [...projectRows(false), ...planRows].sort(
-				(a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || finishedAt(b) - finishedAt(a),
-			);
-			return [...current, ...earlier];
+			if (planRows.length === 0 && earlier.length === 0) return boardOrder(projectRows(false));
+			// This process's runs lead; what an earlier Clio recorded follows as its own section, newest first.
+			return [
+				...boardOrder([...projectRows(false), ...planRows.filter((row) => row.earlier !== true)]),
+				...boardOrder([...planRows.filter((row) => row.earlier === true), ...earlier]),
+			];
 		},
 		activeRows: () => projectRows(true),
 		liveRows: () => [...plans.live().map((plan) => fleetPlanRow(plan, Date.now())), ...projectRows(true)],

@@ -636,7 +636,8 @@ function headerWord(entry: WorkerEntryState): string {
 	if (workerNeedsInput(entry)) return "needs input";
 	const outcome = entry.result.outcome;
 	if (outcome === "canceled") return "cancelled";
-	if (outcome === "stalled") return "stalled";
+	// The board, the dock and the notice say this state in these words; `stalled` was a second name for it.
+	if (outcome === "stalled") return "stopped responding";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
 	return settledCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
@@ -665,7 +666,12 @@ function alignedHeader(
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
 	const word = width >= HEADER_WORD_MIN_WIDTH && !pending ? headerWord(entry) : null;
-	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(HEADER_WORD_WIDTH)}`)}`;
+	// The column fits the widest word among the siblings, so a rare long one still lines the cards up.
+	const wordWidth = Math.max(
+		HEADER_WORD_WIDTH,
+		...(siblings ?? []).map((sibling) => (isPending(sibling) ? 0 : visibleWidth(headerWord(sibling)))),
+	);
+	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(wordWidth)}`)}`;
 	const name = workerName(entry);
 	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
 	const prefix = cardPrefix(entry);

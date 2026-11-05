@@ -14,7 +14,6 @@
  */
 
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import { dotSep, GLYPH, innerDivider, isClioToken, padAnsi, paintHex } from "./theme/index.js";
 
@@ -44,6 +43,8 @@ export interface CouncilMemberView {
 	/** Bounded answer tail the board already keeps for this run. */
 	tailText: string;
 	droppedLines: number;
+	/** The run has ended, so a missing tail means its answer is only in its record. */
+	settled?: boolean;
 }
 
 export interface CouncilGroupView {
@@ -62,6 +63,8 @@ export interface CouncilGroupView {
 	elapsed: string;
 	/** Run id of the selected row when the selection sits inside this group. */
 	selectedRunId?: string;
+	/** Every run in the group was recorded by an earlier Clio process. */
+	earlier?: true;
 }
 
 export type CouncilLayout = { mode: "grid"; columnWidth: number } | { mode: "stack"; columnWidth: number };
@@ -134,6 +137,10 @@ function councilMemberLines(
 		truncateToWidth(`${status}${dot}${theme.fg("annotation", `round ${member.round}`)}`, width, "…", false),
 		...answerRows(theme, member, width, options.maxAnswerRows ?? COUNCIL_ANSWER_ROWS),
 	];
+	// A member this process did not watch has no tail here; its answer is in its record, so the column says where.
+	if (member.settled === true && member.tailText.trim().length === 0) {
+		lines.push(truncateToWidth(theme.fg("annotation", `answer in /view dispatch:${member.runId}`), width, "…", false));
+	}
 	return lines.map((line) => padAnsi(line, width));
 }
 
@@ -185,21 +192,31 @@ export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, cont
 }
 
 /**
- * The compact Fleet Runs island card for a council: one row for the whole
- * group, naming how many members are seated and which round they are on. The
- * grid belongs to the expanded board, where there is width to read it in.
+ * The compact Fleet Runs island card for a council: the council by its size and state, the question, then each
+ * member by label with its own state, so the dock says who is still answering without opening the board. The grid
+ * belongs to the expanded board, where there is width to read it in.
  */
 export function councilIslandLines(theme: ClioTheme, group: CouncilGroupView, width: number): string[] {
 	const dot = dotSep(theme);
 	const glyph = theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph);
 	const status = theme.fg(group.status.token, group.status.label);
-	const title = theme.fg("harnessHeading", `council ${group.group}`);
-	const head = `${glyph} ${title}${dot}${status}${dot}${theme.fg("toolMetadata", group.elapsed)}`;
-	const seats = `${group.members.length} member${group.members.length === 1 ? "" : "s"}`;
-	const facts = [
-		theme.fg("counter", seats),
-		theme.fg("annotation", `r${group.round}`),
-		...(group.synthesis !== null ? [theme.fg("info", COUNCIL_SYNTHESIS_LABEL)] : []),
+	// The group id is the record's; a person knows the council by its size and its question.
+	const name = group.members.length === 0 ? "council" : `council of ${group.members.length}`;
+	const head = `${glyph} ${theme.fg("workerIdentity", name)}${dot}${status}${dot}${theme.fg("toolMetadata", group.elapsed)}`;
+	const seat = (member: CouncilMemberView): string =>
+		`${councilLabelText(theme, member.label, member.color)} ${theme.fg(member.status.glyphToken ?? member.status.token, member.status.glyph)}`;
+	const seats = [
+		...group.members.map(seat),
+		...(group.synthesis !== null ? [seat(group.synthesis)] : []),
+		...(group.round > 1 ? [theme.fg("annotation", `round ${group.round}`)] : []),
 	].join(dot);
-	return [padAnsi(truncateToWidth(head, width, "…", false), width), padAnsi(`  ${facts}`, width)];
+	const lines = [
+		truncateToWidth(head, width, GLYPH.ellipsis, false),
+		...(group.task !== undefined
+			? [truncateToWidth(`  ${theme.fg("body", group.task)}`, width, GLYPH.ellipsis, false)]
+			: []),
+		truncateToWidth(`  ${seats}`, width, GLYPH.ellipsis, false),
+		truncateToWidth(theme.fg("annotation", "  /fleet to read each answer"), width, GLYPH.ellipsis, false),
+	];
+	return lines.map((line) => padAnsi(line, width));
 }

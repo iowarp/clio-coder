@@ -55,6 +55,7 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 		taskSummary: run.task,
 		status,
 		elapsedMs: Number.isFinite(endedAt - startedAt) ? Math.max(0, endedAt - startedAt) : 0,
+		...(Number.isFinite(endedAt) ? { settledAtMs: endedAt } : {}),
 		usage: recordedUsage(run.id),
 		ttft: null,
 		...(run.outcomeDetail ? { outcomeDetail: run.outcomeDetail } : {}),

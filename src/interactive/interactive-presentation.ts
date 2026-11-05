@@ -42,7 +42,6 @@ import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
 import type { TurnPreparationStep } from "../session-control/turn-state.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
-import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
 import { createBackgroundCallTracker } from "./background-calls.js";
 import type { ChatPanel } from "./chat-panel.js";
@@ -55,7 +54,12 @@ import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
 import { admissionHint } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
-import { createDispatchBoardStore, createDispatchBoardView, dispatchStatusPresentation } from "./dispatch-board.js";
+import {
+	createDispatchBoardStore,
+	createDispatchBoardView,
+	dispatchStatusPresentation,
+	isOperatorFleetRun,
+} from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
@@ -751,7 +755,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-			workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
+			workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter(isOperatorFleetRun),
 			background: backgroundCalls.active(),
 			workerActivity: (row, room) =>
 				row.plan !== undefined
@@ -1109,6 +1113,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 				isFooterExpanded: () => footer.isExpanded(),
 				isFleetBoardOpen: () => deps.getOverlayState?.() === "dispatch-board",
+				getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
 			}),
 			editor,
 			contextProgress: createContextProgressRail(
