@@ -13,7 +13,11 @@ export interface TerminalColorFollower {
 
 type FollowedTui = Pick<
 	TUI,
-	"onTerminalColorSchemeChange" | "setTerminalColorSchemeNotifications" | "queryTerminalColors" | "invalidate" | "requestRender"
+	| "onTerminalColorSchemeChange"
+	| "setTerminalColorSchemeNotifications"
+	| "queryTerminalColors"
+	| "invalidate"
+	| "requestRender"
 >;
 
 /**

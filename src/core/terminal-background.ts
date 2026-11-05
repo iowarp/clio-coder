@@ -1,5 +1,5 @@
 import { colorDisabled } from "./terminal-preferences.js";
-import { relativeLuminance, type Rgb, type ThemeBackground } from "./theme-token-hex.js";
+import { type Rgb, relativeLuminance, type ThemeBackground } from "./theme-token-hex.js";
 
 /**
  * What the terminal paints behind us, so the theme can solve its palette for it.
@@ -16,7 +16,8 @@ let reportedScheme: ThemeBackground | null = null;
 let reportedColor: Rgb | null = null;
 let version = 0;
 
-function themeIsForced(env: NodeJS.ProcessEnv): boolean {
+/** True when CLIO_CODER_THEME decides the palette, so terminal reports change nothing. */
+export function terminalThemeForced(env: NodeJS.ProcessEnv = process.env): boolean {
 	const forced = (env.CLIO_CODER_THEME ?? "").trim().toLowerCase();
 	return forced === "dark" || forced === "light" || forced === "neutral";
 }
@@ -30,12 +31,7 @@ export function terminalBackground(env: NodeJS.ProcessEnv = process.env): ThemeB
 
 /** The color the terminal last reported. A forced theme ignores it, since the operator overruled the terminal. */
 export function terminalBackgroundColor(env: NodeJS.ProcessEnv = process.env): Rgb | null {
-	return themeIsForced(env) ? null : reportedColor;
-}
-
-/** True when CLIO_CODER_THEME decides the palette, so terminal reports change nothing. */
-export function terminalThemeForced(env: NodeJS.ProcessEnv = process.env): boolean {
-	return themeIsForced(env);
+	return terminalThemeForced(env) ? null : reportedColor;
 }
 
 /** Moves whenever the reported background changes; caches of painted rows key on it through skinEpoch. */
@@ -49,8 +45,12 @@ export function terminalColorVersion(): number {
  * scheme alone drops a remembered color from the other scheme. Returns whether
  * anything changed.
  */
-export function reportTerminalColors(report: { background?: Rgb | undefined; scheme?: ThemeBackground | undefined }): boolean {
-	const color = report.background ?? (report.scheme === undefined || report.scheme === reportedScheme ? reportedColor : null);
+export function reportTerminalColors(report: {
+	background?: Rgb | undefined;
+	scheme?: ThemeBackground | undefined;
+}): boolean {
+	const color =
+		report.background ?? (report.scheme === undefined || report.scheme === reportedScheme ? reportedColor : null);
 	const scheme = report.background === undefined ? (report.scheme ?? reportedScheme) : schemeOf(report.background);
 	const sameColor =
 		color === reportedColor ||
@@ -77,7 +77,7 @@ export function backgroundFromColorFgBg(value: string | undefined): ThemeBackgro
 }
 
 /** Parse an OSC 11 reply, `ESC ] 11 ; rgb:RRRR/GGGG/BBBB` with 1-4 hex digits per channel, to 8-bit channels. */
-export function colorFromOsc11(reply: string): Rgb | null {
+function colorFromOsc11(reply: string): Rgb | null {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal replies are escape sequences.
 	const match = /\u001b\]11;rgba?:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})/iu.exec(reply);
 	if (match === null) return null;
@@ -111,7 +111,7 @@ export async function probeTerminalBackground(
 	const stdin = options.stdin ?? process.stdin;
 	const stdout = options.stdout ?? process.stdout;
 	const env = options.env ?? process.env;
-	if (themeIsForced(env)) return terminalBackground(env);
+	if (terminalThemeForced(env)) return terminalBackground(env);
 	if (colorDisabled(env) || !stdin.isTTY || !stdout.isTTY) return null;
 	const wasRaw = stdin.isRaw;
 	let buffer = "";

@@ -1,5 +1,11 @@
-import { TEXT_ROLES, resolveRole, STRUCTURAL_ROLES, type SemanticRole } from "./theme-roles.js";
-import { contrastRatio, type PaletteColor, type Rgb, TERMINAL_PALETTE, type ThemeBackground } from "./theme-token-hex.js";
+import { resolveRole, type SemanticRole, STRUCTURAL_ROLES, TEXT_ROLES } from "./theme-roles.js";
+import {
+	contrastRatio,
+	type PaletteColor,
+	type Rgb,
+	TERMINAL_PALETTE,
+	type ThemeBackground,
+} from "./theme-token-hex.js";
 
 /**
  * Contrast rules for the palette, solved against the background the terminal
@@ -12,8 +18,8 @@ import { contrastRatio, type PaletteColor, type Rgb, TERMINAL_PALETTE, type Them
  * vivid. Indexed colors stay in the 16-255 range: 0-15 belong to the terminal's
  * theme, and bright black often falls below 3:1 on a dark background.
  */
-export const CONTRAST_TEXT = 4.5;
-export const CONTRAST_UI = 3;
+const CONTRAST_TEXT = 4.5;
+const CONTRAST_UI = 3;
 
 export interface ProjectedColor {
 	readonly rgb: Rgb;
@@ -22,7 +28,7 @@ export interface ProjectedColor {
 
 /** The terminal's own background, or a palette color painted behind this one. */
 type ContrastSurface = "application" | PaletteColor;
-export interface ContrastRule {
+interface ContrastRule {
 	readonly level: number;
 	readonly surfaces: readonly ContrastSurface[];
 }
@@ -34,12 +40,25 @@ const SURFACE_TINT = {
 } as const satisfies Partial<Record<PaletteColor, { tint: PaletteColor; dark: number; light: number }>>;
 const isSurface = (color: PaletteColor): color is keyof typeof SURFACE_TINT => Object.hasOwn(SURFACE_TINT, color);
 
-const STRUCTURAL_TEXT = new Set<string>(["syntaxKeyword", "syntaxKey", "syntaxString", "syntaxLiteral", "syntaxComment"]);
-// The composer surface paints only behind YOLO's own projections, its outcome
-// colors and its rail. Everything else meets the terminal's background alone.
-const ON_COMPOSER = new Set<PaletteColor>(["composerRail", "attentionRail", "error", "warning", "success"].map((name) =>
-	name in STRUCTURAL_ROLES ? STRUCTURAL_ROLES[name as keyof typeof STRUCTURAL_ROLES] : (name as PaletteColor),
-));
+const STRUCTURAL_TEXT = new Set<string>([
+	"syntaxKeyword",
+	"syntaxKey",
+	"syntaxString",
+	"syntaxLiteral",
+	"syntaxComment",
+]);
+// The composer surface paints behind YOLO's own projections, its rail, the
+// neutral facts in its strip and its outcome colors. Everything else meets the
+// terminal's background alone.
+const ON_COMPOSER = new Set<PaletteColor>([
+	"cyanFocal",
+	"orangeReading",
+	"neutralSupporting",
+	"neutralReading",
+	"error",
+	"warning",
+	"success",
+]);
 const YOLO_CONTEXT = { surface: "composer", mode: "yolo" } as const;
 
 function buildRules(): ReadonlyMap<PaletteColor, ContrastRule> {
@@ -50,7 +69,9 @@ function buildRules(): ReadonlyMap<PaletteColor, ContrastRule> {
 	}
 	const rules = new Map<PaletteColor, ContrastRule>();
 	const raise = (color: PaletteColor, level: number): void => {
-		const surfaces: readonly ContrastSurface[] = ON_COMPOSER.has(color) ? ["application", "yoloSurface"] : ["application"];
+		const surfaces: readonly ContrastSurface[] = ON_COMPOSER.has(color)
+			? ["application", "yoloSurface"]
+			: ["application"];
 		if (level > (rules.get(color)?.level ?? 0)) rules.set(color, { level, surfaces });
 	};
 	for (const role of roles) {
@@ -66,11 +87,6 @@ function buildRules(): ReadonlyMap<PaletteColor, ContrastRule> {
 	return rules;
 }
 const RULES = buildRules();
-
-/** Which surfaces and level bind this palette color; surfaces themselves carry no rule. */
-export function contrastRule(color: PaletteColor): ContrastRule | undefined {
-	return RULES.get(color);
-}
 
 const WHITE: Rgb = [255, 255, 255];
 const BLACK: Rgb = [0, 0, 0];
@@ -88,7 +104,7 @@ function worstContrast(color: Rgb, surfaces: readonly Rgb[]): number {
 }
 
 /** The smallest mix toward white or black that reaches `level` on every surface, or the best end when none does. */
-export function liftToContrast(color: Rgb, surfaces: readonly Rgb[], level: number): Rgb {
+function liftToContrast(color: Rgb, surfaces: readonly Rgb[], level: number): Rgb {
 	if (worstContrast(color, surfaces) >= level) return color;
 	const end = worstContrast(WHITE, surfaces) >= worstContrast(BLACK, surfaces) ? WHITE : BLACK;
 	if (worstContrast(end, surfaces) < level) return end;
@@ -104,7 +120,7 @@ export function liftToContrast(color: Rgb, surfaces: readonly Rgb[], level: numb
 
 const CUBE = [0, 95, 135, 175, 215, 255] as const;
 /** The fixed xterm color at an index in 16-255. */
-export function xtermRgb(index: number): Rgb {
+function xtermRgb(index: number): Rgb {
 	if (index >= 232) {
 		const value = 8 + (index - 232) * 10;
 		return [value, value, value];
@@ -119,7 +135,7 @@ function distance(a: Rgb, b: Rgb): number {
 }
 
 /** The indexed color nearest `target` that holds `level` on the surfaces; the strongest one when none does. */
-export function xtermForContrast(target: Rgb, surfaces: readonly Rgb[], level: number): number {
+function xtermForContrast(target: Rgb, surfaces: readonly Rgb[], level: number): number {
 	let nearest: number | null = null;
 	let nearestDistance = Number.POSITIVE_INFINITY;
 	let strongest = XTERM[0]?.index ?? 16;
@@ -153,7 +169,10 @@ export function adaptPalette<Color extends ProjectedColor>(
 	fixed: ReadonlySet<PaletteColor> = new Set(),
 ): Record<PaletteColor, ProjectedColor> {
 	const adapted = { ...base } as Record<PaletteColor, ProjectedColor>;
-	for (const [color, tint] of Object.entries(SURFACE_TINT) as [keyof typeof SURFACE_TINT, (typeof SURFACE_TINT)[keyof typeof SURFACE_TINT]][]) {
+	for (const [color, tint] of Object.entries(SURFACE_TINT) as [
+		keyof typeof SURFACE_TINT,
+		(typeof SURFACE_TINT)[keyof typeof SURFACE_TINT],
+	][]) {
 		if (fixed.has(color)) continue;
 		const rgb = mix(background, base[tint.tint].rgb, tint[scheme]);
 		adapted[color] = { rgb, xterm: xtermForContrast(rgb, [], 0) };
@@ -163,7 +182,11 @@ export function adaptPalette<Color extends ProjectedColor>(
 		if (rule === undefined || fixed.has(color)) continue;
 		const painted = (read: (surface: ProjectedColor) => Rgb): Rgb[] =>
 			rule.surfaces.map((surface) => (surface === "application" ? background : read(adapted[surface])));
-		const rgb = liftToContrast(base[color].rgb, painted((surface) => surface.rgb), rule.level);
+		const rgb = liftToContrast(
+			base[color].rgb,
+			painted((surface) => surface.rgb),
+			rule.level,
+		);
 		const xtermSurfaces = painted((surface) => xtermRgb(surface.xterm));
 		const xterm =
 			worstContrast(xtermRgb(base[color].xterm), xtermSurfaces) >= rule.level
