@@ -1123,7 +1123,7 @@ describe("Pi TUI compatibility", () => {
 		});
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 80) ?? []).map(stripTerminalSequences).join("\n");
-			match(plain, /System One breakers/u);
+			match(plain, /System One engines/u);
 			match(plain, /local-small paused 120s after 3 consecutive timeouts/u);
 		} finally {
 			handle.hide();
