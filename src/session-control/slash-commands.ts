@@ -2595,10 +2595,21 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "peer-pane-usage", reason: parsed.error };
+			if (parsed.error)
+				return {
+					kind: "peer-pane-usage",
+					// The one required argument is the peer, so name the choices rather than the parser's field.
+					reason:
+						parsed.positionals.length === 0
+							? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt`
+							: parsed.error,
+				};
 			const peer = parsed.positionals[0] ?? "";
 			if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
-				return { kind: "peer-pane-usage", reason: `peer must be one of ${PANE_PEER_IDS.join(", ")}` };
+				return {
+					kind: "peer-pane-usage",
+					reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}`,
+				};
 			}
 			const cwd = parsed.flags.get("--cwd");
 			return {
@@ -2630,7 +2641,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (result.status === "opened") {
 					ctx.notice(
 						"success",
-						`opened ${command.peer} in pane ${result.paneId} at ${result.cwd}; interactive handoff, no managed run record`,
+						`Opened ${command.peer} in a pane beside this one, working in ${result.cwd}. It runs on its own: Clio keeps no run record of it and does not review its changes.`,
 					);
 				} else if (result.status === "missing-binary") {
 					ctx.notice("warn", result.detail);
