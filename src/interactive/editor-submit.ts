@@ -444,21 +444,20 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			if (runEditorBash(text)) deps.ui.requestRender();
 			return;
 		}
-		// A bare `@run-id` from the board with nothing typed would reach the model as a prompt.
+		// A bare `@run-id` from the board with nothing typed would reach the model as
+		// a prompt. A bare `@name` stays chat: only the exact run id is an address.
 		const bareToken = steerDraftToken(trimmed);
-		if (bareToken === trimmed.slice(1)) {
-			const running = runningDispatchRefs();
-			const resolved = resolveSteerTarget(bareToken, running);
-			if (resolved.kind === "match") {
-				deps.notify(
-					"info",
-					`Type the guidance for ${resolved.run.agentId} after the address, then Enter`,
-					`steer:${resolved.run.runId}`,
-				);
-				deps.editor.setText(`${literalText.trimEnd()} `);
-				deps.ui.requestRender();
-				return;
-			}
+		const addressed =
+			bareToken === trimmed.slice(1) ? runningDispatchRefs().find((run) => run.runId === bareToken) : undefined;
+		if (addressed) {
+			deps.notify(
+				"info",
+				`Type the guidance for ${addressed.agentId} after the address, then Enter`,
+				`steer:${addressed.runId}`,
+			);
+			deps.editor.setText(`${literalText.trimEnd()} `);
+			deps.ui.requestRender();
+			return;
 		}
 		const steerMention = parseEditorSteerMention(trimmed);
 		if (steerMention) {

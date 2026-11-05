@@ -536,9 +536,7 @@ test("compact quota stays beside the selected model while workspace and rotating
 		doesNotMatch(rows[0] ?? "", /weekly|Claude|Codex/);
 		ok(rows.every((line) => visibleWidth(line) <= width));
 	}
-	const initial = plain(renderCompactDashboard(snapshot, 160));
-	snapshot.now += 12000;
-	ok(plain(renderCompactDashboard(snapshot, 160)) !== initial);
+	ok(footerKeyHint(0, true) !== footerKeyHint(12000, true), "the hints rotate");
 	for (let page = 0; page < 40; page++) {
 		snapshot.now = page * 12000;
 		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050 \*/);

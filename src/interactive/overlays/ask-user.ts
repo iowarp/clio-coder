@@ -22,6 +22,7 @@ import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/
 import { cancelledAskUserResult, recommendedOptionIndex, unavailableAskUserResult } from "../../tools/ask-user.js";
 import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { dockGrowthRows } from "../dock.js";
+import { formatKeyLabel } from "../keybinding-manager.js";
 import { scrollTranscriptPage } from "../layout.js";
 import {
 	buildHint,
@@ -994,7 +995,11 @@ class AskUserOverlayView implements Component {
 			const escVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
 			const entries: HintEntry[] = [];
 			if (this.deps.tui)
-				entries.push({ key: getKeybindings().getKeys("tui.input.newLine").join("/"), verb: "newline", critical: false });
+				entries.push({
+					key: formatKeyLabel(getKeybindings().getKeys("tui.input.newLine")[0], "Ctrl+J"),
+					verb: "newline",
+					critical: false,
+				});
 			entries.push(...scroll);
 			if (this.questions.length > 1)
 				entries.push({ key: "Tab/Shift+Tab", verb: "question", short: "next", critical: false });
