@@ -55,6 +55,8 @@ export interface TurnSummary {
 	stopDetail?: string | undefined;
 	watchdogPeak: WatchdogTier;
 	truncated: boolean;
+	/** Of `elapsedMs`, what the turn spent waiting on the operator rather than working. */
+	humanWaitMs?: number | undefined;
 }
 
 /**
@@ -117,6 +119,10 @@ export interface AgentStatus {
 	summary?: TurnSummary | undefined;
 	/** Usage settled so far in the active run. Reset by `agent_start`. */
 	runTally?: RunTally | undefined;
+	/** Closed spans this turn spent on an operator-owned wait: an open approval card or interview. */
+	humanWaitMs?: number | undefined;
+	/** Epoch ms the operator-owned wait now open began. */
+	humanWaitSince?: number | undefined;
 }
 
 export interface AgentStatusEvent {

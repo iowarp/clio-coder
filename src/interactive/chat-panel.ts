@@ -156,6 +156,8 @@ export interface ChatPanelTurnUsage {
 	coldReasons?: ReadonlyArray<string>;
 	/** Provider attempts the run sent again after a failure. */
 	retries?: number;
+	/** Of `elapsedMs`, what the run spent waiting on the operator. */
+	humanWaitMs?: number;
 }
 
 /**
@@ -477,6 +479,8 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
+	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
+	getHumanWaitMs?: () => number;
 	/** The telemetry read model's live view, whose turn quantities each turn's receipt reads (#434 §11.3). */
 	getTelemetry?: () => TelemetryView | null;
 	/** Live transcript detail mode. Settings changes take effect on the next frame. */
@@ -1110,7 +1114,7 @@ function renderTurnUsageLine(
 	const spend = usage.spend;
 	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
 	const retries = usage.retries ? ` · ${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : "";
-	const settled = `${outcome}${coverage}${retries}${usage.elapsedMs === undefined ? "" : ` · ${formatCompactMs(usage.elapsedMs)}`}`;
+	const settled = `${outcome}${coverage}${retries}${receiptDuration(usage)}`;
 	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
 		return [`${glyph}${dimLine(settled, Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
@@ -1150,6 +1154,14 @@ function renderTurnUsageLine(
  * other block's mark, so where each turn ended and how is scannable down the
  * left edge. Only the glyph carries color; the facts stay dim.
  */
+/** A turn that waited on the operator states its work and that wait apart: the sum describes neither. */
+function receiptDuration(usage: ChatPanelTurnUsage): string {
+	if (usage.elapsedMs === undefined) return "";
+	const waited = usage.humanWaitMs ?? 0;
+	if (waited < 1000) return ` · ${formatCompactMs(usage.elapsedMs)}`;
+	return ` · ${formatCompactMs(Math.max(0, usage.elapsedMs - waited))} work · ${formatCompactMs(waited)} waiting on you`;
+}
+
 function receiptGlyph(outcome: string): string {
 	if (outcome === "Done") return `${GREEN_OK}${GLYPH.ok}${RESET} `;
 	if (outcome === "Failed") return `${RED_CRIT}${GLYPH.error}${RESET} `;
@@ -2015,10 +2027,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							: Math.max(0, now() - runStartedAt);
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
+				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : 0;
 				target.turnUsage = {
 					...(turnId === undefined ? {} : { turnId }),
 					...(callIds.length > 0 ? { callIds } : {}),
 					...(elapsedMs === undefined ? {} : { elapsedMs }),
+					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),
 					outcome:
@@ -2340,7 +2354,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// list, not a series of blocks, and so is every run of cards in
 			// Compact. Anything else keeps the blank line between entries.
 			const previous = i > 0 ? transcript[i - 1] : undefined;
-			if (i > 0 && !stacksUnder(entry, previous, detail)) out.push("");
+			const separated = i > 0 && !stacksUnder(entry, previous, detail);
+			if (separated) out.push("");
+			const entryStart = out.length;
 			const renders = entryRenderCache.get(entry);
 			const renderKey = entry.role === "worker" && entryHasRunningTool(entry) ? `${baseKey}|${tick}` : baseKey;
 			const cached = renders?.get(renderKey);
@@ -2383,6 +2399,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 				}
 			}
+			// An entry with nothing to show draws no gap either.
+			if (separated && out.length === entryStart) out.pop();
 			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
 				freezeThrough = i + 1;
 				freezeTailRows = out.length;

@@ -59,7 +59,7 @@ import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
-import { createStatusController } from "./status/index.js";
+import { createStatusController, humanWaitTotalMs } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
@@ -360,6 +360,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
+		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.

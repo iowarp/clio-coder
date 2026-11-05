@@ -268,7 +268,8 @@ function reasoningChip(theme: ClioTheme, reasoning: ReasoningUsageView): string 
 
 export function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
-	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(lastTurn.elapsedMs))}`;
+	const work = Math.max(0, lastTurn.elapsedMs - (lastTurn.humanWaitMs ?? 0));
+	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(work))}`;
 }
 
 /** Tokens are the journal's for the whole turn, workers included; timing and tools are the turn's own status. */

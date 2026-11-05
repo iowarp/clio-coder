@@ -253,11 +253,37 @@ function isAwaitingDispatch(prev: AgentStatus): boolean {
 	return (prev.overlayStack ?? []).some((frame) => frame.phase === "dispatching");
 }
 
-function isWaitingForOperator(prev: AgentStatus): boolean {
+/**
+ * The next step belongs to a person: an approval card or an interview is open. Silence here is not evidence about the
+ * agent, so it never reaches the watchdog, and the time it takes is the operator's rather than the turn's work.
+ */
+export function isWaitingForOperator(status: AgentStatus): boolean {
+	if (!isActive(status.phase)) return false;
+	if (status.phase === "tool_blocked" || status.activePhases?.has("tool_blocked")) return true;
+	if ((status.overlayStack ?? []).some((frame) => frame.phase === "tool_blocked")) return true;
 	return (
-		prev.tool?.toolName === ToolNames.AskUser &&
-		(prev.phase === "tool_running" || (prev.phase === "stuck" && prev.resumePhase === "tool_running"))
+		status.tool?.toolName === ToolNames.AskUser ||
+		(status.activeTools ?? []).some((tool) => tool.toolName === ToolNames.AskUser)
 	);
+}
+
+/** What the turn has spent waiting on the operator, the wait still open included. */
+export function humanWaitTotalMs(status: AgentStatus, now: number): number {
+	const open = status.humanWaitSince !== undefined ? Math.max(0, now - status.humanWaitSince) : 0;
+	return (status.humanWaitMs ?? 0) + open;
+}
+
+function withHumanWait(next: AgentStatus, now: number): AgentStatus {
+	const waiting = isWaitingForOperator(next);
+	let status = next;
+	if (waiting && next.humanWaitSince === undefined) status = { ...next, humanWaitSince: now };
+	else if (!waiting && next.humanWaitSince !== undefined) {
+		status = { ...next, humanWaitMs: humanWaitTotalMs(next, now), humanWaitSince: undefined };
+	}
+	const waited = status.humanWaitMs ?? 0;
+	return status.phase === "ended" && status.summary && status.summary.humanWaitMs !== waited && waited > 0
+		? { ...status, summary: { ...status.summary, humanWaitMs: waited } }
+		: status;
 }
 
 /** The messages a run tally folds: its assistant replies and tool results. */
@@ -338,6 +364,11 @@ function leaveRetryOnOutput(prev: AgentStatus, ctx: ReduceContext): AgentStatus 
 }
 
 export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
+	const next = reduceEvent(prev, event, ctx);
+	return next === prev ? prev : withHumanWait(next, ctx.now);
+}
+
+function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
 	switch (event.type) {
 		// A consumed prompt occupies `preparing` before any engine event exists,
 		// and the previous turn's summary rides along untouched: a refused
@@ -360,6 +391,8 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				toolStartedAt: undefined,
 				retry: undefined,
 				dispatch: undefined,
+				humanWaitMs: undefined,
+				humanWaitSince: undefined,
 			};
 		case "submit_settled":
 			if (prev.preparingSubmission !== true) return prev;
@@ -625,13 +658,8 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		case "watchdog_tick": {
 			if (!isActive(prev.phase)) return prev;
 			if (isWaitingForOperator(prev)) {
-				return {
-					...prev,
-					phase: "tool_running",
-					resumePhase: undefined,
-					watchdogTier: 0,
-					localRuntime: ctx.localRuntime,
-				};
+				const held = prev.phase === "stuck" ? popOverlay(prev, "stuck", ctx) : prev;
+				return { ...held, watchdogTier: 0, localRuntime: ctx.localRuntime };
 			}
 			const elapsed = Math.max(0, ctx.now - prev.lastMeaningfulAt);
 			const tier = computeWatchdogTier(elapsed);
