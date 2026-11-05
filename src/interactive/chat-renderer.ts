@@ -698,7 +698,7 @@ function renderReminderMessageEntry(entry: CustomEntry, width: number, full: boo
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
 	// The same spelling as the line a reply carries and the rail: the provider is only the wire protocol.
 	const route = entry.target ? `${entry.target} · ${entry.modelId}` : `${entry.provider}/${entry.modelId}`;
-	return renderNoticeRow(`[model] ${route}`, "info", width);
+	return renderNoticeRow(`Model ${route}`, "info", width);
 }
 
 function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {

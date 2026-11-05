@@ -252,7 +252,8 @@ function nextForSpec(spec: CommandArgsSpec | undefined, lead: string): string {
 	const options = (spec?.flags ?? []).length > 0 ? " Type -- to list its options." : "";
 	if (required.length > 0) return `${lead}, then give ${required.join(" ")}.${options}`;
 	if ((spec?.flags ?? []).length > 0 || (spec?.positionals ?? []).length > 0) {
-		return `${lead}; press Esc, then Enter to run it without arguments.${options}`;
+		// Esc right now would close this menu over the half-typed name, so the order matters.
+		return `${lead}; then Esc closes the argument list and Enter runs it without arguments.${options}`;
 	}
 	return `${lead}; Enter then runs it.`;
 }

@@ -41,7 +41,7 @@ import type { SystemOne } from "../domains/system-one/index.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
-import { createAgentProgress } from "../engine/tui.js";
+import { createAgentProgress, TuiAltScreen } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import { reportLoopChanges } from "../session-control/loop-command.js";
 import type { ReloadClassesController } from "../session-control/reload-report.js";
@@ -1088,9 +1088,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		applyChatEvent: (event) => chatRenderer.applyEvent(event),
 		setFollowUpMessages: (messages) => {
 			followUpQueuePanel.setMessages(messages);
-			// A drained queue leaves the navigator nothing to work on; left open it came back
-			// empty from behind the next approval card and swallowed what was typed next.
-			if (messages.length === 0 && overlayLifecycle.getState() === "queue-navigator") overlayLifecycle.closeOverlay();
+			// A navigator on screen stays open when the run drains the queue under it and
+			// says so, because closing it handed the next key, meant for a message, to the
+			// composer. One drained behind an approval card is put away when the card closes
+			// (`restorable` in the overlay lifecycle).
 		},
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
 		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
@@ -1546,9 +1547,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		presentation.collapseWelcomeDashboard();
 		resetTranscript();
 	};
-	const suspendTerminalAsync = async <T>(run: () => Promise<T>): Promise<T> => {
+	const suspendTerminalAsync = async <T>(run: () => Promise<T>, preserveScreen = false): Promise<T> => {
 		try {
-			tui.stop();
+			tui.stop(preserveScreen ? { preserveScreen: true } : {});
 			return await run();
 		} finally {
 			tui.start();
@@ -2026,9 +2027,19 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					notify("info", "Suspend is not supported on Windows.", "keyboard:suspend");
 					return;
 				}
-				void suspendTerminalAsync(suspendProcessUntilContinued).catch((err: unknown) => {
-					notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
-				});
+				// Fullscreen leaves the alternate screen as it found the shell's: stopping
+				// otherwise reprints the whole transcript, draft included, into the shell's
+				// scrollback on every Ctrl+Z. Inline mode moves below its frame first.
+				void suspendTerminalAsync(suspendProcessUntilContinued, tui instanceof TuiAltScreen).then(
+					(suspended) => {
+						if (!suspended) {
+							notify("info", "Ctrl+Z needs Clio started from an interactive shell with job control", "keyboard:suspend");
+						}
+					},
+					(err: unknown) => {
+						notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
+					},
+				);
 			},
 			canExit: () => {
 				const blocker = exitBlocker();

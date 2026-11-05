@@ -12,6 +12,7 @@ import type {
 	ApplicationSignalCoordinator,
 } from "./application-controller.js";
 import { createApplicationController } from "./application-controller.js";
+import { formatKeyLabel } from "./keybinding-manager.js";
 import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
 import { scrollTranscriptPage } from "./layout.js";
 import type { LeaderTarget } from "./leader-key.js";
@@ -104,6 +105,7 @@ export interface InteractiveInputRuntimeDeps {
 		toggleMutationInspection(): void;
 		scrollMutationInspection(delta: number): void;
 		togglePermissionTerms(): void;
+		isShowingPermissionTerms?(): boolean;
 		scrollPermissionCard(delta: number): boolean;
 		cancelAskUser(): void;
 		toggleFooterDashboardState(): void;
@@ -271,7 +273,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		? createLeaderMenu(
 				deps.tui,
 				() => (search() ? "Transcript search" : overlayScopeLabel(deps.overlay.getState())),
-				(id) => deps.keybindings.getKeys?.(id).join(" / ") ?? "",
+				(id) =>
+					deps.keybindings
+						.getKeys?.(id)
+						.map((key) => formatKeyLabel(key))
+						.join(" / ") ?? "",
 			)
 		: undefined;
 	const dispatchLeader = (id: Keybinding): boolean => {
@@ -495,6 +501,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					toggleMutationInspection: () => deps.overlay.toggleMutationInspection(),
 					scrollMutationInspection: (delta) => deps.overlay.scrollMutationInspection(delta),
 					togglePermissionTerms: () => deps.overlay.togglePermissionTerms(),
+					isShowingPermissionTerms: () => deps.overlay.isShowingPermissionTerms?.() ?? false,
 					scrollPermissionCard: (delta) => deps.overlay.scrollPermissionCard(delta),
 					scrollTranscript: (direction) => (deps.tui ? scrollTranscriptPage(deps.tui, direction) : false),
 					canToggleOwner,

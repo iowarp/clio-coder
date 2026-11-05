@@ -29,8 +29,9 @@ type RampColor = readonly [Projection, Projection, Projection];
  * Unknown-background colors occupy the narrow luminance band that holds 4.5:1 on
  * both black and white. Indexed color has few entries in that band, so its cyans
  * share 29 with success, whose mark tells them apart, and orange keeps 130, the
- * nearest orange at 4.46:1 on black. The dark and light projections hold 4.5:1 for text, 3:1
- * for rails and 2:1 for frames and dividers on typical backgrounds; see
+ * nearest orange at 4.46:1 on black. The dark and light projections hold 4.5:1 for text and
+ * 3:1 for every mark without words, frames and dividers included, on typical
+ * backgrounds (black and #1e1e1e, white and #fdf6e3); see
  * theme-contrast.ts for how they lift further on a reported background. A declared
  * surface supplies its own background and uses the corresponding projection.
  */
@@ -172,8 +173,8 @@ export const TERMINAL_PALETTE = {
 	],
 	border: [
 		["#737a80", 243],
-		["#526762", 240],
-		["#a4abb0", 248],
+		["#60736f", 242],
+		["#848a8e", 245],
 	],
 	// A meter's empty cells say how much is left, so the track holds 3:1 where a frame holds 2:1.
 	meterTrack: [
@@ -183,8 +184,8 @@ export const TERMINAL_PALETTE = {
 	],
 	divider: [
 		["#737a80", 243],
-		["#3f524d", 239],
-		["#a6abaf", 248],
+		["#5d6d69", 242],
+		["#898d90", 245],
 	],
 	surface: [
 		["#151412", 233],

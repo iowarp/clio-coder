@@ -214,6 +214,8 @@ export interface OverlayLifecycleController {
 	scrollMutationInspection(delta: number): void;
 	/** Fold or unfold the standing approval terms on the live permission card. */
 	togglePermissionTerms(): void;
+	/** Whether the live card's terms are unfolded. */
+	isShowingPermissionTerms(): boolean;
 	/** Scroll a permission card taller than its rows; false when the card fits. */
 	scrollPermissionCard(delta: number): boolean;
 	cancelAskUser(): void;
@@ -288,6 +290,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			overlayPermission?.retryPending();
 			deps.onOverlayClosed?.();
 		},
+		restorable: (state) => state !== "queue-navigator" || deps.app.chat.queueEntries().length > 0,
 	});
 	const closeOverlay = overlayTransitions.close;
 
@@ -702,6 +705,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			permissionBody?.toggleTerms();
 			tui.requestRender();
 		},
+		isShowingPermissionTerms: () => permissionBody?.isShowingTerms() ?? false,
 		scrollPermissionCard: (delta) => {
 			const consumed = permissionBody?.scrollCard(delta) ?? false;
 			if (consumed) tui.requestRender();

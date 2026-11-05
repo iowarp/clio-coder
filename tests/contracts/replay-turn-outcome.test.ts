@@ -666,7 +666,7 @@ test("a replayed act states the age its ledger entry records in /view, not the a
 		.map((artifact) => [artifact.title, new Date(artifact.timestamp).toISOString()]);
 	assert.deepEqual(stamps, [
 		["$ Clio ran `npm test`", "2026-09-17T00:01:00.000Z"],
-		["i [model] blade · qwopus", "2026-09-17T00:05:00.000Z"],
+		["i Model blade · qwopus", "2026-09-17T00:05:00.000Z"],
 	]);
 	// Live acts after the resume carry the live clock again.
 	clock += 1_000;

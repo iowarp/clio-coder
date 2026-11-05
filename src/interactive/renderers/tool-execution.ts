@@ -1178,6 +1178,7 @@ function sublineParts(
 	meta: StatusMeta,
 	width?: number,
 	objectBudget?: number,
+	omitRequester = false,
 ): SublineParts {
 	const finished = "result" in call ? call : null;
 	if (isChainCall(call)) return chainSublineParts(call, finished, status, meta);
@@ -1236,7 +1237,9 @@ function sublineParts(
 		? ""
 		: `${toolMeta(call.actor === "operator" ? "you" : "Clio")} ${!settled ? toolMeta(call.actor === "operator" ? "are " : "is ") : ""}`;
 	const requestedBy =
-		executed && call.requestedBy ? toolMeta(` (requested by ${sanitizeCallTargetText(call.requestedBy)})`) : "";
+		executed && call.requestedBy && !omitRequester
+			? toolMeta(` (requested by ${sanitizeCallTargetText(call.requestedBy)})`)
+			: "";
 	const head = (inline: string): string =>
 		`${classMark(row.spec.class)}${actor}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${requestedBy}${scope}${answer}${resource}${inline}`;
 	const ledger = finished === null ? null : ledgerTail(finished, row);
@@ -1826,12 +1829,20 @@ function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, wid
 			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason }
 			: { elapsedMs: call.elapsedMs, live };
 	let parts = sublineParts(call, status, meta, width);
+	// A narrow row gives up who requested the call before any of the command it ran.
+	if (visibleWidth(`${parts.lead}${parts.tail}`) > width)
+		parts = sublineParts(call, status, meta, width, undefined, true);
 	const overflow = visibleWidth(`${parts.lead}${parts.tail}`) - width;
+	// Under 60 columns the row would have to give up the command it names or cut
+	// a fact in half to stay on one line, so it wraps between its facts instead.
+	// A path or URL keeps its own tail when cut, so only a command wraps.
+	if (overflow > 0 && width < 60 && objectDisplay(resolveRow(call), width)?.style === "code")
+		return wrapSublineWithTail(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
 	if (overflow > 0) {
 		const row = resolveRow(call);
 		const finished = "result" in call ? call : null;
 		const targetWidth = visibleWidth(rowObject(row, finished, width));
-		parts = sublineParts(call, status, meta, width, Math.max(1, targetWidth - overflow - 2));
+		parts = sublineParts(call, status, meta, width, Math.max(1, targetWidth - overflow - 2), true);
 	}
 	return [singleActionLine(parts.lead, parts.tail, width)];
 }

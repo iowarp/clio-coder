@@ -70,13 +70,20 @@ function tasksInReadingOrder(tasks: ReadonlyArray<TaskBoardTask>): TaskBoardTask
 		.map(({ task }) => task);
 }
 
+/** A done task's standing in the words a person reads: whether a check Clio saw backs it, not the record's term. */
+const STANDING_WORDS: Readonly<Record<ReturnType<typeof taskCompletionStanding> & string, string>> = {
+	checked: "checked",
+	"claim only": "not checked",
+	unverified: "unverified",
+};
+
 /** The words after a task's title: its state, what the record says of a done one, and whose it is. */
 function taskStateClause(task: TaskBoardTask): string {
 	const standing = taskCompletionStanding(task);
 	const contradicted = standing === "unverified" && observedTaskChecks(task).failed.length > 0;
 	return [
 		standing === "unverified" ? "claimed done" : STATUS_PRESENTATION[task.status].label,
-		contradicted ? "check failed" : standing,
+		contradicted ? "check failed" : standing === null ? null : STANDING_WORDS[standing],
 		taskOriginLabel(task),
 	]
 		.filter((part): part is string => part !== null)
@@ -132,7 +139,7 @@ function observedCheckRows(task: TaskBoardTask, width: number): string[] {
 		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${stampLocal(check.observedAt)}`)),
 		...passed.map((check) => theme.fg("success", `${check.name} passed at ${stampLocal(check.observedAt)}`)),
 	];
-	return facts.flatMap((fact) => wrapTaskProse(`       ${dim("observed")} `, fact, width));
+	return facts.flatMap((fact) => wrapTaskProse(`       ${dim("check")} `, fact, width));
 }
 
 function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
@@ -146,10 +153,10 @@ function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 			rows.push(...wrapTaskProse(`       ${theme.fg("warning", "unverified")} `, theme.fg("warning", owed), width));
 		}
 		if (!unverified && rows.length === 0)
-			rows.push(...wrapTaskProse(`       ${dim("observed")} `, dim("no check on record"), width));
+			rows.push(...wrapTaskProse(`       ${dim("check")} `, dim("none on record"), width));
 		// The completion claim already carries any run id it mentions, so no derived
 		// `evidence:<runId>` suffix is appended; it would repeat that id on one line.
-		if (task.evidence) rows.push(...wrapTaskProse(`       ${dim("completion claim")} `, muted(task.evidence), width));
+		if (task.evidence) rows.push(...wrapTaskProse(`       ${dim("agent said")} `, muted(task.evidence), width));
 		return rows;
 	}
 	if (task.status === "blocked" && task.reason) {
@@ -227,7 +234,7 @@ function formatTasksOverlayBodyLines(
 		counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null,
 		counts.cancelled > 0 ? dim(`${counts.cancelled} dropped`) : null,
 		checkedCount > 0 ? theme.fg("success", `${checkedCount} checked`) : null,
-		claimCount > 0 ? dim(`${claimCount} claim only`) : null,
+		claimCount > 0 ? dim(`${claimCount} ${STANDING_WORDS["claim only"]}`) : null,
 	].filter((chip): chip is string => chip !== null);
 	// A tight width gives the counts their own rows, because a cut would hide the blocked one.
 	const summary = `${theme.fg("sectionHeading", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`;
@@ -562,7 +569,18 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 				? followTasksWindow(this.offset, span, room, total)
 				: Math.max(0, Math.min(this.offset, total - room));
 		const end = this.offset + room;
-		const position = dim(`${this.offset + 1}–${end} of ${total} rows · PgUp/PgDn page`);
+		// The position counts tasks, which a reader can check against the board, not the wrapped lines they fill.
+		const shown = layout.spans.flatMap((taskSpan, index) =>
+			taskSpan.line < end && taskSpan.end > this.offset ? [index + 1] : [],
+		);
+		const first = shown[0];
+		const last = shown.at(-1);
+		const range = first === undefined || last === undefined ? null : first === last ? `${first}` : `${first}–${last}`;
+		const position = dim(
+			range === null
+				? `lines ${this.offset + 1}–${end} of ${total} · PgUp/PgDn page`
+				: `tasks ${range} of ${layout.spans.length} · PgUp/PgDn page`,
+		);
 		return [...layout.lines.slice(this.offset, end), fitRow(position, safeWidth), ...pinned];
 	}
 

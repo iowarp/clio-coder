@@ -1,13 +1,16 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { renderCalls } from "../../core/telemetry/render.js";
+import { parseCouncilReport } from "../../domains/agents/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
 import {
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
+	presentCouncilReport,
 	presentWorkerContractAnswer,
 	safeWorkerAnswerText,
 	WorkerAnswerProjection,
@@ -15,12 +18,18 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
+import type { CompletedRunCaveat } from "../../domains/dispatch/failure-headline.js";
 import {
+	completedRunCaveat,
 	plainOutcomeLabel,
+	refusedCallsWords,
 	STALLED_RUN_HEADLINE,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
-import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
+import type { TrustSummaryProjection } from "../../domains/evidence/trust-projection.js";
+import { trustStateWord, trustVerdict, validationClause } from "../../domains/evidence/trust-projection.js";
+import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
+import { TRUST_STATUS_AXES } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -44,6 +53,7 @@ import {
 import {
 	approvalWaitWords,
 	compactQuantity,
+	completedRunMark,
 	workerActionParts,
 	workerPhaseActivity,
 	workerQuietWords,
@@ -175,7 +185,7 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 	// the operator configured, rather than by its agent id.
 	const who =
 		entry.council !== undefined
-			? councilLabelText(theme, entry.council.label, entry.council.color)
+			? councilLabelText(theme, isSynthesis(entry) ? "council" : entry.council.label, entry.council.color)
 			: theme.fg("workerIdentity", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
 	return [
 		who,
@@ -207,18 +217,46 @@ function cardPrefix(entry: WorkerEntryState): string {
 	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
-/** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
-function settledAgainst(result: WorkerRunResultSummary): string | null {
-	if (result.outcome !== "succeeded") return null;
-	const trust = result.trust;
-	if (trust?.artifactIntegrity.state === "failed") return "seal broken";
-	if (trust?.validationGrounding.state === "failed") return "validation failed";
-	if (trust?.validationGrounding.state === "ungrounded") return "no check ran";
-	return result.contract === "fail" ? "answer in the wrong format" : null;
+/** The verdict and axis states the shared caveat reads; an axis a partial record leaves out reads as unknown. */
+function trustVerdictOf(trust: CanonicalTrustStatus): Pick<TrustSummaryProjection, "verdict" | "axes"> {
+	const partial = trust as Partial<CanonicalTrustStatus>;
+	const filled = Object.fromEntries(
+		TRUST_STATUS_AXES.map((axis) => [axis, partial[axis] ?? { state: "unknown" }]),
+	) as unknown as CanonicalTrustStatus;
+	return {
+		verdict: trustVerdict(filled),
+		axes: Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [axis, filled[axis].state])) as Record<
+			(typeof TRUST_STATUS_AXES)[number],
+			string
+		>,
+	};
 }
 
-function refusedCallsText(count: number): string {
-	return count === 1 ? "1 call refused" : `${count} calls refused`;
+/** The shared caveat on a clean exit, so this card and the Fleet Runs row never disagree about how a run ended. */
+function settledCaveat(result: WorkerRunResultSummary, synthesizes = false): CompletedRunCaveat | null {
+	if (result.outcome !== "succeeded") return null;
+	return completedRunCaveat({
+		...(result.trust !== undefined ? { trust: trustVerdictOf(result.trust) } : {}),
+		...(result.contract !== undefined ? { contract: result.contract } : {}),
+		// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
+		...(result.toolCalls !== undefined && !synthesizes ? { toolCalls: result.toolCalls } : {}),
+		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),
+	});
+}
+
+function isSynthesis(entry: WorkerEntryState): boolean {
+	return entry.council?.label === COUNCIL_SYNTHESIS_LABEL;
+}
+
+function settledMark(result: WorkerRunResultSummary, synthesizes: boolean): string {
+	const mark = completedRunMark(settledCaveat(result, synthesizes));
+	return theme.fg(mark.token, mark.glyph);
+}
+
+/** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
+function settledAgainst(result: WorkerRunResultSummary): string | null {
+	const caveat = settledCaveat(result);
+	return caveat?.kind === "against" ? caveat.words : null;
 }
 
 /**
@@ -229,20 +267,18 @@ function refusedCallsText(count: number): string {
  * outcome code, so it reads as a ledger-side finding instead of the ordinary
  * heartbeat-timeout `stalled` a sealed result reports.
  */
-function outcomeUnit(result: WorkerRunResultSummary): string {
+function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): string {
 	// A worker that exited cleanly without executing one tool did none of an
 	// assignment that needed tools, so "execution ok" would read as a done task.
 	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
-	const against = settledAgainst(result);
-	if (against !== null) return `${theme.fg("error", `${GLYPH.error} ${against}`)}${meta(`${SEPARATOR}execution ok`)}`;
-	if (result.outcome === "succeeded" && result.toolCalls === 0) {
-		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
+	const caveat = settledCaveat(result, synthesizes);
+	if (caveat?.kind === "against") {
+		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}execution ok`)}`;
 	}
+	if (caveat?.kind === "no-tools") return theme.fg("toolMetadata", `${GLYPH.queued} ${caveat.words}`);
 	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
-	if (result.outcome === "succeeded" && (result.refusedCalls ?? 0) > 0) {
-		return theme.fg("warning", `${GLYPH.warn} finished with ${refusedCallsText(result.refusedCalls ?? 0)}`);
-	}
+	if (caveat?.kind === "refused") return theme.fg("warning", `${GLYPH.warn} finished with ${caveat.words}`);
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
 	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
@@ -301,6 +337,11 @@ function railLines(text: string, token: SemanticRole, width: number): string[] {
 
 function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
 	if (entry.result?.trust?.artifactIntegrity.state !== "verified") return null;
+	// A council's synthesis seals the whole council as one report; the card reads it as answers, not as JSON.
+	if (entry.council?.label === COUNCIL_SYNTHESIS_LABEL && !isPending(entry)) {
+		const report = parseCouncilReport(entry.text);
+		if (report !== null) return presentCouncilReport(report);
+	}
 	const kind = entry.result?.contractKind;
 	const conformance = entry.result?.contract;
 	return presentWorkerContractAnswer(
@@ -419,6 +460,23 @@ function failureLines(entry: WorkerEntryState, width: number, inspect = false): 
 }
 
 /**
+ * Where a finished run's changes are when Clio did not merge them: a `changed` row alone reads as the checkout, and
+ * the change sits on the worktree's branch until the operator takes it.
+ */
+function keptWorktreeLines(entry: WorkerEntryState, width: number): string[] {
+	const result = entry.result;
+	const task = result?.taskWorktree;
+	if (result === undefined || result.outcome === "canceled" || result.mergeDetail !== undefined) return [];
+	if (task === undefined || !task.kept || task.changedPaths === 0) return [];
+	const files = `${task.changedPaths} changed ${task.changedPaths === 1 ? "file" : "files"}`;
+	return railLines(
+		sanitizeCallTargetText(`${files} on branch ${task.branch} in its worktree, not in your checkout`),
+		"toolMetadata",
+		width,
+	);
+}
+
+/**
  * Who stopped a cancelled run, and what became of its worktree, which nothing else on the card says: a cancel
  * removes a worktree with no work in it and keeps one holding changes, on its branch.
  */
@@ -461,7 +519,7 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 			? pendingUnit()
 			: workerNeedsInput(entry)
 				? needsInputUnit()
-				: outcomeUnit(entry.result);
+				: outcomeUnit(entry.result, isSynthesis(entry));
 	const elapsed =
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
@@ -506,7 +564,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	if (!inspect) {
 		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
 		if (calls !== undefined) metrics.push(renderCalls(calls));
-		if (refused > 0) metrics.push(refusedCallsText(refused));
+		if (refused > 0) metrics.push(refusedCallsWords(refused));
 		const figure = tokens === undefined ? null : compactQuantity(tokens);
 		if (figure !== null) metrics.push(`${figure} tokens`);
 		return metrics;
@@ -515,7 +573,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
 	if (calls !== undefined) metrics.push(renderCalls(calls));
-	if (refused > 0) metrics.push(refusedCallsText(refused));
+	if (refused > 0) metrics.push(refusedCallsWords(refused));
 	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
@@ -563,7 +621,9 @@ const TIMER_WIDTH = 7;
 const NARROW_CARD_WIDTH = 72;
 
 function workerName(entry: WorkerEntryState): string {
-	return displayText(entry, "name", entry.council?.label ?? entry.agentId);
+	// The synthesis run carries the council's result, judged, voted or only collected, so it goes by the council.
+	const label = entry.council?.label === COUNCIL_SYNTHESIS_LABEL ? "council" : entry.council?.label;
+	return displayText(entry, "name", label ?? entry.agentId);
 }
 
 /** The widest header outcome word, so sibling cards line up. */
@@ -579,7 +639,7 @@ function headerWord(entry: WorkerEntryState): string {
 	if (outcome === "stalled") return "stalled";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
-	return entry.result.toolCalls === 0 ? "no tools" : "done";
+	return settledCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
 }
 
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
@@ -598,14 +658,9 @@ function alignedHeader(
 			? theme.fg("warning", GLYPH.phaseBlocked)
 			: entry.result?.outcome === "canceled"
 				? theme.fg("toolMetadata", GLYPH.cancelled)
-				: entry.result?.outcome !== "succeeded" || settledAgainst(entry.result) !== null
+				: entry.result?.outcome !== "succeeded"
 					? theme.fg("error", GLYPH.error)
-					: (entry.result.refusedCalls ?? 0) > 0
-						? theme.fg("warning", GLYPH.warn)
-						: theme.fg(
-								entry.result.toolCalls === 0 ? "toolMetadata" : "success",
-								entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
-							);
+					: settledMark(entry.result, isSynthesis(entry));
 	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
@@ -813,6 +868,7 @@ function helperRow(
 		alignedHeader(entry, width, nowMs, siblings),
 		...(pending && detail.style === "standard" ? [progressLine(entry, width, nowMs, false)] : []),
 		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", width) : []),
+		...keptWorktreeLines(entry, width),
 		...previewRows(
 			[...failureLines(entry, width), ...attemptLines(entry, width)],
 			previewBudget(detail.errorRows, terminalRows),
@@ -852,6 +908,8 @@ function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, i
 			: "";
 	if (!inspect && entry.state === "failed" && entry.authority.id === "result-quality")
 		return `${trustStateWord("validationGrounding", entry.state)}${why}`;
+	// The folded card says whether anything checked the work in plain words; the record's axis wording is for /view.
+	if (!inspect && entry.state === "absent") return "no check ran on this work";
 	return `quality ${validationClause(trust)}${why}`;
 }
 
@@ -984,6 +1042,7 @@ export function renderWorkerEntryLines(
 		...failure,
 		...(inspect ? [] : cancelLines(entry, safeWidth)),
 		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", safeWidth) : []),
+		...keptWorktreeLines(entry, safeWidth),
 		...(presented ? railLines(presented, "body", safeWidth) : []),
 		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", safeWidth) : []),
 		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", safeWidth) : []),

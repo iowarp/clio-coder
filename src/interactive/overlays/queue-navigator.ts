@@ -11,8 +11,8 @@ import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { QueuedChatMessage } from "../../session-control/chat-loop.js";
 import {
-	buildHint,
 	centeredWindow,
+	fitHintEntries,
 	fitHintEntryList,
 	type HintEntry,
 	type RailAwareBody,
@@ -98,6 +98,16 @@ const QUEUE_MIN_LIST_ROWS = 3;
  */
 class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 	private selected = 0;
+	/**
+	 * The entry the cursor is on, by id. The queue drains under the view whenever
+	 * the run reaches a slot, and an index alone then pointed at the next message,
+	 * so an `x` meant for a message Clio had just taken removed the one after it.
+	 */
+	private selectedId: string | null = null;
+	/** The message the cursor was on went to Clio; the next acting key only re-aims. */
+	private taken: { position: number } | null = null;
+	/** Entries the operator removed here, which leave the queue on purpose rather than to Clio. */
+	private readonly removed = new Set<string>();
 	private rows = 0;
 	private railRoom = 0;
 
@@ -111,14 +121,46 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		this.railRoom = Math.max(0, Math.floor(cells));
 	}
 
+	/** Re-find the cursor's entry in the live queue, and notice when Clio took it. */
+	private sync(entries: ReadonlyArray<QueuedChatMessage>): void {
+		if (this.selectedId !== null) {
+			const at = entries.findIndex((entry) => entry.id === this.selectedId);
+			if (at >= 0) this.selected = at;
+			else if (this.removed.has(this.selectedId)) this.aimAt(entries);
+			else if (this.taken === null) this.taken = { position: this.selected + 1 };
+		}
+		this.selected = Math.max(0, Math.min(this.selected, entries.length - 1));
+		if (this.taken === null) this.selectedId = entries[this.selected]?.id ?? null;
+		if (entries.length > 0) this.lastSeen = entries.map((entry) => entry.id);
+	}
+
+	/** The ids on screen before the queue emptied, so the empty view can say who emptied it. */
+	private lastSeen: string[] = [];
+
+	/** Point at the entry under the index again, after a key or a drained selection. */
+	private aimAt(entries: ReadonlyArray<QueuedChatMessage>): void {
+		this.taken = null;
+		this.selected = Math.max(0, Math.min(this.selected, entries.length - 1));
+		this.selectedId = entries[this.selected]?.id ?? null;
+	}
+
 	render(width: number): string[] {
 		const theme = clioTheme();
 		const safeWidth = Math.max(20, Math.floor(width));
 		const entries = this.deps.entries();
+		this.sync(entries);
 		if (entries.length === 0) {
-			return emptyState(theme, "Nothing queued.", safeWidth, { remedy: "Enter during a run queues a message" });
+			// The view stays open when the run drains the queue under it, so a key
+			// meant for a message lands here, where it does nothing, rather than in
+			// the composer behind a view that vanished.
+			const removedLast = this.lastSeen.length > 0 && this.lastSeen.every((id) => this.removed.has(id));
+			return emptyState(
+				theme,
+				removedLast ? "You removed the last queued message." : "Clio took the rest of the queue at its slot.",
+				safeWidth,
+				{ remedy: "Nothing is queued now. Esc closes this view; Enter during a run queues another message." },
+			);
 		}
-		this.selected = Math.min(this.selected, entries.length - 1);
 		const now = (this.deps.now ?? Date.now)();
 		const slotChip = (entry: QueuedChatMessage): string => {
 			const slot = queueSlotWord(entry);
@@ -130,12 +172,22 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			this.droppedKeys().map((entry) => `${keyCap(theme, entry.key)} ${theme.fg("menuDescription", entry.verb)}`),
 			safeWidth,
 		);
-		const bodyRows = this.rows > 0 ? Math.max(1, this.rows - keyRows.length) : 0;
+		const takenRows =
+			this.taken === null
+				? []
+				: wrapTextWithAnsi(
+						theme.fg(
+							"warning",
+							`${GLYPH.warn} Message ${this.taken.position} went to Clio at its slot while you were on it. The next key only selects; press it again to act.`,
+						),
+						safeWidth,
+					);
+		const bodyRows = this.rows > 0 ? Math.max(1, this.rows - keyRows.length - takenRows.length) : 0;
 		const listBudget = bodyRows > 0 ? Math.max(QUEUE_MIN_LIST_ROWS, bodyRows - QUEUE_DETAIL_ROWS) : entries.length;
 		const visible = Math.min(entries.length, listBudget);
 		const windowed = visible < entries.length;
 		const [start, end] = centeredWindow(entries.length, this.selected, windowed ? Math.max(1, visible - 1) : visible);
-		const rows: string[] = [];
+		const rows: string[] = [...takenRows];
 		for (let index = start; index < end; index += 1) {
 			const entry = entries[index];
 			if (!entry) continue;
@@ -152,7 +204,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			rows.push(positionRow(theme, { start: start + 1, end, total: entries.length, unit: "messages" }, safeWidth));
 		const selected = entries[this.selected];
 		if (selected) {
-			const detailBudget = bodyRows > 0 ? Math.max(2, bodyRows - rows.length) : QUEUE_DETAIL_ROWS;
+			const detailBudget = bodyRows > 0 ? Math.max(2, bodyRows + takenRows.length - rows.length) : QUEUE_DETAIL_ROWS;
 			const slot = queueSlotWord(selected);
 			rows.push(
 				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
@@ -192,10 +244,15 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 	/**
 	 * Send now leads because it is the verb that costs something; a narrowing rail
 	 * drops from the left of the rest, so the arrows go first and the per-message
-	 * verbs last.
+	 * verbs last. A drained queue offers only the way out, and a selection Clio
+	 * took offers re-aiming, because no other key acts until the cursor is placed.
 	 */
-	private hintEntries(): HintEntry[] {
-		const selected = this.deps.entries()[this.selected];
+	private railEntries(): HintEntry[] {
+		const entries = this.deps.entries();
+		const esc: HintEntry = { key: "Esc", verb: "close" };
+		if (entries.length === 0) return [esc];
+		if (this.taken !== null) return [{ key: "any key", verb: "select again", critical: true }, esc];
+		const selected = entries[this.selected];
 		const send = this.sendEntry(selected);
 		return [
 			...(send ? [send] : []),
@@ -205,19 +262,20 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			{ key: "t", verb: "slot" },
 			{ key: "x", verb: "remove" },
 			...(selected?.origin === undefined ? [{ key: "e", verb: "to editor" }] : []),
+			esc,
 		];
 	}
 
+	/** The keys the rail drops at this room, fitted by the same call the rail makes, so the two never disagree. */
 	private droppedKeys(): HintEntry[] {
 		if (this.railRoom <= 0) return [];
-		const all = [...this.hintEntries(), { key: "Esc", verb: "close" }];
+		const all = this.railEntries();
 		const { kept } = fitHintEntryList(all, this.railRoom);
 		return all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
 	}
 
-	footerHint(): string {
-		if (this.deps.entries().length === 0) return buildHint([]);
-		return buildHint(this.hintEntries());
+	footerHint(innerWidth: number): string {
+		return fitHintEntries(this.railEntries(), innerWidth - 3);
 	}
 
 	handleInput(data: string): void {
@@ -226,12 +284,20 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			this.deps.onClose();
 			return;
 		}
+		const entries = this.deps.entries();
+		this.sync(entries);
+		if (entries.length === 0) return;
+		if (this.taken !== null) {
+			// The cursor's message is gone; whatever the key meant, it meant for that message.
+			this.aimAt(entries);
+			this.deps.requestRender();
+			return;
+		}
 		if (this.deps.matchesRestoreAll(data)) {
 			this.deps.restoreAll();
 			this.deps.onClose();
 			return;
 		}
-		const entries = this.deps.entries();
 		const entry = entries[this.selected];
 		if (!entry) return;
 		if (matchesKey(data, "up") || matchesKey(data, "k")) {
@@ -243,6 +309,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		} else if (matchesKey(data, "shift+down")) {
 			if (this.deps.move(entry.id, 1)) this.selected += 1;
 		} else if (matchesKey(data, "x")) {
+			this.removed.add(entry.id);
 			this.deps.remove(entry.id);
 		} else if (matchesKey(data, "t")) {
 			this.deps.toggleKind(entry);
@@ -259,6 +326,9 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		} else {
 			return;
 		}
+		// A removed entry leaves the cursor where it stood, on the message that moved up into its place.
+		const after = this.deps.entries().filter((queued) => !this.removed.has(queued.id));
+		this.aimAt(after);
 		this.deps.requestRender();
 	}
 
@@ -271,7 +341,10 @@ export function openQueueNavigatorOverlay(tui: TUI, deps: QueueNavigatorDeps): O
 		anchor: "center",
 		width: QUEUE_NAVIGATOR_OVERLAY_WIDTH,
 		markerId: "queue-navigator",
-		title: () => `Steering Queue (${deps.entries().length})${deps.isHeld?.() === true ? " · held, nothing sent" : ""}`,
-		footerHint: () => body.footerHint(),
+		title: () => {
+			const count = deps.entries().length;
+			return `Steering Queue (${count})${count > 0 && deps.isHeld?.() === true ? " · held, nothing sent" : ""}`;
+		},
+		footerHint: (innerWidth) => body.footerHint(innerWidth),
 	});
 }

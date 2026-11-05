@@ -19,8 +19,17 @@ export async function loginOAuthRuntime(
 	rl: Pick<ReturnType<typeof createInterface>, "question"> | null,
 	runtime: RuntimeDescriptor,
 	host?: ConfigureWizardHost,
+	/** Set when the operator stopped the wait from the host, so the caller can ask again rather than move on. */
+	outcome?: { stopped: boolean },
 ): Promise<boolean> {
 	const auth = openAuthStorage();
+	const stop = new AbortController();
+	const signal = host ? AbortSignal.any([host.signal, stop.signal]) : undefined;
+	const offerStop = (): void =>
+		host?.stoppableWait?.(() => {
+			if (outcome) outcome.stopped = true;
+			stop.abort();
+		});
 	const report = (line: string): void => {
 		if (host) host.report(line);
 		else process.stdout.write(line);
@@ -41,19 +50,22 @@ export async function loginOAuthRuntime(
 	);
 	try {
 		await auth.login(runtime.oauthProviderId ?? runtime.id, {
-			...(host ? { signal: host.signal } : {}),
+			...(signal ? { signal } : {}),
 			onAuth: ({ url, instructions }) => {
 				host?.openUrl?.(url);
 				report(`\nOpen: ${url}\n`);
 				if (instructions) report(`${instructions}\n`);
-				if (host) host.waiting?.("Waiting for your browser sign-in…");
-				else report("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
+				if (host) {
+					host.waiting?.("Waiting for your browser sign-in…");
+					offerStop();
+				} else report("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
 			},
 			onDeviceCode: ({ verificationUri, userCode }) => {
 				host?.openUrl?.(verificationUri);
 				report(`\nOpen: ${verificationUri}\n`);
 				report(`Enter code: ${userCode}\n`);
 				host?.waiting?.("Waiting for that code in your browser…");
+				offerStop();
 			},
 			onPrompt: async (prompt) => {
 				const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
@@ -65,6 +77,8 @@ export async function loginOAuthRuntime(
 					heading: prompt.message,
 					choices: prompt.options.map((option) => ({ value: option.id, label: option.label })),
 				});
+				// Esc on the method list goes back to the sign-in question, not on to the next step.
+				if (result.kind === "back" && outcome) outcome.stopped = true;
 				return result.kind === "selected" ? result.value : undefined;
 			},
 			onManualCodeInput: manualCodeInput.onManualCodeInput,
@@ -83,11 +97,13 @@ export async function loginOAuthRuntime(
 		else printOk(`authenticated ${runtime.id}`);
 		return true;
 	} catch (error) {
-		if (host) host.report(error instanceof Error ? error.message : String(error));
+		if (host && outcome?.stopped) host.report("Sign-in stopped; nothing was stored.");
+		else if (host) host.report(error instanceof Error ? error.message : String(error));
 		else printError(error instanceof Error ? error.message : String(error));
 		return false;
 	} finally {
 		manualCodeInput.cancel();
+		host?.stoppableWait?.(null);
 		host?.waiting?.(null);
 		host?.dismissPrompt();
 	}

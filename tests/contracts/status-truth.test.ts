@@ -1896,11 +1896,45 @@ test("an opened Fleet Runs detail keeps its trust row on screen and says how man
 	const text = open.join("\n");
 	match(text, /trust\s+✗ not trusted/u);
 	match(text, /completion not recorded/u);
-	match(text, /run 3 of 12 · 11 hidden while the detail is open/u);
+	match(text, /3 of 12 runs · 11 hidden while the detail is open/u);
 	ok(
 		open.some((line) => line.includes("❯")),
 		"the selected run stays listed",
 	);
+});
+
+test("Esc on a permission card folds open terms before it denies, and every rail word follows the layer", async () => {
+	const { routeOverlayKey } = await import("../../src/interactive/overlay-key-routing.js");
+	const { permissionOverlayHint } = await import("../../src/interactive/permission-overlay.js");
+	let terms = true;
+	let denied = 0;
+	const noop = (): void => {};
+	const deps = {
+		cancelPermission: () => {
+			denied += 1;
+		},
+		confirmPermission: noop,
+		stopTurnFromPermission: noop,
+		closeOverlay: noop,
+		selectPreviousDispatch: noop,
+		selectNextDispatch: noop,
+		steerSelectedDispatch: noop,
+		cancelSelectedDispatch: noop,
+		toggleSelectedDispatchDetail: noop,
+		watchSelectedDispatch: () => false,
+		cancelAskUser: noop,
+		togglePermissionTerms: () => {
+			terms = !terms;
+		},
+		isShowingPermissionTerms: () => terms,
+	};
+	match(permissionOverlayHint(100, false, "closed", "open"), /\[Esc\] hide terms/u);
+	routeOverlayKey("\x1b", "permission-confirm", deps, () => false);
+	strictEqual(terms, false, "the first Esc folds the terms");
+	strictEqual(denied, 0, "reading the terms never answers the call");
+	match(permissionOverlayHint(100, false, "closed", "closed"), /\[Esc\] deny/u);
+	routeOverlayKey("\x1b", "permission-confirm", deps, () => false);
+	strictEqual(denied, 1, "from the card itself Esc denies");
 });
 
 test("a worker failure's primary words name what happened to the task, never the validator, repair loop or loop guard", async () => {
@@ -1937,11 +1971,14 @@ test("a steer receipt says the worker's model has the message only once it joine
 	const rows: Array<(width: number) => string[]> = [];
 	const receipts = createSteerReceipts({ bus, append: (render) => rows.push(render), requestRender: () => {} });
 	const run = { runId: "r1", agentId: "verifier" } as Parameters<typeof receipts.sent>[0];
-	const head = (): string => stripTerminalSequences(rows[0]?.(120)[1] ?? "");
+	const head = (): string => stripTerminalSequences(rows[0]?.(120)[0] ?? "");
 	receipts.sent(run, "also check the lint output");
 	match(head(), /waiting for the worker to take it/u);
 	bus.emit("run.progressed", { runId: "r1", agentId: "verifier", event: { type: "clio_coder_steer_received" } });
 	match(head(), /verifier took your message · its model reads it at its next step/u);
+	// A narrow transcript wraps the head under its words, never back to the mark's column.
+	const narrow = (rows[0]?.(40) ?? []).map(stripTerminalSequences);
+	match(narrow[1] ?? "", /^ {2}\S/u);
 	bus.emit("run.progressed", {
 		runId: "r1",
 		agentId: "verifier",
@@ -1954,7 +1991,7 @@ test("a steer receipt says the worker's model has the message only once it joine
 	receipts.sent(run, "and the tests");
 	bus.emit("run.progressed", { runId: "r1", agentId: "verifier", event: { type: "clio_coder_steer_received" } });
 	bus.emit("run.aborted", { runId: "r1", agentId: "verifier" } as never);
-	match(stripTerminalSequences(rows[1]?.(120)[1] ?? ""), /took your message but stopped before its model read it/u);
+	match(stripTerminalSequences(rows[1]?.(120)[0] ?? ""), /took your message but stopped before its model read it/u);
 	receipts.dispose();
 });
 

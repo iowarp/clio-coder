@@ -5,6 +5,9 @@
  * contract failure's is the validator's own vocabulary.
  */
 
+import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
+import { trustFailureWords } from "../evidence/trust-projection.js";
+
 const HEADLINE_MAX_CHARS = 140;
 
 /**
@@ -64,6 +67,8 @@ function stderrHeadline(stderr: string): string {
  */
 const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) => string]> = [
 	[/^operator abort\b/iu, () => "cancelled at your request"],
+	// The model's call that started the worker ended, so the worker went with it.
+	[/^parent tool call cancell?ed\b/iu, () => "stopped because the turn that asked for it ended"],
 	[/^no worker activity within the stall window/iu, () => STALLED_RUN_HEADLINE],
 	// The worker's final reply held only tool calls after its tools were taken away, so there is no answer to show.
 	[
@@ -133,4 +138,39 @@ export function workerFailureHeadline(detail: string | null | undefined): string
 	if (before.length > 0) return clip(plainFailure(before) ?? before);
 	const fromStderr = stderrHeadline(body.slice(stderrAt + "stderr: ".length));
 	return clip(plainFailure(fromStderr) ?? fromStderr);
+}
+
+/** What a settled run's own record says about how it finished, beside its outcome. */
+export interface CompletedRunFacts {
+	trust?: Pick<TrustSummaryProjection, "verdict" | "axes">;
+	/** The result contract's conformance: `fail` means the answer came back in a shape Clio could not read. */
+	contract?: string;
+	toolCalls?: number;
+	refusedCalls?: number;
+}
+
+/**
+ * Why a run that exited cleanly is not a plain `done`, or null when nothing qualifies it. The worker card, the Fleet
+ * Runs row, the dock and the task island all read this one answer, so a run never shows a check mark on one surface
+ * and a warning on another. `against` means the result cannot be leaned on; `no-tools` means the worker answered
+ * without acting; `refused` means it finished but a call it tried was kept from running.
+ */
+export type CompletedRunCaveat =
+	| { kind: "against"; words: string }
+	| { kind: "no-tools"; words: string }
+	| { kind: "refused"; words: string };
+
+export function refusedCallsWords(count: number): string {
+	return count === 1 ? "1 call refused" : `${count} calls refused`;
+}
+
+export function completedRunCaveat(facts: CompletedRunFacts): CompletedRunCaveat | null {
+	const against =
+		(facts.trust !== undefined ? trustFailureWords(facts.trust) : null) ??
+		(facts.contract === "fail" ? "answer in the wrong format" : null);
+	if (against !== null) return { kind: "against", words: against };
+	// A refused call is the stronger fact: a worker whose only call was refused also ran no tools.
+	const refused = facts.refusedCalls ?? 0;
+	if (refused > 0) return { kind: "refused", words: refusedCallsWords(refused) };
+	return facts.toolCalls === 0 ? { kind: "no-tools", words: "ran no tools" } : null;
 }
