@@ -46,6 +46,7 @@ import {
 	workerActionParts,
 	workerPhaseActivity,
 	workerQuietWords,
+	workerSilenceWords,
 } from "../worker-activity.js";
 
 const theme = clioTheme();
@@ -613,7 +614,8 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 				: last !== undefined
 					? clean(finishedAction(last))
 					: isPending(entry)
-						? workerPhaseActivity(entry.progress?.phase)[1]
+						? ((entry.progress === undefined ? null : workerSilenceWords(entry.progress, { room: 48 })) ??
+							workerPhaseActivity(entry.progress?.phase)[1])
 						: "";
 	const facts = [
 		target,
@@ -657,11 +659,22 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	// A worker whose heartbeat stopped is doing nothing it can be seen doing, so its last call or phase would read as current.
 	const quiet = workerQuietWords(entry.progress, nowMs);
 	const action = quiet !== null ? null : describedAction(entry, waitRoom);
-	const [glyph, idle] = quiet !== null ? [GLYPH.warnInline, quiet] : workerPhaseActivity(entry.progress?.phase);
+	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too.
+	const silence =
+		quiet !== null || action !== null || entry.progress === undefined
+			? null
+			: workerSilenceWords(entry.progress, { now: nowMs, room: Math.max(16, waitRoom - 2) });
+	const [glyph, idle] =
+		quiet !== null
+			? [GLYPH.warnInline, quiet]
+			: silence !== null
+				? [GLYPH.warnInline, silence]
+				: workerPhaseActivity(entry.progress?.phase);
 	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
 	const answer =
 		entry.helper ||
 		quiet !== null ||
+		silence !== null ||
 		action !== null ||
 		(entry.progress?.phase !== undefined && entry.progress.phase !== "writing")
 			? ""

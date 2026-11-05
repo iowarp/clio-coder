@@ -3,6 +3,7 @@ import type {
 	WorkerApprovalDecider,
 	WorkerProgressSnapshot,
 } from "../domains/telemetry/worker-progress.js";
+import { TIER_THRESHOLDS_MS } from "./status/watchdog.js";
 import { formatWaitClock, GLYPH } from "./theme/index.js";
 import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
@@ -32,6 +33,51 @@ export function workerQuietWords(
 ): string | null {
 	if (progress?.quietSinceMs === undefined) return null;
 	return `not responding for ${formatWaitClock(now - progress.quietSinceMs)}`;
+}
+
+/**
+ * A worker's model gone quiet, widest form first, for a row to pick the one that fits. The main rail's tiers apply:
+ * past 30 s the words carry the age of the last evidence; past 90 s they also say that Clio puts no time limit on a
+ * worker's model wait and how to end it, because a worker has no stall timer and an operator who waits for one would
+ * wait forever. Null while the worker shows evidence, runs a tool, waits on a person, or has gone quiet as a process,
+ * which `workerQuietWords` says instead.
+ */
+export function workerSilenceForms(
+	progress: Pick<
+		WorkerProgressSnapshot,
+		"phase" | "currentAction" | "awaitingApproval" | "quietSinceMs" | "evidenceAtMs" | "settled"
+	>,
+	now = Date.now(),
+): readonly string[] | null {
+	if (progress.settled || progress.quietSinceMs !== undefined || progress.awaitingApproval === true) return null;
+	if (progress.currentAction !== null && progress.currentAction !== undefined) return null;
+	const phase = progress.phase;
+	if (phase !== "waiting" && phase !== "thinking" && phase !== "writing") return null;
+	if (progress.evidenceAtMs === undefined) return null;
+	const silentMs = Math.max(0, now - progress.evidenceAtMs);
+	if (silentMs < TIER_THRESHOLDS_MS.tier2) return null;
+	const words = workerPhaseActivity(phase)[1];
+	const silent = formatWaitClock(silentMs);
+	const claim = phase === "waiting" ? `no output for ${silent}` : `no new output for ${silent}`;
+	if (silentMs < TIER_THRESHOLDS_MS.tier3) return [`${words} · ${claim}`, claim];
+	return [
+		`${words} · ${claim} · Clio sets no time limit · x in /fleet stops it`,
+		`${claim} · no time limit · x in /fleet stops it`,
+		`${claim} · no time limit`,
+		claim,
+	];
+}
+
+/** The silence form that fits `room`, or the widest one with no room given. */
+export function workerSilenceWords(
+	progress: Parameters<typeof workerSilenceForms>[0],
+	options: { now?: number; room?: number } = {},
+): string | null {
+	const forms = workerSilenceForms(progress, options.now);
+	if (forms === null) return null;
+	const room = options.room;
+	if (room === undefined) return forms[0] ?? null;
+	return forms.find((form) => form.length <= room) ?? forms[forms.length - 1] ?? null;
 }
 
 /** The phase's glyph and words; `starting` until the stream reports a phase. */
@@ -174,7 +220,7 @@ export function approvalWaitWords(
 export function workerActivityWords(
 	progress: Pick<
 		WorkerProgressSnapshot,
-		"phase" | "currentAction" | "awaitingApproval" | "approvalWindow" | "quietSinceMs"
+		"phase" | "currentAction" | "awaitingApproval" | "approvalWindow" | "quietSinceMs" | "evidenceAtMs" | "settled"
 	>,
 	options: { now?: number; room?: number } = {},
 ): string {
@@ -183,5 +229,5 @@ export function workerActivityWords(
 	if (progress.awaitingApproval === true) return approvalWaitWords(progress, options);
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
-	return workerPhaseActivity(progress.phase)[1];
+	return workerSilenceWords(progress, options) ?? workerPhaseActivity(progress.phase)[1];
 }
