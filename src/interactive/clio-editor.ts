@@ -576,8 +576,10 @@ export class ClioEditor extends Editor {
 		const adaptive = entry.adaptive === true;
 		const bodyRows = adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
 		// The body learns the rail's room first, so a list can draw in its own
-		// rows every key the rail below will have to drop.
-		entry.frame.setRailRoom?.(this.railLabelRoom(width));
+		// rows every key the rail below will have to drop. The rail is the keys'
+		// alone: thinking and context describe the composer, which is not open (F07).
+		const room = this.approvalLabelRoom(width);
+		entry.frame.setRailRoom?.(room);
 		let body = entry.frame.renderDockBody(contentWidth, Math.max(1, bodyRows));
 		if (adaptive) {
 			// The frame pads to the ceiling; keep only the rows the content used, down to the compact floor.
@@ -590,11 +592,11 @@ export class ClioEditor extends Editor {
 		const title = entry.frame.dockAwaitingInput?.()
 			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
 			: titleText;
-		const hint = entry.frame.dockHint(this.railLabelRoom(width) + 4);
+		const hint = entry.frame.dockHint(room + 4);
 		const lines = [
 			this.topRail(width, theme, rail, title),
 			...body.map((row) => padAnsi(`${pad}${row}${pad}`, width)),
-			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : ""),
+			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : "", room),
 		];
 		// The rail this body replaced is the only place the run's phase showed. A
 		// surface that reports its own lifecycle keeps its rows.

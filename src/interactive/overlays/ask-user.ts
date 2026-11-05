@@ -23,6 +23,7 @@ import { dockGrowthRows } from "../dock.js";
 import { scrollTranscriptPage } from "../layout.js";
 import {
 	buildHint,
+	buildResponsiveHint,
 	DEFAULT_SELECT_THEME,
 	fitRow,
 	type HintEntry,
@@ -797,11 +798,17 @@ class AskUserOverlayView implements Component {
 		this.questionScroll = 0;
 	}
 
-	footerHint(): string {
-		if (this.phase !== "asking") return buildHint([]);
+	/**
+	 * With a width the rail narrows by the shared rule, so `[Enter] record` and the
+	 * way out survive 40 columns where a joined string would lose its short labels.
+	 */
+	footerHint(innerWidth?: number): string {
+		const fitted = (entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb = "close"): string =>
+			innerWidth === undefined ? buildHint(entries, esc) : buildResponsiveHint(entries, esc)(innerWidth);
+		if (this.phase !== "asking") return fitted([]);
 		const question = this.currentQuestion();
 		const state = this.currentState();
-		if (!question || !state) return buildHint([]);
+		if (!question || !state) return fitted([]);
 		const recordAnswer =
 			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
 			"record answer";
@@ -814,9 +821,10 @@ class AskUserOverlayView implements Component {
 			const escapeVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
 			const entries: HintEntry[] = [];
 			if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question" });
-			entries.push({ key: "Enter", verb: recordAnswer });
-			if (this.deps.tui) entries.push({ key: getKeybindings().getKeys("tui.input.newLine").join("/"), verb: "newline" });
-			return buildHint([...entries, ...scroll], escapeVerb);
+			entries.push({ key: "Enter", verb: recordAnswer, short: "record" });
+			if (this.deps.tui)
+				entries.push({ key: getKeybindings().getKeys("tui.input.newLine")[0] ?? "", verb: "newline", critical: false });
+			return fitted([...entries, ...scroll], escapeVerb);
 		}
 		const entries: HintEntry[] = [];
 		if (this.questions.length > 1) entries.push({ key: "←/→ or Tab", verb: "question" });
@@ -824,10 +832,10 @@ class AskUserOverlayView implements Component {
 		// `t` is on every select footer because the operator cannot tell from a
 		// label whether the option needs a figure attached until they read it.
 		entries.push({ key: "t", verb: "add text", short: "text" });
-		entries.push({ key: "Enter", verb: recordAnswer });
+		entries.push({ key: "Enter", verb: recordAnswer, short: "record" });
 		if (this.ledgerEntries().length > 0) entries.push({ key: "a", verb: "answers" });
 		entries.push({ key: "?", verb: "details" });
-		return buildHint([...entries, ...scroll]);
+		return fitted([...entries, ...scroll]);
 	}
 
 	/**
@@ -1399,7 +1407,7 @@ export interface AskUserViewForTesting {
 	): Promise<AskUserResult>;
 	render(width: number): string[];
 	handleInput(data: string): void;
-	footerHint(): string;
+	footerHint(innerWidth?: number): string;
 	cancel(): void;
 }
 
@@ -1451,7 +1459,11 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 			(view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),
-		footerHint: () => `${view.footerHint()} · drag to select/copy`,
+		footerHint: (innerWidth) => {
+			const keys = view.footerHint(innerWidth);
+			const withDrag = `${keys} · drag to select/copy`;
+			return visibleWidth(withDrag) <= innerWidth - 3 ? withDrag : keys;
+		},
 	});
 	const selectionTui = tui as TUI & { useTerminalSelection?: () => () => void };
 	let releaseSelection = selectionTui.useTerminalSelection?.();
