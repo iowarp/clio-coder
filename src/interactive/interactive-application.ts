@@ -1008,6 +1008,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const memorySweepNotice = deps.takeMemorySweepNotice?.() ?? null;
 	if (memorySweepNotice !== null) notify("warning", memorySweepNotice, "memory:flow-sweep");
 	const eventProjection = createInteractiveEventProjection({
+		heldQueueNotice: (count) =>
+			`${count === 1 ? "1 queued message is" : `${count} queued messages are`} held and nothing was sent. ${keybindings.actionLabel("clio-coder.message.interrupt")} sends the queue in order, ${keybindings.actionLabel("clio-coder.message.dequeue")} restores it to the composer, and a new prompt takes it at its first slot.`,
+		restoreDroppedQueue: (texts) => {
+			const current = editor.getExpandedText();
+			editor.setLiteralText([texts.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
+			notify(
+				"info",
+				`${texts.length === 1 ? "1 message" : `${texts.length} messages`} queued behind the old session ${texts.length === 1 ? "was" : "were"} put back in the editor`,
+				"session:queue",
+			);
+		},
 		isReloadReporting: () => deps.reloadClasses?.active === true,
 		bus: deps.bus,
 		chat: deps.chat,
@@ -1485,10 +1496,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				const current = editor.getExpandedText();
 				editor.setLiteralText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
 			},
-			sendNow: (entry) => {
-				if (deps.chat.removeQueuedEntry(entry.id, "sent-now") === null) return;
-				editorSubmit.interruptFromEditor(entry.text);
-			},
+			sendNow: (entry) => editorSubmit.interruptFromEditor(entry.text, entry),
 			restoreAll: () => editorSubmit.restoreQueuedFollowUpsToEditor(),
 		},
 		getSlashContext: () => slashRuntime.context,
@@ -1548,14 +1556,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 
 	const cancelActiveRun = (): void => {
 		operatorExtensions?.cancel();
-		// Esc must not eat typed work: queued steers and follow-ups return to the
-		// editor before the abort, the same restore the reference implementation
-		// performs. cancel() then finds both queues already empty.
-		const restored = deps.chat.clearQueuedFollowUps();
-		if (restored.length > 0) {
-			const current = editor.getExpandedText();
-			editor.setLiteralText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
-		}
+		// The stop holds the queue as separate entries and announces it once the run settles (#447).
 		chatRenderer.flush();
 		deps.chat.cancel();
 		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");

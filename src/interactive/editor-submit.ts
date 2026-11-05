@@ -81,7 +81,6 @@ type EditorSubmitChat = Pick<
 	ChatLoop,
 	| "discoverOperatorEgg"
 	| "clearQueuedFollowUps"
-	| "flushQueueOnNextPrompt"
 	| "interruptRefusal"
 	| "isStreaming"
 	| "queueEntries"
@@ -160,7 +159,8 @@ export interface EditorSubmitController {
 	 * refusals (attached dispatch, parked permission ask), which degrade the
 	 * message to next-slot delivery with a notice.
 	 */
-	interruptFromEditor(text?: string): void;
+	/** `entry` names the queued entry `text` came from; it leaves the queue only when its prompt is sent. */
+	interruptFromEditor(text?: string, entry?: QueuedChatMessage): void;
 	restoreQueuedFollowUpsToEditor(): void;
 	hasActiveEditorBash(): boolean;
 	cancelActiveEditorBash(): boolean;
@@ -544,30 +544,30 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		return true;
 	};
 
-	const interruptFromEditor = (explicitText?: string): void => {
+	const interruptFromEditor = (explicitText?: string, entry?: QueuedChatMessage): void => {
 		const streaming = deps.chat.isStreaming();
 		const snapshot = captureDraft();
 		let text = (explicitText ?? deps.editor.getTextForSubmit()).trim();
-		let flushed: QueuedChatMessage | undefined;
-		if (text.length === 0) {
-			// An empty draft with a queue means "send the queue now": the first
-			// entry becomes the fresh prompt and the rest ride the engine's opening
-			// poll, so all of them reach the first model call of the new run.
+		let flushed = entry;
+		const flushQueue = text.length === 0;
+		if (flushQueue) {
+			// An empty draft with a queue means "send the queue now", running or held
+			// after a stop (#447): the first entry becomes the fresh prompt and the
+			// rest ride the engine's opening poll, so all of them reach the first
+			// model call of the new run, each as its own user message.
 			// A peer's queued prompt is not the operator's to send as their own.
-			const first = streaming ? deps.chat.queueEntries().find((entry) => entry.origin === undefined) : undefined;
+			const first = deps.chat.queueEntries().find((queued) => queued.origin === undefined);
 			if (!first) return;
 			const refusal = deps.chat.interruptRefusal();
 			if (refusal !== null) {
 				deps.notify("warning", `send now refused: ${refusal}`, "steer:refused");
 				return;
 			}
-			if (deps.chat.removeQueuedEntry(first.id, "sent-now") === null) return;
-			deps.chat.flushQueueOnNextPrompt();
 			text = first.text;
 			flushed = first;
 		}
 		if (streaming && refuseBusyCommand(text, "a send-now")) return;
-		if (!streaming) {
+		if (!streaming && !flushed) {
 			deps.editor.setText("");
 			submitEditorText(text);
 			deps.ui.requestRender();
@@ -607,7 +607,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			// Put the draft back only into the editor this send-now emptied; a
 			// draft the operator started since is theirs.
 			const restoreDraft = (): void => {
-				if (cleared?.owns()) setLiteralText(text);
+				if (cleared?.owns() && !flushed) setLiteralText(text);
 				deps.ui.requestRender();
 			};
 			// A constrained submission while a turn is live is refused by the chat
@@ -634,6 +634,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					restoreDraft();
 					return;
 				}
+				if (choice === "wait" && flushed) {
+					deps.notify("info", "the queue stays queued; it lands as soon as the running tool returns", "steer:wait");
+					return;
+				}
 				if (choice === "wait") {
 					deps.beforeSemanticBoundary?.("send-now-wait");
 					await deps.chat.submit(submitted.text, { ...common, queueFront: true });
@@ -651,10 +655,18 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			// carries: the launchpad collapse, the submitted-turn count, and the
 			// expansion's working-context paths and pending skill requests. Only
 			// images stay behind, rejected above, as they are for a follow-up.
+			// Taken only now: until here an entry the operator kept stays where it was,
+			// and from here the chat loop returns it if the prompt never starts (#447).
+			const taken = flushed ? deps.chat.removeQueuedEntry(flushed.id, "sent-now") : null;
+			if (flushed && taken === null) return;
 			deps.collapseLaunchpadBeforeSubmit?.();
 			deps.sessionTranscript.recordSubmittedTurn();
 			deps.beforeSemanticBoundary?.("interrupt-submit");
-			await deps.chat.submit(submitted.text, { steering: "interrupt", ...common });
+			await deps.chat.submit(submitted.text, {
+				steering: "interrupt",
+				...common,
+				...(taken ? { queued: taken, flushQueue } : {}),
+			});
 			if (refused) restoreDraft();
 			await deps.settleVisibleFrame?.("interrupt-submit-return");
 		})()
