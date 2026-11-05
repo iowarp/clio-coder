@@ -1942,6 +1942,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			(operatorExtensions?.busy ?? false) ||
 			(upgradeFlow?.isRunning() ?? false),
 		cancelActiveRun,
+		explainHeldEscape: () =>
+			notifications.add({
+				level: "info",
+				text: "Esc closed the view and the run keeps going · Esc again stops it",
+				key: "esc:held",
+				ttlMs: 4_000,
+			}),
 		editor,
 		editorSubmit,
 		requestRender: () => tui.requestRender(),

@@ -672,8 +672,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		state.notices.filter((notice) => notice.presentation === "setting"),
 		state.now,
 	);
+	const keyContext = state.keyContext ?? "send";
+	const surfaceOwnsKeys = keyContext === "surface";
+	// A tip is teaching for the composer; under a card or an overlay the slot stays
+	// with the surface's own legend, and a real notice is still shown.
 	const notice = topNotification(
-		state.notices.filter((entry) => entry.presentation !== "setting"),
+		state.notices.filter(
+			(entry) => entry.presentation !== "setting" && !(surfaceOwnsKeys && entry.text.startsWith("tip: ")),
+		),
 		state.now,
 	);
 	const key =
@@ -731,14 +737,16 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
 			: feedback
 				? theme.fg("changedValue", clean(feedback.text))
-				: state.demoHint && !state.welcomeVisible
-					? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-					: theme.fg(
-							"keyboardHint",
-							state.welcomeVisible
-								? ""
-								: ((state.demo !== false ? footerKeyHint(state.now, narrow, room) : null) ?? `${key} Dashboard`),
-						);
+				: surfaceOwnsKeys
+					? ""
+					: state.demoHint && !state.welcomeVisible
+						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
+						: theme.fg(
+								"keyboardHint",
+								state.welcomeVisible
+									? ""
+									: ((state.demo !== false ? footerKeyHint(state.now, narrow, room, keyContext) : null) ?? `${key} Dashboard`),
+							);
 	// One line flattens a multi-line notice and cuts the end, which is where a
 	// remediation command sits. Name the key that opens the dashboard, whose
 	// notice panel wraps the full text.

@@ -24,6 +24,7 @@ import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 import { createDemoHints } from "./demo-hints.js";
+import type { ComposerKeyContext } from "./key-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
 import type { DashboardPage } from "./pages.js";
@@ -93,6 +94,8 @@ export interface FooterDashboardDeps {
 	getExtensionStats?: () => { active: number; installed: number };
 	getContextState?: () => ContextState;
 	getNotifications?: () => ReadonlyArray<Notification>;
+	/** Who answers the keyboard right now; the hint row follows it. Absent reads as the idle composer. */
+	getKeyContext?: () => ComposerKeyContext;
 	/** Whether the Ctrl+G leader is armed and waiting for its next key. */
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
@@ -113,6 +116,7 @@ export interface FooterDashboardRenderState {
 	demoHint?: string | null;
 	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
 	demo?: boolean;
+	keyContext?: ComposerKeyContext;
 	welcomeVisible?: boolean;
 	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
@@ -193,11 +197,14 @@ class FooterText extends Text {
 	private composedRows: number | null = null;
 	private composedText = "";
 	private composedEpoch = -1;
+	private composedOwner: string | undefined;
 	private readonly compose: (width: number) => string;
 
 	constructor(
 		compose: (width: number) => string,
 		private readonly getRows: () => number,
+		/** The hint row names the keyboard owner, so a new owner recomposes on the frame that shows it. */
+		private readonly getOwner: () => string | undefined = () => undefined,
 	) {
 		super("", 0, 0);
 		this.compose = compose;
@@ -207,6 +214,7 @@ class FooterText extends Text {
 		this.composedWidth = width;
 		this.composedEpoch = skinEpoch();
 		this.composedRows = this.getRows();
+		this.composedOwner = this.getOwner();
 		const text = this.compose(width);
 		if (text === this.composedText) return;
 		this.composedText = text;
@@ -214,7 +222,12 @@ class FooterText extends Text {
 	}
 
 	override render(width: number): string[] {
-		if (this.composedEpoch !== skinEpoch() || width !== this.composedWidth || this.getRows() !== this.composedRows)
+		if (
+			this.composedEpoch !== skinEpoch() ||
+			width !== this.composedWidth ||
+			this.getRows() !== this.composedRows ||
+			this.getOwner() !== this.composedOwner
+		)
 			this.composeAt(width);
 		return super.render(width);
 	}
@@ -222,7 +235,11 @@ class FooterText extends Text {
 
 export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboardPanel {
 	const terminalRows = () => deps.getTerminalRows?.() ?? process.stdout.rows ?? 40;
-	const view = new FooterText((width) => composeFooter(width), terminalRows);
+	const view = new FooterText(
+		(width) => composeFooter(width),
+		terminalRows,
+		() => deps.getKeyContext?.(),
+	);
 	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
 	let dashboardMode: FooterDashboardMode = "compact";
@@ -248,6 +265,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const settings = deps.getSettings?.();
 		const taskMemory = deps.getTaskMemoryStatus?.() ?? null;
 		const contextState = deps.getContextState?.() ?? null;
+		const keyContext = deps.getKeyContext?.();
 
 		const statuses = deps.providers.list();
 		const current = settings?.chat?.target ? (statuses.find((s) => s.target.id === settings.chat?.target) ?? null) : null;
@@ -326,6 +344,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
 			demo: settings?.interface.demo !== false,
+			...(keyContext ? { keyContext } : {}),
 			welcomeVisible: deps.getWelcomeVisible?.() === true,
 			demoHint: demoHints({
 				enabled: settings?.interface.demo === true && deps.getWelcomeVisible?.() !== true,
@@ -333,6 +352,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				now,
 				quiet:
 					dashboardMode !== "compact" ||
+					keyContext === "surface" ||
 					compactionActive ||
 					["tool_blocked", "retrying", "stuck"].includes(status?.phase ?? "") ||
 					(status?.activeTools ?? []).some((tool) => tool.toolName === "ask_user") ||

@@ -9,6 +9,8 @@ import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-life
  * hint and press again, so the TUI looked like it ignored Ctrl+C.
  */
 export const APPLICATION_DOUBLE_TAP_MS = 1_200;
+/** How long after an Esc spent inside an overlay the next Esc is taken for the same gesture. */
+const OVERLAY_ESC_GRACE_MS = 1_000;
 
 export const CLOSED_ACTION_ORDER = [
 	"clio-coder.output.cycle",
@@ -113,6 +115,8 @@ export interface ApplicationControllerDeps {
 	cancelActiveEditorBash: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
+	/** An Esc that followed one spent inside an overlay was held rather than cancelling; say so. */
+	explainHeldEscape?: () => void;
 	getEditorText: () => string;
 	clearEditor: () => void;
 	requestRender: () => void;
@@ -180,6 +184,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	const keepAlive = deps.intervals.setInterval(() => {}, 1 << 30);
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
+	let lastOverlayEscAt = Number.NEGATIVE_INFINITY;
 
 	let shutdownArmed = false;
 	let armedIndicator: ApplicationIntervalHandle | null = null;
@@ -405,6 +410,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.forwardFocusedInput?.(data);
 			return { consume: true };
 		}
+		if (isEscapeKey(data) && deps.getOverlayState() !== "closed") lastOverlayEscAt = deps.clock.now();
 		if (deps.routeOverlayKey(data)) return { consume: true };
 		if (overlayOwnsInput(deps.getOverlayState())) {
 			if (deps.forwardFocusedInput) {
@@ -416,7 +422,13 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		if (isEscapeKey(data) && deps.isAutocompleteVisible?.()) return undefined;
 		if (isEscapeKey(data) && deps.cancelActiveEditorBash()) return { consume: true };
 		if (isEscapeKey(data) && deps.isStreaming()) {
-			deps.cancelActiveRun();
+			// A mashed Esc leaving an overlay must not reach the run behind it: the
+			// status line just said closing the view leaves the run going.
+			const heldAfterOverlay =
+				deps.explainHeldEscape !== undefined && deps.clock.now() - lastOverlayEscAt <= OVERLAY_ESC_GRACE_MS;
+			lastOverlayEscAt = Number.NEGATIVE_INFINITY;
+			if (heldAfterOverlay) deps.explainHeldEscape?.();
+			else deps.cancelActiveRun();
 			return { consume: true };
 		}
 		// pi-tui's dedicated history actions are editor actions even when an

@@ -454,6 +454,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 
 	let localBashStartedAt: number | null = null;
+	// The footer composes once before the editor exists; until then no list can be open.
+	let composerEditor: ClioEditor | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
@@ -521,6 +523,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
+		getKeyContext: () => {
+			if (dockTop(deps.tui) !== null || composerEditor?.isShowingAutocomplete()) return "surface";
+			if (deps.chat.isStreaming()) return "steer";
+			if (deps.chat.turnPreparation().phase !== "idle") return "hold";
+			return localBashStartedAt !== null ? "shell" : "send";
+		},
 		get dismissKeyLabel() {
 			return keybindings.actionLabel("clio-coder.notifications.dismiss");
 		},
@@ -634,6 +642,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Ctrl+J"),
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
+	composerEditor = editor;
 	const readSettingState = () => ({
 		thinking: editorChrome.getThinkingLabel(),
 		output: editorChrome.getOutputStyle?.() ?? "standard",

@@ -426,7 +426,10 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
 		match(hints, /newline/);
 		match(hints, /Thinking effort/);
-		match(hints, /Send now/);
+		const runHints = Array.from({ length: 40 }, (_, i) =>
+			footerKeyHint(i * 12000, false, Number.POSITIVE_INFINITY, "steer"),
+		).join("\n");
+		match(runHints, /Send now/);
 	} finally {
 		setKeybindings(previous);
 	}
@@ -537,8 +540,7 @@ test("compact quota stays beside the selected model while workspace and rotating
 		ok(rows.every((line) => visibleWidth(line) <= width));
 	}
 	const initial = plain(renderCompactDashboard(snapshot, 160));
-	snapshot.now += 12000;
-	ok(plain(renderCompactDashboard(snapshot, 160)) !== initial);
+	match(initial, /Enter send/);
 	for (let page = 0; page < 40; page++) {
 		snapshot.now = page * 12000;
 		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050 \*/);

@@ -129,6 +129,7 @@ export interface InteractiveInputRuntimeDeps {
 	cancelActiveEditorBash: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
+	explainHeldEscape?: () => void;
 	editor: {
 		getText(): string;
 		setText(text: string): void;
@@ -528,6 +529,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		cancelActiveEditorBash: deps.cancelActiveEditorBash,
 		isStreaming: deps.isStreaming,
 		cancelActiveRun: deps.cancelActiveRun,
+		...(deps.explainHeldEscape ? { explainHeldEscape: deps.explainHeldEscape } : {}),
 		getEditorText: () => deps.editor.getText(),
 		clearEditor: () => deps.editor.setText(""),
 		requestRender: deps.requestRender,
