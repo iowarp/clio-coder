@@ -318,6 +318,20 @@ export function endedOnCancelledInterview(messages: ReadonlyArray<unknown>): boo
 }
 
 /**
+ * Whether the run's last file change failed: its newest edit or write result is an error. A turn that closed `✓ Done`
+ * after an edit that did not apply read as a change made.
+ */
+export function endedWithFailedChange(messages: ReadonlyArray<unknown>): boolean {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index] as { role?: unknown; toolName?: unknown; isError?: unknown } | undefined;
+		if (message?.role !== "toolResult") continue;
+		if (message.toolName !== ToolNames.Edit && message.toolName !== ToolNames.Write) continue;
+		return message.isError === true;
+	}
+	return false;
+}
+
+/**
  * Stamps a settled reply that ended on calls it only wrote out, with the tools they named. Only the turn runtime knows
  * the session's surface, and the stamp rides the message so a replay and every later reader get the same reading.
  */

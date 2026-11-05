@@ -37,6 +37,7 @@ import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-
 import {
 	classifyTurnEnding,
 	endedOnCancelledInterview,
+	endedWithFailedChange,
 	extractText,
 	isSelfExplainingAbort,
 	proseBeforeWrittenCalls,
@@ -2290,7 +2291,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 										? "No answer"
 										: endedOnCancelledInterview(messages)
 											? "Cancelled"
-											: "Done"),
+											: endedWithFailedChange(messages)
+												? "Done, last change failed"
+												: "Done"),
 				};
 				// Only the newest failure is one ↑ away; a later turn's prompt sits in front of an older one.
 				if (promptRecallReceipt?.turnUsage) {

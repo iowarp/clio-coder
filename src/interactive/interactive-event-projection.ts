@@ -11,6 +11,7 @@ import type {
 } from "../core/telemetry/live-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ChatCancelOptions, ChatLoopEvent, QueuedChatMessage } from "../session-control/chat-loop.js";
+import { COMPACTION_LINE_LEAD } from "../session-control/compaction-lines.js";
 import {
 	loopBlockedAuditReason,
 	loopBlockedStopReason,
@@ -147,7 +148,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				// receipts belong in the footer; errors retain their transcript evidence.
 				// The compaction receipt follows them: the operation's result card now
 				// carries the measured reduction in the transcript (p9/D3).
-				if (event.level === "info" && event.text.startsWith("[context engine] ")) {
+				if (
+					event.level === "info" &&
+					(event.text.startsWith("[context engine] ") || event.text.startsWith(COMPACTION_LINE_LEAD))
+				) {
 					deps.notify("info", event.text, "compaction-notice");
 					return;
 				}
