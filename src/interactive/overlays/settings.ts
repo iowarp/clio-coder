@@ -80,8 +80,10 @@ import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import {
 	buildHint,
+	buildResponsiveHint,
 	centeredWindow,
 	fitRows,
+	type HintEntry,
 	type OverlayEscVerb,
 	type RowBudgetedBody,
 	showClioOverlayFrame,
@@ -98,6 +100,7 @@ import {
 	isModified,
 	renderDetailLane,
 	renderInspector,
+	renderLaneTitle,
 	renderNarrowInspector,
 	renderRowsPosition,
 	renderSectionLane,
@@ -2996,6 +2999,8 @@ function sectionCount(section: SettingsCenterSection): string {
 export class SettingsCenter implements Component {
 	/** The stack level that owns input; "detail" is implied by an open submenu. */
 	private level: SettingsCenterLane = "rows";
+	/** The body's width at the last render: the rail's own room is narrower, and says nothing about the layout. */
+	private renderedWidth = 0;
 	private selectedSectionId: SettingsSectionId = SETTINGS_SECTIONS[0].id;
 	private readonly rowIndexBySection = new Map<SettingsSectionId, number>();
 	/** Semantic anchors survive rows being inserted, removed, or reordered during refresh. */
@@ -3088,6 +3093,7 @@ export class SettingsCenter implements Component {
 		// Category, filter, and submenu changes share one viewport. Only terminal size changes its height.
 		const bodyHeight = Math.max(1, this.options.getBodyHeight());
 		this.normalizeSelection();
+		this.renderedWidth = width;
 		const lines =
 			width < WIDE_LAYOUT_MIN_WIDTH
 				? this.renderNarrow(width, bodyHeight)
@@ -3216,6 +3222,54 @@ export class SettingsCenter implements Component {
 
 	private depth(): SettingsNavigationDepth {
 		return this.submenuComponent ? "detail" : this.level;
+	}
+
+	/** Where the next key goes, in the order `handleInput` routes it. */
+	private keyOwner(): "filter" | "submenu" | SettingsCenterLane {
+		if (this.filterDraft !== null) return "filter";
+		if (this.submenuComponent) return "submenu";
+		return this.level;
+	}
+
+	/**
+	 * The rail for the lane that owns the keys. It used to list Space and `p` in the
+	 * section lane that ignores them, offer `open` on a read-only row where Enter does
+	 * nothing, and lose Tab first at 108 columns, the one key that changes lanes.
+	 */
+	railHint(innerWidth: number): string {
+		const verb = this.escapeVerb();
+		const esc: HintEntry = { key: "Esc", verb, short: verb.split(" ")[0] ?? verb };
+		const owner = this.keyOwner();
+		if (owner === "submenu") return buildResponsiveHint([], esc)(innerWidth);
+		if (owner === "filter") {
+			return buildResponsiveHint([{ key: "Enter", verb: "apply filter", short: "apply" }], esc)(innerWidth);
+		}
+		const twoLanes = this.renderedWidth >= WIDE_LAYOUT_MIN_WIDTH;
+		const filter: HintEntry = { key: "/", verb: "filter", critical: false };
+		if (owner === "sections") {
+			return buildResponsiveHint(
+				[
+					{ key: "Enter", verb: "open section", short: "open" },
+					...(twoLanes ? [{ key: "Tab", verb: "to rows", short: "rows", critical: true }] : []),
+					{ key: "↑↓", verb: "section", critical: false },
+					filter,
+				],
+				esc,
+			)(innerWidth);
+		}
+		const item = this.selectedItem();
+		const editable = item !== null && !item.readOnly;
+		return buildResponsiveHint(
+			[
+				...(editable ? [{ key: "Enter", verb: "open" }] : []),
+				...(twoLanes ? [{ key: "Tab", verb: "to sections", short: "sections", critical: true }] : []),
+				{ key: "↑↓", verb: "move", critical: false },
+				...(twoLanes && editable && item.values?.length ? [{ key: "Space", verb: "preview", critical: false }] : []),
+				...(twoLanes && isShortcutRow(item) ? [{ key: "p", verb: "pin", critical: false }] : []),
+				filter,
+			],
+			esc,
+		)(innerWidth);
 	}
 
 	private handleFilterKey(data: string): void {
@@ -3695,7 +3749,12 @@ export class SettingsCenter implements Component {
 		}
 		// The editor draws its own caret, so the row stops faking one with `_`.
 		this.filterInput.focused = true;
-		return this.filterInput.render(width).map((line) => clioTheme().base("searchQuery", line));
+		const theme = clioTheme();
+		const title = `${GLYPH.laneOwner} Filter `;
+		const room = Math.max(1, width - visibleWidth(title));
+		return this.filterInput
+			.render(room)
+			.map((line) => `${theme.style("selectedOption", title, { bold: true })}${theme.base("searchQuery", line)}`);
 	}
 
 	private emptyFilterLines(width: number, height: number): string[] {
@@ -3754,7 +3813,13 @@ export class SettingsCenter implements Component {
 	private renderSectionLane(width: number, height: number): string[] {
 		const theme = clioTheme();
 		const rows = this.sectionCatalogRows();
-		const header = theme.style("groupHeading", "Sections", { bold: true });
+		const owner = this.keyOwner();
+		const header = renderLaneTitle(theme, {
+			label: "Sections",
+			active: owner === "sections",
+			width,
+			tabReaches: owner === "rows",
+		});
 		const selectedLine = Math.max(
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
@@ -3784,7 +3849,7 @@ export class SettingsCenter implements Component {
 				sectionId: section.id,
 				label: section.label,
 				current: selected,
-				focused: selected && this.level === "sections",
+				focused: selected && this.keyOwner() === "sections",
 				...(badge === undefined ? {} : { badge }),
 			};
 		});
@@ -3803,9 +3868,16 @@ export class SettingsCenter implements Component {
 		if (!section) return fitRows([], width, height);
 		const changed = section.items.filter((item) => isModified(item)).length;
 		const meta = changed > 0 ? `${GLYPH.scoped} ${changed} changed` : sectionCount(section);
-		const title = titleRow(theme, section.label, width, { meta });
+		const owner = this.keyOwner();
+		const title = renderLaneTitle(theme, {
+			label: section.label,
+			active: owner === "rows",
+			width,
+			meta,
+			tabReaches: owner === "sections",
+		});
 		return fitRows(
-			[title, ...this.renderRowsBody(section, width, Math.max(1, height - 1), this.level === "rows")],
+			[title, ...this.renderRowsBody(section, width, Math.max(1, height - 1), owner === "rows")],
 			width,
 			height,
 		);
@@ -3915,7 +3987,7 @@ export class SettingsCenter implements Component {
 	private renderRowsPage(width: number, height: number): string[] {
 		const section = this.currentSection();
 		if (!section) return fitRows([], width, height);
-		return fitRows(this.renderRowsBody(section, width, height, true), width, height);
+		return fitRows(this.renderRowsBody(section, width, height, this.keyOwner() === "rows"), width, height);
 	}
 }
 
@@ -4055,33 +4127,8 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		margin: SETTINGS_OVERLAY_MARGIN,
 		markerId: "settings",
 		title: "Settings",
-		footerHint: (innerWidth) => {
-			// The submenu renders its own choose/back legend. Keeping the parent row
-			// controls in the outer border at the same time advertises actions
-			// (preview, open, filter) that this input depth does not route, so the
-			// border says only where Esc lands.
-			const esc = center.escapeVerb();
-			if (center.getSelection().submenuOpen) return buildHint([], esc);
-			return innerWidth < WIDE_LAYOUT_MIN_WIDTH
-				? buildHint(
-						[
-							{ key: "↑↓", verb: "move" },
-							{ key: "Enter", verb: "open" },
-							{ key: "/", verb: "filter" },
-						],
-						esc,
-					)
-				: buildHint(
-						[
-							{ key: "Tab", verb: "switch level" },
-							{ key: "Space", verb: "preview" },
-							{ key: "p", verb: "pin" },
-							{ key: "Enter", verb: "open" },
-							{ key: "/", verb: "filter" },
-						],
-						esc,
-					);
-		},
+		// A submenu renders its own choose/back legend, so `railHint` says only where Esc lands there.
+		footerHint: (innerWidth) => center.railHint(innerWidth),
 	});
 	return {
 		...handle,

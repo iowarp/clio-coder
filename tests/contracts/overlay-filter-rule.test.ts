@@ -53,7 +53,7 @@ test("settings renders its filter editor as the shared input row while it owns i
 	for (const width of WIDTHS) {
 		const lines = center.render(width);
 		assertFits(lines, width);
-		match(plain(lines), /^> smooth/mu);
+		match(plain(lines), /^▶ Filter > smooth/mu);
 		doesNotMatch(plain(lines), /Filter settings:|smooth_/u);
 	}
 });

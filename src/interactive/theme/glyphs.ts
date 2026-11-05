@@ -15,6 +15,11 @@ export const GLYPH = {
 	// Selection focus marker for list overlays. It is deliberately distinct from
 	// the tool ledger's toolHeader so a focused row never reads as a tool line.
 	cursor: "❯",
+	// The lane that owns the keys on a multi-lane surface: this and its rule read without colour.
+	laneOwner: "▶",
+	laneRule: "━",
+	// Where a lane's cursor would be while another lane owns the keys.
+	laneCurrent: "›",
 	// Action rows carry their class in the gutter: `▸` observes or searches,
 	// `§` consults Clio's knowledge, `±` changes files, `$` executes, `↗`
 	// reaches the network, `◆` delegates, `?` asks the operator and `⇢` calls a
