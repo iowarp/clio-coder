@@ -18,12 +18,14 @@ import {
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import {
 	type ApprovalRequestView,
 	createPermissionOverlayBody,
 	permissionRailTitle,
 } from "../../src/interactive/permission-overlay.js";
+import { providerFailureAdvice } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import {
@@ -781,4 +783,39 @@ test("Pi's fail-fast text for a wait past its cap still names the wait", () => {
 	strictEqual(statedRetryWaitMs(null, "Server requested 7200s retry delay (max: 5s). 429 slow down"), 7_200_000);
 	strictEqual(statedRetryWaitMs(null, "429 quota exceeded, retry-after: 60"), null);
 	strictEqual(statedRetryWaitMs(null, "400 bad request, retry-after: 60"), null);
+});
+
+test("each provider failure names its own way out", () => {
+	const route = { targetId: "gw", url: "http://gw.test:4000" };
+	const refused = providerFailureAdvice({ ...route, stage: "auth", errorClass: "http_401" });
+	match(refused, /refused the credential\. clio-coder configure --id gw replaces it/u);
+	const cut = providerFailureAdvice({ ...route, stage: "transport", errorClass: "stream_dropped", partialReply: true });
+	match(cut, /Your message is kept\. The partial reply stays on screen and the model will not see it\./u);
+	match(cut, /Up recalls your message and Enter resends it/u);
+	doesNotMatch(cut, /configure/u);
+	doesNotMatch(providerFailureAdvice({ ...route, stage: "provider", errorClass: "http_503" }), /configure/u);
+	match(providerFailureAdvice(route), /clio-coder configure --id gw edits this target/u);
+});
+
+test("what just happened borrows the footer slot from a standing warning, never from an error", () => {
+	const notice = (
+		id: string,
+		level: Notification["level"],
+		addedAt: number,
+		expiresAt: number | null,
+	): Notification => ({
+		id,
+		key: null,
+		level,
+		text: id,
+		addedAt,
+		expiresAt,
+	});
+	const standing = notice("standing", "warning", 1_000, 121_000);
+	const applied = notice("applied", "success", 5_000, 17_000);
+	strictEqual(topNotification([standing, applied], 6_000)?.id, "applied");
+	strictEqual(topNotification([standing, applied], 18_000)?.id, "standing");
+	strictEqual(topNotification([standing, notice("older", "info", 500, 12_000)], 6_000)?.id, "standing");
+	strictEqual(topNotification([standing, notice("tip: keys", "info", 5_000, 17_000)], 6_000)?.id, "standing");
+	strictEqual(topNotification([notice("fault", "error", 1_000, null), applied], 6_000)?.id, "fault");
 });
