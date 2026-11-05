@@ -1,7 +1,9 @@
 /**
  * `/handoff` review: the document, before anything is written anywhere.
  *
- * The operator reads the rendered Markdown here and chooses. Enter accepts the
+ * The box opens as soon as the command is admitted and names the extraction
+ * while it runs, so the wait has an owner, an elapsed clock and a way out. The
+ * operator then reads the rendered Markdown here and chooses. Enter accepts the
  * document as it stands, `e` hands it to `$EDITOR` through the same external
  * editor flow the composer uses and comes back with whatever was saved, and Esc
  * cancels the whole handoff. Cancel is the important one: nothing has been
@@ -9,12 +11,32 @@
  * round and nothing else.
  */
 
-import { isKeyRelease, Markdown, matchesKey, type OverlayHandle, type TUI } from "../../engine/tui.js";
+import {
+	isKeyRelease,
+	Markdown,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { buildResponsiveHint, createCachedBody, FocusBox, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
-import { choiceRows, clioTheme, factRows, markdownTheme, positionRow, sectionRule } from "../theme/index.js";
+import {
+	animationStep,
+	choiceRows,
+	clioTheme,
+	factRows,
+	formatCompactMs,
+	GLYPH,
+	markdownTheme,
+	positionRow,
+	sectionRule,
+	spinnerFrame,
+} from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
 export const HANDOFF_REVIEW_OVERLAY_TITLE = "Handoff review";
+const HANDOFF_PREPARING_OVERLAY_TITLE = "Handoff · preparing";
 
 const HANDOFF_REVIEW_MIN_WIDTH = 44;
 const HANDOFF_REVIEW_MAX_WIDTH = 100;
@@ -25,8 +47,12 @@ function handoffReviewOverlayWidth(columns: number): number {
 	return Math.max(HANDOFF_REVIEW_MIN_WIDTH, Math.min(HANDOFF_REVIEW_MAX_WIDTH, columns - 4));
 }
 
+/** Which extraction round the box is waiting on. */
+export type HandoffPreparationStage = "reading" | "repairing";
+
 export interface OpenHandoffReviewOverlayOptions {
-	document: string;
+	/** The document to review, or null while the extraction that draws it is still running. */
+	document: string | null;
 	goal: string;
 	/** Live terminal width, so the box tracks the window it opened in. */
 	columns: number;
@@ -40,18 +66,66 @@ export interface OpenHandoffReviewOverlayOptions {
 	onAccept: (document: string) => void;
 	/** Esc: the whole handoff is abandoned and nothing is written. */
 	onCancel: () => void;
+	now?: () => number;
 }
 
 export interface HandoffReviewOverlaySession extends OverlayHandle {
 	/** The document as it currently stands, including any external edit. */
 	document(): string;
+	/** The extraction finished: the review takes over the same box. */
+	showDocument(document: string): void;
+	setPreparation(stage: HandoffPreparationStage): void;
+	/** Name the route the extraction was sent on. */
+	setRoute(route: string): void;
 }
 
 const CHOICES = [
-	{ key: "Enter", verb: "accept", consequence: "writes this handoff exactly as shown", tone: "action" },
+	{
+		key: "Enter",
+		verb: "accept",
+		consequence: "opens a new session seeded with this text; this one stays in /resume",
+		tone: "action",
+	},
 	{ key: "e", verb: "edit", consequence: "opens it in $EDITOR; what you save comes back here" },
-	{ key: "Esc", verb: "cancel", consequence: "writes nothing" },
+	{ key: "Esc", verb: "cancel", consequence: "stays in this session; nothing is written" },
 ] as const;
+
+const PREPARING_CHOICES = [
+	{ key: "Esc", verb: "cancel", consequence: "stops the extraction; nothing is written" },
+] as const;
+
+const PREPARATION_WORDS: Readonly<Record<HandoffPreparationStage, string>> = {
+	reading: "Reading this session for what the next one needs",
+	repairing: "The first answer could not be read, so asking once more",
+};
+
+/** The goal, what the box is waiting on and for how long, and the one key that applies. */
+function formatPreparingBody(
+	goal: string,
+	stage: HandoffPreparationStage,
+	route: string | null,
+	elapsedMs: number,
+	spinner: string,
+	width: number,
+): string[] {
+	const theme = clioTheme();
+	const contentWidth = Math.max(1, Math.floor(width));
+	const seconds = Math.floor(elapsedMs / 1000);
+	const clock = seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
+	return [
+		...factRows(theme, [{ label: "goal", value: goal }], contentWidth),
+		sectionRule(theme, contentWidth, "Preparing", { meta: clock }),
+		...wrapTextWithAnsi(theme.fg("activity", `${spinner} ${PREPARATION_WORDS[stage]}${GLYPH.ellipsis}`), contentWidth),
+		...(route === null
+			? []
+			: [truncateToWidth(theme.fg("annotation", `asking ${route}`), contentWidth, GLYPH.ellipsis, false)]),
+		...wrapTextWithAnsi(
+			theme.fg("annotation", "The document opens here for review. Nothing is written until you accept it."),
+			contentWidth,
+		),
+		...choiceRows(theme, [...PREPARING_CHOICES], contentWidth),
+	];
+}
 
 /**
  * Render the body. Pure so the layout is testable without a TUI: the goal, the
@@ -92,7 +166,12 @@ export function openHandoffReviewOverlay(
 	tui: TUI,
 	options: OpenHandoffReviewOverlayOptions,
 ): HandoffReviewOverlaySession {
-	let text = options.document;
+	let text = options.document ?? "";
+	let preparing = options.document === null;
+	let stage: HandoffPreparationStage = "reading";
+	let route: string | null = null;
+	const now = options.now ?? Date.now;
+	const openedAt = now();
 	let scroll = 0;
 	let maxScroll = 0;
 	let settled = false;
@@ -100,6 +179,9 @@ export function openHandoffReviewOverlay(
 	// a while and the document changes only through the editor.
 	let memo: { key: string; lines: string[]; maxScroll: number } | null = null;
 	const body = createCachedBody((width, rows) => {
+		if (preparing) {
+			return formatPreparingBody(options.goal, stage, route, now() - openedAt, spinnerFrame(animationStep(now())), width);
+		}
 		const key = `${width}|${rows}|${scroll}|${skinEpoch()}|${text}`;
 		if (memo?.key !== key) {
 			const built = formatHandoffReviewBody(options.goal, text, width, scroll, rows);
@@ -109,14 +191,29 @@ export function openHandoffReviewOverlay(
 		return memo.lines;
 	});
 
+	// Nothing else redraws an idle screen, so the wait's clock keeps its own time.
+	let clock: ReturnType<typeof setInterval> | null = preparing
+		? setInterval(() => {
+				body.touch();
+				tui.requestRender();
+			}, 250)
+		: null;
+	clock?.unref?.();
+	const stopClock = (): void => {
+		if (clock !== null) clearInterval(clock);
+		clock = null;
+	};
+
 	const accept = (): void => {
 		if (settled) return;
 		settled = true;
+		stopClock();
 		options.onAccept(text);
 	};
 	const cancel = (): void => {
 		if (settled) return;
 		settled = true;
+		stopClock();
 		options.onCancel();
 	};
 	const scrollBy = (delta: number): void => {
@@ -131,6 +228,10 @@ export function openHandoffReviewOverlay(
 		// left the overlay unanswerable. Everything unmatched is swallowed.
 		onInput: (data: string): void => {
 			if (settled || isKeyRelease(data)) return;
+			if (preparing) {
+				if (matchesKey(data, "escape")) cancel();
+				return;
+			}
 			if (matchesKey(data, "up")) {
 				scrollBy(-1);
 				return;
@@ -163,15 +264,41 @@ export function openHandoffReviewOverlay(
 		anchor: "center",
 		width: handoffReviewOverlayWidth(options.columns),
 		markerId: "handoff-review",
-		title: HANDOFF_REVIEW_OVERLAY_TITLE,
-		// The body's own rows name Enter, e and Esc with what they do; the rail
-		// carries only the key they do not.
-		footerHint: buildResponsiveHint([{ key: "↑↓", verb: "scroll" }], null),
+		title: () => (preparing ? HANDOFF_PREPARING_OVERLAY_TITLE : HANDOFF_REVIEW_OVERLAY_TITLE),
+		footerHint: (innerWidth) =>
+			(preparing
+				? buildResponsiveHint([], { key: "Esc", verb: "cancel" })
+				: buildResponsiveHint(
+						[
+							{ key: "Enter", verb: "accept" },
+							{ key: "↑↓", verb: "scroll" },
+							{ key: "e", verb: "edit" },
+						],
+						{ key: "Esc", verb: "cancel" },
+					))(innerWidth),
 	});
 
 	return {
 		...handle,
 		document: () => text,
+		showDocument(document: string): void {
+			if (settled) return;
+			text = document;
+			preparing = false;
+			stopClock();
+			body.touch();
+			tui.requestRender();
+		},
+		setPreparation(next: HandoffPreparationStage): void {
+			stage = next;
+			body.touch();
+			tui.requestRender();
+		},
+		setRoute(next: string): void {
+			route = next;
+			body.touch();
+			tui.requestRender();
+		},
 		hide(): void {
 			cancel();
 			handle.hide();

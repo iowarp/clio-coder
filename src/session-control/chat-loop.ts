@@ -3782,6 +3782,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				false,
 			);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			options.onRoute?.({ targetId: prepared.runtime.targetId, wireModelId: prepared.runtime.wireModelId });
 			let result: SideQuestionResult;
 			try {
 				result = await withEndpointSlot(prepared.runtime, (slot) =>
