@@ -538,15 +538,18 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (row) {
 			entries.push({ key: "↑↓", verb: "select" });
 		}
+		const steerable = row !== null && row !== undefined && isDispatchBoardRowSteerable(row);
+		const cancellable = row !== null && row !== undefined && isDispatchBoardRowCancellable(row);
 		if (row && row.council === undefined) {
 			entries.push({
 				key: "Enter",
 				verb: deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail",
-				critical: false,
+				// A live run's steer and cancel outrank it; on a settled run it is the only verb.
+				critical: !steerable && !cancellable,
 			});
 		}
-		if (row && isDispatchBoardRowSteerable(row)) entries.push({ key: "s", verb: "steer", critical: true });
-		if (row && isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });
+		if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
+		if (cancellable) entries.push({ key: "x", verb: "cancel", critical: true });
 		return buildResponsiveHint(entries)(innerWidth);
 	};
 
