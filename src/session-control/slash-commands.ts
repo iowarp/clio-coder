@@ -2601,14 +2601,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					// The one required argument is the peer, so name the choices rather than the parser's field.
 					reason:
 						parsed.positionals.length === 0
-							? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt`
+							? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt.`
 							: parsed.error,
 				};
 			const peer = parsed.positionals[0] ?? "";
 			if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
 				return {
 					kind: "peer-pane-usage",
-					reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}`,
+					reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}.`,
 				};
 			}
 			const cwd = parsed.flags.get("--cwd");
