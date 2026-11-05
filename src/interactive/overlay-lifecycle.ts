@@ -408,11 +408,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		},
 		replaceInterruptedOverlay: (from, to) => overlayTransitions.replaceInterrupted?.(from, to),
 		onHarnessWaiting: () => {
-			appendNotice(
-				"info",
-				"Clio-Coder has a question for you, hidden behind this overlay. Close it to answer.",
-				busNoticeSink,
-			);
+			appendNotice("info", "Clio has a question for you, hidden behind this overlay. Close it to answer.", busNoticeSink);
 			deps.onOperatorParked?.();
 		},
 		renderContextIsland: () => interactiveTickers.renderContextIsland(),

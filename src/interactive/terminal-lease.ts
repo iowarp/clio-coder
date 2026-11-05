@@ -259,6 +259,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getHarnessStatus: (width, reserved, identityCells) =>
 			editorChrome.getHarnessStatus?.(width, reserved, identityCells) ?? null,
 		getLiveWorkStrip: (width, escVerb) => editorChrome.getLiveWorkStrip?.(width, escVerb) ?? null,
+		getBesideCard: (room) => editorChrome.getBesideCard?.(room) ?? null,
 		getWorkspaceRail: (width) => editorChrome.getWorkspaceRail?.(width) ?? null,
 		getLoopRail: (width) => editorChrome.getLoopRail?.(width) ?? null,
 		getTaskRail: (room) => editorChrome.getTaskRail?.(room) ?? null,

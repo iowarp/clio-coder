@@ -66,8 +66,14 @@ function foregroundWorker(facts: LiveWorkFacts): DispatchBoardRow | undefined {
 	);
 }
 
+/** A second worker on the rail says what it is doing in about this much, so it never squeezes the first. */
+const SECOND_WORKER_WORDS = 28;
+
+/** The share of a rail the work beside the phase may take by naming a second worker. */
+const SECOND_WORKER_RAIL_SHARE = 0.6;
+
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
-function workerSummary(facts: LiveWorkFacts, width: number): string | null {
+function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string | null {
 	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
 	const name = sanitizeCallTargetText(first.agentId);
@@ -81,6 +87,22 @@ function workerSummary(facts: LiveWorkFacts, width: number): string | null {
 	);
 	const taken = visibleWidth(name) + 1 + trail.reduce((sum, part) => sum + visibleWidth(part as string) + 3, 0);
 	const doing = sanitizeCallTargetText(facts.workerActivity(first, width - taken));
+	// With room, the second running worker is named too, because `+1 more` sends the reader to /fleet to learn who.
+	const second = rest.find((row) => row.status !== "enqueued");
+	if (second !== undefined) {
+		const secondElapsed = workerElapsed(second);
+		const named = [
+			`${name} ${doing}`,
+			elapsed,
+			`${sanitizeCallTargetText(second.agentId)} ${sanitizeCallTargetText(facts.workerActivity(second, SECOND_WORKER_WORDS))}`,
+			secondElapsed,
+			others > 1 ? `+${others - 1} more` : null,
+			queued > 0 ? `+${queued} queued` : null,
+		]
+			.filter(Boolean)
+			.join(" · ");
+		if (visibleWidth(named) <= cap) return named;
+	}
 	return [`${name} ${doing}`, ...trail].join(" · ");
 }
 
@@ -109,7 +131,7 @@ function isMainActive(status: AgentStatus): boolean {
  * can go in now, which it can unless the turn itself is waiting on this work.
  */
 export function railDetail(facts: LiveWorkFacts, width: number): string | null {
-	const worker = workerSummary(facts, width);
+	const worker = workerSummary(facts, width, Math.floor(width * SECOND_WORKER_RAIL_SHARE));
 	const background = backgroundSummary(facts, width);
 	if (worker === null && background === null) return null;
 	const waiting = facts.background.some((call) => call.blocksTurn);
@@ -117,6 +139,31 @@ export function railDetail(facts: LiveWorkFacts, width: number): string | null {
 	// A worker the turn is blocked on reads straight after `is waiting for a worker`
 	// and leads whatever else is going; the consequence goes first on a short rail.
 	return [worker, background, width >= 60 ? consequence : null].filter(Boolean).join(" · ");
+}
+
+/**
+ * Whether the main turn is working on its own while a card holds the rail. An ask from anyone blocks the status, so
+ * the phase alone says nothing: the caller knows whether a run is streaming and whether it parked a call of its own.
+ */
+function mainKeepsRunning(status: AgentStatus, turn: { streaming: boolean; parked: boolean }): boolean {
+	if (!turn.streaming || turn.parked || status.tool?.toolName === ToolNames.AskUser) return false;
+	return status.phase !== "cancelling" && status.phase !== "dispatching" && status.tool?.toolName !== ToolNames.Dispatch;
+}
+
+/**
+ * What goes on beside the card holding the rail: the card foregrounds the decision, and this says what it is not holding
+ * up. Null when nothing is, or when the room cannot state it whole.
+ */
+export function besideCardDetail(
+	facts: LiveWorkFacts,
+	room: number,
+	turn: { streaming: boolean; parked: boolean },
+): string | null {
+	const main = mainKeepsRunning(facts.status, turn) ? "the main turn keeps running" : null;
+	const free = facts.workers.filter((row) => row.progress?.awaitingApproval !== true);
+	const workers = free.length === 0 ? null : workerSummary({ ...facts, workers: free }, room);
+	const both = main !== null && workers !== null ? `${main} · ${workers}` : null;
+	return [both, workers, main].find((text) => text !== null && visibleWidth(text) <= room) ?? null;
 }
 
 /** What Esc does in this view, and that it does not reach the run. */

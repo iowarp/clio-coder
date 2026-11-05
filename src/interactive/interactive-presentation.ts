@@ -52,7 +52,7 @@ import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { ComposerKeyContext } from "./footer/key-hints.js";
-import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
+import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
 import { activeTaskRail, composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
@@ -109,6 +109,8 @@ export interface InteractivePresentationFactories {
 }
 
 export interface InteractivePresentationDeps {
+	/** How many of the main turn's own calls are parked on the operator. */
+	getParkedCallCount?: () => number;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
 	getExtensionStatus?: () => ReadonlyArray<string>;
@@ -766,6 +768,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { ...readiness, ...(quiet ? { label: "is idle" } : {}), detail };
 		},
 		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
+		getBesideCard: (room) =>
+			besideCardDetail(currentLiveWork(), room, {
+				streaming: deps.chat.isStreaming(),
+				parked: (deps.getParkedCallCount?.() ?? 0) > 0,
+			}),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
 			: {}),

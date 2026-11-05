@@ -34,7 +34,7 @@ import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
-import { railDetail } from "../../src/interactive/footer/live-work.js";
+import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
@@ -1243,6 +1243,46 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		);
 	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
 	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
+});
+
+test("the rail names who is working beside the main turn and what a card is not holding up", () => {
+	const row = (agentId: string, phase: string, awaitingApproval = false) =>
+		({
+			agentId,
+			status: "running",
+			progress: { phase, currentAction: null, awaitingApproval },
+		}) as unknown as DispatchBoardRow;
+	const writing: AgentStatus = { ...INITIAL_STATUS, phase: "writing" };
+	const facts = (workers: DispatchBoardRow[], status: AgentStatus = writing) => ({
+		actor: "Judge-model",
+		status,
+		workers,
+		workerActivity: (worker: DispatchBoardRow) => worker.progress?.phase ?? "",
+		background: [],
+		now: 0,
+	});
+	const two = [row("verifier", "writing"), row("coder", "thinking")];
+	strictEqual(railDetail(facts(two), 100), "verifier writing · coder thinking");
+	// A short rail keeps the count, and three workers name two.
+	strictEqual(railDetail(facts(two), 30), "verifier writing · +1 more");
+	strictEqual(railDetail(facts([...two, row("reviewer", "tool")]), 100), "verifier writing · coder thinking · +1 more");
+	// The worker asking is the card, so the rail says what else goes on, whole or not at all.
+	const asking = [row("coder", "tool", true), row("verifier", "writing")];
+	const running = { streaming: true, parked: false };
+	const idle = { streaming: false, parked: false };
+	strictEqual(besideCardDetail(facts(asking), 80, running), "the main turn keeps running · verifier writing");
+	strictEqual(besideCardDetail(facts(asking), 20, running), "verifier writing");
+	strictEqual(besideCardDetail(facts(asking), 5, running), null);
+	strictEqual(besideCardDetail(facts([row("coder", "tool", true)]), 80, idle), null);
+	// The main turn's own parked call is the card, even with a worker's ask queued behind it.
+	strictEqual(besideCardDetail(facts(asking), 80, { streaming: true, parked: true }), "verifier writing");
+	// The main turn's own question is not the main turn running.
+	const interviewing = {
+		...INITIAL_STATUS,
+		phase: "tool_running" as const,
+		tool: { toolName: "ask_user" },
+	} as unknown as AgentStatus;
+	strictEqual(besideCardDetail(facts([row("verifier", "writing")], interviewing), 80, running), "verifier writing");
 });
 
 test("a route pick says what it does to the running turn, and only what is still true", () => {
