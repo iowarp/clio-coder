@@ -157,6 +157,12 @@ export class SubmenuWrapper implements Component, RowBudgetedBody {
 	 */
 	private problem: string | null = null;
 	private rows = 0;
+	/**
+	 * Where Esc lands when it is not the list behind this page: the scope card
+	 * goes back to the value it was opened from, so a typed value survives the
+	 * press. Null means back to the list.
+	 */
+	escape: { verb: string; short?: string; back: () => void } | null = null;
 
 	constructor(
 		private readonly title: SubmenuTitle,

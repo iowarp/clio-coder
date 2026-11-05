@@ -1251,11 +1251,26 @@ function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSe
 				keptSettingDrafts.delete(`control:${control.path}`);
 				done(value);
 			} catch (error) {
-				wrapper.setProblem(error instanceof Error ? error.message : String(error));
+				wrapper.setProblem(valueProblem(error));
 			}
 		};
 		return wrapper;
 	};
+}
+
+/**
+ * Why a typed value was refused, about the value. The validator checks a copy of
+ * the whole file with the value in it, and its error is written for a broken
+ * file: it named settings.yaml as failing validation and sent the operator to
+ * fix keys in it and run doctor, when the file was untouched and only the
+ * typed value was wrong.
+ */
+function valueProblem(error: unknown): string {
+	if (error instanceof SettingsValidationError && error.issues.length > 0) {
+		const reasons = error.issues.map((issue) => issue.message);
+		return `Not accepted: ${reasons.join("; ")}. The setting is unchanged.`;
+	}
+	return error instanceof Error ? error.message : String(error);
 }
 
 function commonControlItem(control: SettingControl, live: () => Readonly<ClioSettings>): SettingsCenterItem {
@@ -3054,6 +3069,13 @@ function sectionCount(section: SettingsCenterSection, whole: SettingsCenterSecti
 	return filtered ? `${matches} of ${count} ${noun}` : `${count} ${noun}`;
 }
 
+/** Where Esc on the scope card returns: the editor or the choice list the value came from. */
+interface ScopeCardBack {
+	verb: "back to edit" | "back to choices";
+	short?: string;
+	back: () => void;
+}
+
 export class SettingsCenter implements Component {
 	/** The stack level that owns input; "detail" is implied by an open submenu. */
 	private level: SettingsCenterLane = "rows";
@@ -3267,6 +3289,14 @@ export class SettingsCenter implements Component {
 					this.options.requestRender?.();
 				},
 			},
+			submenu instanceof SubmenuWrapper &&
+				submenu.escape !== null && {
+					...submenu.escape,
+					back: () => {
+						submenu.escape?.back();
+						done();
+					},
+				},
 			submenu !== null && {
 				verb: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "back to list",
 				short: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "to list",
@@ -3564,11 +3594,7 @@ export class SettingsCenter implements Component {
 			return;
 		}
 		if (item.submenu) {
-			this.submenuComponent = item.submenu(item.editValue ?? item.currentValue, (selectedValue) => {
-				this.submenuComponent = null;
-				if (selectedValue !== undefined) this.prepareScopeConfirm(item, selectedValue);
-				this.options.requestRender?.();
-			});
+			this.openValueEditor(item, item.editValue ?? item.currentValue);
 			return;
 		}
 		if (item.values && item.values.length > 0) {
@@ -3585,7 +3611,15 @@ export class SettingsCenter implements Component {
 			});
 			const list = new ChoiceList(choices);
 			list.setSelectedIndex(Math.max(0, item.values.indexOf(selectedValue)));
-			list.onSelect = (choice) => this.prepareScopeConfirm(item, choice.value);
+			list.onSelect = (choice) =>
+				this.prepareScopeConfirm(item, choice.value, {
+					verb: "back to choices",
+					short: "choices",
+					back: () => {
+						this.pendingValue = choice.value;
+						this.activateSelectedItem();
+					},
+				});
 			list.onCancel = () => {
 				this.submenuComponent = null;
 				this.options.requestRender?.();
@@ -3600,7 +3634,23 @@ export class SettingsCenter implements Component {
 		}
 	}
 
-	private prepareScopeConfirm(item: SettingsCenterItem, value: string): void {
+	/** The item's own editor, opened on `value`; what it submits goes to the scope card, and Esc there comes back here. */
+	private openValueEditor(item: SettingsCenterItem, value: string): void {
+		const submenu = item.submenu;
+		if (!submenu) return;
+		this.submenuComponent = submenu(value, (selectedValue) => {
+			this.submenuComponent = null;
+			if (selectedValue !== undefined)
+				this.prepareScopeConfirm(item, selectedValue, {
+					verb: "back to edit",
+					short: "edit",
+					back: () => this.openValueEditor(item, selectedValue),
+				});
+			this.options.requestRender?.();
+		});
+	}
+
+	private prepareScopeConfirm(item: SettingsCenterItem, value: string, back?: ScopeCardBack): void {
 		let plan: SettingsChangePlan | null;
 		try {
 			plan = this.options.prepareChange(item, value);
@@ -3614,7 +3664,7 @@ export class SettingsCenter implements Component {
 			this.options.requestRender?.();
 			return;
 		}
-		this.openScopeConfirm(plan);
+		this.openScopeConfirm(plan, back);
 	}
 
 	private showChangeError(item: SettingsCenterItem, value: string, error: unknown): void {
@@ -3625,12 +3675,7 @@ export class SettingsCenter implements Component {
 		list.onSelect = (choice) => {
 			this.submenuComponent = null;
 			if (choice.value === "edit") {
-				if (item.submenu)
-					this.submenuComponent = item.submenu(value, (next) => {
-						this.submenuComponent = null;
-						if (next !== undefined) this.prepareScopeConfirm(item, next);
-						this.options.requestRender?.();
-					});
+				if (item.submenu) this.openValueEditor(item, value);
 				else this.activateSelectedItem();
 			}
 			this.options.requestRender?.();
@@ -3644,13 +3689,13 @@ export class SettingsCenter implements Component {
 			list,
 			buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
 		);
-		wrapper.setProblem(error instanceof Error ? error.message : String(error));
+		wrapper.setProblem(valueProblem(error));
 		this.submenuComponent = wrapper;
 		this.options.requestRender?.();
 	}
 
 	/** Hold one immutable plan while the operator chooses its destination. */
-	private openScopeConfirm(plan: SettingsChangePlan): void {
+	private openScopeConfirm(plan: SettingsChangePlan, back?: ScopeCardBack): void {
 		const restart = !plan.sessionCapable && plan.propagation.some((entry) => entry.timing === "next-session");
 		const landing = restart ? "applied after a restart" : "live now";
 		const options: ChoiceItem[] = [
@@ -3711,12 +3756,15 @@ export class SettingsCenter implements Component {
 		})();
 		const affected = [...new Set(plan.leaves.map((leaf) => settingsPathLabel(leaf.path)))];
 		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} · ${plan.impact}`;
-		this.submenuComponent = new SubmenuWrapper(
+		const card = new SubmenuWrapper(
 			title,
 			list,
-			buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
+			buildHint([{ key: "Enter", verb: "choose" }], back?.verb ?? "back to list"),
 			note,
 		);
+		// Esc backs out one layer, to the value being reviewed; only the Cancel row ends the change.
+		if (back !== undefined) card.escape = back;
+		this.submenuComponent = card;
 	}
 
 	private displayValueFor(item: SettingsCenterItem, selected: boolean): { value: string; pending: boolean } {
@@ -4162,8 +4210,13 @@ export interface OpenSettingsOverlayDeps {
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "project" | "global"): string {
 	const scopedRefs = id === "scope" ? parseScopedModelSelection(value) : null;
-	const displayValue = scopedRefs ? (scopedRefs.length > 0 ? scopedRefs.join(", ") : "(empty)") : value;
 	const path = settingsV2PathForRow(id);
+	// The notice reads the value the way the row does (`$7.50`, `On`), not as it was typed.
+	const displayValue = scopedRefs
+		? scopedRefs.length > 0
+			? scopedRefs.join(", ")
+			: "(empty)"
+		: formatSettingsValue(path, value);
 	const label = settingControl(path)?.label ?? SETTINGS_LABELS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID] ?? path;
 	return `${label} set to ${displayValue} (${scope === "global" ? "saved globally" : scope === "project" ? "saved for this project" : "this session"})`;
 }
