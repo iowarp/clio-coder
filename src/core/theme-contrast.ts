@@ -20,7 +20,7 @@ export interface ProjectedColor {
 	readonly xterm: number;
 }
 
-/** The terminal's own background, then the only surface the composer paints over it. */
+/** The terminal's own background, or a palette color painted behind this one. */
 type ContrastSurface = "application" | PaletteColor;
 export interface ContrastRule {
 	readonly level: number;
@@ -30,21 +30,32 @@ export interface ContrastRule {
 const SURFACE_TINT = {
 	surface: { tint: "neutralStrong", dark: 0.07, light: 0.05 },
 	selectionSurface: { tint: "cyanFocal", dark: 0.2, light: 0.12 },
-	yoloSurface: { tint: "turquoise", dark: 0.22, light: 0.1 },
+	yoloSurface: { tint: "turquoise", dark: 0.16, light: 0.1 },
 } as const satisfies Partial<Record<PaletteColor, { tint: PaletteColor; dark: number; light: number }>>;
 const isSurface = (color: PaletteColor): color is keyof typeof SURFACE_TINT => Object.hasOwn(SURFACE_TINT, color);
 
 const STRUCTURAL_TEXT = new Set<string>(["syntaxKeyword", "syntaxKey", "syntaxString", "syntaxLiteral", "syntaxComment"]);
-const FOREGROUND_SURFACES: readonly ContrastSurface[] = ["application", "yoloSurface"];
+// The composer surface paints only behind YOLO's own projections, its outcome
+// colors and its rail. Everything else meets the terminal's background alone.
+const ON_COMPOSER = new Set<PaletteColor>(["composerRail", "attentionRail", "error", "warning", "success"].map((name) =>
+	name in STRUCTURAL_ROLES ? STRUCTURAL_ROLES[name as keyof typeof STRUCTURAL_ROLES] : (name as PaletteColor),
+));
+const YOLO_CONTEXT = { surface: "composer", mode: "yolo" } as const;
 
 function buildRules(): ReadonlyMap<PaletteColor, ContrastRule> {
+	const roles = Object.keys(TEXT_ROLES) as SemanticRole[];
+	for (const role of roles) {
+		const projected = resolveRole(role, YOLO_CONTEXT).color;
+		if (projected !== resolveRole(role).color) ON_COMPOSER.add(projected);
+	}
 	const rules = new Map<PaletteColor, ContrastRule>();
 	const raise = (color: PaletteColor, level: number): void => {
-		if (level > (rules.get(color)?.level ?? 0)) rules.set(color, { level, surfaces: FOREGROUND_SURFACES });
+		const surfaces: readonly ContrastSurface[] = ON_COMPOSER.has(color) ? ["application", "yoloSurface"] : ["application"];
+		if (level > (rules.get(color)?.level ?? 0)) rules.set(color, { level, surfaces });
 	};
-	for (const role of Object.keys(TEXT_ROLES) as SemanticRole[]) {
+	for (const role of roles) {
 		raise(resolveRole(role).color, CONTRAST_TEXT);
-		raise(resolveRole(role, { surface: "composer", mode: "yolo" }).color, CONTRAST_TEXT);
+		raise(resolveRole(role, YOLO_CONTEXT).color, CONTRAST_TEXT);
 	}
 	for (const [role, color] of Object.entries(STRUCTURAL_ROLES) as [string, PaletteColor][]) {
 		if (isSurface(color) || color === "onAccent") continue;
