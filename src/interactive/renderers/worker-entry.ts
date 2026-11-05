@@ -16,7 +16,12 @@ import {
 /** Bounded worker summaries share the main transcript's output style. */
 
 import { plainOutcomeLabel, workerFailureHeadline } from "../../domains/dispatch/failure-headline.js";
-import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
+import {
+	summarizeTrustStatus,
+	trustFailureWords,
+	trustStateWord,
+	validationClause,
+} from "../../domains/evidence/trust-projection.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -187,10 +192,21 @@ function cardPrefix(entry: WorkerEntryState): string {
 	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
+/** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
+function settledAgainst(result: WorkerRunResultSummary): string | null {
+	if (result.outcome !== "succeeded") return null;
+	if (result.trust) {
+		const words = trustFailureWords(summarizeTrustStatus(result.trust));
+		if (words !== null) return words;
+	}
+	return result.contract === "fail" ? "result contract failed" : null;
+}
+
 /**
- * Execution outcome, explicitly named on successful folded and expanded rows
- * so the separate quality line cannot be mistaken for process status.
- * Abandoned names itself rather than falling through to its `stalled`
+ * The run's overall outcome, leading with the mark that decides it. A clean
+ * exit under a failed validation leads with the failure and keeps the
+ * execution fact in words, because a check mark beside a failed check reads
+ * as a pass. Abandoned names itself rather than falling through to its `stalled`
  * outcome code, so it reads as a ledger-side finding instead of the ordinary
  * heartbeat-timeout `stalled` a sealed result reports.
  */
@@ -199,6 +215,8 @@ function outcomeUnit(result: WorkerRunResultSummary): string {
 	// assignment that needed tools, so "execution ok" would read as a done task.
 	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
+	const against = settledAgainst(result);
+	if (against !== null) return `${theme.fg("error", `${GLYPH.error} ${against}`)}${meta(`${SEPARATOR}execution ok`)}`;
 	if (result.outcome === "succeeded" && result.toolCalls === 0) {
 		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
 	}
@@ -496,7 +514,7 @@ function alignedHeader(
 			? theme.fg("warning", GLYPH.phaseBlocked)
 			: entry.result?.outcome === "canceled"
 				? theme.fg("toolMetadata", GLYPH.cancelled)
-				: entry.result?.outcome !== "succeeded" || entry.result?.contract === "fail"
+				: entry.result?.outcome !== "succeeded" || settledAgainst(entry.result) !== null
 					? theme.fg("error", GLYPH.error)
 					: theme.fg(
 							entry.result.toolCalls === 0 ? "toolMetadata" : "success",
@@ -520,7 +538,13 @@ function alignedHeader(
 
 function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number): string {
 	const running = siblings.filter(isPending).length;
-	const done = siblings.filter((entry) => !isPending(entry) && entry.result?.outcome === "succeeded").length;
+	const done = siblings.filter(
+		(entry) =>
+			!isPending(entry) &&
+			entry.result !== undefined &&
+			entry.result.outcome === "succeeded" &&
+			settledAgainst(entry.result) === null,
+	).length;
 	const failed = siblings.length - running - done;
 	const first = siblings[0];
 	const name =

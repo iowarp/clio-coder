@@ -606,7 +606,9 @@ describe("worker rendering invariants", () => {
 				`width ${width}: ${lines.map(visibleWidth)}`,
 			);
 			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
-			match(plain, /execution ok/u);
+			// The failure leads; the execution fact stays in words wherever the row has room for it.
+			match(plain, /✗ validation failed/u);
+			if (width >= 44) match(plain, /execution ok/u);
 			match(plain, /quality recorded validation failed/u);
 			doesNotMatch(plain, /Ctrl\+O/u);
 		}
