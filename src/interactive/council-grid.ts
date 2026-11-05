@@ -54,6 +54,8 @@ export interface CouncilGroupView {
 	synthesis: CouncilMemberView | null;
 	/** Aggregate status of the group, used by the compact card. */
 	status: { glyph: string; label: string; token: ClioToken; glyphToken?: ClioToken };
+	/** The question every member was asked, as the board's rows word a task. */
+	task?: string;
 	/** Highest round any member has reached. */
 	round: number;
 	/** Elapsed time of the longest-running member, formatted by the caller. */
@@ -129,7 +131,7 @@ function councilMemberLines(
 	const lines = [
 		truncateToWidth(head, width, "…", false),
 		truncateToWidth(theme.fg("footerIdentity", member.route), width, "…", false),
-		truncateToWidth(`${status}${dot}${theme.fg("annotation", `r${member.round}`)}`, width, "…", false),
+		truncateToWidth(`${status}${dot}${theme.fg("annotation", `round ${member.round}`)}`, width, "…", false),
 		...answerRows(theme, member, width, options.maxAnswerRows ?? COUNCIL_ANSWER_ROWS),
 	];
 	return lines.map((line) => padAnsi(line, width));

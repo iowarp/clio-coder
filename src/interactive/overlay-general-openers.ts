@@ -44,17 +44,11 @@ import { type OutOfTurnRoute, outOfTurnRouteLabel } from "../session-control/sid
 import type { ContextClearCommandOptions, FleetRunStartOptions } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
-import {
-	type createDispatchBoardView,
-	isDispatchBoardRowCancellable,
-	isDispatchBoardRowSteerable,
-	renderFleetPlanCard,
-} from "./dispatch-board.js";
+import { type createDispatchBoardView, dispatchBoardHintEntries, renderFleetPlanCard } from "./dispatch-board.js";
 import type { FleetPlanRuns } from "./fleet-plan-runs.js";
 import { progressNoticeKeys } from "./footer/notifications.js";
 import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
-import type { HintEntry } from "./overlay-frame.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import type { ContextResetMutationChoice } from "./overlays/context-reset.js";
@@ -574,26 +568,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.requestRender();
 	};
 
-	const dispatchBoardHint = (innerWidth: number): string => {
-		const row = deps.dispatchBoard.selectedRow();
-		const entries: HintEntry[] = [];
-		if (row) {
-			entries.push({ key: "↑↓", verb: "select" });
-		}
-		const steerable = row !== null && row !== undefined && isDispatchBoardRowSteerable(row);
-		const cancellable = row !== null && row !== undefined && isDispatchBoardRowCancellable(row);
-		// A plan's card already shows every step, so its row has no detail to open or pane to watch.
-		if (row && row.council === undefined && row.plan === undefined) {
-			const detailVerb = deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail";
-			// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read.
-			entries.push({ key: "Enter", verb: detailVerb, critical: !steerable });
-			// The watch pane splits the terminal, so it says so before the key is pressed.
-			if (deps.dispatchBoard.canWatch()) entries.push({ key: "w", verb: "watch in a pane" });
-		}
-		if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
-		if (cancellable) entries.push({ key: "x", verb: "cancel", critical: true });
-		return buildResponsiveHint(entries)(innerWidth);
-	};
+	const dispatchBoardHint = (innerWidth: number): string =>
+		buildResponsiveHint(dispatchBoardHintEntries(deps.dispatchBoard))(innerWidth);
 
 	/**
 	 * `/btw <question>`: one model round beside the session, rendered in an
