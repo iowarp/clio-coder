@@ -1008,6 +1008,11 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	if [ -n "$package_file" ]; then pin="$installed_version"; fi
 	"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null || {
 		: >"$final_prefix/$FAILED_CANDIDATE_MARK"
+		active_version="$("$node_bin" -e 'process.stdout.write(require(process.argv[1]).version)' "$(manifest_field current)/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" || active_version=""
+		if [ -n "$active_version" ] && ! version_ge "${installed_version%%-*}" "${active_version%%-*}"; then
+			# An older version rejects keys a newer one wrote, and its own doctor --fix exits 1 and changes nothing.
+			fail "candidate checks failed; previous install remains active. Clio Coder $installed_version is older than the active $active_version, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $installed_version, remove the keys named above from settings.yaml, then rerun this installer."
+		fi
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 		fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
 	}

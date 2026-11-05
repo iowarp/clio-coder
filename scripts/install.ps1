@@ -328,6 +328,14 @@ function Install-ClioCoder {
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 		if ($LASTEXITCODE -ne 0) { New-Item -ItemType File -Force -Path (Join-Path $final ".clio-coder-refused-candidate") | Out-Null }
 		if ($LASTEXITCODE -ne 0) {
+			$activeVersion = $null
+			if ($previous) {
+				try { $activeVersion = (Get-Content -LiteralPath (Join-Path $previous "lib\node_modules\@iowarp\clio-coder\package.json") -Raw | ConvertFrom-Json).version } catch { $activeVersion = $null }
+			}
+			# An older version rejects keys a newer one wrote, and its own doctor --fix exits 1 and changes nothing.
+			if ($activeVersion -and [version](($pkg.version -split '-')[0]) -lt [version](($activeVersion -split '-')[0])) {
+				Fail "candidate checks failed; previous install remains active. Clio Coder $($pkg.version) is older than the active $activeVersion, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $($pkg.version), remove the keys named above from settings.yaml, then rerun this installer."
+			}
 			$repair = "& '" + $node.Replace("'", "''") + "' '" + $entry.Replace("'", "''") + "' doctor --fix"
 			Fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: $repair"
 		}
