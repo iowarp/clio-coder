@@ -2,7 +2,7 @@
 export class AdmissionCanceledError extends Error {
 	readonly code = "admission_canceled" as const;
 
-	constructor(message = "dispatch: admission canceled before a capacity slot opened") {
+	constructor(message = "dispatch: cancelled before a worker slot opened") {
 		super(message);
 		this.name = "AdmissionCanceledError";
 	}

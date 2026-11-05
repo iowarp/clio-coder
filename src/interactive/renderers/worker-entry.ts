@@ -187,6 +187,10 @@ function cardPrefix(entry: WorkerEntryState): string {
 	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
+function refusedCallsText(count: number): string {
+	return count === 1 ? "1 call refused" : `${count} calls refused`;
+}
+
 /**
  * Execution outcome, explicitly named on successful folded and expanded rows
  * so the separate quality line cannot be mistaken for process status.
@@ -201,6 +205,10 @@ function outcomeUnit(result: WorkerRunResultSummary): string {
 	// (a judge or scout can); the row states the fact in a neutral tone.
 	if (result.outcome === "succeeded" && result.toolCalls === 0) {
 		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
+	}
+	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
+	if (result.outcome === "succeeded" && (result.refusedCalls ?? 0) > 0) {
+		return theme.fg("warning", `${GLYPH.warn} finished with ${refusedCallsText(result.refusedCalls ?? 0)}`);
 	}
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
@@ -419,9 +427,11 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	}
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
+	const refused = entry.result?.refusedCalls ?? 0;
 	if (!inspect) {
 		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
 		if (calls !== undefined) metrics.push(renderCalls(calls));
+		if (refused > 0) metrics.push(refusedCallsText(refused));
 		const figure = tokens === undefined ? null : compactQuantity(tokens);
 		if (figure !== null) metrics.push(`${figure} tokens`);
 		return metrics;
@@ -430,6 +440,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
 	if (calls !== undefined) metrics.push(renderCalls(calls));
+	if (refused > 0) metrics.push(refusedCallsText(refused));
 	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
@@ -463,10 +474,12 @@ function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
 }
 
 /** The running call as `verb object`, or its tool name when the runtime sent no descriptor. */
-function describedAction(entry: WorkerEntryState): string | null {
+function describedAction(entry: WorkerEntryState, room?: number): string | null {
 	const action = entry.progress?.currentAction;
 	if (action === null || action === undefined) return null;
-	if (entry.progress?.awaitingApproval === true) return approvalWaitWords(entry.progress);
+	if (entry.progress?.awaitingApproval === true) {
+		return approvalWaitWords(entry.progress, room === undefined ? {} : { room });
+	}
 	const parts = workerActionParts(action, "running");
 	return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
 }
@@ -496,10 +509,12 @@ function alignedHeader(
 				? theme.fg("toolMetadata", GLYPH.cancelled)
 				: entry.result?.outcome !== "succeeded" || entry.result?.contract === "fail"
 					? theme.fg("error", GLYPH.error)
-					: theme.fg(
-							entry.result.toolCalls === 0 ? "toolMetadata" : "success",
-							entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
-						);
+					: (entry.result.refusedCalls ?? 0) > 0
+						? theme.fg("warning", GLYPH.warn)
+						: theme.fg(
+								entry.result.toolCalls === 0 ? "toolMetadata" : "success",
+								entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
+							);
 	const name = workerName(entry);
 	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
 	const prefix = cardPrefix(entry);
@@ -577,7 +592,11 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
  * moves the elapsed.
  */
 function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, includeTimer = true): string {
-	const action = describedAction(entry);
+	const elapsed = entry.telemetry?.activity.elapsed.display;
+	// The wait's words shorten to leave the clock beside them, because a cut here would lose the time left.
+	const waitRoom =
+		width - RAIL_WIDTH - 2 - (!includeTimer || elapsed === undefined ? 0 : elapsed.length + SEPARATOR.length);
+	const action = describedAction(entry, waitRoom);
 	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
 	const answer =
 		entry.helper || action !== null
@@ -587,7 +606,6 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const actionGlyph = entry.progress?.awaitingApproval === true ? GLYPH.phaseBlocked : GLYPH.phaseTool;
 	const doing =
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${actionGlyph} ${action}`;
-	const elapsed = entry.telemetry?.activity.elapsed.display;
 	const tokens = entry.telemetry?.row.tokens.display;
 	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
 	const calls = entry.telemetry?.activity.toolCalls.display;
@@ -604,7 +622,7 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const prefix =
 		action === null
 			? `${glyph} ${idle}`
-			: `${actionGlyph} ${entry.progress?.awaitingApproval === true ? approvalWaitWords(entry.progress) : current ? workerActionParts(current, "running").verb : ""}`;
+			: `${actionGlyph} ${entry.progress?.awaitingApproval === true ? action : current ? workerActionParts(current, "running").verb : ""}`;
 	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
 	const styledActivity = (shown: string): string => {
 		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);
@@ -613,7 +631,10 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	for (let kept = facts.length; kept >= 0; kept -= 1) {
 		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
 		const activityRoom = room - tail.length;
-		if (activityRoom < 1 || (kept > 1 && activityRoom < Math.min(24, activity.length))) continue;
+		// A wait's words carry its time left, so they outrank the spend beside them.
+		const wanted = entry.progress?.awaitingApproval === true ? activity.length : Math.min(24, activity.length);
+		if (activityRoom < 1 || (kept > (entry.progress?.awaitingApproval === true ? 0 : 1) && activityRoom < wanted))
+			continue;
 		const shown = fitDisplayText(activity, activityRoom);
 		return truncateToWidth(
 			`${theme.fg("gutter", RAIL)}${styledActivity(shown)}${meta(tail)}`,

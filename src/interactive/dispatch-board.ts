@@ -13,7 +13,7 @@ import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.j
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
-import { plainTrustVerdict, trustStateWord } from "../domains/evidence/trust-projection.js";
+import { plainTrustVerdict, trustFailureWords, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
@@ -517,7 +517,7 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	if (progress.awaitingApproval === true && current !== null) {
 		const wanted = workerActionParts(current, "running");
 		units.push(
-			theme.fg("warning", approvalWaitWords(progress)),
+			theme.fg("warning", approvalWaitWords(progress, { room: contentWidth - 12 })),
 			theme.fg("toolTarget", `${wanted.verb} ${wanted.object}`.trim()),
 		);
 	} else if (current !== null)
@@ -621,7 +621,14 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes.completionEvidence === "absent";
 	const host = row.hostVerification === undefined ? "" : ` · ${theme.fg("body", `host checks ${row.hostVerification}`)}`;
 	if (row.trust === undefined) {
-		const unread = theme.fg("annotation", isTerminalStatus(row.status) ? "run record not read back" : "not sealed yet");
+		const unread = theme.fg(
+			"annotation",
+			!isTerminalStatus(row.status)
+				? "not sealed yet"
+				: row.status === "aborted" && row.progress === undefined
+					? "nothing to judge: it never started"
+					: "run record not read back",
+		);
 		return cardWrappedValueLines(theme, "trust", `${unread}${host}`, contentWidth);
 	}
 	// The verdict leads in plain words; the axes that back it follow as detail.
@@ -746,7 +753,11 @@ function dispatchCardBody(
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	// The function phase is orange, while identity, cost and TTFT keep their own roles.
-	const statusStr = `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
+	const failure = completedRunFailure(row);
+	const statusStr =
+		failure !== null
+			? theme.fg("error", `${GLYPH.error} ${presentation.label} · ${failure}`)
+			: `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	const ttft = row.ttft ?? (row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a");
 
@@ -807,7 +818,11 @@ function dispatchCardBody(
 		options.expanded === true || fullTask.length <= 3
 			? fullTask
 			: [...fullTask.slice(0, 2), theme.fg("annotation", "… Enter detail for full task")];
-	const bodyLines = [cardUnitsLine(theme, "status", statusUnits, contentWidth)];
+	const started = runOriginWords(row);
+	const bodyLines = [
+		cardUnitsLine(theme, "status", statusUnits, contentWidth),
+		...(started === null ? [] : [cardUnitsLine(theme, "started", [theme.fg("body", started)], contentWidth)]),
+	];
 	// One current-operation row is useful at a glance; prose and policy expand on demand.
 	if (row.progress) {
 		const doing = progressActionLine(theme, row.progress, contentWidth);
@@ -838,6 +853,16 @@ function dispatchCardBody(
 					// limit, and one settling then does not free a slot.
 					`for a slot on ${sanitizeCallTargetText(row.endpoint.label)}: ${active} in use against a limit of ${row.endpoint.limit}, the main turn included. It starts once the count is under the limit.`,
 				),
+				contentWidth,
+			),
+		);
+	}
+	if (row.status === "enqueued" && row.endpoint === undefined) {
+		bodyLines.push(
+			...cardWrappedValueLines(
+				theme,
+				"waiting",
+				theme.fg("body", "for a worker slot. It starts when a running worker finishes, or [x] cancels it."),
 				contentWidth,
 			),
 		);
@@ -924,8 +949,8 @@ function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">)
 	return sanitizeCallTargetText(`${row.targetId}/${row.wireModelId}`);
 }
 
-/** Below this the island's status column cannot hold a whole approval sentence beside the worker's name and clock. */
-const TASK_ISLAND_NARROW_APPROVAL_WIDTH = 76;
+/** The most of a worker's name an approval's words give way to on the island, so a long name clips first. */
+const TASK_ISLAND_APPROVAL_LABEL_ROOM = 14;
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
@@ -941,20 +966,50 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		compact: true,
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
-	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
+	const failure = completedRunFailure(row);
+	const glyph =
+		failure !== null
+			? theme.fg("error", GLYPH.error)
+			: theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	// A running row says what the run is doing in the inline card's words: the
 	// island said `running` beside a card that said `starting` (BT-007).
 	// An approval's time left must survive a narrow island, so its words shorten before the row cuts them.
-	const statusLabel =
+	let statusLabel =
 		row.status === "running" && row.progress !== undefined
-			? sanitizeCallTargetText(workerActivityWords(row.progress, { narrow: width < TASK_ISLAND_NARROW_APPROVAL_WIDTH }))
+			? sanitizeCallTargetText(
+					workerActivityWords(row.progress, {
+						// Beside the glyph, the name and the clock, each with its separator.
+						room:
+							width -
+							2 -
+							dispatchRowPrefix(theme, row).width -
+							Math.min(visibleWidth(agentLabel), TASK_ISLAND_APPROVAL_LABEL_ROOM) -
+							3 -
+							(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0),
+					}),
+				)
 			: row.status === "enqueued" && row.endpoint !== undefined
 				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
-				: presentation.label;
+				: failure !== null
+					? `done · ${failure}`
+					: presentation.label;
+	// A narrow row keeps the worker's name over the rest of the phase's words, which the card below still states.
+	const nameRoom =
+		width -
+		2 -
+		dispatchRowPrefix(theme, row).width -
+		3 -
+		visibleWidth(statusLabel) -
+		(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0);
+	if (row.progress?.awaitingApproval !== true && nameRoom < Math.min(visibleWidth(agentLabel), 8)) {
+		statusLabel = statusLabel.split(" ")[0] ?? statusLabel;
+	}
 	const statusStr = theme.fg(
-		row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
-			? "shadowDispatchAction"
-			: presentation.token,
+		failure !== null
+			? "error"
+			: row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
+				? "shadowDispatchAction"
+				: presentation.token,
 		statusLabel,
 	);
 
@@ -1188,8 +1243,32 @@ function firstLine(text: string): string {
 	return sanitizeCallTargetText(line.trim());
 }
 
+/** What marks a run that finished as not to be leaned on, so its row cannot read as a plain success. */
+function completedRunFailure(row: Pick<DispatchBoardRow, "status" | "trust">): string | null {
+	return row.status === "completed" && row.trust !== undefined ? trustFailureWords(row.trust) : null;
+}
+
+/** Who started a run, in words, because the row's glyph only implies it. */
+function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | null {
+	switch (row.requestOrigin) {
+		case "user":
+			return "by you";
+		case "agent":
+			return "by the main agent";
+		case "harness":
+			return "by Clio on your behalf";
+		case "internal":
+			return "by Clio";
+		default:
+			return null;
+	}
+}
+
 /** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
-function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined): string {
+function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
+	const failure = completedRunFailure(row);
+	// A narrow row drops `done`, which the mark already implies, so the worker's name keeps its column.
+	if (failure !== null) return theme.fg("error", `${GLYPH.error} ${width < 80 ? "" : "done · "}${failure}`);
 	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" && tick !== undefined ? { tick } : {}),
 	});
@@ -1240,7 +1319,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			return {
 				text: row.endpoint
 					? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
-					: (task ?? "waiting for a slot"),
+					: "waiting for a worker slot",
 				tone: "muted",
 			};
 		case "failed":
@@ -1319,7 +1398,7 @@ export function runTableRows(
 			const cells: Array<string | TableCell> = [];
 			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 			cells.push(
-				runStatusCell(theme, row, options.tick),
+				runStatusCell(theme, row, options.tick, width),
 				`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 			);
 			if (anyPhase) cells.push("");
@@ -1337,14 +1416,25 @@ export function runTableRows(
 		const cells: Array<string | TableCell> = [];
 		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 		cells.push(
-			runStatusCell(theme, row, options.tick),
+			runStatusCell(theme, row, options.tick, width),
 			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 		);
 		if (anyPhase) cells.push(formatDispatchPhaseCell(row.phase, 14) ?? "");
 		if (anyNode) cells.push(row.node ?? "local");
 		// Unmeasured and not started are different facts, and the cost cell is wide enough to say which.
 		const costCell: TableCell = pending
-			? { text: row.usage.kind === "unavailable" ? USAGE_NOT_MEASURED : USAGE_NO_CALLS, tone: "muted" }
+			? {
+					// A finished run's calls are in the session that ran it, so `no calls yet` would be false here.
+					text:
+						row.usage.kind === "unavailable"
+							? USAGE_NOT_MEASURED
+							: isTerminalStatus(row.status)
+								? row.status === "completed"
+									? "earlier session"
+									: "no calls here"
+								: USAGE_NO_CALLS,
+					tone: "muted",
+				}
 			: figure("", usage.cost);
 		cells.push(elapsed, figure(GLYPH.up, usage.prompt), figure(GLYPH.down, usage.output), costCell);
 		if (anyAccount)
@@ -1617,12 +1707,22 @@ export function createDispatchBoardView(
 function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
 	const counts = new Map<string, number>();
 	for (const item of hidden) {
-		const label = item.kind === "council" ? item.group.status.label : dispatchStatusPresentation(item.row.status).label;
+		const label =
+			item.kind === "council"
+				? item.group.status.label
+				: item.row.progress?.awaitingApproval === true
+					? "asking"
+					: dispatchStatusPresentation(item.row.status).label;
 		counts.set(label, (counts.get(label) ?? 0) + 1);
 	}
 	const states = [...counts].map(([label, count]) => `${count} ${label}`).join(" · ");
 	// One state alone is the whole count: `+ 1 more · 1 queued` reads as two runs.
-	return counts.size === 1 ? `+ ${states} · /fleet` : `+ ${hidden.length} more · ${states} · /fleet`;
+	if (counts.size > 1) return `+ ${hidden.length} more · ${states} · /fleet`;
+	// A lone run off the card is named, because a count sends the reader to /fleet just to learn which.
+	const lone = hidden.length === 1 ? hidden[0] : undefined;
+	return lone?.kind === "run"
+		? `+ ${states} · ${sanitizeCallTargetText(lone.row.agentId)} · /fleet`
+		: `+ ${states} · /fleet`;
 }
 
 export function formatTaskIslandLines(
@@ -1701,7 +1801,7 @@ function trustVerdictMark(verdict: TrustVerdict): string {
 
 function terminalDetail(row: DispatchBoardRow): string | null {
 	if (row.status !== "failed" && row.status !== "dead" && row.status !== "aborted") return null;
-	return parseOptionalDetail(row.outcomeDetail);
+	return parseOptionalDetail(row.outcomeDetail)?.replace(/^dispatch:\s*/u, "") ?? null;
 }
 
 function isTerminalStatus(status: DispatchBoardStatus): boolean {

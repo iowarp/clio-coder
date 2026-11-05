@@ -1405,6 +1405,7 @@ export const ApprovalRequestedSchema = Type.Object(
 		escalation: Type.Optional(Type.Boolean()),
 		approvalAuthority: Type.Optional(vocabulary(["main", "operator"])),
 		forwardedByMain: Type.Optional(Type.Boolean()),
+		reviewer: Type.Optional(Type.Literal("safety-judge")),
 	},
 	closed,
 );

@@ -480,6 +480,11 @@ export function describeCallTarget(
 	}
 	for (const [field, value] of Object.entries(args)) {
 		if (allowed.has(field) || field.startsWith(HARNESS_ARG_PREFIX)) continue;
+		// An edit's replacements are the call itself, and the mutation row counts them too; `<array 1 item>` said neither.
+		if (tool === "edit" && field === "edits" && Array.isArray(value)) {
+			parts.push(countLabel(value.length, "replacement", "replacements"));
+			continue;
+		}
 		parts.push(`${targetFieldName(field)}=${summarizeUnlistedField(tool, field, value)}`);
 	}
 	const target = sanitizeCallTargetText(parts.join(" · "));

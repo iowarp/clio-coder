@@ -25,8 +25,8 @@ export interface LiveWorkFacts {
 	status: AgentStatus;
 	/** Active fleet runs, helpers excluded; only the first is named. */
 	workers: ReadonlyArray<DispatchBoardRow>;
-	/** How the worker's current action reads on the fleet dock. */
-	workerActivity: (row: DispatchBoardRow, width: number) => string;
+	/** How the worker's current action reads on the fleet dock, in the columns its row leaves it. */
+	workerActivity: (row: DispatchBoardRow, room: number) => string;
 	/** Side-agent model calls in flight, from their journaled start to their settle. */
 	background: ReadonlyArray<BackgroundCall>;
 	now: number;
@@ -71,15 +71,17 @@ function workerSummary(facts: LiveWorkFacts, width: number): string | null {
 	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
 	const name = sanitizeCallTargetText(first.agentId);
-	const doing = sanitizeCallTargetText(facts.workerActivity(first, width));
 	const elapsed = workerElapsed(first);
 	// A queued run is held up and a running one is not, so `+1 more` must not stand for both.
 	const rest = facts.workers.filter((row) => row !== first);
 	const queued = rest.filter((row) => row.status === "enqueued").length;
 	const others = rest.length - queued;
-	return [`${name} ${doing}`, elapsed, others > 0 ? `+${others} more` : null, queued > 0 ? `+${queued} queued` : null]
-		.filter(Boolean)
-		.join(" · ");
+	const trail = [elapsed, others > 0 ? `+${others} more` : null, queued > 0 ? `+${queued} queued` : null].filter(
+		Boolean,
+	);
+	const taken = visibleWidth(name) + 1 + trail.reduce((sum, part) => sum + visibleWidth(part as string) + 3, 0);
+	const doing = sanitizeCallTargetText(facts.workerActivity(first, width - taken));
+	return [`${name} ${doing}`, ...trail].join(" · ");
 }
 
 /** `memory review on Qwopus3.8 · 3s`, shedding the route first when the room is short. */
@@ -183,6 +185,13 @@ export function liveWorkStrip(
 		candidates = [
 			render(owned, [workers, note.long]),
 			...(workers === null ? [] : [render(owned, [workers, note.short]), render(bare, [workers, note.short])]),
+			// A worker asking outranks the Esc note: with an overlay over its card, this row is all that says time is running.
+			...(facts.workers.some((row) => row.progress?.awaitingApproval === true)
+				? [
+						render(bare, [workerSummary(facts, room - visibleWidth(bare) - 3)]),
+						`${glyph} ${quiet(workerSummary(facts, room - 2) ?? "")}`,
+					]
+				: []),
 			render(owned, [note.long]),
 			render(owned, [note.short]),
 			render(bare, [note.short]),

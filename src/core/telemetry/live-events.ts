@@ -529,6 +529,8 @@ export interface PermissionRequestedPayload {
 	approvalAuthority?: "main" | "operator" | undefined;
 	/** Set when the main agent approved and, below yolo, asks the operator to decide. */
 	forwardedByMain?: boolean | undefined;
+	/** Set when the safety judge reviews this worker ask rather than the main agent. */
+	reviewer?: "safety-judge" | undefined;
 }
 
 /** Live-grant facts carried on a worker permission resolution (Phase D). */

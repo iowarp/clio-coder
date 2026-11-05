@@ -1233,6 +1233,9 @@ function renderTurnUsageLine(
 			spend?.calls != null && (spend.calls > 1 || retries !== null || moved !== null)
 				? renderCalls(String(spend.calls), "call")
 				: null;
+		// A call moved away from has no amounts of its own, so a sum over it is all `≥` and `+?`. The row states the
+		// answering call beside the move, and Detailed keeps the sum.
+		const stated = moved !== null ? spend?.answer : spend;
 		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
 		const rowFacts = [
 			`${outcome}${receiptDuration(usage)}`,
@@ -1242,9 +1245,9 @@ function renderTurnUsageLine(
 		for (const fact of [
 			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
 			spend?.coverageNote ?? null,
-			spend?.tokens ?? null,
+			stated?.tokens ?? null,
 			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
-			spend?.cacheRead != null && spend.cacheRead !== "?" ? `cached ${spend.cacheRead}` : null,
+			stated?.cacheRead != null && stated.cacheRead !== "?" ? `cached ${stated.cacheRead}` : null,
 		]) {
 			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
 		}
@@ -1917,7 +1920,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			liveReceipts.delete(entry);
 			return;
 		}
-		const spend = turnSpend(view, usage.turnId);
+		// The answer closes the run, so the moved turn's answering call is the run's last.
+		const spend = turnSpend(view, usage.turnId, usage.movedTo === undefined ? undefined : usage.callIds?.at(-1));
 		if (spend === null) return;
 		if (JSON.stringify(spend) !== JSON.stringify(usage.spend)) {
 			invalidateEntryCache(entry);

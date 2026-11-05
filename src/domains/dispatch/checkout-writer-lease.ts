@@ -128,9 +128,14 @@ function writerConflictMessage(
 	checkout: string,
 	existing: CheckoutWriterHolder,
 	incoming: CheckoutWriterHolder,
+	operatorStarted = false,
 ): string {
 	const roots = (value: ReadonlyArray<string> | null): string => (value === null ? "undeclared" : value.join(", "));
 	const runId = existing.runId ?? "unknown";
+	// A person reads this one: the monitor call and dispatch fields below are the model's remedy, not theirs.
+	if (operatorStarted) {
+		return `${incoming.agentId} cannot write in this checkout yet: ${existing.agentId} (run ${runId}) is still writing here. Wait for it, cancel it from /fleet, or start this one with --worktree.`;
+	}
 	return `checkout_writer_conflict: ${incoming.agentId} would write ${checkout} while run ${runId} (${existing.agentId}, started by an earlier dispatch call) is still live there; its write roots are ${roots(existing.roots)}, this request's are ${roots(incoming.roots)}. Wait for it with monitor(mode="wait", run_id="${runId}"), declare disjoint intent.write_roots on both dispatches, or use worktree: true.`;
 }
 
@@ -143,6 +148,8 @@ function writerConflictMessage(
 export function acquireCheckoutWriterLease(input: {
 	checkout: string;
 	holder?: CheckoutWriterHolder;
+	/** The person started this run, so a refusal speaks to them rather than to the model. */
+	operatorStarted?: boolean;
 	nowMs?: number;
 	pid?: number;
 	processBirthToken?: string;
@@ -158,7 +165,8 @@ export function acquireCheckoutWriterLease(input: {
 	if (local !== undefined && (input.pid === undefined || input.pid === process.pid)) {
 		if (holder !== undefined) {
 			for (const existing of local.holders) {
-				if (holdersConflict(existing, holder)) throw new Error(writerConflictMessage(checkout, existing, holder));
+				if (holdersConflict(existing, holder))
+					throw new Error(writerConflictMessage(checkout, existing, holder, input.operatorStarted === true));
 			}
 			local.holders.add(holder);
 		}

@@ -7,13 +7,19 @@ import {
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
+import { createGrantBroker } from "../../src/domains/dispatch/grant-broker.js";
+import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
 import {
 	createWorkerApprovalWindows,
 	WORKER_APPROVAL_HOLD_CEILING_MS,
 	workerApprovalBackstopMs,
 } from "../../src/domains/dispatch/worker-approval-window.js";
-import { mainCallExposure } from "../../src/domains/safety/call-consequence.js";
+import { type TrustSummaryProjection, trustFailureWords } from "../../src/domains/evidence/trust-projection.js";
+import { credentialedCallKind, mainCallExposure } from "../../src/domains/safety/call-consequence.js";
+import { outwardShellReason } from "../../src/domains/safety/containment.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
+import { grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
 import {
 	DEFAULT_RETRY_SETTINGS,
 	formatStatedWait,
@@ -29,6 +35,7 @@ import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
+import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
@@ -47,7 +54,7 @@ import {
 } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
-import { workerActivityWords } from "../../src/interactive/worker-activity.js";
+import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
 import {
 	type AgentStatus,
@@ -1103,7 +1110,7 @@ test("a worker's wait states when it ends, what happens then, and that it is hel
 		payload: { requestId: "ask", held: false, expiresAt: 119_000, fallback: "deny" },
 	});
 	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · denied in 1:59");
-	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, narrow: true }), "your approval · denied in 1:59");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, room: 30 }), "your approval · denied in 1:59");
 	fold.observe({
 		type: "clio_coder_permission_window",
 		payload: { requestId: "ask", held: true, expiresAt: 822_000, fallback: "fail" },
@@ -1154,11 +1161,25 @@ test("a key on a worker card holds that ask, restarts the ones queued behind it,
 	const windows = new Map([
 		[
 			"first",
-			{ held: false, remainingMs: 100_000, ceilingMs: 900_000, ceilingRemainingMs: 880_000, fallback: "deny" as const },
+			{
+				held: false,
+				remainingMs: 100_000,
+				ceilingMs: 900_000,
+				ceilingRemainingMs: 880_000,
+				fallback: "deny" as const,
+				decider: "operator" as const,
+			},
 		],
 		[
 			"second",
-			{ held: false, remainingMs: 90_000, ceilingMs: 900_000, ceilingRemainingMs: 870_000, fallback: "deny" as const },
+			{
+				held: false,
+				remainingMs: 90_000,
+				ceilingMs: 900_000,
+				ceilingRemainingMs: 870_000,
+				fallback: "deny" as const,
+				decider: "operator" as const,
+			},
 		],
 	]);
 	const readers: Array<() => { remainingMs: number; held: boolean } | null> = [];
@@ -1234,7 +1255,7 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		phase: "tool",
 		currentAction: null,
 		awaitingApproval: true,
-		approvalWindow: { expiresAt: 119_000, held: false, fallback: "deny" },
+		approvalWindow: { expiresAt: 119_000, held: false, fallback: "deny", decider: "operator" },
 	} as unknown as WorkerProgressSnapshot;
 	const facts = (width: number) =>
 		railDetail(
@@ -1242,7 +1263,7 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 				actor: "Judge-model",
 				status: INITIAL_STATUS,
 				workers: [{ agentId: "coder", status: "running", progress } as DispatchBoardRow],
-				workerActivity: (row, room) => workerActivityWords(row.progress ?? progress, { now: 0, narrow: room < 72 }),
+				workerActivity: (row, room) => workerActivityWords(row.progress ?? progress, { now: 0, room }),
 				background: [],
 				now: 0,
 			},
@@ -1424,4 +1445,175 @@ test("a cancelled interview ends the turn as cancelled, not as a success", () =>
 		}).stopReason,
 		"cancelled",
 	);
+});
+
+test("a brokered ask's window hands the person the whole time, and running out says it timed out", () => {
+	const fired: Array<() => void> = [];
+	const delivered: Array<{ decision: string; cause: string | undefined }> = [];
+	let at = 0;
+	const broker = createGrantBroker({
+		now: () => 1_000,
+		deliver: (_record, decision, _reason, cause) => {
+			delivered.push({ decision, cause });
+			return true;
+		},
+	});
+	const opened = broker.open({
+		workerRequestId: "ask",
+		runId: "run",
+		rootRunId: "run",
+		attempt: 0,
+		attemptToken: "token",
+		ownerSessionId: null,
+		agentId: "coder",
+		tool: "bash",
+		actionClass: "execute",
+		approvalAuthority: "main",
+		argDigest: grantEffectDigest({ tool: "bash", args: { command: "true" } }),
+		effect: { tool: "bash", args: { command: "true" } },
+		cwd: "/w",
+		permitTools: ["bash"],
+		summary: "bash",
+		reasons: [],
+		deadlineAt: 900_000,
+		windowMs: 20_000,
+	});
+	if (!opened.ok) throw new Error(opened.reason);
+	const requestId = opened.record.requestId;
+	const windows = createWorkerApprovalWindows({
+		now: () => at,
+		setTimer: (callback) => {
+			fired.push(callback);
+			return fired.length;
+		},
+		clearTimer: () => {},
+	});
+	windows.open({
+		runId: "run",
+		agentId: "coder",
+		requestId,
+		windowMs: 20_000,
+		fallback: "fail",
+		decider: "judge",
+		deny: () => {
+			broker.expire(requestId);
+			return true;
+		},
+	});
+	strictEqual(windows.read(requestId)?.decider, "judge");
+	at = 15_000;
+	strictEqual(windows.handToOperator(requestId), true);
+	strictEqual(windows.read(requestId)?.decider, "operator");
+	strictEqual(windows.read(requestId)?.remainingMs, 20_000, "the judge's time is not taken from the person");
+	fired.at(-1)?.();
+	deepStrictEqual(delivered, [{ decision: "deny", cause: "timeout" }]);
+	strictEqual(broker.get(requestId)?.state, "expired");
+	broker.dispose();
+	windows.dispose();
+});
+
+test("a wait names who it is on and keeps its time left as the room shrinks", () => {
+	const words = (
+		decider: "operator" | "main" | "judge",
+		room?: number,
+		held = false,
+		fallback: "deny" | "fail" = "fail",
+	) =>
+		approvalWaitWords(
+			{ approvalWindow: { expiresAt: 119_000, held, fallback, decider } },
+			{ now: 0, ...(room === undefined ? {} : { room }) },
+		);
+	strictEqual(words("operator"), "waiting for your approval · run fails in 1:59");
+	strictEqual(words("operator", 34), "your approval · run fails in 1:59");
+	strictEqual(words("operator", 26), "asks you · fails in 1:59");
+	strictEqual(words("operator", 13), "fails in 1:59");
+	strictEqual(words("operator", 20, true), "held · fails in 1:59");
+	strictEqual(words("operator", 14, true), "fails in 1:59");
+	strictEqual(words("judge", 80, false, "deny"), "waiting for the safety judge · denied in 1:59");
+	strictEqual(words("main", 80, false, "deny"), "waiting for the main agent · denied in 1:59");
+});
+
+test("a run's list row and a credentialed call's title say only what is known", () => {
+	const summary = (axes: Partial<TrustSummaryProjection["axes"]>, verdict: TrustSummaryProjection["verdict"]) =>
+		({ verdict, axes }) as Pick<TrustSummaryProjection, "verdict" | "axes">;
+	strictEqual(trustFailureWords(summary({ validationGrounding: "failed" }, "compromised")), "validation failed");
+	strictEqual(trustFailureWords(summary({ validationGrounding: "absent" }, "unverified")), null);
+	strictEqual(outwardShellReason("gh pr list"), "gh reads with your credentials");
+	strictEqual(outwardShellReason("gh pr merge 3"), "gh acts with your credentials");
+	strictEqual(outwardShellReason("gh api repos/o/r/issues"), "gh acts with your credentials");
+	strictEqual(credentialedCallKind(["gh reads with your credentials"]), "reads with your credentials");
+	strictEqual(credentialedCallKind(["gh acts with your credentials"]), "uses your credentials");
+	strictEqual(credentialedCallKind(["Publishes to origin"]), null);
+});
+
+test("a person's /run refused beside the main turn says why without a deadlock or a model's remedy", () => {
+	const detail =
+		foregroundEndpointBlock({
+			endpointKey: "http://127.0.0.1:1",
+			operatorStarted: true,
+			limits: { endpoints: { "http://127.0.0.1:1": 1 } },
+			usage: {
+				endpoints: { "http://127.0.0.1:1": 1 },
+				endpointHolders: {
+					"http://127.0.0.1:1": { foregroundStreams: 1, workers: 0, background: 0 } as never,
+				},
+			},
+		} as never) ?? "";
+	match(detail, /the main turn is using the only slot/u);
+	strictEqual(detail.includes("deadlock"), false);
+});
+
+test("a long silence states its evidence age, what is usual and the limit, and never that anything progressed", () => {
+	const at = 1_000_000;
+	const waiting = {
+		phase: "waiting_model",
+		since: at - 95_000,
+		waitingSince: at - 95_000,
+		lastMeaningfulAt: at - 95_000,
+		watchdogTier: 3,
+		watchdogPeak: 3,
+		localRuntime: false,
+		modelRequest: { sentAt: at - 95_000, firstByteAt: null, bytesObservable: true },
+	} as never;
+	const first = (history: { calls: number; slowestMs: number } | null) =>
+		silenceNoteForms(waiting, at, DEFAULT_RETRY_SETTINGS, history)?.[0] ?? "";
+	match(
+		first(null),
+		/No bytes for 1m35s, usual time for this route unknown\. Clio ends this call after 10m of silence/u,
+	);
+	// One call is not a usual.
+	match(first({ calls: 1, slowestMs: 8_000 }), /usual time for this route unknown/u);
+	match(first({ calls: 3, slowestMs: 8_000 }), /longer than usual for this route \(slowest this session 8\.0s\)/u);
+	match(first({ calls: 3, slowestMs: 180_000 }), /this route has taken up to 3m this session/u);
+	const streaming = { ...(waiting as object), phase: "writing", lastMeaningfulAt: at - 95_000 } as never;
+	match(
+		silenceNoteForms(streaming, at, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "",
+		/No new output for 1m35s.*after 3m of silence/u,
+	);
+	strictEqual(
+		silenceNoteForms(
+			{ ...(waiting as object), lastMeaningfulAt: at - 60_000 } as never,
+			at,
+			DEFAULT_RETRY_SETTINGS,
+			null,
+		),
+		null,
+	);
+	strictEqual(
+		silenceNoteForms({ ...(waiting as object), phase: "tool_running" } as never, at, DEFAULT_RETRY_SETTINGS, null),
+		null,
+	);
+});
+
+test("a write refused beside a lint that changed nothing is a blocked change, and any changed path keeps the old reading", () => {
+	const stats = new Map(
+		[
+			{ tool: "bash", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 },
+			{ tool: "write", count: 1, ok: 0, errors: 0, blocked: 1, totalDurationMs: 1 },
+		].map((stat) => [stat.tool, stat]),
+	);
+	const classify = (tool: string) => (tool === "bash" ? "execute" : "write") as never;
+	strictEqual(blockedWriteAttempts(stats, classify, 0), 1);
+	strictEqual(blockedWriteAttempts(stats, classify, 2), null);
+	strictEqual(blockedWriteAttempts(stats, classify), null);
 });

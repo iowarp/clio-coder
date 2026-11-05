@@ -482,7 +482,11 @@ import {
 	validateJobSpec,
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
-import { createWorkerApprovalWindows, workerApprovalBackstopMs } from "./worker-approval-window.js";
+import {
+	createWorkerApprovalWindows,
+	workerApprovalBackstopMs,
+	workerApprovalCeilingMs,
+} from "./worker-approval-window.js";
 import {
 	resolveWorkerMcpAdmission,
 	type WorkerMcpNetworkWithheld,
@@ -3201,10 +3205,10 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 				...(operatorUnattended ? { operatorResponder: "none" as const } : {}),
 				...(mainRouted && input.grantAttempt !== undefined ? { grant: { ...input.grantAttempt } } : {}),
 			};
-			// This process runs the window of an ask a person answers, so the person can
-			// hold it. With no responder, and on a brokered ask, the worker's timer stays
+			// This process runs the window of an ask a person can answer, brokered or not,
+			// so the person can hold it. With no person to answer, the worker's timer stays
 			// the only one and keeps its short bound.
-			if (attended && !mainRouted && !unattended) {
+			if (attended && !unattended) {
 				spec.escalation.backstopMs = workerApprovalBackstopMs(spec.escalation.timeoutMs);
 			}
 		}
@@ -3747,7 +3751,12 @@ export function createDispatchBundle(
 		...(record.target !== undefined ? { target: record.target } : {}),
 		reasons: [...record.reasons],
 		createdAt: new Date(record.createdAt).toISOString(),
-		deadlineAt: new Date(record.deadlineAt).toISOString(),
+		// A window this process runs ends the request well before its record's ceiling.
+		deadlineAt: new Date(
+			record.state === "pending"
+				? now() + (workerApprovalWindows.read(record.requestId)?.remainingMs ?? record.deadlineAt - now())
+				: record.deadlineAt,
+		).toISOString(),
 		...(record.reason !== undefined ? { reason: record.reason } : {}),
 		...(record.forwardedByMain === true ? { forwardedByMain: true as const } : {}),
 		...(record.reviewer !== undefined ? { reviewer: record.reviewer } : {}),
@@ -3755,6 +3764,7 @@ export function createDispatchBundle(
 	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
+		if (record.state !== "pending") workerApprovalWindows.settle(record.requestId);
 		const requested = (escalation: boolean): void => {
 			emitApproval(context.bus, "approval.requested", {
 				tool: record.tool,
@@ -3768,7 +3778,7 @@ export function createDispatchBundle(
 				...(record.target !== undefined ? { target: record.target } : {}),
 				...(record.consequence !== undefined ? { consequence: [...record.consequence] } : {}),
 				reasons: [...record.reasons],
-				timeoutMs: Math.max(0, record.deadlineAt - now()),
+				timeoutMs: workerApprovalWindows.read(record.requestId)?.remainingMs ?? Math.max(0, record.deadlineAt - now()),
 				fallback,
 				escalation,
 				// Why a forwarded request reached the operator, such as changed git hooks, leads its reasons.
@@ -3777,9 +3787,26 @@ export function createDispatchBundle(
 					: {}),
 				approvalAuthority: record.approvalAuthority,
 				...(record.forwardedByMain === true ? { forwardedByMain: true } : {}),
+				...(record.reviewer !== undefined ? { reviewer: record.reviewer } : {}),
 			});
 		};
 		if (previous === null) {
+			// Opened before the card is told, so its first frame already reads this window.
+			if (record.windowMs !== undefined) {
+				workerApprovalWindows.open({
+					runId: record.runId,
+					agentId: record.agentId,
+					requestId: record.requestId,
+					windowMs: record.windowMs,
+					fallback,
+					decider:
+						record.approvalAuthority === "operator" ? "operator" : record.reviewer === "safety-judge" ? "judge" : "main",
+					deny: () => {
+						grantBroker.expire(record.requestId);
+						return true;
+					},
+				});
+			}
 			// An operator rail goes straight to the operator's card when this
 			// process has one; an ordinary ask waits for the main agent, whose
 			// dispatch call yields on it.
@@ -3800,7 +3827,11 @@ export function createDispatchBundle(
 		if (previous === "pending" && record.state === "pending") {
 			// The main agent approved below yolo: the operator decides, with the
 			// main agent's request as provenance.
-			if (record.forwardedByMain === true && record.approvalAuthority === "main") requested(true);
+			if (record.forwardedByMain === true && record.approvalAuthority === "main") {
+				// The time so far went to the judge or the main agent, so the person gets the whole window.
+				workerApprovalWindows.handToOperator(record.requestId);
+				requested(true);
+			}
 			return;
 		}
 		if (record.state === previous || record.state === "executing") return;
@@ -3846,18 +3877,23 @@ export function createDispatchBundle(
 	};
 	const grantBroker = createGrantBroker({
 		now,
-		deliver: (record, decision, reason) => {
+		deliver: (record, decision, reason, cause) => {
 			const run = active.get(record.runId);
 			if (run?.resolvePermission === undefined) return false;
-			return run.resolvePermission(record.workerRequestId, decision, {
-				attemptToken: record.attemptToken,
-				attempt: record.attempt,
-				argDigest: record.argDigest,
-				issuer: record.issuer ?? "operator",
-				runId: record.runId,
-				grantId: record.requestId,
-				reason: reason.slice(0, 300),
-			});
+			return run.resolvePermission(
+				record.workerRequestId,
+				decision,
+				{
+					attemptToken: record.attemptToken,
+					attempt: record.attempt,
+					argDigest: record.argDigest,
+					issuer: record.issuer ?? "operator",
+					runId: record.runId,
+					grantId: record.requestId,
+					reason: reason.slice(0, 300),
+				},
+				cause,
+			);
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
 	});
@@ -3869,7 +3905,13 @@ export function createDispatchBundle(
 				agentId,
 				event: {
 					type: "clio_coder_permission_window",
-					payload: { requestId, held: view.held, expiresAt: now() + view.remainingMs, fallback: view.fallback },
+					payload: {
+						requestId,
+						held: view.held,
+						expiresAt: now() + view.remainingMs,
+						fallback: view.fallback,
+						decider: view.decider,
+					},
 				},
 			});
 		},
@@ -4230,6 +4272,7 @@ export function createDispatchBundle(
 				...(req.reservation !== undefined && (req.lineage === undefined || req.lineage.attempt === 0)
 					? { reservation: req.reservation }
 					: {}),
+				...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
 				// This attempt's own signal; siblings sharing the assignment keep waiting.
 				...(signal !== undefined ? { signal } : {}),
 			});
@@ -7079,6 +7122,7 @@ export function createDispatchBundle(
 		const tokenMeter: RunTokenMeter = {};
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
+		let escalationDeniedBy: "operator" | "main agent" | "safety judge" | undefined;
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		// Phase D: a main-authority permit binds every grant to this attempt.
 		// The token is a host secret: it rides the spec and each decision frame
@@ -7266,9 +7310,12 @@ export function createDispatchBundle(
 				...(request.target !== undefined ? { target: request.target } : {}),
 				...(request.consequence !== undefined ? { consequence: [...request.consequence] } : {}),
 				reasons: request.reasons,
-				// The broker expires a little before the worker's own timer, so the
-				// denial it sends is the one that settles the request.
-				deadlineAt: now() + Math.max(1_000, request.timeoutMs - GRANT_DEADLINE_MARGIN_MS),
+				// A window this process runs ends the request and a hold can reach the
+				// ceiling. Otherwise the broker expires a little before the worker's own
+				// timer, so the denial it sends is the one that settles the request.
+				...(spec.escalation?.backstopMs !== undefined
+					? { deadlineAt: now() + workerApprovalCeilingMs(request.timeoutMs), windowMs: request.timeoutMs }
+					: { deadlineAt: now() + Math.max(1_000, request.timeoutMs - GRANT_DEADLINE_MARGIN_MS) }),
 				...(judgeReachable && request.authority === "main" ? { reviewer: "safety-judge" as const } : {}),
 			});
 			if (!opened.ok) {
@@ -7806,7 +7853,12 @@ export function createDispatchBundle(
 				if (source === "timeout") escalationCounts.timedOut += 1;
 				else if (source === "main" || source === "operator") {
 					if (approved) escalationCounts.approved += 1;
-					else escalationCounts.denied += 1;
+					else {
+						escalationCounts.denied += 1;
+						// A judge or main-agent denial must not read as the person's on the receipt.
+						escalationDeniedBy =
+							source === "operator" ? "operator" : brokered.reviewer === "safety-judge" ? "safety judge" : "main agent";
+					}
 				}
 				grantBroker.workerResolved(
 					runIdForPermissionAudit,
@@ -8568,7 +8620,11 @@ export function createDispatchBundle(
 				// assignment failing, and rerunning under the same policy is refused
 				// the same way, so it carries a deterministic code.
 				if (finalOutcome === "succeeded" && outcomeCode === null && lifecycle.capabilityClass === "workspace-edit") {
-					const blockedWrites = blockedWriteAttempts(toolStats, (tool) => safety.classify({ tool }).actionClass);
+					const blockedWrites = blockedWriteAttempts(
+						toolStats,
+						(tool) => safety.classify({ tool }).actionClass,
+						finishContract?.assessment.mutatedPaths.length ?? null,
+					);
 					if (blockedWrites !== null) {
 						finalOutcome = "failed";
 						outcomeCode = "worker_mutation_blocked";
@@ -8591,6 +8647,7 @@ export function createDispatchBundle(
 						limitationRecorded: (toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0,
 						mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
 						escalationsDenied: escalationCounts.denied,
+						...(escalationDeniedBy !== undefined ? { escalationDeniedBy } : {}),
 						escalationsTimedOut: escalationCounts.timedOut,
 						finalText: finishContractAssistantText,
 						limitationDetail:
@@ -9328,6 +9385,7 @@ export function createDispatchBundle(
 				try {
 					writerLease = acquireCheckoutWriterLease({
 						checkout,
+						...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
 						// A read-only run writes nothing, so it carries no holder.
 						...(req.readOnly === true
 							? {}

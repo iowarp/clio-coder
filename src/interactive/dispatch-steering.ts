@@ -1,4 +1,9 @@
-import { type DispatchBoardRow, isDispatchBoardRowCancellable, isDispatchBoardRowSteerable } from "./dispatch-board.js";
+import {
+	type DispatchBoardRow,
+	dispatchStatusPresentation,
+	isDispatchBoardRowCancellable,
+	isDispatchBoardRowSteerable,
+} from "./dispatch-board.js";
 
 export type DispatchSteeringNoticeLevel = "info" | "warning" | "error";
 
@@ -39,7 +44,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (!isDispatchBoardRowSteerable(row)) {
 			deps.notify(
 				"warning",
-				`run ${row.runId} is ${row.status} and cannot accept steering`,
+				`${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;
@@ -66,7 +71,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (!isDispatchBoardRowCancellable(row)) {
 			deps.notify(
 				"warning",
-				`run ${row.runId} is ${row.status} and cannot be cancelled`,
+				`${row.agentId} has already settled (${dispatchStatusPresentation(row.status).label}), so there is nothing to cancel`,
 				`dispatch-board:cancel:${row.runId}`,
 			);
 			return;

@@ -254,6 +254,8 @@ function overlayData(status: AgentStatus, phase: OverlayPhase, data?: unknown): 
 
 function popOverlay(prev: AgentStatus, overlay: OverlayPhase, ctx: ReduceContext): AgentStatus {
 	const frames = overlayFrames(prev);
+	// A worker ask the person never saw resolves too, and must not end a phase it did not start.
+	if (!frames.has(overlay)) return prev;
 	const restore = baseResumePhase(prev);
 	frames.delete(overlay);
 	const nextVisible = visibleOverlay(frames);
@@ -411,6 +413,24 @@ function leaveRetryOnOutput(prev: AgentStatus, ctx: ReduceContext): AgentStatus 
 	return prev.phase === "retrying" && prev.retry?.stage === "attempt" ? popOverlay(prev, "retrying", ctx) : prev;
 }
 
+const CALL_MARKUP_OPEN = /<tool_call>\s*(?:<function=|[{[])|<function=[\w.-]+>/giu;
+const CALL_MARKUP_CLOSE = /<\/tool_call>|<\/function>/giu;
+/** Longer than either pattern, so an opener split across deltas is still whole in the tail. */
+const CALL_MARKUP_TAIL_CHARS = 96;
+
+function lastMatchIndex(pattern: RegExp, text: string): number {
+	return [...text.matchAll(pattern)].at(-1)?.index ?? -1;
+}
+
+/** Reads only the tail, so a long answer costs each delta nothing. A quoted opener makes this literally true too. */
+function callMarkupOpen(prev: boolean, partialText: string): boolean {
+	const tail = partialText.slice(-CALL_MARKUP_TAIL_CHARS);
+	const open = lastMatchIndex(CALL_MARKUP_OPEN, tail);
+	const close = lastMatchIndex(CALL_MARKUP_CLOSE, tail);
+	if (close > open) return false;
+	return open >= 0 || prev;
+}
+
 export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
 	const next = reduceEvent(prev, event, ctx);
 	if (next === prev) return prev;
@@ -514,6 +534,7 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			return {
 				...refreshMeaningful(prev, ctx),
 				toolMarkupRepromptSince: event.message.role === "assistant" ? undefined : prev.toolMarkupRepromptSince,
+				writingCallAsText: undefined,
 				runTally: foldMessageIntoRunTally(prev.runTally ?? emptyRunTally(), event.message),
 			};
 		case "tool_execution_end": {
@@ -580,7 +601,18 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 		case "text_delta": {
 			const current = leaveRetryOnOutput(prev, ctx);
 			const base = activePhaseAfterStuck(current);
-			const next = refreshMeaningful({ ...current, phase: base, preparingToolCall: false }, ctx);
+			const next = refreshMeaningful(
+				{
+					...current,
+					phase: base,
+					preparingToolCall: false,
+					writingCallAsText: callMarkupOpen(
+						current.writingCallAsText === true,
+						event.type === "text_frame" ? event.text : event.partialText,
+					),
+				},
+				ctx,
+			);
 			// Streamed answer text while a tool still shows as running: same as
 			// above, the model is writing, so the running-tool spinner must clear.
 			if (base === "preparing" || base === "waiting_model" || base === "thinking" || base === "tool_running") {

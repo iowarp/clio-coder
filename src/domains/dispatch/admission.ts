@@ -56,6 +56,8 @@ export interface CapacityAdmissionController {
 		planId?: string;
 		planOrder?: number;
 		reservation?: { ownerId: string; memberId: string };
+		/** The person started this run, which changes why a held foreground endpoint refuses it. */
+		operatorStarted?: boolean;
 		/** Cancels this request alone; requests sharing its assignment keep waiting. */
 		signal?: AbortSignal;
 	}): Promise<{ lease: CapacityLease; queuedAt: number; admittedAt: number }>;
@@ -125,6 +127,8 @@ const PUMP_MAX_MS = 500;
  */
 export function foregroundEndpointBlock(input: {
 	endpointKey?: string;
+	/** The person started this run, so no model call is waiting on it and the main turn ends on its own. */
+	operatorStarted?: boolean;
 	limits: CapacityLimits;
 	usage: {
 		endpoints: Readonly<Record<string, number>>;
@@ -136,6 +140,12 @@ export function foregroundEndpointBlock(input: {
 	const active = input.usage.endpoints[input.endpointKey] ?? 0;
 	const holders = input.usage.endpointHolders?.[input.endpointKey];
 	if (limit === undefined || active < limit || !holders || holders.foregroundStreams < 1) return null;
+	if (input.operatorStarted === true) {
+		return [
+			`dispatch: admission denied: the main turn is using ${limit === 1 ? "the only slot" : `all ${limit} slots`} on endpoint '${endpointLabel(input.endpointKey)}'.`,
+			" Run this again when the turn finishes, point workers at a second endpoint, or raise this target's maxConcurrentRequests to the server's actual slot count.",
+		].join("");
+	}
 	return [
 		`dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' cannot open a worker slot`,
 		` while ${describeEndpointCapacityHolders(holders)} (${active}/${limit} slots).`,
@@ -159,7 +169,7 @@ function describeAdmissionFailure(input: {
 		endpointHolders?: Readonly<Record<string, EndpointCapacityHolders>>;
 	};
 }): string {
-	if (input.state === "canceled") return "dispatch: admission canceled before a capacity slot opened";
+	if (input.state === "canceled") return "dispatch: cancelled before a worker slot opened";
 	if (input.endpointKey !== undefined) {
 		const endpointLimit = input.limits.endpoints[input.endpointKey];
 		const endpointActive = input.usage.endpoints[input.endpointKey] ?? 0;
@@ -292,7 +302,10 @@ export function createCapacityAdmissionController(options: {
 	 * on the first pass that sees it, as it used to at entry; `usage` is the
 	 * latest snapshot a pass took while it waited, for its timeout message.
 	 */
-	const requests = new Map<string, { endpointKey?: string; foregroundChecked: boolean; usage: AdmissionUsage | null }>();
+	const requests = new Map<
+		string,
+		{ endpointKey?: string; operatorStarted?: boolean; foregroundChecked: boolean; usage: AdmissionUsage | null }
+	>();
 	/**
 	 * Granted leases awaiting their admit() continuation, by request id: one
 	 * pass can grant several requests that share an assignment (fleet members
@@ -386,6 +399,7 @@ export function createCapacityAdmissionController(options: {
 			request.foregroundChecked = true;
 			const block = foregroundEndpointBlock({
 				...(request.endpointKey !== undefined ? { endpointKey: request.endpointKey } : {}),
+				...(request.operatorStarted === true ? { operatorStarted: true } : {}),
 				limits,
 				usage,
 			});
@@ -587,6 +601,7 @@ export function createCapacityAdmissionController(options: {
 			input.signal?.addEventListener("abort", onAbort, { once: true });
 			requests.set(requestId, {
 				...(input.endpointKey !== undefined ? { endpointKey: input.endpointKey } : {}),
+				...(input.operatorStarted === true ? { operatorStarted: true } : {}),
 				foregroundChecked: false,
 				usage: null,
 			});

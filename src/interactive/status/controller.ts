@@ -217,7 +217,10 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 
 	if (deps.bus) {
 		unsubscribes.push(
-			deps.bus.subscribe("approval.requested", () => apply({ type: "overlay_push", overlay: "tool_blocked" }, true)),
+			// A worker ask with the safety judge or the main agent is not waiting on the person yet.
+			deps.bus.subscribe("approval.requested", (payload) => {
+				if (payload.escalation !== false) apply({ type: "overlay_push", overlay: "tool_blocked" }, true);
+			}),
 			deps.bus.subscribe("approval.resolved", () => apply({ type: "overlay_pop", overlay: "tool_blocked" }, true)),
 			deps.bus.subscribe("context.activity_changed", (event) => {
 				if (event.kind !== "compaction" || !event.operation) return;

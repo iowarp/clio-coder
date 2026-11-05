@@ -1,4 +1,5 @@
 import type { ActionClass } from "../domains/safety/action-classifier.js";
+import { credentialedCallKind } from "../domains/safety/call-consequence.js";
 import {
 	classifyDecisionPresentation,
 	type DecisionPresentation,
@@ -226,6 +227,7 @@ function workerGrantAuthority(view: ApprovalRequestView): string | null {
 	if (grant.authority === "operator") {
 		return "operator only. This rail is not the main agent's to grant; your answer decides it.";
 	}
+	if (grant.fromJudge === true) return "yours alone. Git hooks changed, so the safety judge does not decide this call.";
 	return grant.forwardedByMain
 		? "the main agent approved this worker request and, below yolo, asks you to decide."
 		: "the main agent may decide this ordinary worker request.";
@@ -262,7 +264,9 @@ export function permissionRailTitle(
 	const count = depth > 1 ? ` · 1 of ${depth}` : "";
 	// `Worker coder needs approval · worker call` says worker twice and nothing about the call.
 	const candidates = [
-		...(view.origin.kind === "worker" ? [] : [`${who} needs approval · ${presentation.kind}${count}`]),
+		...(view.origin.kind === "worker"
+			? []
+			: [`${who} needs approval · ${credentialedCallKind(view.consequence) ?? presentation.kind}${count}`]),
 		`${who} needs approval${count}`,
 	];
 	return candidates.find((candidate) => visibleWidth(candidate) <= context.room) ?? `Needs approval${count}`;
@@ -355,14 +359,14 @@ function permissionChoices(
 			{
 				key: "Enter",
 				verb: "allow",
-				consequence: `runs this ${actionClass} call and later test runners this session${draftNote}`,
+				consequence: `runs this ${actionClass.replace(/_/gu, " ")} call and later test runners this session${draftNote}`,
 			},
 			{ key: "Esc", verb: "deny", consequence: "skips it; the next test runner asks again" },
 			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
 		];
 	}
 	return [
-		{ key: "Enter", verb: "allow", consequence: `runs this one ${actionClass} call${draftNote}` },
+		{ key: "Enter", verb: "allow", consequence: `runs this one ${actionClass.replace(/_/gu, " ")} call${draftNote}` },
 		{ key: "Esc", verb: "deny", consequence: "skips it" },
 		{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
 	];
@@ -702,6 +706,9 @@ function permissionCardSections(
  * what changes, and the keys that answer the ask are on the rail throughout.
  * The window takes the rows the frame has, so the frame never has to cut it.
  */
+/** The fewest diff rows a window should open with before the facts above it give way. */
+const MIN_INSPECTION_ROWS = 4;
+
 function permissionInspectionLines(
 	view: ApprovalRequestView,
 	preview: MutationPreview,
@@ -721,9 +728,11 @@ function permissionInspectionLines(
 	if (preview.neutralized) notes.push("control characters shown as ·");
 	if (preview.tabsExpanded) notes.push("tabs shown as spaces");
 	const identity = identityRow(theme, view, presentation, content);
-	const head = [
+	const target =
+		view.target !== undefined && view.target.length > 0 ? targetBlock(theme, view.target, risk, content) : [];
+	const fullHead = [
 		...identity.rows,
-		...(view.target !== undefined && view.target.length > 0 ? targetBlock(theme, view.target, risk, content) : []),
+		...target,
 		...factRows(
 			theme,
 			[
@@ -741,7 +750,19 @@ function permissionInspectionLines(
 	];
 	const tail =
 		notes.length > 0 ? [fitRow(theme.fg("annotation", `Rendered safely: ${notes.join(", ")}.`), content)] : [];
-	const visibleRows = inspectionWindowRows(bodyRows, head.length + tail.length);
+	// A short dock cut the facts' rows and the whole diff with them, and no key reached it. The card
+	// just stated those facts, so the diff keeps the rows and only the call's name stays above it.
+	const compact = bodyRows > 0 && fullHead.length + tail.length + 1 + MIN_INSPECTION_ROWS > bodyRows;
+	const head = compact
+		? [
+				...identity.rows.slice(0, 1),
+				...target.slice(0, 1),
+				sectionRule(theme, content, previewLabel(preview.heading), { meta: `${MUTATION_PREVIEW_KEY} closes` }),
+			]
+		: fullHead;
+	const visibleRows = compact
+		? Math.max(1, bodyRows - head.length - tail.length - 1)
+		: inspectionWindowRows(bodyRows, head.length + tail.length);
 	const pane = windowRows(wrapped, scroll, visibleRows);
 	const lines = [
 		...head,

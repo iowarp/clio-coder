@@ -313,7 +313,13 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 		fallback: payload.fallback === "fail" ? "fail" : "deny",
 		...(typeof payload.timeoutMs === "number" && payload.timeoutMs > 0 ? { timeoutMs: payload.timeoutMs } : {}),
 		...(payload.approvalAuthority === "main" || payload.approvalAuthority === "operator"
-			? { grant: { authority: payload.approvalAuthority, forwardedByMain: payload.forwardedByMain === true } }
+			? {
+					grant: {
+						authority: payload.approvalAuthority,
+						forwardedByMain: payload.forwardedByMain === true,
+						...(payload.reviewer === "safety-judge" ? { fromJudge: true } : {}),
+					},
+				}
 			: {}),
 	};
 }

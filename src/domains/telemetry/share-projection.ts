@@ -375,7 +375,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		policyHash: "id",
 	},
 	"approval.requested": {
-		...keep("timeoutMs", "fallback", "escalation", "approvalAuthority", "forwardedByMain"),
+		...keep("timeoutMs", "fallback", "escalation", "approvalAuthority", "forwardedByMain", "reviewer"),
 		tool: "tool",
 		actionClass: "token",
 		requestId: "id",

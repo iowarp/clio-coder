@@ -94,7 +94,14 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "thinking":
 			return { text: "Thinking", toneHint: "normal" };
 		case "writing":
-			return { text: status.preparingToolCall ? "Preparing tool call" : "Writing", toneHint: "normal" };
+			return {
+				text: status.preparingToolCall
+					? "Preparing tool call"
+					: status.writingCallAsText
+						? "Writing a tool call as text"
+						: "Writing",
+				toneHint: "normal",
+			};
 		case "tool_running": {
 			const name = status.tool?.toolName ?? "tool";
 			if (name === ToolNames.Dispatch) return { text: "Waiting for worker", toneHint: "normal" };

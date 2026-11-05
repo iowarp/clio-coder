@@ -79,7 +79,10 @@ function internalGitSummary(snapshot: Pick<ExitSummarySnapshot, "internalGit">):
 function outcomes(snapshot: ExitSummarySnapshot): string {
 	const counts = new Map<string, number>();
 	for (const worker of snapshot.workers) counts.set(worker.outcome, (counts.get(worker.outcome) ?? 0) + 1);
-	return [...counts].map(([outcome, n]) => `${count(n)} ${outcome}`).join(" · ");
+	// Quitting drains the fleet, so a worker still running when the summary was taken did not keep running.
+	return [...counts]
+		.map(([outcome, n]) => `${count(n)} ${outcome === "running" ? "stopped by quitting" : outcome}`)
+		.join(" · ");
 }
 
 /**
