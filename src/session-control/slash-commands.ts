@@ -532,6 +532,9 @@ async function handleDelegate(
  * `/share` puts one there: an operator-authored note on the ordinary user-turn
  * path, never a fabricated tool result.
  */
+/** Commands that refuse rather than queue while a turn streams; the composer's list says so before Enter does. */
+export const COMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["config", "council", "oracle"]);
+
 async function handleOracle(question: string, ctx: SlashCommandContext): Promise<void> {
 	if (!ctx.submitOperatorNote) {
 		ctx.notice("error", "/oracle is not wired in this session; there is nowhere to put the answer");

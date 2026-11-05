@@ -9,6 +9,7 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import {
+	COMMANDS_REFUSED_DURING_TURN,
 	commandReference,
 	parseSlashCommand,
 	SETTINGS_AREA_IDS,
@@ -108,7 +109,11 @@ export interface SlashAutocompleteOptions {
 	completionSources?: CompletionSources;
 	/** Replace the default workspace-aware `@` source without adding a second composer provider. */
 	fileReferenceSource?: FileReferenceCompletionSource;
+	/** True while a turn streams, when some commands refuse; their rows say why before Enter does. */
+	isTurnInFlight?: () => boolean;
 }
+
+const REFUSED_DURING_TURN_REASON = "a turn is running · Esc stops it first";
 
 /** Slots without an in-app source return no dynamic values. */
 function emptyCompletionSources(): Record<CompletionSlotName, CompletionSource> {
@@ -395,6 +400,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		fileReferenceSource?: FileReferenceCompletionSource,
 		promptTemplates?: () => ReadonlyArray<PromptCommandTemplate>,
 		private extensionCommands: () => ReadonlyArray<ExtensionCommandRow> = () => [],
+		private isTurnInFlight: () => boolean = () => false,
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
@@ -561,6 +567,11 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					};
 					if (description) item.description = description;
 					if (remainingGrammar) item.remainingGrammar = remainingGrammar;
+					if (this.isTurnInFlight() && COMMANDS_REFUSED_DURING_TURN.has(ref.name)) {
+						item.disabledReason = REFUSED_DURING_TURN_REASON;
+						item.description = REFUSED_DURING_TURN_REASON;
+						item.nextAction = `Unavailable: ${REFUSED_DURING_TURN_REASON}.`;
+					}
 					return item;
 				});
 			// One listing serves both the template rows and the extension-command
@@ -764,5 +775,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		options.fileReferenceSource,
 		options.promptTemplates,
 		options.extensionCommands,
+		options.isTurnInFlight,
 	);
 }
