@@ -27,7 +27,9 @@ type RampColor = readonly [Projection, Projection, Projection];
  * Warm stone and ivory follow the website's paper palette. Near-white is
  * reserved for answers and entered text; cyan and copper follow the IOWarp logo.
  * Unknown-background colors occupy the narrow luminance band that holds 4.5:1 on
- * both black and white. The dark and light projections hold 4.5:1 for text, 3:1
+ * both black and white. Indexed color has few entries in that band, so its cyans
+ * share 29 with success, whose mark tells them apart, and orange keeps 130, the
+ * nearest orange at 4.46:1 on black. The dark and light projections hold 4.5:1 for text, 3:1
  * for rails and 2:1 for frames and dividers on typical backgrounds; see
  * theme-contrast.ts for how they lift further on a reported background. A declared
  * surface supplies its own background and uses the corresponding projection.
@@ -84,27 +86,27 @@ export const TERMINAL_PALETTE = {
 		["#282015", 234],
 	],
 	cyanSupporting: [
-		["#268288", 30],
+		["#268288", 29],
 		["#65afb6", 73],
 		["#326970", 23],
 	],
 	cyanReading: [
-		["#18838b", 30],
+		["#18838b", 29],
 		["#55bec6", 80],
 		["#16666d", 23],
 	],
 	cyanFocal: [
-		["#13838b", 30],
+		["#13838b", 29],
 		["#43d9dc", 80],
 		["#0a666c", 23],
 	],
 	cyanStrong: [
-		["#08838b", 30],
+		["#08838b", 29],
 		["#8be9eb", 123],
 		["#07565c", 23],
 	],
 	turquoise: [
-		["#22847d", 30],
+		["#22847d", 29],
 		["#58c7b5", 79],
 		["#23685f", 23],
 	],
@@ -144,7 +146,7 @@ export const TERMINAL_PALETTE = {
 		["#1d7440", 22],
 	],
 	syntaxLiteral: [
-		["#14838a", 30],
+		["#14838a", 29],
 		["#59b9bd", 73],
 		["#0a666c", 23],
 	],
@@ -154,7 +156,7 @@ export const TERMINAL_PALETTE = {
 		["#76602a", 94],
 	],
 	warning: [
-		["#996f00", 100],
+		["#996f00", 130],
 		["#ffd166", 221],
 		["#805600", 58],
 	],

@@ -52,8 +52,17 @@ export function setPaletteSkin(palette: typeof overrides): void {
 	PALETTES.clear();
 	epoch += 1;
 }
+// The cube's levels are not evenly spaced, so rounding on a linear scale lands a shade lighter and can lose the contrast
+// the color was chosen to hold.
+const XTERM_CUBE_LEVELS = [0, 95, 135, 175, 215, 255] as const;
 function rgbXterm(rgb: readonly number[]): number {
-	const cube = (channel: number): number => Math.round((channel / 255) * 5);
+	const cube = (channel: number): number => {
+		let nearest = 0;
+		for (const [index, level] of XTERM_CUBE_LEVELS.entries()) {
+			if (Math.abs(level - channel) < Math.abs(XTERM_CUBE_LEVELS[nearest] - channel)) nearest = index;
+		}
+		return nearest;
+	};
 	return 16 + 36 * cube(rgb[0] ?? 0) + 6 * cube(rgb[1] ?? 0) + cube(rgb[2] ?? 0);
 }
 
