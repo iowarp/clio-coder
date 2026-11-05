@@ -231,6 +231,7 @@ import {
 	type ChatLoopTarget,
 	createTurnState,
 	type TurnPreparationPhase,
+	type TurnPreparationStep,
 	takeInterruptedCall,
 } from "./turn-state.js";
 import { isWorkerShareNote } from "./worker-share.js";
@@ -722,7 +723,11 @@ export interface ChatLoop {
 	 * been taken but the turn has not been admitted is never rendered as idle
 	 * (issue #251).
 	 */
-	turnPreparation(): { phase: TurnPreparationPhase; since: number };
+	turnPreparation(): {
+		phase: TurnPreparationPhase;
+		since: number;
+		stage?: { step: TurnPreparationStep; since: number } | null;
+	};
 	/** Evidence about the newest model request, for a surface that reports a silent wait. */
 	modelRequest(): ModelRequestFacts | null;
 	/** What the running turn is waiting on, which decides whether a route pick moves its request. */
@@ -1148,7 +1153,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// `since` is the age of the whole window, not of its current sub-state:
 		// what the operator is judging is how long ago they pressed Enter.
 		if (state.turnPreparation === "idle") state.turnPreparationSince = Date.now();
-		if (phase === "idle") state.turnPreparationSince = 0;
+		if (phase === "idle") {
+			state.turnPreparationSince = 0;
+			state.turnPreparationStage = null;
+		}
 		state.turnPreparation = phase;
 		for (const listener of preparationListeners) {
 			try {
@@ -1157,6 +1165,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Preparation observers are presentation only and cannot fail a turn.
 			}
 		}
+	};
+
+	const markPreparationStep = (step: TurnPreparationStep): void => {
+		state.turnPreparationStage = { step, since: Date.now() };
 	};
 
 	/**
@@ -2779,6 +2791,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				let agentRuntime: AgentRuntime | null;
 				try {
+					markPreparationStep("capabilities");
 					await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
 					if (!admissionCurrent()) return;
 					agentRuntime = turnRuntime.ensureRuntime();
@@ -2798,6 +2811,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					machinePreparation.runtime = agentRuntime;
 				if (refuseSkillRequests(options.pendingSkillRequests ?? [], options.workingContextPaths ?? [])) return;
 				if (deps.promptSubmit && options.requestContinuation !== true) {
+					markPreparationStep("prompt-hook");
 					const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
 					if (!admissionCurrent()) return;
 					if (verdict.kind === "block") {
@@ -2826,6 +2840,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						emitNotice(`[Clio Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
 						try {
 							const question = operatorText.trim() || "Describe the attached image and any visible text.";
+							markPreparationStep("images");
 							const analysis = await sidecar.analyze(options.images, question, controller.signal);
 							if (controller.signal.aborted || !admissionCurrent()) return;
 							sidecarObservation = visionObservationText(analysis);
@@ -2921,6 +2936,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const controllerAbort = owner;
 					pendingPreTurnRead = controllerAbort;
 					setTurnPreparation("preparing");
+					markPreparationStep("turn-control");
 					try {
 						const result = await deps.turnControl.run({
 							userTurnId: reservedUserTurnId,
@@ -2983,6 +2999,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// machinery.
 				middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
 				if (options.requestContinuation !== true) {
+					markPreparationStep("turn-start");
 					await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
 					if (!admissionCurrent()) return;
 				}
@@ -3049,6 +3066,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (!admissionCurrent()) return;
 
 				// 3. Ensure the session prompt (compiles only on explicit events)
+				markPreparationStep("compile");
 				const compiledPrompt = await context.ensureSessionPrompt(agentRuntime, true, submittedText);
 				if (!admissionCurrent()) return;
 				submittedText = composeSubmittedText();
@@ -3774,7 +3792,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		turnPreparation() {
-			return { phase: state.turnPreparation, since: state.turnPreparationSince };
+			return { phase: state.turnPreparation, since: state.turnPreparationSince, stage: state.turnPreparationStage };
 		},
 
 		onTurnPreparation(handler) {

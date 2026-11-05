@@ -737,7 +737,7 @@ export function thinkingEffectNote(thinking: {
 }): string | null {
 	if (thinking.configuredLevel === thinking.effectiveLevel) return null;
 	return thinking.mechanism === "none"
-		? "model has no thinking"
+		? "no thinking control"
 		: `${thinking.configuredLevel} runs as ${thinking.display}`;
 }
 

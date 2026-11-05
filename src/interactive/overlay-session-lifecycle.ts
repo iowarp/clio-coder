@@ -501,6 +501,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	async function runHandoff(session: SessionContract, goal: string): Promise<void> {
 		const controller = new AbortController();
 		let draft: HandoffDraft | null = null;
+		// Closing the box answers as a cancel, and a failed extraction is not one: its own row says what happened.
+		let failed = false;
 		const openReview = deps.openHandoffReviewOverlay ?? openHandoffReviewOverlay;
 		deps.transitions.state = "handoff-review";
 		const review = openReview(deps.tui, {
@@ -518,7 +520,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			onCancel: () => {
 				controller.abort();
 				deps.transitions.close();
-				deps.notify("info", "handoff cancelled; nothing was written", "handoff:cancelled");
+				if (!failed) deps.notify("info", "handoff cancelled; nothing was written", "handoff:cancelled");
 			},
 		});
 		deps.transitions.handle = review;
@@ -540,6 +542,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		// The operator already left, and heard that nothing was written.
 		if (controller.signal.aborted) return;
 		if (!prepared.ok) {
+			failed = true;
 			deps.transitions.close();
 			const unwritten = /nothing was written/u.test(prepared.reason) ? "" : "; nothing was written";
 			emitCommandNotice(deps.getSlashNotice(), prepared.level, "handoff", `${prepared.reason}${unwritten}`);
