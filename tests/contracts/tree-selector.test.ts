@@ -64,7 +64,7 @@ it("toggles the cwd filter and can recover from an empty filtered list", () => {
 	f.view.handleInput("p");
 	match(f.text(), /no turns match the current cwd/u);
 	doesNotMatch(f.text(), /oldest/u);
-	match(stripTerminalSequences(f.view.getHint()), /cwd:current/u);
+	match(stripTerminalSequences(f.view.getHint()), /folder: this/u);
 	f.view.handleInput("\r");
 	deepStrictEqual(f.switched, []);
 	f.view.handleInput("s");
@@ -103,7 +103,7 @@ it("treats p and s as label text while editing and retains filtering and sorting
 	f.view.handleInput("\r");
 	deepStrictEqual(f.edits, [["oldest", "ps", "session"]]);
 	deepStrictEqual(f.order(), ["newest", "branch", "marker", "oldest"]);
-	match(stripTerminalSequences(f.view.getHint()), /cwd:current.*recent/u);
+	match(stripTerminalSequences(f.view.getHint()), /folder: this.*order: newest/u);
 	match(f.text(), /label:"ps"/u);
 });
 

@@ -9,6 +9,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
@@ -43,6 +44,8 @@ export interface OpenTreeOverlayDeps {
 
 interface TreeRow {
 	depth: number;
+	/** The tree lines drawn before this row: `├ ` or `└ ` opens a branch, `│ ` continues one beside it. */
+	rail?: string;
 	node: TreeSnapshotNode;
 	sessionId: string;
 	/** This row is the session's active append point: where the next message lands. */
@@ -53,8 +56,13 @@ interface TreeRow {
 
 type Submode = "browse" | "edit-label";
 
+/**
+ * The distinguishing end of a turn id. Ids are time-ordered, so turns written
+ * in the same second share their first characters; the head made every reply
+ * in a quick exchange read as the same turn.
+ */
 function shortTurnId(id: string): string {
-	return id.length > 6 ? id.slice(0, 6) : id;
+	return id.length > 6 ? id.slice(-6) : id;
 }
 
 function clampPreview(text: string, max: number): string {
@@ -132,11 +140,12 @@ function isSwitchable(node: TreeSnapshotNode): boolean {
 
 function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 	const rows: TreeRow[] = [];
-	const walk = (id: string, depth: number): void => {
+	const walk = (id: string, depth: number, rail = "", rest = ""): void => {
 		const node = snapshot.nodesById[id];
 		if (!node) return;
 		rows.push({
 			depth,
+			rail,
 			node,
 			sessionId: snapshot.sessionId,
 			isActiveTip: snapshot.leafId !== null && node.id === snapshot.leafId,
@@ -150,8 +159,17 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 		// conversation and keeps its parent's depth; only a branch point pushes
 		// its children right, which is the thing the operator opened this view
 		// to see.
-		const childDepth = node.children.length > 1 ? depth + 1 : depth;
-		for (const childId of node.children) walk(childId, childDepth);
+		// Each branch opens with a rail glyph and the ones above the last keep a
+		// vertical rail down their rows, so where one branch ends and the next
+		// begins reads at a glance instead of as one continuous column.
+		if (node.children.length > 1) {
+			node.children.forEach((childId, index) => {
+				const last = index === node.children.length - 1;
+				walk(childId, depth + 1, `${rest}${last ? "└ " : "├ "}`, `${rest}${last ? "  " : "│ "}`);
+			});
+			return;
+		}
+		for (const childId of node.children) walk(childId, depth, rest, rest);
 	};
 	for (const rootId of snapshot.rootIds) walk(rootId, 0);
 	return rows;
@@ -172,7 +190,7 @@ function formatTreeRow(
 	opts: { showTimestamps: boolean; width: number; focused?: boolean },
 ): { label: string; meta?: string } {
 	const theme = clioTheme();
-	const indent = "  ".repeat(row.depth);
+	const indent = row.rail ?? "  ".repeat(row.depth);
 	// The active tip is where the next message lands; it gets its own glyph so
 	// a branched session shows exactly one live tip instead of every childless
 	// node reading the same as every other (issue #94). Other leaves still get
@@ -266,7 +284,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		this.rows = snapshot && (!this.currentCwdOnly || matchesCwd) ? flattenTreeSnapshot(snapshot) : [];
 		if (this.sortOrder === "recent") {
 			this.rows.sort((a, b) => Date.parse(b.node.at) - Date.parse(a.node.at));
-			this.rows = this.rows.map((row) => ({ ...row, depth: 0 }));
+			this.rows = this.rows.map((row) => ({ ...row, depth: 0, rail: "" }));
 		}
 		const selectedIndex = this.rows.findIndex((row) => row.node.id === selectedId);
 		this.highlight = selectedIndex < 0 ? 0 : selectedIndex;
@@ -288,6 +306,15 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		const lines: string[] = [];
 		const lineage = this.snapshot ? forkParentLine(this.snapshot, theme) : null;
 		if (lineage !== null) lines.push(truncateToWidth(lineage, contentWidth, "", true));
+		// What the marks and Enter mean, said once above the turns while there is room for it.
+		const guide =
+			this.rows.length > 0 && (this.bodyRows === 0 || this.bodyRows >= MIN_VISIBLE_ROWS + 3)
+				? theme.fg(
+						"annotation",
+						`${GLYPH.active} is where your next message goes. Enter on an earlier turn continues from there; later turns stay as a branch.`,
+					)
+				: null;
+		if (guide !== null) lines.push(...wrapTextWithAnsi(guide, contentWidth));
 		if (this.rows.length === 0) {
 			// The overlay navigates the CURRENT session's turn tree; an empty
 			// tree means no turns yet, not a missing session list.
@@ -299,7 +326,11 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		} else {
 			// The list takes what the lineage, the label editor and the status
 			// leave, and gives one row back to the position line while rows hide.
-			const chrome = (lineage !== null ? 1 : 0) + (this.submode === "edit-label" ? 1 : 0) + (this.status ? 1 : 0);
+			const chrome =
+				(lineage !== null ? 1 : 0) +
+				(guide !== null ? wrapTextWithAnsi(guide, contentWidth).length : 0) +
+				(this.submode === "edit-label" ? 1 : 0) +
+				(this.status ? 1 : 0);
 			const budget = Math.max(MIN_VISIBLE_ROWS, (this.bodyRows > 0 ? this.bodyRows : VISIBLE_ROWS) - chrome);
 			const windowed = this.rows.length > budget;
 			const visible = windowed ? Math.max(1, budget - 1) : budget;
@@ -348,14 +379,14 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		if (this.submode === "edit-label") {
 			return buildHint([{ key: "Enter", verb: "commit label" }], "back, keeps draft");
 		}
-		const tsLabel = this.showTimestamps ? "on" : "off";
+		// Each toggle names its current setting in words, not a field:value code.
 		return buildHint([
 			{ key: "↑↓", verb: "move" },
-			{ key: "Enter", verb: "switch" },
+			{ key: "Enter", verb: "continue from here" },
 			{ key: "e", verb: "label" },
-			{ key: "p", verb: `cwd:${this.currentCwdOnly ? "current" : "all"}` },
-			{ key: "s", verb: this.sortOrder },
-			{ key: "Shift+T", verb: `ts:${tsLabel}` },
+			{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
+			{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
+			{ key: "Shift+T", verb: `times: ${this.showTimestamps ? "on" : "off"}` },
 		]);
 	}
 

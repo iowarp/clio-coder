@@ -280,6 +280,15 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					// leaf, /usage, the footer Σ, and the last-turn line kept reporting the
 					// abandoned turns.
 					rescopeToBranch(session, turns, turnId);
+					// The transcript just shrank to the chosen turn; say why, and that nothing was lost.
+					const later = (session.tree()?.nodesById[turnId]?.children.length ?? 0) > 0;
+					deps.notify(
+						"info",
+						later
+							? "Continuing from the turn you picked. Your next message starts a new branch; the later turns stay in /tree."
+							: "Continuing from the turn you picked.",
+						"tree:switched",
+					);
 				} catch (error) {
 					deps.notify(
 						"error",
