@@ -669,7 +669,16 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const separator = theme.fg("border", " · ");
 	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
 	// The streaming turn's live rate, else the newest settled main call's from the read model (#434).
-	const settled = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
+	const newest = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
+	// A rate read back from a resumed session, or left by the route the session moved off, says nothing about the next
+	// call. It stays on the Activity page, labelled as the last call, and leaves this row until a call settles here (J1-F3).
+	const settled =
+		newest !== null &&
+		state.context.budget?.historical !== true &&
+		newest.targetId === (state.session.targetId ?? newest.targetId) &&
+		newest.modelId === (state.session.modelId ?? newest.modelId)
+			? newest
+			: null;
 	const rate = state.throughput ? state.throughput.tokensPerSecond : settled?.tokensPerSecond;
 	const estimated = state.throughput ? state.throughput.estimated === true : settled?.estimated === true;
 	// A rate is live only while tokens are arriving; during a tool the turn's figure is as historical as a settled call's (HF03).
