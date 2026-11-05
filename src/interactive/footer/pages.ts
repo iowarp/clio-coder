@@ -784,7 +784,9 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		? typeof state.session.shutdownArmed === "string"
 			? state.session.shutdownArmed
 			: "Ctrl+C again to quit"
-		: state.session.leaderArmed
+		: // The leader also opens the action menu, whose own rail lists the keys: a second legend under it said `choose key`
+			// for a choice already on screen.
+			state.session.leaderArmed && !surfaceOwnsKeys
 			? leaderKey
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
