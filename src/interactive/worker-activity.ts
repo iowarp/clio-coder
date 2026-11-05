@@ -3,6 +3,7 @@ import type {
 	WorkerApprovalDecider,
 	WorkerProgressSnapshot,
 } from "../domains/telemetry/worker-progress.js";
+import { type RouteFirstOutput, usualFirstOutput } from "./footer/silence-note.js";
 import { TIER_THRESHOLDS_MS } from "./status/watchdog.js";
 import { formatWaitClock, GLYPH } from "./theme/index.js";
 import { formatUnattendedRemaining } from "./unattended-countdown.js";
@@ -41,6 +42,10 @@ export function workerQuietWords(
  * worker's model wait and how to end it, because a worker has no stall timer and an operator who waits for one would
  * wait forever. Null while the worker shows evidence, runs a tool, waits on a person, or has gone quiet as a process,
  * which `workerQuietWords` says instead.
+ *
+ * A worker waiting on its model also says whether the wait is unusual, from `history`: this session's worker calls on
+ * the same route and how long the slowest took to its first output. Under two such calls the usual time is unknown and
+ * the words say so. A pause mid-answer has no such history, so its usual length is always unknown.
  */
 function workerSilenceForms(
 	progress: Pick<
@@ -48,6 +53,7 @@ function workerSilenceForms(
 		"phase" | "currentAction" | "awaitingApproval" | "quietSinceMs" | "evidenceAtMs" | "settled"
 	>,
 	now = Date.now(),
+	history: RouteFirstOutput | null = null,
 ): readonly string[] | null {
 	if (progress.settled || progress.quietSinceMs !== undefined || progress.awaitingApproval === true) return null;
 	if (progress.currentAction !== null && progress.currentAction !== undefined) return null;
@@ -56,13 +62,36 @@ function workerSilenceForms(
 	if (progress.evidenceAtMs === undefined) return null;
 	const silentMs = Math.max(0, now - progress.evidenceAtMs);
 	if (silentMs < TIER_THRESHOLDS_MS.tier2) return null;
-	const words = workerPhaseActivity(phase)[1];
 	const silent = formatWaitClock(silentMs);
 	const claim = phase === "waiting" ? `no output for ${silent}` : `no new output for ${silent}`;
-	if (silentMs < TIER_THRESHOLDS_MS.tier3) return [`${words} · ${claim}`, claim];
+	const known = phase === "waiting" ? usualFirstOutput(history) : null;
+	// A sub-second first output reads `0s` on the wait clock, which says nothing true.
+	const slowest = known === null ? "" : known.slowestMs < 1000 ? "under 1s" : formatWaitClock(known.slowestMs);
+	const longer = known !== null && silentMs > known.slowestMs;
+	// The widest form names the history; the next keeps only the verdict, which is what an operator acts on. The claim
+	// leads every form, so a row that drops trailing clauses keeps the age and then the verdict.
+	const usual =
+		known === null
+			? phase === "waiting"
+				? "usual time for this route unknown"
+				: "usual pauses unknown"
+			: longer
+				? `longer than usual for this route (slowest ${slowest})`
+				: `this route has taken up to ${slowest}`;
+	const verdict = known === null ? "usual unknown" : longer ? "longer than usual" : `up to ${slowest} before`;
+	if (silentMs < TIER_THRESHOLDS_MS.tier3) return [`${claim} · ${usual}`, `${claim} · ${verdict}`, claim];
+	// With no history the limit outranks `usual unknown`, so that clause trails where a row drops it first.
+	const middle =
+		known === null
+			? [`${claim} · no time limit · x in /fleet stops it · ${verdict}`, `${claim} · no time limit · x in /fleet stops it`]
+			: [
+					`${claim} · ${verdict} · no time limit · x in /fleet stops it`,
+					`${claim} · ${verdict} · no time limit`,
+					`${claim} · ${verdict}`,
+				];
 	return [
-		`${words} · ${claim} · Clio sets no time limit · x in /fleet stops it`,
-		`${claim} · no time limit · x in /fleet stops it`,
+		`${claim} · ${usual} · Clio sets no time limit · x in /fleet stops it`,
+		...middle,
 		`${claim} · no time limit`,
 		claim,
 	];
@@ -71,9 +100,9 @@ function workerSilenceForms(
 /** The silence form that fits `room`, or the widest one with no room given. */
 export function workerSilenceWords(
 	progress: Parameters<typeof workerSilenceForms>[0],
-	options: { now?: number; room?: number } = {},
+	options: { now?: number; room?: number; history?: RouteFirstOutput | null } = {},
 ): string | null {
-	const forms = workerSilenceForms(progress, options.now);
+	const forms = workerSilenceForms(progress, options.now, options.history ?? null);
 	if (forms === null) return null;
 	const room = options.room;
 	if (room === undefined) return forms[0] ?? null;
@@ -222,7 +251,7 @@ export function workerActivityWords(
 		WorkerProgressSnapshot,
 		"phase" | "currentAction" | "awaitingApproval" | "approvalWindow" | "quietSinceMs" | "evidenceAtMs" | "settled"
 	>,
-	options: { now?: number; room?: number } = {},
+	options: { now?: number; room?: number; history?: RouteFirstOutput | null } = {},
 ): string {
 	const quiet = workerQuietWords(progress, options.now);
 	if (quiet !== null) return quiet;

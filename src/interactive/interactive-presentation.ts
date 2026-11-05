@@ -730,7 +730,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					row.status === "enqueued"
 					? "waiting for a slot"
 					: row.progress
-						? workerActivityWords(row.progress, { room })
+						? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
 						: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});

@@ -46,6 +46,7 @@ import {
 } from "../session-control/chat-loop-messages.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
+import { routeFirstOutput } from "./footer/silence-note.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
@@ -1829,13 +1830,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
 	const workerRenderOptions = (
 		entry: TranscriptEntry,
-	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry"> => {
+	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry" | "routeFirstOutput"> => {
 		if (entry.role !== "worker") return {};
-		const telemetry = options.getTelemetry?.()?.run(entry.state.runId) ?? null;
+		const view = options.getTelemetry?.() ?? null;
+		const telemetry = view?.run(entry.state.runId) ?? null;
 		const siblings =
 			entry.state.parentToolCallId === undefined ? undefined : dispatchGroups.get(entry.state.parentToolCallId);
+		const route = entry.state.runtime;
 		return {
 			telemetry,
+			...(entry.state.pending
+				? { routeFirstOutput: routeFirstOutput(view, route.targetId, route.wireModelId, "worker") }
+				: {}),
 			...(siblings ? { siblings: siblings.map((sibling) => sibling.state), showGroupHeader: siblings[0] === entry } : {}),
 		};
 	};

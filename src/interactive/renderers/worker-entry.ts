@@ -30,6 +30,7 @@ import {
 	workerAskedByModel,
 } from "../../session-control/worker-stream.js";
 import { councilLabelText } from "../council-grid.js";
+import type { RouteFirstOutput } from "../footer/silence-note.js";
 import {
 	clioTheme,
 	fitUnits,
@@ -58,6 +59,8 @@ const meta = (text: string): string => theme.fg("toolMetadata", text);
  */
 type WorkerEntryState = StreamWorkerEntryState & {
 	telemetry?: RunTelemetryV1 | null;
+	/** This session's worker calls on the run's route, for saying whether a silent wait is unusual. */
+	routeFirstOutput?: RouteFirstOutput | null;
 	cacheOwner?: StreamWorkerEntryState;
 };
 
@@ -124,6 +127,7 @@ const SEPARATOR = " · ";
 
 export interface WorkerEntryRenderOptions {
 	telemetry?: RunTelemetryV1 | null;
+	routeFirstOutput?: RouteFirstOutput | null;
 	nowMs?: number;
 	detail?: TranscriptDetailPolicy;
 	terminalRows?: number;
@@ -614,7 +618,9 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 				: last !== undefined
 					? clean(finishedAction(last))
 					: isPending(entry)
-						? ((entry.progress === undefined ? null : workerSilenceWords(entry.progress, { room: 48 })) ??
+						? ((entry.progress === undefined
+								? null
+								: workerSilenceWords(entry.progress, { room: 48, history: entry.routeFirstOutput ?? null })) ??
 							workerPhaseActivity(entry.progress?.phase)[1])
 						: "";
 	const facts = [
@@ -659,11 +665,26 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	// A worker whose heartbeat stopped is doing nothing it can be seen doing, so its last call or phase would read as current.
 	const quiet = workerQuietWords(entry.progress, nowMs);
 	const action = quiet !== null ? null : describedAction(entry, waitRoom);
-	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too.
+	const tokens = entry.telemetry?.row.tokens.display;
+	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
+	const calls = entry.telemetry?.activity.toolCalls.display;
+	const facts = [
+		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
+		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
+		...(calls === undefined ? [] : [renderCalls(calls, "call")]),
+	];
+	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too. The form
+	// is picked for the room the facts beside it leave, so the row never cuts a clause mid-word.
+	const silenceRoom =
+		width - RAIL_WIDTH - 2 - (facts.length === 0 ? 0 : SEPARATOR.length + facts.join(SEPARATOR).length);
 	const silence =
 		quiet !== null || action !== null || entry.progress === undefined
 			? null
-			: workerSilenceWords(entry.progress, { now: nowMs, room: Math.max(16, waitRoom - 2) });
+			: workerSilenceWords(entry.progress, {
+					now: nowMs,
+					room: Math.max(16, silenceRoom),
+					history: entry.routeFirstOutput ?? null,
+				});
 	const [glyph, idle] =
 		quiet !== null
 			? [GLYPH.warnInline, quiet]
@@ -683,14 +704,6 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	const actionGlyph = entry.progress?.awaitingApproval === true ? GLYPH.phaseBlocked : GLYPH.phaseTool;
 	const doing =
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${actionGlyph} ${action}`;
-	const tokens = entry.telemetry?.row.tokens.display;
-	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
-	const calls = entry.telemetry?.activity.toolCalls.display;
-	const facts = [
-		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
-		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
-		...(calls === undefined ? [] : [renderCalls(calls, "call")]),
-	];
 	// The elapsed time is the line's live signal, so a narrow row cuts the
 	// action's text and then drops the spend, never the clock.
 	const room = Math.max(0, width - RAIL_WIDTH);
@@ -781,7 +794,12 @@ export function renderWorkerEntryLines(
 	width: number,
 	options: WorkerEntryRenderOptions,
 ): string[] {
-	entry = { ...entry, telemetry: options.telemetry ?? null, cacheOwner: entry.cacheOwner ?? entry };
+	entry = {
+		...entry,
+		telemetry: options.telemetry ?? null,
+		routeFirstOutput: options.routeFirstOutput ?? null,
+		cacheOwner: entry.cacheOwner ?? entry,
+	};
 	const safeWidth = Math.max(1, Math.floor(width));
 	const inspect = options.unbounded === true;
 	const detail = inspect ? transcriptDetail("detailed") : (options.detail ?? transcriptDetail());
