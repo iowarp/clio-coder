@@ -1978,9 +1978,19 @@ export interface BashTranscriptExecution {
  * exits, how long the stop took when that was long enough to notice. A card reading `you are running` beside a rail
  * reading `stopping` left the operator to guess which was true.
  */
-function bashStopRow(execution: BashTranscriptExecution, width: number): string | null {
+function bashStopRow(execution: BashTranscriptExecution, width: number, killed = false): string | null {
 	const wait = execution.stopWaitMs;
-	if (wait === undefined) return null;
+	const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
+	const settledRow = (candidates: ReadonlyArray<string>): string | null => {
+		const words = candidates.find((text) => visibleWidth(text) <= room);
+		return words === undefined
+			? null
+			: `${CONTENT_INDENT}${theme.fg("toolMetadata", GLYPH.cancelled)} ${toolMeta(words)}`;
+	};
+	// A process that ignored the stop and had to be killed is the one fact the card owes beyond `stopped`.
+	if (wait === undefined) {
+		return !execution.running && killed ? settledRow(["killed after it ignored the stop", "killed"]) : null;
+	}
 	if (execution.running) {
 		const age = wait >= 1000 ? ` ${formatWaitClock(wait)} ago` : "";
 		const words = [`stop sent${age}, waiting for the command to exit`, `stop sent${age}, waiting to exit`, "stopping"];
@@ -1988,13 +1998,34 @@ function bashStopRow(execution: BashTranscriptExecution, width: number): string 
 		const fitted = words.find((text) => visibleWidth(text) <= room) ?? truncateToWidth("stopping", room, "", false);
 		return `${CONTENT_INDENT}${theme.fg("warning", GLYPH.cancelled)} ${toolMeta(fitted)}`;
 	}
-	if (wait < 1000) return null;
 	const took = formatCompactMs(Math.floor(wait / 100) * 100);
-	const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
-	const words = [`stopped ${took} after you asked`, `stopped after ${took}`, took].find(
-		(text) => visibleWidth(text) <= room,
-	);
-	return words === undefined ? null : `${CONTENT_INDENT}${theme.fg("toolMetadata", GLYPH.cancelled)} ${toolMeta(words)}`;
+	if (killed) {
+		return settledRow([
+			`killed ${took} after you asked, because it ignored the stop`,
+			`killed ${took} after you asked`,
+			`killed after ${took}`,
+			"killed",
+		]);
+	}
+	if (wait < 1000) return null;
+	return settledRow([`stopped ${took} after you asked`, `stopped after ${took}`, took]);
+}
+
+/** The notes the shell runner appends to a stopped command's output, which the card states in its own words instead. */
+const STOP_NOTES = /^\[command (?:aborted|terminated by (?<signal>[A-Z0-9]+))\]$/gmu;
+
+/**
+ * A stopped command's output without the runner's notes, and whether the process had to be killed. The card said
+ * `aborted` three times over (`✗ aborted`, `[command aborted]`, `[command terminated by SIGKILL]`) and counted the notes as
+ * `49B` of output (N6). The session entry keeps the notes, which is what the model reads.
+ */
+function withoutStopNotes(output: string): { output: string; killed: boolean } {
+	let killed = false;
+	const cleaned = output.replace(STOP_NOTES, (_line, signal: string | undefined) => {
+		if (signal === "SIGKILL") killed = true;
+		return "";
+	});
+	return { output: cleaned.replace(/\s+$/u, ""), killed };
 }
 
 /**
@@ -2008,8 +2039,10 @@ export function renderBashTranscriptExecution(
 	_expandKey?: string,
 	bodyOptions: ToolBodyRenderOptions = {},
 ): string[] {
+	const stopped = execution.cancelled === true ? withoutStopNotes(execution.output) : null;
+	if (stopped !== null) execution = { ...execution, output: stopped.output };
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
-	const totalBytes = execution.totalBytes ?? shownBytes;
+	const totalBytes = stopped !== null ? shownBytes : (execution.totalBytes ?? shownBytes);
 	const args: Record<string, unknown> = { command: execution.command };
 	const details = {
 		resultSize: {
@@ -2019,12 +2052,13 @@ export function renderBashTranscriptExecution(
 			policy: "tail",
 			...(execution.fullOutputPath !== undefined ? { offloadPath: execution.fullOutputPath } : {}),
 		},
+		...(stopped !== null ? { outcome: "canceled" } : {}),
 	};
 	const result = {
 		content: [{ type: "text", text: execution.output }],
 		details,
 	};
-	const stopRow = bashStopRow(execution, width);
+	const stopRow = bashStopRow(execution, width, stopped?.killed === true);
 	const withStop = (rows: string[]): string[] => (stopRow === null ? rows : [...rows, stopRow]);
 	if (execution.running) {
 		return withStop(
@@ -2059,9 +2093,9 @@ export function renderBashTranscriptExecution(
 		toolName: "bash",
 		args,
 		result: { ...result, content: [{ type: "text", text: output }] },
+		// A stop the operator asked for is a cancel, not a failure: the card wears ⊘ like every other cancelled call.
 		isError: execution.cancelled === true || execution.error !== undefined || (execution.exitCode ?? 0) !== 0,
 		exitCode: execution.exitCode,
-		...(execution.cancelled === true ? { outcome: "aborted" as const } : {}),
 		excludeFromContext: execution.excludeFromContext,
 		actor: "operator",
 		resultSummary: {
