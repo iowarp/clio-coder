@@ -75,6 +75,20 @@ const MODEL_REJECTION_PIVOT =
 const MODEL_REJECTION_MAX_LINES = 16;
 const MODEL_REJECTION_MAX_LINE_CHARS = 300;
 
+/**
+ * A blocked call's result as an operator reads it. The closing instruction and an operator-approval remedy are
+ * addressed to the model, so the row drops them; the result itself keeps every line for /view.
+ */
+export function withoutModelRejectionAdvice(text: string): string {
+	return text
+		.split("\n")
+		.filter((line) => {
+			const trimmed = line.trim();
+			return trimmed !== MODEL_REJECTION_PIVOT && !trimmed.startsWith("To allow it: the operator must approve it;");
+		})
+		.join("\n");
+}
+
 export function formatModelRejection(
 	reason: string,
 	rejection?: RejectionMessage,

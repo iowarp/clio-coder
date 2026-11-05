@@ -21,7 +21,7 @@ import { rawDurationMs } from "../core/timers.js";
 import type { MessageEntry, SessionEntry, SessionUsageDefaults } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { AgentMessage } from "../engine/types.js";
-import { classifyTurnEnding } from "../session-control/chat-loop-messages.js";
+import { classifyTurnEnding, endedOnCancelledInterview } from "../session-control/chat-loop-messages.js";
 import type { TurnStopReason, TurnSummary } from "./status/index.js";
 import { turnFailureFacts } from "./status/summary.js";
 
@@ -140,10 +140,19 @@ export function lastTurnSummaryFromLedger(
 			toolCount += 1;
 			const failed = record?.isError === true || record?.error === true;
 			if (failed) toolErrorCount += 1;
-			settled.push({ role: "toolResult", toolName: record?.toolName, isError: failed } as unknown as AgentMessage);
+			const result = payloadRecord(record?.result);
+			settled.push({
+				role: "toolResult",
+				toolName: record?.toolName,
+				isError: failed,
+				details: result?.details,
+			} as unknown as AgentMessage);
 			continue;
 		}
 		if (row.role !== "assistant" || !record) continue;
+		// The ledger's closing row for a terminating tool is no reply from the
+		// model, and reading it as one called a cancelled interview "no answer".
+		if (record.terminalToolResult === true) continue;
 		sawAssistant = true;
 		settled.push({ role: "assistant", ...record } as unknown as AgentMessage);
 		const reason = stopReasonOf(record.stopReason);
@@ -156,6 +165,8 @@ export function lastTurnSummaryFromLedger(
 	if (!sawAssistant) return null;
 	if ((stopReason === "stop" || stopReason === "toolUse") && classifyTurnEnding(settled)?.kind === "no_answer")
 		stopReason = "no_answer";
+	if ((stopReason === "stop" || stopReason === "toolUse") && endedOnCancelledInterview(settled))
+		stopReason = "cancelled";
 
 	const lastRow = turn.rows[turn.rows.length - 1];
 	return {

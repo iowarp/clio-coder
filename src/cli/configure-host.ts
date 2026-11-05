@@ -14,7 +14,13 @@ export interface ConfigureWizardHost {
 	dismissPrompt(): void;
 	/** Called only after the shared wizard commits the target settings. */
 	onTargetSaved?(): void;
+	/** What the wizard is waiting on with no prompt up, in words; null drops back to the host's own wait row. */
+	waiting?(label: string | null): void;
+	/** Open a sign-in link in the operator's browser, best effort; the link is reported as well. */
+	openUrl?(url: string): void;
 }
+
+const UNWRAPPED_COLUMNS = 100_000;
 
 export type HostedTargetOptions = { mode: "first" | "add" } | { mode: "edit"; target: TargetDescriptor };
 
@@ -30,6 +36,9 @@ export async function runHostedTargetWizard(host: ConfigureWizardHost, options: 
 			done();
 		},
 	});
+	// The surface wraps to its own width. Left to the presenter's 80 columns, one failure arrived as
+	// several reports, and a 40-column dock got them wrapped twice.
+	Object.defineProperty(output, "columns", { value: UNWRAPPED_COLUMNS });
 	const input = new PassThrough();
 	try {
 		return await runOnboardingWizard({ in: input, out: output }, options, host);

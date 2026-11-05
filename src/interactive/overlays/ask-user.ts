@@ -78,8 +78,8 @@ const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
 const OTHER_CAPTION = "Other · recorded exactly as typed";
 const OTHER_POINTER = "[t] type an answer";
 /** With no legend row at all, the Other row is the last place the option keys can be named. */
-const OTHER_POINTER_ALL_KEYS = "[t] · [n] note · [?] info";
-const OTHER_ROW_ALL_KEYS_MIN_WIDTH = 36;
+const OTHER_POINTER_ALL_KEYS = "[t] · [n] note · [?] details";
+const OTHER_ROW_ALL_KEYS_MIN_WIDTH = 38;
 const CURSOR_CELL = renderFakeCursor(" ");
 
 type OptionDetail = "all" | "focused" | "none";
@@ -680,7 +680,8 @@ class AskUserOverlayView implements Component {
 	}
 
 	cancel(): void {
-		this.finish(cancelledAskUserResult());
+		// Esc ends the round and keeps what was already recorded, as the ledger row promises.
+		this.finish({ answers: this.answers(), cancelled: true });
 	}
 
 	close(): void {
@@ -889,7 +890,10 @@ class AskUserOverlayView implements Component {
 					...countdown,
 					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
 				]
-			: [...this.renderCompactPosition(question, width, pointToMove ? moveKey : null), ...countdown];
+			: [
+					...this.renderCompactPosition(question, width, pointToMove ? moveKey : null, !named.includes("[a]")),
+					...countdown,
+				];
 		const header = fit.headers ? this.renderQuestionHeader(question, width, !hasMenu && this.questions.length > 1) : [];
 		const details = this.renderDecisionContext(width);
 		const status = this.status.length > 0 ? wrapTextWithAnsi(statusChip(theme, "warning", this.status), width) : [];
@@ -949,17 +953,28 @@ class AskUserOverlayView implements Component {
 	}
 
 	/** Where the round stands on one row, for a body that has given up its header rows. */
-	private renderCompactPosition(question: AskUserQuestion, width: number, moveKey: string | null = null): string[] {
+	private renderCompactPosition(
+		question: AskUserQuestion,
+		width: number,
+		moveKey: string | null = null,
+		pointToLedger = false,
+	): string[] {
 		const theme = clioTheme();
 		const answered = this.states.filter((state) => state.answer.trim().length > 0).length;
+		const earlier = this.ledgerEntries().length;
+		// The count stands in for the legend's `[a]`, so it holds its key and outlasts
+		// the header, which the question under it already explains.
+		const count =
+			this.questions.length > 1 && answered > 0 ? `${answered} answered` : earlier > 0 ? `${earlier} earlier` : null;
+		const ledger = count === null ? null : `${count}${pointToLedger && earlier > 0 ? " [a]" : ""}`;
 		const parts = this.harnessInterview
 			? [this.harnessPosition(), ...(moveKey === null ? [] : [moveKey])]
 			: [
 					...(this.questions.length > 1 ? [`Q${this.index + 1} of ${this.questions.length}`] : []),
 					...(moveKey === null ? [] : [moveKey]),
-					...(question.header ? [question.header] : []),
+					...(ledger === null ? [] : [ledger]),
 					...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
-					...(this.questions.length > 1 && answered > 0 ? [`${answered} answered`] : []),
+					...(question.header ? [question.header] : []),
 				];
 		if (parts.length === 0) return [];
 		return [fitRow(theme.style("positionCount", parts.join(" · "), { bold: true }), width)];
@@ -1332,7 +1347,9 @@ class AskUserOverlayView implements Component {
 		if (!this.ledgerExpanded) {
 			// A body without headers counts answers on its position row.
 			if (!fit.headers) return [];
-			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", count), width)];
+			// Said before the key is pressed, because Esc ends the turn and an operator should not have to guess at the rest.
+			const esc = this.hintEntries().escVerb === "cancel" ? ` · Esc keeps ${entries.length === 1 ? "it" : "them"}` : "";
+			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", `${count}${esc}`), width)];
 		}
 		const rows: string[] = [];
 		for (const entry of entries) {
@@ -1346,7 +1363,11 @@ class AskUserOverlayView implements Component {
 		}
 		// Earlier rounds are settled, so only this round's answers can still be changed.
 		const canGoBack = this.questions.length > 1 && entries.some((entry) => entry.label.startsWith("Q"));
-		const head = ["", sectionRule(theme, width, "Answers", { meta: canGoBack ? `${count} · [←/→] change one` : count })];
+		// A body that has given up its header rows keeps the answers themselves rather than a heading over none.
+		const head =
+			fit.headers || rowBudget >= rows.length + 2
+				? ["", sectionRule(theme, width, "Answers", { meta: canGoBack ? `${count} · [←/→] change one` : count })]
+				: [];
 		const budget = Math.max(1, rowBudget - head.length);
 		if (rows.length <= budget) return [...head, ...rows];
 		const kept = rows.slice(0, Math.max(0, budget - 1));

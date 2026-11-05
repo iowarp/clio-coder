@@ -49,7 +49,7 @@ for (const style of ["compact", "standard", "detailed"] as const) {
 		const lines = panel.render(100).map(stripTerminalSequences);
 		const row = lines.findIndex((line) => line.includes("git restore ."));
 		ok(row >= 0, lines.join("\n"));
-		const grant = lines.findIndex((line) => /\? allowed by you · safety-net rail git-restore-discard-all/u.test(line));
+		const grant = lines.findIndex((line) => /\? allowed by you · safety net: git restore discard all/u.test(line));
 		ok(grant > row, `no grant row under the call:\n${lines.join("\n")}`);
 		strictEqual(grant, row + 1, "the grant sits directly under the call it answered");
 		doesNotMatch(lines.join("\n"), /awaiting approval/u);

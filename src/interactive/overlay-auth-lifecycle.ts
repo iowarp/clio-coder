@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import type { ClioSettings } from "../core/config.js";
 import {
 	getRuntimeRegistry,
@@ -9,6 +8,7 @@ import {
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
 import type { OverlayHandle, TUI } from "../engine/tui.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
+import { maybeOpenExternalUrl } from "./open-external-url.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AuthDialogHandle, openAuthDialog } from "./overlays/auth-dialog.js";
 
@@ -36,28 +36,6 @@ export interface OverlayAuthLifecycle {
 	finish(dismiss: boolean): void;
 	openConnectFlow(reference: string): Promise<void>;
 }
-
-/**
- * Provider runtimes supply OAuth authorize, device-code, and management-console
- * links, so the string is not ours to trust. the graphical app browser opener opens
- * a browser the right way; this is the same shape.
- */
-const maybeOpenExternalUrl = (url: string): void => {
-	const platform = process.platform;
-	const command = platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open";
-	// `start` is a cmd builtin rather than an executable, and its first
-	// quoted argument is the window title, so the empty string is required.
-	const args = platform === "win32" ? ["/c", "start", "", url] : [url];
-	try {
-		const child = spawn(command, args, { stdio: "ignore", detached: true });
-		child.on("error", () => {
-			// Best effort only: the URL is also printed for the operator.
-		});
-		child.unref();
-	} catch {
-		// Best effort only.
-	}
-};
 
 /**
  * Fail the connect flow when the credential the operator just supplied never

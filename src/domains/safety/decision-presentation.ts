@@ -31,7 +31,7 @@ export type DecisionOrigin =
 /** A safety-net rail as the parked row, the grant row and the notice name it. */
 export function safetyNetRailText(ruleId: string): string {
 	if (ruleId === SESSION_CODE_CONSENT_RULE_ID) return SESSION_CODE_CONSENT_TEXT;
-	return `safety-net rail ${ruleId}`;
+	return `safety net: ${ruleId.replaceAll("-", " ")}`;
 }
 
 /**

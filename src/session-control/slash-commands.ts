@@ -563,6 +563,8 @@ async function handleDelegate(
  */
 /** Commands that refuse rather than queue while a turn streams; the composer's list says so before Enter does. */
 export const COMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["config", "council", "oracle"]);
+/** The same, for a command that only refuses by subcommand, as `<command> <subcommand>`. */
+export const SUBCOMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["fleet run"]);
 
 async function handleOracle(question: string, ctx: SlashCommandContext): Promise<void> {
 	if (!ctx.submitOperatorNote) {

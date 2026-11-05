@@ -18,6 +18,7 @@ import { previewBudget, previewRows } from "./preview.js";
 import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
+import { actionClassWords } from "../../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { safetyNetRailText } from "../../domains/safety/decision-presentation.js";
 import {
@@ -26,6 +27,7 @@ import {
 	redactStreamingSecretString,
 	redactToolArgs,
 } from "../../domains/safety/redaction.js";
+import { withoutModelRejectionAdvice } from "../../domains/safety/rejection-feedback.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
@@ -793,10 +795,11 @@ export function renderToolAwaitingApproval(
 	);
 	const lines = [singleActionLine(parts.lead, AWAITING_APPROVAL_TAIL(), width)];
 	if (view === undefined) return lines;
+	// The lead row already names a target it can show whole, so `target` only adds what that row cut.
+	const leadShowsTarget = view.target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(view.target);
 	const facts = [
-		["action", view.actionClass],
-		["axis", approvalAxisText(view)],
-		...(view.target !== undefined && view.target.length > 0 ? [["target", view.target]] : []),
+		["asked by", `${approvalAxisText(view)} · ${view.actionClass.replaceAll("_", " ")} action`],
+		...(view.target !== undefined && view.target.length > 0 && !leadShowsTarget ? [["target", view.target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
@@ -869,6 +872,17 @@ function blockReasonClause(reason: string): string {
 	return `${(space > BLOCK_REASON_LIMIT / 2 ? head.slice(0, space) : head).trimEnd()}${GLYPH.ellipsis}`;
 }
 
+/**
+ * A refusal's tail in an operator's words. `short` and the denial reason are written for the model and the audit,
+ * so the action class and the third-person "User" stay there, in /view.
+ */
+function refusalTail(reason: string): string {
+	const clause = blockReasonClause(reason);
+	if (/^User denied this call/u.test(clause)) return clause.replace(/^User denied/u, "you denied");
+	const blocked = /^(\S+ blocked: )([a-z_]+)( in \S+)?$/u.exec(clause);
+	return blocked ? `${blocked[1]}${actionClassWords(blocked[2] ?? "")}${blocked[3] ?? ""}` : clause;
+}
+
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
 	const live = meta.live === undefined ? "" : toolMeta(` · ${meta.live}`);
@@ -891,7 +905,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	// stopped. The reason rides the same tail as the outcome so the collapsed
 	// row and the expanded header state it identically.
 	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
-	const reasonSuffix = reason ? toolMeta(` · ${blockReasonClause(reason)}`) : "";
+	const reasonSuffix = reason ? toolMeta(` · ${refusalTail(reason)}`) : "";
 	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${durationSuffix}`;
 }
 
@@ -2368,6 +2382,10 @@ export function renderToolPreview(
 		const refusal = finished?.outcome !== undefined ? finished.blockReason?.trim() : undefined;
 		const tailStatesRefusal = refusal !== undefined && blockReasonClause(refusal) === refusal.replace(/\.$/u, "");
 		let text = refusal && tailStatesRefusal ? withoutLeadingLine(told, refusal) : told;
+		if (finished?.outcome !== undefined) {
+			// An operator's own denial needs no account back; the tail says it, and /view keeps what the model read.
+			text = refusal?.startsWith("User denied") === true ? "" : withoutModelRejectionAdvice(text);
+		}
 		// The action row already names this run. A short monitor summary can
 		// start with the same id; keep the remainder here and the raw result in
 		// inspection, where it is useful as an exact model-facing record.
