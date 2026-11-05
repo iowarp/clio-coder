@@ -26,6 +26,7 @@
  */
 
 import { appendFileSync } from "node:fs";
+import { renderCalls } from "../core/telemetry/render.js";
 import { terminalBackground } from "../core/terminal-background.js";
 import { colorDisabled } from "../core/terminal-preferences.js";
 import { resolveRole, type SemanticRole } from "../core/theme-roles.js";
@@ -509,7 +510,7 @@ function runRecordLines(paint: BoardPaint, model: TakeoverModel, width: number):
 	const record = card.record;
 	if (record === null) return lines;
 	const spend = [
-		`${card.toolCallsDisplay ?? "unknown"} tool calls`,
+		renderCalls(card.toolCallsDisplay ?? "unknown"),
 		...(card.tokens !== undefined ? [`${card.tokens} tokens`] : []),
 		...(card.cost !== undefined ? [card.cost] : []),
 		...(card.elapsed !== undefined ? [card.elapsed] : []),

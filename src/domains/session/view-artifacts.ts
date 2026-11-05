@@ -6,7 +6,7 @@ import { clockLocal } from "../../core/format-time.js";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
-import { renderCompactCount, renderPricing } from "../../core/telemetry/render.js";
+import { renderCalls, renderCompactCount, renderPricing } from "../../core/telemetry/render.js";
 import type { RunResultObject } from "../../core/telemetry/schemas.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
@@ -555,7 +555,7 @@ function renderEvidenceSummary(evidence: RunEvidence, run: SettledRunView | null
 		"## What happened",
 		...(totals
 			? [
-					`${totals.toolCalls} tool calls · ${totals.toolErrors} errors · ${totals.blockedToolCalls} blocked`,
+					`${renderCalls(String(totals.toolCalls))} · ${totals.toolErrors} errors · ${totals.blockedToolCalls} blocked`,
 					`${formatDurationMs(totals.wallTimeMs)} · ${totals.tokens.display} tokens · ${totals.usd.display}`,
 				]
 			: ["Not stated: the run's seal does not vouch for its record."]),
