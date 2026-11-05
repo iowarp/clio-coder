@@ -146,6 +146,7 @@ export function approvalWaitWords(
 		[mid, ...held, fails ? `run fails in ${left}` : denied],
 		[short, ...held, fails ? `fails in ${left}` : denied],
 		[...held, fails ? `fails in ${left}` : denied],
+		[fails ? `fails in ${left}` : denied],
 	].map((parts) => parts.join(" · "));
 	const room = options.room;
 	if (room === undefined) return forms[0] as string;

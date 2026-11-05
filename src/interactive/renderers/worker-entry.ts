@@ -616,7 +616,10 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	for (let kept = facts.length; kept >= 0; kept -= 1) {
 		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
 		const activityRoom = room - tail.length;
-		if (activityRoom < 1 || (kept > 1 && activityRoom < Math.min(24, activity.length))) continue;
+		// A wait's words carry its time left, so they outrank the spend beside them.
+		const wanted = entry.progress?.awaitingApproval === true ? activity.length : Math.min(24, activity.length);
+		if (activityRoom < 1 || (kept > (entry.progress?.awaitingApproval === true ? 0 : 1) && activityRoom < wanted))
+			continue;
 		const shown = fitDisplayText(activity, activityRoom);
 		return truncateToWidth(
 			`${theme.fg("gutter", RAIL)}${styledActivity(shown)}${meta(tail)}`,
