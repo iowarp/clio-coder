@@ -621,19 +621,20 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			const last = lastTurnSummary;
 			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
-			return {
-				...idleReadinessPresentation(
-					{
-						targetId: route.target,
-						available: target.available,
-						reason: target.reason,
-						health: target.health.status,
-						lastStop: onRoute ? last.stopReason : null,
-					},
-					width,
-				),
-				...(detail ? { detail } : {}),
-			};
+			const readiness = idleReadinessPresentation(
+				{
+					targetId: route.target,
+					available: target.available,
+					reason: target.reason,
+					health: target.health.status,
+					lastStop: onRoute ? last.stopReason : null,
+				},
+				width,
+			);
+			if (!detail) return readiness;
+			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
+			const quiet = readiness.glyph === GLYPH.queued && target.health.status === "healthy";
+			return { ...readiness, ...(quiet ? { label: "is idle" } : {}), detail };
 		},
 		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
 		...(deps.workspaceSurfaces

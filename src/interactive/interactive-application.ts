@@ -1902,7 +1902,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			notifications.add({
 				level: "info",
 				key: "keyboard:escape",
-				text: "Run still going · Esc again cancels",
+				text: editorSubmit.hasActiveEditorBash()
+					? "Command still going · Esc again stops it"
+					: "Run still going · Esc again cancels",
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),

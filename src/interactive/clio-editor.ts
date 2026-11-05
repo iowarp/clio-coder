@@ -537,12 +537,23 @@ export class ClioEditor extends Editor {
 			);
 		// The state outranks the identity: a narrow rail keeps `● running a command`
 		// rather than cutting `Judge-model is runnin…` and losing what it is doing.
-		const phrase = [activity, detail].filter(Boolean).join(theme.fg("border", " · "));
-		const whole = [lead, identity, phrase].filter(Boolean).join(" ");
-		const label =
-			activity && visibleWidth(whole) > this.railLabelRoom(width) - (rail.yolo ? 7 : 0)
-				? [lead, phrase.replace("is ", "")].filter(Boolean).join(" ")
-				: whole;
+		const separator = theme.fg("border", " · ");
+		const room = this.railLabelRoom(width) - (rail.yolo ? 7 : 0);
+		const whole = [lead, identity, [activity, detail].filter(Boolean).join(separator)].filter(Boolean).join(" ");
+		let label = whole;
+		if (activity && visibleWidth(whole) > room) {
+			// Facts beside the state leave whole from their end, and a quiet state yields to the work
+			// it would otherwise crowd off the rail rather than either being cut mid-word.
+			const bare = activity.replace("is ", "");
+			const facts = status?.detail?.split(" · ").map((fact) => theme.fg("annotation", fact)) ?? [];
+			const quietState = status?.live === false && status.glyph === GLYPH.queued;
+			const candidates = [
+				...facts.map((_, index) => [bare, ...facts.slice(0, facts.length - index)]),
+				...(quietState ? facts.map((_, index) => facts.slice(0, facts.length - index)) : []),
+				[bare],
+			].map((parts) => [lead, parts.join(separator)].join(" "));
+			label = candidates.find((candidate) => visibleWidth(candidate) <= room) ?? candidates.at(-1) ?? whole;
+		}
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const steer = this.steerTarget(text);
 		const draftLabel = steer

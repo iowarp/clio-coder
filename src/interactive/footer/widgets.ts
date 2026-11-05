@@ -606,9 +606,11 @@ export function composerPhasePresentation(
 	width: number,
 	now: number,
 	modelName?: string,
+	/** Room for the words alone, for a surface that draws them without the rail's identity beside them. */
+	labelRoom?: number,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
-	const room = railActivityRoom(width);
+	const room = labelRoom ?? railActivityRoom(width);
 	// A tool's actor is a short word rather than a model name, and the room it leaves belongs to the command and its time.
 	const actorWidth = visibleWidth(status.tool?.operatorShell === true ? "your shell" : "Clio");
 	const toolRoom = Math.max(room, width - actorWidth - 4 - (width < 60 ? 9 : 14));

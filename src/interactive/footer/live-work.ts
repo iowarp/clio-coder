@@ -46,7 +46,8 @@ const CARRIES_ELAPSED = /\b\d+(?:\.\d+)?(?:ms|s|m|h)\b/u;
 
 function workerElapsed(row: DispatchBoardRow): string | null {
 	const elapsed = row.telemetry?.activity.elapsed.display;
-	return elapsed && elapsed !== "not available" ? elapsed : null;
+	// Whole seconds, as the rail's own phase counts them: tenths beside it read as a different clock.
+	return elapsed && elapsed !== "not available" ? elapsed.replace(/\.\d+(?=s$)/u, "") : null;
 }
 
 /** The main agent's own dispatch outranks a run the operator started beside it. */
@@ -133,7 +134,15 @@ export function liveWorkStrip(
 	const dot = theme.fg("border", " · ");
 	const note = escapeNote(
 		escVerb,
-		mainActive ? "the run" : facts.workers.length > 1 ? "work" : facts.workers.length === 1 ? "the worker" : "it",
+		mainActive
+			? facts.status.tool?.operatorShell === true
+				? "the command"
+				: "the run"
+			: facts.workers.length > 1
+				? "work"
+				: facts.workers.length === 1
+					? "the worker"
+					: "it",
 	);
 	const quiet = (text: string): string => theme.fg("annotation", text);
 	const render = (lead: string, parts: ReadonlyArray<string | null>): string =>
@@ -142,16 +151,23 @@ export function liveWorkStrip(
 	if (mainActive) {
 		const phase = composerPhasePresentation(facts.status, room, facts.now);
 		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
-		const label = phase.label.replace(RAIL_ONLY_FACTS, "");
-		const elapsed = CARRIES_ELAPSED.test(stripTerminalSequences(label))
-			? null
-			: formatCompactMs(phaseElapsedMs(facts.status, facts.now));
-		const clocked = (text: string): string =>
-			`${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
+		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
+		const clockFor = (text: string): string | null =>
+			CARRIES_ELAPSED.test(stripTerminalSequences(text))
+				? null
+				: formatCompactMs(Math.floor(phaseElapsedMs(facts.status, facts.now) / 1000) * 1000);
+		const label = railFree(phase.label);
+		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
+		const looseLabel = railFree(composerPhasePresentation(facts.status, room, facts.now, undefined, room - 2).label);
+		const clocked = (text: string): string => {
+			const elapsed = clockFor(text);
+			return `${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
+		};
 		const owned = clocked(`${phase.subject ?? facts.actor} ${label}`);
-		const bare = clocked(label.replace(/^is /u, ""));
+		const bare = clocked(looseLabel.replace(/^is /u, ""));
 		candidates = [
 			render(owned, [workers, note.long]),
+			...(workers === null ? [] : [render(owned, [workers, note.short]), render(bare, [workers, note.short])]),
 			render(owned, [note.long]),
 			render(owned, [note.short]),
 			render(bare, [note.short]),
