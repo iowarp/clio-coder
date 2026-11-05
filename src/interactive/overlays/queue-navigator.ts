@@ -208,7 +208,8 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			const slot = queueSlotWord(selected);
 			rows.push(
 				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
-					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "next slot" : "end of turn"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
+					// The row's own word leads, so `later` in the list and the slot it means read as one thing.
+					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "steer, lands at the next slot" : "later, lands when the turn ends"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
 				}),
 			);
 			const notice = this.sendNotice(selected).flatMap((line) =>
