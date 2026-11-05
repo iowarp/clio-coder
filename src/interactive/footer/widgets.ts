@@ -610,8 +610,10 @@ function toolActivity(
 	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 	const tier = computeWatchdogTier(silentMs);
 	const full = verb ?? activity?.verb ?? "is running";
-	const lead = room >= 24 ? full : full.replace(/^is /u, "");
-	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9));
+	// Past the first silence the way out is owed its cells, and the name of what is running gives them up.
+	const wayOut = verb === null && tier >= 2 ? 6 : 0;
+	const lead = room - wayOut >= 24 ? full : full.replace(/^is /u, "");
+	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9 - wayOut));
 	const phrase =
 		object === null || span === null
 			? verb !== null
