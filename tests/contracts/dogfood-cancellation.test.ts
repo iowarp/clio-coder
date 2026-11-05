@@ -579,19 +579,19 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			// Live and resumed receipts read the turn's spend from the same view: the sent call reported no usage, so its
 			// counts are the journaled estimate as a lower bound, never a zero (#430, #434 §11.3).
 			for (const rendered of [live, resumed]) {
-				match(rendered, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
-				match(rendered, /in ≥~\S+ \+\? · out ≥~0 \+\?/u);
+				match(rendered, /⊘ Cancelled · /u);
+				match(rendered, /in ≥~\S+ · out ≥~0 · [^\n]*1 call had no usage data/u);
 				strictEqual(rendered.split("Cancelled").length - 1, 1, rendered);
 				doesNotMatch(rendered, /✦|\[aborted\]/u);
 			}
-			strictEqual(resumed.match(/in .+? · out \S+ \+\?/u)?.[0], live.match(/in .+? · out \S+ \+\?/u)?.[0]);
+			strictEqual(resumed.match(/in .+? · out \S+/u)?.[0], live.match(/in .+? · out \S+/u)?.[0]);
 			const html = renderSessionHtml({
 				sessionId: source,
 				exportedAt: "2026-09-07T00:00:00Z",
 				ansiLines: resumedLines,
 			}).replace(/<[^>]*>/gu, "");
-			match(html, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
-			match(html, /in ≥~\S+ \+\? · out ≥~0 \+\?/u);
+			match(html, /⊘ Cancelled · /u);
+			match(html, /in ≥~\S+ · out ≥~0 · [^\n]*1 call had no usage data/u);
 			strictEqual(html.split("Cancelled").length - 1, 1, html);
 			if (source === "loop_guard") {
 				for (const rendered of [resumed, html]) {

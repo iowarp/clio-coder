@@ -313,7 +313,7 @@ export function lastTurnDetails(
 				.join(" · ")
 		: "";
 	const parts: Array<string | null> = [
-		turn ? (measured ? theme.fg("counter", measured) : theme.fg("annotation", "usage unknown (/usage)")) : null,
+		turn ? (measured ? theme.fg("counter", measured) : theme.fg("annotation", "usage not measured (/usage)")) : null,
 		turn ? reasoningChip(theme, turn.reasoning) : null,
 		cache ? theme.fg("annotation", cache) : null,
 	];
