@@ -16,6 +16,14 @@ export interface RetryOverlay {
 	attempt: number;
 	maxAttempts: number;
 	waitMs: number;
+	/** `backoff` waits for the next attempt to be sent; `attempt` is that request, outstanding. */
+	stage?: "backoff" | "attempt" | undefined;
+	/** Epoch ms the next attempt is due. Present during a backoff with a known delay. */
+	dueAt?: number | undefined;
+	/** Epoch ms the current attempt was sent. */
+	attemptStartedAt?: number | undefined;
+	/** The wait the provider itself named, when it named one. */
+	retryAfterMs?: number | undefined;
 }
 
 export interface ToolOverlay {

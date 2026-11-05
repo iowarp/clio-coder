@@ -1535,6 +1535,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								: failure,
 					});
 					Object.assign(message, { callInvoked: failure.invoked });
+					const retryAfterMs = callTracking?.retryAfterMs();
+					if (retryAfterMs !== null && retryAfterMs !== undefined) Object.assign(message, { retryAfterMs });
 				} else {
 					Object.assign(message, { callInvoked: apiCallStartedAt !== null || responseObserved });
 				}

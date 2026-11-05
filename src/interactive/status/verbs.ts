@@ -67,8 +67,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			return { text: "Needs approval", toneHint: "warn" };
 		case "retrying": {
 			const retry = status.retry;
-			const wait = retry && retry.waitMs > 0 ? ` · ${formatStatusElapsed(retry.waitMs)}` : "";
-			return { text: `Retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}${wait}`, toneHint: "warn" };
+			return { text: `Retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`, toneHint: "warn" };
 		}
 		case "compacting":
 			return { text: "Compacting context", toneHint: "normal" };
@@ -109,6 +108,15 @@ export function resolveFooterVerb(status: AgentStatus, now: number, terminalCols
 	}
 	const showElapsed = terminalCols >= 60;
 	if (!showElapsed) return core;
+	// A backoff reads as what is left, and the attempt it leads to as its own time, not the turn's.
+	if (status.phase === "retrying") {
+		const retry = status.retry;
+		if (retry?.dueAt !== undefined) {
+			return { ...core, text: `${core.text} · next in ${Math.max(0, Math.ceil((retry.dueAt - now) / 1000))}s` };
+		}
+		const attempt = retry?.attemptStartedAt !== undefined ? formatLiveElapsed(now - retry.attemptStartedAt) : null;
+		return attempt === null ? core : { ...core, text: `${core.text} · ${attempt}` };
+	}
 	const elapsed = elapsedSince(status, now);
 	return elapsed === null ? core : { text: `${core.text} · ${elapsed}`, toneHint: core.toneHint };
 }

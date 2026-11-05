@@ -214,6 +214,7 @@ import {
 } from "./turn-queues.js";
 import {
 	createTurnRecovery,
+	type RetryForecast,
 	type RetryStatusEvent,
 	reclassifyStallAbort,
 	recoveryAttemptHasOutput,
@@ -236,7 +237,7 @@ export type {
 	QueueRemovalReason,
 	SteeringMode,
 } from "./turn-queues.js";
-export type { RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
+export type { RetryForecast, RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
 export type { ChatLoopRunSnapshot, TurnPreparationPhase } from "./turn-state.js";
 
@@ -442,7 +443,14 @@ export type ChatLoopEvent = (
 	| ChatNoticeEvent
 	| AgentStatusEvent
 	| ToolApprovalStateEvent
-) & { modelTimeMs?: number };
+) & {
+	modelTimeMs?: number;
+	/**
+	 * On a `message_end` or `agent_end` that closes a failed attempt: the attempt recovery will try next. The failure is
+	 * then an event of a turn still underway, not that turn's outcome.
+	 */
+	retryPending?: RetryForecast;
+};
 
 export interface PromptSubmitInput {
 	/** What the operator typed: the template invocation when one expanded. */
@@ -1566,10 +1574,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (status.phase === "retrying") turnRetryAttempts += 1;
 			emit({ type: "retry_status", status });
 		},
-		emitFailureMessage: (message) => emit({ type: "message_end", message }),
+		emitFailureMessage: (message) => {
+			const forecast = state.runtime ? recovery.forecastRetry(state.runtime, message) : null;
+			emit({ type: "message_end", message, ...(forecast ? { retryPending: forecast } : {}) });
+		},
 		emitNotice,
 	});
+	/** Set between a retried attempt's `message_end` and the `agent_end` that closes that attempt. */
+	let attemptRetryForecast: RetryForecast | null = null;
 	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
+		if (event.type === "agent_end" && attemptRetryForecast !== null) {
+			Object.assign(event, { retryPending: attemptRetryForecast });
+			attemptRetryForecast = null;
+		}
 		if (event.type === "message_end") {
 			if (event.message.role === "assistant") {
 				const terminal = terminalFailureFromAssistantMessage(event.message);
@@ -1580,6 +1597,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			rewriteStallAbortMessage(state, event.message);
 			explainInterruptedAssistant(event.message, state.activeInterruptReason);
+			if (event.message.role === "assistant") {
+				attemptRetryForecast = state.runtime ? recovery.forecastRetry(state.runtime, event.message) : null;
+				if (attemptRetryForecast !== null) Object.assign(event, { retryPending: attemptRetryForecast });
+			}
 			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {
 				for (const block of event.message.content) {
 					if (block.type !== "text") continue;
@@ -3055,6 +3076,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRetryAttempts = 0;
 				providerRetryAttempts = 0;
 				const machineMessageStart = agentRuntime.agent.state.messages.length;
+				recovery.noteAttemptStart(machineMessageStart);
 				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 				const priorAskUserPolicy = state.currentAskUserPolicy;
 				state.currentPendingSkillPolicy = pendingSkillPolicy;
@@ -3164,6 +3186,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 				} finally {
+					recovery.settleOpenForecast();
 					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 					// Esc on an interview resolves it as cancelled and the tool ends the turn
 					// itself, so no interrupt is raised and `canceled` stays false. The turn

@@ -303,17 +303,38 @@ function runAbortDetail(event: RunAbortedStatusEvent): string | undefined {
 	return event.reason ?? label;
 }
 
-function retryOverlay(status: {
-	phase: RetryStatusPhase;
-	attempt: number;
-	maxAttempts: number;
-	delayMs?: number;
-}): RetryOverlay {
+function retryOverlay(
+	status: {
+		phase: RetryStatusPhase;
+		attempt: number;
+		maxAttempts: number;
+		delayMs?: number;
+		retryAfterMs?: number;
+	},
+	previous: RetryOverlay | undefined,
+	now: number,
+): RetryOverlay {
+	const backoff = status.phase !== "retrying";
+	const delayMs = status.delayMs ?? 0;
+	// Every countdown tick repeats its `scheduled` payload, so the deadline holds from the first one.
+	const sameWait = previous?.stage === "backoff" && previous.attempt === status.attempt && previous.dueAt !== undefined;
 	return {
 		attempt: status.attempt,
 		maxAttempts: status.maxAttempts,
-		waitMs: status.delayMs ?? 0,
+		waitMs: delayMs,
+		stage: backoff ? "backoff" : "attempt",
+		...(backoff && delayMs > 0 ? { dueAt: sameWait ? previous?.dueAt : now + delayMs } : {}),
+		...(backoff ? {} : { attemptStartedAt: now }),
+		...(status.retryAfterMs !== undefined ? { retryAfterMs: status.retryAfterMs } : {}),
 	};
+}
+
+/**
+ * Output from the attempt answers the retry, so the rail goes back to saying what the model is doing. A later failure
+ * of the same attempt opens the overlay again.
+ */
+function leaveRetryOnOutput(prev: AgentStatus, ctx: ReduceContext): AgentStatus {
+	return prev.phase === "retrying" && prev.retry?.stage === "attempt" ? popOverlay(prev, "retrying", ctx) : prev;
 }
 
 export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
@@ -372,9 +393,11 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		case "message_start":
 			return refreshMeaningful(prev, ctx);
 		case "message_update": {
-			const next = refreshMeaningful(prev, ctx);
 			const streamed = event.assistantMessageEvent;
-			const base = activePhaseAfterStuck(prev);
+			const answered = streamed.type === "toolcall_start" || streamed.type === "toolcall_delta";
+			const current = answered ? leaveRetryOnOutput(prev, ctx) : prev;
+			const next = refreshMeaningful(current, ctx);
+			const base = activePhaseAfterStuck(current);
 			if (
 				(streamed.type === "toolcall_start" || streamed.type === "toolcall_delta") &&
 				CORE_ACTIVE_PHASES.has(base) &&
@@ -432,8 +455,9 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return next;
 		}
 		case "thinking_delta": {
-			const base = activePhaseAfterStuck(prev);
-			const next = refreshMeaningful({ ...prev, phase: base, preparingToolCall: false }, ctx);
+			const current = leaveRetryOnOutput(prev, ctx);
+			const base = activePhaseAfterStuck(current);
+			const next = refreshMeaningful({ ...current, phase: base, preparingToolCall: false }, ctx);
 			// Model reasoning arriving while a tool still shows as running means the
 			// tool is done (its end never landed or was an admission block): the
 			// model is generating, nothing is executing, so drop the tool display.
@@ -453,8 +477,9 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		// A diffusion frame is answer text arriving, whole rather than sliced.
 		case "text_frame":
 		case "text_delta": {
-			const base = activePhaseAfterStuck(prev);
-			const next = refreshMeaningful({ ...prev, phase: base, preparingToolCall: false }, ctx);
+			const current = leaveRetryOnOutput(prev, ctx);
+			const base = activePhaseAfterStuck(current);
+			const next = refreshMeaningful({ ...current, phase: base, preparingToolCall: false }, ctx);
 			// Streamed answer text while a tool still shows as running: same as
 			// above, the model is writing, so the running-tool spinner must clear.
 			if (base === "preparing" || base === "waiting_model" || base === "thinking" || base === "tool_running") {
@@ -483,7 +508,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			// Stamp this call's own start so the footer's running-tool timer counts
 			// from here, not from turn start.
 			return {
-				...refreshMeaningful(prev, ctx),
+				...refreshMeaningful(leaveRetryOnOutput(prev, ctx), ctx),
 				phase: "tool_running",
 				preparingToolCall: false,
 				tool,
@@ -494,19 +519,30 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		case "retry_status": {
 			const phase = event.status.phase;
 			if (phase === "scheduled" || phase === "waiting" || phase === "retrying") {
-				return pushOverlay(prev, "retrying", ctx, retryOverlay(event.status));
+				const previous = prev.phase === "retrying" ? prev.retry : undefined;
+				// A wait announced after a settled run is the run's wait; `agent_start` takes the window over.
+				const active = prev.phase === "ended" ? { ...prev, phase: "preparing" as const, preparingSubmission: true } : prev;
+				return pushOverlay(active, "retrying", ctx, retryOverlay(event.status, previous, ctx.now));
 			}
 			if (phase === "recovered") return popOverlay(prev, "retrying", ctx);
+			// The attempt's own settlement already said how the turn ended.
+			if (!isActive(prev.phase)) return prev;
 			return {
 				...refreshMeaningful(prev, ctx),
 				phase: "ended",
 				summary: cancelledSummary(prev, ctx, phase === "cancelled" ? "cancelled" : "error"),
+				retry: undefined,
 				resumePhase: undefined,
 				activePhases: undefined,
 				overlayStack: [],
 			};
 		}
 		case "agent_end": {
+			// A failed attempt recovery will retry closes that attempt, not the turn.
+			if (event.retryPending !== undefined) {
+				const { attempt, maxAttempts } = event.retryPending;
+				return pushOverlay(prev, "retrying", ctx, { attempt, maxAttempts, waitMs: 0, stage: "backoff" });
+			}
 			const truncated = prev.phase === "idle";
 			const start = prev.since > 0 ? prev.since : ctx.now;
 			const model = targetModel(ctx);

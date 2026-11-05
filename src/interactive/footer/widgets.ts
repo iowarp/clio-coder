@@ -437,9 +437,70 @@ const COMPOSER_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 	[ToolNames.AskUser]: "needs input",
 };
 
+/** Room for the activity phrase on the composer rail, after its stretch, lead glyph and a short model name. */
+function railActivityRoom(width: number): number {
+	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - 14);
+}
+
+/** Facts in reading order, each with its priority. The lowest priorities leave first and the order never changes. */
+function fitRailFacts(facts: ReadonlyArray<{ text: string | null; keep: number }>, room: number): string {
+	const present = facts.filter((fact): fact is { text: string; keep: number } => fact.text !== null);
+	const join = (rows: ReadonlyArray<{ text: string }>): string => rows.map((row) => row.text).join(" · ");
+	const kept = [...present];
+	while (kept.length > 1 && visibleWidth(join(kept)) > room) {
+		const lowest = kept.slice(1).reduce((worst, fact) => (fact.keep < worst.keep ? fact : worst));
+		kept.splice(kept.indexOf(lowest), 1);
+	}
+	return join(kept);
+}
+
+/** Whole seconds, the way a countdown reads: a wait never shows as over before it is. */
+function remainingSeconds(dueAt: number, now: number): number {
+	return Math.max(0, Math.ceil((dueAt - now) / 1000));
+}
+
+function retryRailLabel(
+	status: AgentStatus,
+	room: number,
+	now: number,
+	modelWait: (from: number) => string | null,
+): string {
+	const retry = status.retry;
+	const attempts = `retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
+	if (retry?.stage === "attempt") {
+		const from = retry.attemptStartedAt;
+		return fitRailFacts(
+			[
+				{ text: attempts, keep: 9 },
+				{ text: room >= 44 ? "waiting for a response" : null, keep: 3 },
+				{ text: from !== undefined ? modelWait(from) : null, keep: 8 },
+			],
+			room,
+		);
+	}
+	const left = retry?.dueAt !== undefined ? remainingSeconds(retry.dueAt, now) : null;
+	return fitRailFacts(
+		[
+			{ text: attempts, keep: 9 },
+			{ text: left === null ? null : room >= 32 ? `next attempt in ${left}s` : `in ${left}s`, keep: 8 },
+			{
+				text: retry?.retryAfterMs !== undefined ? `provider asked for ${Math.ceil(retry.retryAfterMs / 1000)}s` : null,
+				keep: 2,
+			},
+		],
+		room,
+	);
+}
+
 /** Subject-aware activity phrases for the model named on the composer rail. */
 export function composerPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
+	const room = railActivityRoom(width);
+	const elapsedFrom = (from: number): string | null => {
+		const elapsed = Math.floor((now - from) / 1000);
+		if (elapsed < 1) return null;
+		return elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsed * 1000);
+	};
 	let label: string;
 	switch (status.phase) {
 		case "idle":
@@ -467,7 +528,7 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 			label = "needs approval";
 			break;
 		case "retrying":
-			label = `is retrying ${status.retry?.attempt ?? 0}/${status.retry?.maxAttempts ?? 0}`;
+			label = retryRailLabel(status, room, now, elapsedFrom);
 			break;
 		case "compacting":
 			label = "is compacting context";
