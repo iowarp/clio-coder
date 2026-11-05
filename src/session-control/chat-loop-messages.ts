@@ -30,7 +30,7 @@ import {
 	responseModelIdObservationFromRecord,
 } from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
-import { stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
+import { proseAnnouncesCall, readTrailingWrittenCalls, stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { sha256 } from "../domains/prompts/hash.js";
@@ -274,16 +274,23 @@ export function hasStructuredToolCall(message: AgentMessage | undefined): boolea
 }
 
 /** Why a run that stopped normally left the operator nothing to read. */
-export type TurnNoAnswerCause = "tool_call_in_reasoning" | "tool_call_as_text" | "reasoning_only" | "empty";
+export type TurnNoAnswerCause =
+	| "tool_call_in_reasoning"
+	| "tool_call_as_text"
+	| "tool_call_announced"
+	| "reasoning_only"
+	| "empty";
 
 /**
  * How a normally stopped run closed when it wrote no answer. `no_answer` is a failed request: nothing answers it, and a
  * call the model only wrote out never ran. `quiet` did real tool work and simply wrote no closing message, which is a
- * finished turn missing its summary and not the same failure.
+ * finished turn missing its summary and not the same failure. `call_not_run` answered in prose and then wrote a call
+ * that never ran, so the answer stands and the turn owes the operator that one fact.
  */
 export type TurnEnding =
-	| { kind: "no_answer"; cause: TurnNoAnswerCause; toolsRan: number }
-	| { kind: "quiet"; toolsRan: number };
+	| { kind: "no_answer"; cause: TurnNoAnswerCause; toolsRan: number; writtenTools?: ReadonlyArray<string> }
+	| { kind: "quiet"; toolsRan: number }
+	| { kind: "call_not_run"; toolsRan: number; writtenTools: ReadonlyArray<string> };
 
 /** The notice key the status surface reads as the one re-prompt for a written-out tool call starting. */
 export const TOOL_MARKUP_REPROMPT_NOTICE_KEY = "turn.tool-markup-reprompt";
@@ -310,6 +317,34 @@ export function endedOnCancelledInterview(messages: ReadonlyArray<unknown>): boo
 	return last?.role === "toolResult" && last.toolName === ToolNames.AskUser && last.details?.cancelled === true;
 }
 
+/**
+ * Stamps a settled reply that ended on calls it only wrote out, with the tools they named. Only the turn runtime knows
+ * the session's surface, and the stamp rides the message so a replay and every later reader get the same reading.
+ */
+export function noteWrittenCalls(message: AgentMessage, onSurface: (tool: string) => boolean): void {
+	if ((message as { stopReason?: unknown }).stopReason !== "stop" || hasStructuredToolCall(message)) return;
+	const written = readTrailingWrittenCalls(extractText(message), onSurface);
+	if (written !== null) (message as { clioCoderWrittenCalls?: string[] }).clioCoderWrittenCalls = written.tools;
+}
+
+/** The tools a settled reply only wrote out, as {@link noteWrittenCalls} recorded them. */
+export function writtenCallsOf(message: unknown): ReadonlyArray<string> {
+	const stamped = (message as { clioCoderWrittenCalls?: unknown } | null | undefined)?.clioCoderWrittenCalls;
+	return Array.isArray(stamped) ? (stamped as string[]) : [];
+}
+
+/** A reply's text as the operator reads it: the calls it only wrote out are stated by its receipt instead. */
+export function proseBeforeWrittenCalls(message: unknown, text: string): string {
+	const tools = writtenCallsOf(message);
+	if (tools.length === 0) return text;
+	return readTrailingWrittenCalls(text, (tool) => tools.includes(tool))?.prose ?? text;
+}
+
+/** One written call by name, several by count, for a fact on a receipt. */
+export function writtenCallsFact(tools: ReadonlyArray<string>): string {
+	return tools.length === 1 ? `written ${tools[0]} call did not run` : `${tools.length} written calls did not run`;
+}
+
 export function classifyTurnEnding(messages: ReadonlyArray<AgentMessage>): TurnEnding | null {
 	const last = [...messages].reverse().find((message) => message?.role === "assistant");
 	if (last === undefined) return null;
@@ -318,9 +353,12 @@ export function classifyTurnEnding(messages: ReadonlyArray<AgentMessage>): TurnE
 	const toolsRan = messages.filter(ranRealTool).length;
 	const text = extractText(last).trim();
 	if (text.length > 0) {
-		return stripDeadToolCallMarkup(text).length === 0
-			? { kind: "no_answer", cause: "tool_call_as_text", toolsRan }
-			: null;
+		if (stripDeadToolCallMarkup(text).length === 0) return { kind: "no_answer", cause: "tool_call_as_text", toolsRan };
+		const writtenTools = writtenCallsOf(last);
+		if (writtenTools.length === 0) return null;
+		return proseAnnouncesCall(proseBeforeWrittenCalls(last, text))
+			? { kind: "no_answer", cause: "tool_call_announced", toolsRan, writtenTools }
+			: { kind: "call_not_run", toolsRan, writtenTools };
 	}
 	const thinking = extractThinking(last);
 	// A route that keeps no reasoning leaves the fact on the message once the text is gone.
@@ -344,6 +382,11 @@ export function turnNoAnswerSentence(ending: Extract<TurnEnding, { kind: "no_ans
 			return `The model wrote a tool call into its reasoning instead of making it, so that call did not run.${earlier}`;
 		case "tool_call_as_text":
 			return `The model wrote a tool call as plain text instead of making it, so that call did not run.${earlier}`;
+		case "tool_call_announced": {
+			const tools = ending.writtenTools ?? [];
+			const named = tools.length === 1 ? `the ${tools[0]} call` : "those calls";
+			return `The model said what it would do next and wrote ${named} as plain text instead of making ${tools.length === 1 ? "it" : "them"}, so nothing after that ran.${earlier}`;
+		}
 		case "reasoning_only":
 			return "The model reasoned but wrote no reply and made no tool call.";
 		case "empty":
@@ -692,6 +735,8 @@ export function assistantSessionPayload(
 		"toolRounds",
 		"clioCoderAbortReason",
 		"clioCoderReasoningNotRetained",
+		"clioCoderReasoningToolMarkup",
+		"clioCoderWrittenCalls",
 	]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}

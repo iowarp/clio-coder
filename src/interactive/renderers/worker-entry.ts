@@ -148,7 +148,7 @@ function originGlyph(entry: WorkerEntryState): string {
  * else's process and can only name the protocol it was reached through, so it
  * carries that on the agent instead of a route.
  */
-function identityUnits(entry: WorkerEntryState): string[] {
+function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 	const { kind, targetId, wireModelId } = entry.runtime;
 	const route =
 		targetId !== undefined && wireModelId !== undefined ? `${targetId}/${wireModelId}` : (targetId ?? wireModelId);
@@ -162,7 +162,7 @@ function identityUnits(entry: WorkerEntryState): string[] {
 		who,
 		...(entry.helper ? [meta("internal")] : []),
 		...(kind !== "acp" && route !== undefined ? [meta(route)] : []),
-		meta(`run ${entry.runId}`),
+		...(withRunId ? [meta(`run ${entry.runId}`)] : []),
 		// A failover keeps the card; the header says which attempt it shows.
 		...(entry.attempts.length > 1 ? [meta(`attempt ${entry.attempts.length}`)] : []),
 	];
@@ -387,8 +387,8 @@ function failureLines(entry: WorkerEntryState, width: number, inspect = false): 
  * renders only when the caller resolved a key binding for it, so a rebound or
  * unbound key never advertises a wrong chord.
  */
-function actionLine(entry: WorkerEntryState, width: number): string {
-	const identity = `${cardPrefix(entry)}${identityUnits(entry).join(meta(SEPARATOR))}`;
+function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean): string {
+	const identity = `${cardPrefix(entry)}${identityUnits(entry, withRunId).join(meta(SEPARATOR))}`;
 	const status =
 		isPending(entry) || entry.result === undefined
 			? pendingUnit()
@@ -402,7 +402,12 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 	// A narrow row keeps what happened and lets the identity take the cut.
 	if (width < NARROW_CARD_WIDTH) {
 		const lead = `${cardPrefix(entry)}${status} `;
-		return truncateToWidth(`${lead}${identityUnits(entry).join(meta(SEPARATOR))}`, width, GLYPH.ellipsis, false);
+		return truncateToWidth(
+			`${lead}${identityUnits(entry, withRunId).join(meta(SEPARATOR))}`,
+			width,
+			GLYPH.ellipsis,
+			false,
+		);
 	}
 	const full = ` ${status}${elapsed}`;
 	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
@@ -587,6 +592,19 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	);
 }
 
+/** Room the live line keeps for its label and facts when it picks which of the worker's words to show. */
+const PROGRESS_FACTS_ROOM = 40;
+
+/** The end of what a worker has written so far, from a word boundary, so the row moves as the stream does. */
+function latestWords(text: string, room: number): string {
+	const flat = text.replace(/\s+/gu, " ").trim();
+	const limit = Math.max(16, room);
+	if (flat.length <= limit) return flat;
+	const tail = flat.slice(flat.length - limit + 1);
+	const space = tail.indexOf(" ");
+	return `${GLYPH.ellipsis}${space > 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail}`;
+}
+
 /**
  * A running card's one live line, rewritten in place: what it is doing now,
  * how long it has run, and what it has spent. No spinner; the panel's clock
@@ -599,10 +617,11 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 		width - RAIL_WIDTH - 2 - (!includeTimer || elapsed === undefined ? 0 : elapsed.length + SEPARATOR.length);
 	const action = describedAction(entry, waitRoom);
 	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
+	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
 	const answer =
-		entry.helper || action !== null
+		entry.helper || action !== null || (entry.progress?.phase !== undefined && entry.progress.phase !== "writing")
 			? ""
-			: answerText(entry, stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
+			: latestWords(answerText(entry, stripDeadToolCallMarkup(entry.text)), width - RAIL_WIDTH - PROGRESS_FACTS_ROOM);
 	// A wait on the operator is not a tool running, so it carries the mark every other human wait does.
 	const actionGlyph = entry.progress?.awaitingApproval === true ? GLYPH.phaseBlocked : GLYPH.phaseTool;
 	const doing =
@@ -787,7 +806,8 @@ export function renderWorkerEntryLines(
 		...council,
 		...group,
 		...(inspect || options.siblings === undefined
-			? [actionLine(entry, safeWidth)]
+			? // The run's id is for looking it up, so the rows that inspect a run state it and the transcript's card does not.
+				[actionLine(entry, safeWidth, inspect || detail.style === "detailed")]
 			: [alignedHeader(entry, safeWidth, nowMs, options.siblings)]),
 		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
 		...(metrics.length ? railLines(joinFacts(metrics), "toolMetadata", safeWidth) : []),

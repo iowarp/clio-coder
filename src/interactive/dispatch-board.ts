@@ -1712,6 +1712,8 @@ export function createDispatchBoardView(
 	};
 }
 
+const HIDDEN_RUNS_NAMED = 3;
+
 /** What the runs off the card are doing, so a queued or failed one is not hidden behind a count. */
 function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
 	const counts = new Map<string, number>();
@@ -1727,10 +1729,10 @@ function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
 	const states = [...counts].map(([label, count]) => `${count} ${label}`).join(" · ");
 	// One state alone is the whole count: `+ 1 more · 1 queued` reads as two runs.
 	if (counts.size > 1) return `+ ${hidden.length} more · ${states} · /fleet`;
-	// A lone run off the card is named, because a count sends the reader to /fleet just to learn which.
-	const lone = hidden.length === 1 ? hidden[0] : undefined;
-	return lone?.kind === "run"
-		? `+ ${states} · ${sanitizeCallTargetText(lone.row.agentId)} · /fleet`
+	// A few runs off the card are named, because a count sends the reader to /fleet just to learn which.
+	const named = hidden.flatMap((item) => (item.kind === "run" ? [sanitizeCallTargetText(item.row.agentId)] : []));
+	return named.length === hidden.length && named.length <= HIDDEN_RUNS_NAMED
+		? `+ ${states} · ${[...new Set(named)].join(", ")} · /fleet`
 		: `+ ${states} · /fleet`;
 }
 

@@ -52,7 +52,7 @@ import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { ComposerKeyContext } from "./footer/key-hints.js";
-import { type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
+import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
 import { activeTaskRail, composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
@@ -109,6 +109,8 @@ export interface InteractivePresentationFactories {
 }
 
 export interface InteractivePresentationDeps {
+	/** How many of the main turn's own calls are parked on the operator. */
+	getParkedCallCount?: () => number;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
 	getExtensionStatus?: () => ReadonlyArray<string>;
@@ -735,7 +737,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				const name = modelNickname(out ?? route?.model);
 				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
 				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
-				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 : 0;
+				// Beside other work a phase must say whose it is, so a rail wide enough to name it holds that name back from the
+				// lesser facts too. A narrower rail has no name to show, and reserving for one would only cost the phase its clock.
+				const named = width >= 100 ? visibleWidth(name) + 1 : 0;
+				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 + named : 0;
 				const presented = composerPhasePresentation(
 					status,
 					width,
@@ -776,6 +781,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { ...readiness, ...(quiet ? { label: "is idle" } : {}), detail };
 		},
 		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
+		getBesideCard: (room) =>
+			besideCardDetail(currentLiveWork(), room, {
+				streaming: deps.chat.isStreaming(),
+				parked: (deps.getParkedCallCount?.() ?? 0) > 0,
+			}),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
 			: {}),

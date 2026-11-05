@@ -8,6 +8,7 @@ import {
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { readTrailingWrittenCalls } from "../../src/core/tool-call-markup.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import { createGrantBroker } from "../../src/domains/dispatch/grant-broker.js";
 import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
@@ -34,7 +35,7 @@ import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
-import { railDetail } from "../../src/interactive/footer/live-work.js";
+import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
@@ -58,7 +59,11 @@ import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-e
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
-import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
+import {
+	classifyTurnEnding,
+	noteWrittenCalls,
+	proseBeforeWrittenCalls,
+} from "../../src/session-control/chat-loop-messages.js";
 import { loopTransitionNotices } from "../../src/session-control/loop-command.js";
 import {
 	type AgentStatus,
@@ -914,6 +919,40 @@ test("a run reads as no answer only when nothing answers it and a run with real 
 	strictEqual(cause([reply([{ type: "toolCall", id: "a", name: "bash", arguments: {} }], "toolUse")]), null);
 });
 
+test("a reply that ended on a call to a session tool is told apart from one that quotes markup", () => {
+	const markup = (tool: string) => `<tool_call>\n{"name": "${tool}", "arguments": {"path": "a"}}\n</tool_call>`;
+	const onSurface = (tool: string) => tool === "edit" || tool === "read";
+	const read = (text: string) => readTrailingWrittenCalls(text, onSurface)?.tools ?? null;
+
+	deepStrictEqual(read(`I will apply the fix now. ${markup("edit")}`), ["edit"]);
+	deepStrictEqual(read(`Reading both.\n${markup("read")}\n${markup("edit")}`), ["read", "edit"]);
+	deepStrictEqual(read("Let me look.\n<function=read><parameter=path>a</parameter></function>"), ["read"]);
+	deepStrictEqual(read("<tool_call><function=read><parameter=path>a</parameter></function></tool_call>"), ["read"]);
+	// A quote: mid-text, finishing a sentence, inside a fence, not a tool here, or not a call at all.
+	strictEqual(read(`The model wrote ${markup("edit")} here.`), null);
+	strictEqual(read(`The model wrote ${markup("edit")}`), null);
+	strictEqual(read(`Like this:\n\n\`\`\`\n${markup("edit")}\n\`\`\``), null);
+	strictEqual(read(`Like this:\n\n\`\`\`\n${markup("edit")}`), null);
+	strictEqual(read(`Another agent uses this.\n${markup("get_weather")}`), null);
+	strictEqual(read("The opener is written <tool_call> in the template."), null);
+	strictEqual(read("Done.\n<tool_call>\n{not json}\n</tool_call>"), null);
+
+	const reply = (text: string) => {
+		const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" } as never;
+		noteWrittenCalls(message, onSurface);
+		return message;
+	};
+	const announced = classifyTurnEnding([reply(`I will apply the fix now. ${markup("edit")}`)]);
+	strictEqual(announced?.kind === "no_answer" ? announced.cause : announced?.kind, "tool_call_announced");
+	const answered = reply(`The bug is on line 4, and nothing was changed.\n\n${markup("edit")}`);
+	deepStrictEqual(classifyTurnEnding([answered]), { kind: "call_not_run", toolsRan: 0, writtenTools: ["edit"] });
+	strictEqual(
+		proseBeforeWrittenCalls(answered, `The bug is on line 4, and nothing was changed.\n\n${markup("edit")}`),
+		"The bug is on line 4, and nothing was changed.",
+	);
+	strictEqual(classifyTurnEnding([reply(`The model wrote ${markup("edit")} here.`)]), null);
+});
+
 test("a no-answer receipt says why, with or without usage, and never wears the green check", () => {
 	const message = {
 		role: "assistant",
@@ -1276,6 +1315,46 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		);
 	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
 	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
+});
+
+test("the rail names who is working beside the main turn and what a card is not holding up", () => {
+	const row = (agentId: string, phase: string, awaitingApproval = false) =>
+		({
+			agentId,
+			status: "running",
+			progress: { phase, currentAction: null, awaitingApproval },
+		}) as unknown as DispatchBoardRow;
+	const writing: AgentStatus = { ...INITIAL_STATUS, phase: "writing" };
+	const facts = (workers: DispatchBoardRow[], status: AgentStatus = writing) => ({
+		actor: "Judge-model",
+		status,
+		workers,
+		workerActivity: (worker: DispatchBoardRow) => worker.progress?.phase ?? "",
+		background: [],
+		now: 0,
+	});
+	const two = [row("verifier", "writing"), row("coder", "thinking")];
+	strictEqual(railDetail(facts(two), 100), "verifier writing · coder thinking");
+	// A short rail keeps the count, and three workers name two.
+	strictEqual(railDetail(facts(two), 30), "verifier writing · +1 more");
+	strictEqual(railDetail(facts([...two, row("reviewer", "tool")]), 100), "verifier writing · coder thinking · +1 more");
+	// The worker asking is the card, so the rail says what else goes on, whole or not at all.
+	const asking = [row("coder", "tool", true), row("verifier", "writing")];
+	const running = { streaming: true, parked: false };
+	const idle = { streaming: false, parked: false };
+	strictEqual(besideCardDetail(facts(asking), 80, running), "the main turn keeps running · verifier writing");
+	strictEqual(besideCardDetail(facts(asking), 20, running), "verifier writing");
+	strictEqual(besideCardDetail(facts(asking), 5, running), null);
+	strictEqual(besideCardDetail(facts([row("coder", "tool", true)]), 80, idle), null);
+	// The main turn's own parked call is the card, even with a worker's ask queued behind it.
+	strictEqual(besideCardDetail(facts(asking), 80, { streaming: true, parked: true }), "verifier writing");
+	// The main turn's own question is not the main turn running.
+	const interviewing = {
+		...INITIAL_STATUS,
+		phase: "tool_running" as const,
+		tool: { toolName: "ask_user" },
+	} as unknown as AgentStatus;
+	strictEqual(besideCardDetail(facts([row("verifier", "writing")], interviewing), 80, running), "verifier writing");
 });
 
 test("a route pick says what it does to the running turn, and only what is still true", () => {
