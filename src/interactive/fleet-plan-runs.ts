@@ -43,7 +43,7 @@ function settledDetail(outcome: FleetRunStepOutcome): string | undefined {
 	const record = outcome.codeStep;
 	if (record !== undefined) {
 		const exit = record.timedOut ? "timed out" : `exit ${record.exitCode}`;
-		return `${exit} · ${record.durationMs}ms`;
+		return `${exit} · ${record.durationMs < 1000 ? `${record.durationMs}ms` : `${(record.durationMs / 1000).toFixed(1)}s`}`;
 	}
 	return outcome.failureReason;
 }

@@ -1469,7 +1469,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	overlayLifecycle = createOverlayLifecycle({
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
-		getDispatchRows: () => dispatchBoardStore.rows(),
+		getDispatchRows: () => dispatchBoardStore.workerRows(),
 		app: { ...deps, ...settingActions },
 		tui,
 		footer,

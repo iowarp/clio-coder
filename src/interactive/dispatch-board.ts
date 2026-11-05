@@ -661,7 +661,14 @@ export function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: n
 	return plan.steps.map((step) => {
 		const mark = PLAN_STEP_MARKS[step.state];
 		// A step still pending at the end was never reached; while the plan runs it is only waiting.
-		const word = step.state === "pending" && plan.state === "running" ? "waiting" : mark.word;
+		const word =
+			step.state !== "pending"
+				? mark.word
+				: plan.state === "running"
+					? "waiting"
+					: plan.state === "unsettled"
+						? "no result"
+						: mark.word;
 		const facts = [word, ...(step.detail !== undefined ? [step.detail] : []), step.label];
 		const lead = `${theme.fg(mark.token, mark.glyph)} ${theme.fg("body", step.stepId.padEnd(nameWidth))}  `;
 		return truncateToWidth(
@@ -1196,6 +1203,8 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 		case "running":
 		case "stale":
 		case "cancelling": {
+			// The worker is being stopped; its last phase would read as work finishing normally.
+			if (row.status === "cancelling") return { text: "stopping", tone: "warning" };
 			const progress = row.progress;
 			if (progress) {
 				if (progress.awaitingApproval === true) return { text: WAITING_FOR_APPROVAL, tone: "warning" };
@@ -1819,6 +1828,8 @@ export function createDispatchBoardStore(
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	/** Every worker run, without the plan rows: what a count or usage of workers reads. */
+	workerRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
 	/** Plans this session started and the durable ones before it; their rows join `rows()` but never `activeRows()`. */
@@ -1857,6 +1868,7 @@ export function createDispatchBoardStore(
 			);
 		},
 		activeRows: () => projectRows(true),
+		workerRows: () => projectRows(false),
 		reconcile() {
 			projection.reconcileRuns();
 			current = projection.snapshot();

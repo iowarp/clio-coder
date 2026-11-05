@@ -56,6 +56,11 @@ import {
 	zipColumns,
 } from "./widgets.js";
 
+/** A plan row stands for a whole fleet plan, and a finished one can predate this process. Neither is a worker. */
+function workerRowsOf(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<DispatchBoardRow> {
+	return rows.filter((row) => row.plan === undefined);
+}
+
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
 /** At this width and above a page lays its sections out in two columns. */
@@ -153,7 +158,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		],
 		width,
 	);
-	const rows = state.dispatchRows;
+	const rows = workerRowsOf(state.dispatchRows);
 	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const done = rows.filter((row) => row.status === "completed");
 	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status));
@@ -433,9 +438,10 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const resource = state.resources;
 	const capacity = state.agent.localCapacity;
 	const memory = state.session.memoryIntervention;
-	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
-	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
-	const failed = state.dispatchRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
+	const workerRows = workerRowsOf(state.dispatchRows);
+	const active = workerRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const completed = workerRows.filter((row) => row.status === "completed").length;
+	const failed = workerRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
 	const toolCalls = Object.values(state.toolCounts.tools).reduce((a, b) => a + b, 0);
 	const value = (text: string): string =>
 		theme.fg(
@@ -691,7 +697,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
 			: null;
-	const workers = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const workers = workerRowsOf(state.dispatchRows).filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const plans = state.dispatchRows.filter((row) => row.plan !== undefined && row.status === "running").length;
 	const skills = state.session.activeSkills ?? [];
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	// Idle and off say nothing: the line names memory only while it works or cannot.
@@ -708,6 +715,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
+		plans ? theme.fg("activity", `${plans} ${plans === 1 ? "plan" : "plans"}`) : "",
 		memoryFact,
 		skills.length
 			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
