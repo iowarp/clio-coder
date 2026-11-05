@@ -185,7 +185,7 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 	// the operator configured, rather than by its agent id.
 	const who =
 		entry.council !== undefined
-			? councilLabelText(theme, entry.council.label, entry.council.color)
+			? councilLabelText(theme, isSynthesis(entry) ? "council" : entry.council.label, entry.council.color)
 			: theme.fg("workerIdentity", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
 	return [
 		who,
