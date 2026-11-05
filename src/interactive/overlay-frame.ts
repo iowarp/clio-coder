@@ -429,6 +429,7 @@ export type OverlayEscVerb =
 	| "back, keeps draft"
 	| "back to list"
 	| "back to edit"
+	| "back to models"
 	| "back to choices"
 	| "back to sections"
 	| "cancel filter"

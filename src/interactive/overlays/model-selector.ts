@@ -109,6 +109,8 @@ export interface OpenModelOverlayDeps {
 	autoRefresh?: boolean;
 	/** What a pick would do to the turn in flight, asked on every frame so it stays true up to the Enter. */
 	turnEffect?: () => string | null;
+	/** The row to select on open, as `target/model`, when the picker reopens on a pick the operator backed out of. */
+	initialSelection?: string;
 }
 
 function healthToken(status: TargetStatus): ClioToken {
@@ -1365,7 +1367,8 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		},
 		deps.turnEffect,
 	);
-	if (activeTarget && activeModel) view.setSelectedValue(`${activeTarget}/${activeModel}`);
+	if (deps.initialSelection) view.setSelectedValue(deps.initialSelection);
+	else if (activeTarget && activeModel) view.setSelectedValue(`${activeTarget}/${activeModel}`);
 	const unsubscribeHealth = deps.bus?.subscribe("provider.health_changed", () => {
 		if (view.isDisposed()) return;
 		view.replaceItems(build());

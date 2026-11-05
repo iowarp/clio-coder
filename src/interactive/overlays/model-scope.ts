@@ -33,8 +33,13 @@ export interface OpenModelScopeOverlayDeps {
 	ref: PendingModelScope;
 	/** Called only for an applying choice. */
 	onChoose: (scope: ModelScopeChoice) => void;
-	/** Called for the explicit Cancel row and for Esc. Nothing has changed yet. */
+	/** Called for the explicit Cancel row, and for Esc when there is nothing to go back to. Nothing has changed yet. */
 	onCancel: () => void;
+	/**
+	 * Esc from a card the picker opened: back to the picker with the same row
+	 * selected, because backing out of the destination is not abandoning the pick.
+	 */
+	onBack?: () => void;
 	/** What choosing does to the turn in flight, asked on every frame so it stays true up to the Enter. */
 	turnEffect?: () => string | null;
 	/** What the swap costs the session's history, when it costs anything. Sized once: choosing does not change it. */
@@ -45,8 +50,8 @@ export interface OpenModelScopeOverlayDeps {
 
 /** The swap as the operator typed it, for the dialog title. */
 export function formatPendingModelScope(ref: PendingModelScope): string {
-	const thinking = ref.thinkingLevel ? ` thinking=${ref.thinkingLevel}` : "";
-	return `${ref.target}/${ref.model}${thinking}`;
+	const thinking = ref.thinkingLevel ? ` with thinking ${ref.thinkingLevel}` : "";
+	return `${ref.target} · ${ref.model}${thinking}`;
 }
 
 /** Three outcomes, least durable first, matching the settings center's order. */
@@ -89,7 +94,7 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		deps.onCancel();
 	};
 	list.onCancel = (): void => {
-		deps.onCancel();
+		(deps.onBack ?? deps.onCancel)();
 	};
 
 	const effect: Component = {
@@ -111,6 +116,6 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		width: MODEL_SCOPE_OVERLAY_WIDTH,
 		markerId: "model-scope",
 		title: `Apply ${formatPendingModelScope(deps.ref)}`,
-		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
+		footerHint: buildHint([{ key: "Enter", verb: "select" }], deps.onBack ? "back to models" : "close"),
 	});
 }
