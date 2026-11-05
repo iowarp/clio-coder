@@ -1065,9 +1065,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		applyChatEvent: (event) => chatRenderer.applyEvent(event),
 		setFollowUpMessages: (messages) => {
 			followUpQueuePanel.setMessages(messages);
-			// A drained queue leaves the navigator nothing to work on; left open it came back
-			// empty from behind the next approval card and swallowed what was typed next.
-			if (messages.length === 0 && overlayLifecycle.getState() === "queue-navigator") overlayLifecycle.closeOverlay();
+			// A navigator on screen stays open when the run drains the queue under it and
+			// says so, because closing it handed the next key, meant for a message, to the
+			// composer. One drained behind an approval card is put away when the card closes
+			// (`restorable` in the overlay lifecycle).
 		},
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
 		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
