@@ -1402,6 +1402,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let submitGeneration = 0;
 	let disposed = false;
 	const context = createTurnContext({
+		isTurnActive: () => turnActive,
 		turnSignal: () => submitOwner?.signal,
 		standingTurnConstraints: () => sessionToolLimits,
 		interactiveGuidance: deps.interactiveGuidance === true,

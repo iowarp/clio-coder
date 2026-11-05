@@ -183,6 +183,8 @@ const AUTO_COMPACT_FAILURE_LIMIT = 3;
 
 export interface TurnContextDeps {
 	getAutonomy?: () => AutonomyLevel;
+	/** A submit is between its start and its settle, so the runtime it built is still the route it runs on. */
+	isTurnActive?: () => boolean;
 	turnSignal?: () => AbortSignal | undefined;
 	/**
 	 * The session's standing tool limits (operator flags, an ACP ceiling). The
@@ -1006,6 +1008,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 		}
 		return { contextWindow: 0, contextWindowSource: null, contextWindowSlots: null };
+	};
+
+	/**
+	 * Between turns the next request goes out on the route in settings, and the runtime or publication on hand may
+	 * still describe the last one until a rebuild lands. A read then states the picked route's window from the frame
+	 * the route changed. A turn in flight stays on the route it started with.
+	 */
+	const routeSuperseded = (targetId: string | null | undefined, modelId: string | null | undefined): boolean => {
+		const route = deps.getSettings().chat;
+		const target = route?.target?.trim();
+		const model = route?.model?.trim();
+		if (!target || !model || state.streaming || deps.isTurnActive?.() === true) return false;
+		return targetId !== target || modelId !== model;
 	};
 
 	const anchorModelKey = (agentRuntime: AgentRuntime): string => {
@@ -3142,8 +3157,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// second time when it becomes settled history.
 			const tokens =
 				view.inputTokens === null ? null : view.inputTokens + (state.streaming ? liveStreamingOutputTokens() : 0);
+			const window = routeSuperseded(view.targetId, view.modelId)
+				? windowWithoutRuntime().contextWindow
+				: view.effectiveWindow;
 			return {
-				...contextUsageSnapshot(tokens, view.effectiveWindow, view.breakdown ?? undefined),
+				...contextUsageSnapshot(tokens, window, view.breakdown ?? undefined),
 				revision: view.revision,
 				inputSource: view.inputSource,
 				historical: view.historical,
@@ -3157,11 +3175,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// included) the window comes from the live resolution or the resumed
 			// snapshot, and the token facts from the snapshot: the resumed
 			// messages are the ones it measured.
-			const window = state.runtime
+			const routed = state.runtime && !routeSuperseded(state.runtime.targetId, state.runtime.wireModelId) ? state.runtime : null;
+			const window = routed
 				? {
-						contextWindow: state.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
-						contextWindowSource: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSource,
-						contextWindowSlots: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSlots,
+						contextWindow: routed.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+						contextWindowSource: routed.runtimeResolution.contextWindowDetails.contextWindowSource,
+						contextWindowSlots: routed.runtimeResolution.contextWindowDetails.contextWindowSlots,
 					}
 				: windowWithoutRuntime();
 			const compactionThreshold = window.contextWindow > 0 ? (settings.context.compaction?.threshold ?? null) : null;
@@ -3170,18 +3189,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				window.contextWindow,
 				compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD,
 				settings.context.compaction.maxTokens,
-				state.runtime?.agent.state.model ??
+				routed?.agent.state.model ??
 					getCatalogModelForRuntime(
-						state.runtime?.runtimeId ??
-							currentContextSnapshot?.runtimeId ??
+						routed?.runtimeId ??
+							(state.runtime ? undefined : currentContextSnapshot?.runtimeId) ??
 							settings.targets.find((target) => target.id === settings.chat.target)?.runtime ??
 							"",
-						state.runtime?.wireModelId ?? settings.chat.model ?? "",
+						routed?.wireModelId ?? settings.chat.model ?? "",
 					),
 			);
 			const compactionCeilingTokens = economic.ceilingTokens;
-			const provider = state.runtime?.targetId ?? settings.chat?.target ?? null;
-			const model = state.runtime?.wireModelId ?? settings.chat?.model ?? null;
+			const provider = routed?.targetId ?? settings.chat?.target ?? null;
+			const model = routed?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
 
 			if (!currentContextSnapshot) {
