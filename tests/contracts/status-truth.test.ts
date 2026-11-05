@@ -404,6 +404,24 @@ test("silence alone never claims a load, and only a word from the target earns o
 	match(composerPhasePresentation(waitOnRequest({ coldAtSend: "sleeping" }, at), 200, late).label, /asleep when sent/);
 });
 
+test("a probe's word stands on a target Clio only observes and yields to a reconcile that looked", () => {
+	const at = 1_000_000;
+	const fresh = (): ModelRequestFacts => ({
+		sentAt: at,
+		firstByteAt: null,
+		bytesObservable: true,
+		probedResidency: "absent",
+	});
+	const observed = fresh();
+	applyModelAdmission(observed, { stage: "admitted" }, at + 1);
+	strictEqual(observed.probedResidency, "absent");
+	strictEqual(observed.sentAt, at);
+	const looked = fresh();
+	applyModelAdmission(looked, { stage: "resident" }, at + 1);
+	applyModelAdmission(looked, { stage: "admitted" }, at + 2);
+	strictEqual(looked.probedResidency, undefined);
+});
+
 test("a wait with every known slot taken is a wait for a slot, and an unknown limit never becomes one", () => {
 	const at = 1_000_000;
 	const slots = { limit: 1, workers: 1, reservations: 0, otherRequests: 0 };

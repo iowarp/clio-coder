@@ -31,6 +31,8 @@ export type ModelAdmissionEvent =
 	| { stage: "restoring"; model: string }
 	/** The target loads on demand and said just now that the model is not serving, so this request pays for it. */
 	| { stage: "cold"; state: "absent" | "sleeping" }
+	/** A reconcile looked and found the model serving, which outranks whatever an older probe said. */
+	| { stage: "resident" }
 	/** Nothing further stands in the way: the request goes out now. */
 	| { stage: "admitted" }
 	| { stage: "abandoned" };
@@ -75,6 +77,10 @@ export function applyModelAdmission(
 	switch (event.stage) {
 		case "cold":
 			facts.coldAtSend = event.state;
+			facts.probedResidency = undefined;
+			return;
+		case "resident":
+			facts.probedResidency = undefined;
 			return;
 		case "abandoned":
 			if (current?.stage === "loading") facts.abandonedLoad = true;
@@ -83,7 +89,7 @@ export function applyModelAdmission(
 		case "admitted": {
 			if (current?.stage === "loading") facts.loadedInMs = Math.max(0, now - current.since);
 			facts.admission = null;
-			facts.probedResidency = undefined;
+			if (facts.admissionBeganAt !== undefined) facts.probedResidency = undefined;
 			if (facts.admissionBeganAt !== undefined) facts.sentAt = now;
 			return;
 		}

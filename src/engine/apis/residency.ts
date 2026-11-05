@@ -854,6 +854,7 @@ async function reconcileResidencyState(adapter: ResidencyAdapter, lockHeld: bool
 
 	const cached = reconcileCache.get(adapter.targetKey);
 	if (cached && cached.modelId === adapter.keepModelId && now() - cached.at < ttl) {
+		if (cached.decision === "reconcile") adapter.onAdmission?.({ stage: "resident" });
 		return {
 			decision: cached.decision,
 			evict: [],
@@ -935,6 +936,7 @@ async function reconcileResidencyState(adapter: ResidencyAdapter, lockHeld: bool
 
 	const plan = decideResidency(facts);
 	adapter.signal?.throwIfAborted();
+	if (plan.decision === "reconcile" && plan.keepResident) adapter.onAdmission?.({ stage: "resident" });
 
 	// An eviction is only justified if the load it makes room for can succeed.
 	// Unloading first and discovering afterwards that the keep model does not

@@ -534,8 +534,9 @@ function admissionFacts(
 						: `Clio ${holder.host ? `on ${holder.host} ` : ""}pid ${holder.pid}`;
 			const held: RailFact = {
 				text: who === null ? "holder unknown" : `held by ${who}${holder?.wants ? ` for ${nickname(holder.wants)}` : ""}`,
-				...(who === null ? {} : { short: `held by ${who}` }),
-				keep: 6,
+				...(holder === null ? {} : { short: holder.self ? "held by this Clio" : `held by pid ${holder.pid}` }),
+				// With room to name the owner, naming it outranks the long form of the way out.
+				keep: room >= 58 ? RAIL_ACTION_KEEP : 6,
 			};
 			return {
 				head: "is waiting for the residency lock",

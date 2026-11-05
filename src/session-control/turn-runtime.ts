@@ -474,6 +474,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// Unexpected provider-contract failures retry after the TTL.
 			}
 			if (disposed) return;
+			// Any probe's word counts for the rail, including the silent one that spends the TTL before a submit.
+			const probed = modelResidencyForStatus(status, wireModelId);
+			coldAtProbe = probed === "absent" || probed === "loading" ? { targetId, modelId: wireModelId, state: probed } : null;
 			if (!options?.silent) announceColdModel(status, targetId, wireModelId);
 			// A passive refresh must update the attached model and footer budget too;
 			// the provider status alone is otherwise invisible until the next submit.
@@ -500,8 +503,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	}, TARGET_PROBE_POLL_MS);
 	selectedRoutePoll.unref();
 
-	/** The last probe's word on the selected model when it was not serving, for the request that goes out on it. */
-	let coldAtProbe: { modelId: string; state: "absent" | "loading" } | null = null;
+	/** The last probe's word on the selected model when it was not serving, until the target answers a request on it. */
+	let coldAtProbe: { targetId: string; modelId: string; state: "absent" | "loading" } | null = null;
 	/** One notice per target+model+state, so a repeated probe stays quiet. */
 	const announcedColdModels = new Set<string>();
 	const announceColdModel = (
@@ -509,8 +512,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		targetId: string,
 		wireModelId: string,
 	): void => {
-		const probed = modelResidencyForStatus(status, wireModelId);
-		coldAtProbe = probed === "absent" || probed === "loading" ? { modelId: wireModelId, state: probed } : null;
 		const notice = coldModelNotice(status, targetId, wireModelId);
 		if (!notice) return;
 		if (announcedColdModels.has(notice.key)) return;
@@ -966,7 +967,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							firstByteAt: null,
 							bytesObservable: tracking.observesResponses(),
 						};
-						if (coldAtProbe?.modelId === currentModel.id) facts.probedResidency = coldAtProbe.state;
+						if (coldAtProbe?.modelId === currentModel.id && coldAtProbe.targetId === target.target.id) {
+							facts.probedResidency = coldAtProbe.state;
+						}
 						state.modelRequest = facts;
 						let slotsReadAt = 0;
 						state.refreshModelRequest = () => {
@@ -992,6 +995,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								if (args[0].status >= 200 && args[0].status < 300) {
 									attempt?.mark("firstByte");
 									if (state.modelRequest) state.modelRequest.firstByteAt ??= Date.now();
+									coldAtProbe = null;
 								}
 								await request.options?.onResponse?.(...args);
 							},
