@@ -73,6 +73,7 @@ import {
 	renderToolAwaitingApproval,
 	renderToolExecution,
 	renderToolPreview,
+	stopSentRow,
 	type ToolExecutionFinished,
 	type ToolFoldFamily,
 	toolFoldFamily,
@@ -518,6 +519,8 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
+	/** When the operator asked the running turn to stop, on the panel's clock; null while no stop is pending. */
+	getStopRequestedAt?: () => number | null;
 	/** The target the running turn was sent to, which the wire protocol on its messages does not say. */
 	getRunTarget?: () => string | null;
 	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
@@ -1362,6 +1365,7 @@ function renderToolSegmentLines(
 	unbounded: boolean,
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
+	stopRequestedAt: number | null = null,
 ): string[] {
 	const call = {
 		toolCallId: seg.id,
@@ -1391,13 +1395,19 @@ function renderToolSegmentLines(
 	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
 	if (seg.finished) return renderToolPreview(finished, width, detail, { ...options, terminalRows });
 	seg.live ??= new LiveToolView();
-	return renderToolPreview(call, width, detail, {
+	// A command the model asked for keeps running until its process exits, so a stop that went out is its own row.
+	const stopRow =
+		stopRequestedAt !== null && seg.executionStarted && shellActor(seg).actor !== undefined
+			? [stopSentRow(Math.max(0, nowMs - stopRequestedAt), width)]
+			: [];
+	const rows = renderToolPreview(call, width, detail, {
 		...options,
 		terminalRows,
 		partialResult: seg.partialResult,
 		live: seg.live,
 		...(seg.previewDiff !== undefined ? { previewDiff: seg.previewDiff } : {}),
 	});
+	return [...rows, ...stopRow];
 }
 
 /** Shell-class calls say who started the process. Anything else already reads as a named action. */
@@ -1545,6 +1555,7 @@ function renderEntryLines(
 	terminalRows: number,
 	previous?: TranscriptEntry,
 	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry">,
+	stopRequestedAt: number | null = null,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
@@ -1686,7 +1697,15 @@ function renderEntryLines(
 				flushReasoning("action");
 				let rows = seg.finished && seg.settledRows?.key === settledKey ? seg.settledRows : undefined;
 				if (rows === undefined) {
-					const lines = renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows);
+					const lines = renderToolSegmentLines(
+						seg,
+						width,
+						nowMs,
+						unboundedToolBodies,
+						detail,
+						terminalRows,
+						seg.finished ? null : stopRequestedAt,
+					);
 					rows = { key: settledKey, lines, body: hasToolBody(lines) };
 					if (seg.finished) seg.settledRows = rows;
 				}
@@ -2676,6 +2695,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					terminalRows,
 					previous,
 					workerRenderOptions(entry),
+					options.getStopRequestedAt?.() ?? null,
 				);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {

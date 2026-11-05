@@ -443,6 +443,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
+		getStopRequestedAt: () => {
+			const status = statusController.current();
+			return status.phase === "cancelling" ? (status.cancelRequestedAt ?? null) : null;
+		},
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
 		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
 		requestRender,

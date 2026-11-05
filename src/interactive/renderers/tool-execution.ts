@@ -1974,6 +1974,18 @@ export interface BashTranscriptExecution {
 }
 
 /**
+ * The row a running command's card carries once a stop went out: that it went out, how long ago, and that the process
+ * has not exited yet. The model's own command card read `running` beside a rail reading `stopping` (HS18).
+ */
+export function stopSentRow(waitMs: number, width: number): string {
+	const age = waitMs >= 1000 ? ` ${formatWaitClock(waitMs)} ago` : "";
+	const words = [`stop sent${age}, waiting for the command to exit`, `stop sent${age}, waiting to exit`, "stopping"];
+	const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
+	const fitted = words.find((text) => visibleWidth(text) <= room) ?? truncateToWidth("stopping", room, "", false);
+	return `${CONTENT_INDENT}${theme.fg("warning", GLYPH.cancelled)} ${toolMeta(fitted)}`;
+}
+
+/**
  * The row a stop request owes the card: while the process runs on, that the stop went out and how long ago; once it
  * exits, how long the stop took when that was long enough to notice. A card reading `you are running` beside a rail
  * reading `stopping` left the operator to guess which was true.
@@ -1991,13 +2003,7 @@ function bashStopRow(execution: BashTranscriptExecution, width: number, killed =
 	if (wait === undefined) {
 		return !execution.running && killed ? settledRow(["killed after it ignored the stop", "killed"]) : null;
 	}
-	if (execution.running) {
-		const age = wait >= 1000 ? ` ${formatWaitClock(wait)} ago` : "";
-		const words = [`stop sent${age}, waiting for the command to exit`, `stop sent${age}, waiting to exit`, "stopping"];
-		const room = Math.max(1, width - CONTENT_INDENT_WIDTH - 2);
-		const fitted = words.find((text) => visibleWidth(text) <= room) ?? truncateToWidth("stopping", room, "", false);
-		return `${CONTENT_INDENT}${theme.fg("warning", GLYPH.cancelled)} ${toolMeta(fitted)}`;
-	}
+	if (execution.running) return stopSentRow(wait, width);
 	const took = formatCompactMs(Math.floor(wait / 100) * 100);
 	if (killed) {
 		return settledRow([
