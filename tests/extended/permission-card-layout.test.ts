@@ -100,7 +100,7 @@ for (const columns of [80, 120, 160]) {
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");
 		ok(opened.includes("Hard-blocked actions remain blocked."));
-		ok(opened.includes("Approval: Approval authorizes one write call to write."));
+		ok(opened.includes("Approval authorizes one write call to write."));
 		ok(opened.includes("Reversible: yes."));
 		body.toggleTerms();
 		strictEqual(body.isShowingTerms(), false);
@@ -130,7 +130,8 @@ test("the footer names the terms key and drops it before any answer key", () => 
 	doesNotMatch(wide, /allow once/u);
 	match(wide, /\[alt\+x\] stop turn/u);
 	const open = permissionOverlayHint(100, false, "closed", "open");
-	match(open, /\[alt\+t\] hide terms/u);
+	match(open, /\[Esc\] hide terms/u);
+	doesNotMatch(open, /\[alt\+t\]/u);
 	// The longer modifier labels shorten at the 80-column box.
 	strictEqual(
 		permissionOverlayHint(80, false, "closed", "closed"),
