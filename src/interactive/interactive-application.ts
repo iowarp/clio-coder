@@ -1801,12 +1801,43 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 	});
 
-	const explainProtectedExit = (): void =>
+	const firstKeyLabel = (id: ClioKeybinding, fallback: string): string =>
+		formatKeyLabel(keybindings.getKeys(id)[0], fallback);
+	/** Answers a refused exit with what is in the way and the key that deals with each thing. */
+	const explainProtectedExit = (pressed = "Ctrl+D"): void => {
+		const running = deps.dispatch.snapshot().running;
+		const queue = deps.chat.queuedMessages();
+		const queued = queue.steer.length + queue.followUp.length;
+		const reasons: string[] = [];
+		const actions: string[] = [];
+		if (running.length > 0) {
+			reasons.push(
+				running.length === 1 ? `${running[0]?.agentId ?? "a worker"} is running` : `${running.length} workers are running`,
+			);
+			actions.push(
+				`${firstKeyLabel("clio-coder.dispatchBoard.toggle", "/fleet")} shows ${running.length === 1 ? "it" : "them"}`,
+			);
+		}
+		if (queued > 0) {
+			reasons.push(`${queued} message${queued === 1 ? " is" : "s are"} queued`);
+			actions.push(`${firstKeyLabel("clio-coder.message.dequeue", "/queue")} restores ${queued === 1 ? "it" : "them"}`);
+		}
+		if (editorSubmit.hasActiveEditorBash()) {
+			reasons.push("a shell command is running");
+			actions.push("Esc stops it");
+		}
+		if (deps.chat.isStreaming() || deps.chat.turnPreparation().phase !== "idle") {
+			reasons.push("a turn is running");
+			actions.push("Esc cancels it");
+		}
+		if (operatorExtensions?.busy) reasons.push("an extension is busy");
+		const why = reasons.length > 0 ? reasons.join(", ") : "work is still running";
 		notify(
-			"info",
-			`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
+			"warning",
+			`${pressed}: not exiting, ${why}. ${[...actions, "/quit stops everything and exits"].join(" · ")}`,
 			"keyboard:exit",
 		);
+	};
 	const exitBlocker = (): "editor" | "work" | "settling" | null => {
 		if (editor.getText().length > 0) return "editor";
 		const queue = deps.chat.queuedMessages();
@@ -1853,7 +1884,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			const queue = deps.chat.queuedMessages();
 			return queue.steer.length + queue.followUp.length > 0;
 		},
-		explainProtectedExit,
+		explainProtectedExit: () => explainProtectedExit("Ctrl+C"),
 		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
@@ -1915,9 +1946,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			leaderArmed = pending;
 		},
 		onShutdownArmedChange: (armed, detail) => {
+			const workers = armed ? deps.dispatch.snapshot().running.length : 0;
 			shutdownArmed = !armed
 				? false
-				: `${detail?.draftKept === true ? "draft kept · " : ""}Ctrl+C again to quit${detail ? ` (${detail.secondsLeft}s)` : ""}`;
+				: [
+						...(detail?.draftKept === true ? ["draft kept"] : []),
+						// Quitting drains the fleet, which is not obvious from a composer with nothing in it.
+						...(workers > 0 ? [`${workers} worker${workers === 1 ? "" : "s"} will stop`] : []),
+						`Ctrl+C again to quit${detail ? ` (${detail.secondsLeft}s)` : ""}`,
+					].join(" · ");
 			// The footer caches its composed text, and arming only requested a frame.
 			// Without a recompose the hint showed when some other refresh happened
 			// to land and the expiry left it standing, so it was never tied to the
