@@ -74,6 +74,11 @@ const DEFAULT_WARNING_TTL_MS = 120_000;
 const DEFAULT_ERROR_TTL_MS = 300_000;
 /** Later work never takes a notice off the footer sooner than this after it appeared. */
 const NOTICE_READING_FLOOR_MS = 8_000;
+/** Key of the notice confirming one applied route, which says something only while that route is the session's. */
+export function routeAppliedNoticeKey(target: string | null | undefined, model: string | null | undefined): string {
+	return `route-applied:${target ?? ""}/${model ?? ""}`;
+}
+
 /** The ended warnings and errors the dashboard can still show. */
 const ENDED_NOTICE_LIMIT = 4;
 
@@ -364,11 +369,17 @@ export interface NotificationCenterOptions {
 	now?: () => number;
 	/** Invoked after any state change (add/dismiss/expiry) so the footer can redraw. */
 	onChange?: () => void;
+	/**
+	 * Whether what a notice states still holds, read on every look at the center. A notice that stops holding is gone
+	 * from that look on and is not kept as an ended one, because its cause ended rather than its time on screen.
+	 */
+	stillTrue?: (notice: Notification) => boolean;
 }
 
 export function createNotificationCenter(options: NotificationCenterOptions = {}): NotificationCenter {
 	const now = options.now ?? (() => Date.now());
 	const onChange = options.onChange ?? (() => {});
+	const stillTrue = options.stillTrue ?? (() => true);
 	const entries: Notification[] = [];
 	const endedEntries: Notification[] = [];
 	let counter = 0;
@@ -407,7 +418,15 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 		endedEntries.length = Math.min(endedEntries.length, ENDED_NOTICE_LIMIT);
 	};
 
+	const dropResolved = (): void => {
+		for (let i = entries.length - 1; i >= 0; i -= 1) {
+			const entry = entries[i];
+			if (entry && !stillTrue(entry)) entries.splice(i, 1);
+		}
+	};
+
 	const prune = (): void => {
+		dropResolved();
 		const current = now();
 		const expired: Notification[] = [];
 		for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -488,6 +507,7 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 			}
 		},
 		list(at) {
+			dropResolved();
 			const current = at ?? now();
 			return entries.filter((entry) => isLive(entry, current)).sort(bySeverityThenRecency);
 		},
@@ -496,10 +516,12 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 			return [...endedEntries];
 		},
 		count(at) {
+			dropResolved();
 			const current = at ?? now();
 			return entries.reduce((sum, entry) => sum + (isLive(entry, current) ? 1 : 0), 0);
 		},
 		hasBlocking(at) {
+			dropResolved();
 			const current = at ?? now();
 			return entries.some((entry) => isLive(entry, current) && entry.level !== "info");
 		},
