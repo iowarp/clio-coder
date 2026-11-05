@@ -3306,6 +3306,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "agent_end") {
 				if (event.retryPending !== undefined) {
 					runAwaitingRetry = true;
+					// Closing an earlier round's entry would show its interim receipt as a Done the turn has not reached.
+					for (const entry of transcript) {
+						if (entry.role !== "assistant" || entry.turnUsage === undefined || entry.turnUsage.outcome !== undefined)
+							continue;
+						invalidateEntryCache(entry);
+						delete entry.turnUsage;
+						liveReceipts.delete(entry);
+					}
 					closeRunEntries(false);
 					markDirty();
 					return;
