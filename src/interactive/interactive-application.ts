@@ -2010,7 +2010,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			shutdownArmed = !armed
 				? false
 				: [
-						...(detail?.draftKept === true ? ["draft kept"] : []),
+						// The draft stays while the window is open; quitting prints it and saves nothing.
+						...(detail?.draftKept === true ? ["draft kept, printed on quit"] : []),
 						// Quitting drains the fleet, which is not obvious from a composer with nothing in it.
 						...(workers > 0 ? [`${workers} worker${workers === 1 ? "" : "s"} will stop`] : []),
 						`Ctrl+C again to quit${detail ? ` (${detail.secondsLeft}s)` : ""}`,
