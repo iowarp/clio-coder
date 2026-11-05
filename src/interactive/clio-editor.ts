@@ -329,8 +329,14 @@ export class ClioEditor extends Editor {
 	private restoredDraft = false;
 	/** A restored draft set aside for the command being typed; it returns when the composer empties. */
 	private parkedDraft: string | null = null;
-	/** The run the board addressed this draft to, so the rail can still name it after the run ends. */
+	/**
+	 * The run the board addressed this draft to. The address stays out of the
+	 * text because a run id is nothing the operator typed or can read; the rail
+	 * names the worker and the address goes back on the line at submit.
+	 */
 	private boardSteer: { runId: string; agentId: string } | null = null;
+	/** The address on the line just submitted, so a refused steer comes back with its address still hidden. */
+	private sentSteer: { runId: string; agentId: string } | null = null;
 
 	get draftRevision(): number {
 		return this.revision;
@@ -365,11 +371,30 @@ export class ClioEditor extends Editor {
 
 	/** Who this draft goes to if it steers a worker, and whether that worker is still running. */
 	steerTarget(text = this.getText()): { agentId: string; live: boolean } | null {
+		if (this.boardSteer !== null) {
+			// A slash command or shell line runs as itself, so it never reads as addressed.
+			if (this.chrome.getDraftOperator?.(text)) return null;
+			const live = this.chrome.getSteerRecipient?.(this.boardSteer.runId) ?? null;
+			return { agentId: this.boardSteer.agentId, live: live !== null };
+		}
 		const token = steerDraftToken(text);
 		if (token === null) return null;
 		const live = this.chrome.getSteerRecipient?.(token) ?? null;
-		if (live !== null) return { agentId: live, live: true };
-		return this.boardSteer?.runId === token ? { agentId: this.boardSteer.agentId, live: false } : null;
+		return live !== null ? { agentId: live, live: true } : null;
+	}
+
+	/** The line a submit hands on: a board-addressed draft gets its address back, and anything else passes untouched. */
+	addressSubmission(text: string): string {
+		const run = this.boardSteer;
+		if (run === null || this.steerTarget(text) === null) return text;
+		this.boardSteer = null;
+		this.sentSteer = run;
+		return `@${run.runId} ${text}`;
+	}
+
+	/** The worker a just-submitted line was addressed to from the board, when `target` is that address. */
+	sentSteerAgent(target: string): string | null {
+		return this.sentSteer?.runId === target ? this.sentSteer.agentId : null;
 	}
 
 	/**
@@ -381,6 +406,11 @@ export class ClioEditor extends Editor {
 		const text = this.getText();
 		const target = this.steerTarget(text);
 		if (target === null) return null;
+		if (this.boardSteer !== null) {
+			this.boardSteer = null;
+			this.revision += 1;
+			return target.agentId;
+		}
 		this.setText(text.trimStart().replace(/^@\S+\s*/u, ""));
 		return target.agentId;
 	}
@@ -1006,7 +1036,13 @@ export class ClioEditor extends Editor {
 		if (lines.length === 0) return lines;
 
 		if (text.length === 0 && lines[1]) {
-			lines[1] = renderEmptyPrompt(lines[1], safeWidth, theme, emptyPromptFor(mode));
+			const addressed = mode === "CONFIRM" ? null : this.steerTarget(text);
+			const prompt = addressed
+				? addressed.live
+					? `Message for ${addressed.agentId}${GLYPH.ellipsis}`
+					: `${addressed.agentId} ended. Esc returns this composer to Clio.`
+				: emptyPromptFor(mode);
+			lines[1] = renderEmptyPrompt(lines[1], safeWidth, theme, prompt);
 		}
 
 		if (docked !== null) {
@@ -1171,6 +1207,19 @@ export class ClioEditor extends Editor {
 		this.bracketedPasteActive = false;
 		this.restoredDraft = false;
 		this.boardSteer = null;
+		const sent = this.sentSteer;
+		this.sentSteer = null;
+		// A refused steer comes back with the address it was sent with, and it hides again.
+		if (sent !== null && text.trimStart().startsWith(`@${sent.runId}`)) {
+			this.boardSteer = sent;
+			super.setText(
+				text
+					.trimStart()
+					.slice(sent.runId.length + 1)
+					.trimStart(),
+			);
+			return;
+		}
 		if (text.length === 0 && this.parkedDraft !== null) {
 			const parked = this.parkedDraft;
 			this.parkedDraft = null;

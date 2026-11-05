@@ -234,7 +234,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		deps.bus.subscribe("run.progressed", (payload) => {
 			const workerEvent = payload.event as { type?: unknown } | null | undefined;
 			if (workerEvent?.type === "clio_coder_steer_received") {
-				deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
+				deps.notify("success", `${payload.agentId} took your message`, `steer:${payload.runId}`);
 			}
 			const change = workers.progress(payload);
 			if (change !== null) queueWorkerPaint(change.entry);

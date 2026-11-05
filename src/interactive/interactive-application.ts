@@ -1437,7 +1437,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	getTerminationCoordinator().onDrain(() => {
 		cancelSubmitExpansions();
 	});
-	editor.onSubmit = (text) => {
+	editor.onSubmit = (submitted) => {
+		const text = editor.addressSubmission(submitted);
 		if (upgradeFlow?.isRunning()) {
 			// Pi clears the composer before invoking onSubmit. Package replacement
 			// must not race a new turn, so restore the draft exactly and leave it for

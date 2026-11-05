@@ -73,6 +73,8 @@ export interface EditorSubmitEditor {
 	/** Literal text that came back from the queue, which the next command must not append to. */
 	setRestoredText?(text: string): void;
 	setText(text: string): void;
+	/** The worker a just-submitted line was addressed to from Fleet Runs, when `target` is that hidden address. */
+	sentSteerAgent?(target: string): string | null;
 	addToHistory(text: string): void;
 }
 
@@ -361,6 +363,9 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	};
 
 	const submitEditorSteerMention = (mention: { target: string; text: string }): EditorSteerSubmission => {
+		// A draft addressed from Fleet Runs never showed its run id, so its notices name the worker.
+		const boardAgent = deps.editor.sentSteerAgent?.(mention.target) ?? null;
+		const addressee = boardAgent ?? `@${mention.target}`;
 		let running: RunningDispatchRef[] = [];
 		try {
 			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
@@ -368,7 +373,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.notify(
 				"error",
-				`cannot resolve steer to @${mention.target}: ${msg}; retry when Fleet Runs is available`,
+				`cannot resolve steer to ${addressee}: ${msg}; retry when Fleet Runs is available`,
 				`steer:${mention.target}`,
 			);
 			return "rejected";
@@ -382,13 +387,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				deps.onSteerSent?.(resolution.run, mention.text);
 				deps.notify(
 					"info",
-					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
+					`Message queued for ${resolution.run.agentId}, waiting for it to take it`,
 					`steer:${resolution.run.runId}`,
 				);
 				return "accepted";
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				deps.notify("error", `steer to @${mention.target} failed: ${msg}`, `steer:${mention.target}`);
+				deps.notify("error", `steer to ${addressee} failed: ${msg}`, `steer:${mention.target}`);
 				return "rejected";
 			}
 		}
@@ -396,6 +401,14 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.notify(
 				"warning",
 				`@${mention.target} matches ${resolution.candidates.length} runs: ${formatSteerCandidates(resolution.candidates)}; use a runId prefix`,
+				`steer:${mention.target}`,
+			);
+			return "rejected";
+		}
+		if (boardAgent !== null) {
+			deps.notify(
+				"warning",
+				`${boardAgent} already ended, so this was not sent. Esc keeps your text as a draft for Clio.`,
 				`steer:${mention.target}`,
 			);
 			return "rejected";
@@ -451,20 +464,35 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const addressed =
 			bareToken === trimmed.slice(1) ? runningDispatchRefs().find((run) => run.runId === bareToken) : undefined;
 		if (addressed) {
+			const hidden = deps.editor.sentSteerAgent?.(addressed.runId) ?? null;
 			deps.notify(
 				"info",
-				`Type the guidance for ${addressed.agentId} after the address, then Enter`,
+				`Type the guidance for ${addressed.agentId}${hidden === null ? " after the address" : ""}, then Enter`,
 				`steer:${addressed.runId}`,
 			);
 			deps.editor.setText(`${literalText.trimEnd()} `);
 			deps.ui.requestRender();
 			return;
 		}
+		// The same empty draft after its worker ended is still no prompt for the model.
+		const endedAgent = bareToken === trimmed.slice(1) ? deps.editor.sentSteerAgent?.(bareToken) : null;
+		if (endedAgent) {
+			deps.notify(
+				"warning",
+				`${endedAgent} already ended, so there is nothing to send. Esc clears it.`,
+				`steer:${bareToken}`,
+			);
+			deps.editor.setText(literalText);
+			deps.ui.requestRender();
+			return;
+		}
 		const steerMention = parseEditorSteerMention(trimmed);
 		if (steerMention) {
+			const hiddenAddress = deps.editor.sentSteerAgent?.(steerMention.target) ?? null;
 			const submission = submitEditorSteerMention(steerMention);
 			if (submission === "accepted") {
-				deps.editor.addToHistory(literalText);
+				// Recalled later, a line with a hidden address is just its words.
+				deps.editor.addToHistory(hiddenAddress !== null ? steerMention.text : literalText);
 				deps.editor.setText("");
 			} else {
 				// Resolution and dispatch failures are correctable rejections. Pi
