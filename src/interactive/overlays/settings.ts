@@ -992,7 +992,10 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 				presentationKind: "destructive-action" as const,
 			},
 		];
-		const details = `URL: ${target?.url ?? "(none)"} · Default model: ${target?.defaultModel ?? "(none)"} · Last probe: ${status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never"} · Failure reason: ${status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none")}`;
+		const details = `URL: ${target?.url ?? "(none)"} · Default model: ${target?.defaultModel ?? "(none)"} · Last probe: ${status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never"} ${(() => {
+			const reason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : null);
+			return reason === null ? "" : ` · Failure reason: ${reason}`;
+		})()}`;
 		const note = chatEligible ? details : `Not chat-eligible: its runtime is not HTTP/native. · ${details}`;
 		return selectListSubmenu(
 			`Target ${targetId}`,
@@ -2087,7 +2090,7 @@ export function targetRows(
 		const latency =
 			status?.health.latencyMs === null || status?.health.latencyMs === undefined ? "—" : `${status.health.latencyMs} ms`;
 		const lastProbe = status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never";
-		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none");
+		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : null);
 		const valueSegments = [
 			liveHealth,
 			{ text: `  ${target.id}`, tone: "neutral" as const },
@@ -2099,7 +2102,8 @@ export function targetRows(
 		const item = settingItem(`targets.${target.id}`, value, {
 			label: target.id,
 			description: `URL: ${target.url ?? "(none)"} · Default model: ${target.defaultModel ?? "(none)"}`,
-			help: `Last probe: ${lastProbe} · Failure reason: ${failureReason}${breakerText}`,
+			// A target with no failure says nothing about one; `Failure reason: none` read as a failure at a glance.
+			help: `Last probe: ${lastProbe}${failureReason === null ? "" : ` · Failure reason: ${failureReason}`}${breakerText}`,
 			submenu: targetActionsSubmenu(target.id, options),
 			affordance: options?.connectTarget ? "Enter: use, connect, probe, edit, remove" : "Enter: use, probe, edit, remove",
 			presentationKind: "status",
@@ -2114,7 +2118,7 @@ export function targetRows(
 			url: target.url ?? "(none)",
 			defaultModel: target.defaultModel ?? "(none)",
 			lastProbe,
-			failureReason,
+			failureReason: failureReason ?? "none",
 		};
 		return item;
 	});

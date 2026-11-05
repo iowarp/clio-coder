@@ -39,7 +39,7 @@ describe("settings targets rows show the in-session breaker", () => {
 		strictEqual(mini?.targetConsole?.health.tone, "unhealthy");
 		strictEqual(
 			mini?.help,
-			"Last probe: never · Failure reason: none · Breaker: qwen paused 42s after target-transient; coder 1 failure (target-overloaded)",
+			"Last probe: never · Breaker: qwen paused 42s after target-transient; coder 1 failure (target-overloaded)",
 		);
 		strictEqual(dragon?.targetConsole?.health.text, "◐ probing");
 		strictEqual(dragon?.help?.endsWith("Breaker: llama probing after target-transient"), true);
@@ -48,6 +48,6 @@ describe("settings targets rows show the in-session breaker", () => {
 	it("keeps probe health when no route on the target carries breaker state", () => {
 		const [mini] = targetRows(settingsWithTargets(), { getRouteBreakers: () => [] });
 		strictEqual(mini?.targetConsole?.health.text, "? unknown");
-		strictEqual(mini?.help, "Last probe: never · Failure reason: none");
+		strictEqual(mini?.help, "Last probe: never");
 	});
 });
