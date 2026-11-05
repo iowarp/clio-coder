@@ -101,7 +101,7 @@ const STATUS_ERROR_GLYPH = GLYPH.error;
 // styled strings per rendered line; by precomputing the structural and error variants
 // once at module scope, repeated rendering of long result blocks stays cheap.
 const RAIL_NORMAL = () => `${CONTENT_INDENT}${theme.fg("gutter", "│ ")}`;
-const RAIL_ERROR = `${CONTENT_INDENT}${red("│ ")}`;
+const RAIL_ERROR = () => `${CONTENT_INDENT}${red("│ ")}`;
 
 export interface ToolExecutionStart {
 	toolCallId: string;
@@ -772,7 +772,7 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
  * in place of the elapsed counter so a parked call never reads as executing
  * work; the ⏸ glyph matches the footer's blocked phase.
  */
-const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${toolMeta(" awaiting approval")}`;
+const AWAITING_APPROVAL_TAIL = () => ` ${yellow(GLYPH.phaseBlocked)}${toolMeta(" awaiting approval")}`;
 
 /**
  * Subline for an in-flight call whose body is parked at the permission gate.
@@ -791,7 +791,7 @@ export function renderToolAwaitingApproval(
 		{},
 		width,
 	);
-	const lines = [singleActionLine(parts.lead, AWAITING_APPROVAL_TAIL, width)];
+	const lines = [singleActionLine(parts.lead, AWAITING_APPROVAL_TAIL(), width)];
 	if (view === undefined) return lines;
 	const facts = [
 		["action", view.actionClass],
@@ -1286,7 +1286,7 @@ function wrapHanging(line: string, width: number): string[] {
  * wrapped line.
  */
 function indentAndWrap(line: string, width: number, isError: boolean): string[] {
-	const rail = isError ? RAIL_ERROR : RAIL_NORMAL();
+	const rail = isError ? RAIL_ERROR() : RAIL_NORMAL();
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const out: string[] = [];
 	for (const wrapped of wrap(line, bodyWidth)) {
@@ -1552,7 +1552,7 @@ function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isErr
 	if (rows.length <= rowLimit) return [...rows];
 	if (rowLimit <= 1)
 		return [
-			`${isError ? RAIL_ERROR : RAIL_NORMAL()}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${rows.length} lines hidden`)}`,
+			`${isError ? RAIL_ERROR() : RAIL_NORMAL()}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${rows.length} lines hidden`)}`,
 		];
 	const available = rowLimit - 1;
 	const head = Math.floor(available / 2);
@@ -1560,7 +1560,7 @@ function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isErr
 	const hidden = Math.max(0, rows.length - head - tail);
 	return [
 		...rows.slice(0, head),
-		`${isError ? RAIL_ERROR : RAIL_NORMAL()}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
+		`${isError ? RAIL_ERROR() : RAIL_NORMAL()}${theme.fg("foldedHint", `${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
 		...rows.slice(-tail),
 	];
 }
@@ -2377,7 +2377,7 @@ export function renderToolPreview(
 					limit,
 					width,
 					command || !finished,
-					failure ? RAIL_ERROR : RAIL_NORMAL(),
+					failure ? RAIL_ERROR() : RAIL_NORMAL(),
 					BODY_INDENT_VISIBLE_WIDTH,
 				),
 			);
@@ -2387,7 +2387,7 @@ export function renderToolPreview(
 		if (notes.length > 0) {
 			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
 			rows.push(
-				`${failure ? RAIL_ERROR : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
+				`${failure ? RAIL_ERROR() : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
 			);
 		}
 	}
@@ -2549,7 +2549,7 @@ function renderChainPreview(
 ): string[] {
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
-	const rail = failure ? RAIL_ERROR : RAIL_NORMAL();
+	const rail = failure ? RAIL_ERROR() : RAIL_NORMAL();
 	const rows = previewActionRows(call, width);
 	if (detail.style === "compact" && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
 		return rows;
@@ -2621,7 +2621,7 @@ function renderChainExecution(finished: ToolExecutionFinished, width: number, op
  * gap around the rest.
  */
 export function hasToolBody(lines: readonly string[]): boolean {
-	return lines.some((line) => line.startsWith(RAIL_NORMAL()) || line.startsWith(RAIL_ERROR));
+	return lines.some((line) => line.startsWith(RAIL_NORMAL()) || line.startsWith(RAIL_ERROR()));
 }
 
 /** Which Compact fold a settled call can join: explorations, knowledge lookups, or changes. */

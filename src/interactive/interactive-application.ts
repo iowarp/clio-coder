@@ -98,6 +98,7 @@ import { createAmbientSurfaces, hasExtensionDrawing } from "./surfaces/ambient.j
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import { renderView } from "./surfaces/view-renderer.js";
+import { followTerminalColors } from "./terminal-color-follow.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
@@ -982,6 +983,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					startUi: () => {
 						tui.start();
 						tui.requestRender(true);
+						terminalColors.refresh();
 					},
 					onDockKey: () => pressFilesKey("dock"),
 				})
@@ -998,6 +1000,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		tui.requestRender();
 	};
 	const agentProgress = createAgentProgress(terminal);
+	const terminalColors = followTerminalColors(tui);
 	// Only the interactive surface asks a diffusion provider for whole-response
 	// frames; it is the one consumer that can show noise settling into text.
 	setDiffusionFramesEnabled(process.stdout.isTTY === true);
@@ -1475,6 +1478,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		} finally {
 			tui.start();
 			tui.requestRender(true);
+			terminalColors.refresh();
 		}
 	};
 	overlayLifecycle = createOverlayLifecycle({
@@ -1523,6 +1527,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			} finally {
 				tui.start();
 				tui.requestRender(true);
+				terminalColors.refresh();
 			}
 		},
 		suspendTerminalAsync,
@@ -2059,6 +2064,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				void operatorExtensions?.dispose();
 				detachMusicDockKey?.();
 				loopJobs?.dispose();
+				terminalColors.dispose();
 				detachYaziBridge?.();
 				yaziBridge?.dispose();
 				detachWorkersDockKey?.();
