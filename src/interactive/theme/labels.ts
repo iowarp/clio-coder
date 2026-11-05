@@ -195,6 +195,12 @@ export function formatCompactMs(value: number): string {
 	return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
+/** A running wait in whole seconds: tenths on a live clock read as jitter, and a wait never shows milliseconds. */
+export function formatWaitClock(elapsedMs: number): string {
+	const seconds = Math.floor(Math.max(0, elapsedMs) / 1000);
+	return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
+}
+
 /**
  * Context-window fill percentage with one shared unknown grammar. A window
  * that has not been measured yet renders `?%` everywhere (compact footer,

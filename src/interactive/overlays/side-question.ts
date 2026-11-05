@@ -14,7 +14,7 @@ import {
 } from "../../domains/safety/redaction.js";
 import { type Component, type OverlayHandle, type TUI, truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
-import { animationStep, clioTheme, GLYPH, rule, spinnerFrame } from "../theme/index.js";
+import { animationStep, clioTheme, formatWaitClock, GLYPH, rule, spinnerFrame } from "../theme/index.js";
 
 export const SIDE_QUESTION_OVERLAY_TITLE = "Side question";
 
@@ -60,6 +60,7 @@ function formatSideQuestionBody(
 	width: number,
 	spinner: string,
 	route: string | null = null,
+	elapsedMs = 0,
 ): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
@@ -84,10 +85,14 @@ function formatSideQuestionBody(
 		}
 	}
 	if (phase.kind === "streaming") {
-		const asking = route === null ? `${spinner} asking…` : `${spinner} asking ${route}`;
+		// The clock leads the route, so a narrow box cuts the route rather than the wait.
+		const clock = formatWaitClock(elapsedMs);
 		lines.push(
 			truncateToWidth(
-				theme.fg("activity", body.length > 0 && route === null ? spinner : asking),
+				theme.fg(
+					"activity",
+					`${spinner} ${body.length > 0 ? "answering" : "asking"} · ${clock}${route === null ? "" : ` · ${route}`}`,
+				),
 				contentWidth,
 				GLYPH.ellipsis,
 				false,
@@ -99,6 +104,7 @@ function formatSideQuestionBody(
 	} else {
 		if (body.length === 0) lines.push(theme.fg("annotation", "the model returned no text"));
 		if (route !== null) lines.push(routeLine("answered by", route, contentWidth));
+		lines.push(theme.fg("annotation", "Not added to the conversation."));
 	}
 	return lines;
 }
@@ -117,11 +123,14 @@ export class SideQuestionOverlayBody implements Component {
 	private phase: SideQuestionOverlayPhase = { kind: "streaming", text: "" };
 	route: string | null = null;
 	private readonly prose = new AssistantProseProjection();
+	private readonly startedAt: number;
 
 	constructor(
 		private readonly question: string,
 		private readonly now: () => number = Date.now,
-	) {}
+	) {
+		this.startedAt = now();
+	}
 
 	set(phase: SideQuestionOverlayPhase): void {
 		if (phase.kind === "error") {
@@ -138,7 +147,15 @@ export class SideQuestionOverlayBody implements Component {
 	}
 
 	render(width: number): string[] {
-		return formatSideQuestionBody(this.question, this.phase, width, spinnerFrame(animationStep(this.now())), this.route);
+		const now = this.now();
+		return formatSideQuestionBody(
+			this.question,
+			this.phase,
+			width,
+			spinnerFrame(animationStep(now)),
+			this.route,
+			now - this.startedAt,
+		);
 	}
 
 	invalidate(): void {}
@@ -161,6 +178,9 @@ export function openSideQuestionOverlay(tui: TUI, options: OpenSideQuestionOverl
 		// round that is still streaming, and it closes one that has settled.
 		footerHint: (innerWidth) => buildResponsiveHint([], { key: "Esc", verb: settled ? "close" : "cancel" })(innerWidth),
 	});
+	// Nothing else redraws an idle screen, so the wait's clock keeps its own time.
+	const clock = setInterval(() => tui.requestRender(), 250);
+	clock.unref?.();
 	return {
 		...handle,
 		setAnswer(text: string): void {
@@ -176,11 +196,13 @@ export function openSideQuestionOverlay(tui: TUI, options: OpenSideQuestionOverl
 		},
 		settle(phase: SideQuestionOverlayPhase): void {
 			settled = true;
+			clearInterval(clock);
 			body.set(phase);
 			body.invalidate();
 			tui.requestRender();
 		},
 		hide(): void {
+			clearInterval(clock);
 			options.onClose();
 			handle.hide();
 		},

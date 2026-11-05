@@ -26,7 +26,7 @@ import {
 	choiceRows,
 	clioTheme,
 	factRows,
-	formatCompactMs,
+	formatWaitClock,
 	GLYPH,
 	markdownTheme,
 	positionRow,
@@ -110,11 +110,9 @@ function formatPreparingBody(
 ): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
-	const seconds = Math.floor(elapsedMs / 1000);
-	const clock = seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
 	return [
 		...factRows(theme, [{ label: "goal", value: goal }], contentWidth),
-		sectionRule(theme, contentWidth, "Preparing", { meta: clock }),
+		sectionRule(theme, contentWidth, "Preparing", { meta: formatWaitClock(elapsedMs) }),
 		...wrapTextWithAnsi(theme.fg("activity", `${spinner} ${PREPARATION_WORDS[stage]}${GLYPH.ellipsis}`), contentWidth),
 		...(route === null
 			? []

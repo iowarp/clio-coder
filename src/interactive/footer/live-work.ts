@@ -15,7 +15,7 @@ import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
 import type { ClioTheme } from "../theme/index.js";
-import { formatCompactMs, GLYPH } from "../theme/index.js";
+import { formatCompactMs, formatWaitClock, GLYPH } from "../theme/index.js";
 import { modelNickname } from "../theme/labels.js";
 import { composerPhasePresentation } from "./widgets.js";
 
@@ -154,8 +154,7 @@ export function liveWorkStrip(
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
 		const clockFor = (text: string): string | null => {
 			if (CARRIES_ELAPSED.test(stripTerminalSequences(text))) return null;
-			const seconds = Math.floor(phaseElapsedMs(facts.status, facts.now) / 1000);
-			return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
+			return formatWaitClock(phaseElapsedMs(facts.status, facts.now));
 		};
 		const label = railFree(phase.label);
 		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
