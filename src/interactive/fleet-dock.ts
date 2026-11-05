@@ -17,6 +17,8 @@ export interface FleetDockDeps {
 	getTaskBoard?: () => TaskBoardSnapshot | null;
 	/** The expanded footer carries the board's own rows, so the dock row steps aside. */
 	isFooterExpanded?: () => boolean;
+	/** Fleet Runs is open and already shows every run, so the worker card steps aside rather than repeat one. */
+	isFleetBoardOpen?: () => boolean;
 }
 
 /**
@@ -54,6 +56,7 @@ export function createFleetDock(deps: FleetDockDeps): Component {
 	return {
 		render(width) {
 			const rows = deps.getRows().filter((row) => !isHelperRun(row));
+			if (rows.length > 0 && deps.isFleetBoardOpen?.() === true) return [];
 			if (rows.length === 0) {
 				if (deps.isFooterExpanded?.() === true) return [];
 				const board = deps.getTaskBoard?.() ?? null;

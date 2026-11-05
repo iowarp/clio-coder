@@ -1,4 +1,11 @@
-import { type Component, type Keybinding, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import {
+	type Component,
+	type Keybinding,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+} from "../engine/tui.js";
 import { dockBodyRows } from "./dock.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
 import {
@@ -8,7 +15,7 @@ import {
 	selectionMark,
 	showClioOverlayFrame,
 } from "./overlay-frame.js";
-import { clioTheme, GLYPH } from "./theme/index.js";
+import { clioTheme, GLYPH, padAnsi } from "./theme/index.js";
 
 /** Noncapturing presentation: controller retains the underlying cancellation owner. */
 export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: Keybinding) => string) {
@@ -22,19 +29,39 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 			const count = Math.max(1, Math.min(10, dockBodyRows(tui) - 2));
 			const [start, end] = centeredWindow(targets.length, selected, count);
 			const theme = clioTheme();
+			// Two columns: the action, then its direct shortcut aligned beside the
+			// longest action. A narrow menu drops the shortcut column, because the
+			// letter already runs the action from here.
+			const bindings = targets.map((entry) => (entry.id === undefined ? "" : keyLabel(entry.id)));
+			const bindingWidth = Math.max(0, ...bindings.map((binding) => visibleWidth(binding)));
+			const showBindings = bindingWidth > 0 && width >= 56;
+			const reasonOf = (entry: LeaderTarget): string =>
+				entry.disabledReason ? ` (${entry.disabledReason.charAt(0).toLowerCase()}${entry.disabledReason.slice(1)})` : "";
+			const labelOf = (entry: LeaderTarget): string => `${entry.label ?? entry.id ?? ""}${reasonOf(entry)}`;
+			const labelRoom = Math.max(1, width - 5 - (showBindings ? bindingWidth + 2 : 0));
+			const labelWidth = Math.min(labelRoom, Math.max(1, ...targets.map((entry) => visibleWidth(labelOf(entry)))));
+			const header =
+				width >= 66
+					? `${scope()} · press a letter to run its action · /help lists commands`
+					: width >= 44
+						? `${scope()} · press a letter to run its action`
+						: "Press a letter to run its action";
 			return [
-				`${scope()} · letters select actions · close, then /help for commands`,
+				theme.fg("annotation", header),
 				...targets.slice(start, end).map((entry, index) => {
 					const focused = start + index === selected;
 					const label = entry.label ?? entry.id ?? "";
-					const reason = entry.disabledReason ? theme.fg("annotation", ` (${entry.disabledReason})`) : "";
+					const reason = entry.disabledReason ? theme.fg("annotation", reasonOf(entry)) : "";
 					// The selection rule: cursor and label in accent, nothing else recolored.
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.
 					const mark = selectionMark(focused);
-					const name = selectionLabel(focused, label);
-					const binding = entry.id === undefined ? "" : keyLabel(entry.id);
-					return `${mark} ${entry.key || " "}  ${name}  ${theme.fg("annotation", binding)}${reason}`;
+					const name = padAnsi(
+						truncateToWidth(`${selectionLabel(focused, label)}${reason}`, labelWidth, GLYPH.ellipsis),
+						labelWidth,
+					);
+					const binding = showBindings ? `  ${theme.fg("annotation", bindings[start + index] ?? "")}` : "";
+					return `${mark} ${entry.key || " "}  ${name}${binding}`.replace(/ +$/u, "");
 				}),
 				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"}${state.notice ? ` · ${state.notice}` : ""}`,
 			].map((line) => truncateToWidth(line, width, GLYPH.ellipsis));

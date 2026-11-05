@@ -59,8 +59,19 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 		ttft: null,
 		...(run.outcomeDetail ? { outcomeDetail: run.outcomeDetail } : {}),
 		...(run.node !== undefined ? { node: run.node.id } : {}),
+		// A council's runs fold into one group on a restarted board too, rather than reading as stray researchers.
+		...(run.council !== undefined ? { council: { ...run.council } } : {}),
 		...(facts?.trust !== undefined ? { trust: summarizeTrustStatus(facts.trust) } : {}),
 		...(facts?.validationFailure !== undefined ? { validationFailure: facts.validationFailure } : {}),
+		...(facts !== null
+			? {
+					completion: {
+						...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
+						...(facts.refusedCalls !== undefined ? { refusedCalls: facts.refusedCalls } : {}),
+						...(facts.contract !== undefined ? { contract: facts.contract } : {}),
+					},
+				}
+			: {}),
 		...contract,
 		lastContextTokens: null,
 		runRecordId: run.id,
@@ -85,7 +96,12 @@ export function readDurableWorkerRuns(cwd: string, worktreeRoot?: string): Dispa
 	for (const run of settled) {
 		if (rows.length >= DURABLE_RUN_LIMIT) break;
 		// Helper and internal work is not the operator's fleet history.
-		if (run.requestOrigin === "internal" || run.agentAudience === "internal" || run.agentAudience === "shadow") continue;
+		// A council member runs in the shadow audience but answers the operator's own /council question, so it stays.
+		if (
+			run.council === undefined &&
+			(run.requestOrigin === "internal" || run.agentAudience === "internal" || run.agentAudience === "shadow")
+		)
+			continue;
 		if (!ownership.inProject(run.cwd)) continue;
 		const status = SETTLED_STATUS[run.status];
 		if (status === undefined) continue;

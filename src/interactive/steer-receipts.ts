@@ -51,7 +51,12 @@ function receiptRows(receipt: SteerReceipt, width: number): string[] {
 	const body = wrapTextWithAnsi(theme.fg("annotation", receipt.text), Math.max(4, width - 4)).map(
 		(line) => `  ${gutter}${line}`,
 	);
-	return ["", ...wrapTextWithAnsi(receiptHead(receipt), Math.max(4, width)), ...body];
+	// A wrapped head continues under its words, past the mark, so the receipt reads as one entry at any width. The
+	// transcript separates blocks itself, so the receipt adds no blank row of its own.
+	const head = wrapTextWithAnsi(receiptHead(receipt), Math.max(4, width - 2)).map((line, index) =>
+		index === 0 ? line : `  ${line}`,
+	);
+	return [...head, ...body];
 }
 
 /** Whether a worker event is the steer entering its model's context: the user message carrying the steer's words. */

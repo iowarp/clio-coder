@@ -97,6 +97,8 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	 * each attempt replaces the last and the footer ends on the terminal state.
 	 */
 	const assignmentOfRun = new Map<string, string>();
+	/** Runs a council started; a terminal event may not repeat the council badge its start carried. */
+	const councilRuns = new Set<string>();
 	const heldRunFailures = new Map<string, ReturnType<typeof setTimeout>>();
 	const helperNotice = (
 		payload: DispatchRunIdentity & { assignmentId?: string; attempt?: number; lineage?: { attempt: number } },
@@ -104,11 +106,15 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	): void => {
 		if (isContextOperationRun(payload)) return;
 		const attempt = payload.lineage?.attempt ?? payload.attempt ?? 0;
+		// A council member answers the operator's own /council question, so it is never a background helper even though
+		// Clio dispatched it on the operator's behalf.
+		if (payload.council !== undefined) councilRuns.add(payload.runId);
 		const helper =
-			payload.agentAudience === "shadow" ||
-			payload.agentAudience === "internal" ||
-			payload.requestOrigin === "internal" ||
-			payload.requestOrigin === "harness";
+			!councilRuns.has(payload.runId) &&
+			(payload.agentAudience === "shadow" ||
+				payload.agentAudience === "internal" ||
+				payload.requestOrigin === "internal" ||
+				payload.requestOrigin === "harness");
 		if (payload.assignmentId !== undefined && status === "working") {
 			// The next attempt overturns the failure the last one reported.
 			clearRunFailure(payload.assignmentId);
@@ -121,7 +127,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		if (attempt > 0 && payload.agentAudience !== "shadow" && payload.agentAudience !== "internal") return;
 		if (payload.assignmentId !== undefined) assignmentOfRun.set(payload.runId, payload.assignmentId);
 		const assignment = assignmentOfRun.get(payload.runId) ?? payload.runId;
-		if (status !== "working") assignmentOfRun.delete(payload.runId);
+		if (status !== "working") {
+			assignmentOfRun.delete(payload.runId);
+			councilRuns.delete(payload.runId);
+		}
 		if (!helper) return;
 		const name = sanitizeCallTargetText(payload.agentId)
 			.slice(0, 80)
@@ -150,9 +159,12 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	const runFailureNotice = (payload: DispatchFailedPayload, entry: WorkerEntryState): void => {
 		if (workerAskedByModel(entry) || entry.helper === true || payload.outcome === "canceled") return;
 		const why = workerFailureHeadline(payload.outcomeDetail);
-		const text = sanitizeCallTargetText(
-			`${payload.agentId} ${plainOutcomeLabel(payload.outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${payload.runId}`,
-		);
+		// A council member goes by the label the operator watched it under, not the recipe every member shares.
+		const who = entry.council === undefined ? payload.agentId : `council member ${entry.council.label}`;
+		const label = plainOutcomeLabel(payload.outcome);
+		// A reason that already opens with the outcome says it once: `stopped responding, so Clio stopped it`.
+		const what = why === null ? label : why.startsWith(label) ? why : `${label}: ${why}`;
+		const text = sanitizeCallTargetText(`${who} ${what} · /view dispatch:${payload.runId}`);
 		const hold = setTimeout(() => {
 			heldRunFailures.delete(entry.assignmentId);
 			deps.notify("warning", text, `run-failed:${entry.assignmentId}`);

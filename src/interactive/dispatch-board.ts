@@ -2,18 +2,14 @@ import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
-import {
-	formatBudgetPolicy,
-	formatBudgetReasons,
-	formatBudgetRequest,
-	formatEffectiveBudget,
-} from "../domains/dispatch/budget-envelope.js";
-import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
+import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
+import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
-import { plainTrustVerdict, trustFailureWords, trustStateWord } from "../domains/evidence/trust-projection.js";
+import { plainTrustVerdict, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
@@ -29,7 +25,14 @@ import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { DOCK_BODY_ROWS_MAX } from "./dock.js";
 import { createFleetPlanRuns, type FleetPlanRuns, type FleetPlanRunView } from "./fleet-plan-runs.js";
 import { type RouteFirstOutput, routeFirstOutput } from "./footer/silence-note.js";
-import { centeredWindow, type GrowableBody, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
+import {
+	centeredWindow,
+	fitHintEntryList,
+	type GrowableBody,
+	type HintEntry,
+	type RowBudgetedBody,
+	windowRows,
+} from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { liveWorkerAnswerText, presentWorkerContractAnswer } from "./renderers/worker-answer.js";
@@ -61,6 +64,7 @@ import { USAGE_NOT_MEASURED, usageLineCoverage } from "./usage-words.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
+	completedRunMark,
 	workerActionParts,
 	workerActivityWords,
 	workerPhaseActivity,
@@ -127,6 +131,8 @@ export interface DispatchBoardRow {
 	trust?: TrustSummaryProjection;
 	/** Which validator failed and on what evidence, beside a validation-failed verdict. */
 	validationFailure?: string;
+	/** How the settled run finished beside its outcome, for the caveat the worker card shows too. */
+	completion?: { toolCalls?: number; refusedCalls?: number; contract?: string };
 	/** Read back from the run ledger because it settled before this Clio process started (J2-F16). */
 	earlier?: true;
 	/** Dead-node failover hops recorded on this run's chain. */
@@ -838,9 +844,10 @@ function dispatchCardBody(
 	});
 	// The function phase is orange, while identity, cost and TTFT keep their own roles.
 	const failure = completedRunFailure(row);
+	const failureMark = completedRunMark(failure);
 	const statusStr =
 		failure !== null
-			? theme.fg("error", `${GLYPH.error} ${presentation.label} · ${failure}`)
+			? theme.fg(failureMark.token, `${failureMark.glyph} ${presentation.label} · ${failure.words}`)
 			: `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	// How long the model took to its first output, in words: a run that has not answered yet says so, and one that
@@ -1040,7 +1047,13 @@ function dispatchCardBody(
 				"control",
 				[
 					// The worker took the message; whether its model read it before the run ended is the transcript receipt's.
-					theme.fg("success", `${GLYPH.ok} the worker took your message`),
+					// A settled run's row cannot tell whether its model read the message; the transcript receipt says which.
+					theme.fg(
+						"success",
+						isTerminalStatus(row.status)
+							? `${GLYPH.ok} the worker took your message before the run ended`
+							: `${GLYPH.ok} the worker took your message`,
+					),
 					theme.fg("body", `${row.steerAcknowledgement.chars} chars`),
 				],
 				contentWidth,
@@ -1072,18 +1085,7 @@ function dispatchCardBody(
 	}
 	if (options.expanded === true && row.budget !== undefined) {
 		bodyLines.push(
-			...cardWrappedValueLines(
-				theme,
-				"policy",
-				theme.fg("body", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
-				contentWidth,
-			),
-			...cardWrappedValueLines(
-				theme,
-				"budget",
-				theme.fg("body", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
-				contentWidth,
-			),
+			...cardWrappedValueLines(theme, "limit", theme.fg("body", budgetLimitWords(row.budget)), contentWidth),
 		);
 	}
 	return bodyLines;
@@ -1113,9 +1115,10 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
 	const failure = completedRunFailure(row);
+	const failureMark = completedRunMark(failure);
 	const glyph =
 		failure !== null
-			? theme.fg("error", GLYPH.error)
+			? theme.fg(failureMark.token, failureMark.glyph)
 			: theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	// A running row says what the run is doing in the inline card's words: the
 	// island said `running` beside a card that said `starting` (BT-007).
@@ -1138,7 +1141,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 			: row.status === "enqueued" && row.endpoint !== undefined
 				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
 				: failure !== null
-					? `done · ${failure}`
+					? `done · ${failure.words}`
 					: presentation.label;
 	// A narrow row keeps the worker's name over the rest of the phase's words, which the card below still states.
 	const nameRoom =
@@ -1153,7 +1156,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	}
 	const statusStr = theme.fg(
 		failure !== null
-			? "error"
+			? failureMark.token
 			: row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
 				? "shadowDispatchAction"
 				: presentation.token,
@@ -1196,9 +1199,15 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 					"body",
 					`${GLYPH.down} ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
 				)}`;
-	const telemetry = row.retry
+	const costUnit =
+		cost === "—" ? "" : `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
+	// A narrow dock drops the cost whole before it cuts the token figures, so no unit ends mid-word.
+	const telemetryLine = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
-		: `  ${tokens}${cost === "—" ? "" : `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`}`;
+		: visibleWidth(`  ${tokens}${costUnit}`) <= width
+			? `  ${tokens}${costUnit}`
+			: `  ${tokens}`;
+	const telemetry = truncateToWidth(telemetryLine, width, GLYPH.ellipsis, false);
 	const task = row.taskSummary
 		? wrapTextWithAnsi(row.taskSummary, Math.max(1, width - 2))
 				.slice(0, 3)
@@ -1243,6 +1252,20 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	];
 }
 
+/** A settled member's typed answer in the words its own card shows; a live one streams its raw tail. */
+function councilMemberTail(row: DispatchBoardRow): string {
+	const progress = row.progress;
+	if (progress === undefined) return "";
+	const presented = presentWorkerContractAnswer(
+		progress.tailText,
+		row.resultContract,
+		progress.droppedLines === 0 && progress.droppedBytes === 0,
+		progress.settled,
+	);
+	if (presented !== null) return presented.lines.join("\n");
+	return redactStreamingSecretString(progress.tailText, progress.completed === true);
+}
+
 /**
  * One member column's facts, drawn from the row the board already keeps. The
  * route, status, and answer tail are the same values the run's own card shows,
@@ -1252,20 +1275,26 @@ function councilMemberView(
 	row: DispatchBoardRow,
 	council: NonNullable<DispatchBoardRow["council"]>,
 ): CouncilMemberView {
-	const presentation = dispatchStatusPresentation(row.status, {
-		compact: true,
+	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
+	// A member column words its outcome the way its own run row does, caveat included.
+	const caveat = completedRunFailure(row);
+	const mark = completedRunMark(caveat);
+	const presentation =
+		caveat !== null
+			? { glyph: mark.glyph, label: caveat.words, token: mark.token }
+			: row.status === "completed"
+				? { ...full, label: "done" }
+				: full;
 	return {
 		runId: row.runId,
 		label: council.label,
 		...(council.color !== undefined ? { color: council.color } : {}),
 		round: council.round,
-		route: `${row.targetId}/${row.wireModelId}`,
+		route: formatRowRoute(row),
 		status: { ...presentation },
-		tailText: sanitizeCallTargetText(
-			redactStreamingSecretString(row.progress?.tailText ?? "", row.progress?.completed === true),
-		),
+		tailText: sanitizeCallTargetText(councilMemberTail(row)),
 		droppedLines: row.progress?.droppedLines ?? 0,
 	};
 }
@@ -1305,10 +1334,15 @@ function foldCouncilGroup(
 	const aggregate = (Object.entries(STATUS_ORDER) as Array<[DispatchBoardStatus, number]>).find(
 		([, value]) => value === rank,
 	);
-	const presentation = dispatchStatusPresentation(aggregate?.[0] ?? "running", {
-		compact: true,
-		...(aggregate?.[0] === "running" ? { tick: animationStep(Date.now()) } : {}),
+	const aggregateStatus = aggregate?.[0] ?? "running";
+	const aggregatePresentation = dispatchStatusPresentation(aggregateStatus, {
+		...(aggregateStatus === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
+	const presentation =
+		aggregateStatus === "completed" ? { ...aggregatePresentation, label: "done" } : aggregatePresentation;
+	const task = rows.find(
+		(row) => row.taskSummary !== undefined && row.council?.label !== COUNCIL_SYNTHESIS_LABEL,
+	)?.taskSummary;
 	const members = [...newest.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
 		// biome-ignore lint/style/noNonNullAssertion: every entry was inserted with its own council badge.
@@ -1321,6 +1355,7 @@ function foldCouncilGroup(
 		// biome-ignore lint/style/noNonNullAssertion: the synthesis row was matched on its own council badge.
 		synthesis: synthesisRow === null ? null : councilMemberView(synthesisRow, synthesisRow.council!),
 		status: { ...presentation },
+		...(task !== undefined ? { task: sanitizeCallTargetText(task) } : {}),
 		round,
 		elapsed: formatCompactMs(elapsedMs),
 		...(selectedInGroup !== undefined ? { selectedRunId: selectedInGroup } : {}),
@@ -1408,8 +1443,25 @@ function firstLine(text: string): string {
 }
 
 /** What marks a run that finished as not to be leaned on, so its row cannot read as a plain success. */
-function completedRunFailure(row: Pick<DispatchBoardRow, "status" | "trust">): string | null {
-	return row.status === "completed" && row.trust !== undefined ? trustFailureWords(row.trust) : null;
+const COUNCIL_SYNTHESIS_AGENT = "council-synthesis";
+
+/** A council by its size; one whose members are past the board's history reads as a council alone. */
+function councilName(group: Pick<CouncilGroupView, "members">): string {
+	return group.members.length === 0 ? "council" : `council of ${group.members.length}`;
+}
+
+function completedRunFailure(
+	row: Pick<DispatchBoardRow, "status" | "trust" | "completion" | "council" | "agentId">,
+): CompletedRunCaveat | null {
+	if (row.status !== "completed") return null;
+	// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
+	const synthesizes = row.council?.label === COUNCIL_SYNTHESIS_LABEL || row.agentId === COUNCIL_SYNTHESIS_AGENT;
+	const { toolCalls, ...completion } = row.completion ?? {};
+	return completedRunCaveat({
+		...(row.trust !== undefined ? { trust: row.trust } : {}),
+		...completion,
+		...(toolCalls !== undefined && !synthesizes ? { toolCalls } : {}),
+	});
 }
 
 /** Who started a run, in words, because the row's glyph only implies it. */
@@ -1428,11 +1480,30 @@ function runOriginWords(row: Pick<DispatchBoardRow, "requestOrigin">): string | 
 	}
 }
 
+const NARROW_STATUS_WIDTH = 60;
+const COMPACT_CAVEAT_WORD: Readonly<Record<CompletedRunCaveat["kind"], string>> = {
+	against: "failed",
+	refused: "done",
+	"no-tools": "no tools",
+};
+
 /** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
 function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
 	const failure = completedRunFailure(row);
-	// A narrow row drops `done`, which the mark already implies, so the worker's name keeps its column.
-	if (failure !== null) return theme.fg("error", `${GLYPH.error} ${width < 80 ? "" : "done · "}${failure}`);
+	// The caveat replaces `done` rather than trailing it: the mark already says the run finished, and the status
+	// column stays narrow enough that the task beside it still reads.
+	if (failure !== null) {
+		const mark = completedRunMark(failure);
+		// Below sixty columns the cell keeps the worker card header's one word, so the agent column survives; the
+		// detail under the table states the caveat whole.
+		const words =
+			width >= NARROW_STATUS_WIDTH
+				? failure.words
+				: failure.kind === "refused"
+					? `${row.completion?.refusedCalls ?? 1} refused`
+					: COMPACT_CAVEAT_WORD[failure.kind];
+		return theme.fg(mark.token, `${mark.glyph} ${words}`);
+	}
 	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" && tick !== undefined ? { tick } : {}),
 	});
@@ -1532,7 +1603,8 @@ export function runTableRows(
 		if (item.kind === "council") {
 			const group = item.group;
 			const selected = group.selectedRunId !== undefined;
-			const name = `council ${group.group}`;
+			// The group id is the record's; a person knows the council by its size and its question.
+			const name = councilName(group);
 			const cells: Array<string | TableCell> = [];
 			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 			cells.push(
@@ -1544,7 +1616,7 @@ export function runTableRows(
 			cells.push(group.elapsed, "", "", "");
 			if (anyAccount) cells.push("");
 			cells.push({
-				text: `${group.members.length} member${group.members.length === 1 ? "" : "s"} · r${group.round}${group.synthesis === null ? "" : ` · ${COUNCIL_SYNTHESIS_LABEL}`}`,
+				text: `${group.task === undefined ? "" : `${group.task} · `}round ${group.round}${group.synthesis === null ? "" : ` · ${COUNCIL_SYNTHESIS_LABEL}`}`,
 				tone: "muted",
 			});
 			return cells;
@@ -1709,15 +1781,23 @@ function formatDispatchBoardBody(
 			item.kind === "run" ? item.row.runId === selectedRunId : item.group.selectedRunId !== undefined,
 		),
 	);
-	const table = runTableRows(items, width, { selectedRunId });
+	// One line per run, then any note on the columns this width dropped. The position row counts runs, so the note
+	// rides under the window instead of being counted as one, which made the total change with the width.
+	const tableLines = runTableRows(items, width, { selectedRunId });
+	const table = tableLines.slice(0, items.length);
+	const columnNote = tableLines
+		.slice(items.length)
+		.map((line) => line.trim())
+		.join(" ");
+	const notes = columnNote.length === 0 ? [] : [truncateToWidth(columnNote, width, GLYPH.ellipsis, false)];
 	const item = items[selectedIndex];
 	const detail =
 		item === undefined
 			? null
 			: item.kind === "council"
 				? {
-						title: `council ${item.group.group}`,
-						meta: `r${item.group.round} · ${item.group.elapsed}`,
+						title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` · ${item.group.task}`}`,
+						meta: `round ${item.group.round} · ${item.group.elapsed}`,
 						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
 						body: councilGroupBody(theme, item.group, width),
 					}
@@ -1739,7 +1819,7 @@ function formatDispatchBoardBody(
 	// An open detail leaves the table what its body and rule do not need, and
 	// never less than the selected row. A table that cannot show every run
 	// spends one more row on the position row that counts the rest.
-	const detailRows = detail === null ? 0 : detail.body.length + 1;
+	const detailRows = (detail === null ? 0 : detail.body.length + 1) + notes.length;
 	const tableBudget = detailExpanded
 		? table.length + detailRows <= budget
 			? table.length
@@ -1748,16 +1828,13 @@ function formatDispatchBoardBody(
 	const [start] = centeredWindow(table.length, selectedIndex, tableBudget);
 	const { window, position } = windowRows(table, start, tableBudget);
 	const lines = [...window];
-	if (position && detailExpanded) {
-		const shown = position.end - position.start + 1;
-		const range = shown === 1 ? `run ${position.start}` : `runs ${position.start}–${position.end}`;
-		const words = [
-			`${range} of ${position.total}`,
-			`${position.total - shown} hidden while the detail is open`,
-			"↑↓ select",
-		];
-		lines.push(theme.fg("annotation", truncateToWidth(words.join(" · "), width, GLYPH.ellipsis, false)));
-	} else if (position) lines.push(positionRow(theme, { ...position, unit: "runs", keys: ["↑↓ select"] }, width));
+	if (position) {
+		// One wording at every width and in both views; an open detail adds only how many runs it is hiding.
+		const hidden = position.total - (position.end - position.start + 1);
+		const keys = [...(detailExpanded ? [`${hidden} hidden while the detail is open`] : []), "↑↓ select"];
+		lines.push(positionRow(theme, { ...position, unit: "runs", keys }, width));
+	}
+	lines.push(...notes);
 	if (detail === null) return lines;
 	lines.push(sectionRule(theme, width, detail.title, { meta: detail.meta }));
 	const room = budget - lines.length;
@@ -1768,11 +1845,13 @@ function formatDispatchBoardBody(
 	if (room <= 0) return lines;
 	const kept = detail.body.slice(0, Math.max(0, room - 1));
 	const hidden = detail.body.length - kept.length;
+	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
 	const where = [
 		`${hidden} more rows`,
 		...(detailExpanded ? [] : [`${detailKey} for detail`]),
 		`/view dispatch:${detail.runId}`,
 	];
+	while (where.length > 1 && visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) > width) where.pop();
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
@@ -1804,6 +1883,52 @@ export interface DispatchBoardView extends Component, RowBudgetedBody, GrowableB
 	canWatch(): boolean;
 	/** Say which rows Enter takes to the watch pane; only a session with a pane host has any. */
 	setWatchable(predicate: (row: DispatchBoardRow) => boolean): void;
+}
+
+/**
+ * The keys Fleet Runs offers for the selected row, without the way out the frame adds. The rail and the board's own
+ * key row read this one list, so a key the rail has no room for is named in the body rather than lost (cards r1).
+ */
+export function dispatchBoardHintEntries(
+	board: Pick<DispatchBoardView, "selectedRow" | "detailExpanded" | "canWatch">,
+): HintEntry[] {
+	const row = board.selectedRow();
+	if (row === null) return [];
+	const entries: HintEntry[] = [{ key: "↑↓", verb: "select" }];
+	const steerable = isDispatchBoardRowSteerable(row);
+	// A plan's card already shows every step, so its row has no detail to open or pane to watch.
+	if (row.council === undefined && row.plan === undefined) {
+		// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read.
+		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
+		// The watch pane splits the terminal, so it says so before the key is pressed.
+		if (board.canWatch()) entries.push({ key: "w", verb: "watch in a pane", short: "watch" });
+	}
+	if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
+	if (isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });
+	return entries;
+}
+
+/** The keys the frame's rail drops at this width, as rows under the table; the arrows are on the position row. */
+function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number): string[] {
+	const all: HintEntry[] = [...entries, { key: "Esc", verb: "close" }];
+	// The frame fits its rail into the body's width less one cell.
+	const { kept } = fitHintEntryList(all, width - 1);
+	const dropped = all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
+	if (dropped.length === 0) return [];
+	const theme = clioTheme();
+	// Keys wrap between entries, never inside one, so a narrow board names every key it takes.
+	const rows: string[] = [];
+	let current = "";
+	for (const entry of dropped) {
+		const unit = `[${entry.key}] ${entry.short ?? entry.verb}`;
+		const joined = current.length === 0 ? unit : `${current} · ${unit}`;
+		if (current.length > 0 && visibleWidth(joined) > width) {
+			rows.push(current);
+			current = unit;
+		} else current = joined;
+	}
+	if (current.length > 0) rows.push(current);
+	return rows.map((row) => theme.fg("keyboardHint", truncateToWidth(row, width, GLYPH.ellipsis, false)));
 }
 
 export function createDispatchBoardView(
@@ -1851,7 +1976,7 @@ export function createDispatchBoardView(
 		selectedRunId = visibleRows[nextIndex]?.runId ?? selected.runId;
 	};
 
-	return {
+	const view: DispatchBoardView = {
 		render(width: number): string[] {
 			const currentRows = rows();
 			normalizeSelection(currentRows);
@@ -1865,17 +1990,19 @@ export function createDispatchBoardView(
 					.filter((run) => run.evidence)
 					.map((run) => run.runId)
 					.join(",") ?? "";
-			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
+			const keyRows = droppedKeyRows(dispatchBoardHintEntries(view), safeWidth);
+			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${keyRows.join("/")}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
-			const lines = formatDispatchBoardBody(
+			const body = formatDispatchBoardBody(
 				currentRows,
 				safeWidth,
-				budget,
+				Math.max(1, budget - keyRows.length),
 				snapshot,
 				selectedRunId,
 				expanded,
 				bodyRows > 0,
 			);
+			const lines = currentRows.length === 0 ? body : [...body, ...keyRows];
 			memo = { key, lines };
 			return lines;
 		},
@@ -1917,6 +2044,7 @@ export function createDispatchBoardView(
 			memo = null;
 		},
 	};
+	return view;
 }
 
 const HIDDEN_RUNS_NAMED = 3;
@@ -2059,6 +2187,7 @@ function toRow(
 		...(entry.hostVerification !== undefined ? { hostVerification: entry.hostVerification } : {}),
 		...(entry.trust !== undefined ? { trust: entry.trust } : {}),
 		...(entry.validationFailure !== undefined ? { validationFailure: entry.validationFailure } : {}),
+		...(entry.completion !== undefined ? { completion: { ...entry.completion } } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),

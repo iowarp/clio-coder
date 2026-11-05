@@ -12,6 +12,7 @@ import type {
 	ApplicationSignalCoordinator,
 } from "./application-controller.js";
 import { createApplicationController } from "./application-controller.js";
+import { formatKeyLabel } from "./keybinding-manager.js";
 import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
 import { scrollTranscriptPage } from "./layout.js";
 import type { LeaderTarget } from "./leader-key.js";
@@ -272,7 +273,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		? createLeaderMenu(
 				deps.tui,
 				() => (search() ? "Transcript search" : overlayScopeLabel(deps.overlay.getState())),
-				(id) => deps.keybindings.getKeys?.(id).join(" / ") ?? "",
+				(id) =>
+					deps.keybindings
+						.getKeys?.(id)
+						.map((key) => formatKeyLabel(key))
+						.join(" / ") ?? "",
 			)
 		: undefined;
 	const dispatchLeader = (id: Keybinding): boolean => {

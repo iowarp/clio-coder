@@ -1108,6 +1108,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				},
 				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 				isFooterExpanded: () => footer.isExpanded(),
+				isFleetBoardOpen: () => deps.getOverlayState?.() === "dispatch-board",
 			}),
 			editor,
 			contextProgress: createContextProgressRail(

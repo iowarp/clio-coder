@@ -27,7 +27,7 @@ test("tasks overlay visibly qualifies completed work with failed or missing chec
 	match(text, /1 unverified/);
 	match(text, /headless failed/);
 	match(text, /full suite has no recorded pass/);
-	match(text, /completion claim/);
+	match(text, /agent said/);
 	const historyLines = formatCompositeTasksOverlayBodyLines({
 		board: null,
 		history: [{ boardId: "old", title: board.title, tasks: board.tasks, lastSnapshotAt: "2026-09-24T00:00:00Z" }],

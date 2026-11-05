@@ -692,13 +692,16 @@ export class ListOverlayView implements Component {
 	 */
 	private leadWidth(width: number, items: ReadonlyArray<ListOverlayItem>): number {
 		const narrow = width <= NARROW_ROW_WIDTH;
+		const cap = Math.max(8, Math.floor(width * LEAD_COLUMN_SHARE));
 		let widest = 0;
 		for (const item of items) {
 			const cells = item.cells;
 			if (!cells) continue;
-			widest = Math.max(widest, visibleWidth(narrow && cells.narrowLead !== undefined ? cells.narrowLead : cells.lead));
+			const full = visibleWidth(cells.lead);
+			const short = cells.narrowLead === undefined ? full : visibleWidth(cells.narrowLead);
+			widest = Math.max(widest, narrow || full > cap ? short : full);
 		}
-		return Math.min(widest, Math.max(8, Math.floor(width * LEAD_COLUMN_SHARE)));
+		return Math.min(widest, cap);
 	}
 
 	/**
@@ -712,8 +715,8 @@ export class ListOverlayView implements Component {
 		if (!cells) return item.label;
 		const theme = clioTheme();
 		const narrow = width <= NARROW_ROW_WIDTH;
-		// The short lead also stands in wherever the full one would be cut: `/run [--agent-profile …`
-		// at 120 columns lost the agent and task the command needs, while `/run <agent> <task> [options]` fits.
+		// A lead the column would cut takes its short form at any width: a whole
+		// `/run <agent> <task>` says more than `/run [--agent-profile <profile>] […`.
 		const lead =
 			cells.narrowLead !== undefined && (narrow || visibleWidth(cells.lead) > leadWidth) ? cells.narrowLead : cells.lead;
 		const fitted = padAnsi(truncateToWidth(lead, leadWidth, GLYPH.ellipsis, false), leadWidth);
