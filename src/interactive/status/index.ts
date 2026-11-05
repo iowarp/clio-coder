@@ -20,7 +20,13 @@ export {
 	reasoningFromQuantity,
 	UNMEASURED_REASONING,
 } from "./reasoning.js";
-export { type ReduceContext, reduceStatus, type StatusInputEvent } from "./state-machine.js";
+export {
+	humanWaitTotalMs,
+	isWaitingForOperator,
+	type ReduceContext,
+	reduceStatus,
+	type StatusInputEvent,
+} from "./state-machine.js";
 export {
 	type BuildSummaryInput,
 	buildSummary,

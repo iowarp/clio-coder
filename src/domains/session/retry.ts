@@ -170,10 +170,19 @@ export function isRateLimitErrorMessage(errorMessage: string | null | undefined)
 	return isEngineRetryableAssistantError(errorMessage) && RATE_LIMIT_PATTERN.test(errorMessage);
 }
 
-/** The provider's own wait for this failure, from the Anthropic response facts or the error text; null when it named none. */
+/**
+ * The provider's own wait for this failure: the response header the call tracker saw, the Anthropic response facts,
+ * or the error text; null when it named none.
+ */
 export function failureRetryAfterMs(message: unknown, errorMessage: string | null | undefined): number | null {
-	const observed = (message as { anthropicResponse?: { retryAfterSeconds?: unknown } } | null | undefined)
-		?.anthropicResponse?.retryAfterSeconds;
+	const facts = message as
+		| { retryAfterMs?: unknown; anthropicResponse?: { retryAfterSeconds?: unknown } }
+		| null
+		| undefined;
+	if (typeof facts?.retryAfterMs === "number" && Number.isFinite(facts.retryAfterMs) && facts.retryAfterMs >= 0) {
+		return facts.retryAfterMs;
+	}
+	const observed = facts?.anthropicResponse?.retryAfterSeconds;
 	if (typeof observed === "number" && Number.isFinite(observed) && observed >= 0) return observed * 1000;
 	const named = errorMessage?.match(
 		/(?:retry[- ]after[:=\s]+|try again in\s+)(\d+(?:\.\d+)?)\s*(ms|milliseconds?|m|mins?|minutes?|h|hours?)?/i,

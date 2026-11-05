@@ -111,7 +111,8 @@ export interface EditorSubmitSessionTranscript {
 export interface EditorSubmitDeps {
 	askEgg?: import("../tools/ask-user.js").AskUserHandler;
 	onLocalEntry?: (entry: SessionEntry) => void;
-	onLocalBashRunning?: (running: boolean) => void;
+	onLocalBashRunning?: (running: boolean, command?: string) => void;
+	onLocalBashCancelling?: () => void;
 	/** A steer was handed to a worker's queue; the transcript tracks it from here. */
 	onSteerSent?: (run: RunningDispatchRef, text: string) => void;
 	/** Note a harness feature the operator used, for demo guidance; see recordOperatorFeature. */
@@ -229,7 +230,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		);
 		deps.ui.requestRender();
 
-		deps.onLocalBashRunning?.(true);
+		deps.onLocalBashRunning?.(true, parsed.command);
 		let settlement!: Promise<void>;
 		settlement = (async () => {
 			try {
@@ -730,6 +731,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		},
 		cancelActiveEditorBash: () => {
 			if (!activeEditorBash) return false;
+			deps.onLocalBashCancelling?.();
 			activeEditorBash.abort();
 			return true;
 		},

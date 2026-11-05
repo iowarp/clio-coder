@@ -330,7 +330,9 @@ test("unfinished JSON message projects useful prose and waiting/running do not r
 	for (const phase of ["waiting", "retrying"] as const) {
 		const panel = createChatPanel();
 		panel.applyEvent({ type: "retry_status", status: { phase, attempt: 1, maxAttempts: 2, errorMessage: raw } });
-		assert.doesNotMatch(plain(panel.render(43)), /Backend|payload/);
+		const row = plain(panel.render(43)).trim();
+		assert.equal(row.split("\n").length, 1);
+		assert.doesNotMatch(row, /\{"message|payload payload/);
 		const artifact = panel.inspectionArtifacts()[0];
 		assert.ok(artifact);
 		assert.match((await artifact.load()).lines.join("\n"), /Backend/);

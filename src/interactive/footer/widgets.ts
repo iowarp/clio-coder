@@ -12,7 +12,7 @@ import { contextPercentRole } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
-import { formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
+import { computeWatchdogTier, formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	FUNCTION_ROLES,
@@ -269,7 +269,8 @@ function reasoningChip(theme: ClioTheme, reasoning: ReasoningUsageView): string 
 
 export function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
-	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(lastTurn.elapsedMs))}`;
+	const work = Math.max(0, lastTurn.elapsedMs - (lastTurn.humanWaitMs ?? 0));
+	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(work))}`;
 }
 
 /** Tokens are the journal's for the whole turn, workers included; timing and tools are the turn's own status. */
@@ -342,6 +343,8 @@ type HarnessPhasePresentation = {
 	label: string;
 	token: ClioToken;
 	live: boolean;
+	/** Who is acting, when that is not the model the rail names by default. */
+	subject?: string;
 };
 
 function shortToolLabel(status: AgentStatus, width: number): string {
@@ -359,7 +362,7 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 	const ultraNarrow = width < 48;
 	switch (status.phase) {
 		case "idle":
-			return { glyph: GLYPH.queued, label: "Ready", token: "counter", live: false };
+			return { glyph: GLYPH.queued, label: "Idle", token: "counter", live: false };
 		case "preparing":
 			return { glyph: GLYPH.phaseWaiting, label: "Preparing", token: "harnessAction", live: true };
 		case "waiting_model":
@@ -412,6 +415,8 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 				live: false,
 			};
 		}
+		case "cancelling":
+			return { glyph: GLYPH.cancelled, label: "Cancelling", token: "counter", live: false };
 		case "ended": {
 			const stop = status.summary?.stopReason;
 			if (stop === "error") return { glyph: GLYPH.error, label: "Failed", token: "error", live: false };
@@ -425,22 +430,201 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 	}
 }
 
-const COMPOSER_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
-	[ToolNames.Write]: "is writing a file",
-	[ToolNames.Edit]: "is editing a file",
-	[ToolNames.Read]: "is reading a file",
-	[ToolNames.Bash]: "is running a command",
-	[ToolNames.RunScript]: "is running a script",
-	[ToolNames.Grep]: "is searching",
-	[ToolNames.Find]: "is finding files",
-	[ToolNames.CodeNav]: "is navigating code",
+/** The verb for a call the harness executes, and the words when its arguments name no object. */
+const HARNESS_TOOL_ACTIVITY: Readonly<Record<string, { verb: string; bare: string }>> = {
+	[ToolNames.Write]: { verb: "is writing", bare: "is writing a file" },
+	[ToolNames.Edit]: { verb: "is editing", bare: "is editing a file" },
+	[ToolNames.Read]: { verb: "is reading", bare: "is reading a file" },
+	[ToolNames.Bash]: { verb: "is running", bare: "is running a command" },
+	[ToolNames.RunScript]: { verb: "is running", bare: "is running a script" },
+	[ToolNames.Grep]: { verb: "is searching for", bare: "is searching" },
+	[ToolNames.Find]: { verb: "is finding", bare: "is finding files" },
+	[ToolNames.CodeNav]: { verb: "is looking up", bare: "is navigating code" },
+};
+
+/** These calls leave the next step with a person or a worker, so the model's turn is what is waiting. */
+const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 	[ToolNames.Dispatch]: "is waiting for a worker",
 	[ToolNames.AskUser]: "needs input",
 };
 
+/** Room for the activity phrase on the composer rail, after its stretch, lead glyph and a short model name. */
+function railActivityRoom(width: number): number {
+	return Math.max(10, width - Math.min(16, Math.floor(width / 3)) - 3 - (width < 60 ? 9 : 14));
+}
+
+/** Facts in reading order, each with its priority. The lowest priorities leave first and the order never changes. */
+function fitRailFacts(facts: ReadonlyArray<{ text: string | null; keep: number }>, room: number): string {
+	const present = facts.filter((fact): fact is { text: string; keep: number } => fact.text !== null);
+	const join = (rows: ReadonlyArray<{ text: string }>): string => rows.map((row) => row.text).join(" · ");
+	const kept = [...present];
+	while (kept.length > 1 && visibleWidth(join(kept)) > room) {
+		const lowest = kept.slice(1).reduce((worst, fact) => (fact.keep < worst.keep ? fact : worst));
+		kept.splice(kept.indexOf(lowest), 1);
+	}
+	return join(kept);
+}
+
+/** Whole seconds, the way a countdown reads: a wait never shows as over before it is. */
+function remainingSeconds(dueAt: number, now: number): number {
+	return Math.max(0, Math.ceil((dueAt - now) / 1000));
+}
+
+function retryRailLabel(
+	status: AgentStatus,
+	room: number,
+	now: number,
+	modelWait: (from: number) => string | null,
+): string {
+	const retry = status.retry;
+	const attempts = `${room >= 22 ? "retrying" : "retry"} ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
+	if (retry?.stage === "attempt") {
+		const from = retry.attemptStartedAt;
+		return fitRailFacts(
+			[
+				{ text: attempts, keep: 9 },
+				{ text: room >= 44 ? "waiting for a response" : null, keep: 3 },
+				{ text: from !== undefined ? modelWait(from) : null, keep: 8 },
+			],
+			room,
+		);
+	}
+	const left = retry?.dueAt !== undefined ? remainingSeconds(retry.dueAt, now) : null;
+	return fitRailFacts(
+		[
+			{ text: attempts, keep: 9 },
+			{ text: left === null ? null : room >= 32 ? `next attempt in ${left}s` : `in ${left}s`, keep: 8 },
+			{
+				text: retry?.retryAfterMs !== undefined ? `provider asked for ${Math.ceil(retry.retryAfterMs / 1000)}s` : null,
+				keep: 2,
+			},
+		],
+		room,
+	);
+}
+
+function clockTime(at: number): string {
+	return new Date(at).toTimeString().slice(0, 8);
+}
+
+/**
+ * What a silent model wait can truthfully say, escalating with the age of the last evidence. None of it is a cause:
+ * no bytes means none arrived, and a target that may be loading or stuck is stated as exactly that much.
+ */
+function modelWaitFacts(
+	status: AgentStatus,
+	room: number,
+	now: number,
+	from: number,
+): ReadonlyArray<{ text: string | null; keep: number }> {
+	const tier = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt));
+	const request = status.modelRequest;
+	const sent = request && request.sentAt >= from ? request : null;
+	const evidence =
+		tier < 1
+			? null
+			: sent?.firstByteAt
+				? "response open, no output yet"
+				: sent?.bytesObservable
+					? "no bytes yet"
+					: "no output yet";
+	return [
+		{ text: sent ? `request sent ${clockTime(sent.sentAt)}` : null, keep: 3 },
+		{ text: evidence, keep: 5 },
+		{ text: tier >= 3 ? (room >= 60 ? "target may be loading or stuck" : "may be stuck") : null, keep: 7 },
+		{ text: tier >= 3 ? (room >= 50 ? "/model switches" : "/model") : null, keep: 6 },
+		{ text: tier === 2 ? "Esc cancels" : null, keep: 6 },
+	];
+}
+
+/** Silence after output has started: the phase is still the last thing observed, and the age of that is the fact. */
+function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<{ text: string | null; keep: number }> {
+	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
+	const tier = computeWatchdogTier(silentMs);
+	return [
+		{ text: tier >= 1 ? `no new output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}` : null, keep: 8 },
+		{ text: tier === 2 ? "Esc cancels" : null, keep: 6 },
+		{ text: tier >= 3 ? "may be stuck" : null, keep: 7 },
+		{ text: tier >= 3 ? "/model switches" : null, keep: 6 },
+	];
+}
+
+/**
+ * A running tool in the grammar of who is acting. A call the model asked for is the harness's process and the model
+ * is idle meanwhile; a direct shell line was never the model's at all. Time is the call's own.
+ */
+function toolActivity(
+	status: AgentStatus,
+	room: number,
+	now: number,
+	verb: string | null,
+	elapsedFrom: (from: number) => string | null,
+	modelName: string | undefined,
+): { label: string; subject?: string } {
+	const tool = status.tool;
+	const name = tool?.toolName ?? "tool";
+	const owned = MODEL_OWNED_TOOL_ACTIVITY[name];
+	if (owned !== undefined && tool?.operatorShell !== true) return { label: owned };
+	const activity = Object.hasOwn(HARNESS_TOOL_ACTIVITY, name) ? HARNESS_TOOL_ACTIVITY[name] : undefined;
+	const object = tool?.toolSubject ?? null;
+	const elapsed = tool?.startedAt ?? status.toolStartedAt;
+	const others = (status.activeTools ?? []).length - 1;
+	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
+	const tier = computeWatchdogTier(silentMs);
+	const full = verb ?? activity?.verb ?? "is running";
+	const lead = room >= 24 ? full : full.replace(/^is /u, "");
+	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9));
+	const phrase =
+		object === null || span === null
+			? verb !== null
+				? `${verb} ${truncateToWidth(name, 18, GLYPH.ellipsis, false)}`
+				: (activity?.bare ?? `is running ${truncateToWidth(name, room >= 40 ? 18 : 12, GLYPH.ellipsis, false)}`)
+			: `${lead} \`${truncateToWidth(object, span, GLYPH.ellipsis, false)}\`${others > 0 ? ` +${others}` : ""}`;
+	const label = fitRailFacts(
+		[
+			{ text: phrase, keep: 9 },
+			{ text: elapsed === undefined ? null : elapsedFrom(elapsed), keep: 8 },
+			{ text: verb === null && tier >= 2 ? "Esc cancels" : null, keep: 5 },
+			// The harness sees a tool's output; a direct shell line's goes straight to its card, so its silence is unknown here.
+			{
+				text:
+					verb === null && tier >= 3 && tool?.operatorShell !== true
+						? `no output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}`
+						: null,
+				keep: 6,
+			},
+			{ text: tool?.operatorShell !== true && modelName ? `requested by ${modelName}` : null, keep: 3 },
+		],
+		room,
+	);
+	return { label, subject: tool?.operatorShell === true ? "your shell" : "Clio" };
+}
+
 /** Subject-aware activity phrases for the model named on the composer rail. */
-export function composerPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
+export function composerPhasePresentation(
+	status: AgentStatus,
+	width: number,
+	now: number,
+	modelName?: string,
+): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
+	const room = railActivityRoom(width);
+	const elapsedFrom = (from: number): string | null => {
+		const elapsed = Math.floor((now - from) / 1000);
+		if (elapsed < 1) return null;
+		return elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsed * 1000);
+	};
+	const waitLabel = (): string => {
+		const from = status.waitingSince ?? status.since;
+		return fitRailFacts(
+			[
+				{ text: room >= 50 ? "is waiting for a response" : room >= 24 ? "is waiting" : "waiting", keep: 9 },
+				{ text: elapsedFrom(from), keep: 8 },
+				...modelWaitFacts(status, room, now, from),
+			],
+			room,
+		);
+	};
 	let label: string;
 	switch (status.phase) {
 		case "idle":
@@ -450,25 +634,29 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 			label = "is preparing";
 			break;
 		case "waiting_model":
-			label = "is waiting for a response";
+			label = waitLabel();
 			break;
 		case "thinking":
-			label = "is thinking";
+			label = fitRailFacts([{ text: "is thinking", keep: 9 }, ...silentStreamFacts(status, now)], room);
 			break;
 		case "writing":
-			label = status.preparingToolCall ? "is preparing a tool" : "is writing";
+			label = fitRailFacts(
+				[
+					{ text: status.preparingToolCall ? "is preparing a tool" : "is writing", keep: 9 },
+					...silentStreamFacts(status, now),
+				],
+				room,
+			);
 			break;
 		case "tool_running": {
-			const name = status.tool?.toolName ?? "tool";
-			const activity = Object.hasOwn(COMPOSER_TOOL_ACTIVITY, name) ? COMPOSER_TOOL_ACTIVITY[name] : undefined;
-			label = activity ?? `is running ${truncateToWidth(name, width >= 100 ? 18 : 12, GLYPH.ellipsis, false)}`;
-			break;
+			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName);
+			return { ...phase, ...activity };
 		}
 		case "tool_blocked":
 			label = "needs approval";
 			break;
 		case "retrying":
-			label = `is retrying ${status.retry?.attempt ?? 0}/${status.retry?.maxAttempts ?? 0}`;
+			label = retryRailLabel(status, room, now, elapsedFrom);
 			break;
 		case "compacting":
 			label = "is compacting context";
@@ -477,24 +665,159 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 			label = "is waiting for a worker";
 			break;
 		case "stuck":
-			label = `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`;
+			if (status.resumePhase === "tool_running" && status.tool) {
+				// Its own process has gone quiet, which is not the model having no output.
+				return { ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName) };
+			}
+			label = fitRailFacts(
+				[
+					{ text: `has no output · ${Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000))}s`, keep: 9 },
+					{ text: "may be loading or stuck", keep: 3 },
+					{ text: "Esc cancels", keep: 7 },
+					{ text: "/model switches", keep: 8 },
+				],
+				room,
+			);
 			break;
+		case "cancelling": {
+			if (status.tool) {
+				// Elapsed here is the stop's own, not the call's: how long the process has ignored the request.
+				const stopping = toolActivity(
+					{
+						...status,
+						activeTools: [],
+						tool: {
+							...status.tool,
+							...(status.cancelRequestedAt !== undefined ? { startedAt: status.cancelRequestedAt } : {}),
+						},
+					},
+					room,
+					now,
+					"is stopping",
+					elapsedFrom,
+					undefined,
+				);
+				return { ...phase, ...stopping };
+			}
+			label = fitRailFacts(
+				[
+					{ text: "is cancelling", keep: 9 },
+					{ text: elapsedFrom(status.cancelRequestedAt ?? now), keep: 8 },
+					{ text: "stop requested", keep: 7 },
+				],
+				room,
+			);
+			break;
+		}
 		case "ended": {
 			const stop = status.summary?.stopReason;
+			const short = room < 24;
 			label =
 				stop === "error"
-					? "failed"
+					? room >= 40
+						? "failed · /model switches"
+						: "failed"
 					: stop === "generation_guard"
-						? "stopped generating tool arguments"
+						? short
+							? "stopped"
+							: "stopped generating tool arguments"
 						: stop === "cancelled" || stop === "aborted"
-							? "was cancelled"
+							? short
+								? "cancelled"
+								: "was cancelled"
 							: stop === "length"
-								? "reached the output limit"
+								? short
+									? "output limit"
+									: "reached the output limit"
 								: "finished";
 			break;
 		}
 	}
 	return { ...phase, label };
+}
+
+/** What the route on screen is known to be able to do right now, in the terms the model picker already uses. */
+export interface RouteReadinessFacts {
+	targetId: string;
+	available: boolean;
+	reason: string;
+	health: "healthy" | "degraded" | "unknown" | "down";
+	/** How the last turn on this exact route ended, when this session ran one. */
+	lastStop: TurnSummary["stopReason"] | null;
+}
+
+/**
+ * Idle states readiness or the real blocker. A target that answers a model listing is reachable, nothing more: only a
+ * request this session saw answered says the model is ready, and until then the claim stays that small.
+ */
+export function idleReadinessPresentation(facts: RouteReadinessFacts, width: number): HarnessPhasePresentation {
+	const room = railActivityRoom(width);
+	const quiet = { token: "counter" as const, live: false };
+	if (!facts.available) {
+		const why = facts.reason.trim();
+		return {
+			glyph: GLYPH.warn,
+			token: "warning",
+			live: false,
+			label: fitRailFacts(
+				[
+					{ text: "is unavailable", keep: 9 },
+					{ text: why.length > 0 ? truncateToWidth(why, 36, GLYPH.ellipsis, false) : null, keep: 3 },
+					{ text: "/model switches", keep: 8 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.health === "down") {
+		return {
+			glyph: GLYPH.error,
+			token: "error",
+			live: false,
+			label: fitRailFacts(
+				[
+					{ text: `target ${facts.targetId} is down`, keep: 9 },
+					{ text: "/model switches", keep: 8 },
+					{ text: `clio-coder configure --id ${facts.targetId}`, keep: 2 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.lastStop === "error") {
+		return {
+			glyph: GLYPH.error,
+			token: "warning",
+			live: false,
+			label: fitRailFacts(
+				[
+					{ text: "last request failed", keep: 9 },
+					{ text: "/model switches", keep: 8 },
+				],
+				room,
+			),
+		};
+	}
+	if (facts.lastStop !== null && facts.lastStop !== "cancelled" && facts.lastStop !== "aborted") {
+		return { glyph: GLYPH.ok, ...quiet, label: "is ready" };
+	}
+	const known =
+		facts.health === "healthy"
+			? "target reachable"
+			: facts.health === "degraded"
+				? "target degraded"
+				: "readiness unknown";
+	return {
+		glyph: GLYPH.queued,
+		...quiet,
+		label: fitRailFacts(
+			[
+				{ text: known, keep: 9 },
+				{ text: facts.lastStop === null ? "no request yet" : "last request cancelled", keep: 5 },
+			],
+			room,
+		),
+	};
 }
 
 export function buildHarnessStatePill(
@@ -512,7 +835,7 @@ export function buildHarnessStatePill(
 	// remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.
 	if (status.phase === "idle") {
-		const idle = theme.fg("counter", `${GLYPH.queued} Ready`);
+		const idle = theme.fg("counter", `${GLYPH.queued} Idle`);
 		return badge ? `${idle} ${theme.fg("annotation", "·")} ${badge}` : idle;
 	}
 	const phase = footerPhasePresentation(status, safeWidth, now);

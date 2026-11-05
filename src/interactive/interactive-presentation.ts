@@ -48,7 +48,7 @@ import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboa
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
-import { composerPhasePresentation } from "./footer/widgets.js";
+import { composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
@@ -59,7 +59,8 @@ import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
-import { createStatusController } from "./status/index.js";
+import { createStatusController, humanWaitTotalMs } from "./status/index.js";
+import { modelNickname } from "./theme/labels.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
@@ -191,7 +192,9 @@ export interface InteractivePresentation {
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
 	announceSettingChanges(): void;
-	setLocalBashRunning(running: boolean): void;
+	setLocalBashRunning(running: boolean, command?: string): void;
+	/** The operator asked the running shell line to stop; it has not necessarily gone yet. */
+	setLocalBashCancelling(): void;
 	getQuotaSnapshots(): QuotaProviders;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
 	recordChatEvent(event: ChatLoopEvent): void;
@@ -360,6 +363,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
+		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.
@@ -449,6 +453,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 
 	let localBashStartedAt: number | null = null;
+	let localBashCommand: string | null = null;
+	let localBashCancelledAt: number | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
@@ -459,10 +465,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			if (localBashStartedAt === null || (status.phase !== "idle" && status.phase !== "ended")) return status;
 			return {
 				...status,
-				phase: "tool_running",
+				phase: localBashCancelledAt === null ? "tool_running" : "cancelling",
 				since: localBashStartedAt,
+				lastMeaningfulAt: Math.max(status.lastMeaningfulAt, localBashStartedAt),
 				toolStartedAt: localBashStartedAt,
-				tool: { toolName: "bash", toolPreview: "local shell" },
+				activeTools: [],
+				...(localBashCancelledAt === null ? {} : { cancelRequestedAt: localBashCancelledAt }),
+				tool: {
+					toolName: "bash",
+					toolPreview: "local shell",
+					startedAt: localBashStartedAt,
+					operatorShell: true,
+					...(localBashCommand === null ? {} : { toolSubject: localBashCommand }),
+				},
 			};
 		},
 		getTerminalColumns: () => deps.terminal.columns,
@@ -565,7 +580,24 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
-			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
+			const route = deps.getSettings?.().chat;
+			if (status.phase !== "idle") {
+				return composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model));
+			}
+			const target = deps.providers.list().find((candidate) => candidate.target.id === route?.target);
+			if (!target || !route?.target) return null;
+			const last = lastTurnSummary;
+			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
+			return idleReadinessPresentation(
+				{
+					targetId: route.target,
+					available: target.available,
+					reason: target.reason,
+					health: target.health.status,
+					lastStop: onRoute ? last.stopReason : null,
+				},
+				width,
+			);
 		},
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
@@ -908,8 +940,16 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		chatRenderer,
 		io,
 		root,
-		setLocalBashRunning(running) {
+		setLocalBashRunning(running, command) {
 			localBashStartedAt = running ? Date.now() : null;
+			localBashCommand = running ? (command ?? null) : null;
+			localBashCancelledAt = null;
+			footer.refresh();
+			requestRender();
+		},
+		setLocalBashCancelling() {
+			if (localBashStartedAt === null) return;
+			localBashCancelledAt = Date.now();
 			footer.refresh();
 			requestRender();
 		},

@@ -653,6 +653,11 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	return merged as TOptions;
 }
 
+/**
+ * A never-reasoning model's replies stay out of its own history, which is why the settled message and every partial
+ * lose their thinking. The deltas still pass: reasoning the provider streamed was observed whatever the target
+ * declared, and hiding it would present real work as silence.
+ */
 function stripNeverReasoningFromStream(
 	source: AssistantMessageEventStream,
 	model: Model<Api>,
@@ -663,9 +668,6 @@ function stripNeverReasoningFromStream(
 	(async () => {
 		try {
 			for await (const event of source) {
-				if (event.type === "thinking_start" || event.type === "thinking_delta" || event.type === "thinking_end") {
-					continue;
-				}
 				if (event.type === "done") {
 					stripped.push({ ...event, message: stripThinkingFromMessage(event.message) });
 				} else if (event.type === "error") {

@@ -1480,6 +1480,7 @@ export const StatusPhase = vocabulary([
 	"compacting",
 	"dispatching",
 	"stuck",
+	"cancelling",
 	"ended",
 ]);
 export const AgentStatusChangedSchema = Type.Object(

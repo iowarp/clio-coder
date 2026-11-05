@@ -206,6 +206,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		const failureRoute = (message as { failureRoute?: unknown }).failureRoute;
+		if (failure && failureRoute !== undefined) payload.failureRoute = failureRoute;
 		// Only the host argument can mark a closure; provider fields cannot opt into this presentation (#430).
 		if (interruptClosure !== undefined) payload.interruptClosure = interruptClosure;
 		const transport = (message as { codexTransport?: CodexTransportObservation }).codexTransport;

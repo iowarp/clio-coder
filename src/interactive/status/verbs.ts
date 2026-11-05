@@ -37,7 +37,13 @@ function elapsedSince(status: AgentStatus, now: number): string | null {
 	// A running tool times from its own start, not from turn start, so the
 	// footer never shows turn-elapsed as tool-elapsed.
 	const from =
-		status.phase === "tool_running" && status.toolStartedAt !== undefined ? status.toolStartedAt : status.since;
+		status.phase === "tool_running" && status.toolStartedAt !== undefined
+			? status.toolStartedAt
+			: status.phase === "waiting_model" && status.waitingSince !== undefined
+				? status.waitingSince
+				: status.phase === "cancelling" && status.cancelRequestedAt !== undefined
+					? status.cancelRequestedAt
+					: status.since;
 	return formatLiveElapsed(Math.max(0, now - from));
 }
 
@@ -67,8 +73,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			return { text: "Needs approval", toneHint: "warn" };
 		case "retrying": {
 			const retry = status.retry;
-			const wait = retry && retry.waitMs > 0 ? ` · ${formatStatusElapsed(retry.waitMs)}` : "";
-			return { text: `Retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}${wait}`, toneHint: "warn" };
+			return { text: `Retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`, toneHint: "warn" };
 		}
 		case "compacting":
 			return { text: "Compacting context", toneHint: "normal" };
@@ -80,9 +85,13 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		}
 		case "stuck":
 			return { text: "No output", toneHint: "error" };
+		case "cancelling":
+			return { text: "Cancelling", toneHint: "muted" };
 		case "ended": {
 			const stop = status.summary?.stopReason ?? "stop";
-			const elapsed = status.summary ? ` · ${formatStatusElapsed(status.summary.elapsedMs)}` : "";
+			const elapsed = status.summary
+				? ` · ${formatStatusElapsed(Math.max(0, status.summary.elapsedMs - (status.summary.humanWaitMs ?? 0)))}`
+				: "";
 			if (stop === "generation_guard") return { text: `${GLYPH.warn} Generation stopped${elapsed}`, toneHint: "warn" };
 			if (stop === "cancelled" || stop === "aborted")
 				return { text: `${GLYPH.cancelled} Cancelled${elapsed}`, toneHint: "muted" };
@@ -109,6 +118,15 @@ export function resolveFooterVerb(status: AgentStatus, now: number, terminalCols
 	}
 	const showElapsed = terminalCols >= 60;
 	if (!showElapsed) return core;
+	// A backoff reads as what is left, and the attempt it leads to as its own time, not the turn's.
+	if (status.phase === "retrying") {
+		const retry = status.retry;
+		if (retry?.dueAt !== undefined) {
+			return { ...core, text: `${core.text} · next in ${Math.max(0, Math.ceil((retry.dueAt - now) / 1000))}s` };
+		}
+		const attempt = retry?.attemptStartedAt !== undefined ? formatLiveElapsed(now - retry.attemptStartedAt) : null;
+		return attempt === null ? core : { ...core, text: `${core.text} · ${attempt}` };
+	}
 	const elapsed = elapsedSince(status, now);
 	return elapsed === null ? core : { text: `${core.text} · ${elapsed}`, toneHint: core.toneHint };
 }

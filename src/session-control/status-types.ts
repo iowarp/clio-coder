@@ -7,6 +7,15 @@ import type { StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js
 // keeps one import site.
 export type { AgentStatusChangedPayload, StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js";
 
+/** What is known about the outstanding model request, measured at the handoff to the provider. */
+export interface ModelRequestFacts {
+	sentAt: number;
+	/** Null until the provider opened a response. */
+	firstByteAt: number | null;
+	/** False on a transport that never reports a response, where "no bytes yet" would claim more than is known. */
+	bytesObservable: boolean;
+}
+
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
 export type TurnStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "cancelled" | "generation_guard";
@@ -16,6 +25,14 @@ export interface RetryOverlay {
 	attempt: number;
 	maxAttempts: number;
 	waitMs: number;
+	/** `backoff` waits for the next attempt to be sent; `attempt` is that request, outstanding. */
+	stage?: "backoff" | "attempt" | undefined;
+	/** Epoch ms the next attempt is due. Present during a backoff with a known delay. */
+	dueAt?: number | undefined;
+	/** Epoch ms the current attempt was sent. */
+	attemptStartedAt?: number | undefined;
+	/** The wait the provider itself named, when it named one. */
+	retryAfterMs?: number | undefined;
 }
 
 export interface ToolOverlay {
@@ -23,6 +40,10 @@ export interface ToolOverlay {
 	startedAt?: number;
 	toolName: string;
 	toolPreview: string;
+	/** What the call acts on, in the operator's terms: its command, path or search. */
+	toolSubject?: string | undefined;
+	/** The operator started this process directly; no model asked for it. */
+	operatorShell?: boolean | undefined;
 }
 
 export interface DispatchOverlay {
@@ -47,6 +68,8 @@ export interface TurnSummary {
 	stopDetail?: string | undefined;
 	watchdogPeak: WatchdogTier;
 	truncated: boolean;
+	/** Of `elapsedMs`, what the turn spent waiting on the operator rather than working. */
+	humanWaitMs?: number | undefined;
 }
 
 /**
@@ -84,6 +107,12 @@ export interface AgentStatus {
 	localRuntime: boolean;
 	/** The model is streaming tool arguments; execution has not started. */
 	preparingToolCall?: boolean;
+	/** Epoch ms this model round started waiting, which the rail times instead of the whole turn. */
+	waitingSince?: number | undefined;
+	/** Evidence about the outstanding request, carried while a model wait is on screen. */
+	modelRequest?: ModelRequestFacts | null | undefined;
+	/** Epoch ms a stop was requested. The phase holds until the work is observed to have stopped. */
+	cancelRequestedAt?: number | undefined;
 	runId?: string | null | undefined;
 	resumePhase?: StatusPhase | undefined;
 	activePhases?: ReadonlySet<OverlayPhase> | undefined;
@@ -109,6 +138,10 @@ export interface AgentStatus {
 	summary?: TurnSummary | undefined;
 	/** Usage settled so far in the active run. Reset by `agent_start`. */
 	runTally?: RunTally | undefined;
+	/** Closed spans this turn spent on an operator-owned wait: an open approval card or interview. */
+	humanWaitMs?: number | undefined;
+	/** Epoch ms the operator-owned wait now open began. */
+	humanWaitSince?: number | undefined;
 }
 
 export interface AgentStatusEvent {

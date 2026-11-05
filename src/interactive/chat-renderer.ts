@@ -546,15 +546,9 @@ function renderBashExecutionEntry(
 	);
 }
 
-function renderRetryStatusEntry(
-	entry: CustomEntry,
-	width: number,
-	detail: TranscriptDetailPolicy,
-	unbounded: boolean,
-	terminalRows: number,
-): string[] {
+function retryStatusFromEntry(entry: CustomEntry): RetryStatusPayload | null {
 	const data = payloadObject(entry.data);
-	if (!data) return renderNoticeRow("provider retry", "retry", width);
+	if (!data) return null;
 	const rawPhase = data.phase;
 	if (
 		rawPhase !== "scheduled" &&
@@ -564,19 +558,31 @@ function renderRetryStatusEntry(
 		rawPhase !== "exhausted" &&
 		rawPhase !== "recovered"
 	) {
-		return renderNoticeRow("provider retry", "retry", width);
+		return null;
 	}
 	const attempt = typeof data.attempt === "number" ? data.attempt : null;
 	const maxAttempts = typeof data.maxAttempts === "number" ? data.maxAttempts : null;
-	if (attempt === null || maxAttempts === null) return renderNoticeRow("provider retry", "retry", width);
-	const status: RetryStatusPayload = {
+	if (attempt === null || maxAttempts === null) return null;
+	return {
 		phase: rawPhase,
 		attempt,
 		maxAttempts,
 		...(typeof data.errorMessage === "string" && data.errorMessage.length > 0 ? { errorMessage: data.errorMessage } : {}),
 		...(typeof data.delayMs === "number" ? { delayMs: data.delayMs } : {}),
 		...(typeof data.seconds === "number" ? { seconds: data.seconds } : {}),
+		...(typeof data.retryAfterMs === "number" ? { retryAfterMs: data.retryAfterMs } : {}),
 	};
+}
+
+function renderRetryStatusEntry(
+	entry: CustomEntry,
+	width: number,
+	detail: TranscriptDetailPolicy,
+	unbounded: boolean,
+	terminalRows: number,
+): string[] {
+	const status = retryStatusFromEntry(entry);
+	if (!status) return renderNoticeRow("provider retry", "retry", width);
 	return renderRetryStatus(status, width, detail, unbounded, terminalRows);
 }
 
@@ -788,6 +794,14 @@ function replayEntries(
 	const placedAssignments = new Set<string>();
 	// A run's settle waits for the next operator row or the end of the replay.
 	let pendingSettle: (() => void) | null = null;
+	// An attempt the ledger shows being retried reads as it did live: a turn still underway, not a failed one.
+	const retriedAttempts = new Set<SessionEntry>();
+	for (const [index, entry] of selected.entries()) {
+		const next = selected[index + 1];
+		if (entry.kind !== "message" || entry.role !== "assistant" || next?.kind !== "custom") continue;
+		const retry = next.customType === "retryStatus" ? retryStatusFromEntry(next) : null;
+		if (retry?.phase === "scheduled") retriedAttempts.add(entry);
+	}
 	const settleReplayedRun = (): void => {
 		const settle = pendingSettle;
 		pendingSettle = null;
@@ -823,6 +837,8 @@ function replayEntries(
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
+							const failureRoute = payloadObject(entry.payload)?.failureRoute;
+							if (failureRoute !== undefined) Object.assign(message, { failureRoute });
 						}
 						const stopReason = (message as { stopReason?: string }).stopReason;
 						const terminalFailure = stopReason === "error" || stopReason === "aborted" || stopReason === "length";
@@ -845,7 +861,12 @@ function replayEntries(
 									? ({ ...message, stopReason: undefined } as unknown as typeof message)
 									: message;
 						chatPanel.applyEvent({ type: "message_start", message: displayMessage });
-						chatPanel.applyEvent({ type: "message_end", message: displayMessage });
+						const retried = retriedAttempts.has(entry);
+						chatPanel.applyEvent({
+							type: "message_end",
+							message: displayMessage,
+							...(retried ? { retryPending: { attempt: 1, maxAttempts: 1 } } : {}),
+						});
 						runAssistantMessages.push(message);
 						for (const reason of persistedColdReasons(entry)) {
 							if (!runColdReasons.includes(reason)) runColdReasons.push(reason);
@@ -854,7 +875,7 @@ function replayEntries(
 						// went on through a middleware continuation, and live it settled
 						// once, at its end.
 						pendingSettle = null;
-						if (!continues) {
+						if (!continues && !retried) {
 							const endedAt = Date.parse(entry.timestamp);
 							const elapsedMs =
 								runStartedAtMs !== undefined && Number.isFinite(endedAt) && endedAt >= runStartedAtMs
@@ -961,6 +982,13 @@ function replayEntries(
 				break;
 			}
 			case "custom":
+				if (entry.customType === "retryStatus" && options.unboundedToolBodies !== true) {
+					const status = retryStatusFromEntry(entry);
+					if (status) {
+						chatPanel.applyEvent({ type: "retry_status", status });
+						break;
+					}
+				}
 				if (rendersCustomEntry(entry))
 					chatPanel.appendReplayBlock((width, detail, unbounded, terminalRows = 40) =>
 						renderCustomEntry(entry, width, detail, unbounded === true || options.unboundedToolBodies === true, terminalRows),

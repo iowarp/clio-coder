@@ -51,10 +51,26 @@ function failureText(error: unknown): string {
 	return String(error);
 }
 
+/**
+ * The wait a refused response names, from `retry-after-ms` or `retry-after` (seconds or an HTTP date). A provider's
+ * error text usually drops these headers, and this fetch is the one place every adapter's response passes through.
+ */
+export function retryAfterHeaderMs(headers: Pick<Headers, "get">, now = Date.now()): number | null {
+	const exact = Number(headers.get("retry-after-ms"));
+	if (Number.isFinite(exact) && exact > 0) return exact;
+	const value = headers.get("retry-after")?.trim();
+	if (!value) return null;
+	const seconds = Number(value);
+	if (Number.isFinite(seconds)) return seconds >= 0 ? seconds * 1000 : null;
+	const at = Date.parse(value);
+	return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
 /** Observe the caller's fetch without replacing provider or caller behavior (#430). */
 export function trackCallFetch(fetchImpl: typeof globalThis.fetch = (url, init) => globalThis.fetch(url, init)) {
 	let attempts = 0;
 	let status: number | null = null;
+	let retryAfterMs: number | null = null;
 	let transportError: unknown;
 	let unobservedTransportStarted = false;
 	const fetch: typeof globalThis.fetch = async (url, init) => {
@@ -62,10 +78,12 @@ export function trackCallFetch(fetchImpl: typeof globalThis.fetch = (url, init) 
 		signal?.throwIfAborted();
 		attempts += 1;
 		status = null;
+		retryAfterMs = null;
 		transportError = undefined;
 		try {
 			const response = await fetchImpl(url, init);
 			status = response.status;
+			if (status < 200 || status >= 300) retryAfterMs = retryAfterHeaderMs(response.headers);
 			return response;
 		} catch (error) {
 			transportError = error;
@@ -74,6 +92,8 @@ export function trackCallFetch(fetchImpl: typeof globalThis.fetch = (url, init) 
 	};
 	return {
 		fetch,
+		retryAfterMs: (): number | null => retryAfterMs,
+		observesResponses: (): boolean => !unobservedTransportStarted,
 		start(api?: string, transport?: string): void {
 			// WebSocket, AWS SDK and plugin transports can send without fetch (#429, #430).
 			unobservedTransportStarted =
