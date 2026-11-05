@@ -488,7 +488,10 @@ export function fitHintEntryList(
 	while (required.length > 1 && !fits(required)) required.shift();
 	const extras: HintEntry[] = [];
 	for (const entry of [...entries].reverse()) {
-		if (!isCriticalEntry(entry) && fits([...required, entry, ...extras])) extras.unshift(entry);
+		if (isCriticalEntry(entry)) continue;
+		// The first that does not fit ends it, so a short key listed earlier never outlives a later one (the terms key).
+		if (!fits([...required, entry, ...extras])) break;
+		extras.unshift(entry);
 	}
 	const kept = [...required, ...extras];
 	// One entry always survives, so a footer never renders empty.
