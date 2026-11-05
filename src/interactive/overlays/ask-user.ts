@@ -19,7 +19,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
-import { cancelledAskUserResult, unavailableAskUserResult } from "../../tools/ask-user.js";
+import { cancelledAskUserResult, recommendedOptionIndex, unavailableAskUserResult } from "../../tools/ask-user.js";
 import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { dockGrowthRows } from "../dock.js";
 import { scrollTranscriptPage } from "../layout.js";
@@ -410,13 +410,19 @@ interface OptionRowLayout {
 }
 
 /** Full-width labels and explanations; selection never hides another option's explanation. */
-function layoutOptionRows(items: ReadonlyArray<SelectItem>, focusedIndex: number, width: number): OptionRowLayout {
+function layoutOptionRows(
+	items: ReadonlyArray<SelectItem>,
+	focusedIndex: number,
+	width: number,
+	recommendedIndex = -1,
+): OptionRowLayout {
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
 	return {
 		rows: items.map((item, index) => {
 			const focused = index === focusedIndex;
-			const label = theme.fg("menuOption", item.label, focused ? "selected" : "normal");
+			const tag = index === recommendedIndex ? ` ${theme.fg("annotation", "recommended")}` : "";
+			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}`;
 			const prefix = focused ? theme.fg("selectedOption", `${GLYPH.cursor} `) : "  ";
 			const labels = wrapTextWithAnsi(label, safeWidth - 2).map((line, at) => `${at === 0 ? prefix : "  "}${line}`);
 			const description = item.description?.trim();
@@ -544,20 +550,50 @@ class AskUserOverlayView implements Component {
 		});
 	}
 
-	/** The countdown row while the round may still resolve itself, else nothing. */
+	/** What the timer does if it runs out, in the words the option list uses. */
+	private unattendedOutcome(): string {
+		if (this.presentation.tier === "outward") return "declines this outward step";
+		const withOptions = this.questions.filter(questionHasOptions).length;
+		if (withOptions === 0) return "leaves this to Clio's judgment";
+		if (withOptions === this.questions.length) {
+			return withOptions > 1 ? "picks the recommended option for each question" : "picks the recommended option";
+		}
+		return "picks each recommended option, or leaves it to Clio's judgment";
+	}
+
+	/** The option this question's timeout would take, while a timer is part of the round. */
+	private recommendedIndex(question: AskUserQuestion): number {
+		if (this.countdown === null || this.presentation.tier === "outward") return -1;
+		const index = recommendedOptionIndex(question);
+		const label = question.options?.[index]?.label ?? "";
+		// A label that already says it needs no second word.
+		return /\brecommended\b/iu.test(label) ? -1 : index;
+	}
+
+	/**
+	 * The timer row: time left and the automatic outcome while it runs, then a
+	 * held line that stays for the rest of the round, so the operator can tell a
+	 * paused timer from one that was never there. Nothing about it implies work.
+	 */
 	private renderCountdown(width: number): string[] {
-		const left = this.countdown?.remainingMs() ?? null;
+		const countdown = this.countdown;
+		if (countdown === null) return [];
+		const theme = clioTheme();
+		if (countdown.state() === "held") {
+			const question = this.currentQuestion();
+			const escVerb =
+				this.currentState()?.mode === "text" && question && questionHasOptions(question) ? "Esc goes back" : "Esc closes";
+			return wrapTextWithAnsi(
+				theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · Enter records, ${escVerb}`),
+				width,
+			);
+		}
+		const left = countdown.remainingMs();
 		if (left === null) return [];
-		const outcome =
-			this.presentation.tier === "outward"
-				? "declines this outward step"
-				: this.questions.length > 1
-					? "picks the recommended option for each question"
-					: "picks the recommended option";
 		return wrapTextWithAnsi(
-			clioTheme().fg(
+			theme.fg(
 				"warning",
-				`${GLYPH.warn} No answer in ${formatUnattendedRemaining(left)} ${outcome} and Clio continues. Any key holds.`,
+				`${GLYPH.warn} No answer in ${formatUnattendedRemaining(left)} ${this.unattendedOutcome()} and Clio continues. Any key holds.`,
 			),
 			width,
 		);
@@ -1105,7 +1141,7 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		const layout = layoutOptionRows(items, focusedIndex, width);
+		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question));
 		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
 		if (totalRows + items.length <= rowBudget) {
 			for (const rows of layout.rows) rows.push("");

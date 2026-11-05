@@ -71,10 +71,11 @@ export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
 export type PermissionAdvisoryReader = () => string;
 
 /**
- * Milliseconds before an unanswered card denies itself (#421), read once per
- * frame; null once the operator is present or no window applies.
+ * Milliseconds before an unanswered card denies itself (#421), `held` once the
+ * operator is present, null when no window applies.
  */
-export type PermissionCountdownReader = () => number | null;
+export type PermissionCountdown = number | "held" | null;
+export type PermissionCountdownReader = () => PermissionCountdown;
 
 /** Whether the composer holds a draft, read once per frame: Enter is inert while it does (#186). */
 export type PermissionDraftReader = () => boolean;
@@ -387,7 +388,8 @@ function permissionFacts(
 	presentation: DecisionPresentation,
 	width: number,
 	advisory: string,
-	countdownMs: number | null,
+	countdown: PermissionCountdown,
+	hasDraft: boolean,
 ): string[] {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const identity = identityRow(theme, view, presentation, width);
@@ -432,12 +434,17 @@ function permissionFacts(
 	lines.push(...factRows(theme, facts, width));
 	// Last among the facts so it never scrolls away: the operator who walks
 	// past the screen reads what happens if they keep walking.
-	if (countdownMs !== null) {
+	if (countdown === "held") {
+		const answer = hasDraft ? "Backspace clears your draft, then Enter allows" : "Enter allows";
+		lines.push(
+			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, Esc denies`), width),
+		);
+	} else if (countdown !== null) {
 		lines.push(
 			...wrapTextWithAnsi(
 				theme.fg(
 					"warning",
-					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdownMs)} denies this call and Clio continues without it. Any key holds the card.`,
+					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} denies this call and Clio continues without it. Any key holds the card.`,
 				),
 				width,
 			),
@@ -466,7 +473,7 @@ function permissionCardSections(
 	width: number,
 	terms = false,
 	advisory = "",
-	countdownMs: number | null = null,
+	countdown: PermissionCountdown = null,
 	hasDraft = false,
 	rowBudget = 0,
 ): {
@@ -483,7 +490,7 @@ function permissionCardSections(
 	const theme = clioTheme();
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
-	const facts = permissionFacts(theme, view, presentation, content, advisory, countdownMs);
+	const facts = permissionFacts(theme, view, presentation, content, advisory, countdown, hasDraft);
 	const identityRows = identityRow(theme, view, presentation, content).rows.length;
 	const hasTarget = view.target !== undefined && view.target.length > 0;
 	const rest: string[] = [];
@@ -707,7 +714,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			this.scroll,
 			this.cardScroll,
 			advisory,
-			countdownMs === null ? "" : Math.ceil(countdownMs / 1000),
+			typeof countdownMs === "number" ? Math.ceil(countdownMs / 1000) : (countdownMs ?? ""),
 			hasDraft,
 			skinEpoch(),
 		].join("|");
@@ -718,7 +725,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		return lines;
 	}
 
-	private renderFresh(width: number, advisory: string, countdownMs: number | null, hasDraft: boolean): string[] {
+	private renderFresh(width: number, advisory: string, countdownMs: PermissionCountdown, hasDraft: boolean): string[] {
 		if (this.argumentsOpen && this.invocation) {
 			const theme = clioTheme();
 			const content = Math.max(8, Math.floor(width));
@@ -865,7 +872,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 	}
 
-	private readCountdown(): number | null {
+	private readCountdown(): PermissionCountdown {
 		if (this.countdown === undefined) return null;
 		try {
 			return this.countdown();
