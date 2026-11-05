@@ -661,7 +661,14 @@ export function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: n
 	return plan.steps.map((step) => {
 		const mark = PLAN_STEP_MARKS[step.state];
 		// A step still pending at the end was never reached; while the plan runs it is only waiting.
-		const word = step.state === "pending" && plan.state === "running" ? "waiting" : mark.word;
+		const word =
+			step.state !== "pending"
+				? mark.word
+				: plan.state === "running"
+					? "waiting"
+					: plan.state === "unsettled"
+						? "no result"
+						: mark.word;
 		const facts = [word, ...(step.detail !== undefined ? [step.detail] : []), step.label];
 		const lead = `${theme.fg(mark.token, mark.glyph)} ${theme.fg("body", step.stepId.padEnd(nameWidth))}  `;
 		return truncateToWidth(
@@ -1196,6 +1203,8 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 		case "running":
 		case "stale":
 		case "cancelling": {
+			// The worker is being stopped; its last phase would read as work finishing normally.
+			if (row.status === "cancelling") return { text: "stopping", tone: "warning" };
 			const progress = row.progress;
 			if (progress) {
 				if (progress.awaitingApproval === true) return { text: WAITING_FOR_APPROVAL, tone: "warning" };
@@ -1703,7 +1712,7 @@ function toRow(
 		runId: entry.runId,
 		agentId: entry.agentId,
 		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),
-		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.requestOrigin } : {}),
+		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.rootRequestOrigin ?? entry.requestOrigin } : {}),
 		runtimeKind: entry.runtimeKind ?? "http",
 		runtimeId: entry.runtimeId ?? "-",
 		targetId: entry.targetId ?? "-",
@@ -1786,6 +1795,13 @@ export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: 
 	return view ? (runUsagesOf(view).get(runId) ?? PENDING) : UNAVAILABLE;
 }
 
+const FLEET_PLAN_ROW_STATUS: Record<FleetPlanRunView["state"], DispatchBoardStatus> = {
+	running: "running",
+	passed: "completed",
+	failed: "failed",
+	unsettled: "stale",
+};
+
 function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 	return {
 		runId: plan.rootId,
@@ -1796,7 +1812,7 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 		targetId: "",
 		wireModelId: "",
 		taskSummary: planProgressText(plan),
-		status: plan.state === "running" ? "running" : plan.state === "passed" ? "completed" : "failed",
+		status: FLEET_PLAN_ROW_STATUS[plan.state],
 		elapsedMs: (plan.finishedAtMs ?? now) - plan.startedAtMs,
 		usage: UNAVAILABLE,
 		ttft: null,
@@ -1808,17 +1824,20 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 /** The board keeps display order and reads every run fact from telemetry; tokens and cost from its read model. */
 export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
+	readDurablePlans?: () => ReadonlyArray<FleetPlanRunView>,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	/** Every worker run, without the plan rows: what a count or usage of workers reads. */
+	workerRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
-	/** Plans the session started; their rows join `rows()` but never the worker count in `activeRows()`. */
+	/** Plans this session started and the durable ones before it; their rows join `rows()` but never `activeRows()`. */
 	plans: FleetPlanRuns;
 	unsubscribe(): void;
 } {
 	let current = projection.snapshot();
-	const plans = createFleetPlanRuns();
+	const plans = createFleetPlanRuns(Date.now, readDurablePlans);
 	const unsubscribe = projection.subscribe((snapshot) => {
 		current = snapshot;
 	});
@@ -1849,6 +1868,7 @@ export function createDispatchBoardStore(
 			);
 		},
 		activeRows: () => projectRows(true),
+		workerRows: () => projectRows(false),
 		reconcile() {
 			projection.reconcileRuns();
 			current = projection.snapshot();

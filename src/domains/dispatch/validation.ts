@@ -146,6 +146,10 @@ export interface JobSpec {
 	/** Normalized model-declared path, output, and host verification intent. */
 	intent?: DispatchIntent;
 	requestOrigin?: DispatchRequestOrigin;
+	/** Who asked for the work a failover attempt continues. Display only: policy reads requestOrigin. */
+	rootRequestOrigin?: DispatchRequestOrigin;
+	/** The route this request moved off and why, for the notice its start event carries. */
+	routeMove?: { fromTargetId: string; fromModelId: string; reason: string };
 	/**
 	 * Threaded output from the previous pipeline step. Set only by the dispatch
 	 * tool's pipeline mode; step 1 and all non-pipeline runs omit it. The text
@@ -200,6 +204,8 @@ const KNOWN_KEYS = new Set([
 	"plannedNode",
 	"protectedArtifactRemap",
 	"reroutes",
+	"rootRequestOrigin",
+	"routeMove",
 	"requiredCapabilities",
 	"toolProfile",
 	"denyTools",
@@ -507,6 +513,25 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
 		if (typeof spec.requestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 			errors.push("requestOrigin must be one of: user|agent|internal|harness");
+		}
+	}
+
+	if ("rootRequestOrigin" in spec && spec.rootRequestOrigin !== undefined) {
+		if (typeof spec.rootRequestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.rootRequestOrigin)) {
+			errors.push("rootRequestOrigin must be one of: user|agent|internal|harness");
+		}
+	}
+
+	if ("routeMove" in spec && spec.routeMove !== undefined) {
+		const move = spec.routeMove as Record<string, unknown> | null;
+		if (
+			typeof move !== "object" ||
+			move === null ||
+			typeof move.fromTargetId !== "string" ||
+			typeof move.fromModelId !== "string" ||
+			typeof move.reason !== "string"
+		) {
+			errors.push("routeMove must name fromTargetId, fromModelId and reason as strings");
 		}
 	}
 

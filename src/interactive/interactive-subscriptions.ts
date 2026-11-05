@@ -1,6 +1,6 @@
 import type { ContextOperation } from "../core/context-operation.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import type { DispatchRunIdentity } from "../core/telemetry/live-events.js";
+import type { DispatchRunIdentity, DispatchStartedPayload } from "../core/telemetry/live-events.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import {
@@ -176,6 +176,19 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			}
 			repaint();
 		};
+	const routeMoveNotice = (payload: DispatchStartedPayload): void => {
+		const move = payload.routeMove;
+		if (move === undefined || isContextOperationRun(payload)) return;
+		// The target says where a run went; the model only tells a move inside one target apart.
+		const sameTarget = move.fromTargetId === payload.targetId;
+		const from = sameTarget ? `${move.fromTargetId}/${move.fromModelId}` : move.fromTargetId;
+		const to = sameTarget ? `${payload.targetId}/${payload.wireModelId}` : payload.targetId;
+		deps.notify(
+			"warning",
+			sanitizeCallTargetText(`${payload.agentId} moved from ${from} to ${to}: ${move.reason}`),
+			`route-move:${payload.runId}`,
+		);
+	};
 	// A settled operation can reach the bus more than once (replayed progress); its card renders once.
 	const renderedContextResults = new Set<string>();
 	const unsubscribers = [
@@ -184,6 +197,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		// the attempt trail a resumed block shows is that history read back.
 		deps.bus.subscribe("run.started", (payload) => {
 			helperNotice(payload, "working");
+			routeMoveNotice(payload);
 			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry)))(payload);
 		}),
 		deps.bus.subscribe("run.progressed", (payload) => {
