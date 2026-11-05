@@ -8568,7 +8568,11 @@ export function createDispatchBundle(
 				// assignment failing, and rerunning under the same policy is refused
 				// the same way, so it carries a deterministic code.
 				if (finalOutcome === "succeeded" && outcomeCode === null && lifecycle.capabilityClass === "workspace-edit") {
-					const blockedWrites = blockedWriteAttempts(toolStats, (tool) => safety.classify({ tool }).actionClass);
+					const blockedWrites = blockedWriteAttempts(
+						toolStats,
+						(tool) => safety.classify({ tool }).actionClass,
+						finishContract?.assessment.mutatedPaths.length ?? null,
+					);
 					if (blockedWrites !== null) {
 						finalOutcome = "failed";
 						outcomeCode = "worker_mutation_blocked";

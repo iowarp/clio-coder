@@ -51,6 +51,8 @@ export interface RunResultSummary {
 	apiCalls?: number;
 	durationMs?: number;
 	toolCalls?: number;
+	/** Calls policy, the operator or a repeat guard kept from running, which a clean exit says nothing about. */
+	refusedCalls?: number;
 	/** Per-tool call counts the run settled, for the exit summary's tally. */
 	toolCounts?: ReadonlyArray<{ tool: string; count: number }>;
 	/** Paths the run changed, from its worktree or checkout facts, for the exit summary. */
@@ -135,6 +137,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 	const durationMs = Math.max(0, Date.parse(settled.endedAt) - Date.parse(settled.startedAt));
 	const failureMessage = result?.failureMessage ?? settled.failureMessage;
 	const text = result?.output?.text;
+	const refusedCalls = settled.tools.reduce((sum, entry) => sum + entry.blocked, 0);
 	return {
 		trust: readRunTrust(record, gates).trust,
 		outcome: settled.outcome,
@@ -150,6 +153,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 		...(apiCalls !== undefined ? { apiCalls } : {}),
 		...(Number.isFinite(durationMs) ? { durationMs } : {}),
 		toolCalls: settled.toolCalls,
+		...(refusedCalls > 0 ? { refusedCalls } : {}),
 		...(placement !== undefined ? { placement } : {}),
 		...(contract !== undefined ? { contract } : {}),
 		...(contractKind !== undefined ? { contractKind } : {}),
