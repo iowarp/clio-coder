@@ -457,6 +457,13 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.settingOrigin ? { settingOrigin: deps.app.settingOrigin } : {}),
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
 		isTurnInFlight: () => deps.app.chat.isStreaming(),
+		...(deps.app.chat.routeMoveWait ? { routeMoveWait: () => deps.app.chat.routeMoveWait?.() ?? "idle" } : {}),
+		...(deps.app.chat.routeMoveFit
+			? { routeMoveFit: (route) => deps.app.chat.routeMoveFit?.(route) ?? { kind: "fits" } }
+			: {}),
+		...(deps.app.chat.moveWaitingRequest
+			? { moveWaitingRequest: () => deps.app.chat.moveWaitingRequest?.() ?? { kind: "idle" } }
+			: {}),
 		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
 		...(deps.app.getRouteBreakers ? { getRouteBreakers: deps.app.getRouteBreakers } : {}),

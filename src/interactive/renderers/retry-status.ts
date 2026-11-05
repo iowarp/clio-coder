@@ -2,6 +2,7 @@ import { formatStatedWait } from "../../domains/session/retry.js";
 import { truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { RetryStatusPayload } from "../../session-control/chat-loop.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
+import { modelNickname } from "../theme/labels.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { renderNoticeRow } from "./notice.js";
 import { previewBudget, previewRows } from "./preview.js";
@@ -21,7 +22,27 @@ function stoppedOnWait(status: RetryStatusPayload): string | null {
 	return `stopped without retrying: provider asked to wait ${formatStatedWait(status.retryAfterMs)}${waited}, and Clio waits at most ${formatStatedWait(status.waitBudgetMs)} on one request · /model switches route`;
 }
 
+/** A move is its own event, and it reads as what the operator chose. Neither side's name needs the target beside it. */
+function movedRow(status: RetryStatusPayload): string {
+	const named = status.movedTo && status.movedFrom && status.movedTo.modelId === status.movedFrom.modelId;
+	// The same model behind another target differs only by the target, which is then the name that says anything.
+	const to = status.movedTo
+		? named
+			? status.movedTo.targetId
+			: modelNickname(status.movedTo.modelId)
+		: "the new route";
+	const from = status.movedFrom
+		? named
+			? status.movedFrom.targetId
+			: modelNickname(status.movedFrom.modelId)
+		: "the old route";
+	return status.movedAborted === false
+		? `moved to ${to} instead of waiting on ${from}`
+		: `moved to ${to} · ${from} had sent no output`;
+}
+
 function rawRetryStatus(status: RetryStatusPayload, unbounded: boolean): string {
+	if (status.phase === "moved") return movedRow(status);
 	const suffix =
 		status.errorMessage !== undefined && status.errorMessage.length > 0
 			? `: ${unbounded ? providerErrorEvidence(status.errorMessage) : presentProviderError(status.errorMessage)}`

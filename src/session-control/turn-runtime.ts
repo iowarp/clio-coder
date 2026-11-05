@@ -172,7 +172,7 @@ const MODEL_SLOTS_SAMPLE_MS = 2_000;
  * about a queue, and says nothing about one.
  */
 function modelRequestSlots(
-	target: ChatLoopTarget,
+	target: Pick<ChatLoopTarget, "target" | "runtime">,
 	providers: Pick<ProvidersContract, "list">,
 ): ModelRequestSlots | null {
 	const key = canonicalEndpointKey(target.target);
@@ -311,12 +311,24 @@ export interface TurnRuntimeDeps {
 	prepareInRunContinuation?: (signal?: AbortSignal) => Promise<string | null>;
 }
 
+/**
+ * `first-output`: a request is out and has produced nothing. `output`: it has. `tool`: a tool is running.
+ * `elsewhere`: no request is the thing being waited on, such as admission, compaction or a settled run.
+ */
+export type RunningCallWait = "first-output" | "output" | "tool" | "elsewhere";
+
 export interface TurnRuntime {
 	ensureRuntime(options?: { silent?: boolean }): AgentRuntime | null;
 	ensureLiveCapabilitiesForSelectedModel(options?: { silent?: boolean }): Promise<void>;
 	dispose(): void;
 	cancelRunWatchdog(): void;
 	cleanupSessionResources(sessionId: string | undefined): void;
+	/** Where the run's current model call stands: what decides whether a route pick can still move it. */
+	callWait(): RunningCallWait;
+	/** Resolve a route without touching the live agent. Throws as `ensureRuntime` does on a route that cannot run. */
+	previewRoute(route?: { target: string; model: string }): { target: ChatLoopTarget; model: EngineModel } | null;
+	/** Put a settled agent on another route for its next call, keeping its conversation, subscribers and run. */
+	rebindRoute(target: ChatLoopTarget): void;
 	/**
 	 * Install on the session tool surface so admission verdicts reach the panel.
 	 * The engine's `tool_execution_end` carries only `isError` and result text,
@@ -391,10 +403,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// Disturbances owed to the next request that leaves: those taken for one that never left, and a Codex auth reset
 	// that closed the socket after its call, so the next call sends the recovery frame (#434).
 	let carriedColdReasons: ExpectedColdReason[] = [];
-	const readTarget = (): ChatLoopTarget | null => {
+	const readTarget = (route?: { target: string; model: string }): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
-		const targetId = settings.chat.target?.trim();
-		const wireModelId = settings.chat.model?.trim();
+		const targetId = (route?.target ?? settings.chat.target)?.trim();
+		const wireModelId = (route?.model ?? settings.chat.model)?.trim();
 		if (!targetId || !wireModelId) return null;
 		const resolved = resolveRuntimeTarget(deps.providers, {
 			targetId,
@@ -459,6 +471,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	let lastTargetProbe: { key: string; at: number } | null = null;
 	let disposed = false;
 	let clearCurrentWatchdog: () => void = () => {};
+	let callWait: () => RunningCallWait = () => "elsewhere";
 	const targetProbesInFlight = new Map<string, Promise<void>>();
 	const ensureLiveCapabilitiesForSelectedModel = async (options?: { silent?: boolean }): Promise<void> => {
 		if (disposed) return;
@@ -754,7 +767,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				cacheBaselineGeneration = generation;
 			}
 			const resolution = localRuntime.runtimeResolution;
-			const key = JSON.stringify([localRuntime.targetId, request?.model.api ?? model.api, localRuntime.wireModelId]);
+			const key = JSON.stringify([
+				localRuntime.targetId,
+				request?.model.api ?? localRuntime.agent.state.model.api,
+				localRuntime.wireModelId,
+			]);
 			let structure: ReturnType<typeof requestStructure> | undefined;
 			try {
 				structure = request ? requestStructure(request.model, request.context, request.compiled) : undefined;
@@ -831,8 +848,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					callSettlementFromMessage(
 						message,
 						localRuntime.runtimeResolution.pricedBy,
-						message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
-							? "operator_cancel"
+						message.role === "assistant" && message.stopReason === "aborted"
+							? state.routeMove !== null
+								? "route_moved"
+								: state.activeInterruptByOperator
+									? "operator_cancel"
+									: undefined
 							: undefined,
 						interrupted,
 					),
@@ -895,7 +916,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					target: {
 						targetId: localRuntime.targetId,
 						runtimeId: localRuntime.runtimeId,
-						api: model.api,
+						api: localRuntime.agent.state.model.api,
 						requestedModel: localRuntime.wireModelId,
 						reportedModel: { kind: "unknown", reason: "not-observed" },
 					},
@@ -945,6 +966,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					call?.stage("admission", "end", hold);
 				}
 			};
+		// Everything below reads the route when it is used: a hot swap or a moved request changes it under this agent.
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				const middlewareChoice = middlewareToolChoice.current();
@@ -959,7 +981,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? { kind: "required", toolName: middlewareChoice.toolName }
 							: undefined,
 					],
-					target.target.id,
+					localRuntime.targetId,
 				);
 				delete localRuntime.lastProviderStatus;
 				const tracking = trackCallFetch(controlled.options?.fetch);
@@ -990,7 +1012,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							firstByteAt: null,
 							bytesObservable: tracking.observesResponses(),
 						};
-						if (coldAtProbe?.modelId === currentModel.id && coldAtProbe.targetId === target.target.id) {
+						if (coldAtProbe?.modelId === currentModel.id && coldAtProbe.targetId === localRuntime.targetId) {
 							facts.probedResidency = coldAtProbe.state;
 						}
 						state.modelRequest = facts;
@@ -999,7 +1021,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							if (state.modelRequest !== facts || facts.firstByteAt !== null || facts.admission) return;
 							if (Date.now() - slotsReadAt < MODEL_SLOTS_SAMPLE_MS) return;
 							slotsReadAt = Date.now();
-							facts.slots = modelRequestSlots(target, deps.providers);
+							facts.slots = modelRequestSlots(localRuntime.runtimeResolution, deps.providers);
 						};
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
 						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"), retry);
@@ -1068,7 +1090,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						);
 						return stream;
 					},
-					target.target.id,
+					localRuntime.targetId,
 					(message) => {
 						if (!modelCall) return;
 						const terminal = terminalFailureFromAssistantMessage(message);
@@ -1120,8 +1142,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					return { block: true, reason: "Request ownership changed before invocation." };
 				}
 				const flowViolation =
-					deps.admitFlow?.({ targetId: target.target.id, runtimeId: target.runtime.id, wireModelId: target.wireModelId }) ??
-					null;
+					deps.admitFlow?.({
+						targetId: localRuntime.targetId,
+						runtimeId: localRuntime.runtimeId,
+						wireModelId: localRuntime.wireModelId,
+					}) ?? null;
 				if (flowViolation !== null) {
 					if (state.lastRunSnapshot) state.lastRunSnapshot.outcomeCode = "information_flow_blocked";
 					return { block: true, reason: flowViolation };
@@ -1173,7 +1198,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 										recordBlock(block);
 										parked = {
 											sentAt: Date.now(),
-											modelId: target.wireModelId,
+											modelId: localRuntime.wireModelId,
 											firstByteAt: null,
 											bytesObservable: false,
 										};
@@ -1229,8 +1254,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (observationTracing())
 					traceObservation("actor-input", {
 						sessionId: deps.sessionId?.() ?? null,
-						target: target.target.id,
-						model: target.wireModelId,
+						target: localRuntime.targetId,
+						model: localRuntime.wireModelId,
 						window: view.effectiveWindow,
 						inputTokens: input,
 						outputTokens: output,
@@ -1255,7 +1280,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// Pi converts the conversation between turn_start and this call; that is the transform stage (#434).
 				const call = modelCall;
 				call?.stage("transform", "end");
-				if (!targetRequiresAuth(target.target, target.runtime)) {
+				if (!targetRequiresAuth(localRuntime.runtimeResolution.target, localRuntime.runtimeResolution.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
 				preInvocationStage = "auth";
@@ -1264,8 +1289,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				try {
 					const signal = getCurrentAgentSignal();
 					const resolved = await deps.providers.auth.resolveForTarget(
-						target.target,
-						target.runtime,
+						localRuntime.runtimeResolution.target,
+						localRuntime.runtimeResolution.runtime,
 						signal ? { signal } : undefined,
 					);
 					refreshed = resolved.refreshed;
@@ -1339,6 +1364,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			stallTimer = null;
 		};
 		clearCurrentWatchdog = clearStallTimer;
+		callWait = () =>
+			!currentRun() || state.runtime !== localRuntime || localRuntime.agent.signal?.aborted
+				? "elsewhere"
+				: toolsInFlight > 0
+					? "tool"
+					: apiCallStartedAt === null || stallSuspendDepth > 0
+						? "elsewhere"
+						: apiCallFirstDeltaAt === null
+							? "first-output"
+							: "output";
 		const armStallTimer = (delayMs: number): void => {
 			if (disposed || !currentRun() || localRuntime.agent.signal?.aborted) return;
 			stallTimer = setTimeout(
@@ -1673,8 +1708,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					Object.assign(message, { callInvoked: failure.invoked });
 					Object.assign(message, {
 						failureRoute: {
-							targetId: target.target.id,
-							...(target.target.url !== undefined ? { url: target.target.url } : {}),
+							targetId: localRuntime.targetId,
+							...(localRuntime.runtimeResolution.target.url !== undefined
+								? { url: localRuntime.runtimeResolution.target.url }
+								: {}),
 						},
 					});
 					const retryAfterMs = callTracking?.retryAfterMs();
@@ -1932,7 +1969,43 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		return state.runtime;
 	};
 
+	const previewRoute: TurnRuntime["previewRoute"] = (route) => {
+		const target = readTarget(route);
+		return target ? { target, model: synthesizeModel(target) } : null;
+	};
+
+	const rebindRoute: TurnRuntime["rebindRoute"] = (target) => {
+		const runtime = state.runtime;
+		if (!runtime) return;
+		// Between turns another target gets a new agent. Mid-turn the submit and the ladder hold this one, and nothing it
+		// keeps is the route's own: Pi reads model, thinking, tools and messages from state at each run, and the closures
+		// above read the route through `localRuntime`.
+		const crossed = runtime.targetId !== target.target.id || runtime.runtimeId !== target.runtime.id;
+		const nextModel = synthesizeModel(target);
+		if (crossed) {
+			cleanupSessionResources(runtime.agent.sessionId);
+			const gatewaySession = target.runtime.id === "litellm" ? deps.sessionId?.() : undefined;
+			if (gatewaySession !== undefined) runtime.agent.sessionId = gatewaySession;
+			else delete runtime.agent.sessionId;
+		}
+		runtime.agent.state.model = nextModel;
+		runtime.agent.state.thinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
+		runtime.targetId = target.target.id;
+		runtime.runtimeId = target.runtime.id;
+		runtime.wireModelId = target.wireModelId;
+		runtime.runtimeResolution = target.runtimeResolution;
+		delete runtime.lastAuthResolution;
+		delete runtime.lastProviderStatus;
+		runtimeTargetSettings = JSON.stringify(target.target);
+		emitThinkingClampNotice(target.runtimeResolution);
+		persistence.appendModelChangeEntry(target);
+		ensureReasoningProbe(target);
+	};
+
 	return {
+		callWait: () => callWait(),
+		previewRoute,
+		rebindRoute,
 		ensureRuntime,
 		ensureLiveCapabilitiesForSelectedModel,
 		dispose: () => {

@@ -533,8 +533,10 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number): string {
 
 const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc cancels", short: "Esc" };
 const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model switches", short: "/model" };
-/** A route change never reaches a request already out, so during a turn the way to another model runs through Esc. */
+/** Once output has started a route change waits for the next turn, so the way to another model now runs through Esc. */
 const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model switches", short: "then /model" };
+/** While nothing has come back, a pick reroutes the request itself. */
+const MODEL_MOVES: Omit<RailFact, "keep"> = { text: "/model moves it", short: "/model" };
 
 /**
  * What a model request is standing behind, in the words of the step Clio is taking. Every form keeps elapsed and the way
@@ -703,7 +705,7 @@ function retryRailLabel(
 				{ text: from !== undefined ? modelWait(from) : null, keep: 8 },
 				{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
 				{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
-				{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
+				{ ...MODEL_MOVES, text: tier >= 3 ? MODEL_MOVES.text : null, keep: 6 },
 			],
 			room,
 		);
@@ -719,6 +721,7 @@ function retryRailLabel(
 				{ text: `provider wait ${left}`, short: `in ${left}`, keep: 8 },
 				{ ...retryCauseFact(retry, now), keep: 6 },
 				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
+				{ text: MODEL_MOVES.text, keep: 5 },
 			],
 			room,
 		);
@@ -736,6 +739,8 @@ function retryRailLabel(
 			// Whose wait this is outranks what the target called its state: a long countdown has to say it is not Clio's choice.
 			{ text: asked === null ? null : `provider asked for ${asked}`, short: "provider asked", keep: 7 },
 			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
+			// The whole words or none: the short form would cost a name the rail is sized to keep.
+			{ text: MODEL_MOVES.text, keep: 5 },
 		],
 		room,
 	);
@@ -795,7 +800,7 @@ function modelWaitFacts(status: AgentStatus, now: number, from: number): Readonl
 		{ text: evidence, keep: 4 },
 		{ text: verdict?.text ?? null, ...(verdict?.short ? { short: verdict.short } : {}), keep: 5 },
 		{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
-		{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
+		{ ...MODEL_MOVES, text: tier >= 3 ? MODEL_MOVES.text : null, keep: 6 },
 	];
 }
 

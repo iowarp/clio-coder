@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ThinkingLevel } from "../core/defaults.js";
+import { formatFooterTokens } from "../core/display-units.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { InteropProposal } from "../domains/interop/index.js";
@@ -10,6 +11,7 @@ import {
 } from "../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { TUI } from "../engine/tui.js";
+import type { RouteMoveFit, RouteMoveResult, RouteMoveWait } from "../session-control/chat-loop.js";
 import type { FooterDashboardPanel } from "./footer/dashboard.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
@@ -39,6 +41,11 @@ export interface OverlayModelSelectorsDeps {
 	onSelectModel?: (ref: { target: string; model: string }, scope: ModelScopeChoice) => void;
 	/** A pick made during a turn takes effect on the next one, which the confirmation has to say. */
 	isTurnInFlight?: () => boolean;
+	/** What the running turn is waiting on, read live: it decides whether a pick moves the request. */
+	routeMoveWait?: () => RouteMoveWait;
+	routeMoveFit?: (route: { target: string; model: string }) => RouteMoveFit;
+	/** Called once the pick is applied. Sends the waiting request to the new route if it can still go. */
+	moveWaitingRequest?: () => RouteMoveResult;
 	/** Applied with the chosen scope when the swap named a thinking level. */
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: ModelScopeChoice) => void;
 	/** Settings → Fleet shows live node placement health when the scheduler exposes it. */
@@ -62,6 +69,44 @@ export interface OverlayModelSelectors {
 	refreshSettingsOverlay(): void;
 }
 
+/** Why a pick cannot reach this turn, for the dialog and the confirmation alike. */
+function notThisTurn(wait: RouteMoveWait, fit?: RouteMoveFit): string {
+	if (fit?.kind === "too-large")
+		return `this conversation needs about ${formatFooterTokens(fit.neededTokens)} tokens and that model's window is ${formatFooterTokens(fit.window)}`;
+	if (fit?.kind === "images") return "it cannot read this turn's images";
+	if (fit?.kind === "unresolved") return "it cannot be used right now";
+	if (wait === "output") return "output has started";
+	if (wait === "tool") return "a tool is running";
+	return "this request is not waiting on a model";
+}
+
+/** The line above the model list, before any route is chosen. */
+export function modelListTurnEffect(wait: RouteMoveWait): string | null {
+	if (wait === "idle") return null;
+	if (wait === "first-output") return "No output yet, so a pick moves the waiting request.";
+	if (wait === "retry-wait") return "Waiting to retry, so a pick sends the request now.";
+	return `A pick applies from the next turn, because ${notThisTurn(wait)}.`;
+}
+
+/** The line in the scope dialog, once the route is known. */
+export function routeTurnEffect(wait: RouteMoveWait, fit: RouteMoveFit | undefined, model: string): string | null {
+	if (wait === "idle" || fit?.kind === "same") return null;
+	const movable = wait === "first-output" || wait === "retry-wait";
+	if (movable && (fit === undefined || fit.kind === "fits")) {
+		return wait === "first-output"
+			? `No output yet, so this moves the waiting request to ${model} now.`
+			: `Waiting to retry, so this sends the request to ${model} now.`;
+	}
+	return `Applies from the next turn, because ${notThisTurn(wait, movable ? fit : undefined)}.`;
+}
+
+/** The clause the confirmation ends on, from what actually happened at the Enter. */
+function moveOutcomeClause(result: RouteMoveResult): string {
+	if (result.kind === "moved") return " · moved the waiting request";
+	if (result.kind !== "next-turn") return "";
+	return result.fit ? ` · from the next turn, because ${notThisTurn(result.wait, result.fit)}` : " · from the next turn";
+}
+
 export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): OverlayModelSelectors {
 	const openModel = deps.openModelOverlay ?? openModelOverlay;
 	const openModelScope = deps.openModelScopeOverlay ?? openModelScopeOverlay;
@@ -76,6 +121,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		deps.transitions.handle = openModel(deps.tui, {
 			settings,
 			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			...(deps.routeMoveWait ? { turnEffect: () => modelListTurnEffect(deps.routeMoveWait?.() ?? "idle") } : {}),
 			providers: deps.providers,
 			bus: deps.bus,
 			// The picker resolves what to run; the scope dialog resolves where it
@@ -106,8 +152,14 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 	const openModelScopeState = (ref: PendingModelScope): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "model-scope";
+		// Sized once: nothing grows the context while a request waits, and the frame loop must not re-estimate it.
+		const fit =
+			deps.routeMoveWait?.() !== "idle" ? deps.routeMoveFit?.({ target: ref.target, model: ref.model }) : undefined;
 		deps.transitions.handle = openModelScope(deps.tui, {
 			ref,
+			...(deps.routeMoveWait
+				? { turnEffect: () => routeTurnEffect(deps.routeMoveWait?.() ?? "idle", fit, ref.model) }
+				: {}),
 			onChoose: (scope) => {
 				deps.closeOverlay();
 				const swap = formatPendingModelScope(ref);
@@ -130,7 +182,11 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					deps.refreshFooter();
 					return;
 				}
-				const timing = deps.isTurnInFlight?.() === true ? " · from the next turn" : "";
+				const timing = deps.moveWaitingRequest
+					? moveOutcomeClause(deps.moveWaitingRequest())
+					: deps.isTurnInFlight?.() === true
+						? " · from the next turn"
+						: "";
 				const applied =
 					scope === "global"
 						? `active and saved globally: ${swap}${timing}`

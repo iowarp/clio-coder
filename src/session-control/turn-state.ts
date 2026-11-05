@@ -147,6 +147,10 @@ export interface ChatTurnState {
 	toolProseAbortReason: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
 	streamStallReason: string | null;
+	/** A route pick the waiting request is moving to. Pinned at the pick, so a later pick changes the next turn only. */
+	routeMove: ChatLoopTarget | null;
+	/** True only while a run the recovery ladder settles is out, because nothing else would send the moved request. */
+	routeMoveSeat: boolean;
 	/** The newest model request of this session, read by the status surfaces as evidence during a silent wait. */
 	modelRequest: ModelRequestFacts | null;
 	/** Refreshes the live parts of `modelRequest` for a surface about to read it; throttled by its owner. */
@@ -204,6 +208,8 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		yoloContinuations: 0,
 		toolProseAbortReason: null,
 		streamStallReason: null,
+		routeMove: null,
+		routeMoveSeat: false,
 		modelRequest: null,
 		refreshModelRequest: null,
 		streamStallStage: null,

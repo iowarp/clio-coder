@@ -13,8 +13,9 @@
  */
 
 import type { ThinkingLevel } from "../../core/defaults.js";
-import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { clioTheme } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
 export const MODEL_SCOPE_OVERLAY_WIDTH = 72;
@@ -34,6 +35,8 @@ export interface OpenModelScopeOverlayDeps {
 	onChoose: (scope: ModelScopeChoice) => void;
 	/** Called for the explicit Cancel row and for Esc. Nothing has changed yet. */
 	onCancel: () => void;
+	/** What choosing does to the turn in flight, asked on every frame so it stays true up to the Enter. */
+	turnEffect?: () => string | null;
 }
 
 /** The swap as the operator typed it, for the dialog title. */
@@ -85,7 +88,16 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		deps.onCancel();
 	};
 
-	return showClioOverlayFrame(tui, new FocusBox(list), {
+	const effect: Component = {
+		render(width) {
+			const text = deps.turnEffect?.();
+			if (!text) return [];
+			return [...wrapTextWithAnsi(clioTheme().fg("accent", text), Math.max(1, width)), ""];
+		},
+		invalidate() {},
+	};
+
+	return showClioOverlayFrame(tui, new FocusBox([effect, list], { inputTarget: list }), {
 		anchor: "center",
 		width: MODEL_SCOPE_OVERLAY_WIDTH,
 		markerId: "model-scope",

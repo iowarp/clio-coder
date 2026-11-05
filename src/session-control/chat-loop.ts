@@ -175,6 +175,7 @@ import {
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import { createMessagePath } from "./message-path.js";
 import type { NoticeSource } from "./notice-source.js";
+import { resolveTurnOutputReserve } from "./output-reserve.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
@@ -216,16 +217,18 @@ import {
 } from "./turn-queues.js";
 import {
 	createTurnRecovery,
+	type MovedRoute,
 	type RetryForecast,
 	type RetryStatusEvent,
 	reclassifyStallAbort,
 	recoveryAttemptHasOutput,
 	rewriteStallAbortMessage,
 } from "./turn-recovery.js";
-import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError } from "./turn-runtime.js";
+import { type AssistantDeltaEvent, createTurnRuntime, TurnAdmissionError, type TurnRuntime } from "./turn-runtime.js";
 import {
 	type AgentRuntime,
 	type ChatLoopRunSnapshot,
+	type ChatLoopTarget,
 	createTurnState,
 	type TurnPreparationPhase,
 	takeInterruptedCall,
@@ -239,7 +242,13 @@ export type {
 	QueueRemovalReason,
 	SteeringMode,
 } from "./turn-queues.js";
-export type { RetryForecast, RetryStatusEvent, RetryStatusPayload, RetryStatusPhase } from "./turn-recovery.js";
+export type {
+	MovedRoute,
+	RetryForecast,
+	RetryStatusEvent,
+	RetryStatusPayload,
+	RetryStatusPhase,
+} from "./turn-recovery.js";
 export type { AssistantDeltaEvent } from "./turn-runtime.js";
 export type { ChatLoopRunSnapshot, TurnPreparationPhase } from "./turn-state.js";
 
@@ -625,6 +634,26 @@ export type SideQuestionOutcome =
 	| { status: "refused"; reason: string }
 	| { status: "failed"; reason: string };
 
+/**
+ * `first-output` and `retry-wait` are the two waits a pick can still move: a request out with nothing back, and no
+ * request out between attempts. The rest keep the pick for the next turn. `elsewhere` is everything that is not a model
+ * call, such as admission or compaction.
+ */
+export type RouteMoveWait = "idle" | "first-output" | "retry-wait" | "output" | "tool" | "elsewhere";
+
+export type RouteMoveFit =
+	| { kind: "fits" }
+	| { kind: "same" }
+	| { kind: "too-large"; neededTokens: number; window: number }
+	| { kind: "images" }
+	| { kind: "unresolved"; reason: string };
+
+export type RouteMoveResult =
+	| { kind: "idle" }
+	| { kind: "same" }
+	| { kind: "moved"; wait: "first-output" | "retry-wait" }
+	| { kind: "next-turn"; wait: RouteMoveWait; fit?: Exclude<RouteMoveFit, { kind: "fits" } | { kind: "same" }> };
+
 export interface ChatLoop {
 	/** Live operator adapters call this before expansion; internal submits never discover eggs. */
 	discoverOperatorEgg?(text: string, ask?: AskUserHandler): Promise<boolean>;
@@ -696,6 +725,12 @@ export interface ChatLoop {
 	turnPreparation(): { phase: TurnPreparationPhase; since: number };
 	/** Evidence about the newest model request, for a surface that reports a silent wait. */
 	modelRequest(): ModelRequestFacts | null;
+	/** What the running turn is waiting on, which decides whether a route pick moves its request. */
+	routeMoveWait?(): RouteMoveWait;
+	/** Whether the running turn's request could go to this route. */
+	routeMoveFit?(route: { target: string; model: string }): RouteMoveFit;
+	/** Send the waiting request to the route settings now name, if it still can go. Call after the pick is applied. */
+	moveWaitingRequest?(): RouteMoveResult;
 	/** Fires on every preparation transition, including back to `idle`. */
 	onTurnPreparation(handler: (phase: TurnPreparationPhase) => void): () => void;
 	contextUsage(): LiveContextUsage;
@@ -1604,6 +1639,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		persistence,
 		context,
 		retrySettings,
+		applyRouteMove: (runtime) => applyRouteMove(runtime),
 		markPersistedUserEcho: (text, prompt) => queues.markPersistedUserEcho(text, prompt),
 		emitRetryStatus: (status) => {
 			if (status.phase === "retrying") turnRetryAttempts += 1;
@@ -1615,6 +1651,90 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		emitNotice,
 	});
+	/** Moves the running turn's foreground slot, which belongs to the endpoint it is using, along with its request. */
+	let moveForeground: ((runtime: AgentRuntime) => void) | null = null;
+	const movedRoute = (route: { targetId: string; wireModelId: string }): MovedRoute => ({
+		targetId: route.targetId,
+		modelId: route.wireModelId,
+	});
+	/**
+	 * Everything a submit binds to its route before the first call, done again for the next one: a next-turn switch
+	 * recompiles for the new route on its way out, and a moved request has to arrive with what that route was told.
+	 */
+	const applyRouteMove = async (runtime: AgentRuntime): Promise<{ from: MovedRoute; to: MovedRoute } | null> => {
+		const target = state.routeMove;
+		state.routeMove = null;
+		if (target === null) return null;
+		const from = movedRoute(runtime);
+		turnRuntime.rebindRoute(target);
+		runtime.agent.state.tools = resolveSessionTools(
+			runtime,
+			deps.toolRegistry,
+			currentToolInvokeOptions,
+			turnRuntime.toolTelemetry,
+			sessionToolLimits,
+		);
+		context.syncRouteConfiguration(runtime);
+		const compiled = await context.ensureSessionPrompt(runtime);
+		context.logPromptCompileIfPending();
+		// A request on another target or wire model shares no cached prefix with the previous call's (#434).
+		context.noteColdReason("model_changed");
+		moveForeground?.(runtime);
+		if (state.lastRunSnapshot) {
+			const promptHash = compiled?.systemPromptHash ?? state.lastRunSnapshot.compiledPromptHash;
+			Object.assign(state.lastRunSnapshot, {
+				targetId: runtime.targetId,
+				targetUrl: runtime.runtimeResolution.target.url ?? null,
+				runtimeId: runtime.runtimeId,
+				runtimeKind: runtime.runtimeResolution.runtimeKind,
+				wireModelId: runtime.wireModelId,
+				pricedBy: runtime.runtimeResolution.pricedBy,
+				compiledPromptHash: promptHash,
+				staticCompositionHash: promptHash,
+				promptSignature: promptHash,
+				toolSignature: toolSignatureFromState(runtime.agent.state.tools),
+				runtimeResolution: runtimeTargetSnapshot(runtime.runtimeResolution),
+			});
+		}
+		return { from, to: movedRoute(runtime) };
+	};
+	const routeMoveWait = (): RouteMoveWait => {
+		if (!state.streaming) return "idle";
+		// A pick already aborted the call, and this pick replaces where it goes.
+		if (state.routeMove !== null) return "first-output";
+		if (recovery.inRetryWait()) return "retry-wait";
+		const wait = turnRuntime.callWait();
+		return wait === "first-output" && !state.routeMoveSeat ? "elsewhere" : wait;
+	};
+	const routeFit = (candidate: { target: ChatLoopTarget; model: EngineModel }): RouteMoveFit => {
+		const runtime = state.runtime;
+		if (!runtime) return { kind: "unresolved", reason: "the turn has no runtime yet" };
+		const resolution = candidate.target.runtimeResolution;
+		if (
+			state.routeMove === null &&
+			runtime.targetId === candidate.target.target.id &&
+			runtime.runtimeId === candidate.target.runtime.id &&
+			runtime.wireModelId === candidate.target.wireModelId
+		)
+			return { kind: "same" };
+		const prompt = [...runtime.agent.state.messages].reverse().find((message) => message.role === "user");
+		if (
+			prompt !== undefined &&
+			countImageBlocks([prompt]) > 0 &&
+			!acceptsImageInput({ runtimeId: candidate.target.runtime.id, vision: resolution.capabilityDecisions.vision })
+		)
+			return { kind: "images" };
+		const inputTokens = context.refreshLiveBudget().inputTokens ?? 0;
+		const window = resolution.contextWindowDetails.effectiveContextWindow;
+		const outputTokens = resolveTurnOutputReserve(
+			{ runtimeResolution: resolution, agent: { state: { model: candidate.model } } },
+			inputTokens,
+		);
+		// An unknown window is nothing to check against, and an overflow there still compacts and retries once.
+		if (window > 0 && !requestFits(inputTokens, outputTokens, window))
+			return { kind: "too-large", neededTokens: inputTokens + outputTokens, window };
+		return { kind: "fits" };
+	};
 	/** Set between a retried attempt's `message_end` and the `agent_end` that closes that attempt. */
 	let attemptRetryForecast: RetryForecast | null = null;
 	const emitRuntimeEvent = (event: AgentEvent | AssistantDeltaEvent): void => {
@@ -3130,8 +3250,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 				// 7. Run the prompt, then route the settled state through recovery.
 				state.streaming = true;
-				const endpointKey = modelEndpointKey(agentRuntime.runtimeResolution.target, agentRuntime.wireModelId);
-				const releaseForeground = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+				const foregroundOn = (runtime: AgentRuntime): (() => void) => {
+					const endpointKey = modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId);
+					return endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
+				};
+				let releaseForeground = foregroundOn(agentRuntime);
+				moveForeground = (runtime) => {
+					releaseForeground();
+					releaseForeground = foregroundOn(runtime);
+				};
 				try {
 					options.onAdmitted?.();
 				} catch {
@@ -3172,8 +3299,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								options.machineTurn !== undefined || options.origin !== undefined || options.requestContinuation === true,
 						});
 						if (userTurnId) context.commitSessionPosture(agentRuntime, userTurnId);
+						state.routeMoveSeat = true;
 						return agentRuntime.agent.prompt(runtimePromptText, images);
 					});
+					state.routeMoveSeat = false;
 					if (
 						admissionCurrent() &&
 						state.synthesisToolLock &&
@@ -3269,6 +3398,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					await recovery.runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 				} finally {
+					const overtaken = state.routeMove;
+					state.routeMove = null;
+					state.routeMoveSeat = false;
+					moveForeground = null;
+					if (overtaken !== null) {
+						state.streamStallReason = null;
+						// The stop lost the race to the reply it was stopping, and that reply is the one on screen.
+						if (generation === submitGeneration && state.activeInterruptReason === null && !owner?.signal.aborted)
+							emitNotice(
+								`The answer arrived before the request could move, so ${overtaken.wireModelId} takes over from the next turn.`,
+								"info",
+								"route-move.overtaken",
+							);
+					}
 					recovery.settleOpenForecast();
 					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 					// Esc on an interview resolves it as cancelled and the tool ends the turn
@@ -3585,6 +3728,48 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		modelRequest() {
 			state.refreshModelRequest?.();
 			return state.modelRequest;
+		},
+
+		routeMoveWait,
+
+		routeMoveFit(route) {
+			try {
+				const candidate = turnRuntime.previewRoute(route);
+				return candidate ? routeFit(candidate) : { kind: "unresolved", reason: "no route is configured" };
+			} catch (err) {
+				return { kind: "unresolved", reason: err instanceof Error ? err.message : String(err) };
+			}
+		},
+
+		moveWaitingRequest() {
+			const wait = routeMoveWait();
+			if (wait === "idle") return { kind: "idle" };
+			let fit: RouteMoveFit;
+			let candidate: ReturnType<TurnRuntime["previewRoute"]> = null;
+			try {
+				candidate = turnRuntime.previewRoute();
+				fit = candidate ? routeFit(candidate) : { kind: "unresolved", reason: "no route is configured" };
+			} catch (err) {
+				fit = { kind: "unresolved", reason: err instanceof Error ? err.message : String(err) };
+			}
+			if (fit.kind === "same") return { kind: "same" };
+			if (wait !== "first-output" && wait !== "retry-wait") return { kind: "next-turn", wait };
+			if (fit.kind !== "fits" || candidate === null) {
+				return { kind: "next-turn", wait, ...(fit.kind === "fits" ? {} : { fit }) };
+			}
+			const inFlight = state.runtime;
+			const alreadyStopped = state.routeMove !== null;
+			state.routeMove = candidate.target;
+			if (wait === "retry-wait") recovery.cancelRetryCountdown();
+			else if (!alreadyStopped && inFlight) {
+				// The stall path's seam, because this is the same event to everything below it: Clio aborted a silent call
+				// with no operator stop behind it, and the run goes on. The reason stays in the ledger for /view.
+				state.streamStallReason = `aborted to move this request to ${candidate.target.target.id}/${candidate.target.wireModelId}: no output had arrived from ${inFlight.targetId}/${inFlight.wireModelId}`;
+				state.streamStallStage = null;
+				turnRuntime.cancelRunWatchdog();
+				inFlight.agent.abort();
+			}
+			return { kind: "moved", wait };
 		},
 
 		turnPreparation() {

@@ -97,6 +97,8 @@ export interface OpenModelOverlayDeps {
 	onToggleFavorite?: (ref: ModelSelection, favorite: boolean) => void;
 	onClose: () => void;
 	autoRefresh?: boolean;
+	/** What a pick would do to the turn in flight, asked on every frame so it stays true up to the Enter. */
+	turnEffect?: () => string | null;
 }
 
 function healthToken(status: TargetStatus): ClioToken {
@@ -889,6 +891,7 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		private readonly onToggleFavorite: ((ref: ModelSelection, favorite: boolean) => void) | undefined,
 		private readonly onClose: () => void,
 		private readonly refreshActions: ModelRefreshActions = {},
+		private readonly turnEffect?: () => string | null,
 	) {
 		this.rows = [...rows];
 		this.summary = summary;
@@ -1016,13 +1019,19 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 	}
 
 	render(width: number): string[] {
+		const effect = this.turnEffect?.() ?? null;
+		const list = this.renderList(width, effect === null ? this.bodyRows : Math.max(0, this.bodyRows - 1));
+		return effect === null ? list : [padAnsi(clioTheme().fg("accent", effect), width, GLYPH.ellipsis), ...list];
+	}
+
+	private renderList(width: number, bodyRows: number): string[] {
 		return renderModelOverlayLines({
 			rows: this.rows,
 			summary: this.summary,
 			selectedIndex: this.selectedIndex,
 			query: this.query,
 			width,
-			bodyRows: this.bodyRows,
+			bodyRows,
 			showAll: this.showAll,
 			refreshing: this.refreshing,
 			refreshError: this.refreshError,
@@ -1150,6 +1159,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 			},
 			requestRender: () => tui.requestRender(),
 		},
+		deps.turnEffect,
 	);
 	if (activeTarget && activeModel) view.setSelectedValue(`${activeTarget}/${activeModel}`);
 	const unsubscribeHealth = deps.bus?.subscribe("provider.health_changed", () => {

@@ -43,7 +43,7 @@ import { stripInjectedPreamble } from "../domains/session/history.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-loop.js";
+import type { ChatLoopEvent, MovedRoute, RetryStatusPayload } from "../session-control/chat-loop.js";
 import { hasStructuredToolCall, toolResultSummary } from "../session-control/chat-loop-messages.js";
 import { isNoticeSource, type NoticeSource } from "../session-control/notice-source.js";
 import type { RehydrateChatPanelOptions, ReplayToolResult } from "../session-control/session-replay-messages.js";
@@ -554,6 +554,7 @@ function retryStatusFromEntry(entry: CustomEntry): RetryStatusPayload | null {
 		rawPhase !== "scheduled" &&
 		rawPhase !== "waiting" &&
 		rawPhase !== "retrying" &&
+		rawPhase !== "moved" &&
 		rawPhase !== "cancelled" &&
 		rawPhase !== "exhausted" &&
 		rawPhase !== "recovered"
@@ -573,7 +574,21 @@ function retryStatusFromEntry(entry: CustomEntry): RetryStatusPayload | null {
 		...(typeof data.retryAfterMs === "number" ? { retryAfterMs: data.retryAfterMs } : {}),
 		...(typeof data.waitBudgetMs === "number" ? { waitBudgetMs: data.waitBudgetMs } : {}),
 		...(typeof data.waitedMs === "number" ? { waitedMs: data.waitedMs } : {}),
+		...(movedRouteFrom(data.movedFrom) ? { movedFrom: movedRouteFrom(data.movedFrom) as MovedRoute } : {}),
+		...(movedRouteFrom(data.movedTo) ? { movedTo: movedRouteFrom(data.movedTo) as MovedRoute } : {}),
+		...(typeof data.movedAborted === "boolean" ? { movedAborted: data.movedAborted } : {}),
 	};
+}
+
+function isPromptRecompile(entry: SessionEntry | undefined): boolean {
+	return entry?.kind === "custom" && entry.customType === "promptRecompiled";
+}
+
+function movedRouteFrom(value: unknown): MovedRoute | null {
+	const route = payloadObject(value);
+	return route && typeof route.targetId === "string" && typeof route.modelId === "string"
+		? { targetId: route.targetId, modelId: route.modelId }
+		: null;
 }
 
 function renderRetryStatusEntry(
@@ -807,11 +822,21 @@ function replayEntries(
 	let pendingSettle: (() => void) | null = null;
 	// An attempt the ledger shows being retried reads as it did live: a turn still underway, not a failed one.
 	const retriedAttempts = new Set<SessionEntry>();
+	const movedRouteMarkers = new Set<SessionEntry>();
 	for (const [index, entry] of selected.entries()) {
 		const next = selected[index + 1];
-		if (entry.kind !== "message" || entry.role !== "assistant" || next?.kind !== "custom") continue;
-		const retry = next.customType === "retryStatus" ? retryStatusFromEntry(next) : null;
-		if (retry?.phase === "scheduled") retriedAttempts.add(entry);
+		if (entry.kind !== "message" || entry.role !== "assistant") continue;
+		// A move files the route change and its recompile between the attempt it stopped and the row that says so.
+		let following = next;
+		for (let ahead = index + 2; following?.kind === "modelChange" || isPromptRecompile(following); ahead += 1)
+			following = selected[ahead];
+		if (following?.kind !== "custom") continue;
+		const retry = following.customType === "retryStatus" ? retryStatusFromEntry(following) : null;
+		if (retry?.phase === "moved") {
+			retriedAttempts.add(entry);
+			// Its row names the route, as it did live, so the marker beneath the attempt would only say it twice.
+			if (next?.kind === "modelChange") movedRouteMarkers.add(next);
+		} else if (retry?.phase === "scheduled" && following === next) retriedAttempts.add(entry);
 	}
 	const settleReplayedRun = (): void => {
 		const settle = pendingSettle;
@@ -1015,7 +1040,7 @@ function replayEntries(
 				break;
 			case "modelChange":
 				if (entry.target) chatPanel.replayRoute?.(entry.target);
-				chatPanel.appendReplayBlock((width) => renderModelChangeEntry(entry, width));
+				if (!movedRouteMarkers.has(entry)) chatPanel.appendReplayBlock((width) => renderModelChangeEntry(entry, width));
 				break;
 			case "thinkingLevelChange":
 				chatPanel.appendReplayBlock((width) => renderThinkingChangeEntry(entry, width));
