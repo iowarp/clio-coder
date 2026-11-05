@@ -62,6 +62,12 @@ export interface GrantRequestInput {
 	/** Epoch ms after which the request expires. */
 	deadlineAt: number;
 	/**
+	 * Set when the dispatching process runs the time a person has to answer, so a
+	 * key can hold it. `deadlineAt` is then the latest a hold can reach, and the
+	 * window ends the request earlier through `expire`.
+	 */
+	windowMs?: number;
+	/**
 	 * Set when the main session's safety judge decides this main-authority ask
 	 * (fleet.permissions.mode=judge) instead of the main agent; the dispatch call
 	 * then does not yield for it.
@@ -108,8 +114,9 @@ export interface GrantBrokerDeps {
 	/**
 	 * Send the bound decision to the worker. Returns false when the worker's
 	 * channel is gone; an approval that cannot be delivered cancels the record.
+	 * `cause` marks a denial nobody decided, so fallback fail ends the worker's run.
 	 */
-	deliver(record: GrantRecord, decision: GrantDecision, reason: string): boolean;
+	deliver(record: GrantRecord, decision: GrantDecision, reason: string, cause?: "timeout"): boolean;
 	now?: () => number;
 	randomId?: () => string;
 	/** Bound on pending records across the process. */
@@ -134,6 +141,8 @@ export interface GrantBroker {
 	findByWorker(runId: string, workerRequestId: string): GrantRecord | null;
 	list(filter?: GrantListFilter): GrantRecord[];
 	decide(requestId: string, input: GrantDecideInput): GrantDecideResult;
+	/** End a pending request because its window ran out, as its deadline would. */
+	expire(requestId: string): void;
 	/**
 	 * Record that this request went to the operator: the main agent forwarded
 	 * it, or the host took it from the safety judge. `reason` says why on the card.
@@ -237,7 +246,7 @@ export function createGrantBroker(deps: GrantBrokerDeps): GrantBroker {
 		if (record === undefined || record.state !== "pending") return;
 		const reason = "the request expired before a decision";
 		transition(record, "expired", { execution: "not_executed", reason, decidedAt: now() });
-		deps.deliver(record, "deny", reason);
+		deps.deliver(record, "deny", reason, "timeout");
 	};
 
 	const pendingCount = (): number => {
@@ -383,6 +392,7 @@ export function createGrantBroker(deps: GrantBrokerDeps): GrantBroker {
 			}
 			return { ok: true, record: snapshot(record), duplicate: false };
 		},
+		expire,
 		markForwarded(requestId, reason) {
 			const record = records.get(requestId);
 			if (record === undefined || record.state !== "pending") return null;

@@ -393,6 +393,9 @@ function standingLimits(ctx: SlashCommandContext): { turnConstraints?: TurnConst
 	return turnConstraints !== undefined ? { turnConstraints } : {};
 }
 
+/** Longer than an admission that finds a free slot takes, so a run that was never held up says nothing. */
+const QUEUED_RUN_NOTICE_MS = 600;
+
 /**
  * The attributed half every operator-started run shares, whether `/run` or
  * `/delegate` built the request. Dispatch it, forward its events for surfaces
@@ -411,8 +414,27 @@ async function runAttributed(
 	const { dispatch, notice, bus } = deps;
 	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
 	if (deps.turnConstraints !== undefined) request = { ...request, turnConstraints: deps.turnConstraints };
+	// Nothing else in the transcript says a run is waiting for a slot, since its card opens when it starts.
+	let queuedRunId: string | null = null;
+	const stopWatchingQueue = bus?.subscribe("run.enqueued", (payload) => {
+		if (payload.agentId === request.agentId && payload.requestOrigin === "user") queuedRunId = payload.runId;
+	});
+	const stopWatchingStart = bus?.subscribe("run.started", (payload) => {
+		if (payload.runId === queuedRunId) queuedRunId = null;
+	});
+	const queuedNotice = setTimeout(() => {
+		if (queuedRunId === null) return;
+		notice("info", `${request.agentId} is queued for a worker slot and starts when one frees · /fleet shows the queue`);
+	}, QUEUED_RUN_NOTICE_MS);
+	queuedNotice.unref?.();
+	const stopQueueWatch = (): void => {
+		clearTimeout(queuedNotice);
+		stopWatchingQueue?.();
+		stopWatchingStart?.();
+	};
 	try {
 		const handle = await dispatch.dispatch(request);
+		stopQueueWatch();
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
 			if (!e.type || e.type === "heartbeat") continue;
@@ -422,16 +444,23 @@ async function runAttributed(
 		const view = `/view dispatch:${handle.runId}`;
 		if (receipt.outcome === "canceled") {
 			const why = workerFailureHeadline(receipt.outcomeDetail) ?? "cancelled at your request";
-			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`} · ${view}`);
+			// A cancel removes an idle worktree but keeps one holding work, which nothing else on screen says.
+			const changed = receipt.worktree?.changedPaths?.length ?? 0;
+			const kept =
+				changed > 0 && receipt.worktree !== undefined
+					? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} in its worktree on branch ${receipt.worktree.branch}`
+					: "";
+			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${kept} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const why = workerFailureHeadline(receipt.failureMessage) ?? `exit code ${receipt.exitCode}`;
 			notice("error", `${request.agentId} failed: ${why} · ${view}`);
 		}
 		if (share) shareReceipt(request.agentId, receipt, deps);
 	} catch (err) {
+		stopQueueWatch();
 		const msg = err instanceof Error ? err.message : String(err);
 		if (err instanceof AdmissionCanceledError) {
-			notice("warn", `${command} cancelled: ${msg.replace(/^dispatch:\s*/u, "")}`);
+			notice("info", `${request.agentId} cancelled before it started, so nothing ran`);
 		} else {
 			// Nothing started, so this is a refusal to start and has no run to inspect.
 			notice("error", `${command} refused: ${msg.replace(/^dispatch:\s*/u, "")}`);

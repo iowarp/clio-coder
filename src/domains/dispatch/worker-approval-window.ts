@@ -17,17 +17,22 @@ export const WORKER_APPROVAL_HOLD_CEILING_MS = 15 * 60_000;
 /** How far the worker's timer sits past the parent's latest possible answer, which also covers a backed-up event lane. */
 const WORKER_APPROVAL_BACKSTOP_MARGIN_MS = 60_000;
 
-function holdCeilingMs(windowMs: number): number {
+/** The whole wait a hold can reach, counted from when the ask was opened. */
+export function workerApprovalCeilingMs(windowMs: number): number {
 	return Math.max(windowMs, WORKER_APPROVAL_HOLD_CEILING_MS);
 }
 
 /** The worker's own timer for an ask whose parent owns the window. */
 export function workerApprovalBackstopMs(windowMs: number): number {
-	return holdCeilingMs(windowMs) + WORKER_APPROVAL_BACKSTOP_MARGIN_MS;
+	return workerApprovalCeilingMs(windowMs) + WORKER_APPROVAL_BACKSTOP_MARGIN_MS;
 }
+
+/** Who an ask waits on now. A brokered ask reaches the person only if the judge or the main agent passes it on. */
+export type WorkerApprovalDecider = "operator" | "main" | "judge";
 
 export interface WorkerApprovalWindowView {
 	held: boolean;
+	decider: WorkerApprovalDecider;
 	remainingMs: number;
 	/** The whole wait a hold can reach, from when the ask was opened. */
 	ceilingMs: number;
@@ -42,6 +47,8 @@ export interface WorkerApprovalWindowInput {
 	requestId: string;
 	windowMs: number;
 	fallback: "deny" | "fail";
+	/** Absent reads as the operator. */
+	decider?: WorkerApprovalDecider;
 	/** Send the timeout denial; false when the worker's channel is gone. */
 	deny(): boolean;
 }
@@ -61,6 +68,8 @@ export interface WorkerApprovalWindows {
 	hold(requestId: string): boolean;
 	/** The person is present but looking at another card: a running window starts again, never past its ceiling. */
 	restart(requestId: string): boolean;
+	/** The ask reached the person's card: the whole window starts there, never past its ceiling. */
+	handToOperator(requestId: string): boolean;
 	/** The parent already sent the timeout denial, so an answer now reaches nothing. */
 	isExpired(requestId: string): boolean;
 	settle(requestId: string): void;
@@ -93,6 +102,7 @@ export function createWorkerApprovalWindows(deps: WorkerApprovalWindowsDeps): Wo
 		const at = deps.now();
 		return {
 			held: entry.held,
+			decider: entry.decider ?? "operator",
 			remainingMs: Math.max(0, entry.deadline - at),
 			ceilingMs: entry.ceilingMs,
 			ceilingRemainingMs: Math.max(0, entry.ceilingAt - at),
@@ -126,7 +136,7 @@ export function createWorkerApprovalWindows(deps: WorkerApprovalWindowsDeps): Wo
 		open(input) {
 			if (windows.has(input.requestId)) return;
 			const at = deps.now();
-			const ceilingMs = holdCeilingMs(input.windowMs);
+			const ceilingMs = workerApprovalCeilingMs(input.windowMs);
 			const entry: OpenWindow = {
 				...input,
 				ceilingAt: at + ceilingMs,
@@ -158,6 +168,17 @@ export function createWorkerApprovalWindows(deps: WorkerApprovalWindowsDeps): Wo
 			if (entry === null || entry.held) return false;
 			entry.deadline = Math.min(deps.now() + entry.windowMs, entry.ceilingAt);
 			arm(entry);
+			changed(entry);
+			return true;
+		},
+		handToOperator(requestId) {
+			const entry = live(requestId);
+			if (entry === null) return false;
+			entry.decider = "operator";
+			if (!entry.held) {
+				entry.deadline = Math.min(deps.now() + entry.windowMs, entry.ceilingAt);
+				arm(entry);
+			}
 			changed(entry);
 			return true;
 		},

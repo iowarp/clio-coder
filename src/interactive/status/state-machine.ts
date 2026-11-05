@@ -254,6 +254,8 @@ function overlayData(status: AgentStatus, phase: OverlayPhase, data?: unknown): 
 
 function popOverlay(prev: AgentStatus, overlay: OverlayPhase, ctx: ReduceContext): AgentStatus {
 	const frames = overlayFrames(prev);
+	// A worker ask the person never saw resolves too, and must not end a phase it did not start.
+	if (!frames.has(overlay)) return prev;
 	const restore = baseResumePhase(prev);
 	frames.delete(overlay);
 	const nextVisible = visibleOverlay(frames);

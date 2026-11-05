@@ -15,6 +15,10 @@ import { shellCommandSteps } from "./protected-artifacts.js";
  */
 
 /** Code-host and cloud CLIs: every subcommand acts with credentials the sandbox hides. */
+/** Card words only: a list or view of a forge's records reads, which `outward consequence` overstates. It stays outward. */
+const FORGE_CLIS: ReadonlySet<string> = new Set(["gh", "glab"]);
+const FORGE_READ_VERBS: ReadonlySet<string> = new Set(["list", "view", "status", "diff", "checks"]);
+
 const CREDENTIALED_CLIS: ReadonlySet<string> = new Set([
 	"gh",
 	"hub",
@@ -120,7 +124,11 @@ function stepOutwardReason(words: ReadonlyArray<string>): string | null {
 	const [head, ...args] = unwrapped(words);
 	if (head === undefined) return null;
 	const name = head.split("/").pop() ?? head;
-	if (CREDENTIALED_CLIS.has(name)) return `${name} acts with the operator's credentials`;
+	if (CREDENTIALED_CLIS.has(name)) {
+		const [noun, verb] = args.filter((arg) => !arg.startsWith("-"));
+		const reads = FORGE_CLIS.has(name) && noun !== "api" && verb !== undefined && FORGE_READ_VERBS.has(verb);
+		return `${name} ${reads ? "reads" : "acts"} with your credentials`;
+	}
 	const publishes = PUBLISHERS.get(name);
 	const subcommand = args.find((arg) => !arg.startsWith("-"));
 	if (publishes !== undefined && subcommand !== undefined && publishes.includes(subcommand)) {

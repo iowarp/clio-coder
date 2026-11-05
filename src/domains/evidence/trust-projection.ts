@@ -170,6 +170,23 @@ export function trustVerdictWord(status: CanonicalTrustStatus): string {
 }
 
 /**
+ * Why a finished run cannot be leaned on, short enough for a list row, or null
+ * when nothing marks it against. A row that said only `done` hid this until the
+ * run was opened.
+ */
+export function trustFailureWords(summary: Pick<TrustSummaryProjection, "verdict" | "axes">): string | null {
+	if (summary.verdict !== "compromised") return null;
+	const { artifactIntegrity, validationGrounding, independentReview, contextProvenance } = summary.axes;
+	if (artifactIntegrity === "failed") return "seal broken";
+	if (independentReview === "failed") return "review failed";
+	if (validationGrounding === "failed") return "validation failed";
+	if (validationGrounding === "ungrounded") return "no check ran";
+	if (independentReview === "not_independent") return "review not independent";
+	if (contextProvenance === "invalid") return "context invalid";
+	return "not trusted";
+}
+
+/**
  * The one sentence a person reads before the axis list: can this result be
  * leaned on, and the reason that decides it. Always under 80 characters, so it
  * fits a board row at ordinary widths. The axes stay the record; this only

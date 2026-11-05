@@ -2072,12 +2072,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		const effectiveFail = source === "timeout" && escalationConfig?.fallback === "fail";
 		const mode: "deny" | "fail" = effectiveFail ? "fail" : "deny";
 		const decider = source === "main" ? "main agent" : "operator";
-		const denialContext =
-			source === "timeout"
-				? `escalation timed out with no ${grantBinding !== undefined ? "" : "operator "}decision`
-				: `${decider} denied`;
+		const denialContext = source === "timeout" ? "nobody answered in time" : `${decider} denied`;
 		const deniedReason = effectiveFail
-			? `permission required for ${active.tool} (${active.actionClass}); ${denialContext} and workers fallback=fail ends this run`
+			? `permission required for ${active.tool} (${active.actionClass}); ${denialContext}, and the fleet's fail fallback ends this run`
 			: hostReason !== undefined
 				? `permission denied: ${hostReason}; ${active.tool} requires ${active.actionClass} confirmation`
 				: `permission denied by ${source === "timeout" ? "escalation timeout fallback" : decider}: ${active.tool} requires ${active.actionClass} confirmation`;

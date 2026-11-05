@@ -41,6 +41,19 @@ export function describeMainCallConsequences(call: ClassifierCall): string[] {
 	return outward === null ? [] : [outward];
 }
 
+/**
+ * The rail's word for a call whose only known reach is a credentialed CLI, since
+ * Clio cannot say that it has an outward consequence, only what it runs as. Null
+ * when the sentences name anything more, and then the tier's word stands.
+ */
+export function credentialedCallKind(consequence: ReadonlyArray<string> | undefined): string | null {
+	if (consequence === undefined || consequence.length !== 1) return null;
+	const line = consequence[0] ?? "";
+	if (/ reads with your credentials$/u.test(line)) return "reads with your credentials";
+	if (/ acts with your credentials$/u.test(line)) return "uses your credentials";
+	return null;
+}
+
 function shellOutwardReason(call: ClassifierCall): string | null {
 	if (call.tool !== ToolNames.Bash && call.tool !== ToolNames.RunScript) return null;
 	const command = call.args?.command;
