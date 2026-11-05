@@ -22,6 +22,7 @@ import type { QuotaProviders } from "../quota-view.js";
 import { quotaAccountRows, routeWeeklyQuota } from "../quota-view.js";
 import {
 	brandMark,
+	type ClioTheme,
 	chipRow,
 	clioTheme,
 	emptyState,
@@ -40,7 +41,13 @@ import {
 import { fitIdentityLabel, modelNickname } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
-import { formatNotificationPanel, notificationGlyph, notificationToken, topNotification } from "./notifications.js";
+import {
+	formatNotificationPanel,
+	type Notification,
+	notificationGlyph,
+	notificationToken,
+	topNotification,
+} from "./notifications.js";
 import type { FooterTelemetry } from "./spend.js";
 import {
 	activeTaskLine,
@@ -811,53 +818,77 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	]
 		.filter(Boolean)
 		.join(separator);
-	const tail = notice && feedback ? theme.fg("changedValue", clean(feedback.text)) : facts;
+	const tail = facts;
 	if (narrow && !urgent && !notice && !feedback && !facts) return [firstRow];
-	// A failure or warning still speaks first. Past that the row is the only place with the width to explain a long silence.
-	const pressing = notice?.level === "error" || notice?.level === "warning";
-	const silence = pressing ? null : (state.silenceNotes ?? null);
+	const silence = state.silenceNotes ?? null;
 	const silenceNote = silence?.find((form) => visibleWidth(form) <= w) ?? silence?.at(-1) ?? null;
 	const alone = urgent !== null || silenceNote !== null || !tail;
 	const tailWidth = alone ? 0 : Math.min(Math.floor(w * 0.4), visibleWidth(tail));
 	const room = alone ? w : w - tailWidth - 3;
-	const message = urgent
+	// The controls that answer this moment. A notice has its own row above them, so it never takes their place.
+	const controls = urgent
 		? theme.fg("warning", urgent)
 		: silenceNote !== null
 			? theme.fg("warning", silenceNote)
-			: notice
-				? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
-				: feedback
-					? theme.fg("changedValue", clean(feedback.text))
-					: surfaceOwnsKeys
-						? ""
-						: state.demoHint && !state.welcomeVisible && !immediateKeys
-							? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-							: theme.fg(
-									"keyboardHint",
-									state.welcomeVisible
-										? ""
-										: (footerKeyHint(state.now, narrow, room, keyContext, {
-												...state.keyHintFacts,
-												learning: state.demo !== false,
-											}) ?? `${key} Dashboard`),
-								);
-	// One line flattens a multi-line notice and cuts the end, which is where a
-	// remediation command sits. Name the key that opens the dashboard, whose
-	// notice panel wraps the full text.
-	const more = theme.fg("keyboardHint", ` ${key} ${otherNotices > 0 ? `+${otherNotices} more` : "more"}`);
-	// A narrow row keeps the notice itself; the hint only rides along when
-	// the notice keeps enough room to stay readable.
-	const clipped =
-		room - visibleWidth(more) >= 24 &&
-		!urgent &&
-		silenceNote === null &&
-		notice !== undefined &&
-		(otherNotices > 0 ||
-			notice.text.includes("\n") ||
-			visibleWidth(`${notificationGlyph(notice.level)} ${clean(notice.text)}`) > room);
-	const line = clipped ? `${fit(message, Math.max(1, room - visibleWidth(more)))}${more}` : message;
-	if (alone) return [firstRow, fit(line)];
-	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];
+			: feedback
+				? theme.fg("changedValue", clean(feedback.text))
+				: surfaceOwnsKeys
+					? ""
+					: state.demoHint && !state.welcomeVisible && !immediateKeys && !notice
+						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
+						: theme.fg(
+								"keyboardHint",
+								state.welcomeVisible
+									? ""
+									: (footerKeyHint(state.now, narrow, room, keyContext, {
+											...state.keyHintFacts,
+											learning: state.demo !== false,
+										}) ?? `${key} Dashboard`),
+							);
+	const row = (text: string): string => (alone ? fit(text) : fit(`${fit(text, room)}   ${fit(tail, tailWidth)}`));
+	if (!notice) return [firstRow, row(controls)];
+	// A narrow footer spends no row on hints it cannot fit, so there the notice keeps the shared row it always had;
+	// only a quit or leader prompt outranks it.
+	if (narrow)
+		return [firstRow, row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, undefined))];
+	const noticeRow = renderNoticeRow(theme, notice, otherNotices, w, key, state.dismissKeyLabel);
+	const hintRow = row(controls);
+	// With nothing else to say on the hint row, the notice keeps the one row it always had.
+	if (controls === "" && !tail) return [firstRow, noticeRow];
+	return [firstRow, noticeRow, hintRow];
+}
+
+/**
+ * The top notice on its own row: severity glyph and text first, then how to read the rest and how to clear it.
+ * One line flattens a multi-line notice and cuts the end, where a remediation command sits, so the row names the
+ * key that opens the dashboard, whose notice panel wraps the full text.
+ */
+function renderNoticeRow(
+	theme: ClioTheme,
+	notice: Notification,
+	otherNotices: number,
+	width: number,
+	dashboardKey: string,
+	dismissKeyLabel: string | undefined,
+): string {
+	const body = `${notificationGlyph(notice.level)} ${clean(notice.text)}`;
+	const message = theme.fg(notificationToken(notice.level), body);
+	const cut = otherNotices > 0 || notice.text.includes("\n") || visibleWidth(body) > width;
+	const dismiss =
+		dismissKeyLabel && !dismissKeyLabel.startsWith("unbound") ? `${dismissKeyLabel.split(" · ").at(-1)} dismiss` : "";
+	const more = cut ? `${dashboardKey} ${otherNotices > 0 ? `+${otherNotices} more` : "more"}` : "";
+	const actions = [more, dismiss].filter(Boolean).join(" · ");
+	const actionText = actions ? theme.fg("keyboardHint", ` ${actions}`) : "";
+	// A narrow row keeps the notice itself; the keys only ride along when the notice keeps enough room to read.
+	if (!actionText || width - visibleWidth(actionText) < 24) return fitNoticeLine(theme, message, width);
+	const room = width - visibleWidth(actionText);
+	const shown = visibleWidth(body) <= room ? message : fitNoticeLine(theme, message, room);
+	const gap = " ".repeat(Math.max(0, room - visibleWidth(shown)));
+	return `${shown}${gap}${actionText}`;
+}
+
+function fitNoticeLine(theme: ClioTheme, text: string, width: number): string {
+	return theme.base("counter", truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, true));
 }
 
 const DASHBOARD_ROOMY_ROWS = 30;

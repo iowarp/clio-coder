@@ -368,12 +368,13 @@ test("expanded pages have identical viewport-relative height across widths and l
 		}
 });
 
-test("compact notice borrows a row then expires without changing height", () => {
+test("a compact notice takes its own row above the hints, then leaves when it expires", () => {
 	const snapshot = state();
 	snapshot.notices = [{ id: "n", text: "Worker finished", level: "info", key: null, addedAt: 11000, expiresAt: 13000 }];
 	const before = renderCompactDashboard(snapshot, 100);
-	strictEqual(before.length, 2);
+	strictEqual(before.length, 3);
 	match(plain(before), /Worker finished/);
+	match(stripTerminalSequences(before[2] ?? ""), /newline|send|Library|Model|Thinking|queue|Dashboard/i);
 	snapshot.now = 14000;
 	const after = renderCompactDashboard(snapshot, 100);
 	strictEqual(after.length, 2);

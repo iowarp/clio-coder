@@ -1210,6 +1210,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			lastTurnSummary = null;
 			liveGeneration = false;
 			statusController.reset();
+			// A timed notice spoke about a moment in the session that just ended; a pinned one states a condition still true.
+			for (const notice of notifications.list()) if (notice.expiresAt !== null) notifications.dismiss(notice.id);
 		},
 		stopTickers,
 		disposeBeforeStatus,
