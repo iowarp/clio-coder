@@ -890,7 +890,10 @@ class AskUserOverlayView implements Component {
 					...countdown,
 					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
 				]
-			: [...this.renderCompactPosition(question, width, pointToMove ? moveKey : null, !named.includes("[a]")), ...countdown];
+			: [
+					...this.renderCompactPosition(question, width, pointToMove ? moveKey : null, !named.includes("[a]")),
+					...countdown,
+				];
 		const header = fit.headers ? this.renderQuestionHeader(question, width, !hasMenu && this.questions.length > 1) : [];
 		const details = this.renderDecisionContext(width);
 		const status = this.status.length > 0 ? wrapTextWithAnsi(statusChip(theme, "warning", this.status), width) : [];
@@ -961,7 +964,8 @@ class AskUserOverlayView implements Component {
 		const earlier = this.ledgerEntries().length;
 		// The count stands in for the legend's `[a]`, so it holds its key and outlasts
 		// the header, which the question under it already explains.
-		const count = this.questions.length > 1 && answered > 0 ? `${answered} answered` : earlier > 0 ? `${earlier} earlier` : null;
+		const count =
+			this.questions.length > 1 && answered > 0 ? `${answered} answered` : earlier > 0 ? `${earlier} earlier` : null;
 		const ledger = count === null ? null : `${count}${pointToLedger && earlier > 0 ? " [a]" : ""}`;
 		const parts = this.harnessInterview
 			? [this.harnessPosition(), ...(moveKey === null ? [] : [moveKey])]
@@ -1359,7 +1363,11 @@ class AskUserOverlayView implements Component {
 		}
 		// Earlier rounds are settled, so only this round's answers can still be changed.
 		const canGoBack = this.questions.length > 1 && entries.some((entry) => entry.label.startsWith("Q"));
-		const head = ["", sectionRule(theme, width, "Answers", { meta: canGoBack ? `${count} · [←/→] change one` : count })];
+		// A body that has given up its header rows keeps the answers themselves rather than a heading over none.
+		const head =
+			fit.headers || rowBudget >= rows.length + 2
+				? ["", sectionRule(theme, width, "Answers", { meta: canGoBack ? `${count} · [←/→] change one` : count })]
+				: [];
 		const budget = Math.max(1, rowBudget - head.length);
 		if (rows.length <= budget) return [...head, ...rows];
 		const kept = rows.slice(0, Math.max(0, budget - 1));
