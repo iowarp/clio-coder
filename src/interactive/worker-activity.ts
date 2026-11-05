@@ -78,6 +78,9 @@ const TOOLS_THE_VERB_NAMES: ReadonlySet<string> = new Set([
 	"think",
 ]);
 
+/** Who owns a parked call. Naming the call's verb here would say it is running when it has not been allowed yet. */
+export const WAITING_FOR_APPROVAL = "waiting for your approval";
+
 export interface WorkerActionParts {
 	verb: string;
 	/** What the call acts on, marked when the safety layer cut it. Empty when nothing safe is known. */
@@ -113,7 +116,10 @@ export function workerActionParts(action: WorkerAction, tense: "running" | "fini
  * when the runtime sent no descriptor, else the phase's words. The card states
  * the call's object beside the verb; the island has room for the verb alone.
  */
-export function workerActivityWords(progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction">): string {
+export function workerActivityWords(
+	progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction" | "awaitingApproval">,
+): string {
+	if (progress.awaitingApproval === true) return WAITING_FOR_APPROVAL;
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
 	return workerPhaseActivity(progress.phase)[1];

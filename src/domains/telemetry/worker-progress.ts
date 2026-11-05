@@ -119,6 +119,8 @@ export interface WorkerProgressSnapshot {
 	/** Distinct tool names in first-use order, bounded by {@link WORKER_TOOL_NAME_LIMIT}. */
 	toolNames: ReadonlyArray<string>;
 	settled: boolean;
+	/** The running call is parked on the operator's approval, so nothing is executing. Absent reads as not parked. */
+	awaitingApproval?: boolean;
 	/** The stream ended on purpose, so a held URL may release. Absent reads as not completed (#446). */
 	completed?: boolean;
 }
@@ -293,6 +295,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let droppedLines = 0;
 	let droppedBytes = 0;
 	let currentAction: WorkerAction | null = null;
+	let awaitingApproval = false;
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
@@ -528,6 +531,15 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				changed = true;
 			}
 
+			if (event.type === "clio_coder_permission_escalated" || event.type === "clio_coder_permission_resolved") {
+				const parked = event.type === "clio_coder_permission_escalated";
+				if (parked !== awaitingApproval) {
+					awaitingApproval = parked;
+					touch();
+					changed = true;
+				}
+			}
+
 			// The loop only starts after the orchestrator admits the attested worker, so
 			// from here the wait is the model's first byte. Reading `starting` through it
 			// made a healthy worker on a slow provider look stuck in launch.
@@ -543,6 +555,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		settle: seal,
 
 		restart(): void {
+			awaitingApproval = false;
 			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
@@ -578,6 +591,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				recentActions: recentActions.map((entry) => ({ ...entry })),
 				toolNames: [...toolNames],
 				settled,
+				...(awaitingApproval && !settled ? { awaitingApproval: true } : {}),
 				completed,
 			};
 			return cached;

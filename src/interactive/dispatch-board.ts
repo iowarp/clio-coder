@@ -56,7 +56,7 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { compactQuantity, workerActionParts, workerActivityWords } from "./worker-activity.js";
+import { compactQuantity, WAITING_FOR_APPROVAL, workerActionParts, workerActivityWords } from "./worker-activity.js";
 
 export type DispatchBoardStatus = TelemetryRunSummary["status"];
 
@@ -514,7 +514,13 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	const recent = progress.recentActions[0];
 	const units: string[] = [];
 	if (phase !== null && current === null) units.push(phase);
-	if (current !== null)
+	if (progress.awaitingApproval === true && current !== null) {
+		const wanted = workerActionParts(current, "running");
+		units.push(
+			theme.fg("warning", WAITING_FOR_APPROVAL),
+			theme.fg("toolTarget", `${wanted.verb} ${wanted.object}`.trim()),
+		);
+	} else if (current !== null)
 		units.push(theme.base("body", `${theme.fg("toolMetadata", "now:")} ${actionPhrase(current, "running")}`));
 	else if (recent !== undefined)
 		units.push(theme.base("body", `${theme.fg("toolMetadata", "last:")} ${actionPhrase(recent, "finished")}`));
@@ -1192,6 +1198,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 		case "cancelling": {
 			const progress = row.progress;
 			if (progress) {
+				if (progress.awaitingApproval === true) return { text: WAITING_FOR_APPROVAL, tone: "warning" };
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress));
 				const tail =
