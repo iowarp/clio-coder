@@ -386,6 +386,7 @@ const OPERATOR_SYMBOLS: Readonly<Record<JobPredicate["op"], string>> = {
 };
 const SUMMARY_CHARS = 160;
 const TASK_PREVIEW_CHARS = 48;
+const NOTICE_LABEL_CHARS = 32;
 /** An active job this far past its due time with nothing running or waiting is reported stale. */
 const STALE_MIN_MS = 30_000;
 
@@ -428,6 +429,17 @@ function runnerText(job: JobRecord): string {
 	const [program = "", ...rest] = runner.argv;
 	const name = program.split("/").pop() ?? program;
 	return `command ${preview([name, ...rest].join(" "), 72)}`;
+}
+
+/**
+ * How a result notice names a loop: by its task, which the operator wrote and can
+ * recognize. The job id belongs on the control lines that need one to type.
+ */
+function loopLabel(job: JobRecord): string {
+	const runner = job.spec.runner;
+	if (runner.kind === "main") return `"${preview(runner.prompt, NOTICE_LABEL_CHARS)}"`;
+	const [program = "", ...rest] = runner.argv;
+	return `"${preview([program.split("/").pop() ?? program, ...rest].join(" "), NOTICE_LABEL_CHARS)}"`;
 }
 
 function runsText(job: JobRecord): string {
@@ -574,7 +586,7 @@ export function loopCreatedLines(job: JobRecord, args: LoopCreateArgs, now: numb
 			: `deadline in ${formatLoopDuration(Math.max(0, job.spec.deadlineAt - now))}`,
 	];
 	const lines = [
-		`loop ${job.id} created: ${runnerText(job)} every ${formatLoopDuration(job.spec.intervalMs)} · ${bounds.join(" · ")}`,
+		`loop created: ${runnerText(job)} every ${formatLoopDuration(job.spec.intervalMs)} · ${bounds.join(" · ")}`,
 	];
 	if (job.spec.until !== null) {
 		lines.push(
@@ -625,12 +637,12 @@ function jobFromResult(result: ToolResult): JobRecord | null {
 }
 
 function controlVerbText(action: LoopControlAction, job: JobRecord): string {
-	if (action === "pause") return `loop ${job.id} paused`;
-	if (action === "resume") return `loop ${job.id} resumed`;
-	if (jobIsComplete(job)) return `loop ${job.id} ${action === "stop" ? "stopped" : "canceled"}`;
+	if (action === "pause") return `loop ${loopLabel(job)} paused`;
+	if (action === "resume") return `loop ${loopLabel(job)} resumed`;
+	if (jobIsComplete(job)) return `loop ${loopLabel(job)} ${action === "stop" ? "stopped" : "canceled"}`;
 	return action === "stop"
-		? `loop ${job.id} stopping: the current run finishes and no new run starts`
-		: `loop ${job.id} cancel requested: waiting for the current run to settle`;
+		? `loop ${loopLabel(job)} stopping: the current run finishes and no new run starts`
+		: `loop ${loopLabel(job)} cancel requested: waiting for the current run to settle`;
 }
 
 /**
@@ -749,22 +761,22 @@ function endedNotice(job: JobRecord): LoopNotice {
 	const runs = `${job.starts} run${job.starts === 1 ? "" : "s"}`;
 	switch (job.reason) {
 		case "count":
-			return { level: "success", text: `loop ${job.id} finished: ${runs} done` };
+			return { level: "success", text: `loop ${loopLabel(job)} finished: ${runs} done` };
 		case "condition":
-			return { level: "success", text: `loop ${job.id} ended: condition met after ${runs}` };
+			return { level: "success", text: `loop ${loopLabel(job)} ended: condition met after ${runs}` };
 		case "deadline":
-			return { level: "warn", text: `loop ${job.id} ended at its deadline after ${runs}` };
+			return { level: "warn", text: `loop ${loopLabel(job)} ended at its deadline after ${runs}` };
 		case "failure": {
 			const last = job.history[job.history.length - 1]?.evidence?.summary;
 			return {
 				level: "warn",
-				text: `loop ${job.id} ended after repeated failures${last ? `: ${preview(last, SUMMARY_CHARS)}` : ""}`,
+				text: `loop ${loopLabel(job)} ended after repeated failures${last ? `: ${preview(last, SUMMARY_CHARS)}` : ""}`,
 			};
 		}
 		case "canceled":
-			return { level: "info", text: `loop ${job.id} canceled after ${runs}` };
+			return { level: "info", text: `loop ${loopLabel(job)} canceled after ${runs}` };
 		default:
-			return { level: "info", text: `loop ${job.id} stopped after ${runs}` };
+			return { level: "info", text: `loop ${loopLabel(job)} stopped after ${runs}` };
 	}
 }
 
@@ -775,7 +787,7 @@ function endedNotice(job: JobRecord): LoopNotice {
  */
 export function loopTransitionNotices(previous: ReportedJob | undefined, job: JobRecord): LoopNotice[] {
 	const notices: LoopNotice[] = [];
-	const pausedText = `loop ${job.id} is paused${job.pendingReason ? `: ${preview(job.pendingReason, SUMMARY_CHARS)}` : ""}. /loop resume ${job.id} restarts its schedule`;
+	const pausedText = `loop ${loopLabel(job)} is paused${job.pendingReason ? `: ${preview(job.pendingReason, SUMMARY_CHARS)}` : ""}. /loop resume ${job.id} restarts its schedule`;
 	if (previous === undefined) {
 		if (job.state === "paused") notices.push({ level: "warn", text: pausedText });
 		return notices;
@@ -783,7 +795,7 @@ export function loopTransitionNotices(previous: ReportedJob | undefined, job: Jo
 	if (job.persistenceError !== null && previous.persistenceError === null) {
 		notices.push({
 			level: "warn",
-			text: `loop ${job.id} could not be saved: ${preview(job.persistenceError, SUMMARY_CHARS)}`,
+			text: `loop ${loopLabel(job)} could not be saved: ${preview(job.persistenceError, SUMMARY_CHARS)}`,
 		});
 	}
 	if (job.state !== previous.state && job.state === "paused") notices.push({ level: "warn", text: pausedText });
@@ -793,12 +805,12 @@ export function loopTransitionNotices(previous: ReportedJob | undefined, job: Jo
 	if (delivery !== null && (delivery.id !== previous.deliveryId || delivery.state !== previous.deliveryState)) {
 		const summary = delivery.evidence?.summary ? `: ${preview(delivery.evidence.summary, SUMMARY_CHARS)}` : "";
 		if (delivery.kind === "notice" && delivery.state === "delivered") {
-			notices.push({ level: "success", text: `loop ${job.id} matched${summary}` });
+			notices.push({ level: "success", text: `loop ${loopLabel(job)} matched${summary}` });
 		} else if (delivery.state === "failed" || delivery.state === "dropped") {
 			const why = delivery.reason ? `: ${preview(delivery.reason, SUMMARY_CHARS)}` : summary;
 			notices.push({
 				level: "warn",
-				text: `loop ${job.id} ${delivery.kind === "main_turn" ? "follow-up turn" : "notice"} ${delivery.state}${why}`,
+				text: `loop ${loopLabel(job)} ${delivery.kind === "main_turn" ? "follow-up turn" : "notice"} ${delivery.state}${why}`,
 			});
 		}
 	}
