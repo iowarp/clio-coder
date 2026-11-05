@@ -233,6 +233,8 @@ export function buildTurnPreview(turn: TurnPreviewInput, max: number = TURN_PREV
 						.filter((n): n is string => n !== null);
 					if (names.length > 0) return clamp(`(tool calls) ${names.join(", ")}`, budget);
 				}
+				// A finished reply with neither text nor a call is an answer that never came, not an empty row.
+				if ((turn.payload as { stopReason?: unknown }).stopReason === "stop") return "(no answer)";
 			}
 			return "(empty)";
 		}

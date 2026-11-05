@@ -26,6 +26,7 @@ import {
 } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { CacheReadField } from "../../core/token-split.js";
+import { stripDeadToolCallMarkup } from "../../core/tool-call-markup.js";
 import { normalizeModelIdForFamily } from "../../domains/providers/model-family.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
@@ -410,12 +411,15 @@ function stripThinkingFromMessage(message: AssistantMessage): AssistantMessage {
 	delete usage.reasoning;
 	delete usage.reasoningTokens;
 	delete usage.reasoning_tokens;
-	// The text leaves but the fact stays: a resumed transcript can then say reasoning happened and was not kept.
+	const thinking = message.content.flatMap((block) => (block.type === "thinking" ? [block.thinking] : [])).join("");
+	// The text leaves but the fact stays: a resumed transcript can then say reasoning happened and was not kept, and the
+	// settlement can still tell a call the model only wrote out from a reply with nothing in it.
 	return {
 		...message,
 		content,
 		usage,
 		...(content.length < message.content.length ? { clioCoderReasoningNotRetained: true } : {}),
+		...(stripDeadToolCallMarkup(thinking) !== thinking ? { clioCoderReasoningToolMarkup: true } : {}),
 	};
 }
 

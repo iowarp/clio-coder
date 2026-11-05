@@ -27,6 +27,10 @@ export interface TurnSpend {
 	coverage: string | null;
 	/** The same caveat for a one-row receipt, whose full wording lives in the Detailed style and /usage. */
 	coverageNote: string | null;
+	/** The token subtotals a one-row receipt can state, or null when no amount is known. */
+	tokens: string | null;
+	/** The one field a provider left out while the amounts stand, so the row names it rather than doubting them all. */
+	unknownField: string | null;
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -66,6 +70,8 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 	if (!calls || !input || !output || !cacheRead || !cacheWrite || !usd || !total || !neverSent) return null;
 	const unknownCalls = "kind" in total.fact ? (total.fact.kind === "unknown" ? 1 : 0) : total.fact.unknownCount;
 	const skipped = known(neverSent);
+	const stated = known(input) + known(output) > 0;
+	const neverSentNote = skipped > 0 ? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent` : null;
 	return {
 		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,
 		input: renderCompactCount(input.fact),
@@ -77,21 +83,23 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
 		coverage: unknownCalls > 0 || skipped > 0 ? usageCoverageLabel(unknownCalls, skipped) : null,
 		coverageNote:
-			unknownCalls === 0 && skipped === 0
-				? null
-				: unknownCalls === 0
-					? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent`
-					: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
+			unknownCalls === 0 || stated
+				? neverSentNote
+				: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
+		tokens: stated ? `in ${renderCompactCount(input.fact)} · out ${renderCompactCount(output.fact)}` : null,
+		unknownField: stated && renderCompactCount(cacheRead.fact) === "?" ? "cached unknown" : null,
 	};
 }
 
 /**
- * Whether the view's fold holds every call a run settled. Compared by id, not by count: the turn's other runs, such
+ * Whether the view's fold holds every call a run settled, amounts included. Compared by id, not by count: the turn's other runs, such
  * as one an auth refresh continues, and its side calls journal under the same turn, so the turn's count can reach the
  * run's before the run's last call lands (#434 §11.3).
  */
 export function turnHoldsCalls(view: TelemetryView, turnId: string, callIds: ReadonlyArray<string>): boolean {
-	if (callIds.length === 0) return true;
-	const held = new Set(view.calls({ turnIds: [turnId] }).calls.map((call) => call.callId));
+	const { calls } = view.calls({ turnIds: [turnId] });
+	// A started call is in the fold before its amounts are. A receipt that stopped reading then kept `usage unknown` for good.
+	if (calls.some((call) => call.settledAt === null)) return false;
+	const held = new Set(calls.map((call) => call.callId));
 	return callIds.every((callId) => held.has(callId));
 }

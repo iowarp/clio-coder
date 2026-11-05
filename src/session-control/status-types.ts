@@ -39,7 +39,15 @@ export type { RetryWaitCause } from "../domains/session/retry.js";
 
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
-export type TurnStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "cancelled" | "generation_guard";
+export type TurnStopReason =
+	| "stop"
+	| "length"
+	| "toolUse"
+	| "error"
+	| "aborted"
+	| "cancelled"
+	| "generation_guard"
+	| "no_answer";
 export type ReasoningTokenProvenance = "provider" | "estimated" | "mixed";
 
 export interface RetryOverlay {

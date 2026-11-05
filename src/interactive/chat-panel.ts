@@ -34,7 +34,13 @@ import {
 } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-loop.js";
-import { extractText, isSelfExplainingAbort } from "../session-control/chat-loop-messages.js";
+import {
+	classifyTurnEnding,
+	extractText,
+	isSelfExplainingAbort,
+	type TurnEnding,
+	turnNoAnswerSentence,
+} from "../session-control/chat-loop-messages.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { editPreviewDiff } from "./mutation-preview.js";
@@ -166,6 +172,8 @@ export interface ChatPanelTurnUsage {
 	retries?: number;
 	/** Of `elapsedMs`, what the run spent waiting on the operator. */
 	humanWaitMs?: number;
+	/** How a normally stopped run closed when it wrote no answer. */
+	ending?: TurnEnding;
 }
 
 /**
@@ -1137,24 +1145,43 @@ function renderTurnUsageLine(
 	width: number,
 	receipt: TranscriptDetailPolicy["receipt"],
 ): string[] {
-	if (receipt === "none") return [];
 	const outcome = usage.outcome ?? "Done";
+	const glyph = receiptGlyph(outcome);
+	const room = Math.max(1, width - PROSE_GUTTER_WIDTH);
+	const quiet = usage.ending?.kind === "quiet" ? "no closing message" : null;
+	// A turn with no answer states why in every style: Brief drops receipts, not this.
+	const noAnswer =
+		usage.ending?.kind === "no_answer"
+			? hangProseLines(
+					wrapTextWithAnsi(
+						`${SECONDARY()}${turnNoAnswerSentence(usage.ending)} Ask again, or /model switches route.${RESET}`,
+						room,
+					).map(releaseSpaces),
+				)
+			: [];
+	if (receipt === "none") {
+		return noAnswer.length === 0 ? [] : [`${glyph}${dimLine(`${outcome}${receiptDuration(usage)}`, room)}`, ...noAnswer];
+	}
 	const spend = usage.spend;
 	const retries = usage.retries ? `${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : null;
-	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
 		const calls =
 			spend?.calls != null && (spend.calls > 1 || retries !== null) ? renderCalls(String(spend.calls), "call") : null;
-		const rowFacts = [
-			`${outcome}${receiptDuration(usage)}`,
-			...(calls !== null || retries !== null ? [[calls, retries].filter(Boolean).join(", ")] : []),
-			...(spend?.coverageNote ? [spend.coverageNote] : []),
-		];
-		return [`${glyph}${dimLine(rowFacts.join(" · "), Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
+		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
+		const rowFacts = [`${outcome}${receiptDuration(usage)}`, ...(quiet === null ? [] : [quiet])];
+		for (const fact of [
+			calls !== null || retries !== null ? [calls, retries].filter(Boolean).join(", ") : null,
+			spend?.coverageNote ?? null,
+			spend?.tokens ?? null,
+			spend?.unknownField ?? null,
+		]) {
+			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
+		}
+		return [`${glyph}${dimLine(releaseSpaces(joinFacts(rowFacts)), room)}`, ...noAnswer];
 	}
 	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
-	const settled = `${outcome}${coverage}${retries === null ? "" : ` · ${retries}`}${receiptDuration(usage)}`;
+	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${coverage}${retries === null ? "" : ` · ${retries}`}${receiptDuration(usage)}`;
 	// Detailed states what the turn spent, one fact per field, as the read model
 	// folds the turn with its workers, so the line and the footer agree: the
 	// calls it made, input and output tokens in the compact token format, what
@@ -1177,12 +1204,10 @@ function renderTurnUsageLine(
 	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
 	}
-	return hangProseLines(
-		wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(
-			releaseSpaces,
-		),
-		glyph,
-	);
+	return [
+		...hangProseLines(wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, room).map(releaseSpaces), glyph),
+		...noAnswer,
+	];
 }
 
 /**
@@ -2084,6 +2109,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							: Math.max(0, now() - runStartedAt);
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
+				const ending = run.outcome === undefined ? classifyTurnEnding(messages as ReadonlyArray<AgentMessage>) : null;
 				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
 				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
 					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
@@ -2095,6 +2121,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),
+					...(ending === null ? {} : { ending }),
 					outcome:
 						run.outcome ??
 						(stop?.stopReason === "error"
@@ -2105,7 +2132,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 									: "Cancelled"
 								: stop?.stopReason === "length"
 									? "Output limit"
-									: "Done"),
+									: ending?.kind === "no_answer"
+										? "No answer"
+										: "Done"),
 				};
 				trackReceipt(target);
 			}

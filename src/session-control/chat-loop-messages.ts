@@ -30,6 +30,7 @@ import {
 	responseModelIdObservationFromRecord,
 } from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
+import { stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { sha256 } from "../domains/prompts/hash.js";
@@ -270,6 +271,71 @@ export function hasStructuredToolCall(message: AgentMessage | undefined): boolea
 	if (!message || typeof message !== "object" || !("content" in message) || !Array.isArray(message.content))
 		return false;
 	return message.content.some((block) => block?.type === "toolCall");
+}
+
+/** Why a run that stopped normally left the operator nothing to read. */
+export type TurnNoAnswerCause = "tool_call_in_reasoning" | "tool_call_as_text" | "reasoning_only" | "empty";
+
+/**
+ * How a normally stopped run closed when it wrote no answer. `no_answer` is a failed request: nothing answers it, and a
+ * call the model only wrote out never ran. `quiet` did real tool work and simply wrote no closing message, which is a
+ * finished turn missing its summary and not the same failure.
+ */
+export type TurnEnding =
+	| { kind: "no_answer"; cause: TurnNoAnswerCause; toolsRan: number }
+	| { kind: "quiet"; toolsRan: number };
+
+/** A call that succeeded and was not a question to the operator, so it did work toward the request. */
+function ranRealTool(message: AgentMessage): boolean {
+	const result = message as { role?: unknown; isError?: unknown; toolName?: unknown };
+	return result.role === "toolResult" && result.isError !== true && result.toolName !== ToolNames.AskUser;
+}
+
+/**
+ * The one reading of a settled run's last reply, shared by the TUI, headless run and ACP. Null when the run answered or
+ * has a stop reason of its own to report: an error, an abort, an output limit, or a terminating tool call. Reasoning
+ * may quote markup on the way to a real answer, so it only counts when no text followed, and text that keeps anything
+ * besides markup stays the answer.
+ */
+export function classifyTurnEnding(messages: ReadonlyArray<AgentMessage>): TurnEnding | null {
+	const last = [...messages].reverse().find((message) => message?.role === "assistant");
+	if (last === undefined) return null;
+	const stopReason = (last as { stopReason?: unknown }).stopReason;
+	if ((stopReason !== undefined && stopReason !== "stop") || hasStructuredToolCall(last)) return null;
+	const toolsRan = messages.filter(ranRealTool).length;
+	const text = extractText(last).trim();
+	if (text.length > 0) {
+		return stripDeadToolCallMarkup(text).length === 0
+			? { kind: "no_answer", cause: "tool_call_as_text", toolsRan }
+			: null;
+	}
+	const thinking = extractThinking(last);
+	// A route that keeps no reasoning leaves the fact on the message once the text is gone.
+	const dropped = last as { clioCoderReasoningNotRetained?: unknown; clioCoderReasoningToolMarkup?: unknown };
+	if (stripDeadToolCallMarkup(thinking) !== thinking || dropped.clioCoderReasoningToolMarkup === true) {
+		return { kind: "no_answer", cause: "tool_call_in_reasoning", toolsRan };
+	}
+	if (toolsRan > 0) return { kind: "quiet", toolsRan };
+	const reasoned = thinking.trim().length > 0 || dropped.clioCoderReasoningNotRetained === true;
+	return { kind: "no_answer", cause: reasoned ? "reasoning_only" : "empty", toolsRan };
+}
+
+/** Why a turn has no answer, in the words every surface states it. A surface adds the next step it can offer. */
+export function turnNoAnswerSentence(ending: Extract<TurnEnding, { kind: "no_answer" }>): string {
+	const earlier =
+		ending.toolsRan === 0
+			? ""
+			: ` ${ending.toolsRan === 1 ? "The tool call before it did run" : `The ${ending.toolsRan} tool calls before it did run`}.`;
+	switch (ending.cause) {
+		case "tool_call_in_reasoning":
+			return `The model wrote a tool call into its reasoning instead of making it, so that call did not run.${earlier}`;
+		case "tool_call_as_text":
+			return `The model wrote a tool call as plain text instead of making it, so that call did not run.${earlier}`;
+		case "reasoning_only":
+			return "The model reasoned but wrote no reply and made no tool call.";
+		case "empty":
+			return "The model returned nothing: no reply and no tool call.";
+	}
 }
 
 export function toolNamesFromAgentState(tools: ReadonlyArray<unknown>): string[] {
