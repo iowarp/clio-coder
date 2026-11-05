@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { ModelAdmissionReporter } from "../../core/model-admission.js";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
 	type ResidencyAdapter,
@@ -40,6 +41,8 @@ export interface LlamaCppResidencyInput {
 	timeoutMs?: number;
 	/** Test-only override for the cross-process mutation lock. */
 	withLock?<T>(targetKey: string, fn: () => Promise<T>): Promise<T>;
+	/** The request's own reporter for what this residency step is doing. */
+	onAdmission?: ModelAdmissionReporter | undefined;
 }
 
 const LOAD_TIMEOUT_MS = 120_000;
@@ -228,11 +231,17 @@ async function postRouterLoad(input: LlamaCppResidencyInput, fetchImpl: typeof f
 	}
 }
 
-async function waitForLoaded(input: LlamaCppResidencyInput, fetchImpl: typeof fetch, modelId: string): Promise<void> {
+async function waitForLoaded(
+	input: LlamaCppResidencyInput,
+	fetchImpl: typeof fetch,
+	modelId: string,
+	report?: ModelAdmissionReporter,
+): Promise<void> {
 	const started = performance.now();
 	while (performance.now() - started < LOAD_TIMEOUT_MS) {
 		const models = await fetchRouterModels(input, fetchImpl);
 		const model = models.find((entry) => entry.id === modelId);
+		if (model?.state === "loading") report?.({ stage: "loading", model: modelId, evidence: "reported" });
 		// A model that goes straight back to sleep between polls is resident and
 		// serves the next request; waiting for it to read `loaded` would spin out
 		// the whole load timeout on an idle router.
@@ -248,14 +257,20 @@ async function ensureModelLoaded(
 	fetchImpl: typeof fetch,
 	modelId: string,
 	knownState: LlamaCppModelState | undefined,
+	report?: ModelAdmissionReporter,
 ): Promise<void> {
 	// A sleeping model is already running and the router wakes it on the next
 	// inference request. Posting a load for it is not merely redundant: the
 	// router answers `400 model is already running`, which fails the turn before
 	// it reaches the model.
 	if (knownState === "loaded" || knownState === "sleeping") return;
-	if (knownState !== "loading") await postRouterLoad(input, fetchImpl, modelId);
-	await waitForLoaded(input, fetchImpl, modelId);
+	if (knownState === "loading") {
+		report?.({ stage: "loading", model: modelId, evidence: "reported", startedElsewhere: true });
+	} else {
+		report?.({ stage: "loading", model: modelId, evidence: "requested" });
+		await postRouterLoad(input, fetchImpl, modelId);
+	}
+	await waitForLoaded(input, fetchImpl, modelId, report);
 }
 
 /**
@@ -279,6 +294,7 @@ async function restoreDisplacedPinned(
 		const state = current.find((entry) => entry.id === model.id)?.state;
 		if (state !== undefined && isResidentState(state)) continue;
 		changed = true;
+		input.onAdmission?.({ stage: "restoring", model: model.id });
 		await ensureModelLoaded(input, fetchImpl, model.id, state);
 	}
 	if (!changed) return;
@@ -321,6 +337,7 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 		managed: input.managed ?? true,
 		strategy: "router",
 		...(input.signal ? { signal: input.signal } : {}),
+		onAdmission: input.onAdmission,
 		listResident: async () => {
 			const models = await fetchRouterModels(input, fetchImpl);
 			if (!models.some((entry) => entry.state !== "unknown")) {
@@ -344,15 +361,18 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 		unload: (modelId) => postRouterModel(fetchImpl, unloadUrl(input.baseUrl), modelId),
 		load: async (modelId) => {
 			const state = snapshot.find((entry) => entry.id === modelId)?.state;
+			// A sleeping model is resident and the next inference request wakes it, which that request pays for.
+			if (state === "sleeping") input.onAdmission?.({ stage: "cold", state: "sleeping" });
 			if (state !== undefined && isResidentState(state) && state !== "loading") return;
-			await ensureModelLoaded(input, fetchImpl, modelId, state);
+			await ensureModelLoaded(input, fetchImpl, modelId, state, input.onAdmission);
 			await restoreDisplacedPinned(input, fetchImpl, snapshot);
 		},
 		// `snapshot` predates the eviction and still calls this model resident, so
 		// the state is deliberately not read here: the reload has to be forced.
 		reloadEvicted: async (modelId) => {
 			// Recovery must survive request cancellation, but has its own total deadline.
-			const recovery = { ...input, signal: AbortSignal.timeout(LOAD_TIMEOUT_MS) };
+			const { onAdmission: _admission, ...unreported } = input;
+			const recovery = { ...unreported, signal: AbortSignal.timeout(LOAD_TIMEOUT_MS) };
 			await ensureModelLoaded(recovery, routerFetch(recovery), modelId, undefined);
 		},
 	};

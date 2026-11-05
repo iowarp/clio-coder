@@ -1,10 +1,22 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import {
+	applyModelAdmission,
+	type ModelAdmissionEvent,
+	type ModelAdmissionWait,
+} from "../../src/core/model-admission.js";
+import { retryWaitCause } from "../../src/domains/session/retry.js";
+import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import { reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
-import { type AgentStatus, INITIAL_STATUS } from "../../src/session-control/status-types.js";
+import {
+	type AgentStatus,
+	INITIAL_STATUS,
+	type ModelRequestFacts,
+	type RetryOverlay,
+} from "../../src/session-control/status-types.js";
 
 const STUCK_AFTER_MS = 180_000;
 
@@ -266,4 +278,266 @@ test("a replayed receipt splits work from the operator wait the live run recorde
 		replayed: { elapsedMs: 50_000, humanWaitMs: 30_000 },
 	} as never);
 	match(screen(panel), /20s work · 30s waiting on you/u);
+});
+
+function waitOnRequest(extra: Partial<ModelRequestFacts>, at = 1_000_000): AgentStatus {
+	return {
+		...INITIAL_STATUS,
+		phase: "waiting_model",
+		since: at,
+		waitingSince: at,
+		lastMeaningfulAt: at,
+		modelRequest: { sentAt: at, modelId: "cold-a", firstByteAt: null, bytesObservable: true, ...extra },
+	};
+}
+
+const WIDTHS = [109, 80, 60, 40] as const;
+
+test("a cold load keeps its state, clock and way out at every width and never says the request went out", () => {
+	const at = 1_000_000;
+	const facts: ModelRequestFacts = { sentAt: at, modelId: "cold-a", firstByteAt: null, bytesObservable: true };
+	applyModelAdmission(facts, { stage: "loading", model: "cold-a", evidence: "requested" }, at);
+	applyModelAdmission(facts, { stage: "loading", model: "cold-a", evidence: "reported" }, at + 500);
+	strictEqual(facts.admission?.since, at);
+	const status = waitOnRequest(facts);
+	for (const width of WIDTHS) {
+		const { label } = composerPhasePresentation(status, width, at + 12_000);
+		match(label, /loading/);
+		match(label, /12s/);
+		match(label, /Esc/);
+		doesNotMatch(label, /request sent|no bytes|waiting for a response/);
+	}
+	match(composerPhasePresentation(status, 200, at + 12_000).label, /target reports loading/);
+});
+
+test("the load that confirmed residency closes the wait for it, and the response gets its own clock", () => {
+	const at = 1_000_000;
+	const facts: ModelRequestFacts = {
+		sentAt: at,
+		modelId: "cold-a",
+		firstByteAt: null,
+		bytesObservable: true,
+		probedResidency: "absent",
+	};
+	applyModelAdmission(facts, { stage: "loading", model: "cold-a", evidence: "requested" }, at);
+	applyModelAdmission(facts, { stage: "admitted" }, at + 20_000);
+	strictEqual(facts.admission, null);
+	strictEqual(facts.sentAt, at + 20_000);
+	const { label } = composerPhasePresentation(waitOnRequest(facts), 200, at + 23_000);
+	match(label, /waiting for a response · 3s/);
+	match(label, /loaded in 20/);
+	doesNotMatch(label, /not resident/);
+});
+
+test("a reconcile that holds a request past the stuck threshold is not silence", () => {
+	const machine = reducer();
+	waitingOnModel(machine);
+	const facts: ModelRequestFacts = {
+		sentAt: machine.now(),
+		firstByteAt: null,
+		bytesObservable: true,
+		admission: { stage: "lock", holder: null, since: machine.now() },
+	};
+	machine.apply({ type: "message_start" });
+	const status = machine.current();
+	const held = reduceStatus(
+		{ ...status, modelRequest: facts },
+		{ type: "watchdog_tick" },
+		{
+			now: machine.now() + STUCK_AFTER_MS + 1_000,
+			localRuntime: false,
+			modelRequest: facts,
+		},
+	);
+	strictEqual(held.phase, "waiting_model");
+	strictEqual(held.watchdogTier, 0);
+});
+
+test("a lock, an unload, a switch and a load each say their own thing, and a lock names its owner when it can", () => {
+	const at = 1_000_000;
+	const wait = (admission: ModelAdmissionWait) =>
+		composerPhasePresentation(waitOnRequest({ admission }), 200, at + 5_000);
+	const held = wait({
+		stage: "lock",
+		holder: { pid: 4242, host: null, self: false, wants: "big-model" },
+		since: at,
+	});
+	strictEqual(held.subject, "Clio");
+	match(held.label, /residency lock/);
+	match(held.label, /held by Clio pid 4242 for Big-model/);
+	match(wait({ stage: "lock", holder: null, since: at }).label, /holder unknown/);
+	match(
+		wait({ stage: "lock", holder: { pid: 1, host: "other", self: false, wants: null }, since: at }).label,
+		/on other/,
+	);
+	match(wait({ stage: "lock", holder: { pid: 1, host: null, self: true, wants: null }, since: at }).label, /this Clio/);
+	match(wait({ stage: "unloading", model: "old", since: at }).label, /is unloading Old/);
+	match(wait({ stage: "switching", from: "old", to: "new", since: at }).label, /is replacing Old with New/);
+	match(
+		wait({ stage: "loading", model: "new", evidence: "reported", replacing: "old", since: at }).label,
+		/replacing Old/,
+	);
+	match(
+		wait({ stage: "loading", model: "new", evidence: "reported", startedElsewhere: true, since: at }).label,
+		/already loading when asked/,
+	);
+	for (const width of WIDTHS) {
+		const { label } = composerPhasePresentation(
+			waitOnRequest({ admission: { stage: "switching", from: "old", to: "new", since: at } }),
+			width,
+			at + 5_000,
+		);
+		match(label, /5s/);
+		match(label, /Esc/);
+	}
+});
+
+test("silence alone never claims a load, and only a word from the target earns one", () => {
+	const at = 1_000_000;
+	const late = at + 100_000;
+	const silent = composerPhasePresentation(waitOnRequest({}, at), 200, late).label;
+	match(silent, /target state unknown/);
+	doesNotMatch(silent, /loading/);
+	const probed = composerPhasePresentation(waitOnRequest({ probedResidency: "absent" }, at), 200, late).label;
+	match(probed, /not resident at last probe/);
+	match(probed, /may be loading or stuck/);
+	match(composerPhasePresentation(waitOnRequest({ coldAtSend: "sleeping" }, at), 200, late).label, /asleep when sent/);
+});
+
+test("a probe's word stands on a target Clio only observes and yields to a reconcile that looked", () => {
+	const at = 1_000_000;
+	const fresh = (): ModelRequestFacts => ({
+		sentAt: at,
+		firstByteAt: null,
+		bytesObservable: true,
+		probedResidency: "absent",
+	});
+	const observed = fresh();
+	applyModelAdmission(observed, { stage: "admitted" }, at + 1);
+	strictEqual(observed.probedResidency, "absent");
+	strictEqual(observed.sentAt, at);
+	const looked = fresh();
+	applyModelAdmission(looked, { stage: "resident" }, at + 1);
+	applyModelAdmission(looked, { stage: "admitted" }, at + 2);
+	strictEqual(looked.probedResidency, undefined);
+});
+
+test("a wait with every known slot taken is a wait for a slot, and an unknown limit never becomes one", () => {
+	const at = 1_000_000;
+	const slots = { limit: 1, workers: 1, reservations: 0, otherRequests: 0 };
+	for (const width of WIDTHS) {
+		const full = composerPhasePresentation(waitOnRequest({ slots }), width, at + 5_000);
+		match(full.label, /slot/);
+		match(full.label, /5s/);
+		match(full.label, /Esc/);
+		strictEqual(full.namesRoute, false);
+	}
+	match(composerPhasePresentation(waitOnRequest({ slots }), 200, at + 5_000).label, /1\/1 held by a worker/);
+	match(composerPhasePresentation(waitOnRequest({ slots }), 200, at + 5_000).label, /queue position unknown/);
+	const unknown = composerPhasePresentation(waitOnRequest({ slots: { ...slots, limit: null } }), 200, at + 15_000).label;
+	match(unknown, /waiting for a response/);
+	match(unknown, /a worker also on target/);
+	const open = composerPhasePresentation(waitOnRequest({ slots, firstByteAt: at + 1_000 }), 200, at + 5_000).label;
+	doesNotMatch(open, /slot|also on target/);
+});
+
+test("a backoff says what the target said it is waiting on, and nothing when it said nothing", () => {
+	const at = 1_000_000;
+	const backoff = (cause: RetryOverlay["cause"]) =>
+		composerPhasePresentation(
+			{
+				...INITIAL_STATUS,
+				phase: "retrying",
+				since: at,
+				lastMeaningfulAt: at,
+				retry: {
+					attempt: 1,
+					maxAttempts: 3,
+					waitMs: 15_000,
+					stage: "backoff",
+					dueAt: at + 15_000,
+					...(cause ? { cause, causeSince: at - 20_000 } : {}),
+				},
+			},
+			200,
+			at,
+		).label;
+	match(backoff("model-loading"), /target has said not loaded for 20/);
+	match(backoff("capacity"), /at capacity/);
+	match(backoff("rate-limit"), /rate limited/);
+	doesNotMatch(backoff(undefined), /loading|capacity|limited|not loaded/);
+	strictEqual(retryWaitCause({ kind: "model-loading", message: "Model is unloaded." }), "model-loading");
+	strictEqual(retryWaitCause({ kind: "transient-provider", message: "503: server overloaded" }), "capacity");
+	strictEqual(retryWaitCause({ kind: "transient-provider", message: "429 too many requests" }), "rate-limit");
+	strictEqual(retryWaitCause({ kind: "transient-provider", message: "503: unavailable" }), null);
+});
+
+test("a cancel that leaves a load behind and a restore that outlives the cancel both say so", () => {
+	const at = 1_000_000;
+	const facts: ModelRequestFacts = { sentAt: at, firstByteAt: null, bytesObservable: true };
+	applyModelAdmission(facts, { stage: "loading", model: "cold-a", evidence: "reported" }, at);
+	applyModelAdmission(facts, { stage: "abandoned" }, at + 1_000);
+	const ended = composerPhasePresentation(
+		{
+			...INITIAL_STATUS,
+			phase: "ended",
+			since: at,
+			lastMeaningfulAt: at,
+			modelRequest: facts,
+			summary: { stopReason: "cancelled" } as AgentStatus["summary"],
+		},
+		200,
+		at + 2_000,
+	).label;
+	match(ended, /was cancelled · target may finish the load/);
+	const stopping = composerPhasePresentation(
+		{
+			...INITIAL_STATUS,
+			phase: "cancelling",
+			since: at,
+			lastMeaningfulAt: at,
+			cancelRequestedAt: at,
+			modelRequest: {
+				sentAt: at,
+				firstByteAt: null,
+				bytesObservable: true,
+				admission: { stage: "restoring", model: "old", since: at },
+			},
+		},
+		200,
+		at + 4_000,
+	).label;
+	match(stopping, /is cancelling · 4s · restoring Old/);
+});
+
+test("a reconcile reports the switch it makes and the restore a failed load forces, in order", async () => {
+	const events: ModelAdmissionEvent[] = [];
+	const targetKey = "http://st2-reconcile.example";
+	markClioLoaded(targetKey, "old");
+	await rejects(
+		reconcileResidency({
+			targetKey,
+			targetId: "router",
+			runtimeId: "llamacpp",
+			keepModelId: "new",
+			managed: true,
+			strategy: "router",
+			ttlMs: 0,
+			capacity: async () => 1,
+			listResident: async () => [{ modelId: "old" }],
+			unload: async () => {},
+			load: async () => {
+				events.push({ stage: "loading", model: "new", evidence: "requested" });
+				throw new Error("load refused");
+			},
+			reloadEvicted: async () => {},
+			withLock: (_key, fn) => fn(),
+			onAdmission: (event) => events.push(event),
+		}),
+		/load refused/,
+	);
+	deepStrictEqual(
+		events.map((event) => event.stage),
+		["switching", "loading", "restoring"],
+	);
 });

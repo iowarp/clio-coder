@@ -315,6 +315,19 @@ export interface EndpointCapacityHolders {
 	foregroundStreams: number;
 }
 
+/** Who holds slots on one endpoint now, by kind, for a surface explaining a wait. */
+export function endpointCapacityHolders(endpointKey: string): EndpointCapacityHolders {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		const file = readCapacityStateUnsafe();
+		reclaim(file, Date.now(), defaultProbe);
+		return {
+			leases: file.leases.filter((lease) => lease.endpointKey === endpointKey).length,
+			reservations: heldReservationUsage(file.reservations).endpoints[endpointKey] ?? 0,
+			foregroundStreams: foregroundStreamUsage()[endpointKey] ?? 0,
+		};
+	});
+}
+
 /** Name the endpoint-capacity addends that are actually nonzero. */
 export function describeEndpointCapacityHolders(holders: EndpointCapacityHolders): string {
 	const parts: string[] = [];

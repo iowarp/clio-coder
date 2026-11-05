@@ -21,6 +21,7 @@ import type {
 	Tool as OllamaTool,
 	ToolCall as OllamaToolCall,
 } from "ollama";
+import type { ModelAdmissionReporter } from "../../core/model-admission.js";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
 	type AppliedThinking,
@@ -32,6 +33,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { resolvedRequestContext } from "../context.js";
 import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
+import { modelAdmissionReporter } from "../model-admission.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
 import { ollamaJson, streamOllamaChat } from "./ollama-http.js";
@@ -91,6 +93,7 @@ async function reconcileOllamaResidency(
 	model: Model<"ollama-native">,
 	headers: Record<string, string>,
 	signal?: AbortSignal,
+	onAdmission?: ModelAdmissionReporter,
 ): Promise<boolean> {
 	const baseUrl = model.baseUrl;
 	if (!baseUrl) return false;
@@ -105,12 +108,15 @@ async function reconcileOllamaResidency(
 		managed: true,
 		strategy: "scheduler",
 		...(signal ? { signal } : {}),
+		onAdmission,
 		listResident: async () => (resident = await listResidentOllamaModels(baseUrl, headers, signal)),
 		unload: (id) =>
 			unloadOllamaModel(baseUrl, resident.find((entry) => entry.modelId === id) ?? { modelId: id }, headers, signal),
 	};
 	try {
 		const plan = await reconcileResidency(adapter);
+		// Ollama loads on the request itself, so the listing just read is the last word before the wait.
+		if (plan.decision === "reconcile" && !plan.keepResident) onAdmission?.({ stage: "cold", state: "absent" });
 		const keep = resident.find((entry) => residentMatchesKeep(entry, model.id));
 		const ids = ollamaModelIds(model.id, ...(keep ? [keep.modelId, ...(keep.aliasIds ?? [])] : []));
 		return (
@@ -473,8 +479,10 @@ function runStream(
 	(async () => {
 		try {
 			signal?.throwIfAborted();
-			const pin = await reconcileOllamaResidency(model, headers, signal);
+			const reportAdmission = modelAdmissionReporter(options);
+			const pin = await reconcileOllamaResidency(model, headers, signal, reportAdmission);
 			signal?.throwIfAborted();
+			reportAdmission?.({ stage: "admitted" });
 			// Native Ollama runs the payload hook like Pi's adapters, so the request-local
 			// edits in provider-payload.ts and the provider diagnostics dump see its body.
 			const request = buildRequest(model, context, options, thinkingLevel, pin);

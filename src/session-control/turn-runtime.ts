@@ -1,5 +1,6 @@
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
+import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
 import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
@@ -9,6 +10,7 @@ import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import { endpointCapacityHolders } from "../domains/dispatch/index.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
@@ -22,6 +24,7 @@ import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
+import { MODEL_ADMISSION } from "../engine/model-admission.js";
 import { requestStructure } from "../engine/request-structure.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
@@ -42,6 +45,8 @@ import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js
 import {
 	applyModelCapabilityPatch,
 	canonicalEndpointKey,
+	endpointCapacityFor,
+	endpointCapacityForStatus,
 	modelResidencyForStatus,
 	type ProvidersContract,
 	recordEndpointThroughput,
@@ -85,6 +90,7 @@ import {
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
 import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
@@ -152,6 +158,41 @@ export class TurnAdmissionError extends Error {
  * same discovery view the planner budgets against, so a model Clio is planning
  * a loaded window for is never announced as absent.
  */
+/** Reading the slots takes the admission state lock, so a wait reads them at this pace and no faster. */
+const MODEL_SLOTS_SAMPLE_MS = 2_000;
+
+/**
+ * Other Clio work on this request's endpoint, for a wait that has no response yet. The request itself holds one
+ * foreground slot and never counts against itself. Null when nothing else of Clio's is there: then Clio knows nothing
+ * about a queue, and says nothing about one.
+ */
+function modelRequestSlots(
+	target: ChatLoopTarget,
+	providers: Pick<ProvidersContract, "list">,
+): ModelRequestSlots | null {
+	const key = canonicalEndpointKey(target.target);
+	if (key === null) return null;
+	let holders: ReturnType<typeof endpointCapacityHolders>;
+	try {
+		holders = endpointCapacityHolders(key);
+	} catch {
+		// The state lock stayed busy: this sample says nothing, and the next one may.
+		return null;
+	}
+	const otherRequests = Math.max(0, holders.foregroundStreams - 1);
+	if (holders.leases + holders.reservations + otherRequests === 0) return null;
+	const status = providers.list().find((entry) => entry.target.id === target.target.id);
+	const capacity = status
+		? endpointCapacityForStatus(status)
+		: endpointCapacityFor({ target: target.target, runtime: target.runtime });
+	return {
+		limit: capacity && capacity.source !== "local-native-default" ? capacity.limit : null,
+		workers: holders.leases,
+		reservations: holders.reservations,
+		otherRequests,
+	};
+}
+
 function coldModelNotice(
 	status: TargetStatus | null | undefined,
 	targetId: string,
@@ -433,6 +474,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// Unexpected provider-contract failures retry after the TTL.
 			}
 			if (disposed) return;
+			// Any probe's word counts for the rail, including the silent one that spends the TTL before a submit.
+			const probed = modelResidencyForStatus(status, wireModelId);
+			coldAtProbe = probed === "absent" || probed === "loading" ? { targetId, modelId: wireModelId, state: probed } : null;
 			if (!options?.silent) announceColdModel(status, targetId, wireModelId);
 			// A passive refresh must update the attached model and footer budget too;
 			// the provider status alone is otherwise invisible until the next submit.
@@ -459,6 +503,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	}, TARGET_PROBE_POLL_MS);
 	selectedRoutePoll.unref();
 
+	/** The last probe's word on the selected model when it was not serving, until the target answers a request on it. */
+	let coldAtProbe: { targetId: string; modelId: string; state: "absent" | "loading" } | null = null;
 	/** One notice per target+model+state, so a repeated probe stays quiet. */
 	const announcedColdModels = new Set<string>();
 	const announceColdModel = (
@@ -915,11 +961,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
 						attempt?.stage("send", "start");
-						state.modelRequest = {
+						const facts: ModelRequestFacts = {
 							sentAt: Date.now(),
 							modelId: currentModel.id,
 							firstByteAt: null,
 							bytesObservable: tracking.observesResponses(),
+						};
+						if (coldAtProbe?.modelId === currentModel.id && coldAtProbe.targetId === target.target.id) {
+							facts.probedResidency = coldAtProbe.state;
+						}
+						state.modelRequest = facts;
+						let slotsReadAt = 0;
+						state.refreshModelRequest = () => {
+							if (state.modelRequest !== facts || facts.firstByteAt !== null || facts.admission) return;
+							if (Date.now() - slotsReadAt < MODEL_SLOTS_SAMPLE_MS) return;
+							slotsReadAt = Date.now();
+							facts.slots = modelRequestSlots(target, deps.providers);
 						};
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
 						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"), retry);
@@ -928,6 +985,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							...request.options,
 							fetch: tracking.fetch,
 							...(pinnedPrefix ? { clioCoderPinnedPrefix: pinnedPrefix } : {}),
+							// A load is this request's own wait, so its report lands on these facts and no other's.
+							[MODEL_ADMISSION]: (event: ModelAdmissionEvent) => applyModelAdmission(facts, event, Date.now()),
 							onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof request.options>["onResponse"]>>) => {
 								// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
 								localRuntime.lastProviderStatus = args[0].status;
@@ -936,6 +995,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								if (args[0].status >= 200 && args[0].status < 300) {
 									attempt?.mark("firstByte");
 									if (state.modelRequest) state.modelRequest.firstByteAt ??= Date.now();
+									coldAtProbe = null;
 								}
 								await request.options?.onResponse?.(...args);
 							},
@@ -969,7 +1029,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						// transport option B. The journal's TTFT is firstToken minus this mark (#434).
 						attempt?.stage("send", "end");
 						// #423: a cache keepalive replays exactly this request, without this turn's call tracker or status hook.
-						const { fetch: _tracked, onResponse: _status, ...replayed } = requestOptions;
+						const { fetch: _tracked, onResponse: _status, [MODEL_ADMISSION]: _admission, ...replayed } = requestOptions;
 						deps.noteMainRequest?.(
 							localRuntime,
 							{
@@ -1078,13 +1138,34 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							// stall (#423).
 							preInvocationStage = "budget admission";
 							stallSuspendDepth += 1;
+							// Parked at the ceiling this is Clio's queue, and no provider has heard of the request.
+							let parked: ModelRequestFacts | null = null;
 							try {
 								await deps.scheduling.admitPaidRequest({
 									waitForRaise: deps.headless !== true,
 									additionalUsd: () => unsettledSpendUsd,
 									getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 									contextTokens: input,
-									onBlocked: recordBlock,
+									onBlocked: (block) => {
+										recordBlock(block);
+										parked = {
+											sentAt: Date.now(),
+											modelId: target.wireModelId,
+											firstByteAt: null,
+											bytesObservable: false,
+										};
+										applyModelAdmission(
+											parked,
+											{
+												stage: "ceiling",
+												spentUsd: block.currentUsd + (block.projectedUsd ?? 0),
+												ceilingUsd: block.ceilingUsd,
+												...(block.pricing ? { pricing: block.pricing } : {}),
+											},
+											Date.now(),
+										);
+										state.modelRequest = parked;
+									},
 									...(modelCall && journalLease
 										? {
 												telemetry: {
@@ -1099,6 +1180,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							} finally {
 								stallSuspendDepth -= 1;
 								lastActivityAt = performance.now();
+								if (parked !== null) (parked as ModelRequestFacts).admission = null;
 							}
 						} else {
 							const { currentUsd, ceilingUsd, pricing } = deps.scheduling.preflight();

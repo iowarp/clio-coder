@@ -170,6 +170,17 @@ export function isRateLimitErrorMessage(errorMessage: string | null | undefined)
 	return isEngineRetryableAssistantError(errorMessage) && RATE_LIMIT_PATTERN.test(errorMessage);
 }
 
+/** What a target's refusal says it is waiting on. Only its own words count: a bare 503 names nothing. */
+export type RetryWaitCause = "model-loading" | "capacity" | "rate-limit";
+
+const NAMED_RATE_LIMIT_PATTERN = /rate.?limit|too many requests|(?<![a-z0-9.$])429(?![a-z0-9])/i;
+
+export function retryWaitCause(failure: RecoveryFailure): RetryWaitCause | null {
+	if (failure.kind === "model-loading") return "model-loading";
+	if (!isRateLimitErrorMessage(failure.message)) return null;
+	return NAMED_RATE_LIMIT_PATTERN.test(failure.message) ? "rate-limit" : "capacity";
+}
+
 /**
  * The provider's own wait for this failure: the response header the call tracker saw, the Anthropic response facts,
  * or the error text; null when it named none.

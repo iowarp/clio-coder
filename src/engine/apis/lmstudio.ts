@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
+import type { ModelAdmissionReporter } from "../../core/model-admission.js";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
 	invalidateLmStudioCatalog,
@@ -305,9 +306,15 @@ function unleased(wireModelId: string): LmStudioResidency {
 	return { wireModelId, release: NO_LEASE };
 }
 
+interface LmStudioResidencyOptions {
+	apiKey?: string;
+	signal?: AbortSignal;
+	onAdmission?: ModelAdmissionReporter | undefined;
+}
+
 export async function ensureLmStudioResidency(
 	model: Model<"openai-completions">,
-	options: { apiKey?: string; signal?: AbortSignal } = {},
+	options: LmStudioResidencyOptions = {},
 ): Promise<LmStudioResidency> {
 	const info = metadata(model);
 	const load = effectiveLmStudioLoad(info?.lmstudio, model.id);
@@ -323,6 +330,7 @@ export async function ensureLmStudioResidency(
 			residencyTargetKey("lmstudio", lmStudioRootUrl(model.baseUrl)),
 			() => ensureLmStudioResidencyUnlocked(model, options),
 			options.signal,
+			{ wants: model.id, report: options.onAdmission },
 		);
 	}
 	return ensureLmStudioResidencyUnlocked(model, options);
@@ -330,7 +338,7 @@ export async function ensureLmStudioResidency(
 
 async function ensureLmStudioResidencyUnlocked(
 	model: Model<"openai-completions">,
-	options: { apiKey?: string; signal?: AbortSignal } = {},
+	options: LmStudioResidencyOptions = {},
 ): Promise<LmStudioResidency> {
 	const target = targetForModel(model);
 	if (!target) return unleased(model.id);
@@ -387,7 +395,11 @@ async function ensureLmStudioResidencyUnlocked(
 		capToLoadedContext(model, loadedContextLength(resolution.instance));
 		return resolution.wireModelId;
 	};
-	if (!explicitLoad || !load || catalog.tier !== "0.4+") return unleased(keepLoaded());
+	if (!explicitLoad || !load || catalog.tier !== "0.4+") {
+		// LM Studio loads this one just in time, so the catalog just read is the last word before the wait.
+		if (!resolution.instance) options.onAdmission?.({ stage: "cold", state: "absent" });
+		return unleased(keepLoaded());
+	}
 	const modelKey = resolution.model?.key ?? model.id;
 	let instances = catalog.models.flatMap((entry) =>
 		entry.loadedInstances.map((instance) => ({ modelKey: entry.key, identifier: instance.id, instance })),
@@ -435,6 +447,7 @@ async function ensureLmStudioResidencyUnlocked(
 		const stale = resolution.instance.id;
 		const staleOwned =
 			ownedInstances(targetKey).has(stale) || ownership.loads.some((record) => record.instanceId === stale);
+		options.onAdmission?.({ stage: "unloading", model: modelKey });
 		await unloadInstance(target, targetKey, stale, options.apiKey, options.signal);
 		replaced = { modelKey, instance: resolution.instance, owned: staleOwned };
 		replacedDrift = drift;
@@ -468,6 +481,7 @@ async function ensureLmStudioResidencyUnlocked(
 		if (entry.modelKey === modelKey || !recorded.has(entry.identifier) || ownership.leased.has(entry.modelKey)) {
 			continue;
 		}
+		options.onAdmission?.({ stage: "switching", from: entry.modelKey, to: modelKey });
 		await unloadInstance(target, targetKey, entry.identifier, options.apiKey, options.signal);
 		instances = instances.filter((resident) => resident.identifier !== entry.identifier);
 		emitResidencyMutation({
@@ -496,6 +510,7 @@ async function ensureLmStudioResidencyUnlocked(
 		strategy: "jit",
 		ttlMs: 0, // The fresh catalog, not a previous load attempt, determines residency.
 		...(options.signal ? { signal: options.signal } : {}),
+		onAdmission: options.onAdmission,
 		...(contextLength !== undefined ? { contextLength } : {}),
 		...(model.contextWindow > 0 ? { modelMaxContext: model.contextWindow } : {}),
 		listResident: async () => [...new Set(instances.map((entry) => entry.modelKey))].map((modelId) => ({ modelId })),
@@ -542,6 +557,8 @@ async function ensureLmStudioResidencyUnlocked(
 		}
 	}
 	const loadAndReport = async (): Promise<string> => {
+		// LM Studio answers this POST only when the load ends, so "requested" is all the target says until then.
+		options.onAdmission?.({ stage: "loading", model: modelKey, evidence: "requested" });
 		const { instanceId, config } = await loadOwnedInstance(
 			target,
 			targetKey,
@@ -589,6 +606,7 @@ async function ensureLmStudioResidencyUnlocked(
 			try {
 				for (const candidate of plan.fallbackEvict) {
 					for (const entry of instances.filter((resident) => resident.modelKey === candidate.modelId)) {
+						options.onAdmission?.({ stage: "switching", from: candidate.modelId, to: modelKey });
 						if (await unloadOwnedInstance(target, targetKey, entry.identifier, options.apiKey, options.signal)) {
 							evicted.push(entry);
 							emitResidencyMutation({
@@ -607,6 +625,7 @@ async function ensureLmStudioResidencyUnlocked(
 				// A rejected replacement must not leave an otherwise working server empty.
 				for (const entry of evicted) {
 					try {
+						options.onAdmission?.({ stage: "restoring", model: entry.modelKey });
 						await loadOwnedInstance(
 							target,
 							targetKey,
@@ -640,6 +659,7 @@ async function ensureLmStudioResidencyUnlocked(
 		return await loadWithCapacityFallback();
 	} catch (error) {
 		if (!replaced) throw error;
+		options.onAdmission?.({ stage: "restoring", model: replaced.modelKey });
 		const outcome = await restoreReplacedInstance(target, targetKey, replaced, options.apiKey);
 		if (outcome.error === undefined) {
 			emitResidencyMutation({
@@ -790,14 +810,17 @@ export function gatewayLmStudioProfile(model: Model<Api>): LmStudioLoad | undefi
  */
 export async function ensureGatewayLmStudioResidency(
 	model: Model<"openai-completions">,
-	options: { apiKey?: string; signal?: AbortSignal } = {},
+	options: LmStudioResidencyOptions = {},
 ): Promise<() => Promise<void>> {
 	const load = gatewayLmStudioProfile(model);
 	if (!load) return NO_LEASE;
 	const deployment = await gatewayLmStudioDeployment(model, options);
 	if (!deployment) return NO_LEASE;
 	const control = gatewayControlModel(model, deployment, load);
-	const residency = await ensureLmStudioResidency(control, options.signal ? { signal: options.signal } : {});
+	const residency = await ensureLmStudioResidency(control, {
+		...(options.signal ? { signal: options.signal } : {}),
+		onAdmission: options.onAdmission,
+	});
 	if (control.contextWindow > 0 && (model.contextWindow <= 0 || control.contextWindow < model.contextWindow)) {
 		model.contextWindow = control.contextWindow;
 	}

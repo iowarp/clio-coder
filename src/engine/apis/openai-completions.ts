@@ -43,6 +43,7 @@ import { isProviderContentFilter, providerContentFilterMessage } from "../ai.js"
 import { normalizeContext, resolvedRequestContext } from "../context.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { retryHarmonyFailureOnce, routeHarmonyStream } from "../harmony-stream.js";
+import { modelAdmissionReporter } from "../model-admission.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
 import { deferResponseDeadline } from "../response-deadline.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
@@ -1037,6 +1038,7 @@ async function ensureResidencyForModel(
 		managed: residencyManagedFor(metadata.lifecycle),
 		headers: localRequestHeaders(model, options),
 		...(options.signal ? { signal: options.signal } : {}),
+		onAdmission: modelAdmissionReporter(options),
 	});
 }
 
@@ -1054,7 +1056,10 @@ async function ensureLocalResidency(
 ): Promise<LocalResidency> {
 	if (isLmStudioModel(model)) {
 		const requestModel = { ...model, headers: localRequestHeaders(model, options) };
-		const { wireModelId, release } = await ensureLmStudioResidency(requestModel, options);
+		const { wireModelId, release } = await ensureLmStudioResidency(requestModel, {
+			...options,
+			onAdmission: modelAdmissionReporter(options),
+		});
 		// Residency may discover a smaller loaded window after turn preflight.
 		if (model.contextWindow <= 0 || requestModel.contextWindow < model.contextWindow) {
 			model.contextWindow = requestModel.contextWindow;
@@ -1063,7 +1068,10 @@ async function ensureLocalResidency(
 	}
 	if (gatewayLmStudioProfile(model)) {
 		// The gateway keeps the route; Clio only fixes the load behind it.
-		return { model, release: await ensureGatewayLmStudioResidency(model, options) };
+		return {
+			model,
+			release: await ensureGatewayLmStudioResidency(model, { ...options, onAdmission: modelAdmissionReporter(options) }),
+		};
 	}
 	await ensureResidencyForModel(model, options);
 	return { model, release: NO_RELEASE };
@@ -1107,6 +1115,7 @@ export function withLocalResidency(
 	}
 	const startResponseDeadline = deferResponseDeadline(options);
 	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
+	const reportAdmission = modelAdmissionReporter(options);
 	(async () => {
 		let release = NO_RELEASE;
 		try {
@@ -1114,6 +1123,7 @@ export function withLocalResidency(
 			const residency = await ensureLocalResidency(model, options);
 			release = residency.release;
 			options.signal?.throwIfAborted();
+			reportAdmission?.({ stage: "admitted" });
 			startResponseDeadline();
 			for await (const event of sourceFactory(residency.model)) {
 				if (event.type === "error" && isLmStudioModel(model)) {
@@ -1127,6 +1137,7 @@ export function withLocalResidency(
 			}
 			stream.end();
 		} catch (err) {
+			reportAdmission?.({ stage: "abandoned" });
 			const message = err instanceof Error ? err.message : String(err);
 			const error = emptyErrorMessage(model, message);
 			error.stopReason = options.signal?.aborted ? "aborted" : "error";

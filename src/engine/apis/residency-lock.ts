@@ -10,6 +10,7 @@
  */
 
 import { join } from "node:path";
+import type { ModelAdmissionReporter, ResidencyLockHolder } from "../../core/model-admission.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStatePath } from "../../core/xdg.js";
 import { canonicalEndpointKey } from "../../domains/providers/endpoint-capacity.js";
@@ -22,11 +23,31 @@ function lockTargetFor(targetKey: string): string {
 	return join(clioStatePath(), "residency-locks", key.replace(/[^a-zA-Z0-9._-]+/g, "_"));
 }
 
-/** Run `fn` while holding the per-target residency lock. */
-export async function withResidencyLock<T>(targetKey: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+/** Run `fn` while holding the per-target residency lock. `wants` is recorded so the next waiter can name what this holds it for. */
+export async function withResidencyLock<T>(
+	targetKey: string,
+	fn: () => Promise<T>,
+	signal?: AbortSignal,
+	watch?: { wants: string; report?: ModelAdmissionReporter | undefined },
+): Promise<T> {
+	const report = watch?.report;
 	return withStateFileLock(lockTargetFor(targetKey), fn, {
 		timeoutMs: LOCK_WAIT_MS,
 		onAcquireFailure: "run-unlocked",
 		...(signal ? { signal } : {}),
+		...(watch ? { note: watch.wants } : {}),
+		...(report
+			? {
+					onContended: (holder) => {
+						const named: ResidencyLockHolder | null = holder && {
+							pid: holder.pid,
+							host: holder.host,
+							self: holder.self,
+							wants: holder.note,
+						};
+						report({ stage: "lock", holder: named });
+					},
+				}
+			: {}),
 	});
 }

@@ -140,6 +140,8 @@ export interface ChatTurnState {
 	streamStallReason: string | null;
 	/** The newest model request of this session, read by the status surfaces as evidence during a silent wait. */
 	modelRequest: ModelRequestFacts | null;
+	/** Refreshes the live parts of `modelRequest` for a surface about to read it; throttled by its owner. */
+	refreshModelRequest: (() => void) | null;
 	/** Local stage held at a watchdog abort; null once invoked or after recovery (#424). */
 	streamStallStage: PreInvocationStage | null;
 	/** Answer length at the last tool-prose scan, so the scan samples instead of running per delta. */
@@ -193,6 +195,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolProseAbortReason: null,
 		streamStallReason: null,
 		modelRequest: null,
+		refreshModelRequest: null,
 		streamStallStage: null,
 		toolProseAssessedChars: 0,
 		turnToolCalls: 0,
