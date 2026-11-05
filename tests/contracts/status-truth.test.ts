@@ -1936,11 +1936,8 @@ test("Esc on a permission card folds open terms before it denies, and every rail
 	routeOverlayKey("\x1b", "permission-confirm", deps, () => false);
 	strictEqual(denied, 1, "from the card itself Esc denies");
 });
-||||||| 6f7742c6f
 
-
-test("a worker failure's primary words name what happened to the task, never the validator, repair loop or loop guard", async () =>
-{
+test("a worker failure's primary words name what happened to the task, never the validator, repair loop or loop guard", async () => {
 	const { workerFailureHeadline } = await import("../../src/domains/dispatch/failure-headline.js");
 	const cases: Array<[string, RegExp]> = [
 		[
@@ -1966,8 +1963,7 @@ test("a worker failure's primary words name what happened to the task, never the
 		match(headline, words);
 		doesNotMatch(headline, /result contract|bounded repair|lockout|synthesis lock|stall window|operator/u);
 	}
-}
-)
+});
 
 test("a steer receipt says the worker's model has the message only once it joined the model's context", async () => {
 	const { createSteerReceipts } = await import("../../src/interactive/steer-receipts.js");
