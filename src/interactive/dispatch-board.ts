@@ -8,6 +8,7 @@ import {
 	formatBudgetRequest,
 	formatEffectiveBudget,
 } from "../domains/dispatch/budget-envelope.js";
+import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
@@ -373,7 +374,7 @@ export function dispatchStatusPresentation(
 		case "dead":
 			return { glyph: GLYPH.error, label: "dead", token: "error" };
 		case "aborted":
-			return { glyph: GLYPH.cancelled, label: compact ? "abort" : "aborted", token: "annotation" };
+			return { glyph: GLYPH.cancelled, label: "cancelled", token: "annotation" };
 		case "stale":
 			return { glyph: GLYPH.warnInline, label: "stale", token: "warning" };
 		case "enqueued":
@@ -600,7 +601,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 	// folds. Unknown, failed, inferred or exceptional provenance stays explicit.
 	const compact =
 		!expanded &&
-		row.status === "completed" &&
+		isTerminalStatus(row.status) &&
 		row.trust?.verdict === "unverified" &&
 		axes?.artifactIntegrity === "verified" &&
 		axes.validationGrounding === "absent" &&
@@ -643,7 +644,9 @@ function dispatchCardBody(
 	const theme = options.theme ?? clioTheme();
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
-	const detail = terminalDetail(row);
+	const rawDetail = terminalDetail(row);
+	// Enter opens the receipt's own words; the folded card leads with the reason.
+	const detail = options.expanded === true ? rawDetail : workerFailureHeadline(rawDetail);
 
 	const presentation = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
@@ -1085,9 +1088,9 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			return { text: task ?? "waiting for a slot", tone: "muted" };
 		case "failed":
 		case "dead":
-			return { text: terminalDetail(row) ?? task ?? "", tone: "error" };
+			return { text: workerFailureHeadline(terminalDetail(row)) ?? task ?? "", tone: "error" };
 		case "aborted":
-			return { text: terminalDetail(row) ?? task ?? "", tone: "muted" };
+			return { text: workerFailureHeadline(terminalDetail(row)) ?? task ?? "", tone: "muted" };
 		case "completed":
 			return { text: task ?? "", tone: "muted" };
 	}

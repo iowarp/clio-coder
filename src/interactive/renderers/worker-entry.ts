@@ -14,6 +14,7 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
+import { plainOutcomeLabel, workerFailureHeadline } from "../../domains/dispatch/failure-headline.js";
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
@@ -201,9 +202,9 @@ function outcomeUnit(result: WorkerRunResultSummary): string {
 		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
 	}
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
-	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} canceled`);
+	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
 	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
-	return theme.fg("error", `${GLYPH.error} ${result.outcomeCode ?? result.outcome}`);
+	return theme.fg("error", `${GLYPH.error} ${plainOutcomeLabel(result.outcomeCode ?? result.outcome)}`);
 }
 
 /**
@@ -358,10 +359,12 @@ function attemptLines(entry: WorkerEntryState, width: number): string[] {
  * line of facts; the reason is prose and wraps like prose, so a long message
  * cannot make the result line heavier than the answer above it.
  */
-function failureLines(entry: WorkerEntryState, width: number): string[] {
+function failureLines(entry: WorkerEntryState, width: number, inspect = false): string[] {
 	const message = entry.result?.failureMessage;
-	if (message === undefined) return [];
-	const first = (message.split("\n", 1)[0] ?? "").trim();
+	// A cancelled card's header already says so; the SIGTERM the worker logged adds nothing but alarm.
+	if (message === undefined || (entry.result?.outcome === "canceled" && !inspect)) return [];
+	// Inspection states the receipt's own words; the transcript leads with the reason a person acts on.
+	const first = inspect ? (message.split("\n", 1)[0] ?? "").trim() : (workerFailureHeadline(message) ?? "");
 	return first.length === 0 ? [] : railLines(`${GLYPH.error} ${first}`, "error", width);
 }
 
@@ -405,7 +408,9 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const metrics: string[] = [];
 	const exitCode = entry.result?.exitCode;
-	if (exitCode !== undefined && exitCode !== 0) metrics.push(`exit ${exitCode}`);
+	if (exitCode !== undefined && exitCode !== 0 && (inspect || entry.result?.outcome !== "canceled")) {
+		metrics.push(`exit ${exitCode}`);
+	}
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	if (tokens !== undefined) metrics.push(`${tokens} tokens processed`);
@@ -508,7 +513,7 @@ function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number
 			: "workers";
 	return meta(
 		truncateToWidth(
-			`${siblings.length} ${name} · ${running} running · ${done} done${failed > 0 ? ` · ${failed} failed/canceled` : ""}`,
+			`${siblings.length} ${name} · ${running} running · ${done} done${failed > 0 ? ` · ${failed} failed/cancelled` : ""}`,
 			width,
 			GLYPH.ellipsis,
 			false,
@@ -725,7 +730,7 @@ export function renderWorkerEntryLines(
 			].flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "body", safeWidth));
 	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
-		failureLines(entry, safeWidth),
+		failureLines(entry, safeWidth, inspect),
 		budget(detail.errorRows),
 		safeWidth,
 		false,

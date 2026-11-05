@@ -35,11 +35,11 @@ describe("settings targets rows show the in-session breaker", () => {
 			route({ targetId: "dragon", wireModelId: "llama", state: "probing", remainingMs: 0 }),
 		];
 		const [mini, dragon] = targetRows(settingsWithTargets(), { getRouteBreakers: () => routes });
-		strictEqual(mini?.targetConsole?.health.text, "○ open 42s");
+		strictEqual(mini?.targetConsole?.health.text, "○ paused 42s");
 		strictEqual(mini?.targetConsole?.health.tone, "unhealthy");
 		strictEqual(
 			mini?.help,
-			"Last probe: never · Failure reason: none · Breaker: qwen open 42s after target-transient; coder 1 failure (target-overloaded)",
+			"Last probe: never · Failure reason: none · Breaker: qwen paused 42s after target-transient; coder 1 failure (target-overloaded)",
 		);
 		strictEqual(dragon?.targetConsole?.health.text, "◐ probing");
 		strictEqual(dragon?.help?.endsWith("Breaker: llama probing after target-transient"), true);

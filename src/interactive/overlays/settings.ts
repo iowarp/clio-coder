@@ -1955,9 +1955,9 @@ function systemOneRows(settings: Readonly<ClioSettings>, live: () => Readonly<Cl
 export function routeBreakerPhrase(route: RouteBreakerView): string {
 	switch (route.state) {
 		case "open":
-			return `${route.wireModelId} open ${Math.ceil(route.remainingMs / 1000)}s after ${route.reason}`;
+			return `${route.wireModelId} paused ${Math.ceil(route.remainingMs / 1000)}s after ${route.reason}`;
 		case "half-open":
-			return `${route.wireModelId} half-open after ${route.reason}`;
+			return `${route.wireModelId} recovering after ${route.reason}; the next call tests it`;
 		case "probing":
 			return `${route.wireModelId} probing after ${route.reason}`;
 		case "closed":
@@ -1965,15 +1965,15 @@ export function routeBreakerPhrase(route: RouteBreakerView): string {
 	}
 }
 
-/** The health cell a tripped route takes over: open first, then a probe in flight, then half-open. */
+/** The health cell a tripped route takes over: paused first, then a probe in flight, then recovering. */
 function routeBreakerSegment(routes: ReadonlyArray<RouteBreakerView>): SettingsValueSegment | null {
 	const open = routes.filter((route) => route.state === "open");
 	if (open.length > 0) {
 		const remainingMs = Math.max(...open.map((route) => route.remainingMs));
-		return { text: `○ open ${Math.ceil(remainingMs / 1000)}s`, tone: "unhealthy" };
+		return { text: `○ paused ${Math.ceil(remainingMs / 1000)}s`, tone: "unhealthy" };
 	}
 	if (routes.some((route) => route.state === "probing")) return { text: "◐ probing", tone: "degraded" };
-	if (routes.some((route) => route.state === "half-open")) return { text: "◐ half-open", tone: "degraded" };
+	if (routes.some((route) => route.state === "half-open")) return { text: "◐ recovering", tone: "degraded" };
 	return null;
 }
 
