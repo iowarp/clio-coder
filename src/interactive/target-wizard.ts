@@ -2,6 +2,7 @@ import type { ConfigureWizardHost, HostedTargetOptions } from "../cli/configure-
 import type { SelectOptions, SelectResult, TextPromptOptions, TextResult } from "../cli/select.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, isKeyRelease, matchesKey, stripTerminalSequences, wrapTextWithAnsi } from "../engine/tui.js";
+import { maybeOpenExternalUrl } from "./open-external-url.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import {
 	buildResponsiveHint,
@@ -33,9 +34,14 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	private pending: PendingChoice | PendingText | null = null;
 	private readonly input = new Input();
 	private messages: string[] = [];
+	/** Where the reports since the last answer start: the prompt on screen shows every one, because they say why it is there. */
+	private freshFrom = 0;
 	private bodyRows = 16;
 	private complete = false;
 	private problem = "";
+	private waitLabel: string | null = null;
+	/** Esc walks back one step, and the rail promises Ctrl+C leaves the wizard. */
+	readonly ownsCtrlC = true;
 	/** Answers the wizard has taken and not gone back over: none means Esc leaves the wizard rather than a step. */
 	private answered = 0;
 
@@ -64,10 +70,18 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	}
 	clearMessages(): void {
 		this.messages = [];
+		this.freshFrom = 0;
 	}
 	report(line: string): void {
 		this.messages.push(stripTerminalSequences(line));
 		this.requestRender();
+	}
+	waiting(label: string | null): void {
+		this.waitLabel = label;
+		this.requestRender();
+	}
+	openUrl(url: string): void {
+		maybeOpenExternalUrl(url);
 	}
 	dismissPrompt(): void {
 		const pending = this.pending;
@@ -83,6 +97,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	select<T>(options: SelectOptions<T>): Promise<SelectResult<T>> {
 		if (this.cancelled()) return Promise.resolve({ kind: "quit" });
 		this.input.setValue("");
+		this.waitLabel = null;
 		return new Promise((resolve) => {
 			this.pending = {
 				kind: "select",
@@ -99,6 +114,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		if (this.cancelled()) return Promise.resolve({ kind: "quit" });
 		this.input.setValue(options.initial ?? "");
 		this.input.handleInput("\x1b[F");
+		this.waitLabel = null;
 		return new Promise((resolve) => {
 			this.pending = { kind: "text", options, finish: resolve };
 			this.problem = "";
@@ -145,6 +161,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		if (matchesKey(data, "escape")) {
 			this.pending = null;
 			this.answered = Math.max(0, this.answered - 1);
+			this.freshFrom = this.messages.length;
 			pending.finish({ kind: "back" });
 			return;
 		}
@@ -158,12 +175,14 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 				}
 				this.pending = null;
 				this.answered += 1;
+				this.freshFrom = this.messages.length;
 				pending.finish({ kind: "value", value });
 			} else {
 				const choice = pending.options.choices[pending.selected];
 				if (choice && this.choices(pending).includes(pending.selected)) {
 					this.pending = null;
 					this.answered += 1;
+					this.freshFrom = this.messages.length;
 					pending.finish({ kind: "selected", value: choice.value });
 				}
 			}
@@ -187,11 +206,18 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		const pending = this.pending;
 		const rows: string[] = [];
 		if (!pending) {
-			rows.push(...this.messages.slice(-Math.max(1, this.bodyRows - 1)).flatMap((line) => wrapTextWithAnsi(line, width)));
-			rows.push(theme.fg("annotation", this.complete ? "Enter returns to Settings" : "Reading target details…"));
+			// Newest rows win: a wrapped sign-in link would otherwise push what the wizard is waiting on out of the body.
+			const log = this.messages.flatMap((line) => wrapTextWithAnsi(line, width));
+			rows.push(...log.slice(-Math.max(1, this.bodyRows - 1)));
+			rows.push(
+				theme.fg("annotation", this.complete ? "Enter returns to Settings" : (this.waitLabel ?? "Reading target details…")),
+			);
 			return fitRows(rows, width, this.bodyRows);
 		}
-		if (this.messages.length) rows.push(theme.fg("body", this.messages.at(-1) ?? ""));
+		// A prompt that follows a failure is there because of it, so everything reported since the last answer stays up.
+		const fresh = this.messages.slice(this.freshFrom);
+		for (const line of fresh.length > 0 ? fresh : this.messages.slice(-1))
+			rows.push(...wrapTextWithAnsi(theme.fg("body", line), width));
 		const heading = pending.options.heading;
 		const headings = (typeof heading === "string" ? [heading] : [...(heading ?? [])]).filter((line) => line.trim());
 		for (const line of headings) rows.push(...wrapTextWithAnsi(stripTerminalSequences(line), width));

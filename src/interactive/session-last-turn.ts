@@ -162,7 +162,8 @@ export function lastTurnSummaryFromLedger(
 	if (!sawAssistant) return null;
 	if ((stopReason === "stop" || stopReason === "toolUse") && classifyTurnEnding(settled)?.kind === "no_answer")
 		stopReason = "no_answer";
-	if ((stopReason === "stop" || stopReason === "toolUse") && endedOnCancelledInterview(settled)) stopReason = "cancelled";
+	if ((stopReason === "stop" || stopReason === "toolUse") && endedOnCancelledInterview(settled))
+		stopReason = "cancelled";
 
 	const lastRow = turn.rows[turn.rows.length - 1];
 	return {
