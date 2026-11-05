@@ -154,9 +154,11 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		return true;
 	}
 	// Reading the mutation is the one thing this dialog does that is not an
-	// answer, so it toggles rather than navigating away: Enter, Alt+X, and Esc keep
-	// their meanings the whole time the mutation is on screen, and Alt+V is what
-	// puts it away. A card with nothing local to inspect leaves the key inert.
+	// answer, so it toggles rather than navigating away: Enter and Alt+X keep
+	// their meanings the whole time the mutation is on screen. Esc puts the
+	// details away first, because an operator backing out of a view they opened
+	// means to go back, not to deny; the card is then as it was and a second Esc
+	// denies. A card with nothing local to inspect leaves the key inert.
 	if (
 		matchesKey(data, MUTATION_PREVIEW_KEY) &&
 		!isKeyRelease(data) &&
@@ -192,7 +194,8 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		if (direction !== 0 && deps.scrollTranscript(direction)) return true;
 	}
 	if (isEscapeKey(data)) {
-		deps.cancelPermission();
+		if ((deps.isInspectingMutation?.() ?? false) && deps.toggleMutationInspection) deps.toggleMutationInspection();
+		else deps.cancelPermission();
 		return true;
 	}
 	// Denying one call does not stop the model asking again, and it re-asked six

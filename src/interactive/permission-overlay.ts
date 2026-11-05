@@ -745,7 +745,7 @@ function permissionInspectionLines(
 			content,
 			CARD_FACT_ROWS,
 		),
-		sectionRule(theme, content, previewLabel(preview.heading), { meta: `${MUTATION_PREVIEW_KEY} closes` }),
+		sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
 		...previewReason(theme, preview.heading, content),
 	];
 	const tail =
@@ -757,7 +757,7 @@ function permissionInspectionLines(
 		? [
 				...identity.rows.slice(0, 1),
 				...target.slice(0, 1),
-				sectionRule(theme, content, previewLabel(preview.heading), { meta: `${MUTATION_PREVIEW_KEY} closes` }),
+				sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
 			]
 		: fullHead;
 	const visibleRows = compact
@@ -949,7 +949,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			const head = [
 				...identity.rows,
 				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content, CARD_FACT_ROWS)),
-				sectionRule(theme, content, "Exact invocation", { meta: `${MUTATION_PREVIEW_KEY} closes` }),
+				sectionRule(theme, content, "Exact invocation", { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
 			];
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
 			const pane = windowRows(rows, this.scroll, this.lastVisibleRows);
