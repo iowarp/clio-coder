@@ -423,7 +423,9 @@ function lastMatchIndex(pattern: RegExp, text: string): number {
 }
 
 /** Reads only the tail, so a long answer costs each delta nothing. A quoted opener makes this literally true too. */
-function callMarkupOpen(prev: boolean, partialText: string): boolean {
+function callMarkupOpen(prev: boolean, partialText: string | undefined): boolean {
+	// An event without the accumulated text has nothing to read, so what was already open stays open.
+	if (partialText === undefined) return prev;
 	const tail = partialText.slice(-CALL_MARKUP_TAIL_CHARS);
 	const open = lastMatchIndex(CALL_MARKUP_OPEN, tail);
 	const close = lastMatchIndex(CALL_MARKUP_CLOSE, tail);
