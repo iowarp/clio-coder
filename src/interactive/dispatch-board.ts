@@ -28,7 +28,7 @@ import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { DOCK_BODY_ROWS_MAX } from "./dock.js";
 import { createFleetPlanRuns, type FleetPlanRuns, type FleetPlanRunView } from "./fleet-plan-runs.js";
-import { centeredWindow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
+import { centeredWindow, type GrowableBody, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { liveWorkerAnswerText, presentWorkerContractAnswer } from "./renderers/worker-answer.js";
@@ -1587,8 +1587,14 @@ function rowSignature(row: DispatchBoardRow): string {
  * then the selected run's facts under a rule that names it. The key router
  * gives the board only ↑↓, Enter, s and x, so nothing here scrolls by key: the
  * table follows the cursor and the detail is cut at the budget with a marker
- * that names where the rest is read. Enter trades table rows for detail rows
- * and adds the worker's answer and budget.
+ * that names where the rest is read.
+ *
+ * Enter asks for the selected run's whole story, so an open detail takes the
+ * rows it needs before the table does. The table shrinks to the selected row
+ * and the rows around it that still fit, and its position row says how many
+ * runs the detail is hiding. `budgetKnown` is false before the frame has
+ * granted rows; an open detail then renders whole and the frame's cut marks
+ * what is missing.
  */
 function formatDispatchBoardBody(
 	rows: ReadonlyArray<DispatchBoardRow>,
@@ -1597,6 +1603,7 @@ function formatDispatchBoardBody(
 	telemetry: TelemetrySnapshot | undefined,
 	selectedRunId: string | null,
 	detailExpanded: boolean,
+	budgetKnown: boolean,
 	detailKey = "Enter",
 ): string[] {
 	const theme = clioTheme();
@@ -1621,51 +1628,69 @@ function formatDispatchBoardBody(
 		),
 	);
 	const table = runTableRows(items, width, { selectedRunId });
-	const tableBudget = Math.min(
-		table.length,
-		Math.max(detailExpanded ? 2 : 3, Math.floor(budget / (detailExpanded ? 4 : 2))),
-	);
+	const item = items[selectedIndex];
+	const detail =
+		item === undefined
+			? null
+			: item.kind === "council"
+				? {
+						title: `council ${item.group.group}`,
+						meta: `r${item.group.round} · ${item.group.elapsed}`,
+						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
+						body: councilGroupBody(theme, item.group, width),
+					}
+				: {
+						title: runRuleTitle(item.row),
+						meta: item.row.telemetry?.activity.elapsed.display ?? formatCompactMs(item.row.elapsedMs),
+						runId: item.row.runId,
+						body: dispatchCardBody(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
+							expanded: detailExpanded,
+							detailKey,
+							...(item.row.endpoint !== undefined
+								? {
+										endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
+										endpointQueued: endpointQueued[item.row.endpoint.key] ?? 0,
+									}
+								: {}),
+						}),
+					};
+	// An open detail leaves the table what its body and rule do not need, and
+	// never less than the selected row. A table that cannot show every run
+	// spends one more row on the position row that counts the rest.
+	const detailRows = detail === null ? 0 : detail.body.length + 1;
+	const tableBudget = detailExpanded
+		? table.length + detailRows <= budget
+			? table.length
+			: Math.max(1, Math.min(table.length - 1, budget - detailRows - 1))
+		: Math.min(table.length, Math.max(3, Math.floor(budget / 2)));
 	const [start] = centeredWindow(table.length, selectedIndex, tableBudget);
 	const { window, position } = windowRows(table, start, tableBudget);
 	const lines = [...window];
-	if (position) lines.push(positionRow(theme, { ...position, unit: "runs", keys: ["↑↓ select"] }, width));
-	const item = items[selectedIndex];
-	if (item === undefined) return lines;
-	const detail =
-		item.kind === "council"
-			? {
-					title: `council ${item.group.group}`,
-					meta: `r${item.group.round} · ${item.group.elapsed}`,
-					runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
-					body: councilGroupBody(theme, item.group, width),
-				}
-			: {
-					title: runRuleTitle(item.row),
-					meta: item.row.telemetry?.activity.elapsed.display ?? formatCompactMs(item.row.elapsedMs),
-					runId: item.row.runId,
-					body: dispatchCardBody(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
-						expanded: detailExpanded,
-						detailKey,
-						...(item.row.endpoint !== undefined
-							? {
-									endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
-									endpointQueued: endpointQueued[item.row.endpoint.key] ?? 0,
-								}
-							: {}),
-					}),
-				};
+	if (position && detailExpanded) {
+		const shown = position.end - position.start + 1;
+		const range = shown === 1 ? `run ${position.start}` : `runs ${position.start}–${position.end}`;
+		const words = [
+			`${range} of ${position.total}`,
+			`${position.total - shown} hidden while the detail is open`,
+			"↑↓ select",
+		];
+		lines.push(theme.fg("annotation", truncateToWidth(words.join(" · "), width, GLYPH.ellipsis, false)));
+	} else if (position) lines.push(positionRow(theme, { ...position, unit: "runs", keys: ["↑↓ select"] }, width));
+	if (detail === null) return lines;
 	lines.push(sectionRule(theme, width, detail.title, { meta: detail.meta }));
 	const room = budget - lines.length;
-	// Enter asked for everything the run has to say; the frame cuts what the
-	// dock cannot hold. The folded view keeps its budget and names the key.
-	if (detailExpanded || detail.body.length <= room) {
+	if ((detailExpanded && !budgetKnown) || detail.body.length <= room) {
 		lines.push(...detail.body);
 		return lines;
 	}
 	if (room <= 0) return lines;
 	const kept = detail.body.slice(0, Math.max(0, room - 1));
 	const hidden = detail.body.length - kept.length;
-	const where = [`${hidden} more rows`, `${detailKey} for detail`, `/view dispatch:${detail.runId}`];
+	const where = [
+		`${hidden} more rows`,
+		...(detailExpanded ? [] : [`${detailKey} for detail`]),
+		`/view dispatch:${detail.runId}`,
+	];
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
@@ -1684,7 +1709,7 @@ function formatDispatchBoardBody(
  * selected run id, kept stable across lifecycle-driven reorders, and whether
  * its detail is expanded.
  */
-export interface DispatchBoardView extends Component, RowBudgetedBody {
+export interface DispatchBoardView extends Component, RowBudgetedBody, GrowableBody {
 	selectedRow(): DispatchBoardRow | null;
 	selectPrevious(): void;
 	selectNext(): void;
@@ -1760,7 +1785,15 @@ export function createDispatchBoardView(
 					.join(",") ?? "";
 			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
-			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded);
+			const lines = formatDispatchBoardBody(
+				currentRows,
+				safeWidth,
+				budget,
+				snapshot,
+				selectedRunId,
+				expanded,
+				bodyRows > 0,
+			);
 			memo = { key, lines };
 			return lines;
 		},
@@ -1785,6 +1818,9 @@ export function createDispatchBoardView(
 			expanded = !expanded;
 		},
 		detailExpanded(): boolean {
+			return expanded;
+		},
+		wantsGrowth(): boolean {
 			return expanded;
 		},
 		canWatch(): boolean {

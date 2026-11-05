@@ -831,7 +831,8 @@ export class ClioEditor extends Editor {
 		const gutter = ClioEditor.DOCK_GUTTER;
 		const contentWidth = Math.max(1, width - gutter * 2);
 		const adaptive = entry.adaptive === true;
-		const bodyRows = adaptive ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
+		const grows = adaptive || entry.frame.dockWantsGrowth?.() === true;
+		const bodyRows = grows ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
 		// The body learns the rail's room first, so a list can draw in its own
 		// rows every key the rail below will have to drop. The rail is the keys'
 		// alone: thinking and context describe the composer, which is not open (F07).
@@ -843,7 +844,8 @@ export class ClioEditor extends Editor {
 		let used = body.length;
 		while (used > 1 && stripTerminalSequences(body[used - 1] ?? "").trim() === "") used -= 1;
 		entry.rowsUsed = Math.max(entry.rowsUsed ?? 0, used);
-		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : entry.rowsUsed);
+		// A body that stops asking to grow returns to the shared height, so the slice is also capped at what it was given.
+		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : Math.min(entry.rowsUsed, bodyRows));
 		const pad = " ".repeat(gutter);
 		const plainTitle = entry.frame.dockTitle();
 		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", plainTitle, { bold: true });

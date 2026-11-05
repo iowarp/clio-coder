@@ -677,6 +677,19 @@ function isRailAware(child: Component): child is Component & RailAwareBody {
 	return typeof (child as Partial<RailAwareBody>).setRailRoom === "function";
 }
 
+/**
+ * A body that can ask the dock for more than the shared height while the
+ * operator has asked it for more, such as an opened run detail. The dock then
+ * grants up to `dockGrowthRows` and returns to its shared height when it stops asking.
+ */
+export interface GrowableBody {
+	wantsGrowth(): boolean;
+}
+
+function isGrowable(child: Component): child is Component & GrowableBody {
+	return typeof (child as Partial<GrowableBody>).wantsGrowth === "function";
+}
+
 export class ClioOverlayFrame implements Component {
 	/**
 	 * Rows the box may occupy, or zero while unknown.
@@ -863,6 +876,10 @@ export class ClioOverlayFrame implements Component {
 
 	dockAwaitingInput(): boolean {
 		return typeof this.awaitingInput === "function" ? this.awaitingInput() : this.awaitingInput === true;
+	}
+
+	dockWantsGrowth(): boolean {
+		return isGrowable(this.child) && this.child.wantsGrowth();
 	}
 
 	get keyboardScope() {
