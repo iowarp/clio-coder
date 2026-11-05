@@ -364,11 +364,11 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					);
 				}
 			}
-			emitCommandNotice(
-				deps.getSlashNotice(),
+			// A sentence of its own rather than a [/fork] tag: what happened, where the
+			// original went, and what did not change on disk.
+			deps.getSlashNotice()(
 				"info",
-				command,
-				"Conversation forked. Workspace files were not rewound; existing edits remain.",
+				`Conversation forked into a new session${name ? ` named ${name}` : ""}; the original is unchanged and /resume opens it. Workspace files were not rewound; existing edits remain.`,
 			);
 		} catch (error) {
 			emitCommandNotice(
