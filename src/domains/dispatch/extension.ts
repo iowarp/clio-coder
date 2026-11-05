@@ -11030,7 +11030,10 @@ export function createDispatchBundle(
 		workerPermissionWindow: (requestId) => workerApprovalWindows.read(requestId),
 		workerRunEndsWithTurn: (runId) => {
 			const run = currentAssignmentRun(runId);
-			return run != null && run.requestOrigin === "agent" && run.detached !== true;
+			if (run === null || run.requestOrigin !== "agent" || run.detached === true) return false;
+			// A dispatch moved to the background belongs to its batch, beyond the turn that started it.
+			const assignmentId = run.lineage.rootRunId;
+			return !listDetachedBatches().some((batch) => batch.runs.some((entry) => entry.assignmentId === assignmentId));
 		},
 		holdWorkerPermission: (requestId) => workerApprovalWindows.hold(requestId),
 		restartWorkerPermission: (requestId) => workerApprovalWindows.restart(requestId),

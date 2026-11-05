@@ -327,7 +327,7 @@ function permissionChoices(
 		// An approval is never remembered, only a denial (`deniedEscalations` in the
 		// worker runtime, F8). The stop key does not reach the worker's process
 		// unless the turn it ends is the one waiting on this worker.
-		const endsWithTurn = view.origin.kind === "worker" && view.origin.endsWithTurn === true;
+		const endsWithTurn = mainTurn !== false && view.origin.kind === "worker" && view.origin.endsWithTurn === true;
 		return [
 			{
 				key: "Enter",
