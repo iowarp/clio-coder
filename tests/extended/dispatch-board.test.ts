@@ -776,7 +776,7 @@ describe("dispatch quality presentation", () => {
 				ok(worker);
 				for (const style of ["compact", "standard", "detailed"] as const) {
 					const lines = renderWorkerEntryLines(worker, 76, { detail: transcriptDetail(style) });
-					ok(plain(lines).includes(`quality ${quality === "fail" ? "recorded validation failed" : wording}`), plain(lines));
+					ok(plain(lines).includes(quality === "fail" ? "validation failed" : `quality ${wording}`), plain(lines));
 					match(plain(lines), /execution ok/u);
 					ok(lines.every((line) => visibleWidth(line) <= 76));
 				}

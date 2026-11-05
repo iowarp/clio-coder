@@ -17,6 +17,7 @@ import {
 
 import { plainOutcomeLabel, workerFailureHeadline } from "../../domains/dispatch/failure-headline.js";
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
+import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -681,6 +682,15 @@ function helperRow(
 	].map((row) => redactedRow(row, width));
 }
 
+/** A failure the run's own record holds reads as a failure on the card; where the verdict came from stays with the detail view. */
+function qualityRow(trust: Pick<CanonicalTrustStatus, "validationGrounding"> | undefined, inspect: boolean): string {
+	if (!trust) return "quality validation unknown";
+	const entry = trust.validationGrounding;
+	if (!inspect && entry.state === "failed" && entry.authority.id === "result-quality")
+		return trustStateWord("validationGrounding", entry.state);
+	return `quality ${validationClause(trust)}`;
+}
+
 export function renderWorkerEntryLines(
 	entry: WorkerEntryState,
 	width: number,
@@ -729,13 +739,7 @@ export function renderWorkerEntryLines(
 					"warning",
 					safeWidth,
 				);
-	const quality = isPending(entry)
-		? []
-		: railLines(
-				`quality ${entry.result?.trust ? validationClause(entry.result.trust) : "validation unknown"}`,
-				"body",
-				safeWidth,
-			);
+	const quality = isPending(entry) ? [] : railLines(qualityRow(entry.result?.trust, inspect), "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
 	// its rows whatever the transcript preset hides of an ordinary answer, and
