@@ -57,7 +57,7 @@ function foregroundWorker(facts: LiveWorkFacts): DispatchBoardRow | undefined {
 }
 
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
-export function workerSummary(facts: LiveWorkFacts): string | null {
+function workerSummary(facts: LiveWorkFacts): string | null {
 	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
 	const name = sanitizeCallTargetText(first.agentId);
