@@ -601,7 +601,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		workers: dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row)),
 		background: backgroundCalls.active(),
 		workerActivity: (row) =>
-			row.progress ? workerActivityWords(row.progress) : dispatchStatusPresentation(row.status).label,
+			// A queued run's progress reads `starting`, which it is not until it has a slot.
+			row.status === "enqueued"
+				? "waiting for a slot"
+				: row.progress
+					? workerActivityWords(row.progress)
+					: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});
 	const editorChrome: EditorChrome = {

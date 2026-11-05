@@ -50,10 +50,20 @@ function workerElapsed(row: DispatchBoardRow): string | null {
 	return elapsed && elapsed !== "not available" ? elapsed.replace(/\.\d+(?=s$)/u, "") : null;
 }
 
-/** The main agent's own dispatch outranks a run the operator started beside it. */
+/**
+ * The worker that says the most about what is holding work up: one waiting on
+ * the operator, then the main agent's own dispatch over a run the operator
+ * started beside it, then a started run over a queued one.
+ */
 function foregroundWorker(facts: LiveWorkFacts): DispatchBoardRow | undefined {
+	const asking = facts.workers.find((row) => row.progress?.awaitingApproval === true);
+	if (asking !== undefined) return asking;
 	const blocked = facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch;
-	return (blocked ? facts.workers.find((row) => row.requestOrigin === "agent") : undefined) ?? facts.workers[0];
+	return (
+		(blocked ? facts.workers.find((row) => row.requestOrigin === "agent") : undefined) ??
+		facts.workers.find((row) => row.status !== "enqueued") ??
+		facts.workers[0]
+	);
 }
 
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
@@ -63,8 +73,13 @@ function workerSummary(facts: LiveWorkFacts): string | null {
 	const name = sanitizeCallTargetText(first.agentId);
 	const doing = sanitizeCallTargetText(facts.workerActivity(first));
 	const elapsed = workerElapsed(first);
-	const others = facts.workers.length - 1;
-	return [`${name} ${doing}`, elapsed, others > 0 ? `+${others} more` : null].filter(Boolean).join(" · ");
+	// A queued run is held up and a running one is not, so `+1 more` must not stand for both.
+	const rest = facts.workers.filter((row) => row !== first);
+	const queued = rest.filter((row) => row.status === "enqueued").length;
+	const others = rest.length - queued;
+	return [`${name} ${doing}`, elapsed, others > 0 ? `+${others} more` : null, queued > 0 ? `+${queued} queued` : null]
+		.filter(Boolean)
+		.join(" · ");
 }
 
 /** `memory review on Qwopus3.8 · 3s`, shedding the route first when the room is short. */
