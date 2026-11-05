@@ -164,8 +164,13 @@ function originGlyph(entry: WorkerEntryState): string {
  */
 function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 	const { kind, targetId, wireModelId } = entry.runtime;
+	// A model id that already starts with its target's name (`mock` serving `mock/judge-model`) is not repeated.
 	const route =
-		targetId !== undefined && wireModelId !== undefined ? `${targetId}/${wireModelId}` : (targetId ?? wireModelId);
+		targetId !== undefined && wireModelId !== undefined
+			? wireModelId.startsWith(`${targetId}/`)
+				? wireModelId
+				: `${targetId}/${wireModelId}`
+			: (targetId ?? wireModelId);
 	// A council member reads by its roster label in its roster color, the name
 	// the operator configured, rather than by its agent id.
 	const who =
@@ -209,7 +214,7 @@ function settledAgainst(result: WorkerRunResultSummary): string | null {
 	if (trust?.artifactIntegrity.state === "failed") return "seal broken";
 	if (trust?.validationGrounding.state === "failed") return "validation failed";
 	if (trust?.validationGrounding.state === "ungrounded") return "no check ran";
-	return result.contract === "fail" ? "result contract failed" : null;
+	return result.contract === "fail" ? "answer in the wrong format" : null;
 }
 
 function refusedCallsText(count: number): string {
@@ -414,6 +419,31 @@ function failureLines(entry: WorkerEntryState, width: number, inspect = false): 
 }
 
 /**
+ * Who stopped a cancelled run, and what became of its worktree, which nothing else on the card says: a cancel
+ * removes a worktree with no work in it and keeps one holding changes, on its branch.
+ */
+function cancelLines(entry: WorkerEntryState, width: number): string[] {
+	if (entry.result?.outcome !== "canceled") return [];
+	// The process's own signal note says how it was stopped, not who stopped it, so the card says only that it was.
+	const headline = workerFailureHeadline(entry.result.failureMessage);
+	const why = headline === null || /\bSIG[A-Z]+\b/u.test(headline) ? "cancelled" : headline;
+	const task = entry.result.taskWorktree;
+	const placement = entry.result.placement;
+	const worktree =
+		task !== undefined
+			? task.kept
+				? task.changedPaths > 0
+					? `${task.changedPaths} changed ${task.changedPaths === 1 ? "file stays" : "files stay"} in its worktree on branch ${task.branch}`
+					: `its worktree stays on branch ${task.branch}`
+				: "its worktree held no changes and was removed"
+			: placement?.mode === "worktree"
+				? `its worktree stays on branch ${placement.branch}`
+				: null;
+	const text = `${GLYPH.cancelled} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${worktree === null ? "" : `${SEPARATOR}${worktree}`}`;
+	return railLines(sanitizeCallTargetText(text), "toolMetadata", width);
+}
+
+/**
  * Folded row: everything the operator needs to decide whether to open it, on
  * one line, shaped like a tool subline. Identity outranks elapsed: when the row
  * is too narrow for both, the elapsed unit goes first, and the identity is then
@@ -463,7 +493,8 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const metrics: string[] = [];
 	const exitCode = entry.result?.exitCode;
-	if (exitCode !== undefined && exitCode !== 0 && (inspect || entry.result?.outcome !== "canceled")) {
+	// The exit status is how the process ended, not what went wrong; the failure row says that, and /view keeps the code.
+	if (inspect && exitCode !== undefined && exitCode !== 0) {
 		metrics.push(`exit ${exitCode}`);
 	}
 	const tokens = entry.telemetry?.row.tokens.display;
@@ -532,6 +563,22 @@ function workerName(entry: WorkerEntryState): string {
 	return displayText(entry, "name", entry.council?.label ?? entry.agentId);
 }
 
+/** The widest header outcome word, so sibling cards line up. */
+const HEADER_WORD_WIDTH = "needs input".length;
+const HEADER_WORD_MIN_WIDTH = 60;
+
+/** The aligned header's outcome in one word: the run's state, never the reason, which the rows under it give. */
+function headerWord(entry: WorkerEntryState): string {
+	if (isPending(entry) || entry.result === undefined) return "";
+	if (workerNeedsInput(entry)) return "needs input";
+	const outcome = entry.result.outcome;
+	if (outcome === "canceled") return "cancelled";
+	if (outcome === "stalled") return "stalled";
+	if (outcome === "timed_out") return "timed out";
+	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
+	return entry.result.toolCalls === 0 ? "no tools" : "done";
+}
+
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
 function alignedHeader(
 	entry: WorkerEntryState,
@@ -542,7 +589,7 @@ function alignedHeader(
 	const elapsed = entry.telemetry?.activity.elapsed.display ?? "—";
 	const timer = meta(elapsed.padStart(TIMER_WIDTH));
 	const pending = isPending(entry);
-	const status = pending
+	const mark = pending
 		? pendingUnit()
 		: workerNeedsInput(entry)
 			? theme.fg("warning", GLYPH.phaseBlocked)
@@ -556,6 +603,11 @@ function alignedHeader(
 								entry.result.toolCalls === 0 ? "toolMetadata" : "success",
 								entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
 							);
+	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
+	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
+	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
+	const word = width >= HEADER_WORD_MIN_WIDTH && !pending ? headerWord(entry) : null;
+	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(HEADER_WORD_WIDTH)}`)}`;
 	const name = workerName(entry);
 	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
 	const prefix = cardPrefix(entry);
@@ -776,7 +828,16 @@ function helperRow(
  * detail view. A failed validation also names its validator and evidence, because a headline that says failed above
  * checks that read as passed is otherwise a contradiction the operator cannot resolve without opening the run.
  */
-function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, inspect: boolean): string {
+function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, inspect: boolean): string | null {
+	// A cancelled run checked nothing by design, so a validation verdict under it says nothing the cancel did not.
+	if (!inspect && result?.outcome === "canceled") return null;
+	// The failure row already says the answer was unusable; naming the report shape it missed is the record's detail.
+	if (
+		!inspect &&
+		result?.outcome !== "succeeded" &&
+		/^the answer did not match the /u.test(result?.validationFailure ?? "")
+	)
+		return `/view dispatch:${runId} shows what it wrote`;
 	const trust = result?.trust;
 	if (!trust) return "quality validation unknown";
 	const entry = trust.validationGrounding;
@@ -842,7 +903,8 @@ export function renderWorkerEntryLines(
 					"warning",
 					safeWidth,
 				);
-	const quality = isPending(entry) ? [] : railLines(qualityRow(entry.result, entry.runId, inspect), "body", safeWidth);
+	const qualityText = isPending(entry) ? null : qualityRow(entry.result, entry.runId, inspect);
+	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
 	// its rows whatever the transcript preset hides of an ordinary answer, and
@@ -915,6 +977,7 @@ export function renderWorkerEntryLines(
 			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, meta(RAIL), RAIL_WIDTH)
 			: []),
 		...failure,
+		...(inspect ? [] : cancelLines(entry, safeWidth)),
 		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", safeWidth) : []),
 		...(presented ? railLines(presented, "body", safeWidth) : []),
 		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", safeWidth) : []),
