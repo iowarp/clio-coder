@@ -64,6 +64,7 @@ function stderrHeadline(stderr: string): string {
  */
 const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) => string]> = [
 	[/^operator abort\b/iu, () => "cancelled at your request"],
+	[/^no worker activity within the stall window/iu, () => STALLED_RUN_HEADLINE],
 	// The worker's final reply held only tool calls after its tools were taken away, so there is no answer to show.
 	[
 		/result contract failed after \d+ bounded repair rounds?: .*(?:tool-call lockout|tool-call markup)/iu,

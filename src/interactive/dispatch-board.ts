@@ -57,10 +57,10 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
+import { USAGE_NOT_MEASURED, usageLineCoverage } from "./usage-words.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
-	unknownCallsClause,
 	workerActionParts,
 	workerActivityWords,
 	workerPhaseActivity,
@@ -394,7 +394,8 @@ export function dispatchStatusPresentation(
 		case "failed":
 			return { glyph: GLYPH.error, label: compact ? "fail" : "failed", token: "error" };
 		case "dead":
-			return { glyph: GLYPH.error, label: "dead", token: "error" };
+			// The watchdog stopped a worker whose heartbeat went silent: the inline card's words, not the ledger's.
+			return { glyph: GLYPH.error, label: "stalled", token: "error" };
 		case "aborted":
 			return { glyph: GLYPH.cancelled, label: "cancelled", token: "annotation" };
 		case "stale":
@@ -858,7 +859,13 @@ function dispatchCardBody(
 	const figure = (display: string): string => compactQuantity(display) ?? USAGE_NOT_MEASURED;
 	const tokenDisplays = [usage.prompt, usage.output, usage.total];
 	const nothingMeasured = tokenDisplays.every((display) => compactQuantity(display) === null);
-	const coverage = unknownCallsClause(tokenDisplays);
+	const coverage =
+		row.usage.kind === "unavailable" || row.usage.kind === "pending"
+			? null
+			: usageLineCoverage([
+					{ label: "in", quantity: row.usage.prompt },
+					{ label: "out", quantity: row.usage.output },
+				]);
 	const tokenUnits = nothingMeasured
 		? [theme.fg("body", row.status === "running" || row.status === "enqueued" ? "not measured yet" : USAGE_NOT_MEASURED)]
 		: [
@@ -1387,7 +1394,8 @@ function tableFigure(display: string): string {
 }
 
 const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
-export const USAGE_NOT_MEASURED = "not measured";
+
+export { USAGE_NOT_MEASURED } from "./usage-words.js";
 export const USAGE_NO_CALLS = "no calls yet";
 
 function firstLine(text: string): string {

@@ -132,19 +132,6 @@ export function compactQuantity(display: string): string | null {
 }
 
 /**
- * The one coverage clause a line of read-model quantities carries, in place of a `(N calls unknown)` after every
- * figure: the most calls any of them could not count. Null when every figure is wholly measured.
- */
-export function unknownCallsClause(displays: ReadonlyArray<string>): string | null {
-	let most = 0;
-	for (const display of displays) {
-		const count = /\((\d+) calls? unknown\)/u.exec(display)?.[1];
-		if (count !== undefined) most = Math.max(most, Number(count));
-	}
-	return most === 0 ? null : `${most} ${most === 1 ? "call" : "calls"} had no usage data`;
-}
-
-/**
  * The descriptor vocabulary's progressive verbs in the past tense. A verb that
  * names a tool rather than an act (`context`, `tasks`) reads the same either way.
  * A check that ran is `checked`, because `verified` would read as a pass on a
