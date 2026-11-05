@@ -165,14 +165,16 @@ export function callSettlementFromMessage(
 	};
 	const observed = Object.values(counts).some((fact) => fact.kind === "measured");
 	const failureCode = cause ?? failureCause(failure);
-	const usd = amount(record(usage.cost).total);
+	const cost = record(usage.cost);
+	const usd = amount(cost.total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
 	else if (pricedBy === "free") pricing = pricedUsd("free", 0);
 	else if (usd !== null && observed) {
 		// Declared target rates price measured tokens as measured, ranked only below a provider's own cost. The Pi
-		// catalog rate is a guess at someone else's price list and stays estimated (#434).
-		if (external.cost === "provider-reported") pricing = pricedUsd("provider", usd);
+		// catalog rate is a guess at someone else's price list and stays estimated (#434). Pi marks a total the provider
+		// billed with totalFromProvider, which OpenRouter reports for every call, on an unpriced target too.
+		if (external.cost === "provider-reported" || cost.totalFromProvider === true) pricing = pricedUsd("provider", usd);
 		else if (pricedBy !== "none") pricing = pricedUsd(pricedBy, usd);
 	}
 	// The estimate an interrupted call gets when the provider reported nothing; the journal keeps it beside the

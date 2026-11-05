@@ -132,7 +132,7 @@ export function compactionBudget(
 	const id = model?.id?.split("/").at(-1) ?? "";
 	if (boundaries.length === 0) {
 		if (/^claude-haiku-5-5(?:$|-)/.test(id)) boundaries.push(100_000);
-		else if (/^gpt-6(?:\.\d+)?-(?:astra|sol|luna)(?:$|-)/.test(id)) boundaries.push(272_000);
+		else if (/^gpt-6(?:\.\d+)?-(?:astra|sol|terra|luna)(?:$|-)/.test(id)) boundaries.push(272_000);
 	}
 	// A 2% estimation margin stays below the price boundary; it is not a fit guarantee.
 	const tierCeiling = boundaries.length > 0 ? Math.floor(Math.min(...boundaries) * 0.98) : Infinity;
