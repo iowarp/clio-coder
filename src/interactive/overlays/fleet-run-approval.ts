@@ -178,12 +178,14 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 		];
 	}
 	const { preview } = subject;
+	// The count is of the steps the waves below list, so the header and the rows under it agree.
+	const steps = preview.waves.reduce((total, wave) => total + wave.steps.length, 0);
 	const rows = [
 		...chipRows(
 			theme,
 			[
 				theme.style("heading", preview.name, { bold: true }),
-				theme.fg("annotation", `${preview.plan.steps.length} ${preview.plan.steps.length === 1 ? "step" : "steps"}`),
+				theme.fg("annotation", `${steps} ${steps === 1 ? "step" : "steps"}`),
 			],
 			width,
 		),
