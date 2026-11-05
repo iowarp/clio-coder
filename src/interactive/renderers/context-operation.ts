@@ -11,6 +11,7 @@ import {
 	tokenRow,
 } from "../context-operation-view.js";
 import { clioTheme, formatCompactMs, frame, GLYPH } from "../theme/index.js";
+import { presentProviderError } from "./provider-error.js";
 
 /**
  * The transcript card for a settled context operation. Live results and
@@ -31,7 +32,7 @@ export function renderContextOperationResult(operation: ContextOperation, width:
 	const body: string[] = [];
 	const { cause, warnings } = splitWarnings(operation);
 	if (cause) {
-		for (const line of wrapTextWithAnsi(cause, room)) body.push(theme.fg(tone, line));
+		for (const line of wrapTextWithAnsi(failureWords(cause, operation.outcome), room)) body.push(theme.fg(tone, line));
 	}
 	for (const fact of operation.facts ?? []) {
 		const row = factRow(fact, operation.outcome);
@@ -54,4 +55,16 @@ export function renderContextOperationResult(operation: ContextOperation, width:
 	return frame(theme, title, body, width, {
 		...(operation.elapsedMs !== undefined ? { rightMeta: formatCompactMs(operation.elapsedMs) } : {}),
 	});
+}
+
+const FAILURE_PREFIXES = /^(?:(?:auto-)?compaction failed: )?(?:compaction stream failed: )?/u;
+
+/**
+ * A failed compaction's cause in the words a provider failure gets everywhere else. The raw cause stacked two prefixes
+ * on a JSON body (`compaction failed: compaction stream failed: 401: {"message":…}`).
+ */
+function failureWords(cause: string, outcome: string | undefined): string {
+	if (outcome !== "failed") return cause;
+	const raw = cause.replace(FAILURE_PREFIXES, "");
+	return `The summary request failed: ${presentProviderError(raw)}`;
 }
