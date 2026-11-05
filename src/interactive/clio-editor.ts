@@ -386,7 +386,9 @@ export class ClioEditor extends Editor {
 		// Enter queues during a run, and the STEER or FOLLOW-UP beside this note already says so.
 		if (this.restoredDraft) {
 			if (width < 80) return "RESTORED";
-			return this.chrome.isStreaming?.() === true ? "RESTORED · / keeps it aside" : "RESTORED · Enter sends · / keeps it aside";
+			return this.chrome.isStreaming?.() === true
+				? "RESTORED · / keeps it aside"
+				: "RESTORED · Enter sends · / keeps it aside";
 		}
 		return "";
 	}
