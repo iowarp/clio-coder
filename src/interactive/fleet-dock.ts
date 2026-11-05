@@ -24,7 +24,7 @@ export interface FleetDockDeps {
  * operator next. It replaced a top-right overlay that painted over transcript
  * words, so it takes a row of its own above the composer instead.
  */
-export function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | null {
+function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | null {
 	const counts = taskBoardCounts(board);
 	if (counts.open === 0 || width < 1) return null;
 	const theme = clioTheme();
