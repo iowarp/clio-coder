@@ -564,8 +564,8 @@ test("a middleware reminder reads the same live and on replay, and a skill activ
 			},
 		},
 	] as SessionEntry[]);
-	assert.match(rows(live)[0] ?? "", /^ {2}┌─ i Reminder ─+┐$/u);
-	assert.equal(rows(live)[1], "  │ This turn used 9+ read-only exploration calls without  │");
+	// Text written to the model keeps one row in the operator's transcript; /view holds the rest.
+	assert.deepEqual(rows(live), ["i Reminder to the model · This turn used 9+ read-on… · /view"]);
 	assert.deepEqual(rows(replayed), rows(live));
 	assert.doesNotMatch(rows(replayed).join("\n"), /\[skill\]/u);
 });

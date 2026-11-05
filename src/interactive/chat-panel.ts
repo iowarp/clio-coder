@@ -3062,7 +3062,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const source = event.source;
 				appendRow({
 					role: "replayBlock",
-					renderBlock: (width) => renderNoticeRow(text, mark, width, source),
+					renderBlock: (width, _detail, unbounded) => renderNoticeRow(text, mark, width, source, unbounded === true),
 					at: stamp(),
 				});
 				markDirty();

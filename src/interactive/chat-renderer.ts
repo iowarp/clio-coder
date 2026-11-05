@@ -668,7 +668,7 @@ function renderCustomEntry(
 	// "finishContractAdvisory" is the pre-middleware name for the same entry
 	// shape; older session ledgers still carry it.
 	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") {
-		return renderReminderMessageEntry(entry, width);
+		return renderReminderMessageEntry(entry, width, unbounded);
 	}
 	if (entry.display !== true) return [];
 	const body = stringifyPreview(entry.data);
@@ -682,7 +682,7 @@ function operatorCommandText(data: unknown): string | null {
 	return typeof text === "string" && text.trim().length > 0 ? text : null;
 }
 
-function renderReminderMessageEntry(entry: CustomEntry, width: number): string[] {
+function renderReminderMessageEntry(entry: CustomEntry, width: number, full: boolean): string[] {
 	const data = payloadObject(entry.data);
 	const message = typeof data?.message === "string" && data.message.length > 0 ? data.message : "middleware reminder";
 	// A reminder is an advisory. Entries written before the source was stored
@@ -692,7 +692,7 @@ function renderReminderMessageEntry(entry: CustomEntry, width: number): string[]
 		: message.startsWith("Memory:")
 			? "memory"
 			: "reminder";
-	return renderNoticeRow(message, reminderMark(data?.severity), width, source);
+	return renderNoticeRow(message, reminderMark(data?.severity), width, source, full);
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
