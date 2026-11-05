@@ -742,14 +742,24 @@ export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator)
  * when no layer did. A parent path's origin applies when the exact leaf was not
  * individually tracked.
  */
+function hasRecordedChild(sources: Record<string, SettingsOrigin>, parent: string): boolean {
+	return Object.keys(sources).some((key) => key.startsWith(`${parent}.`) || key.startsWith(`${parent}[`));
+}
+
 export function settingsSourceFor(sources: Record<string, SettingsOrigin>, keyPath: string): SettingsOrigin {
 	const path = sources[keyPath]
 		? keyPath
 		: (Object.keys(sources).find((path) => settingPathSegments(path).join(".") === keyPath) ?? keyPath);
 	const segments = settingPathSegments(path);
+	const exact = sources[settingPath(segments)];
+	if (exact) return exact;
+	segments.pop();
 	while (segments.length > 0) {
-		const direct = sources[settingPath(segments)];
-		if (direct) return direct;
+		const parent = settingPath(segments);
+		const direct = sources[parent];
+		// Arrays and scalars replace wholesale, so such a parent set everything under it. An object merges key by key:
+		// `interface:` in a file says nothing about a key it does not list, which stays at its default (F10).
+		if (direct && !hasRecordedChild(sources, parent)) return direct;
 		segments.pop();
 	}
 	return "built-in";

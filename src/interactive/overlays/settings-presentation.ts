@@ -184,9 +184,11 @@ export function effectTiming(item: SettingsCenterItem): string | null {
 	return "now";
 }
 
-/** The short form beside a value: which layer set it. Built-in defaults say nothing; the row's default mark already does. */
+/** The short form beside a value: which layer set it, or `default` when none did. */
 function originChip(origin: SettingValueOrigin | null | undefined): string | null {
 	switch (origin) {
+		case "built-in":
+			return "default";
 		case "session":
 			return "session";
 		case "project":
@@ -215,7 +217,7 @@ function originPhrase(origin: SettingValueOrigin | null | undefined): string | n
 		case "cli":
 			return "a command-line flag";
 		case "built-in":
-			return "built-in default";
+			return "default · not set in any file";
 		default:
 			return null;
 	}
@@ -511,8 +513,11 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 		facts.push(chip(theme, isModified(item) ? `default was ${shown}` : `default ${shown}`, "muted"));
 	}
 	const origin = originFact(context.origin);
-	if (!item.readOnly && origin !== null && (context.origin !== "built-in" || isModified(item)))
-		facts.push(chip(theme, origin, context.origin === "session" ? "accent" : "muted"));
+	if (!item.readOnly && origin !== null) {
+		// Beside `default Off` the file fact alone says the rest.
+		const unset = context.origin === "built-in" && item.defaultValue !== undefined && !isModified(item);
+		facts.push(chip(theme, unset ? "not set in any file" : origin, context.origin === "session" ? "accent" : "muted"));
+	}
 	const meaning = item.valueHelp?.[item.currentValue];
 	if (!item.readOnly && meaning) facts.push(chip(theme, meaning, "neutral"));
 	if (context.homeLabel !== undefined) facts.push(chip(theme, `in ${context.homeLabel}`, "muted"));
