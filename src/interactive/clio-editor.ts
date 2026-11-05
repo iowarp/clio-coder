@@ -147,6 +147,8 @@ export interface EditorChrome {
 	getTurnPreparation?: () => TurnPreparationPhase;
 	/** How long the prompt has been held and the step taking the time, once either is worth a word. */
 	getPreparationDetail?: () => string | null;
+	/** A running compaction's stage, clock and way out, fitted to the room given; null when nothing reports. */
+	getCompactionLabel?: (room: number) => string | null;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
 	/** The draft is a command or a shell line, which Enter never queues for the run. */
@@ -605,12 +607,23 @@ export class ClioEditor extends Editor {
 			lead = theme.fg("attentionRail", GLYPH.phaseBlocked);
 			activity = theme.style("decisionCue", "needs approval", { bold: true });
 			stateAlone = activity;
-		} else if (mode === "PREPARING" || mode === "COMPACTING") {
+		} else if (mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
-			const preparing = mode === "PREPARING" ? (this.chrome.getPreparationDetail?.() ?? null) : null;
+			// The stage, its clock and Esc are the claim here, so they get the room before the name does (J2-F04).
+			const room = this.railLabelRoom(width) - reserved - 2;
+			const named = this.chrome.getCompactionLabel?.(room - Math.max(4, Math.min(24, Math.floor(width / 3))) - 1) ?? null;
+			const alone = this.chrome.getCompactionLabel?.(room) ?? null;
+			// The name is the first thing to go: a rail that cannot hold it beside the clock and Esc drops it, not them.
+			const facts = (label: string | null): number => (label ?? "").split(" · ").length;
+			const keepsName = named !== null && facts(named) >= facts(alone);
+			activity = theme.fg("harnessAction", (keepsName ? named : alone) ?? "is compacting context");
+			stateAlone = theme.fg("harnessAction", (alone ?? "compacting context").replace(/^is /u, ""));
+		} else if (mode === "PREPARING") {
+			lead = theme.fg("harnessAction", spinner);
+			const preparing = this.chrome.getPreparationDetail?.() ?? null;
 			const beside = preparing === null ? "" : ` · ${preparing}`;
-			activity = theme.fg("harnessAction", mode === "PREPARING" ? `is preparing${beside}` : "is compacting context");
-			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? `preparing${beside}` : "compacting context");
+			activity = theme.fg("harnessAction", `is preparing${beside}`);
+			stateAlone = theme.fg("harnessAction", `preparing${beside}`);
 		} else if (status) {
 			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
 			activity = theme.fg(status.token, status.label);

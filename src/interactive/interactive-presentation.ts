@@ -55,7 +55,13 @@ import type { ComposerKeyContext } from "./footer/key-hints.js";
 import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
-import { activeTaskRail, composerPhasePresentation, idleReadinessPresentation } from "./footer/widgets.js";
+import type { CompactionRailFacts } from "./footer/widgets.js";
+import {
+	activeTaskRail,
+	compactionRailLabel,
+	composerPhasePresentation,
+	idleReadinessPresentation,
+} from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
@@ -710,6 +716,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					: dispatchStatusPresentation(row.status).label,
 		now: Date.now(),
 	});
+	const runningCompaction = (): CompactionRailFacts | null => {
+		const activity = contextActivityStore.current();
+		return activity?.kind === "compaction" && activity.completedAtMs === null
+			? { phase: activity.phase, startedAtMs: activity.startedAtMs }
+			: null;
+	};
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getTaskRail: (room) => {
@@ -749,6 +761,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					undefined,
 					reserved + beside,
 					identityCells,
+					runningCompaction(),
 				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
@@ -857,6 +870,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
+		getCompactionLabel: (room) => compactionRailLabel(runningCompaction(), room, Date.now()),
 		getPreparationDetail: () => {
 			const { phase, since, stage } = deps.chat.turnPreparation();
 			if (phase !== "preparing" || since <= 0) return null;

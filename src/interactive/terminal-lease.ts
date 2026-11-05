@@ -271,6 +271,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getPermissionInspection: () => editorChrome.getPermissionInspection?.() ?? "none",
 		getTurnPreparation: () => editorChrome.getTurnPreparation?.() ?? "idle",
 		getPreparationDetail: () => editorChrome.getPreparationDetail?.() ?? null,
+		getCompactionLabel: (room) => editorChrome.getCompactionLabel?.(room) ?? null,
 		willEnterSteer: (text) => editorChrome.willEnterSteer?.(text) ?? false,
 		getDraftOperator: (text) => editorChrome.getDraftOperator?.(text) ?? null,
 		getSteerRecipient: (token) => editorChrome.getSteerRecipient?.(token) ?? null,

@@ -1,4 +1,5 @@
 import type { ModelAdmissionWait } from "../../core/model-admission.js";
+import type { ContextActivityPhase } from "../../core/telemetry/live-events.js";
 import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
@@ -295,12 +296,26 @@ export function lastTurnDetails(
 	telemetry: FooterTelemetry | undefined,
 ): string {
 	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
+	const measured = turn
+		? [
+				turn.input === null ? null : `${GLYPH.up} ${turn.input}`,
+				turn.output === null ? null : `${GLYPH.down} ${turn.output}`,
+			]
+				.filter(Boolean)
+				.join(" ")
+		: "";
+	const cache = turn
+		? [
+				turn.cacheRead === null || turn.cacheRead === "0" ? null : `cache read ${turn.cacheRead}`,
+				turn.cacheWrite === null || turn.cacheWrite === "0" ? null : `write ${turn.cacheWrite}`,
+			]
+				.filter(Boolean)
+				.join(" · ")
+		: "";
 	const parts: Array<string | null> = [
-		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
+		turn ? (measured ? theme.fg("counter", measured) : theme.fg("annotation", "usage unknown (/usage)")) : null,
 		turn ? reasoningChip(theme, turn.reasoning) : null,
-		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
-			? theme.fg("annotation", `cache read ${turn.cacheRead} · write ${turn.cacheWrite}`)
-			: null,
+		cache ? theme.fg("annotation", cache) : null,
 	];
 	if (lastTurn.toolCount > 0) {
 		const label = `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`;
@@ -553,6 +568,38 @@ const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model switches", short:
 const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model switches", short: "then /model" };
 /** While nothing has come back, a pick reroutes the request itself. */
 const MODEL_MOVES: Omit<RailFact, "keep"> = { text: "/model moves it", short: "/model" };
+
+/** What a running compaction reports about itself, read from the operation's own stage events. */
+export interface CompactionRailFacts {
+	phase: ContextActivityPhase;
+	startedAtMs: number;
+}
+
+const COMPACTION_STAGE_WORDS: Partial<Record<ContextActivityPhase, readonly [string, string]>> = {
+	compact: ["is preparing to compact", "preparing"],
+	summarize: ["is summarizing history", "summarizing"],
+	state: ["is saving the summary", "saving"],
+};
+
+/**
+ * The rail during a compaction mirrors the stage the transcript instrument shows, with its clock and the way out. The
+ * save stage writes a summary that is already on disk, so it offers no Esc there (J2-F04).
+ */
+export function compactionRailLabel(facts: CompactionRailFacts | null, room: number, now: number): string {
+	const words = facts ? COMPACTION_STAGE_WORDS[facts.phase] : undefined;
+	const [head, tight] = words ?? ["is compacting context", "compacting"];
+	const elapsedMs = facts ? Math.max(0, now - facts.startedAtMs) : 0;
+	const elapsed = Math.floor(elapsedMs / 1000);
+	return fitRailFacts(
+		[
+			{ text: room >= 40 ? head : tight, keep: 9 },
+			// Past ten seconds the clock reads as the transcript instrument's does, so the two never disagree by a second.
+			{ text: elapsed < 1 ? null : elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsedMs), keep: 8 },
+			{ ...ESC_CANCELS, text: facts?.phase === "state" ? null : ESC_CANCELS.text, keep: RAIL_ACTION_KEEP },
+		],
+		room,
+	);
+}
 
 /** A failed turn's rail: the failure, its class and the way out the transcript block gives for that class. */
 function failedTurnFacts(head: RailFact, failure: TurnSummary["failure"]): ReadonlyArray<RailFact> {
@@ -920,6 +967,8 @@ export function composerPhasePresentation(
 	reserved = 0,
 	/** What the rail will spend on the lead glyph and a name wider than a nickname, when it knows. */
 	identityCells?: number,
+	/** The running compaction's own stage and start, when one is reporting. */
+	compaction?: CompactionRailFacts | null,
 ): HarnessPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
 	const room = labelRoom ?? railActivityRoom(width, reserved, identityCols(identityCells));
@@ -1040,7 +1089,7 @@ export function composerPhasePresentation(
 			label = retryRailLabel(status, room, now, elapsedFrom);
 			break;
 		case "compacting":
-			label = "is compacting context";
+			label = compactionRailLabel(compaction ?? null, room, now);
 			break;
 		case "dispatching":
 			label = "is waiting for a worker";

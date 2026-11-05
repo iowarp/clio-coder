@@ -819,9 +819,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		.filter(Boolean)
 		.join(separator);
 	const tail = facts;
-	if (narrow && !urgent && !notice && !feedback && !facts) return [firstRow];
 	const silence = state.silenceNotes ?? null;
 	const silenceNote = silence?.find((form) => visibleWidth(form) <= w) ?? silence?.at(-1) ?? null;
+	// A narrow footer drops its idle hint row, but never the silence note that row exists to carry (HS16).
+	if (narrow && !urgent && !notice && !feedback && !facts && silenceNote === null) return [firstRow];
 	const alone = urgent !== null || silenceNote !== null || !tail;
 	const tailWidth = alone ? 0 : Math.min(Math.floor(w * 0.4), visibleWidth(tail));
 	const room = alone ? w : w - tailWidth - 3;

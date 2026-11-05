@@ -2146,7 +2146,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			operationCwd !== process.cwd()
 		)
 			throw new Error("Context ownership changed during compaction.");
-		summarySignal?.throwIfAborted();
+		// The summarizer checks the signal before it saves, so a summary in hand is already on disk. A stop arriving now
+		// would report `cancelled` over a changed context and leave the runtime replaying the old history (J2-F04).
+		if (result === null || result.summary.length === 0) summarySignal?.throwIfAborted();
 		if (result?.providerFallbackReason)
 			deps.emitNotice(`Native compaction used Clio's portable path: ${result.providerFallbackReason}.`);
 		if (result?.noGain) {
@@ -2183,7 +2185,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (deps.memoryCommitBridge && !handoff && deps.session?.flushAppends) {
 			deps.session.flushAppends();
 			await deps.session.checkpoint("context-summary");
-			if (originSession !== deps.session.current()?.id || originNavigation !== navigationEpoch || signal?.aborted)
+			if (originSession !== deps.session.current()?.id || originNavigation !== navigationEpoch)
 				throw new Error("Context ownership changed during checkpoint.");
 			const summary = [...deps.readSessionEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
 			if (summary) notifyMemoryCommit(summary.turnId, "summary", "summarized");
@@ -2275,7 +2277,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				(error: unknown) => {
 					const outcome =
 						operationArgs[6]?.aborted || (error instanceof Error && error.name === "AbortError") ? "cancelled" : "failed";
-					compactionOperation?.finish(outcome, compactionFailureMessage(error), {
+					// A stop is the operator's own choice, not a fault, and what it left behind is the fact they need.
+					const conclusion =
+						outcome === "cancelled"
+							? compactionFacts.length === 0
+								? "cancelled before anything was saved; context unchanged"
+								: "cancelled before the summary was saved"
+							: compactionFailureMessage(error);
+					compactionOperation?.finish(outcome, conclusion, {
 						facts: compactionFacts,
 						...(compactionTokens ? { tokens: compactionTokens } : {}),
 					});

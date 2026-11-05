@@ -22,7 +22,7 @@ import {
 	openModelScopeOverlay,
 	type PendingModelScope,
 } from "./overlays/model-scope.js";
-import { openModelOverlay } from "./overlays/model-selector.js";
+import { modelResidencySentence, modelResidencyWord, openModelOverlay } from "./overlays/model-selector.js";
 import { openSettingsOverlay, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 import type { SettingValueOrigin } from "./overlays/settings-presentation.js";
 
@@ -169,8 +169,13 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			deps.historyTokens?.(),
 			deps.routeLeavesCache?.({ target: ref.target, model: ref.model }) ?? false,
 		);
+		const status = deps.providers.list().find((entry) => entry.target.id === ref.target);
+		const residency = status
+			? modelResidencySentence(modelResidencyWord(status, ref.model), ref.model, ref.target)
+			: null;
 		deps.transitions.handle = openModelScope(deps.tui, {
 			ref,
+			...(residency ? { residency } : {}),
 			...(switchCost ? { switchCost } : {}),
 			...(deps.routeMoveWait
 				? { turnEffect: () => routeTurnEffect(deps.routeMoveWait?.() ?? "idle", fit, ref.model) }

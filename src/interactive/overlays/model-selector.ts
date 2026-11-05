@@ -14,10 +14,12 @@ import type {
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	acceptsImageInput,
+	hasLiveModelCatalog,
 	isOrchestratorEligibleRuntime,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
 	modelListNoteForStatus,
+	modelResidencyForStatus,
 	newerModelNotice,
 	resolveRuntimeTarget,
 	supportsAgentRoleTools,
@@ -65,6 +67,7 @@ const MODEL_MIN_WIDTH = 14;
 const MODEL_COL_GUTTER = 1;
 const CONTEXT_COL_WIDTH = 7;
 const CAPS_COL_WIDTH = 5;
+const STATE_COL_WIDTH = 8;
 const TARGET_COL_WIDTH_NARROW = 8;
 const TARGET_COL_WIDTH_WIDE = 12;
 const RUNTIME_COL_WIDTH_NARROW = 10;
@@ -159,6 +162,8 @@ export interface ModelRow {
 	sourceNote?: string;
 	loadState?: string;
 	loadStateDetail?: string;
+	/** Whether the model is in memory where it would run; null where residency is not a property of the route. */
+	residency?: ModelResidencyWord | null;
 	authText: string;
 	available: boolean;
 	reason: string;
@@ -193,6 +198,55 @@ export interface ModelOverlaySummary {
 	focusedModels?: number;
 	newerModelNotice?: string;
 }
+
+export type ModelResidencyWord = "resident" | "loading" | "unloaded" | "failed" | "unknown";
+
+/**
+ * Residency as the runtime reported it on its last live answer (J2-F15). A hosted cloud API always serves, so it has
+ * none; a gateway or a runtime that does not report it reads `unknown` rather than a guess, and so does a model list
+ * that is not the provider's live answer, because a cached state says nothing about what is loaded now.
+ */
+export function modelResidencyWord(status: TargetStatus, modelId: string): ModelResidencyWord | null {
+	if (modelBucket(status) === "cloud") return null;
+	if (!hasLiveModelCatalog(status) || modelId.length === 0) return "unknown";
+	if (status.discoveredModelStates?.[modelId]?.state === "failed") return "failed";
+	switch (modelResidencyForStatus(status, modelId)) {
+		case "resident":
+			return "resident";
+		case "loading":
+			return "loading";
+		case "absent":
+			return "unloaded";
+		default:
+			return "unknown";
+	}
+}
+
+/** The residency as one plain sentence, for the selected row's detail and the scope dialog. */
+export function modelResidencySentence(word: ModelResidencyWord | null, model: string, target: string): string | null {
+	switch (word) {
+		case "resident":
+			return `${model} is loaded on ${target}, so there is no load to wait for.`;
+		case "loading":
+			return `${model} is loading on ${target}; the first reply waits for it.`;
+		case "unloaded":
+			return `${model} is not loaded on ${target}; the first request loads it, which can take a minute.`;
+		case "failed":
+			return `${target} reported that loading ${model} failed; the first request tries again.`;
+		case "unknown":
+			return `${target} does not report whether ${model} is loaded.`;
+		default:
+			return null;
+	}
+}
+
+const RESIDENCY_TONES: Record<ModelResidencyWord, ClioToken> = {
+	resident: "success",
+	loading: "warning",
+	unloaded: "counter",
+	failed: "error",
+	unknown: "unknownValue",
+};
 
 /** Enumerate target wire model ids with live discovery taking precedence when available. */
 export function modelsForTarget(status: TargetStatus): string[] {
@@ -402,6 +456,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				apiFamily: status.runtime?.apiFamily ?? "unknown",
 				bucket,
 				source: "missing",
+				residency: modelBucket(status) === "cloud" ? null : "unknown",
 				authText,
 				available: status.available,
 				reason: status.reason,
@@ -463,6 +518,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				...(sourceNote ? { sourceNote } : {}),
 				...(candidate.loadState ? { loadState: candidate.loadState } : {}),
 				...(candidate.loadStateDetail ? { loadStateDetail: candidate.loadStateDetail } : {}),
+				residency: modelResidencyWord(status, wireModel),
 				authText,
 				available: status.available,
 				reason: status.reason,
@@ -502,6 +558,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 
 interface ModelLayout {
 	modelWidth: number;
+	showState: boolean;
 	showTarget: boolean;
 	showRuntime: boolean;
 	targetWidth: number;
@@ -516,14 +573,16 @@ const MODEL_TABLE_GAP = 2;
  * reads, so it is sized last from what the fixed columns leave, and runtime,
  * then target, drop whole when it would fall under `MODEL_MIN_WIDTH`.
  */
-function modelLayout(width: number): ModelLayout {
+function modelLayout(width: number, hasState: boolean): ModelLayout {
 	const targetWidth = width >= 92 ? TARGET_COL_WIDTH_WIDE : TARGET_COL_WIDTH_NARROW;
 	const runtimeWidth =
 		width >= 96 ? RUNTIME_COL_WIDTH_WIDE : width >= 78 ? RUNTIME_COL_WIDTH_MEDIUM : RUNTIME_COL_WIDTH_NARROW;
 	let showTarget = width >= 58;
 	let showRuntime = width >= 68;
+	let showState = hasState;
 	const modelWidthFor = (): number => {
 		let fixed = SELECTED_PREFIX_WIDTH + MODEL_TABLE_GAP + CONTEXT_COL_WIDTH + MODEL_TABLE_GAP + CAPS_COL_WIDTH;
+		if (showState) fixed += MODEL_TABLE_GAP + STATE_COL_WIDTH;
 		if (showTarget) fixed += MODEL_TABLE_GAP + targetWidth;
 		if (showRuntime) fixed += MODEL_TABLE_GAP + runtimeWidth;
 		return width - fixed;
@@ -533,11 +592,16 @@ function modelLayout(width: number): ModelLayout {
 		showRuntime = false;
 		modelWidth = modelWidthFor();
 	}
+	// Whether the pick will wait on a load outlasts which target serves it only once the id itself is at stake.
 	if (modelWidth < MODEL_MIN_WIDTH && showTarget) {
 		showTarget = false;
 		modelWidth = modelWidthFor();
 	}
-	return { modelWidth: Math.max(1, modelWidth), showTarget, showRuntime, targetWidth, runtimeWidth };
+	if (modelWidth < MODEL_MIN_WIDTH && showState) {
+		showState = false;
+		modelWidth = modelWidthFor();
+	}
+	return { modelWidth: Math.max(1, modelWidth), showState, showTarget, showRuntime, targetWidth, runtimeWidth };
 }
 
 // The active, favorite and recent marks keep one fixed column. Scoped and
@@ -558,12 +622,18 @@ function activeMark(row: ModelRow): string {
  */
 function modelTableLines(rows: ReadonlyArray<ModelRow>, selectedIndex: number, width: number): string[] {
 	const theme = clioTheme();
-	const layout = modelLayout(width);
+	const layout = modelLayout(
+		width,
+		rows.some((row) => row.residency != null),
+	);
 	const modelColumnWidth = SELECTED_PREFIX_WIDTH + layout.modelWidth;
 	const columns: TableColumn[] = [
 		{ label: `${" ".repeat(SELECTED_PREFIX_WIDTH)}model`, min: modelColumnWidth, max: modelColumnWidth, priority: 10 },
 		{ label: "ctx", align: "right", min: CONTEXT_COL_WIDTH, max: CONTEXT_COL_WIDTH, priority: 4 },
 		{ label: "caps", min: CAPS_COL_WIDTH, max: CAPS_COL_WIDTH, priority: 3 },
+		...(layout.showState
+			? [{ label: "state", min: STATE_COL_WIDTH, max: STATE_COL_WIDTH, priority: 3 } satisfies TableColumn]
+			: []),
 		...(layout.showTarget
 			? [{ label: "target", min: layout.targetWidth, max: layout.targetWidth, priority: 2 } satisfies TableColumn]
 			: []),
@@ -585,6 +655,7 @@ function modelTableLines(rows: ReadonlyArray<ModelRow>, selectedIndex: number, w
 			`${pointer} ${activeMark(row)} ${model}`,
 			theme.fg(row.context === "-" || row.context === "?" ? "unknownValue" : "counter", row.context),
 			{ text: row.badges, tone: "muted" },
+			...(layout.showState ? [row.residency ? theme.fg(RESIDENCY_TONES[row.residency], row.residency) : ""] : []),
 			...(layout.showTarget ? [theme.fg("modelIdentity", row.target)] : []),
 			...(layout.showRuntime ? [{ text: row.runtimeShortName, tone: "muted" } satisfies TableCell] : []),
 		];
@@ -651,9 +722,19 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 	if (row.defaultModel) tags.push("default");
 	const state = tags.length > 0 ? tags.join("+") : row.selectable ? "candidate" : "not selectable";
 	const availability = row.available ? row.healthText : `${row.healthText}; ${row.reason || "unavailable"}`;
-	const loadState = row.loadState
-		? `state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
-		: null;
+	const residency = modelResidencySentence(row.residency ?? null, row.model, row.target);
+	// Residency reads as its own line in its own tone, above the facts that give way first.
+	const residencyLines =
+		residency && row.residency
+			? wrapTextWithAnsi(
+					theme.fg(RESIDENCY_TONES[row.residency], `${residency}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`),
+					width,
+				).slice(0, 2)
+			: [];
+	const loadState =
+		residency === null && row.loadState
+			? `state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
+			: null;
 	const facts = [
 		`source ${row.sourceNote ?? sourceLabel(row.source)}`,
 		loadState,
@@ -690,7 +771,10 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 				width,
 			)
 		: [];
-	const factBudget = Math.max(1, Math.min(factLines.length, maxRows - 1 - next.length - diagnostics.length));
+	const factBudget = Math.max(
+		1,
+		Math.min(factLines.length, maxRows - 1 - next.length - residencyLines.length - diagnostics.length),
+	);
 	const kept = factLines.slice(0, factBudget);
 	const last = kept.at(-1);
 	if (factLines.length > kept.length && last !== undefined) kept[kept.length - 1] = `${last}${GLYPH.ellipsis}`;
@@ -705,6 +789,7 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 			width,
 		),
 		...next,
+		...residencyLines,
 		...kept,
 		...diagnostics,
 	];
@@ -740,8 +825,29 @@ function modelSelectorSearchText(row: ModelRow): string {
 	].join(" ");
 }
 
+/**
+ * Rows a query names, best first: a word of the ref that starts with the query, then the ref containing every word of
+ * it, then the row's other facts (runtime, health, residency) containing them. A scattered-letter match only answers
+ * when nothing contains the query, because `ornith` matching an embedding model through letters spread across its
+ * runtime name and health is noise, not a result (J2-F09).
+ */
 function filterModelRows(rows: ReadonlyArray<ModelRow>, query: string): ModelRow[] {
-	return fuzzyFilter([...rows], query, modelSelectorSearchText);
+	const words = query.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+	if (words.length === 0) return [...rows];
+	const tiers: ModelRow[][] = [[], [], []];
+	for (const row of rows) {
+		const ref = (row.model.length > 0 ? `${row.target}/${row.model}` : row.target).toLowerCase();
+		const facts = modelSelectorSearchText(row).toLowerCase();
+		if (!words.every((word) => ref.includes(word))) {
+			if (words.every((word) => facts.includes(word))) tiers[2]?.push(row);
+			continue;
+		}
+		const first = words[0] ?? "";
+		const startsWord = ref.split(/[/\s:_.-]+/u).some((part) => part.startsWith(first)) || ref.startsWith(first);
+		tiers[startsWord ? 0 : 1]?.push(row);
+	}
+	const contained = tiers.flat();
+	return contained.length > 0 ? contained : fuzzyFilter([...rows], query, modelSelectorSearchText);
 }
 
 function refreshStatusLine(
