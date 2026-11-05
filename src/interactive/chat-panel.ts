@@ -1176,7 +1176,8 @@ function renderTurnUsageLine(
 			calls !== null || retries !== null ? [calls, retries].filter(Boolean).join(", ") : null,
 			spend?.coverageNote ?? null,
 			spend?.tokens ?? null,
-			spend?.unknownField ?? null,
+			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
+			spend?.cacheRead != null && spend.cacheRead !== "?" ? `cached ${spend.cacheRead}` : null,
 		]) {
 			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
 		}

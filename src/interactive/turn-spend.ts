@@ -29,8 +29,6 @@ export interface TurnSpend {
 	coverageNote: string | null;
 	/** The token subtotals a one-row receipt can state, or null when no amount is known. */
 	tokens: string | null;
-	/** The one field a provider left out while the amounts stand, so the row names it rather than doubting them all. */
-	unknownField: string | null;
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -87,7 +85,6 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 				? neverSentNote
 				: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
 		tokens: stated ? `in ${renderCompactCount(input.fact)} · out ${renderCompactCount(output.fact)}` : null,
-		unknownField: stated && renderCompactCount(cacheRead.fact) === "?" ? "cached unknown" : null,
 	};
 }
 
