@@ -1,5 +1,5 @@
 import type { TaskBoardSnapshot, TaskBoardStore } from "../domains/session/task-board.js";
-import { taskBoardCounts } from "../domains/session/task-board.js";
+import { taskBoardCounts, unverifiedTaskChecks } from "../domains/session/task-board.js";
 import type { TUI } from "../engine/tui.js";
 import { Text, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
@@ -17,6 +17,8 @@ export interface InteractiveTickerHandle {
 
 export interface InteractiveDispatchStore {
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	/** Active workers and running plans, when the store tracks plans. */
+	liveRows?(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 }
 
@@ -44,8 +46,11 @@ function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
 	const counts = taskBoardCounts(board);
 	const active = board.tasks.find((task) => task.status === "active");
 	const next = active ?? board.tasks.find((task) => task.status === "pending");
+	const blocker = board.tasks.find((task) => task.status === "blocked");
+	const unverified = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
 	const chips = [
 		`${counts.completed}/${counts.total} done`,
+		...(unverified > 0 ? [`${unverified} unverified`] : []),
 		...(counts.active > 0 ? [`${counts.active} active`] : []),
 		...(counts.blocked > 0 ? [`${counts.blocked} blocked`] : []),
 	].join(" · ");
@@ -53,6 +58,11 @@ function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
 	if (next) {
 		const glyph = active ? theme.fg("activity", GLYPH.running) : theme.fg("annotation", GLYPH.queued);
 		body.push(`${glyph} ${theme.fg("annotation", next.id)} ${theme.fg("body", next.title)}`);
+	}
+	if (blocker) {
+		body.push(
+			`${theme.fg("warning", GLYPH.phaseBlocked)} ${theme.fg("annotation", blocker.id)} ${theme.fg("body", blocker.title)}`,
+		);
 	}
 	return frame(
 		theme,
@@ -166,7 +176,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		contextIslandTicker = scheduleInterval(() => {
 			deps.dispatchBoardStore.reconcile();
 			const taskNeedsRender = renderTaskIsland();
-			const fleetActive = deps.dispatchBoardStore.activeRows().length > 0;
+			const fleetActive = (deps.dispatchBoardStore.liveRows?.() ?? deps.dispatchBoardStore.activeRows()).length > 0;
 			if (!deps.contextActivityStore.active() && !contextIslandVisible && !fleetActive && !taskNeedsRender) return;
 			renderContextIsland();
 			deps.tui.requestRender();

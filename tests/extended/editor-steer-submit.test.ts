@@ -138,7 +138,7 @@ for (const target of [worker.runId, "run-123", "worker"]) {
 		assert.deepEqual(f.chat, []);
 		assert.equal(f.editor.getText(), "");
 		assert.deepEqual(f.history, [`@${target} check again`]);
-		assert.match(f.notices[0]?.text ?? "", /queued.*awaiting worker acknowledgement/);
+		assert.match(f.notices[0]?.text ?? "", /queued.*waiting for it to take it/);
 	});
 }
 

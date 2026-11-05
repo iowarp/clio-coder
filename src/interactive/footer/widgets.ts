@@ -333,6 +333,15 @@ export function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): stri
 	return `${theme.fg("activity", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("counter", active.title)}`;
 }
 
+/** What stands in the board's way: the first blocked task and its reason, on one row. */
+export function blockedTaskLines(theme: ClioTheme, board: TaskBoardSnapshot, width: number): string[] {
+	const blocked = board.tasks.find((task) => task.status === "blocked");
+	if (!blocked) return [];
+	const reason = blocked.reason ? `: ${sanitizeCallTargetText(blocked.reason)}` : "";
+	const row = `${theme.fg("warning", GLYPH.phaseBlocked)} ${theme.fg("annotation", blocked.id)} ${theme.fg("counter", `${sanitizeCallTargetText(blocked.title)}${reason}`)}`;
+	return [truncateToWidth(row, width, GLYPH.ellipsis, false)];
+}
+
 /** The active task on the composer rail: its id and as much of its title as the leftover room holds. */
 export function activeTaskRail(
 	theme: ClioTheme,

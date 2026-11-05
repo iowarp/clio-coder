@@ -235,6 +235,11 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 		deps.cancelSelectedDispatch();
 		return true;
 	}
+	// The detail reads the same wherever Enter goes, so a pane host loses none of it.
+	if (matchesKey(data, "d")) {
+		deps.toggleSelectedDispatchDetail();
+		return true;
+	}
 	// Enter on a live run enters it: the watch pane opens (or retargets) and
 	// renders the run's stream beside the board. Where panes are off, absent,
 	// or the run is terminal, Enter keeps its inline worker-progress detail.

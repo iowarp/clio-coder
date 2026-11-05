@@ -36,7 +36,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (row.runtimeKind === "acp-delegation" || row.runtimeKind === "subprocess") {
 			deps.notify(
 				"warning",
-				`run ${row.runId} uses ${row.runtimeId} (${row.runtimeKind}) and cannot accept live steering`,
+				`${row.agentId} runs on ${row.runtimeId} (${row.runtimeKind}) and cannot accept live steering`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;
@@ -44,16 +44,23 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (!isDispatchBoardRowSteerable(row)) {
 			deps.notify(
 				"warning",
-				`${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
+				row.status === "enqueued"
+					? `${row.agentId} is queued and can take a message once it starts`
+					: `${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;
 		}
-		const prefix = `@${row.runId} `;
 		const draft = deps.editor.getText();
 		deps.closeOverlay();
-		deps.editor.setText(draft.length > 0 ? `${prefix}${draft}` : prefix);
-		deps.editor.markSteerTarget?.({ runId: row.runId, agentId: row.agentId });
+		// An editor that can hold the address keeps it out of the text and names the worker on its rail.
+		if (deps.editor.markSteerTarget) {
+			deps.editor.setText(draft);
+			deps.editor.markSteerTarget({ runId: row.runId, agentId: row.agentId });
+		} else {
+			const prefix = `@${row.runId} `;
+			deps.editor.setText(draft.length > 0 ? `${prefix}${draft}` : prefix);
+		}
 		deps.editor.focused = true;
 		deps.requestRender();
 	};

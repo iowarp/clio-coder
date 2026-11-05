@@ -1035,7 +1035,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			...(deps.workspaceSurfaces ? { workspace: deps.workspaceSurfaces.board } : {}),
 			pending,
 			fleet: createFleetDock({
-				getRows: () => dispatchBoardStore.activeRows(),
+				getRows: () => dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows(),
 				getQuotaSnapshots: () => {
 					quotaSummary.peekSnapshots();
 					return deps.telemetry.read?.quota().providers ?? [];

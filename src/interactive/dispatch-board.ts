@@ -236,7 +236,8 @@ export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 	return (
 		row.plan === undefined &&
 		runKindSupportsLiveSteering(row.runtimeKind) &&
-		(row.status === "running" || row.status === "stale" || row.status === "enqueued")
+		// A queued run has no worker yet, so a message would have nowhere to go.
+		(row.status === "running" || row.status === "stale")
 	);
 }
 
@@ -710,6 +711,24 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 	];
 }
 
+/** Step rows the live card keeps, so a long plan cannot push the composer off a short terminal. */
+const PLAN_LIVE_STEP_ROWS = 4;
+
+/** A running plan on the fleet card: its progress and clock, then the steps around the one running now. */
+function planIslandLines(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, width: number): string[] {
+	const head = `${theme.fg("activity", GLYPH.running)} ${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg("body", planProgressText(plan))}${dotSep(theme)}${theme.fg("annotation", formatCompactMs(row.elapsedMs))}`;
+	const steps = planStepLines(theme, plan, Math.max(1, width - 2));
+	const running = plan.steps.findIndex((step) => step.state === "running");
+	const start = Math.max(0, Math.min(Math.max(0, running - 1), steps.length - PLAN_LIVE_STEP_ROWS));
+	const shown = steps.slice(start, start + PLAN_LIVE_STEP_ROWS);
+	const hidden = steps.length - shown.length;
+	return [
+		truncateToWidth(head, width, GLYPH.ellipsis, false),
+		...shown.map((line) => `  ${line}`),
+		...(hidden > 0 ? [theme.fg("annotation", `  ${hidden} more steps · /fleet`)] : []),
+	];
+}
+
 /** The transcript's settled record of a plan, in the worker card's gutter grammar. */
 export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): string[] {
 	const theme = clioTheme();
@@ -736,6 +755,8 @@ function dispatchCardBody(
 	evidence?: RunEvidencePresentation,
 	options: {
 		expanded?: boolean;
+		/** The key that opens detail on this row, because Enter opens the watch pane under a pane host. */
+		detailKey?: string;
 		endpointActive?: number;
 		endpointQueued?: number;
 		theme?: ClioTheme;
@@ -817,7 +838,7 @@ function dispatchCardBody(
 	const taskLines =
 		options.expanded === true || fullTask.length <= 3
 			? fullTask
-			: [...fullTask.slice(0, 2), theme.fg("annotation", "… Enter detail for full task")];
+			: [...fullTask.slice(0, 2), theme.fg("annotation", `… ${options.detailKey ?? "Enter"} detail for full task`)];
 	const started = runOriginWords(row);
 	const bodyLines = [
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
@@ -963,6 +984,7 @@ const TASK_ISLAND_APPROVAL_LABEL_ROOM = 14;
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
+	if (row.plan !== undefined) return planIslandLines(theme, row, row.plan, width);
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
 	// A queued run has not started, so it has no elapsed time to be unavailable.
@@ -1524,6 +1546,7 @@ function formatDispatchBoardBody(
 	telemetry: TelemetrySnapshot | undefined,
 	selectedRunId: string | null,
 	detailExpanded: boolean,
+	detailKey = "Enter",
 ): string[] {
 	const theme = clioTheme();
 	if (rows.length === 0) {
@@ -1571,6 +1594,7 @@ function formatDispatchBoardBody(
 					runId: item.row.runId,
 					body: dispatchCardBody(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
 						expanded: detailExpanded,
+						detailKey,
 						...(item.row.endpoint !== undefined
 							? {
 									endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
@@ -1590,7 +1614,7 @@ function formatDispatchBoardBody(
 	if (room <= 0) return lines;
 	const kept = detail.body.slice(0, Math.max(0, room - 1));
 	const hidden = detail.body.length - kept.length;
-	const where = [`${hidden} more rows`, "Enter for detail", `/view dispatch:${detail.runId}`];
+	const where = [`${hidden} more rows`, `${detailKey} for detail`, `/view dispatch:${detail.runId}`];
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
@@ -1617,6 +1641,10 @@ export interface DispatchBoardView extends Component, RowBudgetedBody {
 	/** Open or close the selected row's worker-progress detail. */
 	toggleDetail(): void;
 	detailExpanded(): boolean;
+	/** Whether Enter on the selected row opens the watch pane instead of its detail. */
+	enterWatches(): boolean;
+	/** Say which rows Enter takes to the watch pane; only a session with a pane host has any. */
+	setEnterWatches(predicate: (row: DispatchBoardRow) => boolean): void;
 }
 
 export function createDispatchBoardView(
@@ -1627,6 +1655,7 @@ export function createDispatchBoardView(
 	// Detail is a property of the operator's attention, not of a run, so it
 	// follows the cursor rather than pinning to the row it was opened on.
 	let expanded = false;
+	let enterWatches: (row: DispatchBoardRow) => boolean = () => false;
 	let bodyRows = 0;
 	let memo: { key: string; lines: string[] } | null = null;
 
@@ -1677,9 +1706,12 @@ export function createDispatchBoardView(
 					.filter((run) => run.evidence)
 					.map((run) => run.runId)
 					.join(",") ?? "";
-			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
+			const selectedRow = currentRows.find((row) => row.runId === selectedRunId);
+			// Where Enter goes to the watch pane, the words on the card name the key that still opens detail.
+			const detailKey = selectedRow !== undefined && enterWatches(selectedRow) ? "d" : "Enter";
+			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${detailKey}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
-			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded);
+			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded, detailKey);
 			memo = { key, lines };
 			return lines;
 		},
@@ -1705,6 +1737,14 @@ export function createDispatchBoardView(
 		},
 		detailExpanded(): boolean {
 			return expanded;
+		},
+		enterWatches(): boolean {
+			const row = normalizeSelection(rows());
+			return row !== null && enterWatches(row);
+		},
+		setEnterWatches(predicate: (row: DispatchBoardRow) => boolean): void {
+			enterWatches = predicate;
+			memo = null;
 		},
 		invalidate(): void {
 			memo = null;
@@ -1949,6 +1989,8 @@ export function createDispatchBoardStore(
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	/** What the fleet card shows: plans running now, then the active workers. */
+	liveRows(): ReadonlyArray<DispatchBoardRow>;
 	/** Every worker run, without the plan rows: what a count or usage of workers reads. */
 	workerRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
@@ -1989,6 +2031,7 @@ export function createDispatchBoardStore(
 			);
 		},
 		activeRows: () => projectRows(true),
+		liveRows: () => [...plans.live().map((plan) => fleetPlanRow(plan, Date.now())), ...projectRows(true)],
 		workerRows: () => projectRows(false),
 		reconcile() {
 			projection.reconcileRuns();

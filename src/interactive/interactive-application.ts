@@ -1438,7 +1438,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	getTerminationCoordinator().onDrain(() => {
 		cancelSubmitExpansions();
 	});
-	editor.onSubmit = (text) => {
+	editor.onSubmit = (submitted) => {
+		const text = editor.addressSubmission(submitted);
 		if (upgradeFlow?.isRunning()) {
 			// Pi clears the composer before invoking onSubmit. Package replacement
 			// must not race a new turn, so restore the draft exactly and leave it for
@@ -1758,10 +1759,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const selectedWatchableRun = (): { runId: string; agentId: string } | null => {
 		if (!watchPane) return null;
 		const row = dispatchBoard.selectedRow();
-		if (!row) return null;
+		if (!row || row.plan !== undefined) return null;
 		const decision = paneWatchDecision({ source: "workers-view", runStatus: row.status });
 		return decision.open ? { runId: row.runId, agentId: row.agentId } : null;
 	};
+	if (watchPane) {
+		dispatchBoard.setEnterWatches(
+			(row) => row.plan === undefined && paneWatchDecision({ source: "workers-view", runStatus: row.status }).open,
+		);
+	}
 	/**
 	 * Enter in the workers view. True means the watch pane took the key; false
 	 * (panes off, nothing watchable under the policy) falls back to the inline
@@ -1773,7 +1779,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		void watchPane.watch(selected.runId).then((result) => {
 			if (result.status === "watching") {
 				if (result.opened) {
-					notify("success", `watching ${selected.agentId} (${selected.runId}) in a pane`, "panes:watch");
+					notify("success", `Watching ${selected.agentId} in a pane`, "panes:watch");
 				}
 			} else {
 				notify("warning", result.reason, "panes:watch");

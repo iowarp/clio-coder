@@ -44,6 +44,7 @@ import { formatNotificationPanel, notificationGlyph, notificationToken, topNotif
 import type { FooterTelemetry } from "./spend.js";
 import {
 	activeTaskLine,
+	blockedTaskLines,
 	buildHarnessStatePill,
 	compactContextUsage,
 	contextUsageText,
@@ -174,12 +175,18 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
 							spend.cost === null ? null : theme.fg("counter", spend.cost),
 						]),
-			board && board.tasks.length > 0 ? labelled("tasks", taskBoardValue(theme, board)) : null,
-			board ? activeTaskLine(theme, board) : null,
 			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
 		],
 		width,
 	);
+	// The board keeps a row of its own, because at the tail of the session row its blocked count was the first thing cut.
+	const tasks =
+		board && board.tasks.length > 0
+			? [
+					chipRow(theme, [labelled("tasks", taskBoardValue(theme, board)), activeTaskLine(theme, board)], width),
+					...blockedTaskLines(theme, board, width),
+				]
+			: [];
 	const rows = workerRowsOf(state.dispatchRows);
 	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const done = rows.filter((row) => row.status === "completed");
@@ -199,7 +206,13 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		...(state.dismissKeyLabel ? { dismissKeyLabel: state.dismissKeyLabel } : {}),
 		theme,
 	});
-	const lines = [headline, session, ...notices, sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) })];
+	const lines = [
+		headline,
+		session,
+		...tasks,
+		...notices,
+		sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) }),
+	];
 	if (rows.length === 0) {
 		lines.push(
 			...emptyState(theme, "No workers yet.", width, {
