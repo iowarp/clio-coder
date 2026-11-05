@@ -121,7 +121,7 @@ test("the docked board never cuts a section it cannot reach (BT-015)", () => {
 test("the selection walks into operator tasks and the window follows it (BT-015)", () => {
 	const board = mount();
 	let screen = board.render();
-	match(selectedRow(screen) ?? "", /t1 {3}Reproduce/u);
+	match(selectedRow(screen) ?? "", /t4 {3}Review/u);
 	const visited: string[] = [];
 	for (let step = 0; step < 9; step++) {
 		screen = board.press(DOWN);
@@ -138,7 +138,7 @@ test("the selection walks into operator tasks and the window follows it (BT-015)
 		screen = board.press(UP);
 		ok(selectedRow(screen) !== undefined, `the selected row stays on screen after ↑ ${step + 1}`);
 	}
-	match(selectedRow(screen) ?? "", /t1 {3}Reproduce/u);
+	match(selectedRow(screen) ?? "", /t4 {3}Review/u);
 	match(screen.slice(0, 2).join("\n"), /Divide rounding/u, "returning to the first task shows the board title");
 });
 
@@ -150,7 +150,7 @@ test("Tab moves the selection to the next section and the window follows (BT-015
 	match(selectedRow(screen) ?? "", /u1 {3}Review/u, "Tab again reaches the operator tasks");
 	match(screen.join("\n"), /Operator tasks/u);
 	screen = board.press(TAB);
-	match(selectedRow(screen) ?? "", /t1 {3}Reproduce/u, "Tab wraps to the first section");
+	match(selectedRow(screen) ?? "", /t4 {3}Review/u, "Tab wraps to the first section");
 	screen = board.press("\x1b[Z");
 	match(selectedRow(screen) ?? "", /u1 {3}Review/u, "Shift+Tab goes back a section");
 });

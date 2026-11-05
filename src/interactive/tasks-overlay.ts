@@ -9,7 +9,7 @@ import {
 } from "../domains/session/task-board.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { Input, matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { clockLocal } from "./format-time.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
@@ -44,9 +44,43 @@ function muted(text: string): string {
 	return clioTheme().fg("menuOption", text);
 }
 
-function taskOriginLabel(task: TaskBoardTask): string {
-	if (task.origin === "user") return `operator ${task.userTaskId ?? "unlinked"}`;
-	return "agent";
+/** Only an operator's task says whose it is; on the agent's own board every other row would repeat `agent`. */
+function taskOriginLabel(task: TaskBoardTask): string | null {
+	return task.origin === "user" ? `operator ${task.userTaskId ?? "unlinked"}` : null;
+}
+
+/**
+ * Current work first, then what stands in its way and what is next, then what
+ * settled, with a claim the record does not back above one it does. Ids keep the
+ * plan's order, so a row can still be placed in it.
+ */
+function taskReadingRank(task: TaskBoardTask): number {
+	if (task.status === "active") return 0;
+	if (task.status === "blocked") return 1;
+	if (task.status === "pending") return 2;
+	if (task.status === "cancelled") return 6;
+	const standing = taskCompletionStanding(task);
+	return standing === "unverified" ? 3 : standing === "claim only" ? 4 : 5;
+}
+
+function tasksInReadingOrder(tasks: ReadonlyArray<TaskBoardTask>): TaskBoardTask[] {
+	return tasks
+		.map((task, index) => ({ task, index }))
+		.sort((left, right) => taskReadingRank(left.task) - taskReadingRank(right.task) || left.index - right.index)
+		.map(({ task }) => task);
+}
+
+/** The words after a task's title: its state, what the record says of a done one, and whose it is. */
+function taskStateClause(task: TaskBoardTask): string {
+	const standing = taskCompletionStanding(task);
+	const contradicted = standing === "unverified" && observedTaskChecks(task).failed.length > 0;
+	return [
+		standing === "unverified" ? "claimed done" : STATUS_PRESENTATION[task.status].label,
+		contradicted ? "check failed" : standing,
+		taskOriginLabel(task),
+	]
+		.filter((part): part is string => part !== null)
+		.join(" · ");
 }
 
 /**
@@ -57,26 +91,29 @@ function taskOriginLabel(task: TaskBoardTask): string {
 function taskPresentation(task: TaskBoardTask): { glyph: string; token: ClioToken; label: string } {
 	const base = STATUS_PRESENTATION[task.status];
 	const standing = taskCompletionStanding(task);
-	if (standing === "unverified") return { ...base, glyph: GLYPH.phaseBlocked, token: "warning" };
+	if (standing === "unverified") return { ...base, glyph: GLYPH.warn, token: "warning" };
 	if (standing === "claim only") return { ...base, token: "annotation" };
 	return base;
 }
 
+/** A row a tight width cuts in its title, so the state beside the title stays readable. */
+const TASK_TITLE_FLOOR = 12;
+
 function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string {
 	const theme = clioTheme();
-	const standing = taskCompletionStanding(task);
 	const presentation = taskPresentation(task);
 	const glyph = theme.fg(presentation.token, presentation.glyph);
-	const title = selected
-		? selectionLabel(true, task.title)
-		: task.status === "completed" || task.status === "cancelled"
-			? dim(task.title)
-			: muted(task.title);
 	const cursor = selected === undefined ? "" : `${selectionMark(selected)} `;
-	return fitRow(
-		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${presentation.label} · ${taskOriginLabel(task)}${standing ? ` · ${standing}` : ""}`)}`,
-		width,
-	);
+	const lead = `${cursor}${glyph} ${dim(task.id.padEnd(4))} `;
+	const clause = ` · ${taskStateClause(task)}`;
+	const room = Math.max(TASK_TITLE_FLOOR, width - visibleWidth(lead) - visibleWidth(clause));
+	const shown = truncateToWidth(task.title, room, GLYPH.ellipsis, false);
+	const title = selected
+		? selectionLabel(true, shown)
+		: task.status === "completed" || task.status === "cancelled"
+			? dim(shown)
+			: muted(shown);
+	return fitRow(`${lead}${title}${dim(clause)}`, width);
 }
 
 function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
@@ -177,9 +214,16 @@ function formatTasksOverlayBodyLines(
 		checkedCount > 0 ? theme.fg("success", `${checkedCount} checked`) : null,
 		claimCount > 0 ? dim(`${claimCount} claim only`) : null,
 	].filter((chip): chip is string => chip !== null);
+	// A tight width gives the counts their own rows, because a cut would hide the blocked one.
+	const summary = `${theme.fg("sectionHeading", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`;
 	const lines: string[] = [
 		sectionHeading("Agent board", width),
-		fitRow(`${SECTION_GUTTER}${theme.fg("sectionHeading", board.title)}${dim(" · ")}${chips.join(dim(" · "))}`, width),
+		...(visibleWidth(summary) + SECTION_GUTTER.length <= width
+			? [fitRow(`${SECTION_GUTTER}${summary}`, width)]
+			: wrapTextWithAnsi(
+					`${theme.fg("sectionHeading", board.title)}\n${chips.join(dim(" · "))}`,
+					width - SECTION_GUTTER.length,
+				).map((line) => fitRow(`${SECTION_GUTTER}${line}`, width))),
 	];
 	// The in-flight run ids render once, right under the title: full ids
 	// in muted, fitted so overflow drops whole ids behind a dim ellipsis.
@@ -188,7 +232,7 @@ function formatTasksOverlayBodyLines(
 		lines.push(fitUnits(theme, `${dim("in flight")} `, activeRuns.map(muted), width));
 	}
 	const spans: TasksRowSpan[] = [];
-	for (const task of board.tasks) {
+	for (const task of tasksInReadingOrder(board.tasks)) {
 		const line = lines.length;
 		lines.push(taskRow(task, width, selectedTaskId === undefined ? undefined : selectedTaskId === task.id));
 		lines.push(...taskReceiptRows(task, width));
@@ -228,8 +272,11 @@ function terminalHistoryRows(
 
 function selectableRows(state: CompositeTasksOverlayState): TasksOverlaySelection[] {
 	return [
-		...(state.board?.tasks.map((task) => ({ kind: "current" as const, boardId: state.board?.boardId ?? "", task })) ??
-			[]),
+		...tasksInReadingOrder(state.board?.tasks ?? []).map((task) => ({
+			kind: "current" as const,
+			boardId: state.board?.boardId ?? "",
+			task,
+		})),
 		...terminalHistoryRows(state.board, state.history).map(({ board, task }) => ({
 			kind: "history" as const,
 			board,
@@ -326,10 +373,9 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
 		const presentation = taskPresentation(row.task);
-		const standing = taskCompletionStanding(row.task);
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`· ${presentation.label}${standing ? ` · ${standing}` : ""} · ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`· ${taskStateClause(row.task)} · ${row.board.title}`)}`,
 				width,
 			),
 			...taskReceiptRows(row.task, width),
