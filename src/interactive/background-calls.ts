@@ -23,12 +23,12 @@ export interface BackgroundCall {
 /**
  * The side agents with no surface of their own. Compaction, side questions,
  * handoff and helpers each draw their own card or overlay, so they stay out.
+ * The judge's verdict gates the call it reviews; memory and prewarm hold nothing.
  */
 const PURPOSES: Readonly<Record<string, { purpose: string; blocksTurn: boolean }>> = {
 	memory: { purpose: "memory review", blocksTurn: false },
 	"safety-judge": { purpose: "safety judge", blocksTurn: true },
 	prewarm: { purpose: "prewarm", blocksTurn: false },
-	"system-one": { purpose: "steering triage", blocksTurn: true },
 };
 
 export interface BackgroundCallTracker {

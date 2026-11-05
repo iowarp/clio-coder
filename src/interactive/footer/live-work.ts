@@ -129,7 +129,10 @@ export function liveWorkStrip(
 	const workers = [workerSummary(facts), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
 	const dot = theme.fg("border", " · ");
-	const note = escapeNote(escVerb, mainActive ? "the run" : facts.workers.length > 1 ? "work" : "the worker");
+	const note = escapeNote(
+		escVerb,
+		mainActive ? "the run" : facts.workers.length > 1 ? "work" : facts.workers.length === 1 ? "the worker" : "it",
+	);
 	const quiet = (text: string): string => theme.fg("annotation", text);
 	const render = (lead: string, parts: ReadonlyArray<string | null>): string =>
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
