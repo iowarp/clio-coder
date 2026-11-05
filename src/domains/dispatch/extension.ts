@@ -11028,6 +11028,10 @@ export function createDispatchBundle(
 			workerApprovalWindows.settle(requestId);
 		},
 		workerPermissionWindow: (requestId) => workerApprovalWindows.read(requestId),
+		workerRunEndsWithTurn: (runId) => {
+			const run = currentAssignmentRun(runId);
+			return run != null && run.requestOrigin === "agent" && run.detached !== true;
+		},
 		holdWorkerPermission: (requestId) => workerApprovalWindows.hold(requestId),
 		restartWorkerPermission: (requestId) => workerApprovalWindows.restart(requestId),
 		grants: {

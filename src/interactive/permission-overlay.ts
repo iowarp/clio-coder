@@ -325,7 +325,9 @@ function permissionChoices(
 	const draftNote = hasDraft ? ` · inert until Backspace clears your draft` : "";
 	if (presentation.tier === "worker") {
 		// An approval is never remembered, only a denial (`deniedEscalations` in the
-		// worker runtime, F8), and the stop key does not reach the worker's process.
+		// worker runtime, F8). The stop key does not reach the worker's process
+		// unless the turn it ends is the one waiting on this worker.
+		const endsWithTurn = view.origin.kind === "worker" && view.origin.endsWithTurn === true;
 		return [
 			{
 				key: "Enter",
@@ -337,8 +339,9 @@ function permissionChoices(
 				key: PERMISSION_STOP_KEY,
 				verb: "stop",
 				// A worker asks while the main agent is often idle, and a key cannot end a turn that is not running.
-				consequence:
-					mainTurn === undefined
+				consequence: endsWithTurn
+					? "denies it and ends the main turn, which also stops this worker"
+					: mainTurn === undefined
 						? "denies it and ends any main turn; this worker keeps running"
 						: mainTurn
 							? "denies it and ends the main turn; this worker keeps running"

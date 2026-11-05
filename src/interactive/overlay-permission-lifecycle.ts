@@ -84,7 +84,11 @@ export interface OverlayPermissionLifecycleDeps {
 	bus: Pick<TelemetryHub, "emit" | "subscribe">;
 	dispatch: Pick<
 		DispatchContract,
-		"resolveWorkerPermission" | "workerPermissionWindow" | "holdWorkerPermission" | "restartWorkerPermission"
+		| "resolveWorkerPermission"
+		| "workerPermissionWindow"
+		| "holdWorkerPermission"
+		| "restartWorkerPermission"
+		| "workerRunEndsWithTurn"
 	>;
 	getAutonomy(): string;
 	getOverlayState(): OverlayState;
@@ -314,13 +318,17 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 	};
 }
 
-function workerApprovalRequestView(entry: WorkerEscalationEntry, queueDepth: number): ApprovalRequestView {
+function workerApprovalRequestView(
+	entry: WorkerEscalationEntry,
+	queueDepth: number,
+	endsWithTurn: boolean,
+): ApprovalRequestView {
 	return {
 		requestId: entry.requestId,
 		tool: entry.tool,
 		actionClass: entry.actionClass,
 		axis: entry.axis,
-		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
+		origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId, ...(endsWithTurn ? { endsWithTurn } : {}) },
 		reason: entry.reason,
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
 		...(entry.consequence !== undefined ? { consequence: entry.consequence } : {}),
@@ -492,7 +500,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		};
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		// The entry is still at the head of the queue here, so the queue's length counts it.
-		const view = workerApprovalRequestView(entry, workerQueue.length);
+		const endsWithTurn = deps.dispatch.workerRunEndsWithTurn?.(entry.runId) === true;
+		const view = workerApprovalRequestView(entry, workerQueue.length, endsWithTurn);
 		const { requestId } = entry;
 		if (
 			!deps.openPermissionOverlay(
@@ -765,7 +774,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		},
 		stopTurn: () => {
 			if (pendingPermission === null && pendingWorker === null) return;
-			const tool = pendingPermission?.call.tool ?? pendingWorker?.agentId;
+			const tool =
+				pendingPermission?.call.tool ??
+				(pendingWorker === null ? undefined : `${pendingWorker.agentId}'s ${pendingWorker.tool} call`);
 			stopping = true;
 			confirmed = false;
 			// closeOverlay drives onPermissionOverlayClosed, which denies under the

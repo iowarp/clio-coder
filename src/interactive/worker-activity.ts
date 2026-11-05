@@ -119,13 +119,15 @@ export function workerActionParts(action: WorkerAction, tense: "running" | "fini
  */
 export function approvalWaitWords(
 	progress: Pick<WorkerProgressSnapshot, "approvalWindow">,
-	now: number = Date.now(),
+	options: { now?: number; narrow?: boolean } = {},
 ): string {
 	const window = progress.approvalWindow;
 	if (window === undefined) return WAITING_FOR_APPROVAL;
-	const left = formatUnattendedRemaining(window.expiresAt - now);
+	const left = formatUnattendedRemaining(window.expiresAt - (options.now ?? Date.now()));
 	const next = window.fallback === "fail" ? `run fails in ${left}` : `denied in ${left}`;
-	return [WAITING_FOR_APPROVAL, ...(window.held ? ["held"] : []), `${next} if unanswered`].join(" · ");
+	return [options.narrow === true ? "your approval" : WAITING_FOR_APPROVAL, ...(window.held ? ["held"] : []), next].join(
+		" · ",
+	);
 }
 
 /**
@@ -135,9 +137,9 @@ export function approvalWaitWords(
  */
 export function workerActivityWords(
 	progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction" | "awaitingApproval" | "approvalWindow">,
-	now: number = Date.now(),
+	options: { now?: number; narrow?: boolean } = {},
 ): string {
-	if (progress.awaitingApproval === true) return approvalWaitWords(progress, now);
+	if (progress.awaitingApproval === true) return approvalWaitWords(progress, options);
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
 	return workerPhaseActivity(progress.phase)[1];

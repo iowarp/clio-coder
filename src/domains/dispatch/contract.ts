@@ -566,6 +566,8 @@ export interface DispatchContract {
 	 * window can be held.
 	 */
 	workerPermissionWindow?(requestId: string): WorkerApprovalWindowView | null;
+	/** The main turn is waiting on this run, so cancelling the turn stops the worker too. */
+	workerRunEndsWithTurn?(runId: string): boolean;
 	/** The person is at this ask's card: it waits until its ceiling, then the fallback applies. */
 	holdWorkerPermission?(requestId: string): boolean;
 	/** The person is present and this ask is queued behind another card: its window starts again. */

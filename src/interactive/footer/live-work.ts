@@ -26,7 +26,7 @@ export interface LiveWorkFacts {
 	/** Active fleet runs, helpers excluded; only the first is named. */
 	workers: ReadonlyArray<DispatchBoardRow>;
 	/** How the worker's current action reads on the fleet dock. */
-	workerActivity: (row: DispatchBoardRow) => string;
+	workerActivity: (row: DispatchBoardRow, width: number) => string;
 	/** Side-agent model calls in flight, from their journaled start to their settle. */
 	background: ReadonlyArray<BackgroundCall>;
 	now: number;
@@ -67,11 +67,11 @@ function foregroundWorker(facts: LiveWorkFacts): DispatchBoardRow | undefined {
 }
 
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
-function workerSummary(facts: LiveWorkFacts): string | null {
+function workerSummary(facts: LiveWorkFacts, width: number): string | null {
 	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
 	const name = sanitizeCallTargetText(first.agentId);
-	const doing = sanitizeCallTargetText(facts.workerActivity(first));
+	const doing = sanitizeCallTargetText(facts.workerActivity(first, width));
 	const elapsed = workerElapsed(first);
 	// A queued run is held up and a running one is not, so `+1 more` must not stand for both.
 	const rest = facts.workers.filter((row) => row !== first);
@@ -107,7 +107,7 @@ function isMainActive(status: AgentStatus): boolean {
  * can go in now, which it can unless the turn itself is waiting on this work.
  */
 export function railDetail(facts: LiveWorkFacts, width: number): string | null {
-	const worker = workerSummary(facts);
+	const worker = workerSummary(facts, width);
 	const background = backgroundSummary(facts, width);
 	if (worker === null && background === null) return null;
 	const waiting = facts.background.some((call) => call.blocksTurn);
@@ -144,7 +144,7 @@ export function liveWorkStrip(
 ): string | null {
 	const room = Math.max(1, width);
 	const mainActive = isMainActive(facts.status);
-	const workers = [workerSummary(facts), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
+	const workers = [workerSummary(facts, room), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
 	const dot = theme.fg("border", " · ");
 	const note = escapeNote(
