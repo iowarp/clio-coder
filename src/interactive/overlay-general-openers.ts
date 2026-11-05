@@ -51,6 +51,7 @@ import {
 	renderFleetPlanCard,
 } from "./dispatch-board.js";
 import type { FleetPlanRuns } from "./fleet-plan-runs.js";
+import { progressNoticeKeys } from "./footer/notifications.js";
 import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import type { HintEntry } from "./overlay-frame.js";
@@ -818,6 +819,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.then((outcome) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
+				// A stop asked for from the board is over once the plan is; its notice must not surface after this one.
+				for (const key of progressNoticeKeys(fleetRootId)) deps.dismissNotification?.(key);
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
 				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
 				if (plan?.state === "cancelled") {
@@ -838,6 +841,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			.catch((error: unknown) => {
 				fleetInFlight = null;
 				deps.dismissNotification?.("fleet-run:started");
+				// A stop asked for from the board is over once the plan is; its notice must not surface after this one.
+				for (const key of progressNoticeKeys(fleetRootId)) deps.dismissNotification?.(key);
 				const failed = deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
 				if (failed?.state === "cancelled") {
 					deps.stderr(`${renderFleetPlanCard(failed, deps.terminal.columns).join("\n")}\n`);

@@ -79,7 +79,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 			return;
 		}
 		if (row.status === "cancelling") {
-			deps.notify("info", `cancellation is already in progress for ${row.runId}`, `dispatch-board:cancel:${row.runId}`);
+			deps.notify("info", `cancellation is already in progress for ${row.agentId}`, `dispatch-board:cancel:${row.runId}`);
 			return;
 		}
 		if (!isDispatchBoardRowCancellable(row)) {
@@ -92,14 +92,10 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		}
 		try {
 			deps.abortDispatch(row.runId);
-			deps.notify(
-				"info",
-				`cancellation requested for ${row.agentId} (${row.runId})`,
-				`dispatch-board:cancel:${row.runId}`,
-			);
+			deps.notify("info", `cancellation requested for ${row.agentId}`, `dispatch-board:cancel:${row.runId}`);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			deps.notify("error", `could not cancel ${row.runId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
+			deps.notify("error", `could not cancel ${row.agentId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
 		}
 	};
 
