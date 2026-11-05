@@ -1,3 +1,4 @@
+import { formatFooterTokens } from "../core/display-units.js";
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import { factKnownValue } from "../core/telemetry/known.js";
@@ -27,10 +28,12 @@ export interface TurnSpend {
 	coverage: string | null;
 	/** The same caveat for a one-row receipt, whose full wording lives in the Detailed style and /usage. */
 	coverageNote: string | null;
-	/** The token subtotals a one-row receipt can state, or null when no amount is known. */
+	/** The measured token amounts a one-row receipt states plainly, or null when nothing was measured. */
 	tokens: string | null;
+	/** The measured prompt-cache read a one-row receipt states, or null when none was measured. */
+	cached: string | null;
 	/** One call's own amounts, for a turn whose sum mixes a call that was moved away from with the one that answered. */
-	answer?: { tokens: string | null; cacheRead: string | null };
+	answer?: { tokens: string | null; cached: string | null };
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -54,14 +57,37 @@ function nonZero(quantity: Quantity): boolean {
 	);
 }
 
+/**
+ * The measured part of a quantity in the footer's narrow form, or null when no call measured it. A one-row receipt states
+ * only this: a bound such as `≥~12.9k +?` is true but unreadable on that row, and an estimate of a call that reported
+ * nothing is not usage. Detailed and /usage keep the bounds.
+ */
+function measuredCount(quantity: Quantity): string | null {
+	const fact = quantity.fact;
+	if ("kind" in fact) return fact.kind === "measured" ? formatFooterTokens(fact.value) : null;
+	return fact.coverage.measured > 0 ? formatFooterTokens(fact.measured) : null;
+}
+
+/** `in 321 · out 12` from what was measured, or null when neither side was. */
+function measuredTokens(input: Quantity, output: Quantity): string | null {
+	const inMeasured = measuredCount(input);
+	const outMeasured = measuredCount(output);
+	if (inMeasured === null && outMeasured === null) return null;
+	return [inMeasured === null ? null : `in ${inMeasured}`, outMeasured === null ? null : `out ${outMeasured}`]
+		.filter(Boolean)
+		.join(" · ");
+}
+
+function measuredCached(cacheRead: Quantity): string | null {
+	const cached = measuredCount(cacheRead);
+	return cached === null || cached === "0" ? null : cached;
+}
+
 /** What the call that answered reported, which a moved turn's one-row receipt states in place of the sum. */
 function answerSpend(view: TelemetryView, turnId: string, callId: string): NonNullable<TurnSpend["answer"]> {
 	const usage = view.calls({ turnIds: [turnId] }).calls.find((call) => call.callId === callId)?.usage;
-	if (!usage || (known(usage.input) <= 0 && known(usage.output) <= 0)) return { tokens: null, cacheRead: null };
-	return {
-		tokens: `in ${renderCompactCount(usage.input.fact)} · out ${renderCompactCount(usage.output.fact)}`,
-		cacheRead: nonZero(usage.cacheRead) ? renderCompactCount(usage.cacheRead.fact) : null,
-	};
+	if (!usage) return { tokens: null, cached: null };
+	return { tokens: measuredTokens(usage.input, usage.output), cached: measuredCached(usage.cacheRead) };
 }
 
 /** Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts. */
@@ -80,7 +106,7 @@ export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?:
 	if (!calls || !input || !output || !cacheRead || !cacheWrite || !usd || !total || !neverSent) return null;
 	const unknownCalls = "kind" in total.fact ? (total.fact.kind === "unknown" ? 1 : 0) : total.fact.unknownCount;
 	const skipped = known(neverSent);
-	const stated = known(input) + known(output) > 0;
+	const tokens = measuredTokens(input, output);
 	const neverSentNote = skipped > 0 ? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent` : null;
 	return {
 		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,
@@ -92,11 +118,13 @@ export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?:
 		// A turn nothing priced makes no cost claim, so the receipt names none rather than "not measured".
 		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
 		coverage: unknownCalls > 0 || skipped > 0 ? usageCoverageLabel(unknownCalls, skipped) : null,
+		// `usage unknown` only when no call measured anything; a call cancelled in its first-token wait is one of those.
 		coverageNote:
-			unknownCalls === 0 || stated
+			tokens !== null || (unknownCalls === 0 && !contributed(input) && !contributed(output))
 				? neverSentNote
-				: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
-		tokens: stated ? `in ${renderCompactCount(input.fact)} · out ${renderCompactCount(output.fact)}` : null,
+				: "usage unknown (/usage)",
+		tokens,
+		cached: measuredCached(cacheRead),
 		...(answeringCallId === undefined ? {} : { answer: answerSpend(view, turnId, answeringCallId) }),
 	};
 }
