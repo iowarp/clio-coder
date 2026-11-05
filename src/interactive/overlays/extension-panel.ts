@@ -29,7 +29,7 @@ function cell(text: string, width: number): string {
  * labelled values instead, so no column is cut away. Text stays the plain
  * characters the extension sent; layout is the host's only addition.
  */
-export function extensionPanelRows(panel: ExtensionPanel, width: number): string[] {
+function extensionPanelRows(panel: ExtensionPanel, width: number): string[] {
 	const safe = Math.max(1, width);
 	const plain = (text: string): string => extensionPlainText(text);
 	const wrap = (text: string): string[] =>

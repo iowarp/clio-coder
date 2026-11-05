@@ -34,7 +34,7 @@ const STATUS_ROLES = {
  * owner's name ("Local status ready") gives the name to the label instead of
  * saying it twice, so the footer reads "Local status: ready".
  */
-export function ownedStatus(owner: string, text: string): { owner: string; text: string } {
+function ownedStatus(owner: string, text: string): { owner: string; text: string } {
 	const trimmed = text.trim();
 	if (trimmed.toLowerCase().startsWith(owner.toLowerCase())) {
 		const rest = trimmed.slice(owner.length).replace(/^[\s:·-]+/u, "");
