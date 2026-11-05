@@ -668,7 +668,8 @@ describe("dispatch quality presentation", () => {
 		const fanOut = renderToolSubline({ ...finished, cardAttached: true }, 76)
 			.map(stripTerminalSequences)
 			.join(" ");
-		match(fanOut, /delegated · 3 ok ✓/u);
+		match(fanOut, /delegated · 3 ok/u);
+		doesNotMatch(fanOut, /3 ok ✓/u);
 		doesNotMatch(fanOut, /quality|grounded|validation/u);
 		const single = renderToolSubline(
 			{
