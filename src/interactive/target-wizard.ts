@@ -332,7 +332,12 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		const field =
 			pending.kind === "text"
 				? pending.options.mask
-					? [theme.fg("inputText", "•".repeat(this.input.getValue().length))]
+					? // A masked field still shows where typing goes; an empty one was a blank row under the prompt.
+						[
+							this.input.getValue().length > 0
+								? theme.fg("inputText", `> ${"•".repeat(this.input.getValue().length)}`)
+								: `${theme.fg("inputText", ">")} ${theme.fg("annotation", "type or paste; each character shows as •")}`,
+						]
 					: this.input.render(width).map((line) => theme.base("inputText", line))
 				: pending.options.searchable
 					? [theme.fg("searchQuery", `Filter: ${this.input.getValue()}`)]
