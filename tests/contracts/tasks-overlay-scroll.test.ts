@@ -129,7 +129,11 @@ test("the selection walks into operator tasks and the window follows it (BT-015)
 		ok(selected !== undefined, `the selected row stays on screen after ↓ ${step + 1}`);
 		visited.push(selected);
 	}
-	match(visited.at(-1) ?? "", /u2 {3}Document the rounding mode/u, "↓ reaches the operator tasks right after the agent board");
+	match(
+		visited.at(-1) ?? "",
+		/u2 {3}Document the rounding mode/u,
+		"↓ reaches the operator tasks right after the agent board",
+	);
 	match(screen.join("\n"), /Operator tasks/u, "the section heading shows with its rows");
 	board.press("d");
 	deepStrictEqual(board.done, ["u2"], "[d] done acts on the operator task the operator selected");
