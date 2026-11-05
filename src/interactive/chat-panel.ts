@@ -841,9 +841,19 @@ function fitMarkdownTables(tokens: readonly Tokens.Generic[], width: number): { 
 				return token.raw;
 			}
 			rewritten = true;
+			// Each row becomes one compact record: its first field in bold names it,
+			// the other fields follow on hard line breaks, and a blank line parts records.
 			return `${table.rows
-				.map((row) => row.map((cell, index) => `${table.header[index]?.text ?? ""}: ${cell.text}`).join("\n\n"))
-				.join("\n\n---\n\n")}\n\n`;
+				.map((row) =>
+					row
+						.map((cell, index) => {
+							const label = table.header[index]?.text.trim() ?? "";
+							const field = label ? `${label}: ${cell.text}` : cell.text;
+							return index === 0 && field.trim() ? `**${field}**` : field;
+						})
+						.join("\\\n"),
+				)
+				.join("\n\n")}\n\n`;
 		})
 		.join("");
 	return { text, rewritten };
