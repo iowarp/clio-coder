@@ -4,6 +4,7 @@ import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assist
 import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
+import { renderCalls } from "../core/telemetry/render.js";
 import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
@@ -1143,7 +1144,8 @@ function renderTurnUsageLine(
 	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
-		const calls = spend?.calls != null && (spend.calls > 1 || retries !== null) ? `${spend.calls} calls` : null;
+		const calls =
+			spend?.calls != null && (spend.calls > 1 || retries !== null) ? renderCalls(String(spend.calls), "call") : null;
 		const rowFacts = [
 			`${outcome}${receiptDuration(usage)}`,
 			...(calls !== null || retries !== null ? [[calls, retries].filter(Boolean).join(", ")] : []),

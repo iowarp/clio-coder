@@ -548,6 +548,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
+		getEndedNotifications: () => notifications.ended(),
 		getBackgroundCalls: () => backgroundCalls.active(),
 		getKeyContext: () => {
 			if (dockTop(deps.tui) !== null || composerEditor?.isShowingAutocomplete()) return "surface";

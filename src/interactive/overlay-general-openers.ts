@@ -99,6 +99,7 @@ export interface OverlayGeneralOpenersDeps {
 	getTaskMemoryStatus?: Parameters<typeof openMemoryOverlay>[1];
 	dataDir: string;
 	notify: (level: "info" | "success" | "warning" | "error", text: string, key?: string) => void;
+	dismissNotification?: (key: string) => void;
 	dispatch: DispatchContract;
 	/** The process's System One, whose engine breakers `/health` shows; read when the overlay opens. */
 	systemOne?: () => SystemOne | undefined;
@@ -784,6 +785,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		void run(args)
 			.then((outcome) => {
 				fleetInFlight = null;
+				deps.dismissNotification?.("fleet-run:started");
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
 				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
 				deps.notify(
@@ -795,6 +797,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			})
 			.catch((error: unknown) => {
 				fleetInFlight = null;
+				deps.dismissNotification?.("fleet-run:started");
 				deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
 				if (error instanceof FleetWorkspaceBusyError) {
 					deps.notify("warning", `fleet ${preview.name}: ${error.message}`, "fleet-run:refused");

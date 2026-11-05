@@ -95,6 +95,7 @@ export interface FooterDashboardDeps {
 	getExtensionStats?: () => { active: number; installed: number };
 	getContextState?: () => ContextState;
 	getNotifications?: () => ReadonlyArray<Notification>;
+	getEndedNotifications?: () => ReadonlyArray<Notification>;
 	/** Side-agent model calls in flight; the rail names them, and the footer stops repeating them. */
 	getBackgroundCalls?: () => ReadonlyArray<BackgroundCall>;
 	/** Who answers the keyboard right now; the hint row follows it. Absent reads as the idle composer. */
@@ -131,6 +132,9 @@ export interface FooterDashboardRenderState {
 	context: ContextEngineFacts;
 	agent: AgentWorkFacts;
 	notices: ReadonlyArray<Notification>;
+	/** Warnings and errors that already left the footer, which the Activity page still lists. */
+	endedNotices?: ReadonlyArray<Notification>;
+	dismissKeyLabel?: string;
 	status: AgentStatus;
 	toolCounts: ToolTallySnapshot;
 	dispatchRows: ReadonlyArray<DispatchBoardRow>;
@@ -372,6 +376,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						.join("/") || "Dashboard",
 			}),
 			notices,
+			endedNotices: deps.getEndedNotifications?.() ?? [],
+			...(deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {}),
 			status: status ?? {
 				phase: "idle",
 				since: 0,
@@ -392,13 +398,18 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const current = state(width);
 		const lifecycleHint = deps.getLifecycleHint?.();
 		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("annotation", lifecycleHint), width)] : [];
+		// The Activity page lists every notice itself, which is what the footer's chip opens onto.
 		const notices =
-			dashboardMode === "compact"
+			dashboardMode === "compact" || page === "Activity"
 				? []
-				: formatNotificationPanel(current.notices, width, {
-						maxRows: 1,
-						...(deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {}),
-					}).slice(1);
+				: formatNotificationPanel(
+						current.notices.filter((notice) => notice.presentation !== "setting"),
+						width,
+						{
+							maxRows: 1,
+							...(deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {}),
+						},
+					).slice(1);
 		const contributed = deps.getExtensionStatus?.() ?? [];
 		const extensionLine =
 			dashboardMode === "expanded" && contributed.length

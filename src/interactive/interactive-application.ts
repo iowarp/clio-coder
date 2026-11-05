@@ -1075,11 +1075,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		requestRender: () => tui.requestRender(),
 		notify,
 		dismissNotification: (key) => notifications.dismiss(key),
-		dismissHelperNotifications: () => {
-			for (const notice of notifications.list()) {
-				if (notice.key?.startsWith("helper:")) notifications.dismiss(notice.id);
-			}
-		},
+		supersedeWorkNotifications: () => notifications.supersede("work"),
 		appendTranscriptNotice: (level, text, source) => appendNotice(level, text, busNoticeSink, source),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
@@ -1482,6 +1478,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		}
 	};
 	overlayLifecycle = createOverlayLifecycle({
+		dismissNotification: (key) => notifications.dismiss(key),
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getDispatchRows: () => dispatchBoardStore.workerRows(),
 		app: { ...deps, ...settingActions },
@@ -1774,6 +1771,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		supersedeNotices: (scope) => notifications.supersede(scope),
 		dismissNotice: (key) => {
 			notifications.dismiss(key);
 		},

@@ -70,9 +70,10 @@ export interface InteractiveEventProjectionDeps {
 	refreshLiveWorkspaceGit: (force: boolean) => void;
 	refreshFooter: () => void;
 	requestRender: () => void;
-	notify: (level: InteractiveProjectionNoticeLevel, text: string, key?: string) => void;
+	notify: (level: InteractiveProjectionNoticeLevel, text: string, key?: string, ttlMs?: number) => void;
 	dismissNotification: (key: string) => void;
-	dismissHelperNotifications?: () => void;
+	/** A turn is later work: notices about earlier runs stop reading as current. */
+	supersedeWorkNotifications?: () => void;
 	appendTranscriptNotice: (level: InteractiveTranscriptNoticeLevel, text: string, source?: NoticeSource) => void;
 	refreshSettingsOverlay: () => void;
 	onConfigHotReload?: (settings: Readonly<ClioSettings>) => void;
@@ -124,7 +125,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		const text = notice.trim();
 		if (text.length === 0) continue;
 		const key = text.toLowerCase().includes("keybinding notice") ? "startup:keybinding-notice" : text;
-		deps.notify(classifyNoticeLevel(text), text, key);
+		const level = classifyNoticeLevel(text);
+		// A boot warning names a condition that stays true, such as an ignored project layer; it holds until read.
+		deps.notify(level, text, key, ...(level === "info" ? [] : ([0] as const)));
 	}
 
 	const primaryUnsubscribers: Array<() => void> = [];
@@ -225,7 +228,8 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.dismissNotification("finish.unverified");
 				deps.dismissNotification("finish.coverage-unverified");
 				deps.dismissNotification("safety:blocked");
-				deps.dismissHelperNotifications?.();
+				deps.dismissNotification("nudge.continuation.spent");
+				deps.supersedeWorkNotifications?.();
 			}
 			if (event.type === "agent_start" && showProgress) deps.startTerminalProgress();
 			else if (event.type === "agent_end" && event.retryPending === undefined) {
@@ -254,7 +258,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.bus.subscribe("context.warning_raised", (payload) => {
 			const event = payload as ContextWarningPayload | null | undefined;
 			if (event && typeof event === "object" && "warning" in event) {
-				if (event.warning !== null) deps.notify("warning", event.warning, "context-low-warning");
+				if (event.warning !== null) deps.notify("warning", event.warning, "context-low-warning", 0);
 				else deps.dismissNotification("context-low-warning");
 			}
 			deps.refreshFooter();
@@ -368,6 +372,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					notice.level,
 					notice.text,
 					notice.kind === "external-divergence" ? "config:routing-divergence" : "config:target-removed",
+					0,
 				);
 			}
 			deps.refreshSettingsOverlay();
@@ -385,7 +390,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			// The domain already folded this to one line with a remedy; the frame
 			// only ever sees a notice, never an error object or a stack.
 			if (typeof event.message === "string" && event.message.length > 0) {
-				deps.notify("error", `[config] settings reload rejected: ${event.message}`, "config:reload-failed");
+				deps.notify("error", `[config] settings reload rejected: ${event.message}`, "config:reload-failed", 0);
 			} else if (event.message === null) {
 				deps.dismissNotification("config:reload-failed");
 			}
@@ -396,7 +401,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			if (deps.isReloadReporting?.()) return;
 			const text = restartRequiredNotice(payload);
 			if (text === null) return;
-			deps.notify("warning", text, "config:restart-required");
+			deps.notify("warning", text, "config:restart-required", 0);
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
