@@ -428,9 +428,9 @@ test("a lock, an unload, a switch and a load each say their own thing, and a loc
 		since: at,
 	});
 	strictEqual(held.subject, "Clio");
-	match(held.label, /residency lock/);
-	match(held.label, /held by Clio pid 4242 for Big-model/);
-	match(wait({ stage: "lock", holder: null, since: at }).label, /holder unknown/);
+	match(held.label, /is waiting for another Clio/);
+	match(held.label, /pid 4242 is loading Big-model/);
+	match(wait({ stage: "lock", holder: null, since: at }).label, /who holds it is unknown/);
 	match(
 		wait({ stage: "lock", holder: { pid: 1, host: "other", self: false, wants: null }, since: at }).label,
 		/on other/,

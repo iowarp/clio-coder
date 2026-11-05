@@ -627,22 +627,19 @@ function admissionFacts(
 	const way: RailFact = { ...ESC_CANCELS, keep: RAIL_ACTION_KEEP };
 	switch (admission.stage) {
 		case "lock": {
+			// The lock is Clio's machinery; what the operator needs is who is changing the server's models and to what.
 			const holder = admission.holder;
-			const who =
-				holder === null
-					? null
-					: holder.self
-						? "this Clio"
-						: `Clio ${holder.host ? `on ${holder.host} ` : ""}pid ${holder.pid}`;
+			const who = holder === null ? null : `${holder.host ? `Clio on ${holder.host} ` : ""}pid ${holder.pid}`;
+			const doing = holder?.wants ? `is loading ${nickname(holder.wants)}` : "is changing the loaded model";
 			const held: RailFact = {
-				text: who === null ? "holder unknown" : `held by ${who}${holder?.wants ? ` for ${nickname(holder.wants)}` : ""}`,
-				...(holder === null ? {} : { short: holder.self ? "held by this Clio" : `held by pid ${holder.pid}` }),
+				text: holder === null ? "who holds it is unknown" : holder.self ? `this Clio ${doing}` : `${who} ${doing}`,
+				...(holder === null ? {} : { short: holder.self ? "this Clio" : `pid ${holder.pid}` }),
 				// With room to name the owner, naming it outranks the long form of the way out.
 				keep: room >= 58 ? RAIL_ACTION_KEEP : 6,
 			};
 			return {
-				head: "is waiting for the residency lock",
-				tight: "is waiting for a lock",
+				head: holder?.self === true ? "is waiting for its own model load" : "is waiting for another Clio",
+				tight: "is waiting its turn",
 				subject: "Clio",
 				facts: [elapsed, held, way],
 			};
