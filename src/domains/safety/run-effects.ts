@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
@@ -256,10 +257,12 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision += 1;
 				for (const [name, passed] of validationOutcomes) if (passed) validationOutcomes.delete(name);
 			}
+			// Only a check that ran can fail. A call the engine answered without
+			// reaching its tool settles with no outcome, so it records nothing.
+			const checkOutcome = checkingCalls.get(toolCallId) ?? null;
 			if (
 				effects.validationName !== null &&
-				checkingCalls.get(toolCallId) !== "blocked" &&
-				(failed || effects.mutationRevision === mutationRevision)
+				(failed ? checkOutcome === "error" : checkOutcome !== "blocked" && effects.mutationRevision === mutationRevision)
 			)
 				validationOutcomes.set(effects.validationName, !failed);
 			if (failed) {
@@ -340,5 +343,8 @@ export function recordToolExecutionEffects(recorder: RunEffectsRecorder, event: 
 		recorder.checkOutcome(id, child.admission.outcome);
 		recorder.finish(id, child.admission.outcome !== "ok");
 	}
+	// A structured refusal comes back as an error result with an "error" outcome,
+	// such as a gateway capability off the run's surface, but nothing ran.
+	if (isRefusalToolResultError(event.result)) recorder.checkOutcome(toolCallId, "blocked");
 	recorder.finish(toolCallId, event.isError === true);
 }
