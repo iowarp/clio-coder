@@ -903,6 +903,8 @@ export function showClioOverlayFrame(
 		adaptiveHeight?: boolean;
 		/** Only unanswered decisions receive the small attention cue. */
 		awaitingInput?: boolean | (() => boolean);
+		/** The body states the run's lifecycle itself, so no live-work line joins it. */
+		ownsStatus?: boolean;
 	},
 ): OverlayHandle {
 	const {
@@ -915,10 +917,18 @@ export function showClioOverlayFrame(
 		adaptiveHeight,
 		awaitingInput,
 		approval,
+		ownsStatus,
 		...overlayOptions
 	} = options;
 	const frame = new ClioOverlayFrame(child, title, footerHint, 0, "left", tone, false, awaitingInput);
-	const entry = dockMount(tui, frame, keepComposer === true, adaptiveHeight === true, approval === true);
+	const entry = dockMount(
+		tui,
+		frame,
+		keepComposer === true,
+		adaptiveHeight === true,
+		approval === true,
+		ownsStatus === true,
+	);
 	// The engine keeps this overlay for focus and input routing only. It paints
 	// nothing: the composer draws the frame inline, in normal flow, so the
 	// transcript keeps its rows and its mouse selection.

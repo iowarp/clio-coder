@@ -81,6 +81,8 @@ export interface EditorChrome {
 	getLoopRail?: (width: number) => string | null;
 	getThinking?: () => { label: string; hasLevels: boolean; supportedLevels?: readonly string[] };
 	getHarnessStatus?: (width: number) => { label: string; glyph: string; token: ClioToken; live: boolean } | null;
+	/** What keeps running behind a dock that hides this rail; null at idle. `escVerb` is what the dock's Esc does. */
+	getLiveWorkStrip?: (width: number, escVerb: string | null) => string | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
 	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
@@ -194,6 +196,11 @@ function thinkingRailHint(
 	return Array.from({ length: THINKING_BRAIN_SLOTS }, (_, index) =>
 		theme.fg(index < count ? activeRole : "thinkingInactive", index < count || nerdFontEnabled() ? glyph : "○"),
 	).join(" ");
+}
+
+/** What the rail says Esc does on this surface, read from the same fitted hint the operator sees. */
+function dockEscVerb(hint: string | undefined): string | null {
+	return /\[Esc\] ([^·]+?)(?: ·|$)/u.exec(hint?.trim() ?? "")?.[1] ?? null;
 }
 
 /** The line the empty composer shows for the mode it is in. */
@@ -448,7 +455,13 @@ export class ClioEditor extends Editor {
 				"activeModelIdentity",
 				truncateToWidth(nickname, Math.max(4, Math.min(24, Math.floor(width / 3))), GLYPH.ellipsis, false),
 			);
-		const label = [lead, identity, activity].filter(Boolean).join(" ");
+		// The state outranks the identity: a narrow rail keeps `● running a command`
+		// rather than cutting `Judge-model is runnin…` and losing what it is doing.
+		const whole = [lead, identity, activity].filter(Boolean).join(" ");
+		const label =
+			activity && visibleWidth(whole) > this.railLabelRoom(width) - (rail.yolo ? 7 : 0)
+				? [lead, activity.replace("is ", "")].filter(Boolean).join(" ")
+				: whole;
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		const draftLabel = mode === "STEER" || (mode === "FOLLOW-UP" && text.length > 0) ? theme.fg("draftState", mode) : "";
 		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
@@ -552,7 +565,12 @@ export class ClioEditor extends Editor {
 	}
 
 	/** A docked command or menu: its title and keys on the composer's rails, its body between them. */
-	private renderDock(entry: DockEntry, width: number, theme: ClioTheme, rail: EditorRailState): string[] {
+	private renderDock(
+		entry: DockEntry,
+		width: number,
+		theme: ClioTheme,
+		rail: EditorRailState,
+	): { lines: string[]; bodyEnd: number } {
 		const gutter = ClioEditor.DOCK_GUTTER;
 		const contentWidth = Math.max(1, width - gutter * 2);
 		const adaptive = entry.adaptive === true;
@@ -573,11 +591,17 @@ export class ClioEditor extends Editor {
 			? `${theme.fg(rail.tone ?? "composerRail", attentionCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true))} ${titleText}`
 			: titleText;
 		const hint = entry.frame.dockHint(this.railLabelRoom(width) + 4);
-		return [
+		const lines = [
 			this.topRail(width, theme, rail, title),
 			...body.map((row) => padAnsi(`${pad}${row}${pad}`, width)),
 			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : ""),
 		];
+		// The rail this body replaced is the only place the run's phase showed. A
+		// surface that reports its own lifecycle keeps its rows.
+		const bodyEnd = lines.length - 1;
+		if (entry.ownsStatus === true) return { lines, bodyEnd };
+		const strip = this.chrome.getLiveWorkStrip?.(Math.max(1, width - 2), dockEscVerb(hint));
+		return { lines: strip ? [...lines, padAnsi(` ${strip}`, width)] : lines, bodyEnd };
 	}
 
 	/**
@@ -777,9 +801,9 @@ export class ClioEditor extends Editor {
 				now: this.railAnimationTime,
 				...(docked.approval ? { tone: "attentionRail" as const } : {}),
 			};
-			const lines = this.renderDock(docked, safeWidth, theme, rail);
+			const { lines, bodyEnd } = this.renderDock(docked, safeWidth, theme, rail);
 			this.autocompleteRowMap = lines.map(() => -1);
-			return this.paintComposerBody(lines, safeWidth, lines.length - 1, "menuOption");
+			return this.paintComposerBody(lines, safeWidth, bodyEnd, "menuOption");
 		}
 		const lines = super.render(width);
 		if (lines.length === 0) return lines;

@@ -26,6 +26,7 @@ import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
+import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -37,7 +38,7 @@ import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
 import { admissionHint } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
-import { createDispatchBoardStore, createDispatchBoardView } from "./dispatch-board.js";
+import { createDispatchBoardStore, createDispatchBoardView, dispatchStatusPresentation } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
@@ -46,6 +47,7 @@ import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
+import { type LiveWorkFacts, liveWorkStrip } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter } from "./footer/notifications.js";
 import { composerPhasePresentation } from "./footer/widgets.js";
@@ -65,8 +67,11 @@ import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { WorkspaceSurfaces } from "./surfaces/registry.js";
 import { createDropAlerts } from "./telemetry-drops.js";
 import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
+import { clioTheme } from "./theme/index.js";
+import { modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
+import { workerActivityWords } from "./worker-activity.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 /** How long one `/skill <name>` listing serves later keystrokes. */
@@ -555,6 +560,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	unsubscribeTelemetry.push(deps.telemetry.read?.subscribe("health", checkDrops) ?? (() => {}));
 
+	const currentLiveWork = (): LiveWorkFacts => ({
+		actor: modelNickname(deps.getSettings?.().chat?.model),
+		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
+		workers: dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row)),
+		workerActivity: (row) =>
+			row.progress ? workerActivityWords(row.progress) : dispatchStatusPresentation(row.status).label,
+		now: Date.now(),
+	});
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getModelLabel: () => {
@@ -567,6 +580,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			return status.phase === "idle" ? null : composerPhasePresentation(status, width, Date.now());
 		},
+		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
 			: {}),
