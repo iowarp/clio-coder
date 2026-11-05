@@ -162,7 +162,7 @@ function formatTasksOverlayBodyLines(
 			lines: [
 				sectionHeading("Agent board", width),
 				...emptyRows(muted("No agent board in this session."), width),
-				...emptyRows(dim('The agent declares one with the tasks tool (action="plan") before multi-step work.'), width),
+				...emptyRows(dim("The model lists its steps here before multi-step work."), width),
 			],
 			spans: [],
 		};

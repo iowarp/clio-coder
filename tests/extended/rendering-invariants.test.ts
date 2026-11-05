@@ -2667,8 +2667,8 @@ describe("tool classes", () => {
 				}),
 				style,
 			).join("\n");
-			strictEqual(plain.split("bash blocked: system_modify").length - 1, 1, plain);
-			match(plain, /^\$ blocked `rm -rf \.\/build` ✗ · bash blocked: system_modify/u);
+			strictEqual(plain.split("bash blocked: system_modify").length - 1, 0, plain);
+			match(plain, /^\$ blocked `rm -rf \.\/build` ✗ · bash blocked: changes the system/u);
 			match(plain, /rule: rm-recursive-or-force/u, "the rest of the rejection stays");
 		}
 	});

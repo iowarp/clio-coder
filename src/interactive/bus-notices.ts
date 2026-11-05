@@ -10,6 +10,7 @@ import type {
 	PermissionRequestedPayload,
 	SafetyBlockedPayload,
 } from "../core/telemetry/live-events.js";
+import { actionClassWords } from "../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { safetyNetRailText } from "../domains/safety/decision-presentation.js";
 import { describeBudgetBlock, readBudgetBlock } from "../domains/scheduling/budget.js";
@@ -204,17 +205,17 @@ export function approvalParkedNotice(tool: string, decision: SafetyDecision, aut
 		const asker = safetyNetRailText(axis.ruleId);
 		return {
 			level: "warn",
-			text: `[approval] Parked ${tool} (${actionClass}): ${asker} asks for confirmation. Approve once, or Esc to deny this call.`,
+			text: `${tool} waits on you because it ${actionClassWords(actionClass)}: ${asker} asks for confirmation. Approve once, or Esc denies this call.`,
 			source: "approval",
 		};
 	}
 	const widen =
 		actionClass === "execute"
 			? " Approve once, or add it to .clio-coder/safety.yaml commands."
-			: " Approve once, or Esc to deny this call.";
+			: " Approve once, or Esc denies this call.";
 	return {
 		level: "warn",
-		text: `[approval] Parked ${tool} (${actionClass}): asks at autonomy ${autonomy}.${widen}`,
+		text: `${tool} waits on you because it ${actionClassWords(actionClass)}: autonomy ${autonomy} asks.${widen}`,
 		source: "approval",
 	};
 }
@@ -228,13 +229,13 @@ export function workerEscalationNotice(payload: unknown): BusNotice | null {
 	if (axis.kind === "net") {
 		return {
 			level: "warn",
-			text: `[approval] Worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to deny this call.`,
+			text: `Worker ${agentId} asks to run ${payload.tool}, which ${actionClassWords(payload.actionClass)}: ${safetyNetRailText(axis.ruleId)} asks for confirmation. Approve once, or Esc denies this call. /view dispatch:${runId}`,
 			source: "fleet",
 		};
 	}
 	return {
 		level: "warn",
-		text: `[approval] Worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): asks at autonomy ${axis.level}. Approve once, or Esc to deny this call.`,
+		text: `Worker ${agentId} asks to run ${payload.tool}, which ${actionClassWords(payload.actionClass)}: autonomy ${axis.level} asks. Approve once, or Esc denies this call. /view dispatch:${runId}`,
 		source: "fleet",
 	};
 }
@@ -249,13 +250,9 @@ export function workerEscalationNotice(payload: unknown): BusNotice | null {
  */
 export function safetyBlockedNotice(payload: unknown): BusNotice | null {
 	if (!isSafetyBlockedPayload(payload)) return null;
-	const rule =
-		payload.ruleId !== undefined && payload.ruleId !== payload.reasonCode
-			? `rule ${payload.ruleId} (${payload.reasonCode})`
-			: payload.reasonCode;
 	return {
 		level: "warn",
-		text: `[safety-net] Blocked ${payload.tool} (${payload.actionClass}): ${rule} via ${payload.policySource}. This gate applies at every autonomy level.`,
+		text: `Clio's safety net blocked ${payload.tool} because it ${actionClassWords(payload.actionClass)}. This gate applies at every autonomy level, and /view names the rule.`,
 		source: "safety",
 	};
 }
