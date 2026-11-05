@@ -2,6 +2,7 @@ import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import { reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { type AgentStatus, INITIAL_STATUS } from "../../src/session-control/status-types.js";
 
@@ -199,4 +200,70 @@ test("Esc during a first-token wait puts the receipt under the cancelled prompt 
 	ok(firstReceipt >= 0, output);
 	ok(prompt > firstReceipt, output);
 	ok(cancelled > prompt, output);
+});
+
+test("a backoff longer than the stuck threshold is Clio's own countdown and never reads as silence", () => {
+	const machine = reducer();
+	waitingOnModel(machine);
+	machine.apply({
+		type: "retry_status",
+		status: { phase: "scheduled", attempt: 1, maxAttempts: 3, delayMs: STUCK_AFTER_MS * 2 },
+	});
+	strictEqual(machine.advance(STUCK_AFTER_MS + 30_000).phase, "retrying");
+});
+
+test("a silent wait keeps state, elapsed and the way out at every width past 90 seconds, in that order", () => {
+	const machine = reducer();
+	waitingOnModel(machine);
+	for (const [silence, head] of [
+		[91_000, "waiting"],
+		[STUCK_AFTER_MS + 1_000, "no output"],
+	] as const) {
+		machine.advance(silence - (machine.now() - 1_000_000));
+		for (const width of [160, 109, 80, 60, 40]) {
+			const { label } = composerPhasePresentation(machine.current(), width, machine.now(), "qwopus");
+			const rail = `${width}: ${label}`;
+			const state = label.indexOf(head);
+			const elapsed = label.search(/\b\d+m\d*s/u);
+			ok(state >= 0 && state < elapsed && elapsed < label.indexOf("Esc"), rail);
+			if (width >= 60) ok(label.includes("/model"), rail);
+		}
+	}
+});
+
+test("reasoning a target's history dropped replays as streamed and not kept, with nothing to open", () => {
+	const panel = createChatPanel();
+	panel.appendUser("question");
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text: "Answer." }],
+		stopReason: "stop",
+		usage: { input: 1, output: 1, totalTokens: 2 },
+		clioCoderReasoningNotRetained: true,
+	};
+	panel.applyEvent({ type: "message_start", message } as never);
+	panel.applyEvent({ type: "message_end", message } as never);
+	panel.applyEvent({ type: "agent_end", messages: [message], replayed: { elapsedMs: 5_000 } } as never);
+	const rendered = screen(panel);
+	match(rendered, /streamed live, not kept/u);
+	doesNotMatch(rendered, /Thinking · \/view/u);
+});
+
+test("a replayed receipt splits work from the operator wait the live run recorded", () => {
+	const panel = createChatPanel();
+	panel.appendUser("question");
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text: "Answer." }],
+		stopReason: "stop",
+		usage: { input: 1, output: 1, totalTokens: 2 },
+	};
+	panel.applyEvent({ type: "message_start", message } as never);
+	panel.applyEvent({ type: "message_end", message } as never);
+	panel.applyEvent({
+		type: "agent_end",
+		messages: [message],
+		replayed: { elapsedMs: 50_000, humanWaitMs: 30_000 },
+	} as never);
+	match(screen(panel), /20s work · 30s waiting on you/u);
 });

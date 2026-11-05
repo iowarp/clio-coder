@@ -60,7 +60,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
-import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
+import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
 import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
@@ -762,6 +762,20 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		: undefined;
 	const presentation = createInteractivePresentation({
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
+		recordTurnHumanWait: (fields) => {
+			try {
+				if (!deps.session?.current()) return;
+				deps.session.appendEntry({
+					kind: "custom",
+					customType: TURN_HUMAN_WAIT_ENTRY,
+					parentTurnId: deps.session.tree().leafId ?? null,
+					display: false,
+					data: fields,
+				});
+			} catch {
+				// Best effort; a resumed receipt then states the total without the split.
+			}
+		},
 		bus: deps.bus,
 		getLifecycleHint: () => updateMonitor?.text() ?? null,
 		getLeaderArmed: () => leaderArmed,

@@ -612,6 +612,7 @@ export function assistantSessionPayload(
 		"diagnostics",
 		"toolRounds",
 		"clioCoderAbortReason",
+		"clioCoderReasoningNotRetained",
 	]) {
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}

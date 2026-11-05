@@ -174,6 +174,8 @@ export interface ChatPanelTurnUsage {
 export interface ReplayedRunFacts {
 	elapsedMs?: number;
 	coldReasons?: ReadonlyArray<string>;
+	/** Of `elapsedMs`, what the live run recorded waiting on the operator. */
+	humanWaitMs?: number;
 }
 
 /** What one Markdown layout of the open reply cost and how long the reply was then. */
@@ -376,6 +378,8 @@ type ThinkingSegment = {
 	finalized: boolean;
 	/** Panel clock when the first delta of this stretch arrived. */
 	startedAtMs?: number;
+	/** The stretch was streamed live and its target's history did not keep the text, so only the fact can be shown. */
+	notRetained?: true;
 };
 type ThinkingRender = { source: string; open: boolean; epoch: number; layouts: Map<string, string[]> };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
@@ -492,6 +496,8 @@ export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
 	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
 	getHumanWaitMs?: () => number;
+	/** Keeps a settled run's operator wait in the session, so its resumed receipt can split the same way. */
+	recordTurnHumanWait?: (fields: { turnId: string; humanWaitMs: number }) => void;
 	/** The telemetry read model's live view, whose turn quantities each turn's receipt reads (#434 §11.3). */
 	getTelemetry?: () => TelemetryView | null;
 	/** Live transcript detail mode. Settings changes take effect on the next frame. */
@@ -1039,6 +1045,8 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus, or
  * hidden-thinking presentation and avoids previewing reasoning content.
  */
 const THINKING_HIDDEN_LABEL = "Thinking · /view";
+/** Replayed reasoning the target's history dropped: `/view` has nothing to open, so the row offers nothing. */
+const THINKING_NOT_RETAINED_LABEL = "Thinking · streamed live, not kept";
 function dimLine(text: string, width: number): string {
 	return `${SECONDARY()}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
@@ -1457,6 +1465,14 @@ function renderEntryLines(
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
+			if (seg.notRetained === true) {
+				flushReasoning("words");
+				blocks.push({
+					kind: "thinking",
+					lines: [`${REASON_RAIL()}${dimLine(THINKING_NOT_RETAINED_LABEL, Math.max(1, width - PROSE_GUTTER_WIDTH))}`],
+				});
+				continue;
+			}
 			reasoning = joinReasoning(reasoning, seg.text);
 			reasoningOpen = !seg.finalized;
 			continue;
@@ -2059,7 +2075,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							: Math.max(0, now() - runStartedAt);
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
-				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : 0;
+				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
+				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
+					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
+				}
 				target.turnUsage = {
 					...(turnId === undefined ? {} : { turnId }),
 					...(callIds.length > 0 ? { callIds } : {}),
@@ -3122,7 +3141,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
 						: extractedTerminalError;
 				const reports = !willRetry && reportsCall(event.message);
-				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && !reports) {
+				const notRetained =
+					(event.message as { clioCoderReasoningNotRetained?: unknown }).clioCoderReasoningNotRetained === true;
+				if (text.length === 0 && thinking.length === 0 && !notRetained && terminalError.length === 0 && !reports) {
 					if (completedStreamedArgs) markDirty();
 					return;
 				}
@@ -3147,7 +3168,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// produced, rather than a marker dangling after the answer.
 				const messageCompleted = messageStopCompleted((event.message as { stopReason?: unknown }).stopReason);
 				closeOpenThinking(assistant, messageCompleted);
-				if (thinking.length > 0) {
+				if (thinking.length > 0 || notRetained) {
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
 					const streamedThisMessage = assistant.segments
 						.slice(messageStart)
@@ -3159,6 +3180,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							text: messageCompleted ? thinking : holdCutOffText(thinking),
 							at: stamp(),
 							finalized: true,
+							...(thinking.length === 0 ? { notRetained: true as const } : {}),
 						});
 					}
 				}
