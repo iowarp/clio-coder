@@ -393,7 +393,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				return "accepted";
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				deps.notify("error", `steer to ${addressee} failed: ${msg}`, `steer:${mention.target}`);
+				deps.notify(
+					"error",
+					boardAgent !== null
+						? `${boardAgent} is not taking messages now, so this was not sent. Esc keeps your text as a draft for Clio.`
+						: `steer to ${addressee} failed: ${msg}`,
+					`steer:${mention.target}`,
+				);
 				return "rejected";
 			}
 		}

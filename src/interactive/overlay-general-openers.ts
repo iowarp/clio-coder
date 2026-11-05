@@ -582,12 +582,14 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		const steerable = row !== null && row !== undefined && isDispatchBoardRowSteerable(row);
 		const cancellable = row !== null && row !== undefined && isDispatchBoardRowCancellable(row);
 		if (row && row.council === undefined) {
-			entries.push({
-				key: "Enter",
-				verb: deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail",
-				// A live run's steer and cancel outrank it; on a settled run it is the only verb.
-				critical: !steerable && !cancellable,
-			});
+			const detailVerb = deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail";
+			// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read.
+			if (deps.dispatchBoard.enterWatches()) {
+				entries.push({ key: "Enter", verb: "watch", critical: !steerable && !cancellable });
+				entries.push({ key: "d", verb: detailVerb, critical: !steerable });
+			} else {
+				entries.push({ key: "Enter", verb: detailVerb, critical: !steerable });
+			}
 		}
 		if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
 		if (cancellable) entries.push({ key: "x", verb: "cancel", critical: true });

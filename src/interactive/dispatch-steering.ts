@@ -44,7 +44,9 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (!isDispatchBoardRowSteerable(row)) {
 			deps.notify(
 				"warning",
-				`${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
+				row.status === "enqueued"
+					? `${row.agentId} is queued and can take a message once it starts`
+					: `${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;

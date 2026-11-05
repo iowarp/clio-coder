@@ -1762,6 +1762,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		const decision = paneWatchDecision({ source: "workers-view", runStatus: row.status });
 		return decision.open ? { runId: row.runId, agentId: row.agentId } : null;
 	};
+	if (watchPane) {
+		dispatchBoard.setEnterWatches((row) => paneWatchDecision({ source: "workers-view", runStatus: row.status }).open);
+	}
 	/**
 	 * Enter in the workers view. True means the watch pane took the key; false
 	 * (panes off, nothing watchable under the policy) falls back to the inline
@@ -1773,7 +1776,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		void watchPane.watch(selected.runId).then((result) => {
 			if (result.status === "watching") {
 				if (result.opened) {
-					notify("success", `watching ${selected.agentId} (${selected.runId}) in a pane`, "panes:watch");
+					notify("success", `Watching ${selected.agentId} in a pane`, "panes:watch");
 				}
 			} else {
 				notify("warning", result.reason, "panes:watch");
