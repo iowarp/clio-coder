@@ -1172,13 +1172,12 @@ function stripThinkingEmphasis(text: string): string {
  */
 function settledExcerptLimit(rows: ReadonlyArray<string>, text: string, limit: number): number {
 	const lineStarts = new Set(text.split("\n").map((line) => line.trimStart().slice(0, 12)));
-	let fitted = limit;
-	while (fitted > 2 && rows.length > fitted) {
+	// A paragraph with no line start in reach opens mid-line whatever the cut, so it keeps the rows it streamed with.
+	for (let fitted = limit; fitted > 2 && rows.length > fitted; fitted -= 1) {
 		const opening = (rows[rows.length - fitted + 1] ?? "").trimStart().slice(0, 12);
-		if (lineStarts.has(opening)) break;
-		fitted -= 1;
+		if (lineStarts.has(opening)) return fitted;
 	}
-	return fitted;
+	return limit;
 }
 
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
