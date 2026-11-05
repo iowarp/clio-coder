@@ -145,6 +145,8 @@ export interface ListOverlayOptions {
 	onTabChange?: (tabId: string) => void;
 	/** Enables the type-to-filter input row. */
 	filterable?: boolean;
+	/** What the empty filter row says it searches; a bare `>` said nothing. Defaults to `type to filter`. */
+	filterPlaceholder?: string;
 	/** Start in the list; / enters search, whose letters and arrows belong to the input. */
 	explicitSearch?: boolean;
 	/** Persistent, width-aware scope/mode text, including when the selected tab is empty. */
@@ -710,7 +712,10 @@ export class ListOverlayView implements Component {
 		if (!cells) return item.label;
 		const theme = clioTheme();
 		const narrow = width <= NARROW_ROW_WIDTH;
-		const lead = narrow && cells.narrowLead !== undefined ? cells.narrowLead : cells.lead;
+		// The short lead also stands in wherever the full one would be cut: `/run [--agent-profile …`
+		// at 120 columns lost the agent and task the command needs, while `/run <agent> <task> [options]` fits.
+		const lead =
+			cells.narrowLead !== undefined && (narrow || visibleWidth(cells.lead) > leadWidth) ? cells.narrowLead : cells.lead;
 		const fitted = padAnsi(truncateToWidth(lead, leadWidth, GLYPH.ellipsis, false), leadWidth);
 		if (focused) return `${fitted}  ${cells.text}`;
 		return `${theme.fg("menuOption", fitted)}  ${theme.fg("menuDescription", cells.text)}`;
@@ -1036,6 +1041,12 @@ export class ListOverlayView implements Component {
 		if (this.options.filterable) {
 			this.input.focused = this.isFilterFocused;
 			filterRows = this.input.render(width).map((line) => theme.base("searchQuery", line));
+			if (this.filterText.length === 0 && width > 6) {
+				// The prompt and its cursor at their own width, so the words follow the cursor instead of the padding.
+				const prompt = this.input.render(3).map((line) => theme.base("searchQuery", line))[0] ?? "";
+				const placeholder = this.options.filterPlaceholder ?? "type to filter";
+				filterRows = [truncateToWidth(`${prompt} ${theme.fg("annotation", placeholder)}`, width, GLYPH.ellipsis, false)];
+			}
 		}
 		// The dock's rows are the budget. When they would leave no row for the
 		// cursor, the chrome gives way: an empty, unfocused filter first, then the
