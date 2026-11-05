@@ -1652,6 +1652,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						failureRoute: {
 							targetId: target.target.id,
 							...(target.target.url !== undefined ? { url: target.target.url } : {}),
+							// What the failure was and what reached the screen decide the remedy, and a replay has only this record.
+							stage: failure.stage,
+							errorClass: failure.errorClass,
+							partialReply: extractText(message).length > 0,
 						},
 					});
 					const retryAfterMs = callTracking?.retryAfterMs();

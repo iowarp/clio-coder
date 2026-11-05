@@ -54,8 +54,12 @@ export function providerErrorEvidence(value: string, scanLimit = value.length): 
 	).replace(/[\p{Cc}\p{Cf}]/gu, (char) => (char === "\n" || char === "\t" ? char : " "));
 }
 
-/** A bounded projection; never use this to replace a persisted diagnostic. */
-export function presentProviderError(value: string): string {
+/**
+ * A bounded projection; never use this to replace a persisted diagnostic. `remedyStated` is for a caller printing
+ * {@link providerFailureAdvice} under it, where the LiteLLM tail would give the same way out a second time and push
+ * the failure's own remedy behind the row fold.
+ */
+export function presentProviderError(value: string, options: { remedyStated?: boolean } = {}): string {
 	const available = providerErrorEvidence(value, SCAN_LIMIT);
 	// Preserve the actual Clio wrapper suffix; never infer a retry policy from
 	// provider error codes. A restored body can push this advice past the scan
@@ -115,7 +119,7 @@ export function presentProviderError(value: string): string {
 		sample.match(/"error"\s*:\s*\{[^{}]*?"code"\s*:\s*([45]\d{2})(?=\s*[,}])/i)?.[1];
 	if (status && !summary.includes(status)) summary = `HTTP ${status}; ${summary}`;
 	summary = summary.replace(/\s+/g, " ").trim();
-	if (routeAdvice) {
+	if (routeAdvice && options.remedyStated !== true) {
 		// Keep route recovery ahead of long body detail so row clipping cannot
 		// spend the entire primary preview on the provider payload.
 		const prefix = summary.slice(0, 60);
@@ -130,18 +134,28 @@ export function presentProviderError(value: string): string {
 	return `${summary.slice(0, DISPLAY_LIMIT)}${shortened ? " ... [available diagnostic: /view transcript]" : ""}`;
 }
 
-/** The route a provider failure happened on. A failure names the target it failed on and the way out of it. */
+/** The route a provider failure happened on, and enough of the failure to say what gets past it. */
 export interface ProviderFailureRoute {
 	targetId: string;
 	url?: string;
+	/** Absent on a session saved before failures carried their class; the advice then stays general. */
+	stage?: string;
+	errorClass?: string;
+	partialReply?: boolean;
 }
 
 export function readProviderFailureRoute(value: unknown): ProviderFailureRoute | null {
-	const route = value as { targetId?: unknown; url?: unknown } | null | undefined;
+	const route = value as
+		| { targetId?: unknown; url?: unknown; stage?: unknown; errorClass?: unknown; partialReply?: unknown }
+		| null
+		| undefined;
 	if (typeof route?.targetId !== "string" || route.targetId.length === 0) return null;
 	return {
 		targetId: route.targetId,
 		...(typeof route.url === "string" && route.url.length > 0 ? { url: route.url } : {}),
+		...(typeof route.stage === "string" ? { stage: route.stage } : {}),
+		...(typeof route.errorClass === "string" ? { errorClass: route.errorClass } : {}),
+		...(route.partialReply === true ? { partialReply: true } : {}),
 	};
 }
 
@@ -150,7 +164,27 @@ function shownEndpoint(url: string): string {
 	return providerErrorEvidence(redactUrlCredentials(url.split(/[?#]/u)[0] ?? url));
 }
 
+const SWITCH_ROUTE = "/model switches route";
+const RESEND = "Up recalls your message and Enter resends it";
+
+/** What failed, what was kept and the next step, worded for this failure rather than for every failure. */
 export function providerFailureAdvice(route: ProviderFailureRoute): string {
 	const where = route.url !== undefined ? `${route.targetId} at ${shownEndpoint(route.url)}` : route.targetId;
-	return `Target ${where}. /model switches route · clio-coder configure --id ${route.targetId} fixes it.`;
+	const configure = `clio-coder configure --id ${route.targetId}`;
+	const errorClass = route.errorClass ?? "";
+	if (route.stage === "auth") {
+		const refused = /^http_/u.test(errorClass);
+		return `${where} ${refused ? "refused the credential" : "has no usable credential"}. ${configure} replaces it · ${SWITCH_ROUTE}.`;
+	}
+	if (route.stage === "transport") {
+		// The block folds at few rows, so this leads with what was kept; the route is the row above the block.
+		return route.partialReply === true
+			? `Your message is kept. The partial reply stays on screen and the model will not see it. ${RESEND} · ${SWITCH_ROUTE}.`
+			: `Your message is kept and no reply arrived. ${RESEND} · ${SWITCH_ROUTE}.`;
+	}
+	if (errorClass === "http_429")
+		return `${where} is rate limiting this route. ${RESEND} once the limit clears · ${SWITCH_ROUTE}.`;
+	if (/^http_5/u.test(errorClass))
+		return `${where} is failing on its side. ${RESEND} once it recovers · ${SWITCH_ROUTE}.`;
+	return `Target ${where}. ${SWITCH_ROUTE} · ${configure} edits this target.`;
 }

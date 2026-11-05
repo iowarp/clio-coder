@@ -65,7 +65,8 @@ export function renderRetryStatus(
 	// Attempts collapse into this one row while the retry is open, so the reason stays on it; the full
 	// diagnostic is one /view away and a settled retry states it below.
 	if (status.phase !== "cancelled" && status.phase !== "exhausted") {
-		const reason = presentProviderError(errorMessage).replace(AVAILABLE_DIAGNOSTIC, "").trim();
+		// While Clio is still retrying, advice to pick another route and resend is not yet the next step.
+		const reason = presentProviderError(errorMessage, { remedyStated: true }).replace(AVAILABLE_DIAGNOSTIC, "").trim();
 		// A narrow row spends itself on the reason; the composer rail states the provider's wait alongside.
 		const { retryAfterMs: _asked, ...lean } = heading;
 		const row = renderNoticeRow(`${formatRetryStatus(width < 90 ? lean : heading)} · ${reason}`, "retry", width)[0] ?? "";
