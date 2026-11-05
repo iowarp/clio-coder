@@ -41,7 +41,7 @@ import type { SystemOne } from "../domains/system-one/index.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
-import { createAgentProgress } from "../engine/tui.js";
+import { createAgentProgress, TuiAltScreen } from "../engine/tui.js";
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import { reportLoopChanges } from "../session-control/loop-command.js";
 import type { ReloadClassesController } from "../session-control/reload-report.js";
@@ -1513,9 +1513,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		presentation.collapseWelcomeDashboard();
 		resetTranscript();
 	};
-	const suspendTerminalAsync = async <T>(run: () => Promise<T>): Promise<T> => {
+	const suspendTerminalAsync = async <T>(run: () => Promise<T>, preserveScreen = false): Promise<T> => {
 		try {
-			tui.stop();
+			tui.stop(preserveScreen ? { preserveScreen: true } : {});
 			return await run();
 		} finally {
 			tui.start();
@@ -1993,9 +1993,19 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					notify("info", "Suspend is not supported on Windows.", "keyboard:suspend");
 					return;
 				}
-				void suspendTerminalAsync(suspendProcessUntilContinued).catch((err: unknown) => {
-					notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
-				});
+				// Fullscreen leaves the alternate screen as it found the shell's: stopping
+				// otherwise reprints the whole transcript, draft included, into the shell's
+				// scrollback on every Ctrl+Z. Inline mode moves below its frame first.
+				void suspendTerminalAsync(suspendProcessUntilContinued, tui instanceof TuiAltScreen).then(
+					(suspended) => {
+						if (!suspended) {
+							notify("info", "Ctrl+Z needs Clio started from an interactive shell with job control", "keyboard:suspend");
+						}
+					},
+					(err: unknown) => {
+						notify("error", `Could not suspend: ${err instanceof Error ? err.message : String(err)}`, "keyboard:suspend");
+					},
+				);
 			},
 			canExit: () => {
 				const blocker = exitBlocker();
