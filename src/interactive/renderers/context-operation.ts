@@ -21,8 +21,9 @@ import { presentProviderError } from "./provider-error.js";
 export function renderContextOperationResult(operation: ContextOperation, width: number): string[] {
 	const theme = clioTheme();
 	const outcome = operation.outcome ?? "completed";
-	const tone = outcomeTone(outcome);
-	const glyph = outcome === "failed" ? GLYPH.error : outcome === "cancelled" ? GLYPH.warn : GLYPH.ok;
+	// A cancel the operator asked for wears the same quiet ⊘ as a cancelled turn's receipt, not a warning's `!`.
+	const tone = outcome === "cancelled" ? "annotation" : outcomeTone(outcome);
+	const glyph = outcome === "failed" ? GLYPH.error : outcome === "cancelled" ? GLYPH.cancelled : GLYPH.ok;
 	// An operator command is its own reason. An automatic run names why it ran.
 	const reason = operation.origin === "automatic" ? ` · ${plain(operation.reason)}` : "";
 	const state = outcome === "completed" ? "" : ` · ${outcomeWord(outcome)}`;
