@@ -34,6 +34,9 @@ import { exactRouteLabel, modelNickname, statusRailLabelRoom, type TargetIdentit
 import { skinEpoch } from "./theme/tokens.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
 
+/** The longest wording work beside the state usually takes on the rail, `verifier waiting on the model · 1m23s · you can send`. */
+const WORK_BESIDE_STATE_COLS = 52;
+
 /**
  * The slice of Pi's Editor the suggestion list needs and keeps private. Pi
  * requests suggestions asynchronously and leaves the previous list in place
@@ -587,7 +590,15 @@ export class ClioEditor extends Editor {
 				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
 			// A narrow rail would pay for the full route with the wait's elapsed, which outranks any name.
 			const routeAffordable = width >= 60 || status?.live !== true;
-			if (actor === undefined && workspace === null && exact !== null && atRouteMoment && routeAffordable) {
+			// Work beside the state rewords itself every few seconds, and the route's spelling must not follow it in and out of fit.
+			if (
+				actor === undefined &&
+				workspace === null &&
+				exact !== null &&
+				atRouteMoment &&
+				routeAffordable &&
+				facts.length === 0
+			) {
 				const routed = status
 					? this.chrome.getHarnessStatus?.(width, reserved, visibleWidth(lead) + visibleWidth(exact) + 2)
 					: null;
@@ -602,13 +613,17 @@ export class ClioEditor extends Editor {
 				return !activity || visibleWidth(whole) <= netRoom ? whole : `${lead} ${stateAlone}`;
 			}
 			// Identity is the first thing a state-bearing rail gives up: it takes only what the state and the way out leave over.
-			const spare = netRoom - visibleWidth(lead) - 1 - visibleWidth(phrased(activity)) - 1;
+			// Work beside the state rewords itself every few seconds. The name is judged against the longest of those
+			// rewordings and is whole or absent, so it holds for a given width instead of blinking with them (J1-F12).
+			const workRoom = facts.length > 0 ? Math.max(visibleWidth(phrased("")), WORK_BESIDE_STATE_COLS) : 0;
+			const stateRoom = visibleWidth(activity) + (workRoom > 0 ? visibleWidth(separator) + workRoom : 0);
+			const spare = netRoom - visibleWidth(lead) - 1 - stateRoom - 1;
 			if (actor === undefined && workspace !== null && visibleWidth(workspace) <= spare) {
 				return [lead, workspace, phrased(activity)].join(" ");
 			}
 			const who = actor ?? nickname;
 			const nameRoom = Math.min(nameCap, spare);
-			if (visibleWidth(who) <= nameRoom || nameRoom >= 6) {
+			if (visibleWidth(who) <= nameRoom || (facts.length === 0 && nameRoom >= 6)) {
 				return named(truncateToWidth(who, nameRoom, GLYPH.ellipsis, false));
 			}
 			// With no name in front of it the state reads on its own: `waiting`, not `is waiting`. Facts beside the

@@ -33,6 +33,9 @@ export interface FooterSpeed {
 	estimated: boolean;
 	/** The read model's TTFT display; null when the call has none to show. */
 	ttft: string | null;
+	/** The route that call ran on, which is the only route its rate says anything about. */
+	targetId: string;
+	modelId: string;
 }
 /** `unavailable` means no read model; `reading` means the live view is still merging its cold read. */
 export type FooterTelemetry = { kind: "unavailable" } | { kind: "reading" } | ({ kind: "ready" } & FooterSpend);
@@ -61,6 +64,8 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 		tokensPerSecond: output && generation && generation.value > 0 ? output.value / (generation.value / 1000) : null,
 		estimated: output?.estimated === true || generation?.estimated === true,
 		ttft: ttft ? call.timing.ttft.display : null,
+		targetId: call.target.targetId,
+		modelId: call.target.requestedModel,
 	};
 }
 

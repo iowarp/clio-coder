@@ -1410,6 +1410,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let submitGeneration = 0;
 	let disposed = false;
 	const context = createTurnContext({
+		isTurnActive: () => turnActive,
 		turnSignal: () => submitOwner?.signal,
 		standingTurnConstraints: () => sessionToolLimits,
 		interactiveGuidance: deps.interactiveGuidance === true,
@@ -1459,9 +1460,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		middleware,
 		emitNotice,
-		// #423: keep the pre-send estimate visible when a later cold-cache info notice arrives.
+		// #423: an estimate, not a fault, so it reads as one and ends when the call that answers it settles.
 		emitCacheReuseNotice: (text) =>
-			emit({ type: "notice", level: "warning", surface: "footer", text, key: "context.cache.reuse-uncertain" }),
+			emit({ type: "notice", level: "info", surface: "footer", text, key: "context.cache.reuse-uncertain" }),
 		emitCacheNotice: (reasons) =>
 			emit({
 				type: "notice",

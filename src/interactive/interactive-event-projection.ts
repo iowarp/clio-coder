@@ -124,6 +124,8 @@ function askUserInterviewClosedByToolResult(event: {
  * the rendering contract and intentionally matches the former composition-root
  * subscriptions.
  */
+const CACHE_REUSE_NOTICE_KEY = "context.cache.reuse-uncertain";
+
 export function createInteractiveEventProjection(deps: InteractiveEventProjectionDeps): InteractiveEventProjection {
 	for (const notice of deps.initialNotices ?? []) {
 		const text = notice.trim();
@@ -134,6 +136,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.notify(level, text, key, ...(level === "info" ? [] : ([0] as const)));
 	}
 
+	let cacheEstimateOut = false;
 	const primaryUnsubscribers: Array<() => void> = [];
 	const remainingUnsubscribers: Array<() => void> = [];
 	primaryUnsubscribers.push(
@@ -162,6 +165,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					if (event.skillSurface !== undefined) deps.refreshFooter();
 					return;
 				}
+				// #423: the estimate already says the cache may be cold and carries the number, so a bare restatement must not
+				// take the slot from it while the call it is about is still out.
+				if (event.key === CACHE_REUSE_NOTICE_KEY) cacheEstimateOut = true;
+				else if (event.key === "context.cache.cold" && cacheEstimateOut) return;
 				deps.notify(event.level, event.text, event.key);
 				return;
 			}
@@ -256,9 +263,10 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.chat.onEvent((event) => {
 			if (event.type !== "message_end" && event.type !== "agent_end") return;
 			// #423: the reuse estimate is about the next call. Once a call settles,
-			// its own cache figures answer it, and a warning never expires on its own.
+			// its own cache figures answer it.
 			if (event.type === "agent_end" || event.message.role === "assistant") {
-				deps.dismissNotification("context.cache.reuse-uncertain");
+				cacheEstimateOut = false;
+				deps.dismissNotification(CACHE_REUSE_NOTICE_KEY);
 			}
 			if (event.type === "agent_end") deps.refreshLiveWorkspaceGit(true);
 			deps.refreshFooter();
@@ -276,6 +284,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.bus.subscribe("context.pruned", () => {
 			// The compaction producer emits the canonical receipt once; this accounting
 			// event only refreshes the live context counters (flywheel r4/4).
+			deps.refreshFooter();
+			deps.requestRender();
+		}),
+		// The rail and a notice about the route both read the target's health, so a verdict repaints them on that frame.
+		deps.bus.subscribe("provider.health_changed", () => {
 			deps.refreshFooter();
 			deps.requestRender();
 		}),

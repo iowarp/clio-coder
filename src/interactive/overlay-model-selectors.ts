@@ -11,6 +11,7 @@ import {
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { TUI } from "../engine/tui.js";
 import type { FooterDashboardPanel } from "./footer/dashboard.js";
+import { routeAppliedNoticeKey } from "./footer/notifications.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import {
@@ -150,7 +151,11 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					down ? "this route is down, so turns fail until it answers; /model switches" : null,
 					note !== null && thinking ? `thinking ${thinking.display} (${note})` : null,
 				];
-				deps.notify(down ? "warning" : "success", facts.filter(Boolean).join(" · "));
+				deps.notify(
+					down ? "warning" : "success",
+					facts.filter(Boolean).join(" · "),
+					routeAppliedNoticeKey(ref.target, ref.model),
+				);
 				deps.refreshFooter();
 			},
 			onCancel: () => {

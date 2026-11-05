@@ -590,7 +590,7 @@ describe("provider transport boundary", () => {
 		ok(failure.includes("dynamo/qwen3.8-27b"), failure);
 		ok(failure.includes("target 'blade'"), failure);
 		ok(failure.includes("/model"), failure);
-		ok(failure.includes("did not retry or substitute"), failure);
+		ok(failure.includes("did not substitute"), failure);
 	});
 
 	it("restores the provider error body that the SDK truncated and keeps route advice visible", async () => {

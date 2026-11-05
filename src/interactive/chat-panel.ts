@@ -941,7 +941,10 @@ function withoutLeadingBlanks(lines: string[]): string[] {
  */
 function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: boolean): string[] {
 	const out: string[] = [];
-	for (const line of (unbounded ? providerErrorEvidence(seg.text) : presentProviderError(seg.text)).split("\n")) {
+	const shown = unbounded
+		? providerErrorEvidence(seg.text)
+		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null });
+	for (const line of shown.split("\n")) {
 		for (const wrapped of wrapTextWithAnsi(line, width)) {
 			out.push(`${RED_CRIT()}${wrapped}${RESET}`);
 		}
