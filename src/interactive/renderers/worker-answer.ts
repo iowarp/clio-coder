@@ -1,7 +1,7 @@
 import { AssistantProseProjection, sanitizeAssistantProse } from "../../core/assistant-prose.js";
+import type { CouncilReport } from "../../domains/agents/index.js";
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { RedactedStringProjection, redactStreamingSecretString } from "../../domains/safety/redaction.js";
-import type { CouncilReport } from "../../domains/agents/index.js";
 import { GLYPH } from "../theme/index.js";
 
 /** Sanitize complete source text before splitting, so OSC payloads cannot cross rows. */
@@ -233,7 +233,7 @@ export function presentWorkerContractAnswer(
  * One member's answer as a line a person reads: a typed report's first claim or fact, else its first line of prose.
  * A council collects typed reports, so its raw text is JSON the operator was never meant to read.
  */
-export function councilAnswerGist(answer: string): string {
+function councilAnswerGist(answer: string): string {
 	const value = exactWorkerAnswerObject(answer);
 	const typed =
 		value === null

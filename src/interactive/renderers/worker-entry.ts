@@ -1,12 +1,12 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { renderCalls } from "../../core/telemetry/render.js";
+import { parseCouncilReport } from "../../domains/agents/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
-import { parseCouncilReport } from "../../domains/agents/index.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import {
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
