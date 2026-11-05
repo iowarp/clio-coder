@@ -100,6 +100,8 @@ export interface OverlayGeneralOpenersDeps {
 	dataDir: string;
 	notify: (level: "info" | "success" | "warning" | "error", text: string, key?: string) => void;
 	dismissNotification?: (key: string) => void;
+	/** Writes a command's record to the transcript. */
+	getSlashNotice?: () => import("./command-fallbacks.js").CommandNotice;
 	dispatch: DispatchContract;
 	/** The process's System One, whose engine breakers `/health` shows; read when the overlay opens. */
 	systemOne?: () => SystemOne | undefined;
@@ -132,7 +134,7 @@ export interface OverlayGeneralOpenersDeps {
 	queueNavigator?: {
 		chat: Pick<
 			import("../session-control/chat-loop.js").ChatLoop,
-			"queueEntries" | "removeQueuedEntry" | "moveQueuedEntry" | "setQueuedEntryKind"
+			"queueEntries" | "removeQueuedEntry" | "moveQueuedEntry" | "setQueuedEntryKind" | "isStreaming" | "turnPreparation"
 		>;
 		toEditor(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
 		sendNow(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
@@ -380,6 +382,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			deps.notify("warning", "/rewind needs an open session.", "rewind:no-session");
 			return;
 		}
+		// A refusal from an earlier attempt would sit on the footer of the very list it said could not open.
+		deps.dismissNotification?.("rewind:no-session");
+		deps.dismissNotification?.("rewind:turn");
 		const snapshots = createWorkspaceSnapshots({
 			stateDir: deps.stateDir,
 			sessionId,
@@ -426,13 +431,24 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				record,
 				plan: preview.plan,
 				columns: deps.terminal.columns,
-				onCancel: deps.closeOverlay,
+				onCancel: () => {
+					deps.closeOverlay();
+					deps.notify("info", "rewind cancelled; no files changed", "rewind:outcome");
+				},
 				onConfirm: () => {
 					deps.closeOverlay();
 					if (turnBlocksRewind()) return;
+					deps.notify("info", `restoring files from snapshot #${n}…`, "rewind:outcome");
 					void snapshots.restore(n).then((outcome) => {
+						// A restore changes the work tree, so the record goes in the transcript;
+						// a footer notice can sit behind another one and then scroll away for good.
+						deps.dismissNotification?.("rewind:outcome");
 						const notice = formatRewindOutcome(outcome);
-						deps.notify(notice.level, notice.text, "rewind:outcome");
+						const transcript = deps.getSlashNotice?.();
+						if (transcript)
+							transcript(notice.level === "warning" ? "warn" : notice.level === "error" ? "error" : "info", notice.text);
+						else deps.notify(notice.level, notice.text, "rewind:outcome");
+						deps.refreshFooter();
 						deps.requestRender();
 					});
 				},
@@ -603,12 +619,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					session.settle({ kind: "aborted", text: outcome.text });
 					return;
 				}
-				// A refusal is a question that never reached the model; say so, or the
+				// A refusal or a failed round is a question nobody answered; say so, or the
 				// bare reason reads like a status line (#415).
-				session.settle({
-					kind: "error",
-					reason: outcome.status === "refused" ? `Not answered: ${outcome.reason.replace(/\.?$/u, ".")}` : outcome.reason,
-				});
+				session.settle({ kind: "error", reason: `Not answered: ${outcome.reason.replace(/\.?$/u, ".")}` });
 			})
 			.catch((error: unknown) => {
 				session.settle({ kind: "error", reason: error instanceof Error ? error.message : String(error) });
@@ -826,6 +839,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "queue-navigator";
 		deps.transitions.handle = openQueueNavigatorFactory(deps.tui, {
 			entries: () => queue.chat.queueEntries(),
+			isHeld: () => !queue.chat.isStreaming() && queue.chat.turnPreparation().phase === "idle",
 			remove: (id) => void queue.chat.removeQueuedEntry(id),
 			move: (id, delta) => queue.chat.moveQueuedEntry(id, delta),
 			toggleKind: (entry) => void queue.chat.setQueuedEntryKind(entry.id, entry.kind === "steer" ? "follow-up" : "steer"),

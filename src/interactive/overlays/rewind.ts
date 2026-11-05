@@ -170,6 +170,7 @@ export function openRewindListOverlay(tui: TUI, options: OpenRewindListOptions):
 		unit: "snapshots",
 		emptyMessage: REWIND_EMPTY,
 		hints: [{ key: "Enter", verb: "preview rewind", short: "preview", critical: true }],
+		leadWithHints: true,
 		onSelect: (item) => options.onSelect(Number(item.id)),
 		onClose: options.onClose,
 	});

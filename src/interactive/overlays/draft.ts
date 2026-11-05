@@ -23,7 +23,7 @@ import {
 import { DRAFT_LABELS, type DraftLabel, hasDeadDraftToolCallMarkup } from "../../session-control/drafts.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { codeInk } from "../renderers/code-ink.js";
-import { clioTheme, GLYPH, markdownTheme, rule } from "../theme/index.js";
+import { clioTheme, formatWaitClock, GLYPH, markdownTheme, rule } from "../theme/index.js";
 
 export const DRAFT_OVERLAY_TITLE = "Drafts";
 
@@ -41,6 +41,8 @@ export interface DraftOverlayState {
 	route?: string;
 	/** The whole round was cancelled or refused before any candidate ran. */
 	refused?: string;
+	/** How long the candidates have been running, for the wait on a row still going. */
+	elapsedMs?: number;
 }
 
 export interface DraftOverlaySession extends OverlayHandle {
@@ -80,8 +82,9 @@ function overlayWidth(columns: number): number {
 	return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, columns - 4));
 }
 
-function candidateStatus(phase: DraftCandidatePhase): string {
-	if (phase.kind === "streaming") return phase.text.length > 0 ? "denoising…" : "starting…";
+function candidateStatus(phase: DraftCandidatePhase, elapsedMs: number): string {
+	if (phase.kind === "streaming")
+		return `${phase.text.length > 0 ? "writing" : "starting"} · ${formatWaitClock(elapsedMs)}`;
 	if (phase.kind === "failed") return "failed";
 	const lines = phase.text.split("\n").length;
 	return `${phase.text.length} chars · ${lines} ${lines === 1 ? "line" : "lines"}`;
@@ -100,7 +103,10 @@ function candidateRows(state: DraftOverlayState, width: number): string[] {
 		if (phase.kind === "failed") {
 			body = theme.fg("error", `${GLYPH.error} ${redactUrlCredentials(phase.reason)}`);
 		} else {
-			body = theme.fg(phase.kind === "streaming" ? "annotation" : "menuDescription", candidateStatus(phase));
+			body = theme.fg(
+				phase.kind === "streaming" ? "annotation" : "menuDescription",
+				candidateStatus(phase, state.elapsedMs ?? 0),
+			);
 		}
 		return truncateToWidth(`${head}${body}${routeUnit}`, width, GLYPH.ellipsis, false);
 	});
@@ -178,12 +184,15 @@ export function formatDraftOverlayBody(state: DraftOverlayState, width: number, 
 }
 
 class DraftOverlayBody implements Component {
+	private readonly startedAt = Date.now();
+
 	constructor(
 		readonly state: DraftOverlayState,
 		private readonly maxTextLines: number,
 	) {}
 
 	render(width: number): string[] {
+		this.state.elapsedMs = Date.now() - this.startedAt;
 		return formatDraftOverlayBody(this.state, width, this.maxTextLines);
 	}
 
@@ -272,19 +281,24 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 		footerHint: (innerWidth) =>
 			buildResponsiveHint(
 				[
+					...(options.onUse && takenDraft(state) ? [{ key: "Enter", verb: "put in composer, unsent", short: "use" }] : []),
 					{ key: "←→", verb: "draft" },
 					{ key: "↑↓", verb: "scroll" },
-					...(options.onUse && takenDraft(state) ? [{ key: "Enter", verb: "use" }] : []),
 				],
 				{ key: "Esc", verb: allSettled(state) ? "close" : "cancel" },
 			)(innerWidth),
 	});
+
+	// Nothing else redraws an idle screen, so the wait's clock keeps its own time.
+	const clock = setInterval(() => tui.requestRender(), 1000);
+	clock.unref?.();
 
 	const session: DraftOverlaySession = {
 		...handle,
 		setCandidate(index, phase) {
 			if (closed || index < 0 || index >= state.candidates.length) return;
 			state.candidates[index] = phase;
+			if (allSettled(state)) clearInterval(clock);
 			tui.requestRender();
 		},
 		setRoute(route) {
@@ -295,11 +309,13 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 		refuse(reason) {
 			if (closed) return;
 			state.refused = reason;
+			clearInterval(clock);
 			tui.requestRender();
 		},
 		hide(): void {
 			if (closed) return;
 			closed = true;
+			clearInterval(clock);
 			options.onClose();
 			handle.hide();
 		},

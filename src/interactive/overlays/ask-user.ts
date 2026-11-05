@@ -248,7 +248,7 @@ function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>): 
 		else if (optionAsksForText(option.label)) item.description = TEXT_ASKING_DESCRIPTION;
 		items.push(item);
 	}
-	if (explicitOtherIndex === -1) {
+	if (explicitOtherIndex === -1 && question.fixedChoices !== true) {
 		// The implicit choice is one word on screen; its description says what it
 		// does, and the tool's longer label is what the answer records.
 		items.push({
@@ -763,11 +763,11 @@ class AskUserOverlayView implements Component {
 			this.commitMultiSelectOrOpenOther(question, state);
 			return;
 		}
-		if (matchesKey(data, "t")) {
+		if (matchesKey(data, "t") && question.fixedChoices !== true) {
 			this.openOtherField(question, state);
 			return;
 		}
-		if (matchesKey(data, "n")) {
+		if (matchesKey(data, "n") && question.fixedChoices !== true) {
 			this.openNoteField(question, state);
 			return;
 		}
@@ -1016,8 +1016,10 @@ class AskUserOverlayView implements Component {
 		}
 		const entries: HintEntry[] = [{ key: "?", verb: "details" }];
 		if (this.ledgerEntries().length > 0) entries.push({ key: "a", verb: "answers" });
-		entries.push({ key: "n", verb: "note on option", short: "note" });
-		entries.push({ key: "t", verb: "other answer", short: "other" });
+		if (question.fixedChoices !== true) {
+			entries.push({ key: "n", verb: "note on option", short: "note" });
+			entries.push({ key: "t", verb: "other answer", short: "other" });
+		}
 		entries.push(...scroll);
 		if (this.questions.length > 1) entries.push({ key: "←/→", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });

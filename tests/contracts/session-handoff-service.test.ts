@@ -499,9 +499,17 @@ test("the terminal /handoff runs the shared service from extraction through the 
 		notify: (_level, text) => {
 			notices.push(text);
 		},
+		// The box opens on the preparation; the document arrives once the extraction settles.
 		openHandoffReviewOverlay: (_tui, options) => {
-			reviews.push(options);
-			return {} as never;
+			const review = { ...options, document: "" };
+			reviews.push(review);
+			return {
+				showDocument: (document: string) => {
+					review.document = document;
+				},
+				setPreparation: () => {},
+				setRoute: () => {},
+			} as never;
 		},
 	});
 	lifecycle.startHandoff(GOAL);

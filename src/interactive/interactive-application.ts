@@ -790,6 +790,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					),
 		getShutdownArmed: () => shutdownArmed,
 		isAwaitingApproval: () => overlayLifecycle?.getState() === "permission-confirm",
+		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		getPermissionInspection: () => {
 			if (overlayLifecycle === undefined || overlayLifecycle === null) return "none";
 			if (!overlayLifecycle.canInspectMutation()) return "none";
@@ -1052,7 +1053,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			presentation.recordChatEvent(event);
 		},
 		applyChatEvent: (event) => chatRenderer.applyEvent(event),
-		setFollowUpMessages: (messages) => followUpQueuePanel.setMessages(messages),
+		setFollowUpMessages: (messages) => {
+			followUpQueuePanel.setMessages(messages);
+			// A drained queue leaves the navigator nothing to work on; left open it came back
+			// empty from behind the next approval card and swallowed what was typed next.
+			if (messages.length === 0 && overlayLifecycle.getState() === "queue-navigator") overlayLifecycle.closeOverlay();
+		},
 		isAskUserWaiting: () => overlayLifecycle.isAskUserWaiting(),
 		closeAskUserSession: () => overlayLifecycle.closeAskUserSession(),
 		resetAskUserCancellation: () => overlayLifecycle.resetAskUserCancellation(),
@@ -1400,6 +1406,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			const result = await overlayLifecycle.openTransientAskUserOverlayState([
 				{
 					header: "Send now",
+					// A typed answer has no meaning here, and anything but the wait choice stops the tool.
+					fixedChoices: true,
 					question: `${runningTools === 1 ? "A tool call is" : `${runningTools} tool calls are`} still running. Deliver your message now?`,
 					options: [
 						{
@@ -1414,8 +1422,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			]);
 			if (result.cancelled === true) return "cancelled";
-			const picked = result.answers[0]?.options?.[0];
-			return picked === wait ? "wait" : "stop";
+			return result.answers[0]?.options?.[0] === wait ? "wait" : "stop";
 		},
 		...(deps.labelOperatorCommand ? { labelOperatorCommand: deps.labelOperatorCommand } : {}),
 		...(deps.beforeShellEntryRecorded ? { beforeShellEntryRecorded: deps.beforeShellEntryRecorded } : {}),
@@ -1494,6 +1501,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	overlayLifecycle = createOverlayLifecycle({
 		dismissNotification: (key) => notifications.dismiss(key),
+		onToolResumed: (toolCallId) => statusController.noteToolResumed(toolCallId),
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getDispatchRows: () => dispatchBoardStore.workerRows(),
 		app: { ...deps, ...settingActions },

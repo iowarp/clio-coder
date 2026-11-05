@@ -165,6 +165,8 @@ export interface ListOverlayOptions {
 	 * advertise the keys that row actually offers rather than a fixed set.
 	 */
 	hints?: ReadonlyArray<HintEntry> | ((selected: ListOverlayItem | undefined) => ReadonlyArray<HintEntry>);
+	/** The row's own keys lead the rail, for a list whose whole point is its commit verb. */
+	leadWithHints?: boolean;
 	/** Custom message when list is empty; a function is asked per frame. */
 	emptyMessage?: string | (() => string);
 	/** What would fill the list, or the key that does, under the empty message. */
@@ -616,9 +618,9 @@ export class ListOverlayView implements Component {
 		// the footer is the only place they appear, so they outlive the
 		// navigation reminders there.
 		if (hints) {
-			hintEntries.push(
-				...hints.map((hint) => (this.detailPaneDrawn ? hint : { ...hint, critical: hint.critical ?? true })),
-			);
+			const rowKeys = hints.map((hint) => (this.detailPaneDrawn ? hint : { ...hint, critical: hint.critical ?? true }));
+			if (this.options.leadWithHints) hintEntries.unshift(...rowKeys);
+			else hintEntries.push(...rowKeys);
 		}
 		if (detailKey && this.detailTakeover) hintEntries.push(detailKey);
 

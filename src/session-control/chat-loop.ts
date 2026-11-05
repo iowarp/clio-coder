@@ -1751,10 +1751,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	// --- the state machine --------------------------------------------------
 
-	// Settlement tracking for whenSettled(): the latest submit's promise,
-	// coerced to never reject so shutdown ordering cannot throw. `priorSubmit`
-	// is the promise `activeSubmit` held before the latest submit replaced it,
-	// which is the run an interrupt has to wait out.
+	// Settlement tracking for whenSettled(): every submit still going, coerced
+	// to never reject so shutdown ordering cannot throw. `priorSubmit` is what
+	// `activeSubmit` held before the latest submit joined it, which is the run an
+	// interrupt has to wait out.
 	let activeSubmit: Promise<void> = Promise.resolve();
 	let priorSubmit: Promise<void> = Promise.resolve();
 	let sessionResetSettlement: Promise<void> = Promise.resolve();
@@ -3829,6 +3829,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				false,
 			);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			options.onRoute?.({ targetId: prepared.runtime.targetId, wireModelId: prepared.runtime.wireModelId });
 			let result: SideQuestionResult;
 			try {
 				result = await withEndpointSlot(prepared.runtime, (slot) =>
@@ -3987,7 +3988,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Settle hooks are housekeeping and never cost the turn.
 			}
 		});
-		activeSubmit = run.catch(() => {});
+		// A steer during a run is a submit that returns at once. Replacing the record with it forgot the
+		// live run, so an interrupt's wait for the cancel to settle returned early and shutdown could stop the writer
+		// under a persisting turn. The record covers every submit still going.
+		activeSubmit = Promise.all([priorSubmit, run.catch(() => {})]).then(() => {});
 		return run;
 	};
 

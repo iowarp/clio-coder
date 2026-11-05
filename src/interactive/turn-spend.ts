@@ -80,7 +80,7 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 			unknownCalls === 0 && skipped === 0
 				? null
 				: unknownCalls === 0
-					? `${skipped} never sent`
+					? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent`
 					: `usage ${known(calls) > unknownCalls + skipped ? "partly " : ""}unknown (/usage)`,
 	};
 }

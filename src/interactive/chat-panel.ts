@@ -3054,6 +3054,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// Only the grant path resumes a parked call; a denial settles it blocked.
 					if (event.state === "resumed" && tool.approvalView !== undefined)
 						tool.operatorGrant = approvalAxisText(tool.approvalView);
+					// Time on the card is not time running: an allowed command starts its clock now.
+					if (event.state === "resumed") tool.startedAtMs = now();
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
 					tool.approvalView = event.state === "awaiting-approval" ? event.view : undefined;
 					markDirty();

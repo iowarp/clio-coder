@@ -148,6 +148,8 @@ export interface InteractivePresentationDeps {
 	getShutdownArmed?: () => boolean | string;
 	/** Whether a permission prompt owns the keyboard, for the composer's CONFIRM rail. */
 	isAwaitingApproval?: () => boolean;
+	/** The overlay holding the keyboard, so a dock can stop naming composer keys while it does. */
+	getOverlayState?: () => string;
 	/** Whether that prompt has a mutation to inspect, and whether it is open (issue #254). */
 	getPermissionInspection?: () => import("./permission-hint.js").PermissionInspectionHint;
 	getCwd?: () => string;
@@ -395,6 +397,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getNavigateKey: () => keybindings.actionLabel("clio-coder.queue.open"),
 		getSendNowKey: () => keybindings.actionLabel("clio-coder.message.interrupt"),
+		...(deps.getOverlayState ? { getOverlayState: deps.getOverlayState } : {}),
+		isHeld: () => !deps.chat.isStreaming() && deps.chat.turnPreparation().phase === "idle",
 	});
 	const statusController = factories.createStatusController({
 		chat: deps.chat,

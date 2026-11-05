@@ -91,6 +91,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	chatRenderer: { applyEvent(event: import("../session-control/chat-loop.js").ToolApprovalStateEvent): void };
 	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
 	dismissNotification?: (key: string) => void;
+	onToolResumed?: (toolCallId: string) => void;
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
 	/** Record a dispatched fleet step's plan position for the board's phase column. */
@@ -375,7 +376,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		},
 		closeOverlay,
 		appendNotice: (level, text, source) => appendNotice(level, text, busNoticeSink, source),
-		applyApprovalState: (event) => chatRenderer.applyEvent(event),
+		applyApprovalState: (event) => {
+			chatRenderer.applyEvent(event);
+			if (event.state === "resumed") deps.onToolResumed?.(event.toolCallId);
+		},
 		requestRender: () => tui.requestRender(),
 		// An operator cancel, audited as one. The reason distinguishes it from an
 		// Esc or Ctrl-C in the audit trail without inventing a new abort source.
@@ -521,6 +525,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		refreshFooter: () => footer.refresh(),
 		toggleFooter: () => footer.toggleExpanded(),
 		...(deps.dismissNotification ? { dismissNotification: deps.dismissNotification } : {}),
+		getSlashNotice: () => deps.getSlashContext().notice,
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
 		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),

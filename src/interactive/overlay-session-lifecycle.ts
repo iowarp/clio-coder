@@ -22,6 +22,7 @@ import {
 	buildModelReplayAgentMessagesFromTurns,
 	withContinuityReplay,
 } from "../session-control/model-session-replay.js";
+import { outOfTurnRouteLabel } from "../session-control/side-question.js";
 import type { SlashCommandContext } from "../session-control/slash-commands.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
@@ -490,16 +491,63 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			emitCommandNotice(deps.getSlashNotice(), admitted.level, "handoff", admitted.reason);
 			return;
 		}
-		void runHandoffExtraction(admitted.session, admitted.goal);
+		void runHandoff(admitted.session, admitted.goal);
 	}
 
-	async function runHandoffExtraction(session: SessionContract, goal: string): Promise<void> {
-		const prepared = await prepareHandoff(handoffDeps(), goal);
+	/**
+	 * The review box opens before the first model call, so the wait has an owner,
+	 * a clock and an Esc; the document then takes over the same box.
+	 */
+	async function runHandoff(session: SessionContract, goal: string): Promise<void> {
+		const controller = new AbortController();
+		let draft: HandoffDraft | null = null;
+		const openReview = deps.openHandoffReviewOverlay ?? openHandoffReviewOverlay;
+		deps.transitions.state = "handoff-review";
+		const review = openReview(deps.tui, {
+			document: null,
+			goal,
+			columns: deps.terminal?.columns ?? 80,
+			onEdit: editHandoffDocument,
+			onAccept: (reviewed) => {
+				deps.transitions.close();
+				if (draft) seedHandoffSession(session, draft, reviewed);
+			},
+			// Esc. Nothing has been written yet, so cancel really is free. The
+			// overlay settles itself on cancel and answers no further key, so the
+			// transition has to close here or the review stays on screen inert.
+			onCancel: () => {
+				controller.abort();
+				deps.transitions.close();
+				deps.notify("info", "handoff cancelled; nothing was written", "handoff:cancelled");
+			},
+		});
+		deps.transitions.handle = review;
+		deps.requestRender();
+		const prepared = await prepareHandoff(
+			{
+				...handoffDeps(),
+				extract: (round, options) => {
+					review.setPreparation(options?.repair ? "repairing" : "reading");
+					return deps.chat.extractHandoff(round, {
+						...(options ?? {}),
+						signal: controller.signal,
+						onRoute: (route) => review.setRoute(outOfTurnRouteLabel(route)),
+					});
+				},
+			},
+			goal,
+		);
+		// The operator already left, and heard that nothing was written.
+		if (controller.signal.aborted) return;
 		if (!prepared.ok) {
-			emitCommandNotice(deps.getSlashNotice(), prepared.level, "handoff", prepared.reason);
+			deps.transitions.close();
+			const unwritten = /nothing was written/u.test(prepared.reason) ? "" : "; nothing was written";
+			emitCommandNotice(deps.getSlashNotice(), prepared.level, "handoff", `${prepared.reason}${unwritten}`);
+			deps.requestRender();
 			return;
 		}
-		openHandoffReview(session, prepared.draft);
+		draft = prepared.draft;
+		review.showDocument(prepared.draft.document);
 	}
 
 	/** Hand the document to `$EDITOR`, or say why it could not go. */
@@ -516,30 +564,6 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		if (result.ok) return result.text ?? current;
 		if (result.error) deps.notify("warning", `handoff: ${result.error}`, "handoff:editor-failed");
 		return null;
-	}
-
-	function openHandoffReview(session: SessionContract, draft: HandoffDraft): void {
-		if (deps.transitions.state !== "closed") return;
-		const openReview = deps.openHandoffReviewOverlay ?? openHandoffReviewOverlay;
-		deps.transitions.state = "handoff-review";
-		deps.transitions.handle = openReview(deps.tui, {
-			document: draft.document,
-			goal: draft.goal,
-			columns: deps.terminal?.columns ?? 80,
-			onEdit: editHandoffDocument,
-			onAccept: (reviewed) => {
-				deps.transitions.close();
-				seedHandoffSession(session, draft, reviewed);
-			},
-			// Esc. Nothing has been written yet, so cancel really is free. The
-			// overlay settles itself on cancel and answers no further key, so the
-			// transition has to close here or the review stays on screen inert.
-			onCancel: () => {
-				deps.transitions.close();
-				deps.notify("info", "handoff cancelled; nothing was written", "handoff:cancelled");
-			},
-		});
-		deps.requestRender();
 	}
 
 	/** Seed the successor through the shared service, then open it on screen. */
