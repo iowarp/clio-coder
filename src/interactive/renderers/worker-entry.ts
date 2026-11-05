@@ -439,6 +439,8 @@ function cancelLines(entry: WorkerEntryState, width: number): string[] {
 			: placement?.mode === "worktree"
 				? `its worktree stays on branch ${placement.branch}`
 				: null;
+	// The header already says cancelled; the row is only for who stopped it and what became of its worktree.
+	if (why === "cancelled" && worktree === null) return [];
 	const text = `${GLYPH.cancelled} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${worktree === null ? "" : `${SEPARATOR}${worktree}`}`;
 	return railLines(sanitizeCallTargetText(text), "toolMetadata", width);
 }
@@ -464,15 +466,16 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
 			: meta(`${SEPARATOR}${entry.telemetry.activity.elapsed.display}`);
-	// A narrow row keeps what happened and lets the identity take the cut.
+	// A narrow row keeps the name and what happened, in the wide row's order, and lets the route take the cut.
 	if (width < NARROW_CARD_WIDTH) {
-		const lead = `${cardPrefix(entry)}${status} `;
-		return truncateToWidth(
-			`${lead}${identityUnits(entry, withRunId).join(meta(SEPARATOR))}`,
-			width,
-			GLYPH.ellipsis,
-			false,
-		);
+		// The outcome never takes the cut: the name gives way first, then the elapsed time.
+		const [who, ...rest] = identityUnits(entry, withRunId);
+		const prefix = cardPrefix(entry);
+		const tail = visibleWidth(`${prefix}  ${status}${elapsed}`) + 4 <= width ? `${status}${elapsed}` : status;
+		const nameRoom = Math.max(1, width - visibleWidth(prefix) - visibleWidth(tail) - 1);
+		const lead = `${prefix}${truncateToWidth(who ?? "", nameRoom, GLYPH.ellipsis, false)} ${tail}`;
+		const route = rest.length > 0 ? `${meta(SEPARATOR)}${rest.join(meta(SEPARATOR))}` : "";
+		return truncateToWidth(`${lead}${route}`, width, GLYPH.ellipsis, false);
 	}
 	const full = ` ${status}${elapsed}`;
 	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;

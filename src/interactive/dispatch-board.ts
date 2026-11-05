@@ -1038,7 +1038,11 @@ function dispatchCardBody(
 			cardUnitsLine(
 				theme,
 				"control",
-				[theme.fg("success", `${GLYPH.ok} steer received`), theme.fg("body", `${row.steerAcknowledgement.chars} chars`)],
+				[
+					// The worker took the message; whether its model read it before the run ended is the transcript receipt's.
+					theme.fg("success", `${GLYPH.ok} the worker took your message`),
+					theme.fg("body", `${row.steerAcknowledgement.chars} chars`),
+				],
 				contentWidth,
 			),
 		);
