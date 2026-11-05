@@ -7,13 +7,18 @@ import {
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
+import { createGrantBroker } from "../../src/domains/dispatch/grant-broker.js";
 import {
 	createWorkerApprovalWindows,
 	WORKER_APPROVAL_HOLD_CEILING_MS,
 	workerApprovalBackstopMs,
 } from "../../src/domains/dispatch/worker-approval-window.js";
-import { mainCallExposure } from "../../src/domains/safety/call-consequence.js";
+import { type TrustSummaryProjection, trustFailureWords } from "../../src/domains/evidence/trust-projection.js";
+import { credentialedCallKind, mainCallExposure } from "../../src/domains/safety/call-consequence.js";
+import { outwardShellReason } from "../../src/domains/safety/containment.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
+import { grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
 import {
 	DEFAULT_RETRY_SETTINGS,
 	formatStatedWait,
@@ -40,7 +45,7 @@ import {
 import { providerFailureAdvice } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
-import { workerActivityWords } from "../../src/interactive/worker-activity.js";
+import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
 import {
 	type AgentStatus,
@@ -1315,4 +1320,120 @@ test("a moved request needs no retry budget and its aborted call forecasts no fa
 		ladder.statuses.map((status) => status.phase),
 		["moved"],
 	);
+});
+
+test("a brokered ask's window hands the person the whole time, and running out says it timed out", () => {
+	const fired: Array<() => void> = [];
+	const delivered: Array<{ decision: string; cause: string | undefined }> = [];
+	let at = 0;
+	const broker = createGrantBroker({
+		now: () => 1_000,
+		deliver: (_record, decision, _reason, cause) => {
+			delivered.push({ decision, cause });
+			return true;
+		},
+	});
+	const opened = broker.open({
+		workerRequestId: "ask",
+		runId: "run",
+		rootRunId: "run",
+		attempt: 0,
+		attemptToken: "token",
+		ownerSessionId: null,
+		agentId: "coder",
+		tool: "bash",
+		actionClass: "execute",
+		approvalAuthority: "main",
+		argDigest: grantEffectDigest({ tool: "bash", args: { command: "true" } }),
+		effect: { tool: "bash", args: { command: "true" } },
+		cwd: "/w",
+		permitTools: ["bash"],
+		summary: "bash",
+		reasons: [],
+		deadlineAt: 900_000,
+		windowMs: 20_000,
+	});
+	if (!opened.ok) throw new Error(opened.reason);
+	const requestId = opened.record.requestId;
+	const windows = createWorkerApprovalWindows({
+		now: () => at,
+		setTimer: (callback) => {
+			fired.push(callback);
+			return fired.length;
+		},
+		clearTimer: () => {},
+	});
+	windows.open({
+		runId: "run",
+		agentId: "coder",
+		requestId,
+		windowMs: 20_000,
+		fallback: "fail",
+		decider: "judge",
+		deny: () => {
+			broker.expire(requestId);
+			return true;
+		},
+	});
+	strictEqual(windows.read(requestId)?.decider, "judge");
+	at = 15_000;
+	strictEqual(windows.handToOperator(requestId), true);
+	strictEqual(windows.read(requestId)?.decider, "operator");
+	strictEqual(windows.read(requestId)?.remainingMs, 20_000, "the judge's time is not taken from the person");
+	fired.at(-1)?.();
+	deepStrictEqual(delivered, [{ decision: "deny", cause: "timeout" }]);
+	strictEqual(broker.get(requestId)?.state, "expired");
+	broker.dispose();
+	windows.dispose();
+});
+
+test("a wait names who it is on and keeps its time left as the room shrinks", () => {
+	const words = (
+		decider: "operator" | "main" | "judge",
+		room?: number,
+		held = false,
+		fallback: "deny" | "fail" = "fail",
+	) =>
+		approvalWaitWords(
+			{ approvalWindow: { expiresAt: 119_000, held, fallback, decider } },
+			{ now: 0, ...(room === undefined ? {} : { room }) },
+		);
+	strictEqual(words("operator"), "waiting for your approval · run fails in 1:59");
+	strictEqual(words("operator", 34), "your approval · run fails in 1:59");
+	strictEqual(words("operator", 26), "asks you · fails in 1:59");
+	strictEqual(words("operator", 13), "fails in 1:59");
+	strictEqual(words("operator", 20, true), "held · fails in 1:59");
+	strictEqual(words("operator", 14, true), "fails in 1:59");
+	strictEqual(words("judge", 80, false, "deny"), "waiting for the safety judge · denied in 1:59");
+	strictEqual(words("main", 80, false, "deny"), "waiting for the main agent · denied in 1:59");
+});
+
+test("a run's list row and a credentialed call's title say only what is known", () => {
+	const summary = (axes: Partial<TrustSummaryProjection["axes"]>, verdict: TrustSummaryProjection["verdict"]) =>
+		({ verdict, axes }) as Pick<TrustSummaryProjection, "verdict" | "axes">;
+	strictEqual(trustFailureWords(summary({ validationGrounding: "failed" }, "compromised")), "validation failed");
+	strictEqual(trustFailureWords(summary({ validationGrounding: "absent" }, "unverified")), null);
+	strictEqual(outwardShellReason("gh pr list"), "gh reads with your credentials");
+	strictEqual(outwardShellReason("gh pr merge 3"), "gh acts with your credentials");
+	strictEqual(outwardShellReason("gh api repos/o/r/issues"), "gh acts with your credentials");
+	strictEqual(credentialedCallKind(["gh reads with your credentials"]), "reads with your credentials");
+	strictEqual(credentialedCallKind(["gh acts with your credentials"]), "uses your credentials");
+	strictEqual(credentialedCallKind(["Publishes to origin"]), null);
+});
+
+test("a person's /run refused beside the main turn says why without a deadlock or a model's remedy", () => {
+	const detail =
+		foregroundEndpointBlock({
+			endpointKey: "http://127.0.0.1:1",
+			operatorStarted: true,
+			limits: { endpoints: { "http://127.0.0.1:1": 1 } },
+			usage: {
+				endpoints: { "http://127.0.0.1:1": 1 },
+				endpointHolders: {
+					"http://127.0.0.1:1": { foregroundStreams: 1, workers: 0, background: 0 } as never,
+				},
+			},
+		} as never) ?? "";
+	match(detail, /the main turn is using the only slot/u);
+	strictEqual(detail.includes("deadlock"), false);
 });

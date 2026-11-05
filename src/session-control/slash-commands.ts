@@ -448,7 +448,7 @@ async function runAttributed(
 			const changed = receipt.worktree?.changedPaths?.length ?? 0;
 			const kept =
 				changed > 0 && receipt.worktree !== undefined
-					? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} on branch ${receipt.worktree.branch}`
+					? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} in its worktree on branch ${receipt.worktree.branch}`
 					: "";
 			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${kept} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
