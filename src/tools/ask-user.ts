@@ -839,9 +839,16 @@ async function completeInterview(
 	return okInterviewResult(policy, event);
 }
 
+/** Why the host closed an interview the model left open, as the decisions summary words it. */
+type AskUserHostCloseReason = "turn_finished";
+
+const HOST_CLOSE_SUMMARY: Record<AskUserHostCloseReason, string> = {
+	turn_finished: "The interview ended with the turn before Clio closed it.",
+};
+
 async function finalizeAskUserInterview(
 	policy: AskUserToolPolicy,
-	reason: string,
+	reason: AskUserHostCloseReason,
 	options?: ToolInvokeOptions,
 ): Promise<void> {
 	if (policy.status === "idle" && policy.rounds.length === 0) return;
@@ -850,7 +857,7 @@ async function finalizeAskUserInterview(
 		policy.status = "complete";
 		policy.updatedAt = now;
 		policy.endedAt = now;
-		policy.summary = policy.summary ?? `Interview closed by host: ${reason}.`;
+		policy.summary = policy.summary ?? HOST_CLOSE_SUMMARY[reason];
 	}
 	await persistAskUserTranscript(policy, options);
 }
@@ -858,7 +865,7 @@ async function finalizeAskUserInterview(
 /** Settle a turn-owned interview, then hand its immutable policy to one durable producer. */
 export async function finalizeAskUserInterviewForHost(
 	policy: AskUserToolPolicy,
-	reason: string,
+	reason: AskUserHostCloseReason,
 	options?: ToolInvokeOptions,
 	onFinalized?: (policy: AskUserToolPolicy) => void,
 ): Promise<void> {
