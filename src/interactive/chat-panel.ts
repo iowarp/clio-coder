@@ -2072,7 +2072,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		lastSettledReceipt = null;
 		runAwaitingRetry = false;
 		const { messages, turnId, replayed } = run;
-		if (run.always === true || messages.some(reportsCall)) {
+		const ending = run.outcome === undefined ? classifyTurnEnding(messages as ReadonlyArray<AgentMessage>) : null;
+		// A provider that reports no usage still owes the operator the news that nothing answered.
+		if (run.always === true || messages.some(reportsCall) || ending?.kind === "no_answer") {
 			// The usage line is a caption on rendered output, so it goes on the
 			// last entry that rendered any. A mid-turn notice splits entries, and
 			// a turn that stops after one leaves an empty tail entry behind: the
@@ -2109,7 +2111,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							: Math.max(0, now() - runStartedAt);
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
-				const ending = run.outcome === undefined ? classifyTurnEnding(messages as ReadonlyArray<AgentMessage>) : null;
 				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
 				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
 					options.recordTurnHumanWait?.({ turnId, humanWaitMs });

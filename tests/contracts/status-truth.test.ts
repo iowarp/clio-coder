@@ -10,7 +10,8 @@ import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/reside
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
-import { reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
+import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
+import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
 import {
 	type AgentStatus,
 	INITIAL_STATUS,
@@ -539,5 +540,63 @@ test("a reconcile reports the switch it makes and the restore a failed load forc
 	deepStrictEqual(
 		events.map((event) => event.stage),
 		["switching", "loading", "restoring"],
+	);
+});
+
+test("a run reads as no answer only when nothing answers it and a run with real work ending quietly stays apart", () => {
+	const markup = '<tool_call>\n{"name": "edit", "arguments": {}}\n</tool_call>';
+	const reply = (content: unknown[], stopReason = "stop") => ({ role: "assistant", content, stopReason }) as never;
+	const thinking = (text: string) => ({ type: "thinking", thinking: text });
+	const text = (value: string) => ({ type: "text", text: value });
+	const worked = { role: "toolResult", toolName: "bash", isError: false } as never;
+	const failed = { role: "toolResult", toolName: "bash", isError: true } as never;
+	const cause = (messages: never[]) => {
+		const ending = classifyTurnEnding(messages);
+		return ending?.kind === "no_answer" ? ending.cause : (ending?.kind ?? null);
+	};
+
+	strictEqual(cause([reply([thinking(`Now the edit. ${markup}`)])]), "tool_call_in_reasoning");
+	strictEqual(cause([worked, reply([thinking(markup)])]), "tool_call_in_reasoning");
+	strictEqual(cause([reply([text(markup)])]), "tool_call_as_text");
+	strictEqual(cause([reply([thinking("Nothing further to add.")])]), "reasoning_only");
+	strictEqual(cause([reply([])]), "empty");
+	strictEqual(cause([failed, reply([])]), "empty");
+	strictEqual(cause([worked, reply([])]), "quiet");
+	// Reasoning may quote markup on the way to a real answer, and prose may quote it too.
+	strictEqual(cause([reply([thinking(markup), text("Fixed it.")])]), null);
+	strictEqual(cause([reply([text(`The model wrote ${markup} here.`)])]), null);
+	// Every other stop has its own report.
+	strictEqual(cause([reply([], "length")]), null);
+	strictEqual(cause([reply([], "error")]), null);
+	strictEqual(cause([reply([{ type: "toolCall", id: "a", name: "bash", arguments: {} }], "toolUse")]), null);
+});
+
+test("a no-answer receipt says why, with or without usage, and never wears the green check", () => {
+	const message = {
+		role: "assistant",
+		content: [{ type: "thinking", thinking: "<tool_call>\n{}\n</tool_call>" }],
+		stopReason: "stop",
+	};
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.appendUser("fix it");
+	panel.applyEvent({ type: "agent_start" } as never);
+	panel.applyEvent({ type: "message_start", message } as never);
+	panel.applyEvent({ type: "message_end", message } as never);
+	panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+	const output = screen(panel);
+	doesNotMatch(output, /✓/u);
+	match(output, /No answer/u);
+	match(output, /into its reasoning/u);
+	strictEqual(
+		buildSummary({
+			startedAt: 0,
+			endedAt: 1,
+			modelId: "m",
+			targetId: "t",
+			messages: [message] as never,
+			watchdogPeak: 0,
+			cancelled: false,
+		}).stopReason,
+		"no_answer",
 	);
 });
