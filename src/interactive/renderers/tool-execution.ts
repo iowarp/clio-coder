@@ -1070,7 +1070,7 @@ const MUTATION_PAYLOAD_FIELDS = ["edits", "oldText", "newText", "content"] as co
 /** Scalar arguments the row states inline, as `key value`, in argument order. */
 function inlineArgs(row: ResolvedToolRow, finished: ToolExecutionFinished | null): string[] {
 	// A call whose worker card sits under it leaves the run's facts, its route
-	// included, to the card: the row reads `◆ delegated to scout ✓ · 38s`.
+	// included, to the card: the row reads `◆ delegated to scout · 38s`.
 	if (row.context.cardAttached === true) return [];
 	const skip = new Set<string>([...row.spec.consumes, ...factConsumedFields(row, finished)]);
 	if (row.spec.class === "mutate") for (const key of MUTATION_PAYLOAD_FIELDS) skip.add(key);
@@ -1221,10 +1221,18 @@ function sublineParts(
 	const ledger = finished === null ? null : ledgerTail(finished, row);
 	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
+	// A check here would state the call beside a card whose run may read `!` or `✗`, so the card alone states the outcome.
+	const cardDuration = optionalCompactMs(meta.durationMs);
+	const tail =
+		status === "ok" && row.context.cardAttached === true
+			? cardDuration === null
+				? ""
+				: toolMeta(` · ${cardDuration}`)
+			: statusGlyph(status, meta);
 	const compose = (inline: string): SublineParts =>
 		ledger !== null
-			? { lead: `${head(inline)}${ledger.facts}`, tail: `${statusGlyph(status, meta)}${ledger.offload}` }
-			: { lead: `${head(inline)}${via}${local}`, tail: statusGlyph(status, meta) };
+			? { lead: `${head(inline)}${ledger.facts}`, tail: `${tail}${ledger.offload}` }
+			: { lead: `${head(inline)}${via}${local}`, tail };
 	const full = compose(inlineText);
 	if (width === undefined || inlineText.length === 0 || visibleWidth(`${full.lead}${full.tail}`) <= width) return full;
 	// A row whose status would wrap onto a second line gives up its scalar

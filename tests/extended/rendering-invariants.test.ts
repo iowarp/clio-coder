@@ -1813,7 +1813,7 @@ describe("transcript block grammar", () => {
 		const notice = rows.findIndex((row) => row.includes("a notice between the call and its card"));
 		ok(call >= 0 && card > call && card < notice, rows.join("\n"));
 		// The card states the run, so the call drops its task and its receipt body.
-		strictEqual(rows[call], `${GLYPH.workerAgent} delegated to reviewer ✓ · 5ms`, rows.join("\n"));
+		strictEqual(rows[call], `${GLYPH.workerAgent} delegated to reviewer · 5ms`, rows.join("\n"));
 		doesNotMatch(rows.join("\n"), /review the diff/u);
 		// A call from an earlier turn keeps its row; a card for it lands at the tail.
 		panel.appendUser("Something else");
@@ -2872,7 +2872,7 @@ describe("agent invocations", () => {
 			doesNotMatch(running, /List every call site|task ›/u);
 			dispatchEnd(panel, "d1", 1);
 			const settledRows = plainRender(panel, 100).split("\n");
-			strictEqual(settledRows[0], `${GLYPH.workerAgent} delegated to scout ✓ · 38s`, style);
+			strictEqual(settledRows[0], `${GLYPH.workerAgent} delegated to scout · 38s`, style);
 			doesNotMatch(settledRows.join("\n"), /1 ok|quality .*\n.*quality|tasks -> done/u);
 		}
 	});
@@ -2888,7 +2888,7 @@ describe("agent invocations", () => {
 			);
 			dispatchEnd(panel, "d1", 1);
 			const plain = plainRender(panel, 130);
-			strictEqual(plain.split("\n")[0], `${GLYPH.workerAgent} delegated to scout ✓ · 38s`, `${style}\n${plain}`);
+			strictEqual(plain.split("\n")[0], `${GLYPH.workerAgent} delegated to scout · 38s`, `${style}\n${plain}`);
 			strictEqual(plain.split("Map every caller").length, 2, `${style}: the task must appear once\n${plain}`);
 			doesNotMatch(plain, /task ›/u);
 		}
@@ -2928,7 +2928,7 @@ describe("agent invocations", () => {
 		}
 		dispatchEnd(panel, "fan", 3, 1);
 		const rows = plainRender(panel, 100).split("\n");
-		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 2 ok, 1 failed ✓ · 38s`);
+		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 2 ok, 1 failed · 38s`);
 		strictEqual(rows[1], "", "the cards follow the call as the next entry");
 		const cards = rows.filter((row) => row.startsWith(`${GLYPH.workerAgent} scout`));
 		strictEqual(cards.length, 3);
