@@ -27,8 +27,8 @@ type RampColor = readonly [Projection, Projection, Projection];
  * Warm stone and ivory follow the website's paper palette. Near-white is
  * reserved for answers and entered text; cyan and copper follow the IOWarp logo.
  * Unknown-background colors occupy the narrow luminance band that holds 4.5:1 on
- * both black and white. The dark and light projections hold 4.5:1 for text and
- * 3:1 for rules on typical backgrounds and on the composer surface; see
+ * both black and white. The dark and light projections hold 4.5:1 for text, 3:1
+ * for rails and 2:1 for frames and dividers on typical backgrounds; see
  * theme-contrast.ts for how they lift further on a reported background. A declared
  * surface supplies its own background and uses the corresponding projection.
  */
@@ -170,13 +170,13 @@ export const TERMINAL_PALETTE = {
 	],
 	border: [
 		["#737a80", 243],
-		["#6c7e79", 244],
-		["#7c8185", 244],
+		["#526762", 240],
+		["#a4abb0", 248],
 	],
 	divider: [
 		["#737a80", 243],
-		["#657571", 243],
-		["#868a8e", 102],
+		["#3f524d", 239],
+		["#a6abaf", 248],
 	],
 	surface: [
 		["#151412", 233],

@@ -10,8 +10,9 @@ import {
 /**
  * Contrast rules for the palette, solved against the background the terminal
  * reports. Each color is paired with the surfaces it is painted on and a level,
- * and takes the strictest result across them. Text needs 4.5:1, a rule, rail or
- * meter 3:1.
+ * and takes the strictest result across them. Text needs 4.5:1, a rail or meter
+ * fill 3:1. Frames and dividers carry no words and stay quiet by design at 2:1;
+ * a word on a rule is painted in a text role.
  *
  * A color that passes is left alone. One that fails is mixed toward white or
  * black, which keeps its hue and can only reduce its chroma, so nothing turns
@@ -20,6 +21,8 @@ import {
  */
 const CONTRAST_TEXT = 4.5;
 const CONTRAST_UI = 3;
+const CONTRAST_HAIRLINE = 2;
+const HAIRLINES = new Set<PaletteColor>(["border", "divider"]);
 
 export interface ProjectedColor {
 	readonly rgb: Rgb;
@@ -80,7 +83,7 @@ function buildRules(): ReadonlyMap<PaletteColor, ContrastRule> {
 	}
 	for (const [role, color] of Object.entries(STRUCTURAL_ROLES) as [string, PaletteColor][]) {
 		if (isSurface(color) || color === "onAccent") continue;
-		raise(color, STRUCTURAL_TEXT.has(role) ? CONTRAST_TEXT : CONTRAST_UI);
+		raise(color, STRUCTURAL_TEXT.has(role) ? CONTRAST_TEXT : HAIRLINES.has(color) ? CONTRAST_HAIRLINE : CONTRAST_UI);
 	}
 	// The one inverse pair: onSelection text sits on the selection badge.
 	rules.set("onAccent", { level: CONTRAST_TEXT, surfaces: ["cyanFocal"] });
