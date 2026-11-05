@@ -125,7 +125,7 @@ function councilMemberLines(
 	theme: ClioTheme,
 	member: CouncilMemberView,
 	width: number,
-	options: { selected?: boolean; maxAnswerRows?: number } = {},
+	options: { selected?: boolean; maxAnswerRows?: number; showRound?: boolean } = {},
 ): string[] {
 	const dot = dotSep(theme);
 	const cursor = options.selected === true ? `${theme.fg("selectedOption", GLYPH.cursor)} ` : "";
@@ -134,7 +134,12 @@ function councilMemberLines(
 	const lines = [
 		truncateToWidth(head, width, "…", false),
 		truncateToWidth(theme.fg("footerIdentity", member.route), width, "…", false),
-		truncateToWidth(`${status}${dot}${theme.fg("annotation", `round ${member.round}`)}`, width, "…", false),
+		truncateToWidth(
+			options.showRound === true ? `${status}${dot}${theme.fg("annotation", `round ${member.round}`)}` : status,
+			width,
+			"…",
+			false,
+		),
 		...answerRows(theme, member, width, options.maxAnswerRows ?? COUNCIL_ANSWER_ROWS),
 	];
 	// A member this process did not watch has no tail here; its answer is in its record, so the column says where.
@@ -166,6 +171,7 @@ export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, cont
 		const columns = group.members.map((member) =>
 			councilMemberLines(theme, member, layout.columnWidth, {
 				selected: member.runId === group.selectedRunId,
+				showRound: group.round > 1,
 			}),
 		);
 		body.push(...zipColumns(columns, layout.columnWidth));
@@ -175,6 +181,7 @@ export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, cont
 			body.push(
 				...councilMemberLines(theme, member, layout.columnWidth, {
 					selected: member.runId === group.selectedRunId,
+					showRound: group.round > 1,
 				}),
 			);
 		}
@@ -185,6 +192,7 @@ export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, cont
 			...councilMemberLines(theme, group.synthesis, contentWidth, {
 				selected: group.synthesis.runId === group.selectedRunId,
 				maxAnswerRows: COUNCIL_ANSWER_ROWS + 2,
+				showRound: group.round > 1,
 			}),
 		);
 	}

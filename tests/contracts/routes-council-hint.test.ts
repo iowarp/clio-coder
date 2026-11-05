@@ -1,4 +1,4 @@
-import { doesNotMatch, match, ok } from "node:assert/strict";
+import { match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
@@ -33,7 +33,8 @@ test("fleet hint offers detail only for a row with rendered detail", () => {
 		board.resetSelection();
 		createOverlayGeneralOpeners(deps).toggleDispatchBoard();
 		const councilHint = hint?.(width) ?? "";
-		doesNotMatch(councilHint, /Enter.*detail/u);
+		// A council's detail is its members' answers; Enter gives them the rows the table holds.
+		match(councilHint, /Enter.*detail/u);
 		ok(visibleWidth(councilHint) <= width);
 		board.selectNext();
 		const ordinaryHint = hint?.(width) ?? "";

@@ -1117,8 +1117,9 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	if (row.plan !== undefined) return planIslandLines(theme, row, row.plan, width);
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
-	// A queued run has not started, so it has no elapsed time to be unavailable.
-	const elapsed = row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : "not available");
+	// A queued run has not started, so it has no clock; a run whose telemetry has not arrived yet still has its own.
+	const elapsed =
+		row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatCompactMs(row.elapsedMs));
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
 
@@ -1647,7 +1648,12 @@ export function runTableRows(
 			cells.push(group.elapsed, "", "", "");
 			if (anyAccount) cells.push("");
 			cells.push({
-				text: `${group.task === undefined ? "" : `${group.task} · `}round ${group.round}${group.synthesis === null ? "" : ` · ${COUNCIL_SYNTHESIS_LABEL}`}`,
+				// A one-round council has no round worth naming; a synthesis is the council's own answer, so it says so.
+				text: [
+					...(group.task === undefined ? [] : [group.task]),
+					...(group.round > 1 ? [`round ${group.round}`] : []),
+					...(group.synthesis === null ? [] : ["with a synthesis"]),
+				].join(" · "),
 				tone: "muted",
 			});
 			return cells;
@@ -1835,7 +1841,7 @@ function formatDispatchBoardBody(
 			: item.kind === "council"
 				? {
 						title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` · ${item.group.task}`}`,
-						meta: `round ${item.group.round} · ${item.group.elapsed}`,
+						meta: item.group.round > 1 ? `round ${item.group.round} · ${item.group.elapsed}` : item.group.elapsed,
 						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
 						body: councilGroupBody(theme, item.group, width),
 					}
@@ -1949,11 +1955,13 @@ export function dispatchBoardHintEntries(
 	const entries: HintEntry[] = [{ key: "↑↓", verb: "select" }];
 	const steerable = isDispatchBoardRowSteerable(row);
 	// A plan's card already shows every step, so its row has no detail to open or pane to watch.
-	if (row.council === undefined && row.plan === undefined) {
-		// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read.
+	if (row.plan === undefined) {
+		// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read. A
+		// council's detail is its members' answers, which want the rows the table holds.
 		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
 		// The watch pane splits the terminal, so it says so before the key is pressed.
-		if (board.canWatch()) entries.push({ key: "w", verb: "watch in a pane", short: "watch" });
+		if (row.council === undefined && board.canWatch())
+			entries.push({ key: "w", verb: "watch in a pane", short: "watch" });
 	}
 	if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
 	if (isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });
@@ -2076,10 +2084,10 @@ export function createDispatchBoardView(
 			normalizeSelection(rows());
 		},
 		toggleDetail(): void {
-			// A council or plan already shows everything it has, and its hint offers no Enter; a silent toggle there
-			// opened the next run's detail the moment the cursor moved onto it.
+			// A plan's card already shows every step and its hint offers no Enter; a silent toggle there opened the next
+			// run's detail the moment the cursor moved onto it.
 			const row = normalizeSelection(rows());
-			if (row === null || row.council !== undefined || row.plan !== undefined) return;
+			if (row === null || row.plan !== undefined) return;
 			expanded = !expanded;
 		},
 		detailExpanded(): boolean {

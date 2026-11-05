@@ -11,6 +11,7 @@
 import { ToolNames } from "../../core/tool-names.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
@@ -79,10 +80,19 @@ const SECOND_WORKER_RAIL_SHARE = 0.6;
 const SECOND_WORKER_MIN_RAIL = 100;
 
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
+/** A council member goes by the label the operator watches it under, as its notice does, not the recipe all share. */
+function workerRailName(row: DispatchBoardRow): string {
+	const council = row.council;
+	if (council === undefined) return sanitizeCallTargetText(row.agentId);
+	return sanitizeCallTargetText(
+		council.label === COUNCIL_SYNTHESIS_LABEL ? "council synthesis" : `council member ${council.label}`,
+	);
+}
+
 function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string | null {
 	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
-	const name = sanitizeCallTargetText(first.agentId);
+	const name = workerRailName(first);
 	const elapsed = workerElapsed(first);
 	// A queued run is held up and a running one is not, so `+1 more` must not stand for both.
 	const rest = facts.workers.filter((row) => row !== first);
@@ -100,7 +110,7 @@ function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string
 		const named = [
 			`${name} ${doing}`,
 			elapsed,
-			`${sanitizeCallTargetText(second.agentId)} ${sanitizeCallTargetText(facts.workerActivity(second, SECOND_WORKER_WORDS))}`,
+			`${workerRailName(second)} ${sanitizeCallTargetText(facts.workerActivity(second, SECOND_WORKER_WORDS))}`,
 			secondElapsed,
 			others > 1 ? `+${others - 1} more` : null,
 			queued > 0 ? `+${queued} queued` : null,

@@ -64,7 +64,12 @@ import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
-import { approvalWaitWords, workerActivityWords, workerSilenceWords } from "../../src/interactive/worker-activity.js";
+import {
+	approvalWaitWords,
+	bindWorkerResponseLimit,
+	workerActivityWords,
+	workerSilenceWords,
+} from "../../src/interactive/worker-activity.js";
 import {
 	classifyTurnEnding,
 	noteWrittenCalls,
@@ -1840,12 +1845,23 @@ test("a silent worker says whether its wait is usual for the route only from two
 	const late = { ...waiting, evidenceAtMs: now - 95_000 };
 	strictEqual(
 		workerSilenceWords(late, { now, history: null, room: 60 }),
-		"no output for 1m35s · no time limit · x in /fleet stops it",
+		"no output for 1m35s · x in /fleet stops it · usual unknown",
 	);
 	strictEqual(
 		workerSilenceWords(late, { now, history: { calls: 4, slowestMs: 400 }, room: 40 }),
 		"no output for 1m35s · longer than usual",
 	);
+	// A worker reply that runs past safety.limits.workerResponseSeconds is ended, so the words name that limit and
+	// never claim the wait has none.
+	bindWorkerResponseLimit(() => 600_000);
+	try {
+		const bounded = workerSilenceWords(late, { now, history: null });
+		match(bounded ?? "", /Clio ends a reply after 10m/u);
+		doesNotMatch(bounded ?? "", /no time limit/u);
+		strictEqual(workerSilenceWords(late, { now, history: null, room: 40 }), "no output for 1m35s · reply limit 10m");
+	} finally {
+		bindWorkerResponseLimit(() => null);
+	}
 });
 
 test("an opened Fleet Runs detail keeps its trust row on screen and says how many runs it hides", () => {

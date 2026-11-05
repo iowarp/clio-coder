@@ -104,7 +104,7 @@ import { clioTheme, GLYPH } from "./theme/index.js";
 import { formatWaitClock, modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
-import { workerActivityWords } from "./worker-activity.js";
+import { bindWorkerResponseLimit, workerActivityWords } from "./worker-activity.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 /** How long one `/skill <name>` listing serves later keystrokes. */
@@ -371,6 +371,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	});
 	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
+	// Read per render, so a limit changed in /settings is the one a silent worker's words name.
+	bindWorkerResponseLimit(() => {
+		const seconds = (deps.getSettings?.() ?? settings).safety.limits.workerResponseSeconds;
+		return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+	});
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
