@@ -43,7 +43,13 @@ import { LiveToolView } from "./renderers/live-tool-view.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
-import { presentProviderError, providerErrorEvidence } from "./renderers/provider-error.js";
+import {
+	type ProviderFailureRoute,
+	presentProviderError,
+	providerErrorEvidence,
+	providerFailureAdvice,
+	readProviderFailureRoute,
+} from "./renderers/provider-error.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import { renderSkillSuggestionRow, renderSkillSurfaceRow } from "./renderers/skill-rows.js";
 import {
@@ -348,6 +354,8 @@ type SettledToolRows = { key: string; lines: string[]; body: boolean };
 type ErrorSegment = {
 	kind: "error";
 	text: string;
+	/** Where the failure happened, when a provider route did it. */
+	route?: ProviderFailureRoute | undefined;
 	at: number;
 };
 /**
@@ -918,6 +926,10 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 		for (const wrapped of wrapTextWithAnsi(line, width)) {
 			out.push(`${RED_CRIT}${wrapped}${RESET}`);
 		}
+	}
+	if (seg.route) {
+		for (const wrapped of wrapTextWithAnsi(providerFailureAdvice(seg.route), width))
+			out.push(`${SECONDARY()}${wrapped}${RESET}`);
 	}
 	return out;
 }
@@ -2255,7 +2267,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * Markdown as prose. Guards against a duplicate when the same marker arrives
 	 * twice for one settled turn.
 	 */
-	const appendErrorSegment = (entry: Extract<TranscriptEntry, { role: "assistant" }>, text: string): void => {
+	const appendErrorSegment = (
+		entry: Extract<TranscriptEntry, { role: "assistant" }>,
+		text: string,
+		route: ProviderFailureRoute | null = null,
+	): void => {
 		const tail = entry.segments[entry.segments.length - 1];
 		if (tail?.kind === "error" && tail.text === text) return;
 		entry.segments.push({ kind: "error", text, at: stamp(), ...(route !== null ? { route } : {}) });
@@ -3152,7 +3168,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						if (segment.kind === "text") segment.text = holdCutOffText(segment.text);
 					invalidateEntryCache(assistant);
 				}
-				if (terminalError.length > 0) appendErrorSegment(assistant, terminalError);
+				if (terminalError.length > 0) {
+					// An operator's cancel is not a route failure, and no route change fixes it.
+					const failed = (event.message as { stopReason?: unknown }).stopReason === "error";
+					const route = failed ? readProviderFailureRoute((event.message as { failureRoute?: unknown }).failureRoute) : null;
+					appendErrorSegment(assistant, terminalError, route);
+				}
 				markDirty();
 				return;
 			}

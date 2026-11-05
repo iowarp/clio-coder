@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsText } from "../../domains/evidence/redact.js";
-import { redactStreamingSecretString } from "../../domains/safety/redaction.js";
+import { redactStreamingSecretString, redactUrlCredentials } from "../../domains/safety/redaction.js";
 
 const SCAN_LIMIT = 8_192;
 const DISPLAY_LIMIT = 600;
@@ -83,9 +83,12 @@ export function presentProviderError(value: string): string {
 	} else if (jsonStart >= 0) {
 		// Decode only quoted diagnostic strings, never parse and round numeric
 		// source facts. The scan and every allocation are bounded by SCAN_LIMIT.
-		const fields = [...sample.matchAll(/"(?:message|detail|type|code)"\s*:\s*"((?:[^"\\]|\\.)*)/g)].map((match) => {
-			const quoted = match[1];
-			if (quoted === undefined) return "";
+		const matched = [...sample.matchAll(/"(message|detail|type|code)"\s*:\s*"((?:[^"\\]|\\.)*)/g)];
+		// A provider's error class says nothing its message has not said, so it only stands in for a missing one.
+		const explained = matched.some((match) => match[1] === "message" || match[1] === "detail");
+		const fields = matched.map((match) => {
+			const quoted = match[2];
+			if (quoted === undefined || (explained && match[1] === "type")) return "";
 			try {
 				// A bounded prefix of an unfinished quoted field is still useful
 				// prose. The matcher excludes a dangling escape at the boundary.
@@ -95,8 +98,16 @@ export function presentProviderError(value: string): string {
 				return "";
 			}
 		});
-		if (fields.some(Boolean))
-			summary = [sample.slice(0, jsonStart).trim(), ...new Set(fields)].filter(Boolean).join("; ");
+		if (fields.some(Boolean)) {
+			// The SDK leads with `401:` or `503 `; a bare status reads as the status it is, with no stray colon.
+			const lead = sample
+				.slice(0, jsonStart)
+				.trim()
+				.replace(/[:;,\s]+$/u, "");
+			summary = [lead.replace(/^((?:\[[^\]]+\]\s*)?)([45]\d\d)$/u, "$1HTTP $2"), ...new Set(fields)]
+				.filter(Boolean)
+				.join("; ");
+		}
 	}
 	const status =
 		sample.match(/\b(?:HTTP(?:\/\d(?:\.\d)?)?\s*|status(?:_code)?["']?\s*[:=]\s*)([45]\d\d)\b/i)?.[1] ??
@@ -116,4 +127,29 @@ export function presentProviderError(value: string): string {
 	}
 	const shortened = summary.length > DISPLAY_LIMIT || value.length > SCAN_LIMIT || summary !== sample.trim();
 	return `${summary.slice(0, DISPLAY_LIMIT)}${shortened ? " ... [available diagnostic: /view transcript]" : ""}`;
+}
+
+/** The route a provider failure happened on. A failure names the target it failed on and the way out of it. */
+export interface ProviderFailureRoute {
+	targetId: string;
+	url?: string;
+}
+
+export function readProviderFailureRoute(value: unknown): ProviderFailureRoute | null {
+	const route = value as { targetId?: unknown; url?: unknown } | null | undefined;
+	if (typeof route?.targetId !== "string" || route.targetId.length === 0) return null;
+	return {
+		targetId: route.targetId,
+		...(typeof route.url === "string" && route.url.length > 0 ? { url: route.url } : {}),
+	};
+}
+
+/** Credentials and any query go; what is left is the endpoint the operator configured. */
+function shownEndpoint(url: string): string {
+	return providerErrorEvidence(redactUrlCredentials(url.split(/[?#]/u)[0] ?? url));
+}
+
+export function providerFailureAdvice(route: ProviderFailureRoute): string {
+	const where = route.url !== undefined ? `${route.targetId} at ${shownEndpoint(route.url)}` : route.targetId;
+	return `Target ${where}. /model switches route · clio-coder configure --id ${route.targetId} fixes it.`;
 }

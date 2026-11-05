@@ -1543,6 +1543,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								: failure,
 					});
 					Object.assign(message, { callInvoked: failure.invoked });
+					Object.assign(message, {
+						failureRoute: {
+							targetId: target.target.id,
+							...(target.target.url !== undefined ? { url: target.target.url } : {}),
+						},
+					});
 					const retryAfterMs = callTracking?.retryAfterMs();
 					if (retryAfterMs !== null && retryAfterMs !== undefined) Object.assign(message, { retryAfterMs });
 				} else {

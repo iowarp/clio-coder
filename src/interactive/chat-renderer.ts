@@ -837,6 +837,8 @@ function replayEntries(
 						if (failure) {
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
+							const failureRoute = payloadObject(entry.payload)?.failureRoute;
+							if (failureRoute !== undefined) Object.assign(message, { failureRoute });
 						}
 						const stopReason = (message as { stopReason?: string }).stopReason;
 						const terminalFailure = stopReason === "error" || stopReason === "aborted" || stopReason === "length";
