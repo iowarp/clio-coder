@@ -126,7 +126,8 @@ function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProv
  * what was measured, as the receipt and the turn row do, and points at /usage when nothing was.
  */
 function sessionTokens(theme: ClioTheme, measured: string | null, width: number): string {
-	if (measured === null) return theme.fg("annotation", width < 60 ? "usage unknown" : "session usage unknown (/usage)");
+	if (measured === null)
+		return theme.fg("annotation", width < 60 ? "usage not measured" : "session usage not measured (/usage)");
 	// Cost and never-sent share this row, so a narrow page keeps the figure and `tok`.
 	return theme.fg("counter", width < 60 ? `${measured} tok` : `session ${measured} tokens`);
 }
@@ -463,7 +464,7 @@ function sessionSpendChips(telemetry: FooterTelemetry): string[] {
 		labelled(
 			"session",
 			telemetry.tokens !== null && telemetry.measuredTokens === null
-				? theme.fg("unknownValue", "usage unknown (/usage)")
+				? theme.fg("unknownValue", "usage not measured (/usage)")
 				: `${theme.fg("metricValue", telemetry.measuredTokens ?? "0")} ${theme.fg("metricUnit", "tokens")}`,
 		),
 		theme.fg("metricValue", telemetry.cost ?? "nothing charged yet"),

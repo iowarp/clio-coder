@@ -16,6 +16,7 @@ import {
 	type TableCell,
 	tableRows,
 } from "./theme/index.js";
+import { stripUsageClause, usageCoverage, usageFigure, usageGap } from "./usage-words.js";
 
 /**
  * `/health`: what Clio's own telemetry can vouch for right now (#434 §14). Journal writers and their losses, the
@@ -139,11 +140,11 @@ function healthLines(data: HealthData, width: number): string[] {
 				theme,
 				[
 					{ label: "kind", value: transport.kind },
-					{ label: "continuation", value: transport.continuation.display },
-					{ label: "pinned to SSE", value: transport.sessionPinnedToSse.display },
+					{ label: "continuation", value: stripUsageClause(transport.continuation.display) },
+					{ label: "pinned to SSE", value: stripUsageClause(transport.sessionPinnedToSse.display) },
 					...(transport.pinReason ? [{ label: "because", value: transport.pinReason.replaceAll("_", " ") }] : []),
-					{ label: "websocket failures", value: transport.websocketFailures.display },
-					{ label: "SSE fallbacks", value: transport.sseFallbacks.display },
+					{ label: "websocket failures", value: usageFigure(transport.websocketFailures) },
+					{ label: "SSE fallbacks", value: usageFigure(transport.sseFallbacks) },
 					...(transport.recovery
 						? [
 								{ label: "recovery", value: `${transport.recovery.action.replaceAll("_", " ")} ${transport.recovery.outcome}` },
@@ -152,7 +153,16 @@ function healthLines(data: HealthData, width: number): string[] {
 				],
 				width,
 			),
-			theme.fg("annotation", `as of the main call settled at ${transport.at}`),
+			// The calls that reported no transport facts are counted once here, not beside each figure (F4).
+			theme.fg(
+				"annotation",
+				[
+					`as of the main call settled at ${transport.at}`,
+					usageCoverage(Math.max(usageGap(transport.websocketFailures), usageGap(transport.sseFallbacks)), "transport data"),
+				]
+					.filter((part) => part !== null)
+					.join(" · "),
+			),
 		);
 	}
 

@@ -13,6 +13,16 @@ import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
+import type { UsageQuantity } from "./usage-words.js";
+import {
+	USAGE_NOT_MEASURED,
+	usageCoverage,
+	usageFigure,
+	usageGap,
+	usageLineCoverage,
+	usageSaysNothing,
+	usageUnmeasured,
+} from "./usage-words.js";
 
 export interface ExitSummarySnapshot {
 	sessionId: string;
@@ -111,11 +121,13 @@ export type ExitSpend =
 			byRole: string;
 			/** Generation time, first token to settle, over every call the session paid for, workers included. */
 			modelTime: string;
+			/** `4 calls had no timing data`, said once after the time rather than inside it (F4). */
+			modelTimeCoverage: string | null;
 			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
 	  };
 
 function tokenBreakdown(view: TelemetryView, model?: string): string {
-	const display = (metric: FactMetric) =>
+	const quantity = (metric: FactMetric) =>
 		view.quantity(
 			factRef({
 				scope: "session",
@@ -123,22 +135,34 @@ function tokenBreakdown(view: TelemetryView, model?: string): string {
 				metric,
 				...(model === undefined ? {} : { group: { by: "model", key: model } }),
 			}),
-		)?.display ?? "unknown";
-	// In and out are the amounts; the rest earn a place only with something to say, and what nobody reported is said once.
-	const optional = [
-		["cache read", display("cacheRead")],
-		["cache write", display("cacheWrite")],
-		["reasoning", display("reasoning")],
-	] as const;
-	const unknown = optional.filter(([, value]) => value.startsWith("unknown")).map(([label]) => label);
+		);
+	// In and out are the amounts; the rest earn a place only with something to say, what nobody reported is said once,
+	// and the calls that reported nothing are counted once at the end rather than beside every figure (F4).
+	const figures = [
+		{ label: "in", quantity: quantity("input") },
+		{ label: "out", quantity: quantity("output") },
+		{ label: "cache read", quantity: quantity("cacheRead") },
+		{ label: "cache write", quantity: quantity("cacheWrite") },
+		{ label: "reasoning", quantity: quantity("reasoning") },
+	];
+	const [input, output, ...optional] = figures;
+	const unmeasured = optional.filter((entry) => usageUnmeasured(entry.quantity)).map((entry) => entry.label);
+	const shown = optional.filter((entry) => {
+		const figure = usageFigure(entry.quantity);
+		return figure !== "0" && !usageSaysNothing(figure);
+	});
+	const coverage = usageLineCoverage([input, output, ...shown].filter((entry) => entry !== undefined));
 	return [
-		`${display("input")} in`,
-		`${display("output")} out`,
-		...optional
-			.filter(([, value]) => value !== "0" && !value.startsWith("unknown"))
-			.map(([label, value]) => `${value} ${label}`),
-		...(unknown.length > 0 ? [`${unknown.join(", ")} unknown`] : []),
+		`${usageFigure(input?.quantity)} in`,
+		`${usageFigure(output?.quantity)} out`,
+		...shown.map((entry) => `${usageFigure(entry.quantity)} ${entry.label}`),
+		...(unmeasured.length > 0 ? [`${unmeasured.join(", ")} ${USAGE_NOT_MEASURED}`] : []),
+		...(coverage !== null ? [coverage] : []),
 	].join(" · ");
+}
+
+function modelTimeParts(quantity: UsageQuantity | null): { modelTime: string; modelTimeCoverage: string | null } {
+	return { modelTime: usageFigure(quantity), modelTimeCoverage: usageCoverage(usageGap(quantity), "timing data") };
 }
 
 export function exitSpend(view: TelemetryView | null | undefined, visitFrom: string): ExitSpend {
@@ -146,13 +170,14 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 	const session = view.session();
 	return {
 		kind: "ready",
-		tokens: session.totals.tokens.display,
+		tokens: [usageFigure(session.totals.tokens), usageCoverage(usageGap(session.totals.tokens))]
+			.filter((part) => part !== null)
+			.join(" · "),
 		breakdown: tokenBreakdown(view),
 		cost: session.totals.usd.display,
 		visitCalls: view.calls({ from: visitFrom, limit: 1 }).matched,
 		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
-		modelTime:
-			view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "modelTime" }))?.display ?? "unknown",
+		...modelTimeParts(view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "modelTime" }))),
 		models: view.cost("model").groups.map((group) => ({
 			key: group.key,
 			calls: group.calls.display,
