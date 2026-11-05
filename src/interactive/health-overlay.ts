@@ -214,10 +214,16 @@ export function openHealthOverlay(
 		width: HEALTH_OVERLAY_WIDTH,
 		markerId: "health",
 		title: "Health",
-		footerHint: buildResponsiveHint([
-			{ key: "↑↓", verb: "scroll", critical: true },
-			{ key: "PgUp/PgDn", verb: "page" },
-		]),
+		// The scroll keys are named only while they move something.
+		footerHint: (innerWidth) =>
+			buildResponsiveHint(
+				body.overflows()
+					? [
+							{ key: "↑↓", verb: "scroll", critical: true },
+							{ key: "PgUp/PgDn", verb: "page" },
+						]
+					: [],
+			)(innerWidth),
 	});
 	// The breakers are read live and have no update topic, so a frame the
 	// owner requests for any reason still sees them fresh; the read model's

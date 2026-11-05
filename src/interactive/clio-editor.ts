@@ -844,7 +844,9 @@ export class ClioEditor extends Editor {
 		for (let index = start; index < end; index++)
 			appendSuggestion(items[index] ?? "", this.autocompleteSourceStart + index);
 		if (items.length === 0) appendSuggestion(theme.fg("emptyState", "No suggestions to display"), -1);
-		if (hasCount && listRoom > 1 && last !== undefined) appendSuggestion(last, lines.length - 1);
+		// The count row exists only when the list overflows, which is when the page keys move it.
+		if (hasCount && listRoom > 1 && last !== undefined)
+			appendSuggestion(`${last.trimEnd()}${theme.fg("keyboardHint", " · PgUp/PgDn page")}`, lines.length - 1);
 		for (const line of panel.slice(0, panelRows)) {
 			rows.push(padAnsi(`  ${line}`, width));
 			rowMap.push(-1);

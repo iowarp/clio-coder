@@ -437,10 +437,16 @@ export function openContextOverlay(
 		width: CONTEXT_OVERLAY_WIDTH,
 		markerId: "context-view",
 		title: "Context Window",
-		footerHint: buildResponsiveHint([
-			{ key: "↑↓", verb: "scroll", critical: true },
-			{ key: "PgUp/PgDn", verb: "page" },
-		]),
+		// The scroll keys are named only while they move something.
+		footerHint: (innerWidth) =>
+			buildResponsiveHint(
+				body.overflows()
+					? [
+							{ key: "↑↓", verb: "scroll", critical: true },
+							{ key: "PgUp/PgDn", verb: "page" },
+						]
+					: [],
+			)(innerWidth),
 	});
 
 	const refresh = (): void => {

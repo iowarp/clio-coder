@@ -320,6 +320,11 @@ class UsageOverlayBody implements Component {
 		},
 	) {}
 
+	/** Whether the open view has more than it shows, so the scroll keys move something. */
+	overflows(): boolean {
+		return this.lineCount > this.pageHeight;
+	}
+
 	setHeight(rows: number): void {
 		// The dock reports its own viewport: body rows plus the two rails.
 		this.height = Math.max(1, rows - 2);
@@ -453,11 +458,17 @@ export function openUsageOverlay(
 		// Not derived from the title: that one carries the session id.
 		markerId: "usage",
 		title: sessionId && sessionId.length > 0 ? `Usage (${sessionId})` : "Usage",
-		footerHint: buildResponsiveHint([
-			{ key: "1–5 / Tab", verb: "view", critical: true },
-			{ key: "↑↓", verb: "scroll" },
-			{ key: "PgUp/PgDn", verb: "page" },
-		]),
+		// The scroll keys are named only while the open view has more than it shows.
+		footerHint: (innerWidth) =>
+			buildResponsiveHint([
+				{ key: "1–5 / Tab", verb: "view", critical: true },
+				...(body.overflows()
+					? [
+							{ key: "↑↓", verb: "scroll" },
+							{ key: "PgUp/PgDn", verb: "page" },
+						]
+					: []),
+			])(innerWidth),
 		visible: (_width, height) => {
 			body.setHeight(height);
 			return true;

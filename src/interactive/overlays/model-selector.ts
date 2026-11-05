@@ -835,7 +835,10 @@ function renderModelOverlayLines(input: {
 						end: position?.end ?? filtered.length,
 						total: filtered.length,
 						unit: "models",
-						keys: hidden > 0 ? [`Tab shows all ${allMatches.length}`] : [],
+						keys: [
+							...(position !== null ? ["PgUp/PgDn page"] : []),
+							...(hidden > 0 ? [`Tab shows all ${allMatches.length}`] : []),
+						],
 					},
 					width,
 				),
@@ -1045,6 +1048,14 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		}
 		if (kb.matches(data, "tui.select.down")) {
 			this.move(1);
+			return;
+		}
+		if (kb.matches(data, "tui.select.pageUp") || kb.matches(data, "tui.select.pageDown")) {
+			this.selectionError = null;
+			const count = this.filteredRows().length;
+			const page = Math.max(MODEL_MIN_VISIBLE_ROWS, this.bodyRows - MODEL_CHROME_ROWS);
+			const next = this.selectedIndex + (kb.matches(data, "tui.select.pageDown") ? page : -page);
+			this.selectedIndex = Math.max(0, Math.min(next, count - 1));
 			return;
 		}
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {
