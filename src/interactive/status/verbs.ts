@@ -68,7 +68,7 @@ function elapsedSince(status: AgentStatus, now: number): string | null {
 }
 
 const ADMISSION_VERB: Readonly<Record<ModelAdmissionWait["stage"], string>> = {
-	lock: "Waiting for residency lock",
+	lock: "Waiting for another model load",
 	unloading: "Unloading model",
 	switching: "Switching model",
 	loading: "Loading model",

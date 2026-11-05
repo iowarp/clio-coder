@@ -138,7 +138,7 @@ describe("bash abort settlement (#445)", () => {
 		const result = await abortedRun(() => "Scheduled job occurrence ended: execution timeout.");
 		strictEqual(result.kind, "error");
 		if (result.kind !== "error") return;
-		match(result.message, /bash: command aborted after \d+s of its 3600000ms timeout/u);
+		match(result.message, /bash: command aborted after \d+s of its 1h time limit/u);
 		match(result.message, /The host ended the run: Scheduled job occurrence ended: execution timeout\./u);
 		strictEqual(result.details?.outcome, "abort");
 		strictEqual(result.details?.abortCause, "Scheduled job occurrence ended: execution timeout.");

@@ -44,7 +44,7 @@ import {
 	topNotification,
 } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
-import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
+import { composerPhasePresentation, idleReadinessPresentation } from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
@@ -428,9 +428,9 @@ test("a lock, an unload, a switch and a load each say their own thing, and a loc
 		since: at,
 	});
 	strictEqual(held.subject, "Clio");
-	match(held.label, /residency lock/);
-	match(held.label, /held by Clio pid 4242 for Big-model/);
-	match(wait({ stage: "lock", holder: null, since: at }).label, /holder unknown/);
+	match(held.label, /is waiting for another Clio/);
+	match(held.label, /pid 4242 is loading Big-model/);
+	match(wait({ stage: "lock", holder: null, since: at }).label, /who holds it is unknown/);
 	match(
 		wait({ stage: "lock", holder: { pid: 1, host: "other", self: false, wants: null }, since: at }).label,
 		/on other/,
@@ -1990,4 +1990,10 @@ test("a steer receipt says the worker's model has the message only once it joine
 	bus.emit("run.aborted", { runId: "r1", agentId: "verifier" } as never);
 	match(stripTerminalSequences(rows[1]?.(120)[1] ?? ""), /took your message but stopped before its model read it/u);
 	receipts.dispose();
+});
+
+test("an idle route a worker already got answers from reads ready, not `no request yet`", () => {
+	const facts = { targetId: "mock", available: true, reason: "", health: "healthy" as const, lastStop: null };
+	match(idleReadinessPresentation(facts, 120).label, /no request yet/u);
+	strictEqual(idleReadinessPresentation({ ...facts, workerAnswered: true }, 120).label, "is ready");
 });

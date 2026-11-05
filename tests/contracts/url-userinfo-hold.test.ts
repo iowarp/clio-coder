@@ -673,7 +673,7 @@ test("run feed row fields are redacted before their bound cuts them", () => {
 
 const CUT_OFF = ["aborted", "error", "length", undefined] as const;
 const KILLED_STATUS =
-	"bash: command aborted after 1s of its 300000ms timeout. The host ended the run and recorded no cause.";
+	"bash: command aborted after 1s of its 5m time limit. The host ended the run and recorded no cause.";
 const plainRows = (panel: ChatPanel) => panel.render(400).map(stripTerminalSequences).join("\n");
 const viewOf = async (panel: ChatPanel) => {
 	const shown: string[] = [];

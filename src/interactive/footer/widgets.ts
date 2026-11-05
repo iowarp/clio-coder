@@ -627,22 +627,19 @@ function admissionFacts(
 	const way: RailFact = { ...ESC_CANCELS, keep: RAIL_ACTION_KEEP };
 	switch (admission.stage) {
 		case "lock": {
+			// The lock is Clio's machinery; what the operator needs is who is changing the server's models and to what.
 			const holder = admission.holder;
-			const who =
-				holder === null
-					? null
-					: holder.self
-						? "this Clio"
-						: `Clio ${holder.host ? `on ${holder.host} ` : ""}pid ${holder.pid}`;
+			const who = holder === null ? null : `${holder.host ? `Clio on ${holder.host} ` : ""}pid ${holder.pid}`;
+			const doing = holder?.wants ? `is loading ${nickname(holder.wants)}` : "is changing the loaded model";
 			const held: RailFact = {
-				text: who === null ? "holder unknown" : `held by ${who}${holder?.wants ? ` for ${nickname(holder.wants)}` : ""}`,
-				...(holder === null ? {} : { short: holder.self ? "held by this Clio" : `held by pid ${holder.pid}` }),
+				text: holder === null ? "who holds it is unknown" : holder.self ? `this Clio ${doing}` : `${who} ${doing}`,
+				...(holder === null ? {} : { short: holder.self ? "this Clio" : `pid ${holder.pid}` }),
 				// With room to name the owner, naming it outranks the long form of the way out.
 				keep: room >= 58 ? RAIL_ACTION_KEEP : 6,
 			};
 			return {
-				head: "is waiting for the residency lock",
-				tight: "is waiting for a lock",
+				head: holder?.self === true ? "is waiting for its own model load" : "is waiting for another Clio",
+				tight: "is waiting its turn",
 				subject: "Clio",
 				facts: [elapsed, held, way],
 			};
@@ -1212,6 +1209,8 @@ export interface RouteReadinessFacts {
 	/** How the last turn on this exact route ended, when this session ran one. */
 	lastStop: TurnSummary["stopReason"] | null;
 	lastFailure?: TurnSummary["failure"];
+	/** A worker call on this exact route got output this session, which is evidence the model answers. */
+	workerAnswered?: boolean;
 }
 
 /**
@@ -1282,6 +1281,10 @@ export function idleReadinessPresentation(
 		};
 	}
 	if (facts.lastStop !== null && facts.lastStop !== "cancelled" && facts.lastStop !== "aborted") {
+		return { glyph: GLYPH.ok, ...quiet, label: "is ready" };
+	}
+	// `no request yet` was false once a worker had used the same model; an answered call is an answered call.
+	if (facts.lastStop === null && facts.workerAnswered === true) {
 		return { glyph: GLYPH.ok, ...quiet, label: "is ready" };
 	}
 	const known =

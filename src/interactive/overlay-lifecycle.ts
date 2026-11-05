@@ -426,7 +426,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			const seconds = result.timedOut?.afterSeconds ?? 0;
 			appendNotice(
 				"warn",
-				`No answer within ${seconds} s: Clio answered ${open === 1 ? "the open question" : `${open} open questions`} itself and continued; the ask_user row shows what it chose.`,
+				// The question row above already lists each pick marked `chosen by Clio`; this says why and what happens now.
+				`No answer within ${seconds}s, so Clio chose for you on ${open === 1 ? "the open question" : `${open} open questions`}, taking the recommended option where one was offered, and continued. The question row above shows each pick; tell Clio if one is wrong.`,
 				busNoticeSink,
 			);
 		},
