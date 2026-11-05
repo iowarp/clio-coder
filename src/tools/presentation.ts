@@ -681,9 +681,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		class: "delegate",
 		verbs: ["updating", "updated"],
 		verbsFor: (args) => TASK_VERBS[text(args, "action") ?? ""] ?? null,
+		// One task reads as `task t1`, a whole board as `task board "title"`, so a row never says `started tasks t1`.
 		object: (args) => {
 			const title = text(args, "title");
-			return plain(joinDefined("tasks", title === null ? text(args, "id") : `"${title}"`));
+			if (title !== null) return plain(`task board "${title}"`);
+			const id = text(args, "id");
+			return plain(id === null ? "task board" : `task ${id}`);
 		},
 		consumes: ["action", "title", "id"],
 	},

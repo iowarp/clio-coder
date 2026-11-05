@@ -218,8 +218,8 @@ for (const width of widths) {
 		board.toggleDetail();
 		const expanded = board.render(width);
 		bounded(expanded, width);
-		assert.match(plain(expanded), /policy/u);
-		assert.match(plain(expanded), /budget/u);
+		assert.match(plain(expanded).replace(/\s+/gu, " "), /limit .*Clio stops it at/u);
+		assert.doesNotMatch(plain(expanded), /synthesis=|advisory default/u);
 		assert.ok(expanded.length > folded.length);
 		assert.equal(plain(expanded).replace(/\s/g, "").includes("mini/qwopus3.8-27b-q6"), true);
 		assert.deepEqual(row, before);

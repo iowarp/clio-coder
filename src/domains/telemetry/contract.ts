@@ -72,6 +72,8 @@ export interface TelemetryRunSummary {
 	trust?: TrustSummaryProjection;
 	/** Which validator failed and on what evidence, when the trust status says validation failed. */
 	validationFailure?: string;
+	/** How a settled run finished beside its outcome: the facts every surface reads the same caveat from. */
+	completion?: { toolCalls?: number; refusedCalls?: number; contract?: string };
 	rerouteCount?: number;
 	failoverHops?: number;
 	contextWindow?: number;
@@ -112,6 +114,8 @@ export interface TelemetryRunReaders {
 		contractKind?: string;
 		contract?: string;
 		validationFailure?: string;
+		toolCalls?: number;
+		refusedCalls?: number;
 	} | null;
 }
 
