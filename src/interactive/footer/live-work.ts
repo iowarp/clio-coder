@@ -200,7 +200,7 @@ export function liveWorkStrip(
 	const mainActive = isMainActive(facts.status);
 	const workers = [workerSummary(facts, room), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
-	const dot = theme.fg("border", " · ");
+	const dot = theme.fg("separator", " · ");
 	const quiet = (text: string): string => theme.fg("annotation", text);
 	const render = (lead: string, parts: ReadonlyArray<string | null>): string =>
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);

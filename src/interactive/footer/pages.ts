@@ -706,7 +706,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const narrow = w <= 60;
 	const fit = (text: string, room = w) =>
 		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
-	const separator = theme.fg("border", " · ");
+	const separator = theme.fg("separator", " · ");
 	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
 	// The streaming turn's live rate, else the newest settled main call's from the read model (#434).
 	const newest = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
@@ -728,7 +728,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tok/s")}`
 			: "";
 	// The row's one separator: a `|` beside the `·` of the workspace read as a table rule with nothing under it (F3).
-	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " · "));
+	const metrics = [counter, speed].filter(Boolean).join(theme.fg("separator", " · "));
 	const statsCap = Math.floor(w * 0.4);
 	const values = visibleWidth(metrics) <= statsCap ? metrics : counter;
 	// Once a figure shows, the stats column keeps its widest width (and the dirty
