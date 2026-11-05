@@ -9,6 +9,7 @@ import {
 	type OverlayFrame,
 	type OverlayPhase,
 	type RetryOverlay,
+	type RetryWaitCause,
 	type StatusPhase,
 	type ToolOverlay,
 	type TurnStopReason,
@@ -361,11 +362,13 @@ function retryOverlay(
 		maxAttempts: number;
 		delayMs?: number;
 		retryAfterMs?: number;
+		cause?: RetryWaitCause;
 	},
 	previous: RetryOverlay | undefined,
 	now: number,
 ): RetryOverlay {
 	const backoff = status.phase !== "retrying";
+	const cause = status.cause ?? (status.phase === "retrying" ? previous?.cause : undefined);
 	const delayMs = status.delayMs ?? 0;
 	// Every countdown tick repeats its `scheduled` payload, so the deadline holds from the first one.
 	const sameWait = previous?.stage === "backoff" && previous.attempt === status.attempt && previous.dueAt !== undefined;
@@ -377,7 +380,15 @@ function retryOverlay(
 		...(backoff && delayMs > 0 ? { dueAt: sameWait ? previous?.dueAt : now + delayMs } : {}),
 		...(backoff ? {} : { attemptStartedAt: now }),
 		...(status.retryAfterMs !== undefined ? { retryAfterMs: status.retryAfterMs } : {}),
+		...(cause !== undefined ? { cause, causeSince: previous?.cause === cause ? (previous.causeSince ?? now) : now } : {}),
 	};
+}
+
+/** Clio's own reconcile is the wait, each of its steps is bounded, and it reports what it is doing: this is not silence. */
+function awaitingAdmission(status: AgentStatus, ctx: ReduceContext): boolean {
+	const onRequest =
+		status.phase === "waiting_model" || (status.phase === "retrying" && status.retry?.stage === "attempt");
+	return onRequest && (ctx.modelRequest ?? status.modelRequest)?.admission != null;
 }
 
 /**
@@ -614,7 +625,14 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			// A failed attempt recovery will retry closes that attempt, not the turn.
 			if (event.retryPending !== undefined) {
 				const { attempt, maxAttempts } = event.retryPending;
-				return pushOverlay(prev, "retrying", ctx, { attempt, maxAttempts, waitMs: 0, stage: "backoff" });
+				const carried = prev.phase === "retrying" ? prev.retry : undefined;
+				return pushOverlay(prev, "retrying", ctx, {
+					attempt,
+					maxAttempts,
+					waitMs: 0,
+					stage: "backoff",
+					...(carried?.cause !== undefined ? { cause: carried.cause, causeSince: carried.causeSince } : {}),
+				});
 			}
 			const truncated = prev.phase === "idle";
 			const start = prev.since > 0 ? prev.since : ctx.now;
@@ -723,6 +741,9 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			// A backoff is Clio's own countdown, so nothing is silent and no provider can be stuck during it.
 			if (prev.phase === "retrying" && prev.retry?.stage === "backoff") {
 				return { ...prev, watchdogTier: 0, localRuntime: ctx.localRuntime };
+			}
+			if (awaitingAdmission(prev, ctx)) {
+				return { ...prev, lastMeaningfulAt: ctx.now, watchdogTier: 0, localRuntime: ctx.localRuntime };
 			}
 			const elapsed = Math.max(0, ctx.now - prev.lastMeaningfulAt);
 			const tier = computeWatchdogTier(elapsed);

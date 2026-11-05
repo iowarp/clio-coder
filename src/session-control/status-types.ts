@@ -1,5 +1,7 @@
+import type { ModelAdmissionFacts } from "../core/model-admission.js";
 import type { ResponseModelIdObservation } from "../core/response-model-id.js";
 import type { StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js";
+import type { RetryWaitCause } from "../domains/session/retry.js";
 
 // StatusPhase, WatchdogTier, and AgentStatusChangedPayload moved to
 // src/core/telemetry/live-events.ts (the phase taxonomy rides the agent.status_changed
@@ -7,8 +9,21 @@ import type { StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js
 // keeps one import site.
 export type { AgentStatusChangedPayload, StatusPhase, WatchdogTier } from "../core/telemetry/live-events.js";
 
+/**
+ * Other Clio work on the request's endpoint, which is all Clio can see of that endpoint's queue: other clients and the
+ * server's own scheduler stay out of view.
+ */
+export interface ModelRequestSlots {
+	/** Slots the endpoint is known to have, or null when nothing says. The blind one-slot default is not knowledge. */
+	limit: number | null;
+	workers: number;
+	reservations: number;
+	/** Other requests this process has out on the endpoint: a side question or background memory. */
+	otherRequests: number;
+}
+
 /** What is known about the outstanding model request, measured at the handoff to the provider. */
-export interface ModelRequestFacts {
+export interface ModelRequestFacts extends ModelAdmissionFacts {
 	sentAt: number;
 	/** The model this request went to, which a route change made while it is out does not alter. */
 	modelId?: string | undefined;
@@ -16,7 +31,11 @@ export interface ModelRequestFacts {
 	firstByteAt: number | null;
 	/** False on a transport that never reports a response, where "no bytes yet" would claim more than is known. */
 	bytesObservable: boolean;
+	/** Present while other Clio work shares the endpoint and no response has opened. */
+	slots?: ModelRequestSlots | null | undefined;
 }
+
+export type { RetryWaitCause } from "../domains/session/retry.js";
 
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
@@ -35,6 +54,10 @@ export interface RetryOverlay {
 	attemptStartedAt?: number | undefined;
 	/** The wait the provider itself named, when it named one. */
 	retryAfterMs?: number | undefined;
+	/** What the target's refusal said it is waiting on; absent when it named nothing the rail can claim. */
+	cause?: RetryWaitCause | undefined;
+	/** Epoch ms this cause first answered, which stays put across the attempts it keeps answering. */
+	causeSince?: number | undefined;
 }
 
 export interface ToolOverlay {

@@ -1,3 +1,4 @@
+import type { ModelAdmissionWait } from "../../core/model-admission.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
@@ -7,6 +8,7 @@ import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { taskBoardCounts } from "../../domains/session/task-board.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import type { ModelRequestSlots, RetryOverlay } from "../../session-control/status-types.js";
 import { finiteNonNegative } from "../context-bar.js";
 import { contextPercentRole } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
@@ -24,6 +26,7 @@ import {
 	statusRailLabelRoom,
 	toolFunction,
 } from "../theme/index.js";
+import { modelNickname } from "../theme/labels.js";
 import { type ContextOccupancyFacts, contextUsagePercent } from "./context-rail.js";
 import type { FooterTelemetry } from "./spend.js";
 
@@ -507,9 +510,132 @@ const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model switches", short:
 /** A route change never reaches a request already out, so during a turn the way to another model runs through Esc. */
 const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model switches", short: "then /model" };
 
+/**
+ * What a model request is standing behind, in the words of the step Clio is taking. Every form keeps elapsed and the way
+ * out. A model's load is the model's own clause; a lock or an eviction is Clio's work on the model's behalf.
+ */
+function admissionFacts(
+	admission: ModelAdmissionWait,
+	room: number,
+	elapsedFrom: (from: number) => string | null,
+): { head: string; tight: string; subject?: string; facts: ReadonlyArray<RailFact> } {
+	const nickname = (id: string): string =>
+		truncateToWidth(modelNickname(id), room >= 60 ? 28 : 16, GLYPH.ellipsis, false);
+	const elapsed: RailFact = { text: elapsedFrom(admission.since), keep: 8 };
+	const way: RailFact = { ...ESC_CANCELS, keep: RAIL_ACTION_KEEP };
+	switch (admission.stage) {
+		case "lock": {
+			const holder = admission.holder;
+			const who =
+				holder === null
+					? null
+					: holder.self
+						? "this Clio"
+						: `Clio ${holder.host ? `on ${holder.host} ` : ""}pid ${holder.pid}`;
+			const held: RailFact = {
+				text: who === null ? "holder unknown" : `held by ${who}${holder?.wants ? ` for ${nickname(holder.wants)}` : ""}`,
+				...(who === null ? {} : { short: `held by ${who}` }),
+				keep: 6,
+			};
+			return {
+				head: "is waiting for the residency lock",
+				tight: "is waiting for a lock",
+				subject: "Clio",
+				facts: [elapsed, held, way],
+			};
+		}
+		case "unloading":
+			return {
+				head: `is unloading ${nickname(admission.model)}`,
+				tight: "is unloading",
+				subject: "Clio",
+				facts: [elapsed, way],
+			};
+		case "switching":
+			return {
+				head: `is replacing ${nickname(admission.from)} with ${nickname(admission.to)}`,
+				tight: `is replacing ${nickname(admission.from)}`,
+				subject: "Clio",
+				facts: [elapsed, { text: "unloading", keep: 2 }, way],
+			};
+		case "restoring":
+			return {
+				head: `is restoring ${nickname(admission.model)}`,
+				tight: "is restoring",
+				subject: "Clio",
+				facts: [elapsed, way],
+			};
+		case "loading": {
+			const evidence =
+				admission.startedElsewhere === true
+					? "already loading when asked"
+					: admission.evidence === "reported"
+						? "target reports loading"
+						: "load requested";
+			return {
+				head: "is loading",
+				tight: "is loading",
+				facts: [
+					elapsed,
+					{ text: evidence, keep: 5 },
+					{ text: admission.replacing ? `replacing ${nickname(admission.replacing)}` : null, keep: 3 },
+					way,
+				],
+			};
+		}
+	}
+}
+
+/** The whole of a request's admission, for a rail that has nothing else to say while it lasts. */
+function admissionLabel(
+	admission: ModelAdmissionWait,
+	room: number,
+	elapsedFrom: (from: number) => string | null,
+): { label: string; subject?: string } {
+	const { head, tight, subject, facts } = admissionFacts(admission, room, elapsedFrom);
+	return {
+		label: fitRailFacts([{ text: room >= 40 ? head : tight, keep: 9 }, ...facts], room),
+		...(subject !== undefined ? { subject } : {}),
+	};
+}
+
+/** Slots Clio itself can see taken on the request's endpoint, as far as they go: none of this reaches other clients. */
+function slotHolders(slots: ModelRequestSlots): { used: number; words: string } {
+	const parts = [
+		slots.workers > 0 ? (slots.workers === 1 ? "a worker" : `${slots.workers} workers`) : null,
+		slots.reservations > 0 ? "a fleet plan" : null,
+		slots.otherRequests > 0 ? (slots.otherRequests === 1 ? "another request" : `${slots.otherRequests} requests`) : null,
+	].filter((part): part is string => part !== null);
+	return { used: slots.workers + slots.reservations + slots.otherRequests, words: parts.join(" and ") };
+}
+
+function wholeSeconds(ms: number): string {
+	const seconds = Math.floor(ms / 1000);
+	return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
+}
+
 /** Whole seconds, the way a countdown reads: a wait never shows as over before it is. */
 function remainingSeconds(dueAt: number, now: number): number {
 	return Math.max(0, Math.ceil((dueAt - now) / 1000));
+}
+
+/** What the target said it is waiting on, in its own terms. A wait it named nothing about states nothing here. */
+function retryCauseFact(retry: RetryOverlay | undefined, now: number): Omit<RailFact, "keep"> {
+	switch (retry?.cause) {
+		case "model-loading": {
+			const age = retry.causeSince === undefined ? 0 : Math.floor(Math.max(0, now - retry.causeSince) / 1000);
+			const span = formatCompactMs(age * 1000);
+			return age < 1
+				? { text: "target says model is loading", short: "model loading" }
+				: { text: `target has said loading for ${span}`, short: `loading ${span}` };
+		}
+		case "capacity":
+			return { text: "target says it is at capacity", short: "at capacity" };
+		case "rate-limit":
+			return { text: "target says rate limited", short: "rate limited" };
+		default:
+			return { text: null };
+	}
 }
 
 function retryRailLabel(
@@ -520,12 +646,18 @@ function retryRailLabel(
 ): string {
 	const retry = status.retry;
 	const attempts = `${room >= 22 ? "retrying" : "retry"} ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
+	const admission = status.modelRequest?.admission;
+	if (retry?.stage === "attempt" && admission) {
+		const { head, facts } = admissionFacts(admission, room, modelWait);
+		return fitRailFacts([{ text: attempts, keep: 9 }, { text: head.replace(/^is /u, ""), keep: 5 }, ...facts], room);
+	}
 	if (retry?.stage === "attempt") {
 		const from = retry.attemptStartedAt;
 		const tier = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt));
 		return fitRailFacts(
 			[
 				{ text: attempts, keep: 9 },
+				{ ...retryCauseFact(retry, now), keep: 5 },
 				{ text: "waiting for a response", keep: 3 },
 				{ text: from !== undefined ? modelWait(from) : null, keep: 8 },
 				{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
@@ -539,6 +671,7 @@ function retryRailLabel(
 	return fitRailFacts(
 		[
 			{ text: attempts, keep: 9 },
+			{ ...retryCauseFact(retry, now), keep: 6 },
 			{
 				text: left === null ? null : `next attempt in ${left}s`,
 				...(left === null ? {} : { short: `in ${left}s` }),
@@ -574,10 +707,32 @@ function modelWaitFacts(status: AgentStatus, now: number, from: number): Readonl
 				: sent?.bytesObservable
 					? "no bytes yet"
 					: "no output yet";
+	// Only a word from the target earns a word about loading. Silence on its own says the state is unknown.
+	const cold =
+		sent?.coldAtSend === "absent"
+			? { text: "not resident when sent", short: "was not resident" }
+			: sent?.coldAtSend === "sleeping"
+				? { text: "asleep when sent", short: "was asleep" }
+				: sent?.probedResidency === "absent"
+					? { text: "not resident at last probe", short: "was not resident" }
+					: sent?.probedResidency === "loading"
+						? { text: "loading at last probe", short: "was loading" }
+						: null;
+	const loaded = sent?.loadedInMs !== undefined ? `loaded in ${wholeSeconds(sent.loadedInMs)}` : null;
+	const verdict =
+		tier < 3
+			? null
+			: cold !== null
+				? { text: "may be loading or stuck", short: "may be stuck" }
+				: loaded !== null
+					? { text: "may be stuck" }
+					: { text: "target state unknown", short: "state unknown" };
 	return [
 		{ text: sent ? `request sent ${clockTime(sent.sentAt)}` : null, keep: 1 },
+		{ text: loaded, keep: 2 },
+		{ text: sent?.firstByteAt ? null : (cold?.text ?? null), ...(cold ? { short: cold.short } : {}), keep: 3 },
 		{ text: evidence, keep: 4 },
-		{ text: tier >= 3 ? "target may be loading or stuck" : null, short: "may be stuck", keep: 5 },
+		{ text: verdict?.text ?? null, ...(verdict?.short ? { short: verdict.short } : {}), keep: 5 },
 		{ ...ESC_CANCELS, text: tier >= 2 ? ESC_CANCELS.text : null, keep: 7 },
 		{ ...MODEL_AFTER_ESC, text: tier >= 3 ? MODEL_AFTER_ESC.text : null, keep: 6 },
 	];
@@ -671,8 +826,14 @@ export function composerPhasePresentation(
 		return elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsed * 1000);
 	};
 	const quiet = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) >= 3;
-	const waitLabel = (head: string, tight: string): string => {
+	/** A wait that stood behind admission is a new wait once admission ends: the request only just went out. */
+	const waitFrom = (): number => {
 		const from = status.waitingSince ?? status.since;
+		const request = status.modelRequest;
+		return request?.admissionBeganAt !== undefined && request.admissionBeganAt >= from ? request.sentAt : from;
+	};
+	const waitLabel = (head: string, tight: string): string => {
+		const from = waitFrom();
 		return fitRailFacts(
 			[
 				{ text: room >= 40 ? head : tight, keep: 9 },
@@ -682,6 +843,36 @@ export function composerPhasePresentation(
 			room,
 		);
 	};
+	/**
+	 * A wait with every slot Clio can see taken is a wait for a slot, whatever the provider's socket is doing. With no
+	 * known limit the same holders are only company, and what they do to this request stays unknown.
+	 */
+	const slotWaitLabel = (): string | null => {
+		const request = status.modelRequest;
+		const slots = request?.firstByteAt === null ? request.slots : null;
+		if (!slots) return null;
+		const { used, words } = slotHolders(slots);
+		if (slots.limit === null || used < slots.limit) return null;
+		return fitRailFacts(
+			[
+				{ text: room >= 40 ? "is waiting for a slot" : "waiting for slot", keep: 9 },
+				{ text: elapsedFrom(waitFrom()), keep: 8 },
+				{ text: `${used}/${slots.limit} held by ${words}`, short: `${used}/${slots.limit} busy`, keep: 6 },
+				{ text: "queue position unknown", keep: 2 },
+				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
+			],
+			room,
+		);
+	};
+	const admission = status.phase === "waiting_model" ? (status.modelRequest?.admission ?? null) : null;
+	if (admission !== null) {
+		const stage = admissionLabel(
+			admission,
+			labelRoom ?? railActivityRoom(width, reserved, identityCols(identityCells)),
+			elapsedFrom,
+		);
+		return { ...phase, ...stage, namesRoute: stage.subject === undefined };
+	}
 	let label: string;
 	switch (status.phase) {
 		case "idle":
@@ -693,7 +884,10 @@ export function composerPhasePresentation(
 		case "waiting_model":
 			// A long wait spends its room on the way out before it spends it on repeating what is awaited.
 			label =
-				room >= (quiet ? 110 : 50) ? waitLabel("is waiting for a response", "waiting") : waitLabel("is waiting", "waiting");
+				slotWaitLabel() ??
+				(room >= (quiet ? 110 : 50)
+					? waitLabel("is waiting for a response", "waiting")
+					: waitLabel("is waiting", "waiting"));
 			break;
 		case "thinking":
 			label = fitRailFacts([{ text: "is thinking", keep: 9 }, ...silentStreamFacts(status, now)], room);
@@ -771,11 +965,16 @@ export function composerPhasePresentation(
 				);
 				return { ...phase, ...stopping };
 			}
+			// Putting back a model an abandoned load evicted is why this stop can take a while, and it is the truth about it.
+			const restoring = status.modelRequest?.admission;
 			label = fitRailFacts(
 				[
 					{ text: "is cancelling", keep: 9 },
 					{ text: elapsedFrom(status.cancelRequestedAt ?? now), keep: 8 },
-					{ text: "stop requested", keep: 7 },
+					{
+						text: restoring?.stage === "restoring" ? `restoring ${modelNickname(restoring.model)}` : "stop requested",
+						keep: 7,
+					},
 				],
 				room,
 			);

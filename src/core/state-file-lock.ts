@@ -57,6 +57,10 @@ export interface StateFileLockOptions {
 	 * or stall a turn. Everything else fails closed.
 	 */
 	onAcquireFailure?: "throw" | "run-unlocked";
+	/** What this holder is doing, recorded in the lock so a waiter can say who it waits for. */
+	note?: string;
+	/** An asynchronous wait found another holder, or the holder changed; null when its record cannot be read. */
+	onContended?: (holder: StateFileLockHolder | null) => void;
 }
 
 interface LockOwner {
@@ -64,18 +68,40 @@ interface LockOwner {
 	host: string | null;
 	pid: number;
 	birthToken: string | null;
+	note?: string;
+}
+
+/** Who holds a lock, as its record states. A null `host` is this machine. */
+export interface StateFileLockHolder {
+	pid: number;
+	host: string | null;
+	self: boolean;
+	note: string | null;
+}
+
+function lockHolder(lockPath: string): StateFileLockHolder | null {
+	const owner = readLockOwner(lockPath);
+	if (owner === null) return null;
+	const foreign = owner.host !== null && owner.host !== hostname();
+	return {
+		pid: owner.pid,
+		host: foreign ? owner.host : null,
+		self: !foreign && owner.pid === process.pid,
+		note: owner.note ?? null,
+	};
 }
 
 function readLockOwner(lockPath: string): LockOwner | null {
 	try {
 		const raw = readFileSync(lockPath, "utf8").trim();
 		const record = raw.startsWith("{") ? (JSON.parse(raw) as Record<string, unknown>) : { pid: Number.parseInt(raw, 10) };
-		const { host, pid, birthToken } = record;
+		const { host, pid, birthToken, note } = record;
 		if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
 		return {
 			host: typeof host === "string" ? host : null,
 			pid,
 			birthToken: typeof birthToken === "string" ? birthToken : null,
+			...(typeof note === "string" ? { note } : {}),
 		};
 	} catch {
 		return null;
@@ -100,13 +126,13 @@ function lockfileAgeMs(lockPath: string): number | null {
 }
 
 /** Create the lock file exclusively; false when it already exists. */
-function createLock(lockPath: string): boolean {
+function createLock(lockPath: string, note?: string): boolean {
 	try {
 		const fd = openSync(lockPath, "wx", 0o600);
 		try {
 			writeSync(
 				fd,
-				`${JSON.stringify({ host: hostname(), pid: process.pid, birthToken: processBirthToken(), at: new Date().toISOString() })}\n`,
+				`${JSON.stringify({ host: hostname(), pid: process.pid, birthToken: processBirthToken(), at: new Date().toISOString(), ...(note !== undefined ? { note } : {}) })}\n`,
 			);
 		} finally {
 			closeSync(fd);
@@ -157,12 +183,12 @@ function reclaimAbandonedLock(lockPath: string): boolean {
 }
 
 /** True once the lock is ours. Steals only from an owner that is provably gone. */
-function tryAcquire(lockPath: string): boolean {
-	if (createLock(lockPath)) return true;
+function tryAcquire(lockPath: string, note?: string): boolean {
+	if (createLock(lockPath, note)) return true;
 	if (!lockIsAbandoned(lockPath) || !reclaimAbandonedLock(lockPath)) return false;
 	// Acquire in the same attempt as the reclaim: a caller with no wait budget, such as a recovery writer, would
 	// otherwise reclaim a dead owner's lock and still give up (#434).
-	return createLock(lockPath);
+	return createLock(lockPath, note);
 }
 
 /** The acquisition budget ran out while another holder kept the lock. Callers that refuse on it can tell it from a failure. */
@@ -276,9 +302,17 @@ async function acquireAsync<T>(
 		options.signal?.throwIfAborted();
 		mkdirSync(dirname(lockPath), { recursive: true });
 		const deadlineMs = performance.now() + timeoutMs;
-		for (let attempt = 1; !tryAcquire(lockPath); attempt += 1) {
+		let reported: number | null | undefined;
+		for (let attempt = 1; !tryAcquire(lockPath, options.note); attempt += 1) {
 			options.signal?.throwIfAborted();
 			if (performance.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
+			if (options.onContended) {
+				const holder = lockHolder(lockPath);
+				if ((holder?.pid ?? null) !== reported) {
+					reported = holder?.pid ?? null;
+					options.onContended(holder);
+				}
+			}
 			const base = backoffMs(attempt);
 			const delayMs = base + Math.floor(Math.random() * base);
 			if (options.signal) await sleep(delayMs, undefined, { signal: options.signal });

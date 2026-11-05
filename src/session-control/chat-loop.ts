@@ -3500,6 +3500,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		modelRequest() {
+			state.refreshModelRequest?.();
 			return state.modelRequest;
 		},
 

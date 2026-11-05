@@ -16,7 +16,9 @@ import {
 	isRateLimitErrorMessage,
 	isRetryableRecoveryFailure,
 	RATE_LIMIT_WAIT_BUDGET_MS,
+	type RetryWaitCause,
 	recoveryRetryDelayMs,
+	retryWaitCause,
 } from "../domains/session/retry.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
 import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
@@ -43,6 +45,8 @@ export interface RetryStatusPayload {
 	seconds?: number;
 	/** The wait the provider itself named, which `delayMs` honours up to the configured ceiling. */
 	retryAfterMs?: number;
+	/** What the refusal this wait answers said the target is waiting on. */
+	cause?: RetryWaitCause;
 }
 
 /** The attempt that follows a failure the recovery ladder has already decided to retry. */
@@ -507,6 +511,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				: Math.min(askedMs, Math.max(backoffMs, settings.maxDelayMs));
 			chainWaitedMs += delayMs;
 			const maxAttempts = Math.max(attempt, settings.maxRetries);
+			const cause = retryWaitCause(classified);
 			const scheduled: RetryStatusPayload = {
 				phase: "scheduled",
 				attempt,
@@ -514,6 +519,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				delayMs,
 				errorMessage: failure.errorMessage,
 				...(retryAfterMs === null ? {} : { retryAfterMs }),
+				...(cause === null ? {} : { cause }),
 			};
 			recordRetryStatus(scheduled);
 			const countdown = await waitForRetryCountdown(scheduled);
@@ -535,6 +541,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					attempt,
 					maxAttempts,
 					errorMessage: failure.errorMessage,
+					...(cause === null ? {} : { cause }),
 				},
 				false,
 			);

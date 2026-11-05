@@ -38,6 +38,7 @@
  */
 
 import { canonicalEndpointUrl } from "../../core/endpoint-key.js";
+import type { ModelAdmissionReporter } from "../../core/model-admission.js";
 import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
@@ -748,6 +749,8 @@ export interface ResidencyAdapter {
 	reloadEvicted?(modelId: string): Promise<void>;
 	/** Cross-process mutation serializer; defaults to the state-dir lock file. */
 	withLock?<T>(targetKey: string, fn: () => Promise<T>): Promise<T>;
+	/** The request's own reporter: each step this reconcile takes, as it takes it. */
+	onAdmission?: ModelAdmissionReporter | undefined;
 	now?: () => number;
 	ttlMs?: number;
 }
@@ -776,6 +779,7 @@ async function restoreEvictedModels(
 			continue;
 		}
 		try {
+			adapter.onAdmission?.({ stage: "restoring", model: entry.modelId });
 			await adapter.reloadEvicted(entry.modelId);
 			markClioLoaded(adapter.targetKey, entry.modelId);
 			restored.push(entry.modelId);
@@ -864,7 +868,10 @@ async function reconcileResidencyState(adapter: ResidencyAdapter, lockHeld: bool
 		const reconcile = () => reconcileResidencyState(adapter, true);
 		return adapter.withLock
 			? adapter.withLock(adapter.targetKey, reconcile)
-			: withResidencyLock(adapter.targetKey, reconcile, adapter.signal);
+			: withResidencyLock(adapter.targetKey, reconcile, adapter.signal, {
+					wants: adapter.keepModelId,
+					report: adapter.onAdmission,
+				});
 	}
 
 	let resident: ResidentModelInfo[];
@@ -962,6 +969,11 @@ async function reconcileResidencyState(adapter: ResidencyAdapter, lockHeld: bool
 			const evicted: ResidentModelInfo[] = [];
 			try {
 				for (const entry of plan.evict) {
+					adapter.onAdmission?.(
+						plan.keepResident
+							? { stage: "unloading", model: entry.modelId }
+							: { stage: "switching", from: entry.modelId, to: adapter.keepModelId },
+					);
 					await adapter.unload(entry.modelId);
 					forgetClioLoaded(adapter.targetKey, entry.modelId);
 					evicted.push(entry);
@@ -1002,7 +1014,11 @@ async function reconcileResidencyState(adapter: ResidencyAdapter, lockHeld: bool
 		// waiting on a still-loading model is read-only polling.
 		if (!lockHeld && (plan.evict.length > 0 || (adapter.load && !plan.keepResident))) {
 			if (adapter.withLock) await adapter.withLock(adapter.targetKey, mutate);
-			else await withResidencyLock(adapter.targetKey, mutate, adapter.signal);
+			else
+				await withResidencyLock(adapter.targetKey, mutate, adapter.signal, {
+					wants: adapter.keepModelId,
+					report: adapter.onAdmission,
+				});
 		} else {
 			await mutate();
 		}
