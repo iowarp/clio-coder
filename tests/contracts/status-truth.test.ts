@@ -25,7 +25,13 @@ import {
 	createPermissionOverlayBody,
 	permissionRailTitle,
 } from "../../src/interactive/permission-overlay.js";
-import { providerFailureAdvice } from "../../src/interactive/renderers/provider-error.js";
+import {
+	presentProviderError,
+	providerFailureAdvice,
+	providerFailureEvidence,
+	providerFailureHeadline,
+	providerFailureRailFacts,
+} from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
