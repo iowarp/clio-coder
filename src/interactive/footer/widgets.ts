@@ -1209,6 +1209,8 @@ export interface RouteReadinessFacts {
 	/** How the last turn on this exact route ended, when this session ran one. */
 	lastStop: TurnSummary["stopReason"] | null;
 	lastFailure?: TurnSummary["failure"];
+	/** A worker call on this exact route got output this session, which is evidence the model answers. */
+	workerAnswered?: boolean;
 }
 
 /**
@@ -1279,6 +1281,10 @@ export function idleReadinessPresentation(
 		};
 	}
 	if (facts.lastStop !== null && facts.lastStop !== "cancelled" && facts.lastStop !== "aborted") {
+		return { glyph: GLYPH.ok, ...quiet, label: "is ready" };
+	}
+	// `no request yet` was false once a worker had used the same model; an answered call is an answered call.
+	if (facts.lastStop === null && facts.workerAnswered === true) {
 		return { glyph: GLYPH.ok, ...quiet, label: "is ready" };
 	}
 	const known =

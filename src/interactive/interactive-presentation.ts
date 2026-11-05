@@ -71,6 +71,7 @@ import type { ComposerKeyContext } from "./footer/key-hints.js";
 import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
+import { routeFirstOutput } from "./footer/silence-note.js";
 import type { CompactionRailFacts } from "./footer/widgets.js";
 import {
 	activeTaskRail,
@@ -828,6 +829,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					reason: target.reason,
 					health: target.health.status,
 					lastStop: onRoute ? last.stopReason : null,
+					workerAnswered:
+						(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
 					...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
 				},
 				width,
