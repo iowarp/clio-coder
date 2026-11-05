@@ -169,6 +169,8 @@ export function workerNoWorkDetail(input: {
 	mutatedPathCount: number | null;
 	/** Permission asks the operator or main agent denied during the run. */
 	escalationsDenied?: number;
+	/** Permission asks nobody answered inside their window, which the fallback then denied. */
+	escalationsTimedOut?: number;
 	finalText?: string;
 	limitationDetail?: string;
 }): string | null {
@@ -192,6 +194,11 @@ export function workerNoWorkDetail(input: {
 	const denied = input.escalationsDenied ?? 0;
 	if (denied > 0 && !input.activity.mutatingSucceeded && (input.mutatedPathCount ?? 0) === 0) {
 		return `the operator denied ${denied === 1 ? "the worker's permission request" : `${denied} of the worker's permission requests`}, so it changed nothing and the assignment was not done`;
+	}
+	// The same refusal with nobody at the keys sealed `✓ execution ok` over an unchanged tree.
+	const timedOut = input.escalationsTimedOut ?? 0;
+	if (timedOut > 0 && !input.activity.mutatingSucceeded && (input.mutatedPathCount ?? 0) === 0) {
+		return `nobody answered ${timedOut === 1 ? "the worker's permission request" : `${timedOut} of the worker's permission requests`} in time, so it changed nothing and the assignment was not done`;
 	}
 	if (unchanged && (input.limitationRecorded || reportedInability)) {
 		const reason = input.limitationDetail?.trim() || report;

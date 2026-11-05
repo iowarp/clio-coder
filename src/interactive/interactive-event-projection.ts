@@ -250,9 +250,6 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.onTurnEnded?.();
 			}
 		}),
-		deps.bus.subscribe("run.aborted", () => {
-			deps.stopTerminalProgress();
-		}),
 		deps.bus.subscribe("turn.aborted", () => {
 			deps.stopTerminalProgress();
 		}),

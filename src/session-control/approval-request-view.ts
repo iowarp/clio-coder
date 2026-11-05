@@ -68,4 +68,6 @@ export interface ApprovalRequestView {
 	 * operator knows whose request they are answering.
 	 */
 	workerGrant?: { authority: "main" | "operator"; forwardedByMain: boolean };
+	/** What an unanswered worker ask becomes, so the card can say so before it happens. */
+	workerFallback?: "deny" | "fail";
 }

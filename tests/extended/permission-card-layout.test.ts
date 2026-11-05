@@ -33,7 +33,7 @@ const DEEP_TARGET =
 test("a worker bash target keeps command boundaries without terminal controls", () => {
 	const command = "rm -rf scratch-a\r\nrm -rf scratch-b";
 	const target = describeCallTarget("bash", { command, output_policy: "bounded" });
-	strictEqual(target, "rm -rf scratch-a ⏎ rm -rf scratch-b · output_policy=bounded");
+	strictEqual(target, "rm -rf scratch-a ⏎ rm -rf scratch-b");
 	const hostile = describeCallTarget("bash", {
 		command: `rm -rf scratch-a\u001b]0;hidden\ntext\u0007\nrm -rf scratch-b`,
 	});
@@ -107,20 +107,19 @@ for (const columns of [80, 120, 160]) {
 	});
 }
 
-test("worker terms disclose approval and denial reuse within the same run", () => {
+test("worker terms say an approval covers one call and a denial holds within the run", () => {
 	const body = createPermissionOverlayBody({
 		...WRITE_VIEW,
 		origin: { kind: "worker", agentId: "coder", runId: "run-1" },
 	});
 	const folded = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
-	match(folded, /allow\s+runs it and holds for identical calls in this worker run/u);
-	match(folded, /deny\s+skips it and holds for identical calls in this worker run/u);
-	doesNotMatch(folded, /this one .*call/u);
+	match(folded, /allow\s+runs this one call; an identical call asks again/u);
+	match(folded, /deny\s+skips it; an identical call in this run is refused without asking/u);
 	body.toggleTerms();
 	const terms = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
 	match(terms, /same tool, arguments, approval axis, and safety classification/u);
 	match(terms, /Each call still passes the safety net/u);
-	match(terms, /remembers denial for identical calls/u);
+	match(terms, /refuses identical calls/u);
 	doesNotMatch(terms, /authorizes one|only.*exact request/u);
 });
 

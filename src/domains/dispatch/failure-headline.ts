@@ -58,7 +58,7 @@ export function workerFailureHeadline(detail: string | null | undefined): string
 	const text = (detail ?? "").replace(/\s+/gu, " ").trim();
 	if (text.length === 0) return null;
 	const exit = /^(?:exit=\d+ )?(exit code \d+);? ?/u.exec(text);
-	const body = exit === null ? text : text.slice(exit[0].length);
+	const body = (exit === null ? text : text.slice(exit[0].length)).replace(/^permission_required; /u, "");
 	if (body.length === 0) return exit?.[1] ?? null;
 	if (/^operator abort\b/iu.test(body)) return "cancelled at your request";
 	const contract = /result contract failed after (\d+) bounded repair rounds?: (.+)$/iu.exec(body);

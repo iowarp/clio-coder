@@ -4,7 +4,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { describeMainCallConsequences } from "../domains/safety/call-consequence.js";
-import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { sanitizeCallTargetText, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
@@ -27,6 +27,7 @@ import {
 	type PermissionAdvisoryReader,
 	type PermissionCountdownReader,
 } from "./permission-overlay.js";
+import { formatCompactMs } from "./theme/index.js";
 import { startUnattendedCountdown, type UnattendedCountdown, type UnattendedTimers } from "./unattended-countdown.js";
 
 /**
@@ -71,6 +72,8 @@ interface WorkerEscalationEntry {
 	target?: string;
 	consequence?: string[];
 	fallback: "deny" | "fail";
+	/** The worker's own window for this ask, when it named one. */
+	timeoutMs?: number;
 	/** Present on a worker ask routed through the main agent (Phase D). */
 	grant?: ApprovalRequestView["workerGrant"];
 }
@@ -132,6 +135,8 @@ export interface OverlayPermissionLifecycle {
 	 * again, so a present operator never loses a queued ask to the timeout.
 	 */
 	notePresence(): void;
+	/** Worker asks waiting behind the card on screen, so its count names them. */
+	queuedWorkerAsks(): number;
 	onPermissionOverlayClosed(): void;
 	/**
 	 * Re-present whatever is still parked once no overlay holds the screen. A
@@ -293,10 +298,11 @@ function workerEscalationEntry(payload: PermissionRequestedPayload, autonomy: st
 			payload.rejection?.short ??
 			(typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`),
 		...(typeof payload.target === "string" && payload.target.length > 0
-			? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
+			? { target: sanitizeCallTargetText(payload.target).slice(0, WORKER_CALL_TARGET_MAX_CHARS) }
 			: {}),
 		...(consequence.length > 0 ? { consequence } : {}),
 		fallback: payload.fallback === "fail" ? "fail" : "deny",
+		...(typeof payload.timeoutMs === "number" && payload.timeoutMs > 0 ? { timeoutMs: payload.timeoutMs } : {}),
 		...(payload.approvalAuthority === "main" || payload.approvalAuthority === "operator"
 			? { grant: { authority: payload.approvalAuthority, forwardedByMain: payload.forwardedByMain === true } }
 			: {}),
@@ -314,6 +320,7 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry, queueDepth: num
 		...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
 		...(entry.consequence !== undefined ? { consequence: entry.consequence } : {}),
 		...(entry.grant !== undefined ? { workerGrant: entry.grant } : {}),
+		workerFallback: entry.fallback,
 		...(queueDepth > 1 ? { queueDepth } : {}),
 	};
 }
@@ -348,6 +355,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let withdrawingWorker = false;
 	/** Set when the card on screen closed because its countdown ran out, not because anyone answered. */
 	let timedOut: UnattendedPark | null = null;
+	/** Countdowns of worker asks, shown only: the worker's process owns the window and applies its fallback. */
+	const workerCountdowns = new Map<string, UnattendedCountdown>();
 	/** Unattended countdowns of parked main-agent calls, by approval request id. */
 	const countdowns = new Map<string, UnattendedPark & { countdown: UnattendedCountdown }>();
 	const onScreenRequestId = (): string | undefined => pendingPermission?.meta?.requestId;
@@ -431,10 +440,31 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			return countdown.state() === "held" ? "held" : countdown.remainingMs();
 		};
 
+	/** Started when the ask arrives, because the worker's window runs from then, seen or not. */
+	const armWorkerCountdown = (entry: WorkerEscalationEntry): void => {
+		if (entry.timeoutMs === undefined || workerCountdowns.has(entry.requestId)) return;
+		workerCountdowns.set(
+			entry.requestId,
+			startUnattendedCountdown({
+				windowMs: entry.timeoutMs,
+				...(deps.unattendedTimers !== undefined ? { timers: deps.unattendedTimers } : {}),
+				// The worker applies its fallback itself and that resolution withdraws the card.
+				onExpire: () => {},
+				onTick: () => {
+					if (pendingWorker?.requestId === entry.requestId) deps.requestRender();
+				},
+			}),
+		);
+	};
+	const dropWorkerCountdown = (requestId: string): void => {
+		workerCountdowns.get(requestId)?.cancel();
+		workerCountdowns.delete(requestId);
+	};
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		// The entry is still at the head of the queue here, so the queue's length counts it.
 		const view = workerApprovalRequestView(entry, workerQueue.length);
-		if (!deps.openPermissionOverlay(view, undefined, undefined)) return false;
+		const reader: PermissionCountdownReader = () => workerCountdowns.get(entry.requestId)?.remainingMs() ?? null;
+		if (!deps.openPermissionOverlay(view, undefined, undefined, undefined, reader)) return false;
 		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;
@@ -454,19 +484,21 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const announceWorkerExpiry = (
 		entry: WorkerEscalationEntry,
 		fallback: "deny" | "fail",
-		cause: "timeout" | "terminal" | "late-answer",
+		cause: "timeout" | "terminal" | "late-answer" | "revoked",
 	): void => {
+		dropWorkerCountdown(entry.requestId);
 		if (!markPermissionRequestSurfaced(expiredWorkerRequestIds, entry.requestId)) return;
-		const why =
+		const call = `${entry.agentId}'s ${entry.tool} call`;
+		const after = fallback === "fail" ? "and the worker run fails" : "and the worker carries on without it";
+		const what =
 			cause === "timeout"
-				? "expired after its escalation timeout"
+				? `${call} was denied: nobody answered in ${entry.timeoutMs === undefined ? "its window" : formatCompactMs(entry.timeoutMs)}. It did not run, ${after}.`
 				: cause === "terminal"
-					? "expired when its run ended"
-					: "expired before the operator decision arrived";
-		deps.appendNotice(
-			"warn",
-			`Worker approval request ${entry.requestId} for ${entry.agentId} (${entry.runId}) ${why}; fallback ${fallback} applied.`,
-		);
+					? `${call} no longer needs an answer: its run ended, and the call did not run.`
+					: cause === "revoked"
+						? `${call} no longer needs an answer: the ask was withdrawn, and the call did not run.`
+						: `Your answer to ${call} came too late. It did not run, ${after}.`;
+		deps.appendNotice("warn", `${what} /view dispatch:${entry.runId}`);
 	};
 	const removeQueuedWorkers = (matches: (entry: WorkerEscalationEntry) => boolean): WorkerEscalationEntry[] => {
 		const removed: WorkerEscalationEntry[] = [];
@@ -480,7 +512,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	};
 	const withdrawWorkers = (
 		matches: (entry: WorkerEscalationEntry) => boolean,
-		cause: "timeout" | "terminal",
+		cause: "timeout" | "terminal" | "revoked",
 		fallback?: "deny" | "fail",
 	): void => {
 		const active = pendingWorker !== null && matches(pendingWorker) ? pendingWorker : null;
@@ -546,6 +578,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
 		deps.onOperatorParked?.();
+		armWorkerCountdown(entry);
 		workerQueue.push(entry);
 		maybeOpenWorker();
 	});
@@ -555,7 +588,11 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		// the card the same way an expired one does.
 		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") return;
 		const fallback = payload.fallback === "fail" ? "fail" : "deny";
-		withdrawWorkers((entry) => entry.requestId === payload.requestId, "timeout", fallback);
+		withdrawWorkers(
+			(entry) => entry.requestId === payload.requestId,
+			payload.decidedBy === "revoked" ? "revoked" : "timeout",
+			fallback,
+		);
 	});
 	const withdrawTerminalRun = (payload: { runId?: unknown }): void => {
 		if (typeof payload.runId !== "string") return;
@@ -592,6 +629,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (wasTimedOut !== null && permission?.meta !== undefined) {
 			denyUnattended(permission.meta.requestId, wasTimedOut);
 		} else if (worker) {
+			dropWorkerCountdown(worker.requestId);
 			try {
 				deps.dispatch.resolveWorkerPermission?.(worker.runId, worker.requestId, wasConfirmed ? "approve" : "deny");
 			} catch (error) {
@@ -659,8 +697,10 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		}
 		if (stopping) {
 			stopping = false;
-			workerQueue.length = 0;
 			dropAllCountdowns();
+			// Another worker's ask is not part of the turn this ended. Dropping it from the
+			// queue left that worker waiting out its window on a card nobody could see.
+			maybeOpenWorker();
 			return;
 		}
 		retryPending();
@@ -704,10 +744,13 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			}
 			if (changed) deps.requestRender();
 		},
+		queuedWorkerAsks: () => workerQueue.length,
 		onPermissionOverlayClosed,
 		retryPending,
 		dispose: () => {
 			dropAllCountdowns();
+			for (const countdown of workerCountdowns.values()) countdown.cancel();
+			workerCountdowns.clear();
 			unsubscribePermission();
 			unsubscribeWorker();
 			unsubscribeWorkerResolution();

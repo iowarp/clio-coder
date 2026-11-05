@@ -344,9 +344,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 					permissionRailTitle(view, {
 						actor: context?.actor ?? "",
 						room: context?.room ?? Number.POSITIVE_INFINITY,
-						...(view.origin.kind === "main" && deps.app.toolRegistry
-							? { queueDepth: deps.app.toolRegistry.parkedCount() }
-							: {}),
+						// Every ask this card holds back, the worker asks behind it included:
+						// their windows run whether or not anything on screen counts them.
+						queueDepth:
+							(deps.app.toolRegistry?.parkedCount() ?? 0) +
+							(overlayPermission?.queuedWorkerAsks() ?? 0) +
+							(view.origin.kind === "worker" ? 1 : 0),
 					}),
 				tone: permissionOverlayTone(view),
 				// Read per frame: the footer names what Enter does right now, and

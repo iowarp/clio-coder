@@ -159,6 +159,13 @@ export const CALL_ACTION_OBJECT_MAX_CHARS = 64;
 export const CALL_TARGET_MAX_CHARS = 120;
 
 /**
+ * The same line for a worker's ask. A main card opens the exact invocation with
+ * its inspect key; a worker's arguments stay in the worker, so this line is all
+ * the operator can read of the command they are approving.
+ */
+export const WORKER_CALL_TARGET_MAX_CHARS = 1000;
+
+/**
  * The verb and object field for each tool Clio ships, plus the ACP tool kinds
  * a delegated peer reports. A tool absent from this table gets the neutral
  * `calling` verb, never a verb guessed from its name.
@@ -446,6 +453,7 @@ export function describeCallTarget(
 	args: Record<string, unknown> | undefined,
 	/** The command a verify check resolved to; the card names it beside the check id. */
 	resolved?: { command: string },
+	maxChars: number = CALL_TARGET_MAX_CHARS,
 ): string {
 	if (!args) return "";
 	const allowedFields = CALL_TARGET_FIELDS[tool] ?? [];
@@ -453,6 +461,8 @@ export function describeCallTarget(
 	const parts: string[] = [];
 	for (const field of allowedFields) {
 		if (!(field in args)) continue;
+		// The bash tool fills this default in on every call, so it says nothing about this one.
+		if (tool === "bash" && field === "output_policy" && args[field] === "bounded") continue;
 		if (isSecretArgKey(field)) {
 			parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(args[field])}`);
 			continue;
@@ -473,5 +483,5 @@ export function describeCallTarget(
 		parts.push(`${targetFieldName(field)}=${summarizeUnlistedField(tool, field, value)}`);
 	}
 	const target = sanitizeCallTargetText(parts.join(" · "));
-	return target.length <= CALL_TARGET_MAX_CHARS ? target : `${target.slice(0, CALL_TARGET_MAX_CHARS - 1)}…`;
+	return target.length <= maxChars ? target : `${target.slice(0, maxChars - 1)}…`;
 }

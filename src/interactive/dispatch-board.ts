@@ -834,7 +834,9 @@ function dispatchCardBody(
 				"waiting",
 				theme.fg(
 					"body",
-					`for a slot on ${sanitizeCallTargetText(row.endpoint.label)}: ${active} of ${row.endpoint.limit} in use, starts when one settles`,
+					// The main turn's stream counts and is not gated, so `in use` can pass the
+					// limit, and one settling then does not free a slot.
+					`for a slot on ${sanitizeCallTargetText(row.endpoint.label)}: ${active} in use against a limit of ${row.endpoint.limit}, the main turn included. It starts once the count is under the limit.`,
 				),
 				contentWidth,
 			),
@@ -926,7 +928,8 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	const theme = clioTheme();
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
-	const elapsed = row.telemetry?.activity.elapsed.display ?? "not available";
+	// A queued run has not started, so it has no elapsed time to be unavailable.
+	const elapsed = row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : "not available");
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
 
@@ -941,7 +944,9 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	const statusLabel =
 		row.status === "running" && row.progress !== undefined
 			? sanitizeCallTargetText(workerActivityWords(row.progress))
-			: presentation.label;
+			: row.status === "enqueued" && row.endpoint !== undefined
+				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
+				: presentation.label;
 	const statusStr = theme.fg(
 		row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
 			? "shadowDispatchAction"
@@ -971,7 +976,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	);
 
 	// Worker identity, function phase, outcome and telemetry each keep their role.
-	const line1 = `${glyph} ${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}${dot}${statusStr}${dot}${theme.fg("toolMetadata", elapsed)}${showPhase ? phaseColumn : ""}`;
+	const line1 = `${glyph} ${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}${dot}${statusStr}${elapsed.length > 0 ? `${dot}${theme.fg("toolMetadata", elapsed)}` : ""}${showPhase ? phaseColumn : ""}`;
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
@@ -1612,7 +1617,8 @@ function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
 		counts.set(label, (counts.get(label) ?? 0) + 1);
 	}
 	const states = [...counts].map(([label, count]) => `${count} ${label}`).join(" · ");
-	return `+ ${hidden.length} more · ${states} · /fleet`;
+	// One state alone is the whole count: `+ 1 more · 1 queued` reads as two runs.
+	return counts.size === 1 ? `+ ${states} · /fleet` : `+ ${hidden.length} more · ${states} · /fleet`;
 }
 
 export function formatTaskIslandLines(

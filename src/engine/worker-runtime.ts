@@ -94,7 +94,7 @@ import {
 } from "../domains/providers/types/knowledge-base.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
-import { describeCallTarget } from "../domains/safety/call-target.js";
+import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
 import { describeBashCallConsequences } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../domains/safety/grant-effect.js";
@@ -2271,7 +2271,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// preview of its object. Unlisted fields cross only as type-and-size
 			// summaries on this display event; the effect descriptor a grant is
 			// evaluated against rides the control lane below.
-			const target = describeCallTarget(call.tool, call.args);
+			const target = describeCallTarget(call.tool, call.args, undefined, WORKER_CALL_TARGET_MAX_CHARS);
 			// Composed here because only the worker holds the whole command: `target`
 			// is one flattened, cut line. Display text only, never read by a decision.
 			const consequence = describeBashCallConsequences(call.tool, call.args, { home: homedir });

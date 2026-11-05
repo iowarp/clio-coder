@@ -739,7 +739,9 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
 			: null;
-	const workers = workerRowsOf(state.dispatchRows).filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const liveWorkers = workerRowsOf(state.dispatchRows).filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
+	const queuedWorkers = liveWorkers.filter((row) => row.status === "enqueued").length;
+	const workers = liveWorkers.length - queuedWorkers;
 	const plans = state.dispatchRows.filter((row) => row.plan !== undefined && row.status === "running").length;
 	const skills = state.session.activeSkills ?? [];
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
@@ -761,6 +763,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
+		queuedWorkers ? theme.fg("annotation", `${queuedWorkers} queued`) : "",
 		plans ? theme.fg("activity", `${plans} ${plans === 1 ? "plan" : "plans"}`) : "",
 		memoryFact,
 		skills.length
