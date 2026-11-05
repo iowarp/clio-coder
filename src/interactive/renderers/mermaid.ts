@@ -102,7 +102,8 @@ export function createMermaidMarkdownTransform(
 					// Say why only once the fence is closed, so a diagram still streaming in
 					// does not flash a note on every frame.
 					if (!/\n[ \t]*(?:`{3,}|~{3,})[ \t]*\n*$/.test(token.raw)) return token.raw;
-					return `${token.raw.replace(/\n*$/, "")}\n\n${theme.fg("metadata", `Mermaid diagram shown as source: it ${fallback}.`)}\n\n`;
+					// The reason comes first, so the source below it reads as the fallback it is.
+					return `${theme.fg("metadata", `Mermaid diagram shown as source: it ${fallback}.`)}\n\n${token.raw.replace(/\n*$/, "")}\n\n`;
 				}
 				const lines = art.styled.map((row) => row.map((span) => styleSpan(span, theme)).join(""));
 				return `${lines.map(codeSpan).join("  \n")}\n`;

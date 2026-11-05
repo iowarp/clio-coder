@@ -535,7 +535,7 @@ export function buildWelcomeDashboardLines(
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
 	// Give the wide three-column panel one value axis, including wrapped quotas.
 	// Narrow layouts keep short labels so padding does not consume the route.
-	const fieldWidth = showHints ? "Awareness".length : 0;
+	const fieldWidth = showHints || sideBySide ? "Awareness".length : 0;
 	const fieldPrefix = (label: string) => `${label.padEnd(fieldWidth)}  `;
 	const field = (label: string, value: string) => `${theme.fg("fieldName", fieldPrefix(label))}${value}`;
 	const wrappedField = (label: string, value: string): string[] => {

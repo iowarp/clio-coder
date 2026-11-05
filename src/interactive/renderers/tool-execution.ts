@@ -1832,6 +1832,11 @@ function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, wid
 	if (visibleWidth(`${parts.lead}${parts.tail}`) > width)
 		parts = sublineParts(call, status, meta, width, undefined, true);
 	const overflow = visibleWidth(`${parts.lead}${parts.tail}`) - width;
+	// Under 60 columns the row would have to give up the command it names or cut
+	// a fact in half to stay on one line, so it wraps between its facts instead.
+	// A path or URL keeps its own tail when cut, so only a command wraps.
+	if (overflow > 0 && width < 60 && objectDisplay(resolveRow(call), width)?.style === "code")
+		return wrapSublineWithTail(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
 	if (overflow > 0) {
 		const row = resolveRow(call);
 		const finished = "result" in call ? call : null;

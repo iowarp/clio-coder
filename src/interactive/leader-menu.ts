@@ -35,22 +35,23 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 			const bindings = targets.map((entry) => (entry.id === undefined ? "" : keyLabel(entry.id)));
 			const bindingWidth = Math.max(0, ...bindings.map((binding) => visibleWidth(binding)));
 			const showBindings = bindingWidth > 0 && width >= 56;
-			const labelOf = (entry: LeaderTarget): string =>
-				`${entry.label ?? entry.id ?? ""}${entry.disabledReason ? ` (${entry.disabledReason})` : ""}`;
+			const reasonOf = (entry: LeaderTarget): string =>
+				entry.disabledReason ? ` (${entry.disabledReason.charAt(0).toLowerCase()}${entry.disabledReason.slice(1)})` : "";
+			const labelOf = (entry: LeaderTarget): string => `${entry.label ?? entry.id ?? ""}${reasonOf(entry)}`;
 			const labelRoom = Math.max(1, width - 5 - (showBindings ? bindingWidth + 2 : 0));
 			const labelWidth = Math.min(labelRoom, Math.max(1, ...targets.map((entry) => visibleWidth(labelOf(entry)))));
 			const header =
 				width >= 66
-					? `${scope()} · letters select actions · close, then /help for commands`
+					? `${scope()} · press a letter to run its action · /help lists commands`
 					: width >= 44
-						? `${scope()} · letters select actions`
-						: "Letters select actions";
+						? `${scope()} · press a letter to run its action`
+						: "Press a letter to run its action";
 			return [
 				theme.fg("annotation", header),
 				...targets.slice(start, end).map((entry, index) => {
 					const focused = start + index === selected;
 					const label = entry.label ?? entry.id ?? "";
-					const reason = entry.disabledReason ? theme.fg("annotation", ` (${entry.disabledReason})`) : "";
+					const reason = entry.disabledReason ? theme.fg("annotation", reasonOf(entry)) : "";
 					// The selection rule: cursor and label in accent, nothing else recolored.
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.

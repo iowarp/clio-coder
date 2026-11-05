@@ -850,8 +850,8 @@ function fitMarkdownTables(tokens: readonly Tokens.Generic[], width: number): { 
 					row
 						.map((cell, index) => {
 							const label = table.header[index]?.text.trim() ?? "";
-							const field = label ? `${label}: ${cell.text}` : cell.text;
-							return index === 0 && field.trim() ? `**${field}**` : field;
+							if (index === 0) return label ? `**${label}: ${cell.text}**` : `**${cell.text}**`;
+							return label ? `**${label}:** ${cell.text}` : cell.text;
 						})
 						.join("\\\n"),
 				)
