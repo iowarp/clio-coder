@@ -93,7 +93,7 @@ export function modelListTurnEffect(wait: RouteMoveWait): string | null {
 }
 
 /** What a swap costs a session with history, in the words of its journal's `model_changed` cold reason. */
-export function routeSwitchCost(historyTokens: number | null | undefined, leavesCache: boolean): string | null {
+function routeSwitchCost(historyTokens: number | null | undefined, leavesCache: boolean): string | null {
 	if (!leavesCache || !historyTokens || historyTokens <= 0) return null;
 	return `A new model starts with no prompt cache, so the next turn re-reads this session's ${formatFooterTokens(historyTokens)} tokens.`;
 }

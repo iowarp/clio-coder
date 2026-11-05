@@ -613,16 +613,16 @@ function refusedCredential(probe: ProbeResult): boolean {
 
 /** Says which credential the server turned down, because the screen after it asks for one again. */
 function refusedCredentialLine(answers: Answers): string {
-	const next = "Choose a credential before selecting a model.";
+	const line = (why: string): string => `Authentication failed: ${why}. Choose a credential before selecting a model.`;
 	if (answers.credential === "env") {
 		const name = answers.apiKeyEnv ?? "";
-		return process.env[name]
-			? `The server refused the key in $${name}. ${next}`
-			: `$${name} is not set here, so the server saw no key and refused the request. ${next}`;
+		return line(
+			process.env[name] ? `the server refused the key in $${name}` : `$${name} is not set here, so the server saw no key`,
+		);
 	}
-	if (answers.credential === "stored") return `The server refused that key. ${next}`;
-	if (answers.credential === "keep") return `The server refused the saved key. ${next}`;
-	return `This server wants a key. ${next}`;
+	if (answers.credential === "stored") return line("the server refused that key");
+	if (answers.credential === "keep") return line("the server refused the saved key");
+	return line("this server wants a key");
 }
 
 /**

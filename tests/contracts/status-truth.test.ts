@@ -40,6 +40,7 @@ import {
 } from "../../src/interactive/permission-overlay.js";
 import { providerFailureAdvice } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
+import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
@@ -1317,6 +1318,24 @@ test("the hint row says what Enter does with the draft and never offers exit or 
 	strictEqual(hint("send", 0), hint("send", 600_000), "a draft silences the learning");
 	const running = Array.from({ length: 12 }, (_, slot) => hint("steer-empty", slot * 60_000)).join("\n");
 	doesNotMatch(running, /Workers dock|Queue navigator|Send now/u);
+});
+
+test("a resumed cancelled interview reads as cancelled, not as a turn with no answer", () => {
+	const row = (turnId: string, parentTurnId: string | null, role: string, payload: object) => ({
+		kind: "message",
+		turnId,
+		parentTurnId,
+		timestamp: "2026-11-05T10:00:00.000Z",
+		role,
+		payload,
+	});
+	const summary = lastTurnSummaryFromLedger([
+		row("t1", null, "user", { text: "go" }),
+		row("t2", "t1", "assistant", { text: "", stopReason: "toolUse", content: [{ type: "toolCall", name: "ask_user" }] }),
+		row("t3", "t2", "tool_result", { toolName: "ask_user", isError: false, result: { details: { cancelled: true } } }),
+		row("t4", "t3", "assistant", { text: "", stopReason: "stop", terminalToolResult: true, toolName: "ask_user" }),
+	] as never);
+	strictEqual(summary?.stopReason, "cancelled");
 });
 
 test("a cancelled interview ends the turn as cancelled, not as a success", () => {

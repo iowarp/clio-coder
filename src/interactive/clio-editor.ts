@@ -500,8 +500,10 @@ export class ClioEditor extends Editor {
 			return shown.map((line) => `${gutter}${paint(line)}`);
 		};
 		const effect = item.effectDescription ?? item.description ?? "";
-		if (effect) rows.push(...wrapClamped(effect, (line) => theme.base("menuOption", line)));
-		if (item.nextAction) rows.push(...wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)));
+		const effectRows = effect ? wrapClamped(effect, (line) => theme.base("menuOption", line)) : [];
+		const nextRows = item.nextAction ? wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)) : [];
+		// A refused row's reason is why Enter did nothing, so a short panel keeps it over the description.
+		rows.push(...(item.disabledReason ? [...nextRows, ...effectRows] : [...effectRows, ...nextRows]));
 		return rows.slice(0, SUGGESTION_PANEL_ROWS);
 	}
 
