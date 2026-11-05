@@ -152,10 +152,11 @@ export function liveWorkStrip(
 		const phase = composerPhasePresentation(facts.status, room, facts.now);
 		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
-		const clockFor = (text: string): string | null =>
-			CARRIES_ELAPSED.test(stripTerminalSequences(text))
-				? null
-				: formatCompactMs(Math.floor(phaseElapsedMs(facts.status, facts.now) / 1000) * 1000);
+		const clockFor = (text: string): string | null => {
+			if (CARRIES_ELAPSED.test(stripTerminalSequences(text))) return null;
+			const seconds = Math.floor(phaseElapsedMs(facts.status, facts.now) / 1000);
+			return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
+		};
 		const label = railFree(phase.label);
 		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
 		const looseLabel = railFree(composerPhasePresentation(facts.status, room, facts.now, undefined, room - 2).label);
