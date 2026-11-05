@@ -107,7 +107,9 @@ function reviewFacts(step: LibraryPlanStep, review: LibraryStepReview | undefine
 								: statusChip(theme, "warning", `reaches further than the installed copy: ${review.growth.join("; ")}`),
 						]
 					: []),
-				...envelopeLines(review.envelope).map((line) => theme.fg("body", line)),
+				...envelopeLines(review.envelope, step.identity.kind === "extension" ? step.identity.name : undefined).map((line) =>
+					theme.fg("body", line),
+				),
 				theme.fg("annotation", ENVELOPE_SEAT_BELT),
 			].join("\n"),
 		});

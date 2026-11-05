@@ -221,6 +221,8 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 	private sortOrder: "tree" | "recent" = "tree";
 	private submode: Submode = "browse";
 	private labelBuffer = "";
+	/** Labels typed and stepped out of with Esc, by turn: `e` on that turn offers the text again. */
+	private readonly keptLabels = new Map<string, string>();
 	private readonly labelInput = new Input();
 	undoInput(): boolean {
 		if (this.submode !== "edit-label") return false;
@@ -344,7 +346,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 
 	private footerText(): string {
 		if (this.submode === "edit-label") {
-			return buildHint([{ key: "Enter", verb: "commit label" }], "back");
+			return buildHint([{ key: "Enter", verb: "commit label" }], "back, keeps draft");
 		}
 		const tsLabel = this.showTimestamps ? "on" : "off";
 		return buildHint([
@@ -416,18 +418,25 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		}
 		if (data === "e") {
 			this.submode = "edit-label";
-			this.labelBuffer = this.currentRow()?.node.label ?? "";
+			const node = this.currentRow()?.node;
+			this.labelBuffer = (node ? this.keptLabels.get(node.id) : undefined) ?? node?.label ?? "";
 			this.labelInput.setValue(this.labelBuffer);
+			this.labelInput.handleInput("\x1b[F");
 			this.setStatus("");
 			return;
 		}
 	}
 
 	private handleLabelInput(data: string): void {
+		// Esc leaves the field and keeps an unsaved label for the next `e` on the same turn.
 		if (matchesKey(data, "esc")) {
+			const node = this.currentRow()?.node;
+			const changed = node !== undefined && this.labelBuffer !== (node.label ?? "");
+			if (node && changed) this.keptLabels.set(node.id, this.labelBuffer);
+			else if (node) this.keptLabels.delete(node.id);
 			this.submode = "browse";
 			this.labelBuffer = "";
-			this.setStatus("");
+			this.setStatus(changed ? "Draft kept · e reopens it" : "");
 			return;
 		}
 		if (matchesKey(data, "enter") || data === "\n") {
@@ -439,6 +448,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			}
 			try {
 				this.deps.session.editLabel(row.node.id, this.labelBuffer, row.sessionId);
+				this.keptLabels.delete(row.node.id);
 				this.setStatus(`[tree] label updated on ${shortTurnId(row.node.id)}`);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);

@@ -715,6 +715,19 @@ function findSkillSuggestionLine(seg: TextSegment): { start: number; end: number
 	return { start: at, end: lineEnd };
 }
 
+/** Text with no letter or digit and at most three visible marks: punctuation a model left between actions. */
+function isStrayFragment(text: string): boolean {
+	const visible = text.trim();
+	return visible.length > 0 && visible.length <= 3 && !/[\p{L}\p{N}]/u.test(visible);
+}
+
+/** Another segment of the turn that shows the operator something: an action, an error, or words. */
+function carriesOutput(other: AssistantSegment, self: AssistantSegment): boolean {
+	if (other === self) return false;
+	if (other.kind === "tool" || other.kind === "error") return true;
+	return other.kind === "text" && other.text.trim().length > 0 && !isStrayFragment(other.text);
+}
+
 /**
  * Split a reply that carries the skill-suggestion protocol line into that
  * line and the answer around it.
@@ -1684,6 +1697,11 @@ function renderEntryLines(
 		// protocol line is advisory rather than the answer: it renders in place
 		// without claiming the glyph.
 		if (seg.kind === "text" && seg.text.length === 0) continue;
+		// A stray mark between actions (`.` or `)` left over when a model ends its
+		// words in a tool call) carries nothing to read, and as its own bubble it
+		// looked like a reply. A turn whose only output is that mark keeps it.
+		if (seg.kind === "text" && isStrayFragment(seg.text) && entry.segments.some((other) => carriesOutput(other, seg)))
+			continue;
 		// A skill suggestion is advice for the operator, not the answer: it reads
 		// `§ suggests /skill <name>` as its own row, ahead of the answer wherever
 		// the model put it.

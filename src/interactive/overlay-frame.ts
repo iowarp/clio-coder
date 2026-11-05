@@ -417,13 +417,16 @@ function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): 
  * caller is the only thing that knows it.
  *
  * `back` is for a submode that returns to the surface that opened it: a
- * settings submenu, the `/tree` label editor.
+ * settings submenu, the `/tree` label editor. `back, keeps draft` is the same
+ * move from a text field whose typed text survives it, so the operator knows
+ * leaving the field is not discarding what they wrote.
  */
 export type OverlayEscVerb =
 	| "close"
 	| "cancel"
 	| "clear filter"
 	| "back"
+	| "back, keeps draft"
 	| "back to list"
 	| "back to sections"
 	| "cancel filter"

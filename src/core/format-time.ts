@@ -74,6 +74,18 @@ export function dateLocal(instant: Instant): string {
 }
 
 /**
+ * Operator-local instant: `HH:MM:SS` when it falls on today's local date,
+ * `YYYY-MM-DD HH:MM:SS` otherwise. The one presentation for an exact time on
+ * an operator surface, so a row never sits in UTC beside a row in local time.
+ */
+export function stampLocal(instant: Instant, now: number = Date.now()): string {
+	const ms = toEpochMs(instant);
+	if (ms === null) return MISSING;
+	const date = dateLocal(ms);
+	return date === dateLocal(now) ? clockLocal(ms) : `${date} ${clockLocal(ms)}`;
+}
+
+/**
  * Coarse age ("3m ago", "yesterday"), falling back to `dateLocal` past 30 days.
  * The week branch resolves the divergence between the two existing copies:
  * session-selector had it, welcome-dashboard did not, so the same artifact read

@@ -24,6 +24,7 @@ import {
 	brandMark,
 	type ClioTheme,
 	chipRow,
+	chipRows,
 	clioTheme,
 	emptyState,
 	factRows,
@@ -141,7 +142,10 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
 	const lastTurn = state.agent.lastTurn;
 	const contextWork = state.agent.contextActivity;
-	const headline = chipRow(
+	// The headline and the session row wrap between whole chips rather than give
+	// the tail up to an ellipsis: the last chip is the one that did not fit the
+	// row's end, and dropping it left free width beside a `…` that hid a fact.
+	const headline = chipRows(
 		theme,
 		[
 			buildHarnessStatePill(theme, state.status, state.toolCounts, state.tick, state.now, Math.max(width, 40)),
@@ -168,7 +172,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	const tools = meaningfulToolTally(state.agent.toolTally);
 	const board = state.agent.taskBoard;
 	const spend = state.telemetry;
-	const session = chipRow(
+	const session = chipRows(
 		theme,
 		[
 			...(spend.kind === "unavailable"
@@ -214,8 +218,8 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		theme,
 	});
 	const lines = [
-		headline,
-		session,
+		...headline,
+		...session,
 		...tasks,
 		...notices,
 		sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) }),

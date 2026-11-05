@@ -169,6 +169,11 @@ export class SubmenuWrapper implements Component, RowBudgetedBody {
 		this.problem = problem;
 	}
 
+	/** A text editor, whose Esc keeps what was typed for the next visit. */
+	get editsText(): boolean {
+		return this.child instanceof Input;
+	}
+
 	setBodyRows(rows: number): void {
 		this.rows = Math.max(0, Math.floor(rows));
 	}

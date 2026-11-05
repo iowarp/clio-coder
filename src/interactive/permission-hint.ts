@@ -39,8 +39,8 @@ export type PermissionTermsHint = "closed" | "open";
  *
  * Esc says `deny`, not `close`: the operator explicitly denies the call, and on the
  * one surface where a misread is a wrong decision about a tool call the key
- * names its effect. It keeps that meaning while the mutation is open, so the
- * inspect key is what puts the mutation away again.
+ * names its effect. While the mutation is open Esc hides it instead, and the
+ * entry says `hide details`, so backing out of the view never answers the call.
  *
  * With a draft in the composer, Enter is inert (issue #186): the habitual send
  * key must not resolve toward "allow" on a safety rail. The entry then says so
@@ -66,7 +66,8 @@ export function permissionHintEntries(
 		// The terms key is the card's own and the most droppable entry: the folded
 		// card already states what the keys do in one row. It sits before the
 		// inspect key so the narrowing drops it first.
-		...(terms === undefined
+		// The terms key is inert while the mutation is open, so the rail does not offer it then.
+		...(terms === undefined || inspection === "open"
 			? []
 			: [{ key: PERMISSION_TERMS_KEY, verb: terms === "open" ? "hide terms" : "terms", short: "terms", critical: false }]),
 		// A card taller than its rows scrolls (BT-005). The open mutation names the
@@ -75,14 +76,14 @@ export function permissionHintEntries(
 		...(inspection === "none"
 			? []
 			: inspection === "open"
-				? [
-						{ key: "↑↓", verb: "scroll", critical: false },
-						{ key: MUTATION_PREVIEW_KEY, verb: "hide details", short: "hide", critical: false },
-					]
+				? [{ key: "↑↓", verb: "scroll", critical: false }]
 				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect details", short: "inspect", critical: false }]),
 		{ key: PERMISSION_STOP_KEY, verb: stopVerb, short: "stop", critical: true },
 		// With a draft, deny and stop are the only immediate answers, so Esc
-		// outranks the narrowing that would otherwise drop it first.
-		{ key: "Esc", verb: "deny", critical: composerHasDraft },
+		// outranks the narrowing that would otherwise drop it first. With the
+		// details open, Esc hides them and the card says so; deny is one more Esc.
+		inspection === "open"
+			? { key: "Esc", verb: "hide details", short: "hide", critical: true }
+			: { key: "Esc", verb: "deny", critical: composerHasDraft },
 	];
 }

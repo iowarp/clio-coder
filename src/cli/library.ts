@@ -243,7 +243,8 @@ function printStepReviews(plan: LibraryLifecyclePlan): void {
 						? "  reaches no further than the installed copy\n"
 						: `  reaches further than the installed copy: ${review.growth.join("; ")}\n`,
 				);
-			for (const line of envelopeLines(review.envelope)) process.stdout.write(`  ${line}\n`);
+			const id = step.identity.kind === "extension" ? step.identity.name : undefined;
+			for (const line of envelopeLines(review.envelope, id)) process.stdout.write(`  ${line}\n`);
 			process.stdout.write(`  ${ENVELOPE_SEAT_BELT}\n`);
 			if (review.envelopeDigest) process.stdout.write(`  envelope sha256 ${review.envelopeDigest}\n`);
 		}

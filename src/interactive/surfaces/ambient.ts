@@ -26,6 +26,25 @@ const DRAWING_KEYS = [
 	"prompt",
 ] as const;
 
+/** The drawings that put a surface of their own in front of the operator, rather than updating ambient chrome. */
+const OWN_SURFACE_KEYS = ["card", "panel", "workspace", "interview", "prompt"] as const;
+
+/** Where an ambient-only result landed, in words, for the line that acknowledges a typed command. */
+export function ambientDrawingPlace(output: ExtensionOutputV2): string {
+	const places = [
+		...(output.status !== undefined ? ["the footer status"] : []),
+		...(output.band !== undefined ? ["its band"] : []),
+		...(output.toast !== undefined ? ["a toast"] : []),
+		...(output.dock !== undefined || output.regions !== undefined || output.islands !== undefined ? ["its dock"] : []),
+	];
+	return places.length > 0 ? places.join(" and ") : "its own display";
+}
+
+/** Whether a result opened or appended something the operator will see where they are looking. */
+export function opensOwnSurface(output: ExtensionOutputV2): boolean {
+	return OWN_SURFACE_KEYS.some((key) => output[key] !== undefined);
+}
+
 /** A text-only result needs its transcript fallback; drawn results already reached their host surfaces. */
 export function hasExtensionDrawing(output: ExtensionOutputV2): boolean {
 	return DRAWING_KEYS.some((key) => output[key] !== undefined);

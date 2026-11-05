@@ -3442,7 +3442,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 						dispatchSlashCommand(command, ctx);
 						return;
 					}
-					ctx.notice("error", `${command.token}: ${error instanceof Error ? error.message : String(error)}`);
+					ctx.notice("error", `/${command.token} failed: ${error instanceof Error ? error.message : String(error)}`);
 				}
 			});
 			return "accepted";

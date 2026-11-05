@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
-import { fitIdentityLabel, releaseSpaces } from "./labels.js";
+import { fitIdentityLabel } from "./labels.js";
 import { padAnsi, rule } from "./rules.js";
 import { dotSep } from "./segments.js";
 import type { ClioTheme, ClioToken, SemanticRole } from "./tokens.js";
@@ -158,8 +158,33 @@ export function chipRow(theme: ClioTheme, chips: ReadonlyArray<string | null | u
 export function chipRows(theme: ClioTheme, chips: ReadonlyArray<string | null | undefined>, width: number): string[] {
 	const safe = Math.max(1, Math.floor(width));
 	const present = chips.filter((part): part is string => typeof part === "string" && part.length > 0);
-	const held = present.map((chip) => (visibleWidth(chip) <= safe ? chip.replaceAll(" ", "\u00a0") : chip));
-	return wrap(held.join(dotSep(theme)), safe).map(releaseSpaces);
+	const separator = dotSep(theme);
+	const separatorWidth = visibleWidth(separator);
+	// Packed chip by chip, so a row break falls between chips and takes the
+	// separator with it: a row never ends on a dangling `·`.
+	const rows: string[] = [];
+	let row = "";
+	let rowWidth = 0;
+	for (const chip of present) {
+		const chipWidth = visibleWidth(chip);
+		if (row.length > 0 && rowWidth + separatorWidth + chipWidth <= safe) {
+			row += separator + chip;
+			rowWidth += separatorWidth + chipWidth;
+			continue;
+		}
+		if (row.length > 0) rows.push(row);
+		if (chipWidth <= safe) {
+			row = chip;
+			rowWidth = chipWidth;
+			continue;
+		}
+		const folded = wrap(chip, safe);
+		rows.push(...folded.slice(0, -1));
+		row = folded.at(-1) ?? "";
+		rowWidth = visibleWidth(row);
+	}
+	if (row.length > 0 || rows.length === 0) rows.push(row);
+	return rows;
 }
 
 export interface SectionRuleOptions {

@@ -14,7 +14,7 @@ import {
 	type TaskMemoryTelemetryDecision,
 } from "../domains/memory/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { clockLocal } from "./format-time.js";
+import { clockLocal, stampLocal } from "./format-time.js";
 import {
 	memoryBankEntries,
 	memoryLessonDetail,
@@ -116,14 +116,14 @@ function activityItems(events: ReadonlyArray<TaskMemoryActivityEvent>, group: st
 		meta: theme.fg("annotation", `${event.tier} ${Math.round(event.latencyMs)}ms`),
 		group,
 		detail: () => [
-			`# ${event.at}`,
+			`# ${stampLocal(event.at)}`,
 			`**Decision:** ${event.decision} (${event.reason})`,
 			`**Triggers:** ${event.triggerReasons.join(", ")}`,
 			`**Tier:** ${event.tier}`,
 			`**Latency:** ${Math.round(event.latencyMs)}ms`,
 			`**Bank writes:** ${event.bankWrites}`,
 			`**Cited entries:** ${event.citedEntries}`,
-			...(event.resumeAt === undefined ? [] : [`**Resumes:** ${event.resumeAt}`]),
+			...(event.resumeAt === undefined ? [] : [`**Resumes:** ${stampLocal(event.resumeAt)}`]),
 		],
 	}));
 }

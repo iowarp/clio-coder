@@ -10,7 +10,7 @@ import {
 import type { UserTask } from "../domains/user-tasks/store.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { clockLocal } from "./format-time.js";
+import { stampLocal } from "./format-time.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
 import type { ClioToken } from "./theme/index.js";
@@ -129,8 +129,8 @@ function observedCheckRows(task: TaskBoardTask, width: number): string[] {
 	const theme = clioTheme();
 	const { passed, failed } = observedTaskChecks(task);
 	const facts = [
-		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${clockLocal(check.observedAt)}`)),
-		...passed.map((check) => theme.fg("success", `${check.name} passed at ${clockLocal(check.observedAt)}`)),
+		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${stampLocal(check.observedAt)}`)),
+		...passed.map((check) => theme.fg("success", `${check.name} passed at ${stampLocal(check.observedAt)}`)),
 	];
 	return facts.flatMap((fact) => wrapTaskProse(`       ${dim("observed")} `, fact, width));
 }
@@ -405,7 +405,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${artifact.timestamp}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${stampLocal(artifact.timestamp)}`)}`,
 				width,
 			),
 		]);
@@ -491,6 +491,9 @@ export interface OpenTasksOverlayOptions {
 	workspace?: string;
 }
 
+/** An operator task title typed and stepped out of with Esc, offered again by the next `a`. */
+let keptTaskTitle = "";
+
 class TasksOverlayBody implements Component, RowBudgetedBody {
 	private history: ReadonlyArray<SessionTaskHistoryBoard> = [];
 	private artifacts: ReadonlyArray<SessionArtifact> = [];
@@ -557,8 +560,11 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 
 	handleInput(data: string): void {
 		if (this.addInput) {
+			// Esc leaves the field and keeps what was typed; `a` brings it back, even after the board closes.
 			if (matchesKey(data, "esc")) {
+				keptTaskTitle = this.addInput.getValue().trim().length > 0 ? this.addInput.getValue() : "";
 				this.addInput = null;
+				this.status = keptTaskTitle ? "Draft kept · a reopens it" : "";
 				this.requestRender();
 				return;
 			}
@@ -615,7 +621,7 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 	}
 
 	footerHint(): string {
-		if (this.addInput) return buildHint([{ key: "Enter", verb: "add" }], "back");
+		if (this.addInput) return buildHint([{ key: "Enter", verb: "add" }], "back, keeps draft");
 		// Only the keys the selected row answers: Enter opens an artifact, and h, d and x act on operator tasks.
 		const selected = selectableRows(this.state())[this.selectedIndex];
 		return buildHint([
@@ -623,7 +629,7 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 			...(this.windowRows > 0 ? [{ key: "PgUp/PgDn", verb: "page" }] : []),
 			{ key: "Tab", verb: "section" },
 			...(selected?.kind === "artifact" && this.options.onOpenArtifact ? [{ key: "Enter", verb: "view" }] : []),
-			{ key: "a", verb: "add" },
+			{ key: "a", verb: keptTaskTitle ? "resume draft" : "add" },
 			...(selected?.kind === "user" && selected.task.status === "open" ? [{ key: "h", verb: "hand" }] : []),
 			...(selected?.kind === "user" && selected.task.status !== "done" && selected.task.status !== "dropped"
 				? [
@@ -709,6 +715,8 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 			return;
 		}
 		const input = new Input();
+		input.setValue(keptTaskTitle);
+		input.handleInput("\x1b[F");
 		input.onSubmit = (value) => {
 			const title = value.trim();
 			if (title.length === 0) {
@@ -720,6 +728,7 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 				this.options.onAddUserTask?.(title);
 				this.refreshUserTasks();
 				this.addInput = null;
+				keptTaskTitle = "";
 				this.status = "Operator task added.";
 			} catch (error) {
 				this.status = error instanceof Error ? error.message : String(error);

@@ -6,22 +6,30 @@
  */
 import { loadManifestFromRoot } from "./discovery.js";
 import type { ExtensionCapabilityEnvelope } from "./manifest-v2.js";
+import { extensionInvocation } from "./operator-commands.js";
 import { capabilityEnvelope, envelopeDigest, envelopeGrowth, hookPowers } from "./runtime-schema-v2.js";
 
 /** The honest limit of the process permission flags, said wherever consent is asked. */
 export const ENVELOPE_SEAT_BELT =
 	"Node's permission flags are a seat belt against mistakes, not a boundary against hostile code.";
 
-/** One line per capability class, written for an operator and never abbreviated into a code. */
-export function envelopeLines(envelope: ExtensionCapabilityEnvelope): string[] {
+/**
+ * One line per capability class, written for an operator and never abbreviated into a code.
+ * With the extension's id, commands read as the operator types them (`/ext:<id>:<name>`).
+ */
+export function envelopeLines(envelope: ExtensionCapabilityEnvelope, extensionId?: string): string[] {
 	const list = (items: readonly string[]): string => (items.length > 0 ? items.join(", ") : "none");
+	const commands =
+		extensionId === undefined
+			? envelope.commands
+			: envelope.commands.map((name) => `/${extensionInvocation(extensionId, name)}`);
 	const hooks = envelope.hooks.map((hook) => {
 		const tools = hook.tools ? ` on ${hook.tools.join(", ")}` : "";
 		const failure = `on timeout ${hook.onTimeout}, on error ${hook.onError}`;
 		return `${hook.on}${tools} (${[`${hook.timeoutMs} ms`, failure, ...hookPowers(hook, envelope.access)].join("; ")})`;
 	});
 	const lines = [
-		`Commands: ${list(envelope.commands)}`,
+		`Commands: ${list(commands)}`,
 		...(envelope.takesOver ? [`Takes over prompts: ${list(envelope.takesOver.map((name) => `/${name}`))}`] : []),
 		...(envelope.state
 			? [
@@ -97,6 +105,6 @@ export function envelopeReviewLines(review: ExtensionEnvelopeReview): string[] {
 				: "Reaches further than the installed copy:",
 			...review.growth.map((line) => `  ${line}`),
 		);
-	lines.push(...envelopeLines(review.envelope), ENVELOPE_SEAT_BELT, `Envelope sha256 ${review.digest}`);
+	lines.push(...envelopeLines(review.envelope, review.id), ENVELOPE_SEAT_BELT, `Envelope sha256 ${review.digest}`);
 	return lines;
 }

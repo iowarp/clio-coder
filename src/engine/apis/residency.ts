@@ -499,7 +499,8 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Recon
 			facts,
 			"swap",
 			"warning",
-			`evicting '${entry.modelId}' from '${facts.targetId}' to make room for '${facts.keepModelId}' even though settings still reference it as ${describeRole(entry.role)}: every slot is taken and no unprotected resident is left. Another profile pointed at it will reload it.`,
+			// State first, consequence second, so a hint row that cuts the line still says what happened and why.
+			`unloading ${entry.modelId} from ${facts.targetId} to fit ${facts.keepModelId}, since every slot is taken; settings still use it as ${describeRole(entry.role)}, so its next use reloads it.`,
 			{ swappedOut: entry.modelId, configProtected: true, ...(entry.role ? { role: entry.role } : {}) },
 		);
 	}
@@ -507,7 +508,7 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Recon
 		facts,
 		"about-to-evict",
 		"info",
-		`evicting Clio-loaded model '${entry.modelId}' from '${facts.targetId}' to free a slot for '${facts.keepModelId}'.`,
+		`unloading ${entry.modelId}, which Clio loaded, from ${facts.targetId} to fit ${facts.keepModelId}.`,
 		entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : undefined,
 	);
 }

@@ -27,6 +27,12 @@ interface PendingText {
 	finish: (result: TextResult) => void;
 }
 
+/** A text step's identity across visits: what it asks, which is the same each time the wizard walks onto it. */
+function textStepKey(options: TextPromptOptions): string {
+	const heading = options.heading;
+	return JSON.stringify([typeof heading === "string" ? [heading] : [...(heading ?? [])], options.hint ?? ""]);
+}
+
 /** #385: prompts are dock components; the shared CLI wizard retains every step and write. */
 export class TargetWizardSurface implements Component, RowBudgetedBody, ConfigureWizardHost {
 	private readonly abort = new AbortController();
@@ -44,6 +50,8 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	readonly ownsCtrlC = true;
 	/** Answers the wizard has taken and not gone back over: none means Esc leaves the wizard rather than a step. */
 	private answered = 0;
+	/** Text typed into a step and left with Esc, by step, so walking forward again finds it. Masked steps keep nothing. */
+	private readonly keptText = new Map<string, string>();
 
 	constructor(
 		private readonly requestRender: () => void,
@@ -112,7 +120,8 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 
 	text(options: TextPromptOptions): Promise<TextResult> {
 		if (this.cancelled()) return Promise.resolve({ kind: "quit" });
-		this.input.setValue(options.initial ?? "");
+		const kept = options.mask ? undefined : this.keptText.get(textStepKey(options));
+		this.input.setValue(kept ?? options.initial ?? "");
 		this.input.handleInput("\x1b[F");
 		this.waitLabel = null;
 		return new Promise((resolve) => {
@@ -159,6 +168,12 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			return;
 		}
 		if (matchesKey(data, "escape")) {
+			if (pending.kind === "text" && !pending.options.mask) {
+				const typed = this.input.getValue();
+				const key = textStepKey(pending.options);
+				if (typed !== (pending.options.initial ?? "") && typed.trim().length > 0) this.keptText.set(key, typed);
+				else this.keptText.delete(key);
+			}
 			this.pending = null;
 			this.answered = Math.max(0, this.answered - 1);
 			this.freshFrom = this.messages.length;
@@ -176,6 +191,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 				this.pending = null;
 				this.answered += 1;
 				this.freshFrom = this.messages.length;
+				this.keptText.delete(textStepKey(pending.options));
 				pending.finish({ kind: "value", value });
 			} else {
 				const choice = pending.options.choices[pending.selected];
@@ -268,7 +284,11 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 				{ key: "Enter", verb: "continue" },
 				...(this.answered > 0 ? [{ key: "Ctrl+C", verb: "cancel" }] : []),
 			],
-			this.answered > 0 ? "back" : { key: "Esc", verb: "cancel" },
+			this.answered > 0
+				? pending.kind === "text" && !pending.options.mask
+					? "back, keeps draft"
+					: "back"
+				: { key: "Esc", verb: "cancel" },
 		)(innerWidth);
 	}
 }
