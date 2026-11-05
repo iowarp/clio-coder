@@ -594,11 +594,15 @@ function defaultCredentialSource(runtime: RuntimeDescriptor, targetId: string): 
  * erase that replaces it with the answer row. So the wizard owns no readline,
  * and the one flow that needs one opens and closes it around the call.
  */
-async function connectOAuth(wizard: Wizard, runtime: RuntimeDescriptor): Promise<boolean> {
-	if (wizard.host) return loginOAuthRuntime(null, runtime, wizard.host);
+async function connectOAuth(wizard: Wizard, runtime: RuntimeDescriptor): Promise<"connected" | "failed" | "stopped"> {
+	if (wizard.host) {
+		const outcome = { stopped: false };
+		const connected = await loginOAuthRuntime(null, runtime, wizard.host, outcome);
+		return connected ? "connected" : outcome.stopped ? "stopped" : "failed";
+	}
 	const rl = createInterface({ input: wizard.streams.in, output: wizard.streams.out });
 	try {
-		return await loginOAuthRuntime(rl, runtime);
+		return (await loginOAuthRuntime(rl, runtime)) ? "connected" : "failed";
 	} finally {
 		rl.close();
 	}
@@ -649,7 +653,8 @@ const CREDENTIAL_STEP: Step = {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
 		const stored = describeAuthStatus(runtime, answers.existing);
-		if (runtime.auth === "oauth") {
+		// A sign-in the operator stops with Esc asks this question again, so the loop.
+		while (runtime.auth === "oauth") {
 			const result = await wizard.select<CredentialSource>({
 				heading: [
 					"",
@@ -662,7 +667,9 @@ const CREDENTIAL_STEP: Step = {
 					{
 						value: "oauth-skip",
 						label: "Later",
-						hint: `run \`clio-coder auth login ${runtime.id}\` before the first turn`,
+						hint: wizard.host
+							? "connect it from Settings → Connections before the first turn"
+							: `run \`clio-coder auth login ${runtime.id}\` before the first turn`,
 					},
 				],
 				initialIndex: answers.credential === "oauth-skip" ? 1 : 0,
@@ -677,8 +684,13 @@ const CREDENTIAL_STEP: Step = {
 			answers.credential = result.value;
 			if (result.value === "oauth-connect") {
 				const connected = await connectOAuth(wizard, runtime);
-				if (!connected) {
-					wizard.presenter.warn(`sign-in did not complete; run \`clio-coder auth login ${runtime.id}\` when ready`);
+				if (connected === "stopped") continue;
+				if (connected === "failed") {
+					wizard.presenter.warn(
+						wizard.host
+							? "sign-in did not complete; connect it from Settings → Connections when ready"
+							: `sign-in did not complete; run \`clio-coder auth login ${runtime.id}\` when ready`,
+					);
 					wizard.answer("Credential", "not connected yet");
 					return "next";
 				}
@@ -1484,8 +1496,11 @@ async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promi
 				presenter.done("Nothing written");
 				return 1;
 			}
+			// Inside the TUI the flag is not something the operator can type; the credential step's choice is.
 			presenter.warn(
-				"API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+				wizard.host
+					? "API key stored unencrypted (mode 0600). Any process running as you can read it. Edit the target and choose Environment variable to keep the key off disk."
+					: "API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
 			);
 		}
 
@@ -1515,7 +1530,9 @@ async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promi
 
 	if (contextWindowUndiscovered(descriptor, answers.probe ?? null)) {
 		presenter.warn(
-			`${targetId} reported no context window, so Clio will use the runtime default as a guess. Set the real one with \`clio-coder configure --id ${targetId} --runtime ${runtime.id} --context-window <N>\`.`,
+			wizard.host
+				? `${targetId} reported no context window, so Clio will use the runtime default as a guess. Set the real one in Settings → Connections: select ${targetId} and choose Edit.`
+				: `${targetId} reported no context window, so Clio will use the runtime default as a guess. Set the real one with \`clio-coder configure --id ${targetId} --runtime ${runtime.id} --context-window <N>\`.`,
 		);
 	}
 

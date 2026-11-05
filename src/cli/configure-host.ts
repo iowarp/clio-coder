@@ -18,6 +18,12 @@ export interface ConfigureWizardHost {
 	waiting?(label: string | null): void;
 	/** Open a sign-in link in the operator's browser, best effort; the link is reported as well. */
 	openUrl?(url: string): void;
+	/**
+	 * A wait the operator may stop without leaving the wizard, such as a browser
+	 * sign-in: the host's Esc calls `stop`, and the step that started the wait
+	 * asks its question again. Null when the wait ends.
+	 */
+	stoppableWait?(stop: (() => void) | null): void;
 }
 
 const UNWRAPPED_COLUMNS = 100_000;

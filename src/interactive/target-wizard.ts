@@ -47,6 +47,8 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	private complete = false;
 	private problem = "";
 	private waitLabel: string | null = null;
+	/** Stops the wait on screen without leaving the wizard (a browser sign-in); null when nothing can be stopped. */
+	private stopWait: (() => void) | null = null;
 	/** Esc walks back one step, and the rail promises Ctrl+C leaves the wizard. */
 	readonly ownsCtrlC = true;
 	/** Answers the wizard has taken and not gone back over: none means Esc leaves the wizard rather than a step. */
@@ -91,6 +93,10 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	}
 	openUrl(url: string): void {
 		maybeOpenExternalUrl(url);
+	}
+	stoppableWait(stop: (() => void) | null): void {
+		this.stopWait = stop;
+		this.requestRender();
 	}
 	dismissPrompt(): void {
 		const pending = this.pending;
@@ -270,7 +276,17 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			this.cancel();
 			this.close();
 		};
+		const stopWait = this.stopWait;
 		return [
+			pending === null &&
+				stopWait !== null && {
+					verb: "stop waiting, back a step",
+					short: "stop waiting",
+					back: () => {
+						this.stopWait = null;
+						stopWait();
+					},
+				},
 			pending !== null &&
 				this.answered > 0 && {
 					verb: pending.kind === "text" && !pending.options.mask ? "back, keeps draft" : "back a step",
@@ -302,7 +318,10 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		if (!pending) {
 			return this.complete
 				? buildResponsiveHint([], { key: "Enter/Esc", verb: "back to Settings" })(innerWidth)
-				: buildResponsiveHint([], esc)(innerWidth);
+				: buildResponsiveHint(
+						this.stopWait === null ? [] : [{ key: "Ctrl+C", verb: "cancel, nothing saved", short: "cancel" }],
+						esc,
+					)(innerWidth);
 		}
 		return buildResponsiveHint(
 			[
