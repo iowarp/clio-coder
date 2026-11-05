@@ -1153,8 +1153,7 @@ class AskUserOverlayView implements Component {
 					critical: false,
 				});
 			entries.push(...scroll);
-			if (this.questions.length > 1)
-				entries.push({ key: "Tab/Shift+Tab", verb: "question", critical: false });
+			if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question", critical: false });
 			entries.push(record);
 			return { entries, esc };
 		}
