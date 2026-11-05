@@ -2,6 +2,7 @@ import type { ConfigureWizardHost, HostedTargetOptions } from "../cli/configure-
 import type { SelectOptions, SelectResult, TextPromptOptions, TextResult } from "../cli/select.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, isKeyRelease, matchesKey, stripTerminalSequences, wrapTextWithAnsi } from "../engine/tui.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "./escape-layers.js";
 import { maybeOpenExternalUrl } from "./open-external-url.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
 import {
@@ -159,25 +160,13 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			this.close();
 			return;
 		}
-		const pending = this.pending;
-		if (!pending) {
-			if (matchesKey(data, "escape")) {
-				this.cancel();
-				this.close();
-			} else if (this.complete && matchesKey(data, "enter")) this.close();
+		if (matchesKey(data, "escape")) {
+			backOutOneLayer(this.escapeLayers());
 			return;
 		}
-		if (matchesKey(data, "escape")) {
-			if (pending.kind === "text" && !pending.options.mask) {
-				const typed = this.input.getValue();
-				const key = textStepKey(pending.options);
-				if (typed !== (pending.options.initial ?? "") && typed.trim().length > 0) this.keptText.set(key, typed);
-				else this.keptText.delete(key);
-			}
-			this.pending = null;
-			this.answered = Math.max(0, this.answered - 1);
-			this.freshFrom = this.messages.length;
-			pending.finish({ kind: "back" });
+		const pending = this.pending;
+		if (!pending) {
+			if (this.complete && matchesKey(data, "enter")) this.close();
 			return;
 		}
 		if (matchesKey(data, "enter")) {
@@ -268,13 +257,52 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 
 	invalidate(): void {}
 
+	/**
+	 * Esc by the shared rule: a step with an answer behind it goes back to that
+	 * answer, keeping typed text; the first step has nothing behind it, so Esc
+	 * leaves the wizard and returns to Settings at once, with nothing saved. It
+	 * used to send the first step a `back` the flow read as a cancel, which
+	 * printed a cancelled page that took a second Esc to leave.
+	 */
+	private escapeLayers(): EscapeLayers {
+		const pending = this.pending;
+		const leave = (): void => {
+			this.cancel();
+			this.close();
+		};
+		return [
+			pending !== null &&
+				this.answered > 0 && {
+					verb: pending.kind === "text" && !pending.options.mask ? "back, keeps draft" : "back a step",
+					short: "back",
+					back: () => this.stepBack(pending),
+				},
+			this.complete && { verb: "back to Settings", back: () => this.close() },
+			{ verb: "cancel, nothing saved", short: "cancel", back: leave },
+		];
+	}
+
+	private stepBack(pending: PendingChoice | PendingText): void {
+		if (pending.kind === "text" && !pending.options.mask) {
+			const typed = this.input.getValue();
+			const key = textStepKey(pending.options);
+			if (typed !== (pending.options.initial ?? "") && typed.trim().length > 0) this.keptText.set(key, typed);
+			else this.keptText.delete(key);
+		}
+		this.pending = null;
+		this.answered = Math.max(0, this.answered - 1);
+		this.freshFrom = this.messages.length;
+		pending.finish({ kind: "back" });
+	}
+
 	/** The rail for the step on screen: a finished wizard offers only the way out, and Enter and Esc both take it. */
 	railHint(innerWidth: number): string {
 		const pending = this.pending;
+		const esc = escapeHintEntry(this.escapeLayers());
 		if (!pending) {
 			return this.complete
 				? buildResponsiveHint([], { key: "Enter/Esc", verb: "back to Settings" })(innerWidth)
-				: buildResponsiveHint([], { key: "Esc", verb: "cancel" })(innerWidth);
+				: buildResponsiveHint([], esc)(innerWidth);
 		}
 		return buildResponsiveHint(
 			[
@@ -282,13 +310,9 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 					? [{ key: "↑↓", verb: "choose" }, ...(pending.options.searchable ? [FILTER_HINT] : [])]
 					: []),
 				{ key: "Enter", verb: "continue" },
-				...(this.answered > 0 ? [{ key: "Ctrl+C", verb: "cancel" }] : []),
+				...(this.answered > 0 ? [{ key: "Ctrl+C", verb: "cancel, nothing saved", short: "cancel" }] : []),
 			],
-			this.answered > 0
-				? pending.kind === "text" && !pending.options.mask
-					? "back, keeps draft"
-					: "back"
-				: { key: "Esc", verb: "cancel" },
+			esc,
 		)(innerWidth);
 	}
 }

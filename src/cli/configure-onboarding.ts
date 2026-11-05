@@ -1324,7 +1324,9 @@ export async function runOnboardingWizard(
 	// "Nothing is saved" read as false to a first-run user who then found the
 	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
 	// hold no choice of theirs; the sentence is about the choices.
-	presenter.note("Escape goes back. Your choices are saved only at the review, except a browser sign-in you complete.");
+	presenter.note(
+		"Escape goes back a step, and from the first step leaves without saving. Your choices are saved only at the review, except a browser sign-in you complete.",
+	);
 	presenter.note(`Saved result: ${shortenPath(settingsPath())}`);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
