@@ -871,6 +871,11 @@ function dispatchCardBody(
 	return bodyLines;
 }
 
+/** The route as `target/model`, the shape the inline card's header already uses. */
+function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">): string {
+	return sanitizeCallTargetText(`${row.targetId}/${row.wireModelId}`);
+}
+
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
 	const weekly = routeWeeklyQuota(row, quota);
@@ -943,6 +948,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		: [];
 	return [
 		padAnsi(line1, width),
+		padAnsi(theme.fg("annotation", truncateToWidth(`  ${formatRowRoute(row)}`, width, GLYPH.ellipsis, false)), width),
 		...quality.map((line) => padAnsi(theme.fg("body", line), width)),
 		...task.map((line) => padAnsi(line, width)),
 		padAnsi(telemetry, width),

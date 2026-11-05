@@ -150,6 +150,21 @@ export interface SideQuestionResult {
 	reportedModel?: string;
 }
 
+/** Where an out-of-turn round was sent, and who the provider says answered it. */
+export interface OutOfTurnRoute {
+	targetId: string;
+	wireModelId: string;
+	reportedModel?: string;
+}
+
+/** `target/model`, plus the provider's own claim when it names a different model than was asked for. */
+export function outOfTurnRouteLabel(route: OutOfTurnRoute): string {
+	const asked = `${route.targetId}/${route.wireModelId}`;
+	return route.reportedModel !== undefined && route.reportedModel !== route.wireModelId
+		? `${asked} (provider reports ${route.reportedModel})`
+		: asked;
+}
+
 function positive(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }

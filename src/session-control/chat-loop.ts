@@ -176,7 +176,7 @@ import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
-import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
+import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent } from "./status-types.js";
 import {
 	parseTriageAnswer,
@@ -563,6 +563,8 @@ export interface SideQuestionOptions {
 	signal?: AbortSignal;
 	/** Streamed answer text so the overlay fills as the provider produces it. */
 	onDelta?: (partialText: string) => void;
+	/** The route the round was admitted on, before any answer arrives. */
+	onRoute?: (route: OutOfTurnRoute) => void;
 }
 
 export interface DraftOptions {
@@ -570,10 +572,14 @@ export interface DraftOptions {
 	signal?: AbortSignal;
 	/** One candidate's streamed text, by index in start order. */
 	onCandidate?: (index: number, partialText: string) => void;
+	/** The route the candidates were admitted on, before any text arrives. */
+	onRoute?: (route: OutOfTurnRoute) => void;
 }
 
 /** One `/draft` candidate: its text, or why its round produced none. */
-export type DraftCandidate = { status: "drafted"; text: string } | { status: "failed"; reason: string };
+export type DraftCandidate = ({ status: "drafted"; text: string } | { status: "failed"; reason: string }) & {
+	route?: OutOfTurnRoute;
+};
 
 export type DraftOutcome =
 	| { status: "drafted"; candidates: DraftCandidate[]; aborted: boolean }
@@ -594,7 +600,7 @@ export interface HandoffRoundOptions extends SideQuestionOptions {
  * started and the provider rejected.
  */
 export type SideQuestionOutcome =
-	| { status: "answered"; text: string }
+	| { status: "answered"; text: string; route?: OutOfTurnRoute }
 	| { status: "aborted"; text: string }
 	| { status: "refused"; reason: string }
 	| { status: "failed"; reason: string };
@@ -3637,6 +3643,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// moment it was asked in had passed.
 			const prepared = await prepareOutOfTurnRound(null, options.signal, false, false);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			const route = { targetId: prepared.runtime.targetId, wireModelId: prepared.runtime.wireModelId };
+			options.onRoute?.(route);
 			// A snapshot, taken now: a running turn keeps appending to the live list
 			// while this round awaits admission and streams.
 			const messages = [...prepared.runtime.agent.state.messages];
@@ -3664,7 +3672,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch (err) {
 				return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
-			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
+			return result.aborted
+				? { status: "aborted", text: result.text }
+				: {
+						status: "answered",
+						text: result.text,
+						route: { ...route, ...(result.reportedModel !== undefined ? { reportedModel: result.reportedModel } : {}) },
+					};
 		},
 
 		async draftCandidates(request: string, count: number, options: DraftOptions = {}): Promise<DraftOutcome> {
@@ -3677,6 +3691,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// flight the same way (#415): the drafts answer the session as it stands now.
 			const prepared = await prepareOutOfTurnRound(null, options.signal, false, false);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			const route = { targetId: prepared.runtime.targetId, wireModelId: prepared.runtime.wireModelId };
+			options.onRoute?.(route);
 			const messages = [...prepared.runtime.agent.state.messages];
 			const candidates = await Promise.all(
 				DRAFT_TEMPERATURES.slice(0, count).map(async (temperature, index): Promise<DraftCandidate> => {
@@ -3710,9 +3726,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								options.signal,
 							),
 						);
-						return draftCandidateFromText(result.text);
+						return {
+							...draftCandidateFromText(result.text),
+							route: { ...route, ...(result.reportedModel !== undefined ? { reportedModel: result.reportedModel } : {}) },
+						};
 					} catch (err) {
-						return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+						return { status: "failed", reason: err instanceof Error ? err.message : String(err), route };
 					}
 				}),
 			);
