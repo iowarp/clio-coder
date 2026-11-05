@@ -824,7 +824,7 @@ function capWrapped(rows: ReadonlyArray<string>, max: number): string[] {
 }
 
 /** A connection and its model the way the composer names them: `mock · mock/judge-model`, never `mock/mock/judge-model`. */
-export function modelRefWords(target: string, model: string): string {
+function modelRefWords(target: string, model: string): string {
 	return model.length > 0 ? `${target} · ${model}` : target;
 }
 

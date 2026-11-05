@@ -1,5 +1,5 @@
 import type { EscapeLayers } from "./escape-layers.js";
-import { escapeHintEntry, innermostEscapeLayer } from "./escape-layers.js";
+import { escapeHintEntry } from "./escape-layers.js";
 import type { HintEntry } from "./overlay-frame.js";
 
 /**
@@ -118,9 +118,4 @@ export function permissionEscapeLayers(
 		terms === "open" && { verb: "hide terms", back: actions.hideTerms },
 		{ verb: "deny", back: actions.deny },
 	];
-}
-
-/** The word the card's Esc carries right now. */
-export function permissionEscapeVerb(inspection: PermissionInspectionHint, terms: PermissionTermsHint): string {
-	return innermostEscapeLayer(permissionEscapeLayers(inspection, terms, NO_ACTIONS))?.verb ?? "deny";
 }
