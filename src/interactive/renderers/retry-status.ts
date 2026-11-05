@@ -1,3 +1,4 @@
+import { formatStatedWait } from "../../domains/session/retry.js";
 import { truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { RetryStatusPayload } from "../../session-control/chat-loop.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
@@ -10,7 +11,14 @@ const AVAILABLE_DIAGNOSTIC = /\s*\.\.\. \[available diagnostic: \/view transcrip
 
 /** The wait the provider named, beside the one Clio is actually sitting out. */
 function askedFor(status: RetryStatusPayload): string {
-	return status.retryAfterMs !== undefined ? ` (provider asked for ${Math.ceil(status.retryAfterMs / 1000)}s)` : "";
+	return status.retryAfterMs !== undefined ? ` (provider asked for ${formatStatedWait(status.retryAfterMs)})` : "";
+}
+
+/** A stop on the wait budget ran out of nothing: no attempt was made, and the row says what the provider said and why. */
+function stoppedOnWait(status: RetryStatusPayload): string | null {
+	if (status.waitBudgetMs === undefined || status.retryAfterMs === undefined) return null;
+	const waited = status.waitedMs ? ` after waiting ${formatStatedWait(status.waitedMs)}` : "";
+	return `stopped without retrying: provider asked to wait ${formatStatedWait(status.retryAfterMs)}${waited}, and Clio waits at most ${formatStatedWait(status.waitBudgetMs)} on one request · /model switches route`;
 }
 
 function rawRetryStatus(status: RetryStatusPayload, unbounded: boolean): string {
@@ -19,15 +27,15 @@ function rawRetryStatus(status: RetryStatusPayload, unbounded: boolean): string 
 			? `: ${unbounded ? providerErrorEvidence(status.errorMessage) : presentProviderError(status.errorMessage)}`
 			: "";
 	if (status.phase === "waiting") {
-		return `provider retry ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${askedFor(status)}${suffix}`;
+		return `provider retry ${status.attempt}/${status.maxAttempts} in ${formatStatedWait((status.seconds ?? 0) * 1000)}${askedFor(status)}${suffix}`;
 	}
 	if (status.phase === "scheduled") {
-		const seconds = Math.ceil((status.delayMs ?? 0) / 1000);
-		return `provider retry ${status.attempt}/${status.maxAttempts} in ${seconds}s${askedFor(status)}${suffix}`;
+		return `provider retry ${status.attempt}/${status.maxAttempts} in ${formatStatedWait(status.delayMs ?? 0)}${askedFor(status)}${suffix}`;
 	}
 	if (status.phase === "retrying") return `provider retry ${status.attempt}/${status.maxAttempts} running${suffix}`;
 	if (status.phase === "cancelled") return `provider retry cancelled (${status.attempt}/${status.maxAttempts})${suffix}`;
-	if (status.phase === "exhausted") return `provider retry exhausted (${status.attempt})${suffix}`;
+	if (status.phase === "exhausted")
+		return `${stoppedOnWait(status) ?? `provider retry exhausted (${status.attempt})`}${suffix}`;
 	return `provider retry recovered after ${status.attempt} attempt${status.attempt === 1 ? "" : "s"}`;
 }
 
@@ -66,6 +74,8 @@ export function renderRetryStatus(
 	// One heading row leaves room for the failure itself, not just a View hint.
 	// The diagnosis hangs in the content column beneath the mark.
 	const headingRow = truncateToWidth(renderNoticeRow(formatRetryStatus(heading), "retry", width)[0] ?? "", width);
+	// A stop on the wait budget states the next step in its heading, so all of it has to reach the screen.
+	if (stoppedOnWait(status) !== null) return renderNoticeRow(formatRetryStatus(heading), "error", width);
 	const diagnosis = presentProviderError(errorMessage);
 	const inner = Math.max(1, width - 2);
 	const rows = wrapTextWithAnsi(diagnosis, inner);

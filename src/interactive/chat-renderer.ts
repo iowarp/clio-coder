@@ -571,6 +571,8 @@ function retryStatusFromEntry(entry: CustomEntry): RetryStatusPayload | null {
 		...(typeof data.delayMs === "number" ? { delayMs: data.delayMs } : {}),
 		...(typeof data.seconds === "number" ? { seconds: data.seconds } : {}),
 		...(typeof data.retryAfterMs === "number" ? { retryAfterMs: data.retryAfterMs } : {}),
+		...(typeof data.waitBudgetMs === "number" ? { waitBudgetMs: data.waitBudgetMs } : {}),
+		...(typeof data.waitedMs === "number" ? { waitedMs: data.waitedMs } : {}),
 	};
 }
 

@@ -105,9 +105,11 @@ describe("rate limit ladder at yolo (#445)", () => {
 		strictEqual(phases.at(-1), "recovered");
 	});
 
-	it("clamps a Retry-After past the budget to what is left of the hour", async (c) => {
-		const { delays } = await run(c, { yolo: true, retryAfterSeconds: 7200, failingContinues: 1000 });
-		deepStrictEqual(delays, [RATE_LIMIT_WAIT_BUDGET_MS]);
+	it("stops without another attempt on a Retry-After past the budget", async (c) => {
+		const { continues, delays, state } = await run(c, { yolo: true, retryAfterSeconds: 7200, failingContinues: 1000 });
+		deepStrictEqual(delays, []);
+		strictEqual(continues, 0);
+		strictEqual(state.turnStop?.cause, "wait_past_budget");
 	});
 
 	it("leaves other autonomy levels on the short ladder", async (c) => {

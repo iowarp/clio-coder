@@ -157,7 +157,10 @@ export function isRetryableRecoveryFailure(failure: RecoveryFailure): boolean {
 	return failure.kind === "connection" || failure.kind === "model-loading" || failure.kind === "transient-provider";
 }
 
-/** The longest one turn at yolo waits out a provider telling it to back off (#445). */
+/**
+ * The longest one chain of attempts on a request waits on a provider, summed over its waits. A provider that states
+ * more than what is left gets no attempt at all: going back early would ignore what it said (#445).
+ */
 export const RATE_LIMIT_WAIT_BUDGET_MS = 3_600_000;
 
 const RATE_LIMIT_PATTERN =
@@ -196,7 +199,7 @@ export function failureRetryAfterMs(message: unknown, errorMessage: string | nul
 	const observed = facts?.anthropicResponse?.retryAfterSeconds;
 	if (typeof observed === "number" && Number.isFinite(observed) && observed >= 0) return observed * 1000;
 	const named = errorMessage?.match(
-		/(?:retry[- ]after[:=\s]+|try again in\s+)(\d+(?:\.\d+)?)\s*(ms|milliseconds?|m|mins?|minutes?|h|hours?)?/i,
+		/(?:retry[- ]after[:=\s]+|try again in\s+|please retry in\s+|server requested\s+)(\d+(?:\.\d+)?)\s*(ms|milliseconds?|m|mins?|minutes?|h|hours?)?/i,
 	);
 	if (!named?.[1]) return null;
 	const unit = (named[2] ?? "s").toLowerCase();
@@ -209,6 +212,26 @@ export function failureRetryAfterMs(message: unknown, errorMessage: string | nul
 					? 60_000
 					: 1000;
 	return Number(named[1]) * scale;
+}
+
+/**
+ * The wait a provider stated for a failure that time can clear; null when it stated none. An error a wait does not
+ * clear, such as spent quota or a bad request, stays what it is whatever its response carried.
+ */
+export function statedRetryWaitMs(message: unknown, errorMessage: string | null | undefined): number | null {
+	if (!errorMessage || errorMessage.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return null;
+	if (isHarmonyTerminalFailure(errorMessage) || !isEngineRetryableAssistantError(errorMessage)) return null;
+	const wait = failureRetryAfterMs(message, errorMessage);
+	return wait !== null && wait > 0 ? wait : null;
+}
+
+/** A wait in the units a person plans by: `48s`, `56m52s`, `2h`, `1h30m`. */
+export function formatStatedWait(ms: number): string {
+	const seconds = Math.max(0, Math.ceil(ms / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 3600) return seconds % 60 === 0 ? `${seconds / 60}m` : `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+	const minutes = Math.floor((seconds % 3600) / 60);
+	return `${Math.floor(seconds / 3600)}h${minutes === 0 ? "" : `${minutes}m`}`;
 }
 
 /**

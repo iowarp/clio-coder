@@ -71,11 +71,18 @@ export type TurnPreparationPhase = "idle" | "preparing" | "compacting";
 /** A local request stage must stay distinct from an invoked stream stall (#424). */
 export type PreInvocationStage = "transform" | "auth" | "budget admission" | "admission";
 
-export interface TurnStop {
-	cause: "retries_exhausted" | "compaction";
-	reason: string;
-	retryAfterMs?: number;
-}
+export type TurnStop =
+	| {
+			cause: "retries_exhausted" | "compaction";
+			reason: string;
+			retryAfterMs?: number;
+	  }
+	| {
+			/** The provider asked for longer than Clio waits on one request, so nothing may go back to it before then. */
+			cause: "wait_past_budget";
+			reason: string;
+			retryAfterMs: number;
+	  };
 
 export interface ChatTurnState {
 	/** Live agent runtime; built or hot-swapped by turn-runtime. */

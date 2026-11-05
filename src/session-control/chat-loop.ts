@@ -1779,9 +1779,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/** What a settled turn stopped on, when nobody asked for it and yolo has continuations left (#445). */
 	const yoloContinuationDue = (): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number } | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
+		const failed = state.turnStop;
+		// Continuing would send this provider a request before the time it named.
+		if (failed?.cause === "wait_past_budget") return null;
 		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
 		const stop =
-			state.turnStop ??
+			failed ??
 			(state.synthesisToolLock
 				? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
 				: state.toolBudgetLock

@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
+import { setImmediate as nextLoop } from "node:timers/promises";
 import {
 	applyModelAdmission,
 	type ModelAdmissionEvent,
@@ -7,7 +8,13 @@ import {
 } from "../../src/core/model-admission.js";
 import { mainCallExposure } from "../../src/domains/safety/call-consequence.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
-import { retryWaitCause } from "../../src/domains/session/retry.js";
+import {
+	DEFAULT_RETRY_SETTINGS,
+	formatStatedWait,
+	RATE_LIMIT_WAIT_BUDGET_MS,
+	retryWaitCause,
+	statedRetryWaitMs,
+} from "../../src/domains/session/retry.js";
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -17,6 +24,7 @@ import {
 	createPermissionOverlayBody,
 	permissionRailTitle,
 } from "../../src/interactive/permission-overlay.js";
+import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import {
 	type AgentStatus,
@@ -24,6 +32,9 @@ import {
 	type ModelRequestFacts,
 	type RetryOverlay,
 } from "../../src/session-control/status-types.js";
+import type { RetryStatusPayload, TurnRecoveryDeps } from "../../src/session-control/turn-recovery.js";
+import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
 const STUCK_AFTER_MS = 180_000;
 
@@ -622,4 +633,152 @@ test("a worker card's stop does not promise to end a main turn that is not runni
 	match(stopRow(false), /no main turn is running/u);
 	doesNotMatch(stopRow(false), /ends the main/u);
 	match(stopRow(true), /ends the main turn/u);
+});
+
+/** A chain of failures that each state their own wait, driven to its settle on a mocked clock. */
+async function statedWaitChain(c: TestContext, waitsSeconds: ReadonlyArray<number>) {
+	c.mock.timers.enable({ apis: ["setTimeout"] });
+	let clock = 0;
+	c.mock.method(performance, "now", () => clock);
+	const failure = (seconds: number): Record<string, unknown> => ({
+		role: "assistant",
+		content: [],
+		stopReason: "error",
+		errorMessage: "429 rate_limit_error: slow down",
+		retryAfterMs: seconds * 1000,
+		timestamp: Date.now(),
+	});
+	let sent = 0;
+	const runtime = {
+		runtimeId: "openai-compat",
+		runtimeResolution: { contextWindowDetails: { effectiveContextWindow: 131072 } },
+		agent: {
+			state: { messages: [] as unknown[], errorMessage: undefined as string | undefined },
+			async continue() {
+				sent += 1;
+				const next = waitsSeconds[sent];
+				this.state.messages.push(
+					next !== undefined
+						? failure(next)
+						: { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "stop", timestamp: Date.now() },
+				);
+			},
+		},
+	} as unknown as AgentRuntime;
+	const state = createTurnState();
+	const statuses: RetryStatusPayload[] = [];
+	const recovery = createTurnRecovery({
+		state,
+		isYolo: () => false,
+		turnIdentity: () => state,
+		persistence: { appendRetryStatus() {}, wasPersisted: () => true } as unknown as TurnRecoveryDeps["persistence"],
+		context: {} as unknown as TurnRecoveryDeps["context"],
+		retrySettings: () => ({ ...DEFAULT_RETRY_SETTINGS, maxDelayMs: 5000 }),
+		markPersistedUserEcho: async (_text, prompt) => prompt(),
+		emitRetryStatus: (status) => {
+			statuses.push(status);
+		},
+		emitFailureMessage() {},
+		emitNotice() {},
+	});
+	let done = false;
+	void recovery
+		.runTransientRetryChain(runtime, "request", {
+			stopReason: "error",
+			errorMessage: "429 rate_limit_error: slow down",
+			message: failure(waitsSeconds[0] ?? 0) as never,
+		})
+		.then(() => {
+			done = true;
+		});
+	for (let tick = 0; !done && tick < 20_000; tick++) {
+		await nextLoop();
+		clock += 1000;
+		c.mock.timers.tick(1000);
+	}
+	strictEqual(done, true);
+	const delays = statuses.filter((status) => status.phase === "scheduled").map((status) => status.delayMs);
+	return { delays, sent, state, last: statuses.at(-1) };
+}
+
+test("a stated wait is sat out whole in attended mode, past maxDelayMs and without spending attempts", async (c) => {
+	const { delays, sent, last, state } = await statedWaitChain(c, [12, 12, 12, 12, 12]);
+	deepStrictEqual(delays, [12_000, 12_000, 12_000, 12_000, 12_000]);
+	strictEqual(sent, 5);
+	strictEqual(last?.phase, "recovered");
+	strictEqual(last?.attempt, 5);
+	strictEqual(state.turnStop, null);
+});
+
+test("stated waits that add up past the hour stop before the wait that would cross it, with no partial wait", async (c) => {
+	const { delays, sent, last, state } = await statedWaitChain(c, [2400, 2400]);
+	deepStrictEqual(delays, [2_400_000]);
+	strictEqual(sent, 1);
+	strictEqual(last?.phase, "exhausted");
+	strictEqual(last?.waitBudgetMs, RATE_LIMIT_WAIT_BUDGET_MS);
+	strictEqual(last?.waitedMs, 2_400_000);
+	strictEqual(state.turnStop?.cause, "wait_past_budget");
+	match(
+		formatRetryStatus(last as RetryStatusPayload),
+		/stopped without retrying: provider asked to wait 40m after waiting 40m/u,
+	);
+});
+
+test("a wait of exactly the budget is honoured, and one past it sends nothing and claims no retries", async (c) => {
+	const exact = await statedWaitChain(c, [3600]);
+	deepStrictEqual(exact.delays, [RATE_LIMIT_WAIT_BUDGET_MS]);
+	strictEqual(exact.last?.phase, "recovered");
+	c.mock.timers.reset();
+	const past = await statedWaitChain(c, [7200]);
+	deepStrictEqual(past.delays, []);
+	strictEqual(past.sent, 0);
+	strictEqual(past.last?.attempt, 0);
+	match(formatRetryStatus(past.last as RetryStatusPayload), /provider asked to wait 2h, and Clio waits at most 1h/u);
+	doesNotMatch(formatRetryStatus(past.last as RetryStatusPayload), /exhausted/u);
+});
+
+test("a long countdown reads in minutes on the rail and says the provider asked for it", () => {
+	const now = 1_000_000;
+	const status = (width: number) =>
+		composerPhasePresentation(
+			{
+				phase: "retrying",
+				since: now - 1000,
+				lastMeaningfulAt: now - 1000,
+				watchdogTier: 0,
+				watchdogPeak: 0,
+				localRuntime: false,
+				retry: {
+					attempt: 1,
+					maxAttempts: 3,
+					waitMs: 3_412_000,
+					stage: "backoff",
+					dueAt: now + 3_412_000,
+					retryAfterMs: 3_600_000,
+				},
+			} as never,
+			width,
+			now,
+			"Qwopus3.8",
+		).label;
+	match(status(111), /in 56m52s · provider asked for 1h · Esc cancels/u);
+	match(status(80), /provider wait 56m52s · Esc cancels/u);
+	doesNotMatch(status(111), /3412s/u);
+});
+
+test("formatStatedWait uses the units a person plans by", () => {
+	deepStrictEqual([48_000, 60_000, 3_412_000, 3_600_000, 5_400_000, 7_200_000].map(formatStatedWait), [
+		"48s",
+		"1m",
+		"56m52s",
+		"1h",
+		"1h30m",
+		"2h",
+	]);
+});
+
+test("Pi's fail-fast text for a wait past its cap still names the wait", () => {
+	strictEqual(statedRetryWaitMs(null, "Server requested 7200s retry delay (max: 5s). 429 slow down"), 7_200_000);
+	strictEqual(statedRetryWaitMs(null, "429 quota exceeded, retry-after: 60"), null);
+	strictEqual(statedRetryWaitMs(null, "400 bad request, retry-after: 60"), null);
 });
