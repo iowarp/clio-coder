@@ -143,9 +143,13 @@ export function ledgerCallFailureCounts(
 	return { invokedUnknownCalls, neverInvokedCalls: foldCalls(unique).neverSent };
 }
 
-/** Coverage labels preserve the distinction between unknown and never sent (#430). */
+/**
+ * Coverage labels preserve the distinction between unknown and never sent (#430), in the one form every usage line
+ * ends on: `2 calls had no usage data` (F4).
+ */
 export function usageCoverageLabel(unknownCalls: number, neverSentCalls = 0): string {
-	if (unknownCalls === 0)
-		return `${neverSentCalls.toLocaleString("en-US")} call${neverSentCalls === 1 ? "" : "s"} never sent`;
-	return `${unknownCalls.toLocaleString("en-US")} call${unknownCalls === 1 ? "" : "s"} with unknown usage; token amounts are known subtotals${neverSentCalls > 0 ? `; ${neverSentCalls.toLocaleString("en-US")} never sent` : ""}`;
+	const calls = (n: number) => `${n.toLocaleString("en-US")} call${n === 1 ? "" : "s"}`;
+	const never = neverSentCalls > 0 ? `${calls(neverSentCalls)} never sent` : null;
+	if (unknownCalls === 0) return never ?? "";
+	return [`${calls(unknownCalls)} had no usage data`, never].filter((part) => part !== null).join(", ");
 }

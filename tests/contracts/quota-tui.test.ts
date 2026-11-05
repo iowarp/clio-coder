@@ -351,9 +351,9 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(combined, /worker calls.*2/);
 		match(combined, /conversation calls.*1/);
 		match(combined, /System One.*1/);
-		match(combined, /token coverage.*1 unknown/);
+		match(combined, /usage data\s+1 of \d+ calls had no usage data/);
 		// An unreported cache read is unknown on this tab, never 0 (#434).
-		match(combined, /cache read\s+≥0 \(1 call unknown\)/);
+		match(combined, /cache read\s+≥0\s/);
 
 		quota = [
 			{

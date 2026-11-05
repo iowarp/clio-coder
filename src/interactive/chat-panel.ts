@@ -1350,8 +1350,7 @@ function renderTurnUsageLine(
 		}
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts(rowFacts)), room)}`, ...noAnswer];
 	}
-	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
-	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${coverage}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
+	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
 	// Detailed states what the turn spent, one fact per field, as the read model
 	// folds the turn with its workers, so the line and the footer agree: the
 	// calls it made, input and output tokens in the compact token format, what
@@ -1375,6 +1374,8 @@ function renderTurnUsageLine(
 	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
 	}
+	// How many calls had no usage data closes the line once, after the figures it qualifies (F4).
+	if (spend?.coverage) facts.push(spend.coverage);
 	return [
 		...hangProseLines(wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, room).map(releaseSpaces), glyph),
 		...noAnswer,
