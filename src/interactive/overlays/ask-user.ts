@@ -896,7 +896,10 @@ class AskUserOverlayView implements Component {
 							"positionCount",
 							this.harnessInterview
 								? this.harnessPosition()
-								: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
+								: // A confirmation the operator's own key raised is one choice, not a numbered question in a round.
+									this.confirmation && this.questions.length === 1
+									? "Choose one"
+									: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
 							{ bold: true },
 						),
 						width,
@@ -1143,9 +1146,10 @@ class AskUserOverlayView implements Component {
 		const state = this.currentState();
 		const esc = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: "cancel interview", short: "cancel" };
 		if (this.phase !== "asking" || !question || !state) return { entries: [], esc };
-		const recordAnswer =
-			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
-			"record answer";
+		const recordAnswer = this.confirmation
+			? "choose"
+			: (this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
+				"record answer");
 		// Back on an answered question, Enter swaps the answer rather than adding one.
 		const record: HintEntry =
 			state.answer.trim().length > 0
