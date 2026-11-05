@@ -371,6 +371,8 @@ function retryOverlay(
 		delayMs?: number;
 		retryAfterMs?: number;
 		cause?: RetryWaitCause;
+		providerWaits?: number;
+		onProviderWait?: boolean;
 	},
 	previous: RetryOverlay | undefined,
 	now: number,
@@ -388,6 +390,8 @@ function retryOverlay(
 		...(backoff && delayMs > 0 ? { dueAt: sameWait ? previous?.dueAt : now + delayMs } : {}),
 		...(backoff ? {} : { attemptStartedAt: now }),
 		...(status.retryAfterMs !== undefined ? { retryAfterMs: status.retryAfterMs } : {}),
+		...(status.providerWaits !== undefined ? { providerWaits: status.providerWaits } : {}),
+		...(status.onProviderWait === true ? { onProviderWait: true } : {}),
 		...(cause !== undefined ? { cause, causeSince: previous?.cause === cause ? (previous.causeSince ?? now) : now } : {}),
 	};
 }
@@ -659,13 +663,15 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 		case "agent_end": {
 			// A failed attempt recovery will retry closes that attempt, not the turn.
 			if (event.retryPending !== undefined) {
-				const { attempt, maxAttempts } = event.retryPending;
+				const { attempt, maxAttempts, providerWaits, onProviderWait } = event.retryPending;
 				const carried = prev.phase === "retrying" ? prev.retry : undefined;
 				return pushOverlay(prev, "retrying", ctx, {
 					attempt,
 					maxAttempts,
 					waitMs: 0,
 					stage: "backoff",
+					...(providerWaits !== undefined ? { providerWaits } : {}),
+					...(onProviderWait === true ? { onProviderWait: true } : {}),
 					...(carried?.cause !== undefined ? { cause: carried.cause, causeSince: carried.causeSince } : {}),
 				});
 			}

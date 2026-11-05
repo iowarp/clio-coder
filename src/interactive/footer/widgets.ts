@@ -18,7 +18,13 @@ import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import { providerFailureRailFacts } from "../renderers/provider-error.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
-import { computeWatchdogTier, formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
+import {
+	computeWatchdogTier,
+	formatReasoningChip,
+	type ReasoningUsageView,
+	retryCountLabel,
+	spinnerFrame,
+} from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	FUNCTION_ROLES,
@@ -425,11 +431,11 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 			// wait for confirmation; "blocked" would contradict the ask overlay.
 			return { glyph: GLYPH.phaseBlocked, label: "Needs approval", token: "warning", live: false };
 		case "retrying": {
-			const attempt = status.retry?.attempt ?? 0;
-			const maxAttempts = status.retry?.maxAttempts ?? 0;
+			const count = retryCountLabel(status.retry);
+			const shown = count === null ? "" : status.retry?.onProviderWait === true ? ` (${count})` : ` ${count}`;
 			return {
 				glyph: GLYPH.phaseRetry,
-				label: ultraNarrow ? "Retrying" : `Retrying ${attempt}/${maxAttempts}`,
+				label: ultraNarrow ? "Retrying" : `Retrying${shown}`,
 				token: "warning",
 				live: false,
 			};
@@ -700,7 +706,19 @@ function retryRailLabel(
 	modelWait: (from: number) => string | null,
 ): string {
 	const retry = status.retry;
-	const attempts = `${room >= 22 ? "retrying" : "retry"} ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`;
+	const count = retryCountLabel(retry);
+	const word = room >= 22 ? "retrying" : "retry";
+	const onWait = retry?.onProviderWait === true;
+	// A countdown is not a retry yet, so a wait's count stands alone until the request goes out again.
+	const attempts = !onWait
+		? `${word} ${count}`
+		: retry?.stage === "attempt"
+			? count === null
+				? word
+				: room >= 22
+					? `retrying (${count})`
+					: count
+			: count;
 	const admission = status.modelRequest?.admission;
 	if (retry?.stage === "attempt" && admission) {
 		const { head, facts } = admissionFacts(admission, room, modelWait);
