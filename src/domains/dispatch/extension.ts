@@ -4272,6 +4272,7 @@ export function createDispatchBundle(
 				...(req.reservation !== undefined && (req.lineage === undefined || req.lineage.attempt === 0)
 					? { reservation: req.reservation }
 					: {}),
+				...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
 				// This attempt's own signal; siblings sharing the assignment keep waiting.
 				...(signal !== undefined ? { signal } : {}),
 			});

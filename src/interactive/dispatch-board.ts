@@ -621,7 +621,14 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes.completionEvidence === "absent";
 	const host = row.hostVerification === undefined ? "" : ` · ${theme.fg("body", `host checks ${row.hostVerification}`)}`;
 	if (row.trust === undefined) {
-		const unread = theme.fg("annotation", isTerminalStatus(row.status) ? "run record not read back" : "not sealed yet");
+		const unread = theme.fg(
+			"annotation",
+			!isTerminalStatus(row.status)
+				? "not sealed yet"
+				: row.status === "aborted" && row.progress === undefined
+					? "nothing to judge: it never started"
+					: "run record not read back",
+		);
 		return cardWrappedValueLines(theme, "trust", `${unread}${host}`, contentWidth);
 	}
 	// The verdict leads in plain words; the axes that back it follow as detail.
@@ -846,6 +853,16 @@ function dispatchCardBody(
 					// limit, and one settling then does not free a slot.
 					`for a slot on ${sanitizeCallTargetText(row.endpoint.label)}: ${active} in use against a limit of ${row.endpoint.limit}, the main turn included. It starts once the count is under the limit.`,
 				),
+				contentWidth,
+			),
+		);
+	}
+	if (row.status === "enqueued" && row.endpoint === undefined) {
+		bodyLines.push(
+			...cardWrappedValueLines(
+				theme,
+				"waiting",
+				theme.fg("body", "for a worker slot. It starts when a running worker finishes, or [x] cancels it."),
 				contentWidth,
 			),
 		);
@@ -1291,7 +1308,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			return {
 				text: row.endpoint
 					? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
-					: (task ?? "waiting for a slot"),
+					: "waiting for a worker slot",
 				tone: "muted",
 			};
 		case "failed":
@@ -1401,7 +1418,9 @@ export function runTableRows(
 						row.usage.kind === "unavailable"
 							? USAGE_NOT_MEASURED
 							: isTerminalStatus(row.status)
-								? "earlier session"
+								? row.status === "completed"
+									? "earlier session"
+									: "no calls here"
 								: USAGE_NO_CALLS,
 					tone: "muted",
 				}
@@ -1677,12 +1696,22 @@ export function createDispatchBoardView(
 function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
 	const counts = new Map<string, number>();
 	for (const item of hidden) {
-		const label = item.kind === "council" ? item.group.status.label : dispatchStatusPresentation(item.row.status).label;
+		const label =
+			item.kind === "council"
+				? item.group.status.label
+				: item.row.progress?.awaitingApproval === true
+					? "asking"
+					: dispatchStatusPresentation(item.row.status).label;
 		counts.set(label, (counts.get(label) ?? 0) + 1);
 	}
 	const states = [...counts].map(([label, count]) => `${count} ${label}`).join(" · ");
 	// One state alone is the whole count: `+ 1 more · 1 queued` reads as two runs.
-	return counts.size === 1 ? `+ ${states} · /fleet` : `+ ${hidden.length} more · ${states} · /fleet`;
+	if (counts.size > 1) return `+ ${hidden.length} more · ${states} · /fleet`;
+	// A lone run off the card is named, because a count sends the reader to /fleet just to learn which.
+	const lone = hidden.length === 1 ? hidden[0] : undefined;
+	return lone?.kind === "run"
+		? `+ ${states} · ${sanitizeCallTargetText(lone.row.agentId)} · /fleet`
+		: `+ ${states} · /fleet`;
 }
 
 export function formatTaskIslandLines(
@@ -1761,7 +1790,7 @@ function trustVerdictMark(verdict: TrustVerdict): string {
 
 function terminalDetail(row: DispatchBoardRow): string | null {
 	if (row.status !== "failed" && row.status !== "dead" && row.status !== "aborted") return null;
-	return parseOptionalDetail(row.outcomeDetail);
+	return parseOptionalDetail(row.outcomeDetail)?.replace(/^dispatch:\s*/u, "") ?? null;
 }
 
 function isTerminalStatus(status: DispatchBoardStatus): boolean {
