@@ -1,3 +1,4 @@
+import { DEFAULT_HEARTBEAT_SPEC } from "../domains/dispatch/heartbeat.js";
 import type {
 	WorkerAction,
 	WorkerApprovalDecider,
@@ -33,7 +34,12 @@ export function workerQuietWords(
 	now = Date.now(),
 ): string | null {
 	if (progress?.quietSinceMs === undefined) return null;
-	return `not responding for ${formatWaitClock(now - progress.quietSinceMs)}`;
+	// The watchdog reaps a worker whose heartbeat stays silent past its window and grace, so the words count down to
+	// that end rather than leaving the operator to guess whether anything will happen.
+	const quietMs = Math.max(0, now - progress.quietSinceMs);
+	const endsInMs = DEFAULT_HEARTBEAT_SPEC.windowMs + DEFAULT_HEARTBEAT_SPEC.graceMs - quietMs;
+	const end = endsInMs > 0 ? `Clio stops it in ${formatWaitClock(endsInMs)}` : "Clio is stopping it";
+	return `not responding for ${formatWaitClock(quietMs)} · ${end}`;
 }
 
 /**
@@ -122,7 +128,7 @@ export function workerPhaseActivity(phase: string | undefined): readonly [glyph:
  */
 export function compactQuantity(display: string): string | null {
 	const figure = display.replace(/ \(.*\)$/u, "");
-	return figure === "unknown" || figure === "?" ? null : figure;
+	return figure === "unknown" || figure === "?" || figure === "—" ? null : figure;
 }
 
 /**

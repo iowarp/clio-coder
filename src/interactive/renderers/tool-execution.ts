@@ -1795,7 +1795,8 @@ function renderResultBlock(
 
 /** A question the operator dismissed finished cleanly, but nothing was answered, so its mark is not a success. */
 function settledStatus(finished: ToolExecutionFinished): HeaderStatus {
-	if (finished.isError) return "error";
+	// A delegation whose worker was cancelled did not fail; its card under the row already says who stopped it.
+	if (finished.isError) return detailsOf(finished.result)?.outcome === "canceled" ? "cancelled" : "error";
 	return resolveRow(finished).spec.class === "interaction" && detailsOf(finished.result)?.cancelled === true
 		? "cancelled"
 		: "ok";

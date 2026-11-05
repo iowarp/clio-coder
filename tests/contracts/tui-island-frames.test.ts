@@ -173,9 +173,9 @@ const run: DispatchBoardRow = {
 
 test("the fleet island is a fixed-width island and fits the narrowest terminal that shows it", () => {
 	const empty = formatTaskIslandLines([]);
-	assertIsland(empty, 48, "Fleet runs");
+	assertIsland(empty, 48, "Fleet Runs");
 	const busy = formatTaskIslandLines([run]);
-	assertIsland(busy, 48, "Fleet runs");
+	assertIsland(busy, 48, "Fleet Runs");
 	deepStrictEqual(
 		busy.map((line) => visibleWidth(line)),
 		busy.map(() => 48),
