@@ -974,7 +974,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	// A running row says what the run is doing in the inline card's words: the
 	// island said `running` beside a card that said `starting` (BT-007).
 	// An approval's time left must survive a narrow island, so its words shorten before the row cuts them.
-	const statusLabel =
+	let statusLabel =
 		row.status === "running" && row.progress !== undefined
 			? sanitizeCallTargetText(
 					workerActivityWords(row.progress, {
@@ -993,6 +993,17 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 				: failure !== null
 					? `done · ${failure}`
 					: presentation.label;
+	// A narrow row keeps the worker's name over the rest of the phase's words, which the card below still states.
+	const nameRoom =
+		width -
+		2 -
+		dispatchRowPrefix(theme, row).width -
+		3 -
+		visibleWidth(statusLabel) -
+		(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0);
+	if (row.progress?.awaitingApproval !== true && nameRoom < Math.min(visibleWidth(agentLabel), 8)) {
+		statusLabel = statusLabel.split(" ")[0] ?? statusLabel;
+	}
 	const statusStr = theme.fg(
 		failure !== null
 			? "error"

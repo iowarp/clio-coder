@@ -9381,6 +9381,7 @@ export function createDispatchBundle(
 				try {
 					writerLease = acquireCheckoutWriterLease({
 						checkout,
+						...(req.requestOrigin === "user" ? { operatorStarted: true } : {}),
 						// A read-only run writes nothing, so it carries no holder.
 						...(req.readOnly === true
 							? {}

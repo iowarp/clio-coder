@@ -444,7 +444,13 @@ async function runAttributed(
 		const view = `/view dispatch:${handle.runId}`;
 		if (receipt.outcome === "canceled") {
 			const why = workerFailureHeadline(receipt.outcomeDetail) ?? "cancelled at your request";
-			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`} · ${view}`);
+			// A cancel removes an idle worktree but keeps one holding work, which nothing else on screen says.
+			const changed = receipt.worktree?.changedPaths?.length ?? 0;
+			const kept =
+				changed > 0 && receipt.worktree !== undefined
+					? ` · ${changed} changed ${changed === 1 ? "file stays" : "files stay"} on branch ${receipt.worktree.branch}`
+					: "";
+			notice("info", `${request.agentId} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${kept} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const why = workerFailureHeadline(receipt.failureMessage) ?? `exit code ${receipt.exitCode}`;
 			notice("error", `${request.agentId} failed: ${why} · ${view}`);
