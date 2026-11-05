@@ -61,7 +61,7 @@ import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
-import { buildLayout, type ComposerPlacement, preserveTranscriptScroll } from "./layout.js";
+import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
@@ -185,8 +185,6 @@ export interface PresentationToolEnd {
 }
 
 export interface InteractivePresentation {
-	/** Screen rows above the composer in the last frame, for overlays that must stay clear of it. */
-	composerRowsAbove(termRows: number): number | null;
 	keybindings: ClioKeybindingManager;
 	banner: WelcomeDashboardComponent;
 	chatPanel: ChatPanel;
@@ -1027,7 +1025,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 		: followUpQueuePanel;
 	let transcriptView: ScrollView | undefined;
-	let composerPlacement: ComposerPlacement | undefined;
 	const root = factories.buildLayout(
 		{
 			banner: deps.workspaceSurfaces ? deps.workspaceSurfaces.banner(banner) : banner,
@@ -1059,9 +1056,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			fullscreenScrollbar: settings.interface?.fullscreenScrollbar ?? "auto",
 			onTranscript: (view) => {
 				transcriptView = view;
-			},
-			onComposerPlacement: (placement) => {
-				composerPlacement = placement;
 			},
 		},
 	);
@@ -1145,7 +1139,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		statusController.dispose();
 	};
 	return {
-		composerRowsAbove: (termRows) => composerPlacement?.rowsAbove(termRows) ?? null,
 		keybindings,
 		banner,
 		chatPanel,
