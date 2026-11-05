@@ -65,12 +65,18 @@ export interface RetryStatusPayload {
 	movedTo?: MovedRoute;
 	/** On `moved`: whether a call was out on the old route, as opposed to a wait between attempts. */
 	movedAborted?: boolean;
+	/** Of `attempt`, how many sat out a provider's wait and so spent no retry. Absent when none did. */
+	providerWaits?: number;
+	/** This attempt is one of `providerWaits`, so `maxAttempts` says nothing about it. */
+	onProviderWait?: boolean;
 }
 
 /** The attempt that follows a failure the recovery ladder has already decided to retry. */
 export interface RetryForecast {
 	attempt: number;
 	maxAttempts: number;
+	providerWaits?: number;
+	onProviderWait?: boolean;
 }
 
 export interface RetryStatusEvent {
@@ -211,6 +217,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 	let chainAttempt = 0;
 	/** Those Clio chose to send on its own backoff, which `maxRetries` limits. A wait the provider stated spends none. */
 	let chainOwnRetries = 0;
+	/** Those the provider's rate limit made Clio sit out. No limit counts them, so nothing may show them against one. */
+	let chainProviderWaits = 0;
 	let chainWaitedMs = 0;
 	let attemptStart = 0;
 	let refreshingAuth = false;
@@ -305,6 +313,16 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			: attempt <= deps.retrySettings().maxRetries;
 	};
 	const pastWaitBudget = (statedMs: number): boolean => chainWaitedMs + statedMs > RATE_LIMIT_WAIT_BUDGET_MS;
+	/** Whether this failure's retry sits out a provider's wait instead of spending one of `maxRetries`. */
+	const isProviderWait = (message: unknown, errorMessage: string | null | undefined): boolean =>
+		statedRetryWaitMs(message, errorMessage) !== null || waitsOutRateLimitMessage(errorMessage);
+	const waitFacts = (waits: number, onWait: boolean): Pick<RetryForecast, "providerWaits" | "onProviderWait"> => ({
+		...(waits > 0 ? { providerWaits: waits } : {}),
+		...(onWait ? { onProviderWait: true } : {}),
+	});
+	/** The chain's retry limit as a status states it: never below what Clio has spent of its own. */
+	const retryLimit = (attempt: number, waits: number): number =>
+		Math.max(attempt - waits, deps.retrySettings().maxRetries);
 	const refreshesAuth = (agentRuntime: AgentRuntime): boolean => {
 		const rejected = agentRuntime.lastAuthResolution;
 		return deps.auth !== undefined && rejected?.source === "stored-oauth" && rejected.apiKey !== undefined;
@@ -338,7 +356,13 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		const statedMs = statedRetryWaitMs(message, failure.errorMessage);
 		if (statedMs !== null && pastWaitBudget(statedMs)) return null;
 		if (!mayAttempt(chainOwnRetries + 1, failure.errorMessage, message)) return null;
-		openForecast = { attempt: chainAttempt + 1, maxAttempts: Math.max(chainAttempt + 1, settings.maxRetries) };
+		const onWait = isProviderWait(message, failure.errorMessage);
+		const waits = chainProviderWaits + (onWait ? 1 : 0);
+		openForecast = {
+			attempt: chainAttempt + 1,
+			maxAttempts: retryLimit(chainAttempt + 1, waits),
+			...waitFacts(waits, onWait),
+		};
 		return openForecast;
 	};
 
@@ -546,12 +570,14 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		chainWaitedMs = 0;
 		chainAttempt = 0;
 		chainOwnRetries = 0;
+		chainProviderWaits = 0;
 		while (moving() || mayAttempt(chainOwnRetries + 1, failure.errorMessage, failure.message)) {
 			ensureFailureVisibleAndPersisted(failure);
 			pruneFailedAssistantFromContext(agentRuntime.agent);
 
 			let attempt = 0;
 			let maxAttempts = 0;
+			let onWait = false;
 			let cause: RetryWaitCause | null = null;
 			const movedAborted = moving();
 			if (!moving()) {
@@ -560,7 +586,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt: chainAttempt,
-						maxAttempts: Math.max(chainAttempt, settings.maxRetries),
+						maxAttempts: retryLimit(chainAttempt, chainProviderWaits),
+						...waitFacts(chainProviderWaits, false),
 						errorMessage: failure.errorMessage,
 						retryAfterMs: statedMs,
 						waitBudgetMs: RATE_LIMIT_WAIT_BUDGET_MS,
@@ -578,6 +605,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				const backoffMs = recoveryRetryDelayMs(chainOwnRetries + 1, settings, classified);
 				// Going back when told to is not the retry a count limits.
 				if (statedMs === null) chainOwnRetries += 1;
+				onWait = isProviderWait(failure.message, failure.errorMessage);
+				if (onWait) chainProviderWaits += 1;
 				const retryAfterMs = failureRetryAfterMs(failure.message, failure.errorMessage);
 				// `chat.retry.maxDelayMs` limits Clio's own backoff. It has no say over a wait the provider stated.
 				const delayMs =
@@ -587,13 +616,14 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 							? Math.min(backoffMs, RATE_LIMIT_WAIT_BUDGET_MS - chainWaitedMs)
 							: backoffMs;
 				chainWaitedMs += delayMs;
-				maxAttempts = Math.max(attempt, settings.maxRetries);
+				maxAttempts = retryLimit(attempt, chainProviderWaits);
 				cause = retryWaitCause(classified);
 				const scheduled: RetryStatusPayload = {
 					phase: "scheduled",
 					attempt,
 					maxAttempts,
 					delayMs,
+					...waitFacts(chainProviderWaits, onWait),
 					errorMessage: failure.errorMessage,
 					...(retryAfterMs === null ? {} : { retryAfterMs }),
 					...(cause === null ? {} : { cause }),
@@ -610,6 +640,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						phase: "cancelled",
 						attempt,
 						maxAttempts,
+						...waitFacts(chainProviderWaits, onWait),
 						errorMessage: failure.errorMessage,
 					});
 					pruneFailedAssistantFromContext(agentRuntime.agent);
@@ -623,6 +654,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				// What the old route said about waiting, and what it used of the retries, is not the new route's to inherit.
 				chainAttempt = 0;
 				chainOwnRetries = 0;
+				chainProviderWaits = 0;
 				chainWaitedMs = 0;
 				attempt = 1;
 				maxAttempts = Math.max(1, settings.maxRetries);
@@ -646,6 +678,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						phase: "retrying",
 						attempt,
 						maxAttempts,
+						...waitFacts(chainProviderWaits, onWait),
 						errorMessage: failure.errorMessage,
 						...(cause === null ? {} : { cause }),
 					},
@@ -676,6 +709,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						phase: "exhausted",
 						attempt,
 						maxAttempts,
+						...waitFacts(chainProviderWaits, false),
 						errorMessage: message,
 					});
 					if (retryable(classified)) recordRetriesExhausted(message);
@@ -705,6 +739,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						phase: "recovered",
 						attempt,
 						maxAttempts,
+						...waitFacts(chainProviderWaits, false),
 					});
 				}
 				return true;
@@ -730,7 +765,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		recordRetryStatus({
 			phase: "exhausted",
 			attempt: chainAttempt,
-			maxAttempts: Math.max(chainAttempt, settings.maxRetries),
+			maxAttempts: retryLimit(chainAttempt, chainProviderWaits),
+			...waitFacts(chainProviderWaits, false),
 			errorMessage: failure.errorMessage,
 		});
 		recordRetriesExhausted(failure.errorMessage, failure.message);
@@ -744,6 +780,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		} finally {
 			chainAttempt = 0;
 			chainOwnRetries = 0;
+			chainProviderWaits = 0;
 			chainWaitedMs = 0;
 			refreshingAuth = false;
 		}

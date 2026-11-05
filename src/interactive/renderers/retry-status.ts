@@ -1,6 +1,7 @@
 import { formatStatedWait } from "../../domains/session/retry.js";
 import { truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { RetryStatusPayload } from "../../session-control/chat-loop.js";
+import { ordinal } from "../status/verbs.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import { modelNickname } from "../theme/labels.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
@@ -41,23 +42,49 @@ function movedRow(status: RetryStatusPayload): string {
 		: `moved to ${to} · ${from} had sent no output`;
 }
 
+/** A wait the provider asked for, counted only once there is more than one. No limit applies, so none is shown. */
+function waitName(status: RetryStatusPayload): string {
+	const waits = status.providerWaits ?? 1;
+	return `${waits > 1 ? `${ordinal(waits)} ` : ""}provider wait`;
+}
+
+/** What a settled chain went through, in the terms each part was limited by. */
+function settledRetries(status: RetryStatusPayload): string {
+	const waits = status.providerWaits ?? 0;
+	const own = status.attempt - waits;
+	if (waits === 0) return `${own} attempt${own === 1 ? "" : "s"}`;
+	const waited = `${waits} provider wait${waits === 1 ? "" : "s"}`;
+	return own > 0 ? `${waited} and ${own} ${own === 1 ? "retry" : "retries"}` : waited;
+}
+
 function rawRetryStatus(status: RetryStatusPayload, unbounded: boolean): string {
 	if (status.phase === "moved") return movedRow(status);
 	const suffix =
 		status.errorMessage !== undefined && status.errorMessage.length > 0
 			? `: ${unbounded ? providerErrorEvidence(status.errorMessage) : presentProviderError(status.errorMessage)}`
 			: "";
+	const own = `${status.attempt - (status.providerWaits ?? 0)}/${status.maxAttempts}`;
+	if (status.onProviderWait === true) {
+		if (status.phase === "waiting" || status.phase === "scheduled") {
+			const left = status.phase === "waiting" ? (status.seconds ?? 0) * 1000 : (status.delayMs ?? 0);
+			return `${waitName(status)}, next attempt in ${formatStatedWait(left)}${askedFor(status)}${suffix}`;
+		}
+		if (status.phase === "retrying") return `retrying after ${waitName(status)}${suffix}`;
+		if (status.phase === "cancelled") return `cancelled during ${waitName(status)}${suffix}`;
+	}
 	if (status.phase === "waiting") {
-		return `provider retry ${status.attempt}/${status.maxAttempts} in ${formatStatedWait((status.seconds ?? 0) * 1000)}${askedFor(status)}${suffix}`;
+		return `provider retry ${own} in ${formatStatedWait((status.seconds ?? 0) * 1000)}${askedFor(status)}${suffix}`;
 	}
 	if (status.phase === "scheduled") {
-		return `provider retry ${status.attempt}/${status.maxAttempts} in ${formatStatedWait(status.delayMs ?? 0)}${askedFor(status)}${suffix}`;
+		return `provider retry ${own} in ${formatStatedWait(status.delayMs ?? 0)}${askedFor(status)}${suffix}`;
 	}
-	if (status.phase === "retrying") return `provider retry ${status.attempt}/${status.maxAttempts} running${suffix}`;
-	if (status.phase === "cancelled") return `provider retry cancelled (${status.attempt}/${status.maxAttempts})${suffix}`;
+	if (status.phase === "retrying") return `provider retry ${own} running${suffix}`;
+	if (status.phase === "cancelled") return `provider retry cancelled (${own})${suffix}`;
 	if (status.phase === "exhausted")
-		return `${stoppedOnWait(status) ?? `provider retry exhausted (${status.attempt})`}${suffix}`;
-	return `provider retry recovered after ${status.attempt} attempt${status.attempt === 1 ? "" : "s"}`;
+		return `${stoppedOnWait(status) ?? `provider retry exhausted (${status.attempt - (status.providerWaits ?? 0)})`}${suffix}`;
+	return status.providerWaits
+		? `recovered after ${settledRetries(status)}`
+		: `provider retry recovered after ${settledRetries(status)}`;
 }
 
 /**

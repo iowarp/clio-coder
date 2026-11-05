@@ -14,6 +14,7 @@ import {
 	parseSlashCommand,
 	SETTINGS_AREA_IDS,
 	SLASH_COMMAND_GROUPS,
+	SUBCOMMANDS_REFUSED_DURING_TURN,
 } from "../session-control/slash-commands.js";
 import {
 	type ArgCompletion,
@@ -690,6 +691,15 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			if (effectDescription) item.effectDescription = effectDescription;
 			if (result.submenu) item.submenu = { parent: ref.name, back: true };
 			if (result.quote) item.quote = result.quote;
+			if (
+				this.isTurnInFlight() &&
+				result.submenu &&
+				SUBCOMMANDS_REFUSED_DURING_TURN.has(`${ref.name} ${completion.token}`)
+			) {
+				item.disabledReason = REFUSED_DURING_TURN_REASON;
+				item.description = REFUSED_DURING_TURN_REASON;
+				item.nextAction = `Unavailable: ${REFUSED_DURING_TURN_REASON}.`;
+			}
 			items.push(item);
 		}
 		return items.length ? { items, prefix: beforeCursor } : null;

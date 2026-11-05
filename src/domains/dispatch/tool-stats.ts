@@ -139,17 +139,22 @@ export function zeroSuccessfulToolNote(activity: ToolActivitySummary): string | 
  * that state produced no mutation, yet its finish contract reads "no
  * mutation" as success, so the caller seals it failed instead. Null whenever
  * no write was attempted, one write got past admission, or any mutating call
- * landed.
+ * landed. A shell call may have changed anything, so it counts as landing until
+ * `mutatedPathCount` says the run's tree did not move: a lint that passed beside
+ * a refused write does not make the write's refusal `✓ execution ok`.
  */
 export function blockedWriteAttempts(
 	stats: ReadonlyMap<string, ToolCallStat>,
 	classify: (tool: string) => ActionClass,
+	mutatedPathCount: number | null = null,
 ): number | null {
 	let attempted = 0;
 	let blocked = 0;
 	for (const stat of stats.values()) {
 		const actionClass = classify(stat.tool);
-		if (stat.ok > 0 && MUTATING_ACTION_CLASSES.has(actionClass)) return null;
+		if (stat.ok > 0 && MUTATING_ACTION_CLASSES.has(actionClass) && (actionClass === "write" || mutatedPathCount !== 0)) {
+			return null;
+		}
 		if (actionClass !== "write") continue;
 		attempted += stat.count;
 		blocked += stat.blocked;
@@ -213,5 +218,5 @@ export function workerNoWorkDetail(input: {
 }
 
 export function blockedWriteDetail(attempted: number): string {
-	return `all ${attempted} attempted write(s) were blocked by policy; no workspace mutation landed`;
+	return `${attempted === 1 ? "the one write it attempted was" : `all ${attempted} writes it attempted were`} blocked by policy, so no workspace change landed`;
 }

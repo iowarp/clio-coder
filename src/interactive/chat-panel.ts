@@ -175,6 +175,8 @@ export interface ChatPanelTurnUsage {
 	coldReasons?: ReadonlyArray<string>;
 	/** Provider attempts the run sent again after a failure. */
 	retries?: number;
+	/** Provider waits the run sat out, which no retry limit counts. */
+	providerWaits?: number;
 	/** The model the operator moved the waiting request to, which is the one the turn's answer came from. */
 	movedTo?: string;
 	/** Of `elapsedMs`, what the run spent waiting on the operator. */
@@ -1002,7 +1004,8 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 }
 
 const CLIO_PREFIX = () => `${TEAL()}${AGENT_GLYPH}${RESET} `;
-const CLIO_PREFIX_ERROR = () => `${RED_CRIT()}${AGENT_GLYPH}${RESET} `;
+/** Clio wrote this about a failure, so it never wears the mark of something the model said. */
+const CLIO_PREFIX_ERROR = () => `${RED_CRIT()}${GLYPH.error}${RESET} `;
 /**
  * Operator prompts wear the accent bar on every row and bold text, so the
  * operator's words are never the same weight as the agent prose beneath them.
@@ -1065,17 +1068,21 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
  * stop at the first row the way a voice glyph does.
  */
 const SKILL_INVOCATION = /^\/skill\s+\S+/u;
+const LOOP_LABEL_CHARS = 32;
 
 function renderUserLines(text: string, width: number, status: UserTurnStatus, origin?: string): string[] {
 	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const scheduled = /^job (\S+) (\S+)$/u.exec(origin ?? "");
 	if (scheduled !== null) {
-		const header = `${GLYPH.scheduled} Scheduled loop · /loop status`;
+		const task = sanitizeMultilineDisplayText(text).text;
+		const flat = task.replace(/\s+/gu, " ").trim();
+		const label =
+			flat.length <= LOOP_LABEL_CHARS ? flat : `${flat.slice(0, LOOP_LABEL_CHARS - 1).trimEnd()}${GLYPH.ellipsis}`;
+		// Two loops can run at once, so the row says which one fired. A task the label holds whole needs no second row.
+		const header = `${GLYPH.scheduled} Scheduled loop "${label}" · /loop status`;
 		return [
 			...wrapTextWithAnsi(clioTheme().fg("annotation", header), width),
-			...hangProseLines(
-				wrapTextWithAnsi(clioTheme().fg("annotation", sanitizeMultilineDisplayText(text).text), contentWidth),
-			),
+			...(label === flat ? [] : hangProseLines(wrapTextWithAnsi(clioTheme().fg("annotation", task), contentWidth))),
 		];
 	}
 	const committed = status === "committed";
@@ -1211,7 +1218,14 @@ function renderTurnUsageLine(
 		return noAnswer.length === 0 ? [] : [`${glyph}${dimLine(`${outcome}${receiptDuration(usage)}`, room)}`, ...noAnswer];
 	}
 	const spend = usage.spend;
-	const retries = usage.retries ? `${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : null;
+	// A wait the provider asked for spends no retry, so the receipt keeps it apart: a count of them approached no limit.
+	const retries =
+		[
+			usage.providerWaits ? `${usage.providerWaits} provider wait${usage.providerWaits === 1 ? "" : "s"}` : null,
+			usage.retries ? `${usage.retries} ${usage.retries === 1 ? "retry" : "retries"}` : null,
+		]
+			.filter(Boolean)
+			.join(", ") || null;
 	const moved = usage.movedTo ? `moved to ${modelNickname(usage.movedTo)}` : null;
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
@@ -1219,6 +1233,9 @@ function renderTurnUsageLine(
 			spend?.calls != null && (spend.calls > 1 || retries !== null || moved !== null)
 				? renderCalls(String(spend.calls), "call")
 				: null;
+		// A call moved away from has no amounts of its own, so a sum over it is all `≥` and `+?`. The row states the
+		// answering call beside the move, and Detailed keeps the sum.
+		const stated = moved !== null ? spend?.answer : spend;
 		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
 		const rowFacts = [
 			`${outcome}${receiptDuration(usage)}`,
@@ -1228,9 +1245,9 @@ function renderTurnUsageLine(
 		for (const fact of [
 			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
 			spend?.coverageNote ?? null,
-			spend?.tokens ?? null,
+			stated?.tokens ?? null,
 			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
-			spend?.cacheRead != null && spend.cacheRead !== "?" ? `cached ${spend.cacheRead}` : null,
+			stated?.cacheRead != null && stated.cacheRead !== "?" ? `cached ${stated.cacheRead}` : null,
 		]) {
 			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
 		}
@@ -1788,6 +1805,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let runAwaitingRetry = false;
 	/** Provider attempts this run sent again, kept until its receipt can state them. */
 	let runRetries = 0;
+	let runProviderWaits = 0;
 	let runMovedTo: string | undefined;
 	/** The model the newest assistant message came from: the requester of the calls that follow it. */
 	let requestingModel: string | undefined;
@@ -1902,7 +1920,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			liveReceipts.delete(entry);
 			return;
 		}
-		const spend = turnSpend(view, usage.turnId);
+		// The answer closes the run, so the moved turn's answering call is the run's last.
+		const spend = turnSpend(view, usage.turnId, usage.movedTo === undefined ? undefined : usage.callIds?.at(-1));
 		if (spend === null) return;
 		if (JSON.stringify(spend) !== JSON.stringify(usage.spend)) {
 			invalidateEntryCache(entry);
@@ -2071,17 +2090,24 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	/** The attempts a retry status says went out again. A live run hears of its recovery after its receipt, a replay before. */
 	const noteRunRetries = (status: RetryStatusPayload): void => {
-		const sent =
-			status.phase === "retrying" || status.phase === "recovered" || status.phase === "exhausted"
-				? status.attempt
-				: status.phase === "cancelled"
-					? status.attempt - 1
-					: 0;
-		runRetries = Math.max(runRetries, sent);
+		const whole = status.phase === "retrying" || status.phase === "recovered" || status.phase === "exhausted";
+		if (whole || status.phase === "cancelled") {
+			// A cancel stopped one attempt before it went out, and that attempt is a wait or a retry by what it answered.
+			const waits = status.providerWaits ?? 0;
+			const unsentWait = status.phase === "cancelled" && status.onProviderWait === true ? 1 : 0;
+			const unsentRetry = status.phase === "cancelled" && status.onProviderWait !== true ? 1 : 0;
+			runProviderWaits = Math.max(runProviderWaits, waits - unsentWait);
+			runRetries = Math.max(runRetries, status.attempt - waits - unsentRetry);
+		}
 		const receipt = lastSettledReceipt;
-		if (receipt?.turnUsage && runRetries > (receipt.turnUsage.retries ?? 0)) {
+		const usage = receipt?.turnUsage;
+		if (receipt && usage && (runRetries > (usage.retries ?? 0) || runProviderWaits > (usage.providerWaits ?? 0))) {
 			invalidateEntryCache(receipt);
-			receipt.turnUsage = { ...receipt.turnUsage, retries: runRetries };
+			receipt.turnUsage = {
+				...usage,
+				...(runRetries > 0 ? { retries: runRetries } : {}),
+				...(runProviderWaits > 0 ? { providerWaits: runProviderWaits } : {}),
+			};
 		}
 	};
 
@@ -2184,6 +2210,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),
+					...(runProviderWaits > 0 ? { providerWaits: runProviderWaits } : {}),
 					...(runMovedTo !== undefined ? { movedTo: runMovedTo } : {}),
 					...(ending === null ? {} : { ending }),
 					outcome:
@@ -2228,6 +2255,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		runColdReasons = [];
 		runTurnId = undefined;
 		runRetries = 0;
+		runProviderWaits = 0;
 		runMovedTo = undefined;
 		const runWasAborted = messages.some(
 			(message) =>
@@ -2919,6 +2947,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			runStartIndex = undefined;
 			runAwaitingRetry = false;
 			runRetries = 0;
+			runProviderWaits = 0;
 			runMovedTo = undefined;
 			runColdReasons = [];
 			workerEntries.clear();
@@ -2950,6 +2979,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					return;
 				}
 				runRetries = 0;
+				runProviderWaits = 0;
 				runMovedTo = undefined;
 				// The run's cold-cache reasons arrive just before it starts, as the
 				// chat loop consumes them ahead of the prompt, so they are kept here

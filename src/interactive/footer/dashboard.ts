@@ -13,6 +13,7 @@ import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { getKeybindings, Text } from "../../engine/tui.js";
+import { normalizeRetrySettings } from "../../session-control/chat-loop-policy.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
@@ -30,6 +31,7 @@ import type { Notification, NotificationCenter } from "./notifications.js";
 import { formatNotificationPanel } from "./notifications.js";
 import type { DashboardPage } from "./pages.js";
 import { DASHBOARD_PAGES, dashboardPageViewport, renderCompactDashboard } from "./pages.js";
+import { routeFirstOutput, silenceNoteForms } from "./silence-note.js";
 import type { FooterTelemetry } from "./spend.js";
 import { footerTelemetry } from "./spend.js";
 import type { LocalMachineMetrics } from "./system-metrics.js";
@@ -119,6 +121,8 @@ export interface FooterDashboardRenderState {
 	quota?: QuotaProviders;
 	quotaRoute?: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">;
 	demoHint?: string | null;
+	/** What a long silence owes the operator, widest form first; the row shows the first that fits. */
+	silenceNotes?: readonly string[] | null;
 	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
 	demo?: boolean;
 	keyContext?: ComposerKeyContext;
@@ -353,6 +357,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				taskBoard: deps.getTaskBoard?.() ?? null,
 				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
+			silenceNotes: status
+				? silenceNoteForms(
+						status,
+						now,
+						normalizeRetrySettings(settings?.chat?.retry),
+						routeFirstOutput(deps.getTelemetry?.(), settings?.chat?.target, settings?.chat?.model),
+					)
+				: null,
 			demo: settings?.interface.demo !== false,
 			...(keyContext ? { keyContext } : {}),
 			...(deps.getKeyHintFacts ? { keyHintFacts: deps.getKeyHintFacts() } : {}),

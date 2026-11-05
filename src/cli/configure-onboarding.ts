@@ -69,12 +69,14 @@ import {
 	gatewayUrlGuidance,
 	inventoryGap,
 	inventoryNote,
+	isUntrustedCertificate,
 	LOCAL_APP_RUNTIME_IDS,
 	modelChoiceRefusal,
 	modelSupportsThinking,
 	normalizeUrl,
 	offeredUrlFor,
 	PROTOCOL_COMPAT_RUNTIME_IDS,
+	plainConnectionProblem,
 	preferredModelFor,
 	probeReadings,
 	railPrefix,
@@ -139,6 +141,8 @@ interface Answers {
 	model?: string | undefined;
 	thinking?: ThinkingLevel | undefined;
 	probe?: ProbeResult | null | undefined;
+	/** The address step's failure, when it already told the operator why the model list will not come. */
+	unreachable?: string | undefined;
 	antigravity?: { targetId: string; model: string } | undefined;
 }
 
@@ -444,13 +448,14 @@ const URL_STEP: Step = {
 		if (result.kind === "quit") return "quit";
 		if (result.kind === "back") return "back";
 		const url = normalizeUrl(result.value, runtime.id);
+		const bareHost = !/^[a-z][a-z0-9+.-]*:\/\//iu.test(result.value.trim());
 		if (answers.url !== url) {
 			answers.inventoryKey = undefined;
 			answers.detected = undefined;
 		}
 		answers.url = url;
 		wizard.answer("URL", url);
-		const authenticated = await reportReachability(wizard, answers, runtime, url);
+		const authenticated = await reportReachability(wizard, answers, runtime, url, bareHost);
 		if (!authenticated && runtime.auth === "api-key") {
 			answers.keyRequested = true;
 			answers.inventoryKey = undefined;
@@ -474,24 +479,46 @@ async function reportReachability(
 	answers: Answers,
 	runtime: RuntimeDescriptor,
 	url: string,
+	bareHost = false,
 ): Promise<boolean> {
+	wizard.host?.waiting?.(`Checking ${url}…`);
 	const draft = draftDescriptor(answers, runtime, false);
 	// A freshly typed "store the key" answer is not on disk yet (that write
 	// happens at the end of the wizard), so it has to ride along as an explicit
 	// token the same way the model step already does; env and stored-from-before
 	// credentials resolve on their own through the descriptor's auth fields.
-	const probe = await runtimeProbe(runtime, draft, answers.apiKeyLiteral);
+	let probe = await runtimeProbe(runtime, draft, answers.apiKeyLiteral);
+	answers.unreachable = undefined;
+	// A bare host was read as http only because normalizeUrl had to pick. An https-only host must not read as down.
+	if (probe !== null && !probe.ok && !refusedCredential(probe) && bareHost && url.startsWith("http://")) {
+		const secure = url.replace(/^http:/u, "https:");
+		wizard.host?.waiting?.(`Checking ${secure}…`);
+		const retried = await runtimeProbe(runtime, { ...draft, url: secure }, answers.apiKeyLiteral);
+		if (retried !== null && (retried.ok || refusedCredential(retried) || isUntrustedCertificate(retried.error))) {
+			probe = retried;
+			answers.url = secure;
+			answers.inventoryKey = undefined;
+			wizard.presenter.step(`${url} did not answer and https did, so Clio uses ${secure}`);
+		}
+	}
 	if (probe !== null) {
 		if (probe.ok) {
 			const readings = probeReadings(probe);
 			wizard.presenter.step(
 				`${runtime.id === "alcf" ? "ALCF catalog reachable; inference URL not checked" : "reachable"}, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`,
 			);
-		} else if (probe.authFailed || REFUSED_CREDENTIAL.test(probe.error ?? "")) {
-			wizard.presenter.warn("Authentication failed. Choose a credential for this server before selecting a model.");
+		} else if (refusedCredential(probe)) {
+			wizard.presenter.warn(refusedCredentialLine(answers));
 			return false;
+		} else if (isUntrustedCertificate(probe.error)) {
+			wizard.presenter.warn(
+				`The server answered, but Clio does not trust its certificate: ${probe.error}. Point NODE_EXTRA_CA_CERTS at its CA, or change the address.`,
+			);
+			answers.unreachable = probe.error;
 		} else {
-			wizard.presenter.warn(`not reachable, you can fix this later: ${probe.error ?? "no reply"}`);
+			const problem = plainConnectionProblem(probe.error ?? "no reply");
+			wizard.presenter.warn(`not reachable: ${problem}`);
+			answers.unreachable = probe.error ?? "no reply";
 		}
 	}
 	if (probe?.ok && runtime.id === "lmstudio") {
@@ -580,6 +607,24 @@ async function connectOAuth(wizard: Wizard, runtime: RuntimeDescriptor): Promise
 /** Only some runtimes flag a refused credential; the rest report the bare status of the shared HTTP probe. */
 const REFUSED_CREDENTIAL = /\bHTTP (?:401|403)\b/u;
 
+function refusedCredential(probe: ProbeResult): boolean {
+	return probe.authFailed === true || REFUSED_CREDENTIAL.test(probe.error ?? "");
+}
+
+/** Says which credential the server turned down, because the screen after it asks for one again. */
+function refusedCredentialLine(answers: Answers): string {
+	const line = (why: string): string => `Authentication failed: ${why}. Choose a credential before selecting a model.`;
+	if (answers.credential === "env") {
+		const name = answers.apiKeyEnv ?? "";
+		return line(
+			process.env[name] ? `the server refused the key in $${name}` : `$${name} is not set here, so the server saw no key`,
+		);
+	}
+	if (answers.credential === "stored") return line("the server refused that key");
+	if (answers.credential === "keep") return line("the server refused the saved key");
+	return line("this server wants a key");
+}
+
 /**
  * An app on this computer (LM Studio, Lemonade) takes no key unless its owner turned one on, and asking
  * before the address reads as a question about something the user never set up. The address step routes
@@ -613,7 +658,7 @@ const CREDENTIAL_STEP: Step = {
 					"Sign-in stores credentials immediately; target settings wait for Save.",
 				],
 				choices: [
-					{ value: "oauth-connect", label: "Connect now", hint: "opens your browser and waits for the callback" },
+					{ value: "oauth-connect", label: "Connect now", hint: "opens your browser and waits for the sign-in" },
 					{
 						value: "oauth-skip",
 						label: "Later",
@@ -705,9 +750,11 @@ const CREDENTIAL_VALUE_STEP: Step = {
 				: `stored at ${shortenPath(authStoragePath())}`,
 			...(wantsEnv ? {} : { mask: true }),
 			validate: (value) =>
-				value.length > 0
-					? null
-					: `Enter ${wantsEnv ? "an environment variable" : "a key"}, or press Escape to choose No key.`,
+				value.length === 0
+					? `Enter ${wantsEnv ? "an environment variable" : "a key"}, or press Escape to choose No key.`
+					: wantsEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)
+						? "A variable name holds only letters, digits and underscores. Paste a key under Store the key instead."
+						: null,
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,
@@ -724,13 +771,18 @@ const CREDENTIAL_VALUE_STEP: Step = {
 		}
 		answers.apiKeyLiteral = result.value.length > 0 ? result.value : undefined;
 		answers.inventoryKey = undefined;
-		wizard.answer("Credential", result.value.length > 0 ? "stored in credentials.yaml" : "none");
+		// Nothing is on disk until Save, and a cancelled wizard must not read as having stored a key.
+		wizard.answer("Credential", result.value.length > 0 ? "key, written to credentials.yaml on Save" : "none");
 		return "next";
 	},
 };
 
 /** Read the model list once per distinct set of connection answers. */
-async function modelInventory(answers: Answers, runtime: RuntimeDescriptor): Promise<WireModelInventory> {
+async function modelInventory(
+	wizard: Wizard,
+	answers: Answers,
+	runtime: RuntimeDescriptor,
+): Promise<WireModelInventory> {
 	const key = [
 		runtime.id,
 		answers.targetId,
@@ -739,6 +791,7 @@ async function modelInventory(answers: Answers, runtime: RuntimeDescriptor): Pro
 		answers.apiKeyLiteral ? "literal" : "",
 	].join("|");
 	if (answers.inventoryKey === key && answers.inventory) return answers.inventory;
+	wizard.host?.waiting?.("Reading the model list…");
 	const inventory = await resolveSupportedWireModels(
 		runtime,
 		draftDescriptor(answers, runtime, false),
@@ -757,7 +810,7 @@ const MODEL_STEP: Step = {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
 		const support = supportFor(runtime);
-		const inventory = await modelInventory(answers, runtime);
+		const inventory = await modelInventory(wizard, answers, runtime);
 		// A catalog-ordered list has no head worth recommending: openai's first of
 		// 38 ids is `gpt-4` because g sorts early.
 		const preferred = answers.model ?? preferredModelFor(inventory, support);
@@ -770,12 +823,14 @@ const MODEL_STEP: Step = {
 			// A keyed llama.cpp or vLLM answers its health check and refuses only the model list.
 			answers.keyRequested = true;
 			answers.inventoryKey = undefined;
-			wizard.presenter.warn("Authentication failed. Choose a credential for this server before selecting a model.");
+			wizard.presenter.warn(refusedCredentialLine(answers));
 			return "credential";
 		}
 		if (inventory.models.length === 0) {
-			const gap = inventoryGap(runtime, { url: answers.url }, inventory.probeError);
-			wizard.presenter.warn(gap);
+			// The address step just said why, in these words; the list failing for the same reason adds nothing.
+			if (answers.unreachable === undefined || answers.unreachable !== inventory.probeError)
+				wizard.presenter.warn(inventoryGap(runtime, { url: answers.url }, inventory.probeError));
+			answers.unreachable = undefined;
 			const canDetect = runtimeListsModelsLive(runtime);
 			const result = await wizard.select<"retry" | "back" | "manual" | "key">({
 				heading: [
@@ -1055,7 +1110,7 @@ function verificationSummary(answers: Answers): string[] {
 			? answers.runtime?.id === "alcf"
 				? "ALCF catalog reachable; URL untested"
 				: "Endpoint: reachable (metadata only)"
-			: "Endpoint: reachability not verified";
+			: "Endpoint: did not answer when checked";
 	const inventory = answers.inventory;
 	const models =
 		inventory?.source === "probe"

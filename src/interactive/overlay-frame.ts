@@ -58,6 +58,9 @@ export class FocusBox extends Box {
 	get keyboardScope() {
 		return keyboardOwner(this.inputTarget).keyboardScope;
 	}
+	get ownsCtrlC() {
+		return keyboardOwner(this.inputTarget).ownsCtrlC;
+	}
 	undoInput(): boolean {
 		return keyboardOwner(this.inputTarget).undoInput?.() ?? false;
 	}
@@ -862,6 +865,9 @@ export class ClioOverlayFrame implements Component {
 	get keyboardScope() {
 		return keyboardOwner(this.child).keyboardScope;
 	}
+	get ownsCtrlC() {
+		return keyboardOwner(this.child).ownsCtrlC;
+	}
 	undoInput(): boolean {
 		return keyboardOwner(this.child).undoInput?.() ?? false;
 	}
@@ -948,12 +954,15 @@ export function showClioOverlayFrame(
 	// The engine keeps this overlay for focus and input routing only. It paints
 	// nothing: the composer draws the frame inline, in normal flow, so the
 	// transcript keeps its rows and its mouse selection.
-	const proxy: Component & { keyboardScope?: unknown; undoInput(): boolean } = {
+	const proxy: Component & { keyboardScope?: unknown; ownsCtrlC?: unknown; undoInput(): boolean } = {
 		render: () => [],
 		invalidate: () => frame.invalidate(),
 		handleInput: (data: string) => frame.handleInput(data),
 		get keyboardScope() {
 			return frame.keyboardScope;
+		},
+		get ownsCtrlC() {
+			return frame.ownsCtrlC;
 		},
 		undoInput: () => frame.undoInput(),
 	};

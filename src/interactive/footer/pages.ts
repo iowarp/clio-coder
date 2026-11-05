@@ -800,28 +800,34 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		.join(separator);
 	const tail = notice && feedback ? theme.fg("changedValue", clean(feedback.text)) : facts;
 	if (narrow && !urgent && !notice && !feedback && !facts) return [firstRow];
-	const alone = urgent !== null || !tail;
+	// A failure or warning still speaks first. Past that the row is the only place with the width to explain a long silence.
+	const pressing = notice?.level === "error" || notice?.level === "warning";
+	const silence = pressing ? null : (state.silenceNotes ?? null);
+	const silenceNote = silence?.find((form) => visibleWidth(form) <= w) ?? silence?.at(-1) ?? null;
+	const alone = urgent !== null || silenceNote !== null || !tail;
 	const tailWidth = alone ? 0 : Math.min(Math.floor(w * 0.4), visibleWidth(tail));
 	const room = alone ? w : w - tailWidth - 3;
 	const message = urgent
 		? theme.fg("warning", urgent)
-		: notice
-			? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
-			: feedback
-				? theme.fg("changedValue", clean(feedback.text))
-				: surfaceOwnsKeys
-					? ""
-					: state.demoHint && !state.welcomeVisible && !immediateKeys
-						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-						: theme.fg(
-								"keyboardHint",
-								state.welcomeVisible
-									? ""
-									: (footerKeyHint(state.now, narrow, room, keyContext, {
-											...state.keyHintFacts,
-											learning: state.demo !== false,
-										}) ?? `${key} Dashboard`),
-							);
+		: silenceNote !== null
+			? theme.fg("warning", silenceNote)
+			: notice
+				? theme.fg(notificationToken(notice.level), `${notificationGlyph(notice.level)} ${clean(notice.text)}`)
+				: feedback
+					? theme.fg("changedValue", clean(feedback.text))
+					: surfaceOwnsKeys
+						? ""
+						: state.demoHint && !state.welcomeVisible && !immediateKeys
+							? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
+							: theme.fg(
+									"keyboardHint",
+									state.welcomeVisible
+										? ""
+										: (footerKeyHint(state.now, narrow, room, keyContext, {
+												...state.keyHintFacts,
+												learning: state.demo !== false,
+											}) ?? `${key} Dashboard`),
+								);
 	// One line flattens a multi-line notice and cuts the end, which is where a
 	// remediation command sits. Name the key that opens the dashboard, whose
 	// notice panel wraps the full text.
@@ -831,6 +837,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const clipped =
 		room - visibleWidth(more) >= 24 &&
 		!urgent &&
+		silenceNote === null &&
 		notice !== undefined &&
 		(otherNotices > 0 ||
 			notice.text.includes("\n") ||
@@ -839,6 +846,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	if (alone) return [firstRow, fit(line)];
 	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];
 }
+
+const DASHBOARD_ROOMY_ROWS = 30;
 
 /**
  * The expanded footer: tab row, rule, a bounded content viewport, rule, hint.
@@ -863,7 +872,8 @@ export function dashboardPageViewport(
 			"fieldValue",
 			padAnsi(`${pad}${truncateToWidth(line, innerWidth, GLYPH.ellipsis, true)}${pad}`, safeWidth),
 		);
-	const budget = Math.max(6, Math.min(12, terminalRows - 6));
+	// A terminal with room shows a whole page rather than a scroll: the Context page alone runs to twelve rows.
+	const budget = Math.max(6, Math.min(terminalRows >= DASHBOARD_ROOMY_ROWS ? 16 : 12, terminalRows - 6));
 	const tabs = DASHBOARD_PAGES.map((name, index) =>
 		name === page
 			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })

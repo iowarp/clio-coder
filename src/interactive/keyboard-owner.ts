@@ -11,6 +11,8 @@ import {
 /** Internal focus contract for Clio's existing components and frame wrappers. */
 export interface KeyboardOwner {
 	readonly keyboardScope?: "browse" | "edit" | "review";
+	/** Ctrl+C means something of its own here, so it arrives as itself rather than as Esc. */
+	readonly ownsCtrlC?: boolean;
 	undoInput?(): boolean;
 }
 

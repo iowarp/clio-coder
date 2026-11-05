@@ -202,6 +202,10 @@ function settledAgainst(result: WorkerRunResultSummary): string | null {
 	return result.contract === "fail" ? "result contract failed" : null;
 }
 
+function refusedCallsText(count: number): string {
+	return count === 1 ? "1 call refused" : `${count} calls refused`;
+}
+
 /**
  * The run's overall outcome, leading with the mark that decides it. A clean
  * exit under a failed validation leads with the failure and keeps the
@@ -219,6 +223,10 @@ function outcomeUnit(result: WorkerRunResultSummary): string {
 	if (against !== null) return `${theme.fg("error", `${GLYPH.error} ${against}`)}${meta(`${SEPARATOR}execution ok`)}`;
 	if (result.outcome === "succeeded" && result.toolCalls === 0) {
 		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
+	}
+	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
+	if (result.outcome === "succeeded" && (result.refusedCalls ?? 0) > 0) {
+		return theme.fg("warning", `${GLYPH.warn} finished with ${refusedCallsText(result.refusedCalls ?? 0)}`);
 	}
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
@@ -437,9 +445,11 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	}
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
+	const refused = entry.result?.refusedCalls ?? 0;
 	if (!inspect) {
 		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
 		if (calls !== undefined) metrics.push(renderCalls(calls));
+		if (refused > 0) metrics.push(refusedCallsText(refused));
 		const figure = tokens === undefined ? null : compactQuantity(tokens);
 		if (figure !== null) metrics.push(`${figure} tokens`);
 		return metrics;
@@ -448,6 +458,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
 	if (calls !== undefined) metrics.push(renderCalls(calls));
+	if (refused > 0) metrics.push(refusedCallsText(refused));
 	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
@@ -516,10 +527,12 @@ function alignedHeader(
 				? theme.fg("toolMetadata", GLYPH.cancelled)
 				: entry.result?.outcome !== "succeeded" || settledAgainst(entry.result) !== null
 					? theme.fg("error", GLYPH.error)
-					: theme.fg(
-							entry.result.toolCalls === 0 ? "toolMetadata" : "success",
-							entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
-						);
+					: (entry.result.refusedCalls ?? 0) > 0
+						? theme.fg("warning", GLYPH.warn)
+						: theme.fg(
+								entry.result.toolCalls === 0 ? "toolMetadata" : "success",
+								entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
+							);
 	const name = workerName(entry);
 	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
 	const prefix = cardPrefix(entry);

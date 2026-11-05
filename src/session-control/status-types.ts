@@ -66,6 +66,10 @@ export interface RetryOverlay {
 	cause?: RetryWaitCause | undefined;
 	/** Epoch ms this cause first answered, which stays put across the attempts it keeps answering. */
 	causeSince?: number | undefined;
+	/** Of `attempt`, how many sat out a provider's wait and so spent no retry. */
+	providerWaits?: number | undefined;
+	/** This attempt is one of those, so `maxAttempts` says nothing about it. */
+	onProviderWait?: boolean | undefined;
 }
 
 export interface ToolOverlay {
@@ -152,6 +156,8 @@ export interface AgentStatus {
 	localRuntime: boolean;
 	/** The model is streaming tool arguments; execution has not started. */
 	preparingToolCall?: boolean;
+	/** Tool-call markup is open in the answer channel, so nothing is being prepared and nothing will run from it. */
+	writingCallAsText?: boolean | undefined;
 	/** Epoch ms this model round started waiting, which the rail times instead of the whole turn. */
 	waitingSince?: number | undefined;
 	/** Evidence about the outstanding request, carried while a model wait is on screen. */

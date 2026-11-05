@@ -577,6 +577,8 @@ function retryStatusFromEntry(entry: CustomEntry): RetryStatusPayload | null {
 		...(movedRouteFrom(data.movedFrom) ? { movedFrom: movedRouteFrom(data.movedFrom) as MovedRoute } : {}),
 		...(movedRouteFrom(data.movedTo) ? { movedTo: movedRouteFrom(data.movedTo) as MovedRoute } : {}),
 		...(typeof data.movedAborted === "boolean" ? { movedAborted: data.movedAborted } : {}),
+		...(typeof data.providerWaits === "number" ? { providerWaits: data.providerWaits } : {}),
+		...(data.onProviderWait === true ? { onProviderWait: true } : {}),
 	};
 }
 

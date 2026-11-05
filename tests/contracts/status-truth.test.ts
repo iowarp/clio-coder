@@ -9,6 +9,7 @@ import {
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
 import { createGrantBroker } from "../../src/domains/dispatch/grant-broker.js";
+import { blockedWriteAttempts } from "../../src/domains/dispatch/tool-stats.js";
 import {
 	createWorkerApprovalWindows,
 	WORKER_APPROVAL_HOLD_CEILING_MS,
@@ -34,6 +35,7 @@ import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { railDetail } from "../../src/interactive/footer/live-work.js";
 import { type Notification, topNotification } from "../../src/interactive/footer/notifications.js";
+import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import { composerPhasePresentation } from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
@@ -51,6 +53,7 @@ import {
 	providerFailureRailFacts,
 } from "../../src/interactive/renderers/provider-error.js";
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
+import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import { approvalWaitWords, workerActivityWords } from "../../src/interactive/worker-activity.js";
 import { classifyTurnEnding } from "../../src/session-control/chat-loop-messages.js";
@@ -795,6 +798,73 @@ test("a long countdown reads in minutes on the rail and says the provider asked 
 	doesNotMatch(status(111), /3412s/u);
 });
 
+test("a provider's waits count up against no limit, and Clio's own retries still read against theirs", async (c) => {
+	const chain = await statedWaitChain(c, [1, 1, 1, 1, 1]);
+	strictEqual(chain.last?.phase, "recovered");
+	strictEqual(chain.last?.providerWaits, 5);
+	strictEqual(formatRetryStatus(chain.last as RetryStatusPayload), "recovered after 5 provider waits");
+
+	const now = 1_000_000;
+	const rail = (retry: Record<string, unknown>, width: number) =>
+		composerPhasePresentation(
+			{
+				phase: "retrying",
+				since: now - 1000,
+				lastMeaningfulAt: now - 1000,
+				watchdogTier: 0,
+				watchdogPeak: 0,
+				localRuntime: false,
+				retry: { waitMs: 8000, ...retry },
+			} as never,
+			width,
+			now,
+			"Qwopus3.8",
+		).label;
+	const third = { attempt: 3, maxAttempts: 3, providerWaits: 3, onProviderWait: true };
+	for (const width of [40, 80, 111]) {
+		const waiting = rail({ ...third, stage: "backoff", dueAt: now + 8000, retryAfterMs: 8000 }, width);
+		match(waiting, /3rd wait/u);
+		doesNotMatch(waiting, /\d\/\d/u);
+	}
+	match(rail({ ...third, stage: "attempt", attemptStartedAt: now }, 111), /retrying \(3rd wait\)/u);
+
+	const row = (status: Partial<RetryStatusPayload>) =>
+		formatRetryStatus({ ...third, phase: "scheduled", delayMs: 8000, ...status } as RetryStatusPayload);
+	match(row({ retryAfterMs: 8000 }), /^3rd provider wait, next attempt in 8s \(provider asked for 8s\)/u);
+	match(row({ phase: "retrying" }), /^retrying after 3rd provider wait/u);
+	match(row({ phase: "cancelled" }), /^cancelled during 3rd provider wait/u);
+
+	// Two waits and one retry of Clio's own: the limit counts only what it limits.
+	const mixed = { attempt: 3, maxAttempts: 3, providerWaits: 2 };
+	match(formatRetryStatus({ ...mixed, phase: "retrying" }), /^provider retry 1\/3 running/u);
+	match(rail({ ...mixed, stage: "attempt", attemptStartedAt: now }, 111), /retrying 1\/3/u);
+	strictEqual(formatRetryStatus({ ...mixed, phase: "recovered" }), "recovered after 2 provider waits and 1 retry");
+});
+
+test("the receipt keeps a provider's waits apart from retries", () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.appendUser("hello");
+	panel.applyEvent({ type: "agent_start" } as never);
+	for (const event of failedAttempt(1)) panel.applyEvent(event as never);
+	const answer = {
+		role: "assistant",
+		content: [{ type: "text", text: "Recovered answer." }],
+		stopReason: "stop",
+		usage: { input: 1, output: 1, totalTokens: 2 },
+	};
+	panel.applyEvent({
+		type: "retry_status",
+		status: { phase: "retrying", attempt: 3, maxAttempts: 3, providerWaits: 2 },
+	} as never);
+	panel.applyEvent({ type: "agent_start" } as never);
+	panel.applyEvent({ type: "message_start", message: answer } as never);
+	panel.applyEvent({ type: "message_end", message: answer } as never);
+	panel.applyEvent({ type: "agent_end", messages: [answer] } as never);
+	const output = screen(panel);
+	match(output, /2 provider waits, 1 retry/u);
+	doesNotMatch(output, /3 retries/u);
+});
+
 test("formatStatedWait uses the units a person plans by", () => {
 	deepStrictEqual([48_000, 60_000, 3_412_000, 3_600_000, 5_400_000, 7_200_000].map(formatStatedWait), [
 		"48s",
@@ -1360,6 +1430,24 @@ test("the hint row says what Enter does with the draft and never offers exit or 
 	doesNotMatch(running, /Workers dock|Queue navigator|Send now/u);
 });
 
+test("a resumed cancelled interview reads as cancelled, not as a turn with no answer", () => {
+	const row = (turnId: string, parentTurnId: string | null, role: string, payload: object) => ({
+		kind: "message",
+		turnId,
+		parentTurnId,
+		timestamp: "2026-11-05T10:00:00.000Z",
+		role,
+		payload,
+	});
+	const summary = lastTurnSummaryFromLedger([
+		row("t1", null, "user", { text: "go" }),
+		row("t2", "t1", "assistant", { text: "", stopReason: "toolUse", content: [{ type: "toolCall", name: "ask_user" }] }),
+		row("t3", "t2", "tool_result", { toolName: "ask_user", isError: false, result: { details: { cancelled: true } } }),
+		row("t4", "t3", "assistant", { text: "", stopReason: "stop", terminalToolResult: true, toolName: "ask_user" }),
+	] as never);
+	strictEqual(summary?.stopReason, "cancelled");
+});
+
 test("a cancelled interview ends the turn as cancelled, not as a success", () => {
 	strictEqual(
 		buildSummary({
@@ -1492,4 +1580,59 @@ test("a person's /run refused beside the main turn says why without a deadlock o
 		} as never) ?? "";
 	match(detail, /the main turn is using the only slot/u);
 	strictEqual(detail.includes("deadlock"), false);
+});
+
+test("a long silence states its evidence age, what is usual and the limit, and never that anything progressed", () => {
+	const at = 1_000_000;
+	const waiting = {
+		phase: "waiting_model",
+		since: at - 95_000,
+		waitingSince: at - 95_000,
+		lastMeaningfulAt: at - 95_000,
+		watchdogTier: 3,
+		watchdogPeak: 3,
+		localRuntime: false,
+		modelRequest: { sentAt: at - 95_000, firstByteAt: null, bytesObservable: true },
+	} as never;
+	const first = (history: { calls: number; slowestMs: number } | null) =>
+		silenceNoteForms(waiting, at, DEFAULT_RETRY_SETTINGS, history)?.[0] ?? "";
+	match(
+		first(null),
+		/No bytes for 1m35s, usual time for this route unknown\. Clio ends this call after 10m of silence/u,
+	);
+	// One call is not a usual.
+	match(first({ calls: 1, slowestMs: 8_000 }), /usual time for this route unknown/u);
+	match(first({ calls: 3, slowestMs: 8_000 }), /longer than usual for this route \(slowest this session 8\.0s\)/u);
+	match(first({ calls: 3, slowestMs: 180_000 }), /this route has taken up to 3m this session/u);
+	const streaming = { ...(waiting as object), phase: "writing", lastMeaningfulAt: at - 95_000 } as never;
+	match(
+		silenceNoteForms(streaming, at, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "",
+		/No new output for 1m35s.*after 3m of silence/u,
+	);
+	strictEqual(
+		silenceNoteForms(
+			{ ...(waiting as object), lastMeaningfulAt: at - 60_000 } as never,
+			at,
+			DEFAULT_RETRY_SETTINGS,
+			null,
+		),
+		null,
+	);
+	strictEqual(
+		silenceNoteForms({ ...(waiting as object), phase: "tool_running" } as never, at, DEFAULT_RETRY_SETTINGS, null),
+		null,
+	);
+});
+
+test("a write refused beside a lint that changed nothing is a blocked change, and any changed path keeps the old reading", () => {
+	const stats = new Map(
+		[
+			{ tool: "bash", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 },
+			{ tool: "write", count: 1, ok: 0, errors: 0, blocked: 1, totalDurationMs: 1 },
+		].map((stat) => [stat.tool, stat]),
+	);
+	const classify = (tool: string) => (tool === "bash" ? "execute" : "write") as never;
+	strictEqual(blockedWriteAttempts(stats, classify, 0), 1);
+	strictEqual(blockedWriteAttempts(stats, classify, 2), null);
+	strictEqual(blockedWriteAttempts(stats, classify), null);
 });

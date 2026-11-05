@@ -559,7 +559,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					: cause === "revoked"
 						? `${call} no longer needs an answer: the ask was withdrawn, and the call did not run.`
 						: `Your answer to ${call} came too late. It did not run, ${after}.`;
-		deps.appendNotice("warn", `${what} /view dispatch:${entry.runId}`);
+		deps.appendNotice("warn", `${what} /view dispatch:${entry.agentId}`);
 	};
 	const removeQueuedWorkers = (matches: (entry: WorkerEscalationEntry) => boolean): WorkerEscalationEntry[] => {
 		const removed: WorkerEscalationEntry[] = [];

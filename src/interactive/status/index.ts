@@ -35,6 +35,7 @@ export {
 } from "./summary.js";
 export {
 	resolveFooterVerb,
+	retryCountLabel,
 	spinnerFrame,
 	type VerbRender,
 } from "./verbs.js";

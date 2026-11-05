@@ -136,6 +136,8 @@ export interface EditorChrome {
 	 * indistinguishable from a dropped Enter (issue #251).
 	 */
 	getTurnPreparation?: () => TurnPreparationPhase;
+	/** How long the prompt has been held and the step taking the time, once either is worth a word. */
+	getPreparationDetail?: () => string | null;
 	/** Whether the current draft will actually steer Clio or live dispatch work on Enter. */
 	willEnterSteer?: (text: string) => boolean;
 	/** The draft is a command or a shell line, which Enter never queues for the run. */
@@ -530,8 +532,10 @@ export class ClioEditor extends Editor {
 			return shown.map((line) => `${gutter}${paint(line)}`);
 		};
 		const effect = item.effectDescription ?? item.description ?? "";
-		if (effect) rows.push(...wrapClamped(effect, (line) => theme.base("menuOption", line)));
-		if (item.nextAction) rows.push(...wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)));
+		const effectRows = effect ? wrapClamped(effect, (line) => theme.base("menuOption", line)) : [];
+		const nextRows = item.nextAction ? wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)) : [];
+		// A refused row's reason is why Enter did nothing, so a short panel keeps it over the description.
+		rows.push(...(item.disabledReason ? [...nextRows, ...effectRows] : [...effectRows, ...nextRows]));
 		return rows.slice(0, SUGGESTION_PANEL_ROWS);
 	}
 
@@ -588,8 +592,10 @@ export class ClioEditor extends Editor {
 			stateAlone = activity;
 		} else if (mode === "PREPARING" || mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
-			activity = theme.fg("harnessAction", mode === "PREPARING" ? "is preparing" : "is compacting context");
-			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? "preparing" : "compacting context");
+			const preparing = mode === "PREPARING" ? (this.chrome.getPreparationDetail?.() ?? null) : null;
+			const beside = preparing === null ? "" : ` · ${preparing}`;
+			activity = theme.fg("harnessAction", mode === "PREPARING" ? `is preparing${beside}` : "is compacting context");
+			stateAlone = theme.fg("harnessAction", mode === "PREPARING" ? `preparing${beside}` : "compacting context");
 		} else if (status) {
 			lead = theme.fg(status.token, status.live ? spinner : status.glyph);
 			activity = theme.fg(status.token, status.label);
@@ -1120,6 +1126,9 @@ export class ClioEditor extends Editor {
 				this.reopenSuggestions();
 				return;
 			}
+		} else if (acceptsSuggestion && this.isShowingAutocomplete() && this.selectedSuggestion()?.disabledReason) {
+			// A row that refuses keeps the list and the reason under it. Closing would strand a partial `/co` on the composer.
+			return;
 		} else this.suggestionsAreStale();
 		const killsText = KILL_ACTIONS.some((action) => keybindings.matches(data, action));
 		const closesSuggestions =

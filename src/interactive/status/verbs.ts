@@ -1,11 +1,30 @@
 import type { ModelAdmissionWait } from "../../core/model-admission.js";
 import { ToolNames } from "../../core/tool-names.js";
-import type { AgentStatus } from "../../session-control/status-types.js";
+import type { AgentStatus, RetryOverlay } from "../../session-control/status-types.js";
 import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 
 export interface VerbRender {
 	text: string;
 	toneHint: "normal" | "warn" | "ok" | "error" | "muted";
+}
+
+/** `3rd`, `11th`, `22nd`: how a count of waits reads, since a stated wait has no limit to count against. */
+export function ordinal(n: number): string {
+	const teens = n % 100 >= 11 && n % 100 <= 13;
+	const tail = !teens && n % 10 === 1 ? "st" : !teens && n % 10 === 2 ? "nd" : !teens && n % 10 === 3 ? "rd" : "th";
+	return `${n}${tail}`;
+}
+
+/**
+ * Where a retry stands, as the count that means something. Clio's own retries read against the limit they spend; a
+ * wait the provider asked for spends none and no limit applies, so it counts up alone, and the first says nothing.
+ */
+export function retryCountLabel(retry: RetryOverlay | undefined): string | null {
+	if (retry?.onProviderWait === true) {
+		const waits = retry.providerWaits ?? 1;
+		return waits > 1 ? `${ordinal(waits)} wait` : null;
+	}
+	return `${(retry?.attempt ?? 0) - (retry?.providerWaits ?? 0)}/${retry?.maxAttempts ?? 0}`;
 }
 
 export function spinnerFrame(frameIndex: number): string {
@@ -75,7 +94,14 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "thinking":
 			return { text: "Thinking", toneHint: "normal" };
 		case "writing":
-			return { text: status.preparingToolCall ? "Preparing tool call" : "Writing", toneHint: "normal" };
+			return {
+				text: status.preparingToolCall
+					? "Preparing tool call"
+					: status.writingCallAsText
+						? "Writing a tool call as text"
+						: "Writing",
+				toneHint: "normal",
+			};
 		case "tool_running": {
 			const name = status.tool?.toolName ?? "tool";
 			if (name === ToolNames.Dispatch) return { text: "Waiting for worker", toneHint: "normal" };
@@ -85,8 +111,9 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "tool_blocked":
 			return { text: "Needs approval", toneHint: "warn" };
 		case "retrying": {
-			const retry = status.retry;
-			return { text: `Retrying ${retry?.attempt ?? 0}/${retry?.maxAttempts ?? 0}`, toneHint: "warn" };
+			const count = retryCountLabel(status.retry);
+			const shown = count === null ? "" : status.retry?.onProviderWait === true ? ` (${count})` : ` ${count}`;
+			return { text: `Retrying${shown}`, toneHint: "warn" };
 		}
 		case "compacting":
 			return { text: "Compacting context", toneHint: "normal" };

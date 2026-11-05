@@ -462,7 +462,8 @@ export function modelSupportsThinking(
  */
 export function probeReadings(probe: ProbeResult): string[] {
 	const readings: string[] = [];
-	if (probe.models && probe.models.length > 0) readings.push(`${probe.models.length} models`);
+	if (probe.models && probe.models.length > 0)
+		readings.push(`${probe.models.length} ${probe.models.length === 1 ? "model" : "models"}`);
 	if (probe.serverVersion) readings.push(probe.serverVersion);
 	if (probe.discoveredCapabilities && Object.keys(probe.discoveredCapabilities).length > 0) {
 		readings.push("capabilities");
@@ -689,6 +690,25 @@ export function preferredModelFor(
 }
 
 /** Why a target offered no model list, in the words the screen shows. */
+/**
+ * What an operator can do about a transport failure, in place of the socket code a probe reports. A bare host is
+ * read as http, so a port that speaks only TLS looks exactly like the reset below.
+ */
+export function plainConnectionProblem(error: string): string {
+	if (/ECONNRESET|socket hang up|other side closed/iu.test(error))
+		return `the connection closed with no answer (${error}). A port that speaks only https does this, so type the https:// address if this server has one`;
+	if (/ENOTFOUND|EAI_AGAIN/u.test(error)) return `that host name does not resolve (${error})`;
+	if (/ECONNREFUSED/u.test(error)) return `nothing is listening there (${error}). Start the server or check its address`;
+	return error;
+}
+
+const UNTRUSTED_CERTIFICATE = /self.signed|certificate|\bCERT_|UNABLE_TO_VERIFY/iu;
+
+/** True when an https failure says the server answered with a certificate Clio's TLS does not trust. */
+export function isUntrustedCertificate(error: string | undefined): boolean {
+	return error !== undefined && UNTRUSTED_CERTIFICATE.test(error);
+}
+
 export function inventoryGap(
 	runtime: RuntimeDescriptor,
 	target: { url?: string | undefined },
@@ -699,8 +719,10 @@ export function inventoryGap(
 	}
 	if (!runtimeListsModelsLive(runtime))
 		return `${runtime.id} does not list its models; type the id the provider documents`;
-	const why = probeError ? ` (${probeError})` : "";
-	return `${target.url ?? runtime.id} answered no model list${why}; type the id the server serves`;
+	const where = target.url ?? runtime.id;
+	return probeError
+		? `No model list from ${where}: ${plainConnectionProblem(probeError)}`
+		: `${where} answered with no model list`;
 }
 
 export const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio", "lemonade"]);

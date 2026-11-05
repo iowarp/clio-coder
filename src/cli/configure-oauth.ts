@@ -43,13 +43,17 @@ export async function loginOAuthRuntime(
 		await auth.login(runtime.oauthProviderId ?? runtime.id, {
 			...(host ? { signal: host.signal } : {}),
 			onAuth: ({ url, instructions }) => {
+				host?.openUrl?.(url);
 				report(`\nOpen: ${url}\n`);
 				if (instructions) report(`${instructions}\n`);
-				report("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
+				if (host) host.waiting?.("Waiting for your browser sign-in…");
+				else report("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
 			},
 			onDeviceCode: ({ verificationUri, userCode }) => {
+				host?.openUrl?.(verificationUri);
 				report(`\nOpen: ${verificationUri}\n`);
 				report(`Enter code: ${userCode}\n`);
+				host?.waiting?.("Waiting for that code in your browser…");
 			},
 			onPrompt: async (prompt) => {
 				const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
@@ -84,6 +88,7 @@ export async function loginOAuthRuntime(
 		return false;
 	} finally {
 		manualCodeInput.cancel();
+		host?.waiting?.(null);
 		host?.dismissPrompt();
 	}
 }

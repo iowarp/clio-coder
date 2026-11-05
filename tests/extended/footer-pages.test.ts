@@ -357,13 +357,13 @@ test("expanded pages have identical viewport-relative height across widths and l
 			const snapshot = state();
 			for (const page of DASHBOARD_PAGES) {
 				const rows = renderDashboardPage(snapshot, page, width, height, "alt+u");
-				strictEqual(rows.length, Math.max(6, Math.min(12, height - 6)));
+				strictEqual(rows.length, Math.max(6, Math.min(height >= 30 ? 16 : 12, height - 6)));
 				ok(rows.every((row) => visibleWidth(row) <= width));
 			}
 			snapshot.dispatchRows = [];
 			strictEqual(
 				renderDashboardPage(snapshot, "Activity", width, height, "alt+u").length,
-				Math.max(6, Math.min(12, height - 6)),
+				Math.max(6, Math.min(height >= 30 ? 16 : 12, height - 6)),
 			);
 		}
 });

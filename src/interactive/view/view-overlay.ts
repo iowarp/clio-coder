@@ -720,7 +720,7 @@ export class ViewOverlayView implements Component {
 				[
 					...lines,
 					theme.fg("annotation", "No matching details."),
-					theme.fg("menuDescription", "Esc clears the filter."),
+					theme.fg("menuDescription", this.filterArrivedWithOpen ? "Esc closes." : "Esc clears the filter."),
 					theme.fg("annotation", "Try workspace: or run:"),
 				],
 				width,

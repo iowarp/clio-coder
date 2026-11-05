@@ -155,7 +155,7 @@ function formatTasksOverlayBodyLines(
 	if (!board || board.tasks.length === 0) {
 		// The empty state is one statement with its remedy on one row, so an empty board never sits above real content.
 		return {
-			lines: [collapsedSection("Agent board", "none yet, the agent declares one before multi-step work", width)],
+			lines: [collapsedSection("Agent board", "none yet, the model lists its steps here before multi-step work", width)],
 			spans: [],
 		};
 	}

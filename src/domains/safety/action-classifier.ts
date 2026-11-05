@@ -26,6 +26,22 @@ export type ActionClass =
 	| "destructive"
 	| "unknown";
 
+/** What an action class means, in words for an operator; the class itself stays in /view and the audit rows. */
+const ACTION_CLASS_WORDS: Readonly<Record<ActionClass, string>> = {
+	read: "reads files",
+	write: "writes files",
+	execute: "runs a command",
+	dispatch: "starts a worker",
+	system_modify: "changes the system",
+	git_destructive: "discards git work",
+	destructive: "deletes data",
+	unknown: "has no known effect",
+};
+
+export function actionClassWords(actionClass: string): string {
+	return ACTION_CLASS_WORDS[actionClass as ActionClass] ?? actionClass.replaceAll("_", " ");
+}
+
 export interface ClassifierCall {
 	tool: string;
 	args?: Record<string, unknown>;
