@@ -1748,6 +1748,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		dismissNotice: (key) => {
+			notifications.dismiss(key);
+		},
 		getSessionId: () => deps.chat.getSessionId(),
 		contextResult: (operation) => {
 			chatRenderer.mutate(

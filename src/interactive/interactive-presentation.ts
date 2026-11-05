@@ -185,7 +185,7 @@ export interface InteractivePresentation {
 	contextActivityStore: ContextActivityStore;
 	footer: FooterDashboardPanel;
 	notifications: NotificationCenter;
-	notify(level: InteractiveNoticeLevel, text: string, key?: string): void;
+	notify(level: InteractiveNoticeLevel, text: string, key?: string, ttlMs?: number): void;
 	dismissContextBootstrapNotices(): void;
 	announceTaskMemorySeedOffer(): void;
 	collapseWelcomeDashboard(): void;
@@ -434,8 +434,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			requestRender();
 		},
 	});
-	const notify = (level: InteractiveNoticeLevel, text: string, key?: string): void => {
-		notifications.add(key ? { level, text, key } : { level, text });
+	const notify = (level: InteractiveNoticeLevel, text: string, key?: string, ttlMs?: number): void => {
+		notifications.add({ level, text, ...(key ? { key } : {}), ...(ttlMs === undefined ? {} : { ttlMs }) });
 	};
 	const dismissContextBootstrapNotices = (): void => {
 		for (const notice of notifications.list()) {

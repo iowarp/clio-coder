@@ -22,6 +22,8 @@ import {
 export type InteractiveNoticeLevel = "info" | "success" | "warning" | "error";
 
 const WORKER_PAINT_INTERVAL_MS = 16;
+/** Long enough to read after looking away; a failed helper's record stays on the board and its turn's receipt. */
+const FAILED_HELPER_NOTICE_TTL_MS = 120_000;
 
 export interface InteractiveSubscriptionsDeps {
 	bus: TelemetryHub;
@@ -31,7 +33,7 @@ export interface InteractiveSubscriptionsDeps {
 	renderTaskIsland: () => void;
 	renderContextIsland: () => void;
 	requestRender: () => void;
-	notify: (level: InteractiveNoticeLevel, text: string, key?: string) => void;
+	notify: (level: InteractiveNoticeLevel, text: string, key?: string, ttlMs?: number) => void;
 	/**
 	 * Place or refresh a worker's transcript block. Optional only so a host
 	 * without a chat panel still gets the footer and island repaints. Without it
@@ -53,6 +55,8 @@ export interface InteractiveSubscriptionsDeps {
 	 * context its last call occupied), so a resumed card states the same spend.
 	 */
 	recordWorkerSettled?: (fields: WorkerSettledFields) => void;
+	/** Drop one notice by its key once what it reported is over. */
+	dismissNotice?: (key: string) => void;
 	/** Run record reader, injected by tests. Defaults to the run's sealed scope. */
 	readWorkerRunResult?: WorkerRunResultReader;
 	/**
@@ -84,6 +88,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	 * each attempt replaces the last and the footer ends on the terminal state.
 	 */
 	const assignmentOfRun = new Map<string, string>();
+	const failedHelperNotices = new Set<string>();
 	const helperNotice = (
 		payload: DispatchRunIdentity & { assignmentId?: string },
 		status: "working" | "completed" | "failed",
@@ -92,6 +97,12 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		if (payload.assignmentId !== undefined) assignmentOfRun.set(payload.runId, payload.assignmentId);
 		const assignment = assignmentOfRun.get(payload.runId) ?? payload.runId;
 		if (status !== "working") assignmentOfRun.delete(payload.runId);
+		// A later run makes an old helper failure history: the board keeps it, and
+		// the footer stops reading as though it were current (N02).
+		if (status === "working") {
+			for (const key of failedHelperNotices) deps.dismissNotice?.(key);
+			failedHelperNotices.clear();
+		}
 		if (
 			payload.agentAudience !== "shadow" &&
 			payload.agentAudience !== "internal" &&
@@ -99,6 +110,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			payload.requestOrigin !== "harness"
 		)
 			return;
+		if (status === "failed") failedHelperNotices.add(`helper:${assignment}`);
 		deps.notify(
 			status === "failed" ? "warning" : status === "completed" ? "success" : "info",
 			`Clio-Coder → ${sanitizeCallTargetText(payload.agentId)
@@ -107,7 +119,13 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 					letter.toUpperCase(),
 				)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
 			`helper:${assignment}`,
+			...(status === "failed" ? ([FAILED_HELPER_NOTICE_TTL_MS] as const) : []),
 		);
+	};
+	/** A request about a run is over when the run is: `cancellation requested` must not outlive it (NO06). */
+	const settleRunNotices = (runId: string): void => {
+		deps.dismissNotice?.(`dispatch-board:cancel:${runId}`);
+		deps.dismissNotice?.(`steer:${runId}`);
 	};
 	const repaint = (): void => {
 		deps.refreshFooter();
@@ -171,13 +189,18 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		// An abort settles the block provisionally; the terminal event dispatch
 		// publishes for every finalized run seals it, and that event writes the one
 		// settled row. Recording here as well left two rows per aborted run.
-		deps.bus.subscribe("run.aborted", folded(workers.aborted)),
+		deps.bus.subscribe("run.aborted", (payload) => {
+			settleRunNotices(payload.runId);
+			folded(workers.aborted)(payload);
+		}),
 		deps.bus.subscribe("run.completed", (payload) => {
+			settleRunNotices(payload.runId);
 			helperNotice(payload, "completed");
 			folded(workers.completed, recordSettled)(payload);
 			deps.onDispatchSettled?.();
 		}),
 		deps.bus.subscribe("run.failed", (payload) => {
+			settleRunNotices(payload.runId);
 			helperNotice(payload, "failed");
 			folded(workers.failed, recordSettled)(payload);
 			deps.onDispatchSettled?.();

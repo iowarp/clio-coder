@@ -117,6 +117,12 @@ function sessionTokens(display: string, width: number): string {
 	return `session ${worded} tokens${partial ? ", some calls unknown" : ""}`;
 }
 
+/** A settled rate says which call it belongs to; beside `last turn` it read as a live figure. */
+function lastCallThroughput(state: FooterDashboardRenderState): string | null {
+	const figures = formattedThroughput(clioTheme(), state.throughput, state.telemetry);
+	return figures === null ? null : labelled("last call", figures);
+}
+
 function activityPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
@@ -142,7 +148,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 			streaming ? liveTokenValue(theme, state.throughput, state.telemetry, state.context.used) : null,
 			!streaming && lastTurn ? labelled("last turn", lastTurnOutcome(theme, lastTurn)) : null,
 			!streaming && lastTurn ? lastTurnDetails(theme, lastTurn, state.telemetry) : null,
-			!streaming ? formattedThroughput(theme, state.throughput, state.telemetry) : null,
+			!streaming ? lastCallThroughput(state) : null,
 		],
 		width,
 	);
@@ -638,8 +644,8 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
-/** The widest stats a row carries, `272K/272K (100.0%) | 999 tps`. */
-const STATS_RESERVE_WIDTH = 28;
+/** The widest stats a row carries, `272K/272K (100.0%) | last 999 tps`. */
+const STATS_RESERVE_WIDTH = 33;
 
 /** Workspace and counts above; notices and active harness facts below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
@@ -654,9 +660,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const settled = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
 	const rate = state.throughput ? state.throughput.tokensPerSecond : settled?.tokensPerSecond;
 	const estimated = state.throughput ? state.throughput.estimated === true : settled?.estimated === true;
+	// A settled call's rate is history: only tokens arriving now may read as a bare rate (HF03).
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")
+			? `${settled ? theme.fg("annotation", "last ") : ""}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")}`
 			: "";
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
 	const statsCap = Math.floor(w * 0.4);
@@ -692,14 +699,18 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	);
 	const keyContext = state.keyContext ?? "send";
 	const surfaceOwnsKeys = keyContext === "surface";
-	// A tip is teaching for the composer; under a card or an overlay the slot stays
-	// with the surface's own legend, and a real notice is still shown.
-	const notice = topNotification(
-		state.notices.filter(
-			(entry) => entry.presentation !== "setting" && !(surfaceOwnsKeys && entry.text.startsWith("tip: ")),
-		),
-		state.now,
+	// The keys that answer this moment, which a tip must not cover and a notice may.
+	const immediateKeys = keyContext === "steer" || keyContext === "hold" || keyContext === "shell";
+	// A tip is teaching for the idle composer. Under a card or an overlay, or while
+	// a run holds the keys, the slot stays with what applies; a real notice still shows.
+	const liveNotices = state.notices.filter(
+		(entry) =>
+			entry.presentation !== "setting" && !((surfaceOwnsKeys || immediateKeys) && entry.text.startsWith("tip: ")),
 	);
+	const notice = topNotification(liveNotices, state.now);
+	const otherNotices = notice
+		? liveNotices.filter((entry) => entry !== notice && (entry.expiresAt === null || entry.expiresAt > state.now)).length
+		: 0;
 	const key =
 		getKeybindings()
 			.getKeys("clio-coder.status.toggle")
@@ -761,7 +772,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? theme.fg("changedValue", clean(feedback.text))
 				: surfaceOwnsKeys
 					? ""
-					: state.demoHint && !state.welcomeVisible
+					: state.demoHint && !state.welcomeVisible && !immediateKeys
 						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
 						: theme.fg(
 								"keyboardHint",
@@ -772,14 +783,16 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	// One line flattens a multi-line notice and cuts the end, which is where a
 	// remediation command sits. Name the key that opens the dashboard, whose
 	// notice panel wraps the full text.
-	const more = theme.fg("keyboardHint", ` ${key} more`);
+	const more = theme.fg("keyboardHint", ` ${key} ${otherNotices > 0 ? `+${otherNotices} more` : "more"}`);
 	// A narrow row keeps the notice itself; the hint only rides along when
 	// the notice keeps enough room to stay readable.
 	const clipped =
 		room - visibleWidth(more) >= 24 &&
 		!urgent &&
 		notice !== undefined &&
-		(notice.text.includes("\n") || visibleWidth(`${notificationGlyph(notice.level)} ${clean(notice.text)}`) > room);
+		(otherNotices > 0 ||
+			notice.text.includes("\n") ||
+			visibleWidth(`${notificationGlyph(notice.level)} ${clean(notice.text)}`) > room);
 	const line = clipped ? `${fit(message, Math.max(1, room - visibleWidth(more)))}${more}` : message;
 	if (alone) return [firstRow, fit(line)];
 	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];
