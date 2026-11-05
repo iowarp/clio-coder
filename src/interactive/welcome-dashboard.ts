@@ -552,14 +552,16 @@ export function buildWelcomeDashboardLines(
 	const git =
 		workspace === null
 			? "Checking…"
-			: !workspace.isGit
-				? "No Git repository"
-				: [
-						workspaceBranch(stats) || "Detached HEAD",
-						workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
-						...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
-						...(workspace.behind ? [`${workspace.behind} behind`] : []),
-					].join(" · ");
+			: workspace.gitUnknown === true
+				? "Git did not answer yet"
+				: !workspace.isGit
+					? "No Git repository"
+					: [
+							workspaceBranch(stats) || "Detached HEAD",
+							workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
+							...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
+							...(workspace.behind ? [`${workspace.behind} behind`] : []),
+						].join(" · ");
 	const details = [
 		...(band.length > 0 ? [...band, ""] : artFits ? [""] : []),
 		...(band.length > 0 || !artFits
