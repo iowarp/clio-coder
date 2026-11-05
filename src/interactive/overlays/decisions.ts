@@ -30,6 +30,18 @@ export interface OpenDecisionsOverlayOptions {
 	now?: () => number;
 }
 
+/**
+ * Corrections an operator typed and stepped out of with Esc, by decision. The
+ * field is the only place the text lives, so Esc used to throw it away along
+ * with the whole board; it now survives leaving the field and closing the
+ * board, and comes back the next time that decision is corrected.
+ */
+const keptCorrections = new Map<string, string>();
+
+function decisionRowKey(interviewId: string, key: string): string {
+	return `${interviewId}:${key}`;
+}
+
 interface SelectableDecision {
 	interview: DecisionLedgerEntry;
 	decision: DecisionRecord;
@@ -94,7 +106,13 @@ function interviewHeader(interview: DecisionLedgerEntry, width: number, now: num
  * one row; a superseded decision's correction beneath it; and, when expanded,
  * the question it answered, the answer, and why Clio chose it when it did.
  */
-function decisionLines(decision: DecisionRecord, selected: boolean, expanded: boolean, width: number): string[] {
+function decisionLines(
+	decision: DecisionRecord,
+	selected: boolean,
+	expanded: boolean,
+	width: number,
+	draft?: string,
+): string[] {
 	const theme = clioTheme();
 	const cursor = selectionMark(selected);
 	const status = decision.status === "active" ? theme.fg("success", GLYPH.ok) : theme.fg("annotation", GLYPH.cancelled);
@@ -113,6 +131,7 @@ function decisionLines(decision: DecisionRecord, selected: boolean, expanded: bo
 	if (decision.status === "superseded" && decision.correction) {
 		facts.push({ label: "correction", value: decision.correction });
 	}
+	if (draft !== undefined) facts.push({ label: "draft kept", value: draft });
 	if (selected && expanded) {
 		if (decision.source_question) facts.push({ label: "question", value: decision.source_question });
 		facts.push({ label: "answer", value: decision.value });
@@ -134,6 +153,7 @@ function formatDecisionsOverlayBodyLines(
 	expandedKey: string | null = null,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 	now = Date.now(),
+	editingKey: string | null = null,
 ): string[] {
 	const width = Math.max(1, Math.floor(contentWidth));
 	const theme = clioTheme();
@@ -158,8 +178,16 @@ function formatDecisionsOverlayBodyLines(
 		for (const decision of interview.decisions) {
 			const isSelected =
 				selected?.interview.interviewId === interview.interviewId && selected.decision.key === decision.key;
-			const rowKey = `${interview.interviewId}:${decision.key}`;
-			lines.push(...decisionLines(decision, isSelected, isSelected && expandedKey === rowKey, width));
+			const rowKey = decisionRowKey(interview.interviewId, decision.key);
+			lines.push(
+				...decisionLines(
+					decision,
+					isSelected,
+					isSelected && expandedKey === rowKey,
+					width,
+					rowKey === editingKey ? undefined : keptCorrections.get(rowKey),
+				),
+			);
 		}
 	}
 	return lines;
@@ -169,6 +197,8 @@ class DecisionsOverlayBody implements Component {
 	private selectedIndex = 0;
 	private expandedKey: string | null = null;
 	private correctionInput: Input | null = null;
+	/** The decision the open correction field belongs to, whose kept draft is in the field rather than under the row. */
+	private correctionKey: string | null = null;
 	private status: { kind: "ok" | "warning"; text: string } | null = null;
 
 	constructor(
@@ -186,6 +216,7 @@ class DecisionsOverlayBody implements Component {
 			this.expandedKey,
 			width,
 			this.options.now?.() ?? Date.now(),
+			this.correctionKey,
 		);
 		const theme = clioTheme();
 		if (this.correctionInput) {
@@ -236,7 +267,7 @@ class DecisionsOverlayBody implements Component {
 		const selected = rows[this.selectedIndex];
 		if (!selected) return;
 		if (matchesKey(data, "enter") || data === "\n") {
-			const key = `${selected.interview.interviewId}:${selected.decision.key}`;
+			const key = decisionRowKey(selected.interview.interviewId, selected.decision.key);
 			this.expandedKey = this.expandedKey === key ? null : key;
 			this.requestRender();
 			return;
@@ -259,14 +290,16 @@ class DecisionsOverlayBody implements Component {
 	}
 
 	footerHint(): string {
-		return this.correctionInput
-			? buildHint([{ key: "Enter", verb: "submit" }])
-			: buildHint([
-					{ key: "↑↓", verb: "select" },
-					{ key: "Enter", verb: "expand" },
-					{ key: "s", verb: "supersede" },
-					{ key: "c", verb: "correct" },
-				]);
+		if (this.correctionInput) return buildHint([{ key: "Enter", verb: "submit" }], "back, keeps draft");
+		const selected = selectableRows(this.readInterviews())[this.selectedIndex];
+		const drafted =
+			selected !== undefined && keptCorrections.has(decisionRowKey(selected.interview.interviewId, selected.decision.key));
+		return buildHint([
+			{ key: "↑↓", verb: "select" },
+			{ key: "Enter", verb: "expand" },
+			{ key: "s", verb: "supersede" },
+			{ key: "c", verb: drafted ? "resume draft" : "correct" },
+		]);
 	}
 
 	private readInterviews(): ReadonlyArray<DecisionLedgerEntry> {
@@ -279,7 +312,11 @@ class DecisionsOverlayBody implements Component {
 	}
 
 	private beginCorrection(selected: SelectableDecision): void {
+		const rowKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
 		const input = new Input();
+		input.setValue(keptCorrections.get(rowKey) ?? "");
+		// End, so a resumed draft continues where it stopped.
+		input.handleInput("\x1b[F");
 		input.onSubmit = (value) => {
 			const correction = value.trim();
 			if (correction.length === 0) {
@@ -289,13 +326,28 @@ class DecisionsOverlayBody implements Component {
 			}
 			try {
 				this.options.onCorrection(selectionFor(selected), correction);
+				keptCorrections.delete(rowKey);
 			} catch (error) {
 				this.status = { kind: "warning", text: error instanceof Error ? error.message : String(error) };
 				this.requestRender();
 			}
 		};
-		input.onEscape = () => this.options.onClose();
+		// Esc leaves the field, not the board, and what was typed stays with the decision.
+		input.onEscape = () => {
+			const draft = input.getValue();
+			this.correctionInput = null;
+			this.correctionKey = null;
+			if (draft.trim().length > 0) {
+				keptCorrections.set(rowKey, draft);
+				this.status = { kind: "ok", text: "Draft kept · c reopens it" };
+			} else {
+				keptCorrections.delete(rowKey);
+				this.status = null;
+			}
+			this.requestRender();
+		};
 		this.correctionInput = input;
+		this.correctionKey = rowKey;
 		this.status = null;
 		this.requestRender();
 	}

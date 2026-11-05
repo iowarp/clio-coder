@@ -355,14 +355,57 @@ function delegationAgentsAffordance(
 
 export { SubmenuWrapper } from "./settings-submenus.js";
 
+/**
+ * Text typed into a setting's editor and left with Esc, by editor, with the
+ * value it was typed against. Esc returns to the list without applying, and
+ * the next visit to the same editor offers the text again as long as the
+ * saved value has not moved underneath it.
+ */
+const keptSettingDrafts = new Map<string, { base: string; text: string }>();
+
+/**
+ * Fill an editor from its kept draft or its saved value, and wire Esc to keep
+ * what was typed. Returns the sentence that says a draft came back, for the
+ * editor's note, or undefined when the field shows the saved value.
+ */
+function keepDraftOnEscape(
+	key: string,
+	input: Input,
+	currentValue: string,
+	done: (val?: string) => void,
+): string | undefined {
+	const kept = keptSettingDrafts.get(key);
+	const restored = kept !== undefined && kept.base === currentValue && kept.text !== currentValue;
+	input.setValue(restored ? kept.text : currentValue);
+	input.handleInput("\x1b[F");
+	input.onEscape = () => {
+		const text = input.getValue();
+		if (text !== currentValue && text.trim().length > 0) keptSettingDrafts.set(key, { base: currentValue, text });
+		else keptSettingDrafts.delete(key);
+		done();
+	};
+	return restored
+		? `This is the text you left with Esc, not yet applied; the saved value is ${currentValue.length > 0 ? `"${currentValue}"` : "empty"}.`
+		: undefined;
+}
+
+function joinNotes(...notes: Array<string | undefined>): string | undefined {
+	const present = notes.filter((note): note is string => note !== undefined && note.length > 0);
+	return present.length > 0 ? present.join(" ") : undefined;
+}
+
+const DRAFT_EDITOR_HINT = (verb: string): string => buildHint([{ key: "Enter", verb }], "back, keeps draft");
+
 function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
-		input.setValue(currentValue);
 		input.focused = true;
-		input.onSubmit = (val) => done(val);
-		input.onEscape = () => done();
-		return new SubmenuWrapper(title, input, buildHint([{ key: "Enter", verb: "confirm" }], "back to list"), note);
+		const restored = keepDraftOnEscape(`text:${title}`, input, currentValue, done);
+		input.onSubmit = (val) => {
+			keptSettingDrafts.delete(`text:${title}`);
+			done(val);
+		};
+		return new SubmenuWrapper(title, input, DRAFT_EDITOR_HINT("confirm"), joinNotes(restored, note));
 	};
 }
 
@@ -507,13 +550,13 @@ function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBu
 	const rule = NUMBER_SETTING_RULES[id];
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
-		input.setValue(currentValue);
 		input.focused = true;
+		const restored = keepDraftOnEscape(`number:${id}`, input, currentValue, done);
 		const wrapper = new SubmenuWrapper(
 			title,
 			input,
-			buildHint([{ key: "Enter", verb: "confirm" }], "back to list"),
-			numberSettingNote(rule),
+			DRAFT_EDITOR_HINT("confirm"),
+			joinNotes(restored, numberSettingNote(rule)),
 		);
 		input.onSubmit = (val) => {
 			const outcome = parseNumberSetting(val, rule);
@@ -522,9 +565,9 @@ function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBu
 				return;
 			}
 			wrapper.setProblem(null);
+			keptSettingDrafts.delete(`number:${id}`);
 			done(outcome.value === null ? "" : val.trim());
 		};
-		input.onEscape = () => done();
 		return wrapper;
 	};
 }
@@ -552,13 +595,13 @@ function parseEnumListSetting(value: string, legal: readonly string[]): { values
 function editEnumListSubmenu(title: string, legal: readonly string[]): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
-		input.setValue(currentValue);
 		input.focused = true;
+		const restored = keepDraftOnEscape(`list:${title}`, input, currentValue, done);
 		const wrapper = new SubmenuWrapper(
 			title,
 			input,
-			buildHint([{ key: "Enter", verb: "confirm" }], "back to list"),
-			`Comma-separated, from ${legal.join(", ")}; blank activates none.`,
+			DRAFT_EDITOR_HINT("confirm"),
+			joinNotes(restored, `Comma-separated, from ${legal.join(", ")}; blank activates none.`),
 		);
 		input.onSubmit = (val) => {
 			const outcome = parseEnumListSetting(val, legal);
@@ -567,9 +610,9 @@ function editEnumListSubmenu(title: string, legal: readonly string[]): SettingSu
 				return;
 			}
 			wrapper.setProblem(null);
+			keptSettingDrafts.delete(`list:${title}`);
 			done(outcome.values.join(", "));
 		};
-		input.onEscape = () => done();
 		return wrapper;
 	};
 }
@@ -1194,23 +1237,23 @@ function thinkingChoices(
 function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSettings>): SettingSubmenuBuilder {
 	return (current, done) => {
 		const input = new Input();
-		input.setValue(current);
 		input.focused = true;
+		const restored = keepDraftOnEscape(`control:${control.path}`, input, current, done);
 		const wrapper = new SubmenuWrapper(
 			control.label,
 			input,
-			buildHint([{ key: "Enter", verb: "review" }], "back to list"),
-			controlInstructions(control, "settings"),
+			DRAFT_EDITOR_HINT("review"),
+			joinNotes(restored, controlInstructions(control, "settings")),
 		);
 		input.onSubmit = (value) => {
 			try {
 				applyControlValue(structuredClone(live()), control.path, value);
+				keptSettingDrafts.delete(`control:${control.path}`);
 				done(value);
 			} catch (error) {
 				wrapper.setProblem(error instanceof Error ? error.message : String(error));
 			}
 		};
-		input.onEscape = () => done();
 		return wrapper;
 	};
 }
