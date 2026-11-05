@@ -8,6 +8,7 @@
  * returns.
  */
 
+import { ToolNames } from "../../core/tool-names.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import type { BackgroundCall } from "../background-calls.js";
@@ -45,9 +46,15 @@ function workerElapsed(row: DispatchBoardRow): string | null {
 	return elapsed && elapsed !== "not available" ? elapsed : null;
 }
 
+/** The main agent's own dispatch outranks a run the operator started beside it. */
+function foregroundWorker(facts: LiveWorkFacts): DispatchBoardRow | undefined {
+	const blocked = facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch;
+	return (blocked ? facts.workers.find((row) => row.requestOrigin === "agent") : undefined) ?? facts.workers[0];
+}
+
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
 export function workerSummary(facts: LiveWorkFacts): string | null {
-	const first = facts.workers[0];
+	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
 	const name = sanitizeCallTargetText(first.agentId);
 	const doing = sanitizeCallTargetText(facts.workerActivity(first));
@@ -81,11 +88,14 @@ function isMainActive(status: AgentStatus): boolean {
  * can go in now, which it can unless the turn itself is waiting on this work.
  */
 export function railDetail(facts: LiveWorkFacts, width: number): string | null {
+	const worker = workerSummary(facts);
 	const background = backgroundSummary(facts, width);
-	if (background === null) return null;
+	if (worker === null && background === null) return null;
 	const waiting = facts.background.some((call) => call.blocksTurn);
 	const consequence = waiting ? "the turn waits" : isMainActive(facts.status) ? null : "you can send";
-	return [background, width >= 60 ? consequence : null].filter(Boolean).join(" · ");
+	// A worker the turn is blocked on reads straight after `is waiting for a worker`
+	// and leads whatever else is going; the consequence goes first on a short rail.
+	return [worker, background, width >= 60 ? consequence : null].filter(Boolean).join(" · ");
 }
 
 /** What Esc does in this view, and that it does not reach the run. */
