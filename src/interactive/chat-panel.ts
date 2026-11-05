@@ -1452,7 +1452,9 @@ function renderToolSegmentLines(
 		stopRequestedAt !== null && seg.executionStarted && shellActor(seg).actor !== undefined
 			? [stopSentRow(Math.max(0, nowMs - stopRequestedAt), width)]
 			: [];
-	const rows = renderToolPreview(call, width, detail, {
+	// A started process names who runs it while it runs, as its settled row does, so a stop reads `Clio is stopping`.
+	const running = seg.executionStarted ? { ...call, ...shellActor(seg) } : call;
+	const rows = renderToolPreview(stopRow.length > 0 ? { ...running, stopping: true } : running, width, detail, {
 		...options,
 		terminalRows,
 		partialResult: seg.partialResult,

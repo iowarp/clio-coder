@@ -122,6 +122,8 @@ export interface ToolExecutionStart {
 	actor?: "operator" | "harness" | undefined;
 	/** The model that asked the harness to run this call. */
 	requestedBy?: string | undefined;
+	/** A stop went out and the process has not exited yet, so the header says `stopping` rather than `running`. */
+	stopping?: boolean | undefined;
 	/** A worker card sits under this dispatch call and states its task and outcome. */
 	cardAttached?: boolean | undefined;
 	/**
@@ -916,6 +918,17 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${durationSuffix}`;
 }
 
+/** A running process whose stop already went out: its card must not keep the live mark beside a stop row. */
+function stoppingCall(call: ToolExecutionStart | ToolExecutionFinished): boolean {
+	return !("result" in call) && call.stopping === true;
+}
+
+/** The stop mark and the call's own clock, in place of the live mark while the process ignores or works through a stop. */
+function stoppingGlyph(meta: StatusMeta): string {
+	const elapsed = optionalCompactMs(meta.elapsedMs);
+	return ` ${theme.fg("warning", GLYPH.cancelled)}${elapsed === null ? "" : toolMeta(` ${elapsed}`)}`;
+}
+
 const CLASS_MARKS: Readonly<Record<ToolClass, string>> = {
 	observe: GLYPH.toolHeader,
 	search: GLYPH.toolHeader,
@@ -1206,7 +1219,9 @@ function sublineParts(
 					? "edit failed"
 					: settled
 						? row.spec.verbs[1]
-						: row.spec.verbs[0];
+						: stoppingCall(call)
+							? "stopping"
+							: row.spec.verbs[0];
 	const target = rowObject(row, finished, width, objectBudget);
 	// A call cut off before its arguments named a target still says which tool it was.
 	const object =
@@ -1252,7 +1267,9 @@ function sublineParts(
 			? cardDuration === null
 				? ""
 				: toolMeta(` · ${cardDuration}`)
-			: statusGlyph(status, meta);
+			: stoppingCall(call) && status === "running"
+				? stoppingGlyph(meta)
+				: statusGlyph(status, meta);
 	const compose = (inline: string): SublineParts =>
 		ledger !== null
 			? { lead: `${head(inline)}${ledger.facts}`, tail: `${tail}${ledger.offload}` }
@@ -2096,6 +2113,7 @@ export function renderBashTranscriptExecution(
 					elapsedMs: execution.elapsedMs,
 					excludeFromContext: execution.excludeFromContext,
 					actor: "operator",
+					...(execution.stopWaitMs !== undefined ? { stopping: true } : {}),
 				},
 				width,
 				bodyOptions.detail ?? transcriptDetail(),

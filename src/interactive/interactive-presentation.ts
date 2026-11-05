@@ -78,6 +78,10 @@ import {
 	compactionRailLabel,
 	composerPhasePresentation,
 	idleReadinessPresentation,
+	type RouteReadinessFacts,
+	routeBlockerWords,
+	type ShellSettlement,
+	shellSettledPresentation,
 } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
@@ -232,7 +236,7 @@ export interface InteractivePresentation {
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
 	announceSettingChanges(): void;
-	setLocalBashRunning(running: boolean, command?: string): void;
+	setLocalBashRunning(running: boolean, command?: string, settled?: ShellSettlement): void;
 	/** The operator asked the running shell line to stop; it has not necessarily gone yet. */
 	setLocalBashCancelling(): void;
 	getQuotaSnapshots(): QuotaProviders;
@@ -585,6 +589,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let composerEditor: ClioEditor | null = null;
 	let localBashCommand: string | null = null;
 	let localBashCancelledAt: number | null = null;
+	/** The last direct shell line, until a model turn settles after it; idle leads with it while it is the newest event. */
+	let lastShell: ShellSettlement | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
@@ -673,12 +679,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				localBashCancelledAt !== null ||
 				(footerDeps.getAgentStatus?.() ?? statusController.current()).phase === "cancelling";
 			if (stopping && text.trim().length === 0) return "stopping";
-			return draftKeyContext(
+			const context = draftKeyContext(
 				text,
 				deps.chat.isStreaming(),
 				deps.chat.turnPreparation().phase !== "idle",
 				localBashStartedAt !== null,
 			);
+			// A failed turn is the newest thing on screen until a shell line or another turn follows it.
+			return context === "idle" && lastShell === null && lastTurnSummary?.stopReason === "error" ? "recover" : context;
 		},
 		getKeyHintFacts: () => {
 			const current = deps.getSettings?.();
@@ -825,21 +833,26 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			const last = lastTurnSummary;
 			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
-			const readiness = idleReadinessPresentation(
-				{
-					targetId: route.target,
-					available: target.available,
-					reason: target.reason,
-					health: target.health.status,
-					lastStop: onRoute ? last.stopReason : null,
-					workerAnswered:
-						(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
-					...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
-				},
-				width,
-				reserved,
-				phaseModelName(status),
-			);
+			const routeFacts: RouteReadinessFacts = {
+				targetId: route.target,
+				available: target.available,
+				reason: target.reason,
+				health: target.health.status,
+				lastStop: onRoute ? last.stopReason : null,
+				workerAnswered:
+					(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
+				...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
+			};
+			if (lastShell !== null && !detail) {
+				const blocker = routeBlockerWords(routeFacts);
+				return shellSettledPresentation(
+					lastShell,
+					width,
+					reserved,
+					blocker === null ? null : `${phaseModelName(status)} ${blocker}`,
+				);
+			}
+			const readiness = idleReadinessPresentation(routeFacts, width, reserved, phaseModelName(status));
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
 			const quiet = readiness.glyph === GLYPH.queued && target.health.status === "healthy";
@@ -1249,7 +1262,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		chatRenderer,
 		io,
 		root,
-		setLocalBashRunning(running, command) {
+		setLocalBashRunning(running, command, settled) {
+			lastShell = running ? null : (settled ?? null);
 			localBashStartedAt = running ? Date.now() : null;
 			localBashCommand = running ? (command ?? null) : null;
 			localBashCancelledAt = null;
@@ -1282,6 +1296,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		toolCounts: () => footerToolCounts,
 		setLastTurnSummary: (summary) => {
 			lastTurnSummary = summary;
+			lastShell = null;
 		},
 		resetForNewSession: () => {
 			resetLoopJobs();
@@ -1291,6 +1306,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolErrors = 0;
 			footerToolTruncatedResults = 0;
 			lastTurnSummary = null;
+			lastShell = null;
 			liveGeneration = false;
 			statusController.reset();
 			// A timed notice spoke about a moment in the session that just ended; a pinned one states a condition still true.
