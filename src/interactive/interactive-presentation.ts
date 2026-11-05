@@ -712,7 +712,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		actor: modelNickname(deps.getSettings?.().chat?.model),
 		status: footerDeps.getAgentStatus?.() ?? statusController.current(),
 		// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-		workers: dispatchBoardStore.liveRows().filter((row) => !isHelperRun(row)),
+		workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
 		background: backgroundCalls.active(),
 		workerActivity: (row, room) =>
 			row.plan !== undefined
