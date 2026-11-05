@@ -296,12 +296,26 @@ export function lastTurnDetails(
 	telemetry: FooterTelemetry | undefined,
 ): string {
 	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
+	const measured = turn
+		? [
+				turn.input === null ? null : `${GLYPH.up} ${turn.input}`,
+				turn.output === null ? null : `${GLYPH.down} ${turn.output}`,
+			]
+				.filter(Boolean)
+				.join(" ")
+		: "";
+	const cache = turn
+		? [
+				turn.cacheRead === null || turn.cacheRead === "0" ? null : `cache read ${turn.cacheRead}`,
+				turn.cacheWrite === null || turn.cacheWrite === "0" ? null : `write ${turn.cacheWrite}`,
+			]
+				.filter(Boolean)
+				.join(" · ")
+		: "";
 	const parts: Array<string | null> = [
-		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
+		turn ? (measured ? theme.fg("counter", measured) : theme.fg("annotation", "usage unknown (/usage)")) : null,
 		turn ? reasoningChip(theme, turn.reasoning) : null,
-		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
-			? theme.fg("annotation", `cache read ${turn.cacheRead} · write ${turn.cacheWrite}`)
-			: null,
+		cache ? theme.fg("annotation", cache) : null,
 	];
 	if (lastTurn.toolCount > 0) {
 		const label = `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`;

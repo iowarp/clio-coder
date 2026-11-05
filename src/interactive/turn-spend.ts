@@ -62,7 +62,7 @@ function nonZero(quantity: Quantity): boolean {
  * only this: a bound such as `≥~12.9k +?` is true but unreadable on that row, and an estimate of a call that reported
  * nothing is not usage. Detailed and /usage keep the bounds.
  */
-function measuredCount(quantity: Quantity): string | null {
+export function measuredCount(quantity: Quantity): string | null {
 	const fact = quantity.fact;
 	if ("kind" in fact) return fact.kind === "measured" ? formatFooterTokens(fact.value) : null;
 	return fact.coverage.measured > 0 ? formatFooterTokens(fact.measured) : null;

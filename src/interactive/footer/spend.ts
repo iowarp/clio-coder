@@ -5,6 +5,7 @@ import { renderCompactCount, renderCount } from "../../core/telemetry/render.js"
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import { type ReasoningUsageView, reasoningFromQuantity } from "../status/reasoning.js";
+import { measuredCount } from "../turn-spend.js";
 
 /**
  * What the footer shows of the session's spend, read from the telemetry read model's live view (#434 §11.3): the
@@ -18,8 +19,18 @@ export interface FooterSpend {
 	cost: string | null;
 	/** Calls that never reached a provider, or null when there are none. */
 	neverSent: string | null;
-	/** The newest turn's tokens across every call it made, workers included, and the reasoning those calls journaled. */
-	turn: { input: string; output: string; cacheRead: string; cacheWrite: string; reasoning: ReasoningUsageView } | null;
+	/**
+	 * The newest turn's measured tokens across every call it made, workers included, and the reasoning those calls
+	 * journaled. Each amount is null when no call measured it: like the receipt, this row states only what was measured,
+	 * because a bound such as `≥~25.2k +?` is true but unreadable here, and /usage keeps it (HS21).
+	 */
+	turn: {
+		input: string | null;
+		output: string | null;
+		cacheRead: string | null;
+		cacheWrite: string | null;
+		reasoning: ReasoningUsageView;
+	} | null;
 	/** The newest main call's prompt-cache split and verdict. */
 	promptCache: { read: string; write: string; uncached: string; verdict: string } | null;
 	/** The newest main call's speed once it settles; the streaming turn's live rate is the footer's own. */
@@ -84,9 +95,9 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 		turnId === undefined
 			? null
 			: view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
-	const turnCount = (metric: FactMetric): string => {
+	const turnCount = (metric: FactMetric): string | null => {
 		const quantity = turnQuantity(metric);
-		return quantity ? renderCompactCount(quantity.fact) : "?";
+		return quantity ? measuredCount(quantity) : null;
 	};
 	const spend: FooterTelemetry = {
 		kind: "ready",
