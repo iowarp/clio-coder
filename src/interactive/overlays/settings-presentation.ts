@@ -445,9 +445,32 @@ export function renderTargetTable(
 	return { lines, starts };
 }
 
+/** A lane's title row. The lane that owns the keys has the marker, the rule and the accent; the others name Tab. */
+export function renderLaneTitle(
+	theme: ClioTheme,
+	options: { label: string; active: boolean; width: number; meta?: string; tabReaches?: boolean },
+): string {
+	const { label, active, meta, tabReaches = false } = options;
+	const width = Math.max(1, options.width);
+	if (!active) {
+		const both = [tabReaches ? "[Tab]" : "", meta ?? ""].filter(Boolean).join(" · ");
+		// A short lane keeps the key that reaches it over the note about its rows.
+		const facts = visibleWidth(label) + 4 + visibleWidth(both) <= width || !tabReaches ? both : "[Tab]";
+		return titleRow(theme, `  ${label}`, width, { token: "annotation", ...(facts ? { meta: facts } : {}) });
+	}
+	const title = `${GLYPH.laneOwner} ${label}`;
+	const tail = meta === undefined ? "" : ` ${meta}`;
+	const ruleCells = width - visibleWidth(title) - 1 - visibleWidth(tail);
+	// A rule of a cell or two is a stray mark, and a short lane keeps the title over its meta.
+	if (ruleCells < 2) return titleRow(theme, title, width, { token: "selectedOption", ...(meta ? { meta } : {}) });
+	return `${theme.style("selectedOption", title, { bold: true })} ${theme.fg("selectedOption", GLYPH.laneRule.repeat(ruleCells))}${
+		tail ? theme.fg("annotation", tail) : ""
+	}`;
+}
+
 export interface SectionLaneRow {
 	label: string;
-	/** The current section: highlighted whether or not the lane holds the cursor. */
+	/** The current section: named whether or not the lane holds the cursor, without the cursor's accent when it does not. */
 	current: boolean;
 	/** The lane holds the cursor and this row is the current one. */
 	focused: boolean;
@@ -460,7 +483,8 @@ export function renderSectionLane(theme: ClioTheme, rows: ReadonlyArray<SectionL
 		(row) =>
 			selectionRow(theme, {
 				focused: row.focused,
-				label: row.current && !row.focused ? theme.style("selectedOption", row.label, { bold: true }) : row.label,
+				...(row.current && !row.focused ? { mark: theme.fg("annotation", GLYPH.laneCurrent) } : {}),
+				label: row.current && !row.focused ? theme.style("heading", row.label, { bold: true }) : row.label,
 				...(row.badge === undefined ? {} : { meta: row.badge }),
 				width,
 			})[0] ?? "",

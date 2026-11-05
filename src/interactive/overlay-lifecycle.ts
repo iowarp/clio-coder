@@ -90,6 +90,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	busNoticeSink: Parameters<typeof import("./command-output.js").appendNotice>[2];
 	chatRenderer: { applyEvent(event: import("../session-control/chat-loop.js").ToolApprovalStateEvent): void };
 	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
+	dismissNotification?: (key: string) => void;
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
 	/** Record a dispatched fleet step's plan position for the board's phase column. */
@@ -446,6 +447,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.commitSetting ? { commitSetting: deps.app.commitSetting } : {}),
 		...(deps.app.settingOrigin ? { settingOrigin: deps.app.settingOrigin } : {}),
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
+		isTurnInFlight: () => deps.app.chat.isStreaming(),
 		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
 		...(deps.app.getRouteBreakers ? { getRouteBreakers: deps.app.getRouteBreakers } : {}),
@@ -515,6 +517,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		stderr: (text) => io.stderr(text),
 		refreshFooter: () => footer.refresh(),
 		toggleFooter: () => footer.toggleExpanded(),
+		...(deps.dismissNotification ? { dismissNotification: deps.dismissNotification } : {}),
 		renderTaskIsland: () => interactiveTickers.renderTaskIsland(),
 		requestRender: () => tui.requestRender(),
 		...(deps.app.getTaskBoard ? { getTaskBoard: deps.app.getTaskBoard } : {}),

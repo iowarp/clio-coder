@@ -1,6 +1,11 @@
 import type { ContextOperation } from "../core/context-operation.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import type { DispatchRunIdentity, DispatchStartedPayload } from "../core/telemetry/live-events.js";
+import type {
+	DispatchFailedPayload,
+	DispatchRunIdentity,
+	DispatchStartedPayload,
+} from "../core/telemetry/live-events.js";
+import { plainOutcomeLabel, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import {
@@ -10,8 +15,10 @@ import {
 	type WorkerRunResultReader,
 	type WorkerStream,
 	type WorkerStreamChange,
+	workerAskedByModel,
 } from "../session-control/worker-stream.js";
 import { showsContextResult } from "./context-operation-view.js";
+import type { NoticeSupersedeScope } from "./footer/notifications.js";
 import {
 	type WorkerRunEntryFields,
 	type WorkerSettledFields,
@@ -22,8 +29,8 @@ import {
 export type InteractiveNoticeLevel = "info" | "success" | "warning" | "error";
 
 const WORKER_PAINT_INTERVAL_MS = 16;
-/** Long enough to read after looking away; a failed helper's record stays on the board and its turn's receipt. */
-const FAILED_HELPER_NOTICE_TTL_MS = 120_000;
+/** A failover's next attempt starts within this, so a failure it overturns never reaches the footer. */
+const FAILED_RUN_NOTICE_HOLD_MS = 400;
 
 export interface InteractiveSubscriptionsDeps {
 	bus: TelemetryHub;
@@ -57,6 +64,8 @@ export interface InteractiveSubscriptionsDeps {
 	recordWorkerSettled?: (fields: WorkerSettledFields) => void;
 	/** Drop one notice by its key once what it reported is over. */
 	dismissNotice?: (key: string) => void;
+	/** A new run started: notices about earlier work stop reading as current. */
+	supersedeNotices?: (scope: NoticeSupersedeScope) => void;
 	/** Run record reader, injected by tests. Defaults to the run's sealed scope. */
 	readWorkerRunResult?: WorkerRunResultReader;
 	/**
@@ -88,37 +97,32 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	 * each attempt replaces the last and the footer ends on the terminal state.
 	 */
 	const assignmentOfRun = new Map<string, string>();
-	const failedHelperNotices = new Set<string>();
+	const heldRunFailures = new Map<string, ReturnType<typeof setTimeout>>();
 	const helperNotice = (
 		payload: DispatchRunIdentity & { assignmentId?: string; attempt?: number; lineage?: { attempt: number } },
 		status: "working" | "completed" | "failed",
 	): void => {
 		if (isContextOperationRun(payload)) return;
-		// A failover attempt is stamped internal, but the run it continues may be the operator's own and reports there.
-		if (
-			(payload.lineage?.attempt ?? payload.attempt ?? 0) > 0 &&
-			payload.agentAudience !== "shadow" &&
-			payload.agentAudience !== "internal"
-		) {
-			return;
+		const attempt = payload.lineage?.attempt ?? payload.attempt ?? 0;
+		const helper =
+			payload.agentAudience === "shadow" ||
+			payload.agentAudience === "internal" ||
+			payload.requestOrigin === "internal" ||
+			payload.requestOrigin === "harness";
+		if (payload.assignmentId !== undefined && status === "working") {
+			// The next attempt overturns the failure the last one reported.
+			clearRunFailure(payload.assignmentId);
 		}
+		// A later run makes an old failure history: the board and the dashboard keep
+		// it, and the footer stops reading as though it were current (NO01). A failover
+		// continues the same work, and background helpers say nothing about the operator's.
+		if (status === "working" && attempt === 0) deps.supersedeNotices?.(helper ? "helper" : "work");
+		// A failover attempt is stamped internal, but the run it continues may be the operator's own and reports there.
+		if (attempt > 0 && payload.agentAudience !== "shadow" && payload.agentAudience !== "internal") return;
 		if (payload.assignmentId !== undefined) assignmentOfRun.set(payload.runId, payload.assignmentId);
 		const assignment = assignmentOfRun.get(payload.runId) ?? payload.runId;
 		if (status !== "working") assignmentOfRun.delete(payload.runId);
-		// A later run makes an old helper failure history: the board keeps it, and
-		// the footer stops reading as though it were current (N02).
-		if (status === "working") {
-			for (const key of failedHelperNotices) deps.dismissNotice?.(key);
-			failedHelperNotices.clear();
-		}
-		if (
-			payload.agentAudience !== "shadow" &&
-			payload.agentAudience !== "internal" &&
-			payload.requestOrigin !== "internal" &&
-			payload.requestOrigin !== "harness"
-		)
-			return;
-		if (status === "failed") failedHelperNotices.add(`helper:${assignment}`);
+		if (!helper) return;
 		deps.notify(
 			status === "failed" ? "warning" : status === "completed" ? "success" : "info",
 			`Clio-Coder → ${sanitizeCallTargetText(payload.agentId)
@@ -127,12 +131,35 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 					letter.toUpperCase(),
 				)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
 			`helper:${assignment}`,
-			...(status === "failed" ? ([FAILED_HELPER_NOTICE_TTL_MS] as const) : []),
 		);
+	};
+	const clearRunFailure = (assignmentId: string): void => {
+		const held = heldRunFailures.get(assignmentId);
+		if (held !== undefined) clearTimeout(held);
+		heldRunFailures.delete(assignmentId);
+		deps.dismissNotice?.(`run-failed:${assignmentId}`);
+	};
+	/**
+	 * A run the operator started can fail while the transcript is somewhere else,
+	 * and nothing else speaks for it: the model reports the runs it asked for.
+	 */
+	const runFailureNotice = (payload: DispatchFailedPayload, entry: WorkerEntryState): void => {
+		if (workerAskedByModel(entry) || entry.helper === true || payload.outcome === "canceled") return;
+		const why = workerFailureHeadline(payload.outcomeDetail);
+		const text = sanitizeCallTargetText(
+			`${payload.agentId} ${plainOutcomeLabel(payload.outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${payload.runId}`,
+		);
+		const hold = setTimeout(() => {
+			heldRunFailures.delete(entry.assignmentId);
+			deps.notify("warning", text, `run-failed:${entry.assignmentId}`);
+		}, FAILED_RUN_NOTICE_HOLD_MS);
+		hold.unref?.();
+		heldRunFailures.set(entry.assignmentId, hold);
 	};
 	/** A request about a run is over when the run is: `cancellation requested` must not outlive it (NO06). */
 	const settleRunNotices = (runId: string): void => {
 		deps.dismissNotice?.(`dispatch-board:cancel:${runId}`);
+		deps.dismissNotice?.(`dispatch-board:steer:${runId}`);
 		deps.dismissNotice?.(`steer:${runId}`);
 	};
 	const repaint = (): void => {
@@ -224,7 +251,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		deps.bus.subscribe("run.failed", (payload) => {
 			settleRunNotices(payload.runId);
 			helperNotice(payload, "failed");
-			folded(workers.failed, recordSettled)(payload);
+			folded(workers.failed, (change) => {
+				recordSettled(change);
+				runFailureNotice(payload, change.entry);
+			})(payload);
 			deps.onDispatchSettled?.();
 		}),
 		deps.bus.subscribe("context.activity_changed", (event) => {
@@ -256,6 +286,8 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			disposed = true;
 			for (const unsubscribe of unsubscribers) unsubscribe();
 			if (workerPaintTimer !== null) clearTimeout(workerPaintTimer);
+			for (const held of heldRunFailures.values()) clearTimeout(held);
+			heldRunFailures.clear();
 			pendingWorkers.clear();
 		},
 	};

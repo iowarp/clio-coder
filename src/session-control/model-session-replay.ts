@@ -117,7 +117,12 @@ export function withContinuityReplay(
 	options: RehydrateChatPanelOptions,
 	session: Pick<SessionContract, "current"> | undefined,
 ): ModelReplayOptions {
-	const merged: ModelReplayOptions = { ...options, continuity: continuityContextFromSession(session) };
+	const routeTarget = session?.current()?.target;
+	const merged: ModelReplayOptions = {
+		...options,
+		...(routeTarget ? { routeTarget } : {}),
+		continuity: continuityContextFromSession(session),
+	};
 	return { ...merged, continuityBlocks: continuityReplayBlocks(resolveReplayContinuity(turns, merged)) };
 }
 

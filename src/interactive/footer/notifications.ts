@@ -18,7 +18,7 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
-import { clioTheme, GLYPH, sectionRule } from "../theme/index.js";
+import { clioTheme, formatCompactMs, GLYPH, sectionRule } from "../theme/index.js";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
@@ -27,7 +27,10 @@ export interface NotificationInput {
 	text: string;
 	/** Stable identity. Re-adding the same key replaces the existing entry. */
 	key?: string;
-	/** Override the level default. Use 0 to pin (never auto-expire). */
+	/**
+	 * Override the level default. Use 0 to pin a notice that states a condition
+	 * still true: its end is whatever clears that condition, or the operator.
+	 */
 	ttlMs?: number;
 	/** Brief setting feedback occupies the compact footer's separate value slot. */
 	presentation?: "setting";
@@ -48,13 +51,37 @@ export interface NotificationCenter {
 	add(input: NotificationInput): string;
 	dismiss(idOrKey: string): boolean;
 	dismissAll(): void;
+	/**
+	 * Later work has started, so a notice about earlier work stops reading as
+	 * current. One younger than the reading floor stays until it reaches the floor.
+	 */
+	supersede(scope: NoticeSupersedeScope): void;
 	list(now?: number): ReadonlyArray<Notification>;
+	/** Warnings and errors that ended without the operator dismissing them, newest first. */
+	ended(): ReadonlyArray<Notification>;
 	count(now?: number): number;
 	hasBlocking(now?: number): boolean;
 }
 
-/** Info and success notices fade on their own; warnings and errors persist until dismissed. */
+/** Info and success notices fade on their own. */
 const DEFAULT_INFO_TTL_MS = 12_000;
+/**
+ * A warning or an error also ends, later: long enough to read after looking
+ * away, and never a permanent claim about a moment that has passed. The dashboard
+ * keeps it afterwards. A notice stating a live condition pins with `ttlMs: 0`.
+ */
+const DEFAULT_WARNING_TTL_MS = 120_000;
+const DEFAULT_ERROR_TTL_MS = 300_000;
+/** Later work never takes a notice off the footer sooner than this after it appeared. */
+const NOTICE_READING_FLOOR_MS = 8_000;
+/** The ended warnings and errors the dashboard can still show. */
+const ENDED_NOTICE_LIMIT = 4;
+
+/** `helper` is background harness work, which ends only other helpers' notices. */
+export type NoticeSupersedeScope = "helper" | "work";
+
+/** Notices that describe one piece of finished or moved work rather than a standing condition. */
+const WORK_NOTICE_KEY = /^(?:helper|run-failed|route-move|fleet-run):/u;
 
 const SEVERITY: Record<NotificationLevel, number> = { error: 4, warning: 3, success: 2, info: 1 };
 
@@ -308,7 +335,8 @@ export function createInteractiveDesktopNotifications(
 
 function resolveExpiry(level: NotificationLevel, addedAt: number, ttlMs: number | undefined): number | null {
 	if (ttlMs !== undefined) return ttlMs <= 0 ? null : addedAt + ttlMs;
-	return level === "info" || level === "success" ? addedAt + DEFAULT_INFO_TTL_MS : null;
+	if (level === "error") return addedAt + DEFAULT_ERROR_TTL_MS;
+	return addedAt + (level === "warning" ? DEFAULT_WARNING_TTL_MS : DEFAULT_INFO_TTL_MS);
 }
 
 function isLive(entry: Notification, now: number): boolean {
@@ -342,6 +370,7 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 	const now = options.now ?? (() => Date.now());
 	const onChange = options.onChange ?? (() => {});
 	const entries: Notification[] = [];
+	const endedEntries: Notification[] = [];
 	let counter = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -372,12 +401,23 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 		timer.unref?.();
 	};
 
+	const retire = (entry: Notification): void => {
+		if (entry.level !== "warning" && entry.level !== "error") return;
+		endedEntries.unshift(entry);
+		endedEntries.length = Math.min(endedEntries.length, ENDED_NOTICE_LIMIT);
+	};
+
 	const prune = (): void => {
 		const current = now();
+		const expired: Notification[] = [];
 		for (let i = entries.length - 1; i >= 0; i -= 1) {
 			const entry = entries[i];
-			if (entry && !isLive(entry, current)) entries.splice(i, 1);
+			if (entry && !isLive(entry, current)) {
+				entries.splice(i, 1);
+				expired.push(entry);
+			}
 		}
+		for (const entry of expired.sort((a, b) => a.addedAt - b.addedAt)) retire(entry);
 	};
 
 	return {
@@ -398,6 +438,9 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 			if (entry.key !== null) {
 				const existing = entries.findIndex((candidate) => candidate.key === entry.key);
 				if (existing >= 0) entries.splice(existing, 1);
+				// The fresh notice is this subject's current word; an ended one would contradict it.
+				const ended = endedEntries.findIndex((candidate) => candidate.key === entry.key);
+				if (ended >= 0) endedEntries.splice(ended, 1);
 			}
 			entries.push(entry);
 			scheduleExpiry();
@@ -418,14 +461,39 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 			return removed;
 		},
 		dismissAll() {
-			if (entries.length === 0) return;
+			if (entries.length === 0 && endedEntries.length === 0) return;
 			entries.length = 0;
+			endedEntries.length = 0;
 			clearTimer();
 			onChange();
+		},
+		supersede(scope) {
+			const current = now();
+			let changed = false;
+			for (const entry of [...entries]) {
+				if (entry.key === null || !WORK_NOTICE_KEY.test(entry.key)) continue;
+				if (scope === "helper" && !entry.key.startsWith("helper:")) continue;
+				const floor = entry.addedAt + NOTICE_READING_FLOOR_MS;
+				if (entry.expiresAt !== null && entry.expiresAt <= floor) continue;
+				changed = true;
+				if (current < floor) entry.expiresAt = floor;
+				else {
+					entries.splice(entries.indexOf(entry), 1);
+					retire(entry);
+				}
+			}
+			if (changed) {
+				scheduleExpiry();
+				onChange();
+			}
 		},
 		list(at) {
 			const current = at ?? now();
 			return entries.filter((entry) => isLive(entry, current)).sort(bySeverityThenRecency);
+		},
+		ended() {
+			prune();
+			return [...endedEntries];
 		},
 		count(at) {
 			const current = at ?? now();
@@ -446,30 +514,49 @@ export function createNotificationCenter(options: NotificationCenterOptions = {}
 export function formatNotificationPanel(
 	entries: ReadonlyArray<Notification>,
 	width: number,
-	options: { maxRows?: number; dismissKeyLabel?: string; theme?: ClioTheme } = {},
+	options: {
+		maxRows?: number;
+		dismissKeyLabel?: string;
+		theme?: ClioTheme;
+		/** Notices that already left the footer, listed under the live ones with their age. */
+		ended?: ReadonlyArray<Notification>;
+		now?: number;
+	} = {},
 ): string[] {
-	if (entries.length === 0) return [];
+	const ended = options.ended ?? [];
+	if (entries.length === 0 && ended.length === 0) return [];
 	const theme = options.theme ?? clioTheme();
 	const maxRows = Math.max(1, options.maxRows ?? 4);
 	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
-	const lines: string[] = [
-		sectionRule(theme, width, "Notices", { meta: `${entries.length} ${entries.length === 1 ? "notice" : "notices"}` }),
-	];
-	for (const entry of entries.slice(0, maxRows)) {
+	const meta = [
+		entries.length > 0 ? `${entries.length} ${entries.length === 1 ? "notice" : "notices"}` : "",
+		ended.length > 0 ? `${ended.length} earlier` : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+	const lines: string[] = [sectionRule(theme, width, "Notices", { meta })];
+	const row = (entry: Notification, token: ClioToken, suffix: string): void => {
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));
 		const prefix = `${glyph} `;
 		const prefixWidth = visibleWidth(prefix);
 		// Same redaction as the compact line; only the one-line flattening is skipped.
 		const wrapped = wrapTextWithAnsi(
-			theme.fg("notice", redactSecretString(entry.text)),
+			theme.fg(token, `${redactSecretString(entry.text)}${suffix}`),
 			Math.max(1, width - prefixWidth),
 		);
 		lines.push(
 			...wrapped.map((line, index) => fitFooterText(`${index === 0 ? prefix : " ".repeat(prefixWidth)}${line}`, width)),
 		);
+	};
+	for (const entry of entries.slice(0, maxRows)) row(entry, "notice", "");
+	for (const entry of ended) {
+		const age = options.now === undefined ? "" : ` · ${formatCompactMs(Math.max(0, options.now - entry.addedAt))} ago`;
+		row(entry, "annotation", age);
 	}
 	const overflow = entries.length - maxRows;
 	const hint = overflow > 0 ? `+${overflow} more · ${dismiss} dismiss` : `${dismiss} dismiss`;
-	lines.push(fitFooterText(theme.fg("keyboardHint", hint), width));
+	lines.push(
+		fitFooterText(theme.fg("keyboardHint", entries.length > 0 ? hint : "/notifications dismiss all clears"), width),
+	);
 	return lines;
 }

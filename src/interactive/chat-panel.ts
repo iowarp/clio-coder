@@ -4,6 +4,7 @@ import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assist
 import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
+import { renderCalls } from "../core/telemetry/render.js";
 import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
@@ -174,6 +175,8 @@ export interface ChatPanelTurnUsage {
 export interface ReplayedRunFacts {
 	elapsedMs?: number;
 	coldReasons?: ReadonlyArray<string>;
+	/** Of `elapsedMs`, what the live run recorded waiting on the operator. */
+	humanWaitMs?: number;
 }
 
 /** What one Markdown layout of the open reply cost and how long the reply was then. */
@@ -376,6 +379,8 @@ type ThinkingSegment = {
 	finalized: boolean;
 	/** Panel clock when the first delta of this stretch arrived. */
 	startedAtMs?: number;
+	/** The stretch was streamed live and its target's history did not keep the text, so only the fact can be shown. */
+	notRetained?: true;
 };
 type ThinkingRender = { source: string; open: boolean; epoch: number; layouts: Map<string, string[]> };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
@@ -457,6 +462,8 @@ export interface ChatPanel extends Component {
 	 */
 	appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void;
 	applyEvent(event: ChatLoopEvent): void;
+	/** The target a replay's next messages ran on, from the ledger's own route changes. */
+	replayRoute?(targetId: string | null): void;
 	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
 	markToolReplayed?(toolCallId: string): void;
 	/**
@@ -490,8 +497,12 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
+	/** The target the running turn was sent to, which the wire protocol on its messages does not say. */
+	getRunTarget?: () => string | null;
 	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
 	getHumanWaitMs?: () => number;
+	/** Keeps a settled run's operator wait in the session, so its resumed receipt can split the same way. */
+	recordTurnHumanWait?: (fields: { turnId: string; humanWaitMs: number }) => void;
 	/** The telemetry read model's live view, whose turn quantities each turn's receipt reads (#434 §11.3). */
 	getTelemetry?: () => TelemetryView | null;
 	/** Live transcript detail mode. Settings changes take effect on the next frame. */
@@ -1039,6 +1050,8 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus, or
  * hidden-thinking presentation and avoids previewing reasoning content.
  */
 const THINKING_HIDDEN_LABEL = "Thinking · /view";
+/** Replayed reasoning the target's history dropped: `/view` has nothing to open, so the row offers nothing. */
+const THINKING_NOT_RETAINED_LABEL = "Thinking · streamed live, not kept";
 function dimLine(text: string, width: number): string {
 	return `${SECONDARY()}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
@@ -1131,7 +1144,8 @@ function renderTurnUsageLine(
 	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
-		const calls = spend?.calls != null && (spend.calls > 1 || retries !== null) ? `${spend.calls} calls` : null;
+		const calls =
+			spend?.calls != null && (spend.calls > 1 || retries !== null) ? renderCalls(String(spend.calls), "call") : null;
 		const rowFacts = [
 			`${outcome}${receiptDuration(usage)}`,
 			...(calls !== null || retries !== null ? [[calls, retries].filter(Boolean).join(", ")] : []),
@@ -1457,6 +1471,14 @@ function renderEntryLines(
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
+			if (seg.notRetained === true) {
+				flushReasoning("words");
+				blocks.push({
+					kind: "thinking",
+					lines: [`${REASON_RAIL()}${dimLine(THINKING_NOT_RETAINED_LABEL, Math.max(1, width - PROSE_GUTTER_WIDTH))}`],
+				});
+				continue;
+			}
 			reasoning = joinReasoning(reasoning, seg.text);
 			reasoningOpen = !seg.finalized;
 			continue;
@@ -1857,6 +1879,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * not of the resume.
 	 */
 	let replayStampMs: number | undefined;
+	let replayTarget: string | null = null;
+	const messageTarget = (): string | null =>
+		replayStampMs !== undefined ? replayTarget : (options.getRunTarget?.() ?? null);
 	const stamp = (): number => replayStampMs ?? now();
 	const currentDetail = (): TranscriptDetailPolicy => transcriptDetail(options.getOutputStyle?.());
 
@@ -2059,7 +2084,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							: Math.max(0, now() - runStartedAt);
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
-				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : 0;
+				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
+				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
+					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
+				}
 				target.turnUsage = {
 					...(turnId === undefined ? {} : { turnId }),
 					...(callIds.length > 0 ? { callIds } : {}),
@@ -2774,7 +2802,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			clearRenderCaches();
 			markDirty();
 		},
+		replayRoute(targetId: string | null): void {
+			replayTarget = targetId;
+		},
 		replayAt(timestampMs: number | undefined): void {
+			if (timestampMs === undefined) replayTarget = null;
 			replayStampMs =
 				timestampMs !== undefined && Number.isFinite(timestampMs) && timestampMs > 0 ? timestampMs : undefined;
 		},
@@ -2937,7 +2969,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const respondedModel = (event.message as { model?: unknown }).model;
 				if (typeof respondedModel === "string" && respondedModel.length > 0)
 					requestingModel = modelNickname(respondedModel);
-				const model = assistantModelLabel(event.message);
+				const model = assistantModelLabel(event.message, messageTarget());
 				if (model !== null && !assistant.models?.includes(model)) {
 					assistant.models ??= [];
 					assistant.models.push(model);
@@ -3122,14 +3154,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
 						: extractedTerminalError;
 				const reports = !willRetry && reportsCall(event.message);
-				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && !reports) {
+				const notRetained =
+					(event.message as { clioCoderReasoningNotRetained?: unknown }).clioCoderReasoningNotRetained === true;
+				if (text.length === 0 && thinking.length === 0 && !notRetained && terminalError.length === 0 && !reports) {
 					if (completedStreamedArgs) markDirty();
 					return;
 				}
 				const assistant = ensureAssistant();
 				// message_end rewrites exactly one entry: the assistant it lands on.
 				invalidateEntryCache(assistant);
-				const model = assistantModelLabel(event.message);
+				const model = assistantModelLabel(event.message, messageTarget());
 				if (model !== null && !assistant.models?.includes(model)) {
 					assistant.models ??= [];
 					assistant.models.push(model);
@@ -3147,7 +3181,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// produced, rather than a marker dangling after the answer.
 				const messageCompleted = messageStopCompleted((event.message as { stopReason?: unknown }).stopReason);
 				closeOpenThinking(assistant, messageCompleted);
-				if (thinking.length > 0) {
+				if (thinking.length > 0 || notRetained) {
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
 					const streamedThisMessage = assistant.segments
 						.slice(messageStart)
@@ -3159,6 +3193,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							text: messageCompleted ? thinking : holdCutOffText(thinking),
 							at: stamp(),
 							finalized: true,
+							...(thinking.length === 0 ? { notRetained: true as const } : {}),
 						});
 					}
 				}

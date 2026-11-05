@@ -40,7 +40,7 @@ import {
 import { fitIdentityLabel, modelNickname } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
-import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
+import { formatNotificationPanel, notificationGlyph, notificationToken, topNotification } from "./notifications.js";
 import type { FooterTelemetry } from "./spend.js";
 import {
 	activeTaskLine,
@@ -191,7 +191,15 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	]
 		.filter((part): part is string => part !== null)
 		.join(" · ");
-	const lines = [headline, session, sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) })];
+	const liveNotices = state.notices.filter((notice) => notice.presentation !== "setting");
+	const notices = formatNotificationPanel(liveNotices, width, {
+		maxRows: liveNotices.length,
+		ended: state.endedNotices ?? [],
+		now: state.now,
+		...(state.dismissKeyLabel ? { dismissKeyLabel: state.dismissKeyLabel } : {}),
+		theme,
+	});
+	const lines = [headline, session, ...notices, sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) })];
 	if (rows.length === 0) {
 		lines.push(
 			...emptyState(theme, "No workers yet.", width, {

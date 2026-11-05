@@ -636,7 +636,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 }
 
 /** `2/2 steps`, then the first step that failed. Unsettled steps are not counted as anything yet. */
-export function planProgressText(plan: FleetPlanRunView): string {
+function planProgressText(plan: FleetPlanRunView): string {
 	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
 	const failed = plan.steps.find((step) => step.state === "failed");
 	const count = `${plan.state === "running" ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps`;
@@ -656,7 +656,7 @@ const PLAN_STEP_MARKS: Record<
 };
 
 /** One row per step: state first, because the step's name and command are what a narrow row can lose. */
-export function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number): string[] {
+function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number): string[] {
 	const nameWidth = Math.max(...plan.steps.map((step) => visibleWidth(step.stepId)));
 	return plan.steps.map((step) => {
 		const mark = PLAN_STEP_MARKS[step.state];

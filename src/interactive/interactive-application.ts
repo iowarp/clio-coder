@@ -60,7 +60,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
-import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
+import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
 import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
@@ -763,6 +763,20 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		: undefined;
 	const presentation = createInteractivePresentation({
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
+		recordTurnHumanWait: (fields) => {
+			try {
+				if (!deps.session?.current()) return;
+				deps.session.appendEntry({
+					kind: "custom",
+					customType: TURN_HUMAN_WAIT_ENTRY,
+					parentTurnId: deps.session.tree().leafId ?? null,
+					display: false,
+					data: fields,
+				});
+			} catch {
+				// Best effort; a resumed receipt then states the total without the split.
+			}
+		},
 		bus: deps.bus,
 		getLifecycleHint: () => updateMonitor?.text() ?? null,
 		getLeaderArmed: () => leaderArmed,
@@ -1064,11 +1078,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		requestRender: () => tui.requestRender(),
 		notify,
 		dismissNotification: (key) => notifications.dismiss(key),
-		dismissHelperNotifications: () => {
-			for (const notice of notifications.list()) {
-				if (notice.key?.startsWith("helper:")) notifications.dismiss(notice.id);
-			}
-		},
+		supersedeWorkNotifications: () => notifications.supersede("work"),
 		appendTranscriptNotice: (level, text, source) => appendNotice(level, text, busNoticeSink, source),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
@@ -1472,6 +1482,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		}
 	};
 	overlayLifecycle = createOverlayLifecycle({
+		dismissNotification: (key) => notifications.dismiss(key),
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getDispatchRows: () => dispatchBoardStore.workerRows(),
 		app: { ...deps, ...settingActions },
@@ -1765,6 +1776,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const interactiveSubscriptions = createInteractiveSubscriptions({
 		bus: deps.bus,
+		supersedeNotices: (scope) => notifications.supersede(scope),
 		dismissNotice: (key) => {
 			notifications.dismiss(key);
 		},

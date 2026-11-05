@@ -84,6 +84,14 @@ export interface TargetIdentity {
 	modelId: string | null | undefined;
 }
 
+/** The effective route in the spelling the header and dashboards use, or null while either half is unknown. */
+export function exactRouteLabel(route: TargetIdentity | string): string | null {
+	if (typeof route === "string") return sanitizeCallTargetText(route) || null;
+	const target = sanitizeCallTargetText(route.targetId ?? "");
+	if (!target || !route.modelId) return null;
+	return `${fitIdentityLabel(target, MODEL_ID_LABEL_WIDTH)} · ${abbreviateModelId(route.modelId)}`;
+}
+
 /** The activity rail names the model family/version; inspection retains the wire id. */
 export function modelNickname(modelId: string | null | undefined): string {
 	const raw = sanitizeCallTargetText(modelId ?? "");
@@ -222,4 +230,13 @@ function accountHome(): string | null {
 		}
 	}
 	return cachedAccountHome;
+}
+
+/**
+ * The composer rail's room while it states the harness. The left stretch gives way as the terminal narrows, because at
+ * 40 columns the state and the way out need those cells more than the composer's shape does.
+ */
+export function statusRailLabelRoom(width: number): number {
+	const stretch = Math.min(16, Math.max(3, 3 + Math.floor(((width - 40) * 13) / 40)));
+	return Math.max(1, width - stretch - 3);
 }

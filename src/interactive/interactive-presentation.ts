@@ -132,6 +132,7 @@ export interface InteractivePresentationDeps {
 	resources?: Pick<ResourcesContract, "skillsForDisplay" | "promptsForDisplay">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
+	recordTurnHumanWait?: (fields: { turnId: string; humanWaitMs: number }) => void;
 	jobs?: Pick<JobOperations, "list" | "subscribe">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
@@ -366,10 +367,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	if (deps.startsResumed === true) banner.collapseToSessionHeader();
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
+		getRunTarget: () => deps.chat.lastRunSnapshot?.()?.targetId ?? null,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
+		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.
@@ -545,6 +548,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
+		getEndedNotifications: () => notifications.ended(),
 		getBackgroundCalls: () => backgroundCalls.active(),
 		getKeyContext: () => {
 			if (dockTop(deps.tui) !== null || composerEditor?.isShowingAutocomplete()) return "surface";
@@ -603,18 +607,26 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
 		getModelLabel: () => {
-			const current = deps.getSettings?.();
+			const route = deps.getSettings?.().chat;
+			// A route with no model of its own runs on its target's default, which the rail has to name.
+			const modelId =
+				route?.model ?? deps.providers.list().find((entry) => entry.target.id === route?.target)?.target.defaultModel;
 			// Keep raw fields separate through the terminal-lease proxy until render knows its width.
-			return { targetId: current?.chat?.target, modelId: current?.chat?.model };
+			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width) => {
+		getHarnessStatus: (width, reserved = 0, identityCells) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
+				// Once a request is out the rail names the model it went to, whatever route was picked since.
+				const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
+				const name = modelNickname(out ?? route?.model);
+				const presented = composerPhasePresentation(status, width, Date.now(), name, undefined, reserved, identityCells);
 				return {
-					...composerPhasePresentation(status, width, Date.now(), modelNickname(route?.model)),
+					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
+					...presented,
 					...(detail ? { detail } : {}),
 				};
 			}
@@ -633,6 +645,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					lastStop: onRoute ? last.stopReason : null,
 				},
 				width,
+				reserved,
+				identityCells,
 			);
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.

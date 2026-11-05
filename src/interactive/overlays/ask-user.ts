@@ -643,7 +643,15 @@ class AskUserOverlayView implements Component {
 		if (left === null) return [];
 		const remaining = formatUnattendedRemaining(left);
 		if (!headers) {
-			const short = `${GLYPH.warn} ${remaining} then ${this.unattendedOutcomeShort()} · key holds`;
+			// The outcome is what gives way: a long option's label must not cut the time or the key that stops it.
+			const frame = `${GLYPH.warn} ${remaining} then  · key holds`;
+			const outcome = truncateToWidth(
+				this.unattendedOutcomeShort(),
+				Math.max(1, width - visibleWidth(frame)),
+				GLYPH.ellipsis,
+				false,
+			);
+			const short = `${GLYPH.warn} ${remaining} then ${outcome} · key holds`;
 			return [fitRow(theme.fg("warning", short), width)];
 		}
 		return wrapTextWithAnsi(
@@ -934,7 +942,7 @@ class AskUserOverlayView implements Component {
 	private renderKeyLegend(width: number, maxRows: number): string[] {
 		if (this.railRoom <= 0) return [];
 		const entries = this.railEntries();
-		const { kept } = fitHintEntryList(entries, this.railRoom);
+		const kept = this.railKept(entries, this.railRoom);
 		const dropped = entries.filter((entry) => !kept.includes(entry));
 		if (dropped.length === 0) return [];
 		const text = fitHintEntries(dropped, Math.max(1, width * maxRows - (maxRows - 1) * 8));
@@ -1022,18 +1030,24 @@ class AskUserOverlayView implements Component {
 		return buildHint(entries, escVerb);
 	}
 
-	/** The rail's order: the last entry always survives a narrow rail, and that must be the key that records. */
+	/** The rail's order: the verb that records leads, and the way out closes it. */
 	private railEntries(): HintEntry[] {
 		const { entries, escVerb } = this.hintEntries();
 		const record = entries.at(-1);
 		if (!record) return [{ key: "Esc", verb: escVerb }];
-		return [...entries.slice(0, -1), { key: "Esc", verb: escVerb }, record];
+		return [record, ...entries.slice(0, -1), { key: "Esc", verb: escVerb }];
+	}
+
+	/** The shared rule lets the way out stand last, but a rail with room for one key here keeps the key that records. */
+	private railKept(entries: ReadonlyArray<HintEntry>, cells: number): HintEntry[] {
+		const { kept } = fitHintEntryList(entries, cells);
+		const primary = entries[0];
+		return primary === undefined || kept.includes(primary) ? kept : [primary];
 	}
 
 	/** The rail hint for a rail of `cells`; the legend in the body draws what this drops. */
 	railHint(cells: number): string {
-		const entries = this.railEntries();
-		const fitted = fitHintEntries(entries, cells);
+		const fitted = fitHintEntries(this.railKept(this.railEntries(), cells), cells);
 		const withDrag = `${fitted} · drag to select/copy`;
 		return visibleWidth(withDrag) <= cells ? withDrag : fitted;
 	}

@@ -1,5 +1,5 @@
 /** Recorded response provenance, independent of the session's current route. */
-export function assistantModelLabel(message: unknown): string | null {
+export function assistantModelLabel(message: unknown, targetId?: string | null): string | null {
 	if (message === null || typeof message !== "object" || Array.isArray(message)) return null;
 	const record = message as Record<string, unknown>;
 	const clean = (value: unknown): string | null =>
@@ -11,6 +11,7 @@ export function assistantModelLabel(message: unknown): string | null {
 			: null;
 	const model = clean(record.model);
 	if (model === null) return null;
-	const provider = clean(record.provider);
+	// A message records the wire protocol as its provider. The target is what the operator chose and the rail names.
+	const provider = clean(targetId) ?? clean(record.provider);
 	return provider === null ? model : `${provider} · ${model}`;
 }

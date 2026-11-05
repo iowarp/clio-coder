@@ -64,6 +64,8 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
  * context is built from message entries, and this is never one.
  */
 export const OPERATOR_COMMAND_ENTRY = "operatorCommand";
+/** Session entry holding a settled run's operator wait, which replay has no other way to know. Never model context. */
+export const TURN_HUMAN_WAIT_ENTRY = "turnHumanWait";
 
 /** An operator command line as the transcript echoes it, live and on replay. */
 export function renderOperatorCommandRows(text: string, width: number): string[] {

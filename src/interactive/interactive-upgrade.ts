@@ -14,7 +14,7 @@ export type InteractiveUpgradeNoticeLevel = "info" | "success" | "warning" | "er
 export interface InteractiveUpgradeFlowDeps {
 	runningVersion: string;
 	openAskUser: AskUserHandler;
-	notify(level: InteractiveUpgradeNoticeLevel, text: string, key?: string): void;
+	notify(level: InteractiveUpgradeNoticeLevel, text: string, key?: string, ttlMs?: number): void;
 	/**
 	 * Scrollback copy of an outcome the operator has to act on. The footer shows
 	 * one line and cut the manager command off; the transcript keeps it whole.
@@ -218,7 +218,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				deps.signal.throwIfAborted();
 				deps.dismissUpdateHint();
 				const restartNotice = `Clio Coder ${result.to} is installed. Restart before the next turn; your current session is saved and available through /resume.`;
-				deps.notify("warning", restartNotice, "lifecycle:restart-required");
+				deps.notify("warning", restartNotice, "lifecycle:restart-required", 0);
 				deps.record?.("warn", restartNotice);
 				const restart = await deps.openAskUser([
 					{

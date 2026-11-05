@@ -917,6 +917,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						attempt?.stage("send", "start");
 						state.modelRequest = {
 							sentAt: Date.now(),
+							modelId: currentModel.id,
 							firstByteAt: null,
 							bytesObservable: tracking.observesResponses(),
 						};
@@ -1418,7 +1419,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let runStartMessageCount = 0;
 
 		const onAgentEvent = async (event: AgentEvent): Promise<void> => {
-			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
+			if (event.type === "agent_start") {
+				runIdentity = deps.turnIdentity?.();
+				// The last run's request says nothing about this one until this one is sent.
+				state.modelRequest = null;
+			}
 			if (event.type === "agent_end") await abandonModelCall();
 			if (!currentRun()) {
 				if (event.type === "message_end" && event.message.role === "assistant") await settleModelCall(event.message);
