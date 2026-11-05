@@ -40,7 +40,7 @@ same server in `.clio-coder/mcp.yaml`; it then needs
 shows every declaration with its scope, trust, and action class. See
 [local stdio MCP configuration and trust](configuration-reference.md).
 
-`clio-coder doctor` reports the pieces. See [Doctor rows](#doctor-rows).
+`clio-coder doctor --verbose` reports the pieces. See [Doctor rows](#doctor-rows).
 
 ## The five capabilities
 
@@ -129,7 +129,9 @@ falls back to `sbatch` through `bash`.
 `clio-coder doctor` runs `slurmMcpFindings` and never fails because of it: every
 row is informational, OK, or a warning. On an install with none of `clio-kit`,
 `sbatch`, `squeue`, or a Slurm declaration there is one informational
-`slurm mcp` row that says nothing is set up. Otherwise there are three rows:
+`slurm mcp` row that says nothing is set up. Otherwise there are three rows. The
+text report folds them into one while none of them needs attention, and a row
+with a warning keeps its own line; `clio-coder doctor --verbose` prints all three:
 
 | Row | What it reports |
 | --- | --- |
