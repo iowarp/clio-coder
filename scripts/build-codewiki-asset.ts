@@ -6,20 +6,18 @@
  * This runs the same model-free, deterministic indexer as `clio-coder context
  * index` (tree-sitter wasm plus regex fallbacks; byte-identical across runs)
  * and serializes the result straight into dist/assets/. The file set is what
- * `npm pack` will ship, read through npm's official packlist and actual
- * dependency tree without compressing a throwaway tarball. Every entry names a
- * file the installed package actually contains. The API pins mirror Node 22's
- * bundled npm and must move with it. It never reads or writes
+ * `npm pack --dry-run` reports, so every entry names a file the installed
+ * package actually contains. Asking npm costs a few seconds per build and keeps
+ * npm's own dependency tree out of this repository. It never reads or writes
  * `.clio-coder/`: a found, cached, or checked-in index would describe some
  * other tree, and `state.json` carries timestamps and mtimeMs fingerprints
  * that must never enter the tarball. Wired into `pnpm run build` after tsup so
  * the grammars it loads are the vendored ones.
  */
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import Arborist from "@npmcli/arborist";
-import packlist from "npm-packlist";
 import { serializeCodewiki } from "../src/domains/context/codewiki/artifact.js";
 import { buildCodewiki } from "../src/domains/context/codewiki/indexer.js";
 import { detectProjectProfile } from "../src/domains/session/workspace/project-type.js";
@@ -29,9 +27,17 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const target = join(root, "dist", "assets", "codemap.json");
 const startedAt = performance.now();
 
-const tree = await new Arborist({ path: root }).loadActual();
-const packOptions = { path: root, prefix: root };
-const packed = new Set(await packlist(tree, packOptions));
+const report = JSON.parse(
+	execFileSync("npm", ["pack", "--dry-run", "--json"], {
+		cwd: root,
+		encoding: "utf8",
+		maxBuffer: 64 * 1024 * 1024,
+		// npm is a .cmd on Windows, which execFile cannot start without a shell.
+		shell: process.platform === "win32",
+		stdio: ["ignore", "pipe", "ignore"],
+	}),
+)[0] as { files: { path: string }[] };
+const packed = new Set(report.files.map((file) => file.path));
 
 const profile = detectProjectProfile(root);
 const codewiki = await buildCodewiki(
