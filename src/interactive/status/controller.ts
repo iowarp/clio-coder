@@ -33,6 +33,8 @@ export interface StatusController {
 	 * would otherwise open reporting work it never did.
 	 */
 	reset(): void;
+	/** An allowed call has left its approval card, so its clock starts now. */
+	noteToolResumed(toolCallId: string): void;
 	dispose(): void;
 }
 
@@ -276,6 +278,9 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			return () => {
 				listeners.delete(listener);
 			};
+		},
+		noteToolResumed(toolCallId) {
+			apply({ type: "tool_resumed", toolCallId });
 		},
 		reset() {
 			if (disposed) return;

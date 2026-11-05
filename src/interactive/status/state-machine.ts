@@ -73,6 +73,12 @@ export interface SubmitSettledStatusEvent {
 	type: "submit_settled";
 }
 
+/** The operator allowed a parked call, so it starts executing only now. */
+export interface ToolResumedStatusEvent {
+	type: "tool_resumed";
+	toolCallId: string;
+}
+
 /** The cancelled submit has returned, so nothing of the turn is still running. */
 export interface CancelSettledStatusEvent {
 	type: "cancel_settled";
@@ -88,7 +94,8 @@ export type StatusInputEvent =
 	| DispatchProgressStatusEvent
 	| SubmitAcceptedStatusEvent
 	| SubmitSettledStatusEvent
-	| CancelSettledStatusEvent;
+	| CancelSettledStatusEvent
+	| ToolResumedStatusEvent;
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
 const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
@@ -584,6 +591,18 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 				tool,
 				toolStartedAt: ctx.now,
 				activeTools: [...(prev.activeTools ?? []).filter((active) => active.toolCallId !== event.toolCallId), tool],
+			};
+		}
+		case "tool_resumed": {
+			// The engine started this call before it parked on the card; time on the card is not time running.
+			const restart = (tool: ToolOverlay): ToolOverlay =>
+				tool.toolCallId === event.toolCallId ? { ...tool, startedAt: ctx.now } : tool;
+			const current = prev.tool?.toolCallId === event.toolCallId;
+			return {
+				...prev,
+				...(prev.tool ? { tool: restart(prev.tool) } : {}),
+				...(current ? { toolStartedAt: ctx.now } : {}),
+				...(prev.activeTools ? { activeTools: prev.activeTools.map(restart) } : {}),
 			};
 		}
 		case "retry_status": {

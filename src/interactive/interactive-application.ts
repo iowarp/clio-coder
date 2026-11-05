@@ -1486,6 +1486,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	overlayLifecycle = createOverlayLifecycle({
 		dismissNotification: (key) => notifications.dismiss(key),
+		onToolResumed: (toolCallId) => statusController.noteToolResumed(toolCallId),
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getDispatchRows: () => dispatchBoardStore.workerRows(),
 		app: { ...deps, ...settingActions },
