@@ -67,7 +67,12 @@ export interface ApprovalRequestView {
 	 * it, and whether the main agent asked for it. The card names both so the
 	 * operator knows whose request they are answering.
 	 */
-	workerGrant?: { authority: "main" | "operator"; forwardedByMain: boolean };
+	workerGrant?: {
+		authority: "main" | "operator";
+		forwardedByMain: boolean;
+		/** The safety judge held this request and passed it on: changed git hooks are the person's call. */
+		fromJudge?: boolean;
+	};
 	/** What an unanswered worker ask becomes, so the card can say so before it happens. */
 	workerFallback?: "deny" | "fail";
 }

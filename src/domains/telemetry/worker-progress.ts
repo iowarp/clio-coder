@@ -127,18 +127,27 @@ export interface WorkerProgressSnapshot {
 	completed?: boolean;
 }
 
+export type WorkerApprovalDecider = "operator" | "main" | "judge";
+
 export interface WorkerApprovalWindowFacts {
 	/** Epoch milliseconds. */
 	expiresAt: number;
 	held: boolean;
 	fallback: "deny" | "fail";
+	/** Who the ask waits on now, because a brokered ask reaches the person only if it is passed on. */
+	decider: WorkerApprovalDecider;
 }
 
 function approvalWindowFacts(payload: unknown): WorkerApprovalWindowFacts | null {
 	if (typeof payload !== "object" || payload === null) return null;
-	const { expiresAt, held, fallback } = payload as Record<string, unknown>;
+	const { expiresAt, held, fallback, decider } = payload as Record<string, unknown>;
 	if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
-	return { expiresAt, held: held === true, fallback: fallback === "fail" ? "fail" : "deny" };
+	return {
+		expiresAt,
+		held: held === true,
+		fallback: fallback === "fail" ? "fail" : "deny",
+		decider: decider === "main" || decider === "judge" ? decider : "operator",
+	};
 }
 
 export interface WorkerProgressFold {

@@ -1013,7 +1013,7 @@ test("a worker's wait states when it ends, what happens then, and that it is hel
 		payload: { requestId: "ask", held: false, expiresAt: 119_000, fallback: "deny" },
 	});
 	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · denied in 1:59");
-	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, narrow: true }), "your approval · denied in 1:59");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, room: 30 }), "your approval · denied in 1:59");
 	fold.observe({
 		type: "clio_coder_permission_window",
 		payload: { requestId: "ask", held: true, expiresAt: 822_000, fallback: "fail" },
@@ -1064,11 +1064,25 @@ test("a key on a worker card holds that ask, restarts the ones queued behind it,
 	const windows = new Map([
 		[
 			"first",
-			{ held: false, remainingMs: 100_000, ceilingMs: 900_000, ceilingRemainingMs: 880_000, fallback: "deny" as const },
+			{
+				held: false,
+				remainingMs: 100_000,
+				ceilingMs: 900_000,
+				ceilingRemainingMs: 880_000,
+				fallback: "deny" as const,
+				decider: "operator" as const,
+			},
 		],
 		[
 			"second",
-			{ held: false, remainingMs: 90_000, ceilingMs: 900_000, ceilingRemainingMs: 870_000, fallback: "deny" as const },
+			{
+				held: false,
+				remainingMs: 90_000,
+				ceilingMs: 900_000,
+				ceilingRemainingMs: 870_000,
+				fallback: "deny" as const,
+				decider: "operator" as const,
+			},
 		],
 	]);
 	const readers: Array<() => { remainingMs: number; held: boolean } | null> = [];
@@ -1144,7 +1158,7 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		phase: "tool",
 		currentAction: null,
 		awaitingApproval: true,
-		approvalWindow: { expiresAt: 119_000, held: false, fallback: "deny" },
+		approvalWindow: { expiresAt: 119_000, held: false, fallback: "deny", decider: "operator" },
 	} as unknown as WorkerProgressSnapshot;
 	const facts = (width: number) =>
 		railDetail(
@@ -1152,7 +1166,7 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 				actor: "Judge-model",
 				status: INITIAL_STATUS,
 				workers: [{ agentId: "coder", status: "running", progress } as DispatchBoardRow],
-				workerActivity: (row, room) => workerActivityWords(row.progress ?? progress, { now: 0, narrow: room < 72 }),
+				workerActivity: (row, room) => workerActivityWords(row.progress ?? progress, { now: 0, room }),
 				background: [],
 				now: 0,
 			},

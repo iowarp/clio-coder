@@ -463,10 +463,12 @@ function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
 }
 
 /** The running call as `verb object`, or its tool name when the runtime sent no descriptor. */
-function describedAction(entry: WorkerEntryState): string | null {
+function describedAction(entry: WorkerEntryState, room?: number): string | null {
 	const action = entry.progress?.currentAction;
 	if (action === null || action === undefined) return null;
-	if (entry.progress?.awaitingApproval === true) return approvalWaitWords(entry.progress);
+	if (entry.progress?.awaitingApproval === true) {
+		return approvalWaitWords(entry.progress, room === undefined ? {} : { room });
+	}
 	const parts = workerActionParts(action, "running");
 	return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
 }
@@ -577,7 +579,11 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
  * moves the elapsed.
  */
 function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, includeTimer = true): string {
-	const action = describedAction(entry);
+	const elapsed = entry.telemetry?.activity.elapsed.display;
+	// The wait's words shorten to leave the clock beside them, because a cut here would lose the time left.
+	const waitRoom =
+		width - RAIL_WIDTH - 2 - (!includeTimer || elapsed === undefined ? 0 : elapsed.length + SEPARATOR.length);
+	const action = describedAction(entry, waitRoom);
 	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
 	const answer =
 		entry.helper || action !== null
@@ -585,7 +591,6 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 			: answerText(entry, stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
 	const doing =
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
-	const elapsed = entry.telemetry?.activity.elapsed.display;
 	const tokens = entry.telemetry?.row.tokens.display;
 	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
 	const calls = entry.telemetry?.activity.toolCalls.display;
@@ -602,7 +607,7 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const prefix =
 		action === null
 			? `${glyph} ${idle}`
-			: `${GLYPH.phaseTool} ${entry.progress?.awaitingApproval === true ? approvalWaitWords(entry.progress) : current ? workerActionParts(current, "running").verb : ""}`;
+			: `${GLYPH.phaseTool} ${entry.progress?.awaitingApproval === true ? action : current ? workerActionParts(current, "running").verb : ""}`;
 	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
 	const styledActivity = (shown: string): string => {
 		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);

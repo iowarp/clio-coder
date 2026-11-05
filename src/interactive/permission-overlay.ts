@@ -226,6 +226,7 @@ function workerGrantAuthority(view: ApprovalRequestView): string | null {
 	if (grant.authority === "operator") {
 		return "operator only. This rail is not the main agent's to grant; your answer decides it.";
 	}
+	if (grant.fromJudge === true) return "yours alone. Git hooks changed, so the safety judge does not decide this call.";
 	return grant.forwardedByMain
 		? "the main agent approved this worker request and, below yolo, asks you to decide."
 		: "the main agent may decide this ordinary worker request.";

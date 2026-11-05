@@ -1,4 +1,8 @@
-import type { WorkerAction, WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
+import type {
+	WorkerAction,
+	WorkerApprovalDecider,
+	WorkerProgressSnapshot,
+} from "../domains/telemetry/worker-progress.js";
 import { GLYPH } from "./theme/index.js";
 import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
@@ -112,22 +116,40 @@ export function workerActionParts(action: WorkerAction, tense: "running" | "fini
 	return object.length > 0 ? { verb, object, tool } : { verb, object: tool, tool: null };
 }
 
+/** Who the wait is on, longest first. The person's own wait names no one, because `your` already does. */
+const APPROVAL_WAITERS: Readonly<Record<WorkerApprovalDecider, readonly [string, string, string]>> = {
+	operator: [WAITING_FOR_APPROVAL, "your approval", "asks you"],
+	main: ["waiting for the main agent", "main agent", "main agent"],
+	judge: ["waiting for the safety judge", "safety judge", "safety judge"],
+};
+
 /**
  * Whose wait this is, when it ends and what happens then, because nothing else
  * on a dock or rail says the ask has an end. Without a window the wait has no
- * end this process knows of, so it states none.
+ * end this process knows of, so it states none. `room` picks the longest form
+ * that fits, and the time left is the last thing to survive, because a row cut
+ * mid-sentence would drop exactly that.
  */
 export function approvalWaitWords(
 	progress: Pick<WorkerProgressSnapshot, "approvalWindow">,
-	options: { now?: number; narrow?: boolean } = {},
+	options: { now?: number; room?: number } = {},
 ): string {
 	const window = progress.approvalWindow;
 	if (window === undefined) return WAITING_FOR_APPROVAL;
 	const left = formatUnattendedRemaining(window.expiresAt - (options.now ?? Date.now()));
-	const next = window.fallback === "fail" ? `run fails in ${left}` : `denied in ${left}`;
-	return [options.narrow === true ? "your approval" : WAITING_FOR_APPROVAL, ...(window.held ? ["held"] : []), next].join(
-		" · ",
-	);
+	const held = window.held ? ["held"] : [];
+	const denied = `denied in ${left}`;
+	const fails = window.fallback === "fail";
+	const [long, mid, short] = APPROVAL_WAITERS[window.decider];
+	const forms = [
+		[long, ...held, fails ? `run fails in ${left}` : denied],
+		[mid, ...held, fails ? `run fails in ${left}` : denied],
+		[short, ...held, fails ? `fails in ${left}` : denied],
+		[...held, fails ? `fails in ${left}` : denied],
+	].map((parts) => parts.join(" · "));
+	const room = options.room;
+	if (room === undefined) return forms[0] as string;
+	return forms.find((form) => form.length <= room) ?? (forms[forms.length - 1] as string);
 }
 
 /**
@@ -137,7 +159,7 @@ export function approvalWaitWords(
  */
 export function workerActivityWords(
 	progress: Pick<WorkerProgressSnapshot, "phase" | "currentAction" | "awaitingApproval" | "approvalWindow">,
-	options: { now?: number; narrow?: boolean } = {},
+	options: { now?: number; room?: number } = {},
 ): string {
 	if (progress.awaitingApproval === true) return approvalWaitWords(progress, options);
 	const action = progress.currentAction;

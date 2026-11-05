@@ -517,7 +517,7 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	if (progress.awaitingApproval === true && current !== null) {
 		const wanted = workerActionParts(current, "running");
 		units.push(
-			theme.fg("warning", approvalWaitWords(progress)),
+			theme.fg("warning", approvalWaitWords(progress, { room: contentWidth - 12 })),
 			theme.fg("toolTarget", `${wanted.verb} ${wanted.object}`.trim()),
 		);
 	} else if (current !== null)
@@ -924,8 +924,8 @@ function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">)
 	return sanitizeCallTargetText(`${row.targetId}/${row.wireModelId}`);
 }
 
-/** Below this the island's status column cannot hold a whole approval sentence beside the worker's name and clock. */
-const TASK_ISLAND_NARROW_APPROVAL_WIDTH = 76;
+/** The most of a worker's name an approval's words give way to on the island, so a long name clips first. */
+const TASK_ISLAND_APPROVAL_LABEL_ROOM = 14;
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
@@ -947,7 +947,18 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	// An approval's time left must survive a narrow island, so its words shorten before the row cuts them.
 	const statusLabel =
 		row.status === "running" && row.progress !== undefined
-			? sanitizeCallTargetText(workerActivityWords(row.progress, { narrow: width < TASK_ISLAND_NARROW_APPROVAL_WIDTH }))
+			? sanitizeCallTargetText(
+					workerActivityWords(row.progress, {
+						// Beside the glyph, the name and the clock, each with its separator.
+						room:
+							width -
+							2 -
+							dispatchRowPrefix(theme, row).width -
+							Math.min(visibleWidth(agentLabel), TASK_ISLAND_APPROVAL_LABEL_ROOM) -
+							3 -
+							(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0),
+					}),
+				)
 			: row.status === "enqueued" && row.endpoint !== undefined
 				? `waiting for a slot on ${sanitizeCallTargetText(row.endpoint.label)}`
 				: presentation.label;
