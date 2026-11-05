@@ -583,8 +583,10 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 		entry.helper || action !== null
 			? ""
 			: answerText(entry, stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
+	// A wait on the operator is not a tool running, so it carries the mark every other human wait does.
+	const actionGlyph = entry.progress?.awaitingApproval === true ? GLYPH.phaseBlocked : GLYPH.phaseTool;
 	const doing =
-		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
+		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${actionGlyph} ${action}`;
 	const elapsed = entry.telemetry?.activity.elapsed.display;
 	const tokens = entry.telemetry?.row.tokens.display;
 	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
@@ -602,7 +604,7 @@ function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, in
 	const prefix =
 		action === null
 			? `${glyph} ${idle}`
-			: `${GLYPH.phaseTool} ${entry.progress?.awaitingApproval === true ? WAITING_FOR_APPROVAL : current ? workerActionParts(current, "running").verb : ""}`;
+			: `${actionGlyph} ${entry.progress?.awaitingApproval === true ? WAITING_FOR_APPROVAL : current ? workerActionParts(current, "running").verb : ""}`;
 	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
 	const styledActivity = (shown: string): string => {
 		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);

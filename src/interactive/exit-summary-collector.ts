@@ -124,7 +124,21 @@ function tokenBreakdown(view: TelemetryView, model?: string): string {
 				...(model === undefined ? {} : { group: { by: "model", key: model } }),
 			}),
 		)?.display ?? "unknown";
-	return `${display("input")} in · ${display("output")} out · ${display("cacheRead")} cache read · ${display("cacheWrite")} cache write · ${display("reasoning")} reasoning`;
+	// In and out are the amounts; the rest earn a place only with something to say, and what nobody reported is said once.
+	const optional = [
+		["cache read", display("cacheRead")],
+		["cache write", display("cacheWrite")],
+		["reasoning", display("reasoning")],
+	] as const;
+	const unknown = optional.filter(([, value]) => value.startsWith("unknown")).map(([label]) => label);
+	return [
+		`${display("input")} in`,
+		`${display("output")} out`,
+		...optional
+			.filter(([, value]) => value !== "0" && !value.startsWith("unknown"))
+			.map(([label, value]) => `${value} ${label}`),
+		...(unknown.length > 0 ? [`${unknown.join(", ")} unknown`] : []),
+	].join(" · ");
 }
 
 export function exitSpend(view: TelemetryView | null | undefined, visitFrom: string): ExitSpend {
