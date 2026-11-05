@@ -1462,7 +1462,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		contextActivityStore,
 		getOverlayState: () => overlayLifecycle?.getState() ?? "closed",
 		isFooterExpanded: () => footer.isExpanded(),
-		...(workspaceSurfaces ? { isTaskIslandYielded: () => workspaceSurfaces.yieldsTaskIsland() } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 	});
 	/**

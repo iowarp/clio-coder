@@ -1040,6 +1040,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					quotaSummary.peekSnapshots();
 					return deps.telemetry.read?.quota().providers ?? [];
 				},
+				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+				isFooterExpanded: () => footer.isExpanded(),
 			}),
 			editor,
 			contextProgress: createContextProgressRail(

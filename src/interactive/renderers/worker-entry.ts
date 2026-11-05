@@ -825,8 +825,9 @@ export function renderWorkerEntryLines(
 		...council,
 		...group,
 		...(inspect || options.siblings === undefined
-			? // The run's id is for looking it up, so the rows that inspect a run state it and the transcript's card does not.
-				[actionLine(entry, safeWidth, inspect || detail.style === "detailed")]
+			? // The run's id is for looking it up, so /view and Detailed state it and the transcript's card does not,
+				// even with its bodies expanded: the live transcript always passes its own style, and /view never does.
+				[actionLine(entry, safeWidth, options.detail === undefined ? inspect : options.detail.style === "detailed")]
 			: [alignedHeader(entry, safeWidth, nowMs, options.siblings)]),
 		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
 		...(metrics.length ? railLines(joinFacts(metrics), "toolMetadata", safeWidth) : []),

@@ -17,7 +17,7 @@
 import { taskMemoryNoteForDisplay } from "../../domains/memory/task-memory-ref.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactUrlCredentials } from "../../domains/safety/redaction.js";
-import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { NoticeSource } from "../../session-control/notice-source.js";
 import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
 
@@ -101,13 +101,49 @@ function renderCallout(source: NoticeSource, text: string, mark: NoticeMark, wid
 }
 
 /**
+ * What a reminder said, as one line: its first line, up to the end of its first
+ * sentence or the colon that introduces a list.
+ */
+function reminderGist(text: string): string {
+	// The list a reminder introduces can arrive flattened onto its first line, so the colon ends the gist too.
+	const firstLine = (text.split("\n")[0] ?? "").trim();
+	return (/^(.+?)(?::\s|:$|[.!?](?:\s|$))/u.exec(firstLine)?.[1] ?? firstLine).trim();
+}
+
+/**
+ * A reminder is written to the model, so the operator's transcript keeps one
+ * row of it: that Clio reminded the model, and of what. The whole text is in
+ * /view, which renders the block in full.
+ */
+function renderReminderRow(text: string, mark: NoticeMark, width: number): string[] {
+	const { glyph, token } = MARKS[mark];
+	const gist = reminderGist(text);
+	const lead = `${theme.fg(token, glyph)} ${theme.style(token, "Reminder", { bold: true })} ${theme.fg("annotation", "to the model ·")} `;
+	const tail = theme.fg("commandHint", " · /view");
+	// The /view pointer shows whenever the row holds less than the whole reminder.
+	const whole = gist.length >= text.trim().replace(/[.!?:]$/u, "").length;
+	const fits = visibleWidth(lead) + visibleWidth(gist) <= width;
+	const room = Math.max(1, width - visibleWidth(lead) - (whole && fits ? 0 : visibleWidth(tail)));
+	const shown = theme.fg("body", truncateToWidth(gist, room, GLYPH.ellipsis, false));
+	return [truncateToWidth(`${lead}${shown}${whole && fits ? "" : tail}`, width)];
+}
+
+/**
  * One transcript notice. An event keeps its mark in the gutter; an advisory,
- * which the emitting source names, sits in a titled frame. Empty text renders
+ * which the emitting source names, sits in a titled frame. A reminder keeps one
+ * row unless `full` asks for its whole text, as /view does. Empty text renders
  * nothing.
  */
-export function renderNoticeRow(text: string, mark: NoticeMark, width: number, source?: NoticeSource): string[] {
+export function renderNoticeRow(
+	text: string,
+	mark: NoticeMark,
+	width: number,
+	source?: NoticeSource,
+	full = false,
+): string[] {
 	const body = noticeText(text);
 	if (body.length === 0) return [];
+	if (source === "reminder" && !full && width >= 8) return renderReminderRow(body, mark, width);
 	if (source !== undefined) return renderCallout(source, body, mark, width);
 	const { glyph, token } = MARKS[mark];
 	const tagged = LEADING_TAG.exec(body);

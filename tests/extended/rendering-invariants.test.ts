@@ -1684,7 +1684,7 @@ describe("transcript block grammar", () => {
 		match((budgetBlocks[0]?.(80) ?? []).map(stripTerminalSequences).join("\n"), /│ Session priced spend/u);
 		// A reminder that opens with a command keeps it verbatim; only a memory note is capitalized on display.
 		for (const [source, text, shown] of [
-			["reminder", "npm run test before claiming done.", "│ npm run test before"],
+			["reminder", "npm run test before claiming done.", "Reminder to the model · npm run test before"],
 			["memory", "Memory: you already tried the retry.", "│ You already tried"],
 		] as const) {
 			const commandBlocks: Array<(width: number) => string[]> = [];

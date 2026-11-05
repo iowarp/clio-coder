@@ -1,11 +1,10 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import type { Component, OverlayOptions } from "../../src/engine/tui.js";
-import { visibleWidth } from "../../src/engine/tui.js";
 import { createInteractiveTickers } from "../../src/interactive/interactive-tickers.js";
 import { footerState } from "../harness/footer-fixture.js";
 
-test("context progress allocates no transcript overlay; task island survives resize and short terminals", () => {
+test("neither context progress nor the task board allocates a transcript overlay", () => {
 	const terminal = { columns: 80, rows: 24 };
 	const slots: { component: Component; options: OverlayOptions; hidden: boolean }[] = [];
 	const row = footerState().dispatchRows[0];
@@ -57,11 +56,6 @@ test("context progress allocates no transcript overlay; task island survives res
 		scheduleInterval: () => ({}),
 		clearScheduledInterval() {},
 	});
-	const visible = (index: number) => {
-		const slot = slots[index];
-		ok(slot);
-		return !slot.hidden && (slot.options.visible?.(terminal.columns, terminal.rows) ?? true);
-	};
 	try {
 		for (const width of [60, 80, 100, 120, 200, 80, 92]) {
 			terminal.columns = width;
@@ -69,16 +63,7 @@ test("context progress allocates no transcript overlay; task island survives res
 				terminal.rows = height;
 				controller.renderTaskIsland();
 				controller.renderContextIsland();
-				strictEqual(visible(0), width >= 80, `${width}x${height} task`);
-				strictEqual(slots.length, 1, "only the task island owns an overlay");
-				for (const slot of slots)
-					for (const line of slot.component.render(slot.options.width as number)) {
-						ok(visibleWidth(line) <= width);
-						const plain = line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
-						ok(
-							[...plain].every((char) => char.charCodeAt(0) >= 32 && (char.charCodeAt(0) < 127 || char.charCodeAt(0) > 159)),
-						);
-					}
+				strictEqual(slots.length, 0, `${width}x${height}: nothing paints over the transcript`);
 			}
 		}
 		for (const mode of ["modal", "expanded"]) {
@@ -86,8 +71,7 @@ test("context progress allocates no transcript overlay; task island survives res
 			expanded = mode === "expanded";
 			controller.renderTaskIsland();
 			controller.renderContextIsland();
-			strictEqual(visible(0), false);
-			strictEqual(slots.length, 1);
+			strictEqual(slots.length, 0);
 		}
 	} finally {
 		controller.dispose();

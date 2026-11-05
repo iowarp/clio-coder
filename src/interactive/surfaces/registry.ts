@@ -71,8 +71,6 @@ export interface WorkspaceSurfaces {
 	footerLine(width: number): string | null;
 	/** Owner-labelled status facts for the compact footer's second line. */
 	statusFacts(width: number): string[];
-	/** True while the workspace's islands hold the top-right corner. */
-	yieldsTaskIsland(): boolean;
 	/** The active workspace's leader entries: its declared keys, then how to leave. */
 	leaderTargets(): Array<{ key: string; label: string; run: () => void }>;
 	/** Re-evaluate the floating stack; called on model change and by the host's island tick. */
@@ -260,10 +258,6 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 					return [theme.fg(STATUS_ROLES[status.tone ?? "neutral"], text)];
 				});
 			});
-		},
-		yieldsTaskIsland() {
-			const active = deps.model.activeWorkspace;
-			return active !== null && (active.regions.includes("islands") || active.board === "island");
 		},
 		leaderTargets() {
 			const active = deps.model.activeWorkspace;

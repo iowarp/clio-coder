@@ -23,7 +23,9 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 	const normalized = redactUrlCredentials(text).replace(/\r/g, "").replace(/\n+/gu, " ").trimEnd();
 	if (normalized.trim().length === 0) return;
 	if (source !== undefined) {
-		sink.appendReplayBlock((width) => renderNoticeRow(normalized, NOTICE_MARKS[level], width, source));
+		sink.appendReplayBlock((width, _detail, unbounded) =>
+			renderNoticeRow(normalized, NOTICE_MARKS[level], width, source, unbounded === true),
+		);
 		sink.requestRender();
 		return;
 	}
@@ -147,7 +149,7 @@ export function appendInterviewRecord(entries: ReadonlyArray<InterviewRecordEntr
 	sink.requestRender();
 }
 
-export type CommandOutputReplayBlock = (width: number) => string[];
+export type CommandOutputReplayBlock = (width: number, detail?: unknown, unbounded?: boolean) => string[];
 
 export interface CommandOutputSink {
 	appendReplayBlock(renderBlock: CommandOutputReplayBlock): void;
