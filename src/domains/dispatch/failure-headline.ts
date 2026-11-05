@@ -67,6 +67,8 @@ function stderrHeadline(stderr: string): string {
  */
 const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) => string]> = [
 	[/^operator abort\b/iu, () => "cancelled at your request"],
+	// The model's call that started the worker ended, so the worker went with it.
+	[/^parent tool call cancell?ed\b/iu, () => "stopped because the turn that asked for it ended"],
 	[/^no worker activity within the stall window/iu, () => STALLED_RUN_HEADLINE],
 	// The worker's final reply held only tool calls after its tools were taken away, so there is no answer to show.
 	[

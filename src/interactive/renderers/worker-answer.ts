@@ -1,6 +1,7 @@
 import { AssistantProseProjection, sanitizeAssistantProse } from "../../core/assistant-prose.js";
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { RedactedStringProjection, redactStreamingSecretString } from "../../domains/safety/redaction.js";
+import type { CouncilReport } from "../../domains/agents/index.js";
 import { GLYPH } from "../theme/index.js";
 
 /** Sanitize complete source text before splitting, so OSC payloads cannot cross rows. */
@@ -226,4 +227,39 @@ export function presentWorkerContractAnswer(
 		lines: answer.lines.map(safeWorkerAnswerText),
 		...(answer.footer ? { footer: safeWorkerAnswerText(answer.footer) } : {}),
 	};
+}
+
+/**
+ * One member's answer as a line a person reads: a typed report's first claim or fact, else its first line of prose.
+ * A council collects typed reports, so its raw text is JSON the operator was never meant to read.
+ */
+export function councilAnswerGist(answer: string): string {
+	const value = exactWorkerAnswerObject(answer);
+	const typed =
+		value === null
+			? null
+			: (researchReport(value) ?? worldKnowledgeReport(value) ?? debuggerReport(value) ?? verifierReport(value));
+	const first = typed?.lines.find((line) => line.trim().length > 0 && !line.startsWith("  "));
+	const line = (first ?? answer.split("\n").find((row) => row.trim().length > 0) ?? "").replace(/^-\s*/u, "").trim();
+	return safeWorkerAnswerText(line);
+}
+
+/** A council's sealed report in words: the synthesis, then each member's gist under its label. */
+export function presentCouncilReport(report: CouncilReport): PresentedContractAnswer {
+	const lines: string[] = [];
+	const synthesis = report.synthesis;
+	if (synthesis.kind === "vote" && synthesis.verdict !== undefined) lines.push(`vote: ${synthesis.verdict}`);
+	if (synthesis.text !== undefined && synthesis.text.trim().length > 0) lines.push(synthesis.text.trim());
+	for (const member of report.members) {
+		lines.push(
+			member.failed !== undefined
+				? `${member.label}: no answer (${member.failed.reason})`
+				: `${member.label}: ${councilAnswerGist(member.answer)}`,
+		);
+	}
+	const footer =
+		synthesis.kind === "none"
+			? `${report.members.length} answers, no synthesis asked for`
+			: `synthesis by ${synthesis.kind}`;
+	return { lines: lines.map(safeWorkerAnswerText), footer };
 }

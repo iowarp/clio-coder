@@ -5,9 +5,12 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
+import { parseCouncilReport } from "../../domains/agents/index.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import {
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
+	presentCouncilReport,
 	presentWorkerContractAnswer,
 	safeWorkerAnswerText,
 	WorkerAnswerProjection,
@@ -230,18 +233,23 @@ function trustVerdictOf(trust: CanonicalTrustStatus): Pick<TrustSummaryProjectio
 }
 
 /** The shared caveat on a clean exit, so this card and the Fleet Runs row never disagree about how a run ended. */
-function settledCaveat(result: WorkerRunResultSummary): CompletedRunCaveat | null {
+function settledCaveat(result: WorkerRunResultSummary, synthesizes = false): CompletedRunCaveat | null {
 	if (result.outcome !== "succeeded") return null;
 	return completedRunCaveat({
 		...(result.trust !== undefined ? { trust: trustVerdictOf(result.trust) } : {}),
 		...(result.contract !== undefined ? { contract: result.contract } : {}),
-		...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
+		// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
+		...(result.toolCalls !== undefined && !synthesizes ? { toolCalls: result.toolCalls } : {}),
 		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),
 	});
 }
 
-function settledMark(result: WorkerRunResultSummary): string {
-	const mark = completedRunMark(settledCaveat(result));
+function isSynthesis(entry: WorkerEntryState): boolean {
+	return entry.council?.label === COUNCIL_SYNTHESIS_LABEL;
+}
+
+function settledMark(result: WorkerRunResultSummary, synthesizes: boolean): string {
+	const mark = completedRunMark(settledCaveat(result, synthesizes));
 	return theme.fg(mark.token, mark.glyph);
 }
 
@@ -259,12 +267,12 @@ function settledAgainst(result: WorkerRunResultSummary): string | null {
  * outcome code, so it reads as a ledger-side finding instead of the ordinary
  * heartbeat-timeout `stalled` a sealed result reports.
  */
-function outcomeUnit(result: WorkerRunResultSummary): string {
+function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): string {
 	// A worker that exited cleanly without executing one tool did none of an
 	// assignment that needed tools, so "execution ok" would read as a done task.
 	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
-	const caveat = settledCaveat(result);
+	const caveat = settledCaveat(result, synthesizes);
 	if (caveat?.kind === "against") {
 		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}execution ok`)}`;
 	}
@@ -329,6 +337,11 @@ function railLines(text: string, token: SemanticRole, width: number): string[] {
 
 function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
 	if (entry.result?.trust?.artifactIntegrity.state !== "verified") return null;
+	// A council's synthesis seals the whole council as one report; the card reads it as answers, not as JSON.
+	if (entry.council?.label === COUNCIL_SYNTHESIS_LABEL && !isPending(entry)) {
+		const report = parseCouncilReport(entry.text);
+		if (report !== null) return presentCouncilReport(report);
+	}
 	const kind = entry.result?.contractKind;
 	const conformance = entry.result?.contract;
 	return presentWorkerContractAnswer(
@@ -489,7 +502,7 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 			? pendingUnit()
 			: workerNeedsInput(entry)
 				? needsInputUnit()
-				: outcomeUnit(entry.result);
+				: outcomeUnit(entry.result, isSynthesis(entry));
 	const elapsed =
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
@@ -607,7 +620,7 @@ function headerWord(entry: WorkerEntryState): string {
 	if (outcome === "stalled") return "stalled";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
-	return settledCaveat(entry.result)?.kind === "no-tools" ? "no tools" : "done";
+	return settledCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
 }
 
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
@@ -628,7 +641,7 @@ function alignedHeader(
 				? theme.fg("toolMetadata", GLYPH.cancelled)
 				: entry.result?.outcome !== "succeeded"
 					? theme.fg("error", GLYPH.error)
-					: settledMark(entry.result);
+					: settledMark(entry.result, isSynthesis(entry));
 	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
@@ -875,6 +888,8 @@ function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, i
 			: "";
 	if (!inspect && entry.state === "failed" && entry.authority.id === "result-quality")
 		return `${trustStateWord("validationGrounding", entry.state)}${why}`;
+	// The folded card says whether anything checked the work in plain words; the record's axis wording is for /view.
+	if (!inspect && entry.state === "absent") return "no check ran on this work";
 	return `quality ${validationClause(trust)}${why}`;
 }
 

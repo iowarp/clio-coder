@@ -1246,6 +1246,20 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 	];
 }
 
+/** A settled member's typed answer in the words its own card shows; a live one streams its raw tail. */
+function councilMemberTail(row: DispatchBoardRow): string {
+	const progress = row.progress;
+	if (progress === undefined) return "";
+	const presented = presentWorkerContractAnswer(
+		progress.tailText,
+		row.resultContract,
+		progress.droppedLines === 0 && progress.droppedBytes === 0,
+		progress.settled,
+	);
+	if (presented !== null) return presented.lines.join("\n");
+	return redactStreamingSecretString(progress.tailText, progress.completed === true);
+}
+
 /**
  * One member column's facts, drawn from the row the board already keeps. The
  * route, status, and answer tail are the same values the run's own card shows,
@@ -1255,20 +1269,26 @@ function councilMemberView(
 	row: DispatchBoardRow,
 	council: NonNullable<DispatchBoardRow["council"]>,
 ): CouncilMemberView {
-	const presentation = dispatchStatusPresentation(row.status, {
-		compact: true,
+	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
+	// A member column words its outcome the way its own run row does, caveat included.
+	const caveat = completedRunFailure(row);
+	const mark = completedRunMark(caveat);
+	const presentation =
+		caveat !== null
+			? { glyph: mark.glyph, label: caveat.words, token: mark.token }
+			: row.status === "completed"
+				? { ...full, label: "done" }
+				: full;
 	return {
 		runId: row.runId,
 		label: council.label,
 		...(council.color !== undefined ? { color: council.color } : {}),
 		round: council.round,
-		route: `${row.targetId}/${row.wireModelId}`,
+		route: formatRowRoute(row),
 		status: { ...presentation },
-		tailText: sanitizeCallTargetText(
-			redactStreamingSecretString(row.progress?.tailText ?? "", row.progress?.completed === true),
-		),
+		tailText: sanitizeCallTargetText(councilMemberTail(row)),
 		droppedLines: row.progress?.droppedLines ?? 0,
 	};
 }
@@ -1308,10 +1328,15 @@ function foldCouncilGroup(
 	const aggregate = (Object.entries(STATUS_ORDER) as Array<[DispatchBoardStatus, number]>).find(
 		([, value]) => value === rank,
 	);
-	const presentation = dispatchStatusPresentation(aggregate?.[0] ?? "running", {
-		compact: true,
-		...(aggregate?.[0] === "running" ? { tick: animationStep(Date.now()) } : {}),
+	const aggregateStatus = aggregate?.[0] ?? "running";
+	const aggregatePresentation = dispatchStatusPresentation(aggregateStatus, {
+		...(aggregateStatus === "running" ? { tick: animationStep(Date.now()) } : {}),
 	});
+	const presentation =
+		aggregateStatus === "completed" ? { ...aggregatePresentation, label: "done" } : aggregatePresentation;
+	const task = rows.find(
+		(row) => row.taskSummary !== undefined && row.council?.label !== COUNCIL_SYNTHESIS_LABEL,
+	)?.taskSummary;
 	const members = [...newest.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
 		// biome-ignore lint/style/noNonNullAssertion: every entry was inserted with its own council badge.
@@ -1324,6 +1349,7 @@ function foldCouncilGroup(
 		// biome-ignore lint/style/noNonNullAssertion: the synthesis row was matched on its own council badge.
 		synthesis: synthesisRow === null ? null : councilMemberView(synthesisRow, synthesisRow.council!),
 		status: { ...presentation },
+		...(task !== undefined ? { task: sanitizeCallTargetText(task) } : {}),
 		round,
 		elapsed: formatCompactMs(elapsedMs),
 		...(selectedInGroup !== undefined ? { selectedRunId: selectedInGroup } : {}),
@@ -1411,11 +1437,25 @@ function firstLine(text: string): string {
 }
 
 /** What marks a run that finished as not to be leaned on, so its row cannot read as a plain success. */
+const COUNCIL_SYNTHESIS_AGENT = "council-synthesis";
+
+/** A council by its size; one whose members are past the board's history reads as a council alone. */
+function councilName(group: Pick<CouncilGroupView, "members">): string {
+	return group.members.length === 0 ? "council" : `council of ${group.members.length}`;
+}
+
 function completedRunFailure(
-	row: Pick<DispatchBoardRow, "status" | "trust" | "completion">,
+	row: Pick<DispatchBoardRow, "status" | "trust" | "completion" | "council" | "agentId">,
 ): CompletedRunCaveat | null {
 	if (row.status !== "completed") return null;
-	return completedRunCaveat({ ...(row.trust !== undefined ? { trust: row.trust } : {}), ...row.completion });
+	// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
+	const synthesizes = row.council?.label === COUNCIL_SYNTHESIS_LABEL || row.agentId === COUNCIL_SYNTHESIS_AGENT;
+	const { toolCalls, ...completion } = row.completion ?? {};
+	return completedRunCaveat({
+		...(row.trust !== undefined ? { trust: row.trust } : {}),
+		...completion,
+		...(toolCalls !== undefined && !synthesizes ? { toolCalls } : {}),
+	});
 }
 
 /** Who started a run, in words, because the row's glyph only implies it. */
@@ -1552,7 +1592,8 @@ export function runTableRows(
 		if (item.kind === "council") {
 			const group = item.group;
 			const selected = group.selectedRunId !== undefined;
-			const name = `council ${group.group}`;
+			// The group id is the record's; a person knows the council by its size and its question.
+			const name = councilName(group);
 			const cells: Array<string | TableCell> = [];
 			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 			cells.push(
@@ -1564,7 +1605,7 @@ export function runTableRows(
 			cells.push(group.elapsed, "", "", "");
 			if (anyAccount) cells.push("");
 			cells.push({
-				text: `${group.members.length} member${group.members.length === 1 ? "" : "s"} · r${group.round}${group.synthesis === null ? "" : ` · ${COUNCIL_SYNTHESIS_LABEL}`}`,
+				text: `${group.task === undefined ? "" : `${group.task} · `}round ${group.round}${group.synthesis === null ? "" : ` · ${COUNCIL_SYNTHESIS_LABEL}`}`,
 				tone: "muted",
 			});
 			return cells;
@@ -1744,8 +1785,8 @@ function formatDispatchBoardBody(
 			? null
 			: item.kind === "council"
 				? {
-						title: `council ${item.group.group}`,
-						meta: `r${item.group.round} · ${item.group.elapsed}`,
+						title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` · ${item.group.task}`}`,
+						meta: `round ${item.group.round} · ${item.group.elapsed}`,
 						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
 						body: councilGroupBody(theme, item.group, width),
 					}
