@@ -49,8 +49,13 @@ interface DocumentSlot {
  * reader of the previous frame relies on: the current layout until the next one
  * replaces it, and `preserveTranscriptScroll` comparing before with after.
  */
-function transcriptDocument(banner: Component, chat: TranscriptComponent): Component {
+function transcriptDocument(
+	banner: Component,
+	chat: TranscriptComponent,
+	viewportRows: () => number = () => 0,
+): Component {
 	let source: unknown;
+	let anchored: { from: readonly string[]; rows: number; lines: string[] } | null = null;
 	let header: string[] = [];
 	let lines: string[] = [];
 	let renderedSkinEpoch = skinEpoch();
@@ -82,6 +87,21 @@ function transcriptDocument(banner: Component, chat: TranscriptComponent): Compo
 		out.length = row;
 		return out;
 	};
+	/**
+	 * A document shorter than the viewport sits on the composer rather than
+	 * under the top edge: the launchpad and the first turns stay next to the
+	 * place the operator types, as they do on the regular screen, and the
+	 * spare rows go above them. The padded copy is reused while neither the
+	 * document nor the viewport changes, so an idle frame stays the same array.
+	 */
+	const bottomAnchored = (from: string[]): string[] => {
+		const rows = viewportRows();
+		if (from.length >= rows) return from;
+		if (anchored?.from === from && anchored.rows === rows) return anchored.lines;
+		const lines = [...Array.from({ length: rows - from.length }, () => ""), ...from];
+		anchored = { from, rows, lines };
+		return lines;
+	};
 	return {
 		render(width: number): string[] {
 			if (renderedSkinEpoch !== skinEpoch()) {
@@ -105,7 +125,7 @@ function transcriptDocument(banner: Component, chat: TranscriptComponent): Compo
 				turn = (turn + 1) % pool.length;
 				lines = compose(pool[turn] as DocumentSlot, regions, regions?.prefix ?? (nextSource as string[]));
 			}
-			return lines;
+			return bottomAnchored(lines);
 		},
 		invalidate(): void {
 			source = undefined;
@@ -126,12 +146,24 @@ class TranscriptScrollView extends ScrollView {
 	override getContentWidth(width: number): number {
 		return this.scrollbar !== "hidden" && width > 1 ? width - 1 : width;
 	}
+
+	/**
+	 * The document pads a short transcript to the viewport it last saw, so a
+	 * viewport that changes height under short content asks for one more frame,
+	 * which pads to the new height instead of leaving a gap until the next event.
+	 */
+	override updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void {
+		const before = this.viewportHeight;
+		super.updateLayout(contentHeight, viewportHeight, requestRender);
+		if (viewportHeight !== before && contentHeight <= Math.max(before, viewportHeight)) requestRender();
+	}
 }
 
 function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}): FullscreenLayout {
-	const document = transcriptDocument(parts.banner, parts.chat);
+	let transcript: TranscriptScrollView | undefined;
+	const document = transcriptDocument(parts.banner, parts.chat, () => transcript?.viewportHeight ?? 0);
 	const theme = clioTheme();
-	const transcript = new TranscriptScrollView(document, {
+	transcript = new TranscriptScrollView(document, {
 		follow: "end",
 		primary: true,
 		overscroll: "chain",
