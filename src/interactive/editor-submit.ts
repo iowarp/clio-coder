@@ -631,8 +631,9 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			// The queue stays queued: a send-now does not undo what the operator
 			// already asked for. Held through the cancel, it lands at the new run's
 			// first slot (or with its first model call, for a flush).
+			// A queued entry sent from the navigator leaves the composer alone: a draft there is other work.
 			let cleared: ReturnType<typeof captureDraft> | undefined;
-			if (snapshot.owns()) {
+			if (!flushed && snapshot.owns()) {
 				setLiteralText("");
 				cleared = captureDraft();
 			}
@@ -667,13 +668,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					restoreDraft();
 					return;
 				}
-				if (choice === "wait" && flushed) {
-					deps.notify("info", "the queue stays queued; it lands as soon as the running tool returns", "steer:wait");
-					return;
-				}
 				if (choice === "wait") {
+					// The choice promises the head of the queue, whichever slot a queued entry was in.
+					const taken = flushed ? deps.chat.removeQueuedEntry(flushed.id, "sent-now") : null;
+					if (flushed && taken === null) return;
 					deps.beforeSemanticBoundary?.("send-now-wait");
-					await deps.chat.submit(submitted.text, { ...common, queueFront: true });
+					await deps.chat.submit(submitted.text, { ...common, queueFront: true, ...(taken ? { queued: taken } : {}) });
 					if (refused) restoreDraft();
 					else
 						deps.notify(
