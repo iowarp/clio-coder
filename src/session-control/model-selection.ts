@@ -31,11 +31,12 @@ export function selectModel(
 		throw new Error(
 			`cannot use target '${selection.target}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
-	const selected = {
+	// The setting keeps what the operator asked for, and each request resolves what the model does with it. Saving
+	// the clamped level left thinking off for good after one stop on a model that has none.
+	apply(selection);
+	if (recentLimit !== undefined) rememberRecentModel(`${selection.target}/${selection.model}`, recentLimit);
+	return {
 		...selection,
 		thinkingLevel: clampThinkingLevel(providers, selection.target, selection.model, selection.thinkingLevel),
 	};
-	apply(selected);
-	if (recentLimit !== undefined) rememberRecentModel(`${selected.target}/${selected.model}`, recentLimit);
-	return selected;
 }

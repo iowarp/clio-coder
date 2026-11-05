@@ -12,7 +12,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
+import { resolveModelRuntimeCapabilitiesForProviders, thinkingEffectNote } from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
@@ -678,23 +678,17 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			)?.thinking;
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
-			const coerced = thinking !== undefined && thinking.configuredLevel !== thinking.effectiveLevel;
+			const note = thinking ? thinkingEffectNote(thinking) : null;
 			return {
-				label: coerced
-					? thinking.display
-					: thinking?.mechanism === "none"
-						? "unavailable"
-						: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
+				label:
+					note !== null && thinking
+						? thinking.display
+						: thinking?.mechanism === "none"
+							? "unavailable"
+							: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
-				...(coerced
-					? {
-							note:
-								thinking.mechanism === "none"
-									? "model has no thinking"
-									: `${thinking.configuredLevel} runs as ${thinking.display}`,
-						}
-					: {}),
+				...(note !== null ? { note } : {}),
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",

@@ -218,7 +218,7 @@ describe("provider transport boundary", () => {
 		const selectors = createOverlayModelSelectors({
 			tui: { requestRender: () => undefined } as TUI,
 			transitions,
-			providers: {} as ProvidersContract,
+			providers: { list: () => [] } as unknown as ProvidersContract,
 			bus: {} as TelemetryHub,
 			refreshFooter: () => undefined,
 			notify: () => undefined,

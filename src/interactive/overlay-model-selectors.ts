@@ -3,7 +3,11 @@ import type { ThinkingLevel } from "../core/defaults.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { InteropProposal } from "../domains/interop/index.js";
-import type { ProvidersContract } from "../domains/providers/index.js";
+import {
+	type ProvidersContract,
+	resolveModelRuntimeCapabilitiesForProviders,
+	thinkingEffectNote,
+} from "../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { TUI } from "../engine/tui.js";
 import type { FooterDashboardPanel } from "./footer/dashboard.js";
@@ -124,14 +128,26 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					deps.refreshFooter();
 					return;
 				}
-				deps.notify(
-					"success",
+				const applied =
 					scope === "global"
 						? `active and saved globally: ${swap}`
 						: scope === "project"
 							? `active and saved for this project: ${swap}`
-							: `active this session: ${swap}`,
-				);
+							: `active this session: ${swap}`;
+				const down = deps.providers.list().find((status) => status.target.id === ref.target)?.health.status === "down";
+				const thinking = resolveModelRuntimeCapabilitiesForProviders(
+					deps.providers,
+					ref.target,
+					ref.model,
+					deps.getSettings?.().chat?.thinkingLevel ?? "off",
+				)?.thinking;
+				const note = thinking ? thinkingEffectNote(thinking) : null;
+				const facts = [
+					applied,
+					down ? "this route is down, so turns fail until it answers; /model switches" : null,
+					note !== null && thinking ? `thinking ${thinking.display} (${note})` : null,
+				];
+				deps.notify(down ? "warning" : "success", facts.filter(Boolean).join(" · "));
 				deps.refreshFooter();
 			},
 			onCancel: () => {

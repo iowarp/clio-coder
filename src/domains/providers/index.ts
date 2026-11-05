@@ -120,6 +120,7 @@ export {
 	resolveTargetRuntimeCapabilities,
 	restrictThinkingLevelsByMechanism,
 	type ThinkingBudgetEnforcement,
+	thinkingEffectNote,
 	thinkingLevelChoiceLabel,
 	thinkingLevelDisplayWord,
 	thinkingLevelFromChoiceLabel,

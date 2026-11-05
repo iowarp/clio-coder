@@ -728,6 +728,19 @@ export function resolveModelRuntimeCapabilitiesForStatus(
 	});
 }
 
+/** Why the level that runs differs from the level asked for, in words; null when they match. */
+export function thinkingEffectNote(thinking: {
+	mechanism: string;
+	configuredLevel: ThinkingLevel;
+	effectiveLevel: ThinkingLevel;
+	display: string;
+}): string | null {
+	if (thinking.configuredLevel === thinking.effectiveLevel) return null;
+	return thinking.mechanism === "none"
+		? "model has no thinking"
+		: `${thinking.configuredLevel} runs as ${thinking.display}`;
+}
+
 export function resolveModelRuntimeCapabilitiesForProviders(
 	providers: ProvidersContract,
 	targetId: string | null | undefined,
