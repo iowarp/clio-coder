@@ -132,15 +132,22 @@ export function withFrontmatterCache<T>(load: () => T): T {
 	}
 }
 
-/** True when JSON round-trips the value exactly, so a cache hit equals a fresh parse. */
-function isJsonExact(value: unknown): boolean {
+/**
+ * True when JSON round-trips the value exactly, so a cache hit equals a fresh parse. A recursive YAML alias yields
+ * a cycle, which JSON cannot carry, so `ancestors` holds the objects on the current path and a cycle answers false.
+ */
+function isJsonExact(value: unknown, ancestors: Set<object> = new Set()): boolean {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
 	if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
-	if (Array.isArray(value)) return value.every(isJsonExact);
-	if (typeof value !== "object") return false;
-	const proto = Object.getPrototypeOf(value);
-	if (proto !== Object.prototype && proto !== null) return false;
-	return Object.values(value as Record<string, unknown>).every(isJsonExact);
+	if (typeof value !== "object" || ancestors.has(value)) return false;
+	if (!Array.isArray(value)) {
+		const proto = Object.getPrototypeOf(value);
+		if (proto !== Object.prototype && proto !== null) return false;
+	}
+	ancestors.add(value);
+	const exact = Object.values(value).every((child) => isJsonExact(child, ancestors));
+	ancestors.delete(value);
+	return exact;
 }
 
 /** The cached parse, or undefined when the entry's JSON does not parse and the source must be read instead. */
