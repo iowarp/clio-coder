@@ -2,7 +2,10 @@ import { ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
+import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
+import { readClioState } from "../../src/domains/context/state.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // A frontier bootstrap run returned 26 grounded rule lines for this repository
@@ -70,4 +73,52 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 	ok(handbook.includes("\n  - The export lives in `src/index.ts`"), handbook);
 	strictEqual(handbook.includes("src/missing-module.ts"), false, handbook);
 	strictEqual(handbook.includes("npm run deploy"), false, handbook);
+});
+
+it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
+	const draft = {
+		projectName: "harbor",
+		identity: "A widget renderer.",
+		invariants: [],
+		conventions: ["Code under `src/widgets/**` renders through `renderWidget()`."],
+		sections: [],
+	};
+	let dispatches = 0;
+	const dispatch = {
+		dispatch: async () => {
+			dispatches += 1;
+			const runId = `bootstrap-spend-${dispatches}`;
+			return {
+				runId,
+				events: (async function* () {
+					yield { type: "text_delta", text: JSON.stringify(draft) };
+				})(),
+				finalPromise: Promise.resolve({
+					runId,
+					exitCode: 0,
+					toolCalls: 3,
+					toolStats: [],
+					spend: { totalTokens: { kind: "measured", value: 1000 * dispatches } },
+				}),
+			};
+		},
+		abort: () => {},
+	} as unknown as DispatchContract;
+	const generate = modelBootstrapGenerate({ dispatch, onFallback: () => {} });
+	let assessed = 0;
+	await runBootstrap({
+		cwd,
+		// The first draft is sent back for repair, the repair is accepted, and one section is asked for.
+		generate: (input) =>
+			generate({
+				...input,
+				assessDraft: () => (assessed++ === 0 ? "cite the files" : null),
+				missingSections: () => [{ title: "Change recipes", reason: "fixture" }],
+			}),
+	});
+	strictEqual(dispatches, 3);
+	const generation = readClioState(cwd)?.lastBootstrap;
+	strictEqual(generation?.tokenCount, 6000, JSON.stringify(generation));
+	strictEqual(generation?.toolCalls, 9, JSON.stringify(generation));
+	strictEqual(generation?.repairRan, true, JSON.stringify(generation));
 });

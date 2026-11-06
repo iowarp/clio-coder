@@ -9,6 +9,7 @@ import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
+import { sumFacts } from "../../core/telemetry/pricing.js";
 import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
@@ -135,7 +136,15 @@ export interface BootstrapGenerationTelemetry {
 	mode: BootstrapGenerationMode;
 	parserOutcome: BootstrapParserOutcome;
 	fallbackReason?: string;
+	/** The dispatch whose draft this generation reports on. */
 	run?: BootstrapRunTelemetry;
+	/**
+	 * Every dispatch this generation made, in order: schema fallback, repair and
+	 * section requests each spend tokens and tool calls that `run` alone omits.
+	 */
+	runs?: ReadonlyArray<BootstrapRunTelemetry>;
+	/** Monotonic span of the whole generation, every dispatch included. */
+	durationMs?: number;
 	repairRan?: boolean;
 	repairProducedHandbook?: boolean;
 }
@@ -1746,13 +1755,28 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 		const bounded = boundedStateString(value, 512);
 		if (bounded) state[key] = bounded;
 	}
+	// A dispatch without a run id never started a worker and spent nothing.
+	const runs = (telemetry.runs ?? [run]).filter((entry) => entry === run || entry.runId !== undefined);
+	const measuredTotal = (entries: ReadonlyArray<BootstrapRunTelemetry>): number | undefined => {
+		const sum = sumFacts(entries.flatMap((entry) => (entry.spend ? [entry.spend.totalTokens] : [])));
+		return sum.coverage.measured === entries.length ? sum.measured : undefined;
+	};
+	const across = (field: (entry: BootstrapRunTelemetry) => number | undefined): number | undefined => {
+		let total = 0;
+		for (const entry of runs) {
+			const value = field(entry);
+			if (value === undefined) return undefined;
+			total += value;
+		}
+		return total;
+	};
 	for (const [key, value] of [
-		// The project state keeps a plain count, so only a measured total is recorded (#434).
-		["tokenCount", run.spend?.totalTokens.kind === "measured" ? run.spend.totalTokens.value : undefined],
-		["toolCalls", run.toolCalls],
-		["durationMs", run.durationMs],
-		["promptBytes", run.promptBytes],
-		["outputBytes", run.outputBytes],
+		// The project state keeps a plain count, so a total is recorded only when every dispatch measured its own (#434).
+		["tokenCount", measuredTotal(runs)],
+		["toolCalls", across((entry) => entry.toolCalls ?? 0)],
+		["durationMs", telemetry.durationMs ?? run.durationMs],
+		["promptBytes", across((entry) => entry.promptBytes)],
+		["outputBytes", across((entry) => entry.outputBytes)],
 	] as const) {
 		const counter = safeStateCounter(value);
 		if (counter !== undefined) state[key] = counter;
