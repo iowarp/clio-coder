@@ -121,11 +121,18 @@ import { type TurnSpend, turnHoldsCalls, turnSpend } from "./turn-spend.js";
 // source line starts, so a piece Pi cut off is never mistaken for a new line.
 const CODE_SPACE = "\u2800";
 const CODE_LINE = "\uFDD1";
+// Pi calls listBullet only for a list token's item marker, so a marker carrying LIST_MARK in place of the
+// space after its bullet is a list item by the lexer's own reading. The operator lift refuses it, which keeps a
+// paragraph's soft wrap apart from the list that follows it. The mark is one cell wide, like the space it
+// stands for, so Pi wraps the item exactly as before, and fitMarkdownRow turns it back into that space.
+const LIST_MARK = "\uFDD2";
+const BASE_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) =>
+	codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")).map((line) => line.replaceAll(" ", CODE_SPACE)),
+);
 const CHAT_MARKDOWN_THEME = {
-	...markdownTheme(clioTheme(), (code, lang) =>
-		codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")).map((line) => line.replaceAll(" ", CODE_SPACE)),
-	),
+	...BASE_MARKDOWN_THEME,
 	codeBlockIndent: `${CODE_LINE}${CODE_SPACE}`,
+	listBullet: (marker: string) => BASE_MARKDOWN_THEME.listBullet(marker.replace(" ", LIST_MARK)),
 };
 // /export writes plain text inside its own fence, so Pi's top-level fence rows
 // are noise there and widen that outer fence. Pi gives no switch for them, so
@@ -986,7 +993,10 @@ function exportFenceRow(row: string): string | null {
  */
 function fitMarkdownRow(padded: string, width: number, bareFences: boolean): string[] {
 	// A fence nested in a quote is not rejoined, so its code row still carries CODE_SPACE.
-	const trimmed = padded.replace(/ +$/u, "").replace(CODE_LINE, " ").replaceAll(CODE_SPACE, " ");
+	const trimmed = padded
+		.replace(/ +$/u, "")
+		.replace(CODE_LINE, " ")
+		.replace(/[\u2800\uFDD2]/gu, " ");
 	const line = bareFences ? exportFenceRow(trimmed) : trimmed;
 	if (line === null) return [];
 	const parts = visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line];
@@ -998,8 +1008,8 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 /**
  * A paragraph wrapped just before ` - ` or ` + ` starts its next row with what reads as a list bullet
  * (`- μ)² and the block…`). The operator moves to the end of the row above when it fits there, the way
- * typesetting breaks after a binary operator. A row above that is itself a list item at the same indent
- * is a list, not a wrapped paragraph, and is left alone.
+ * typesetting breaks after a binary operator. A real list marker carries LIST_MARK instead of its space,
+ * so the pattern never matches one: a list right after a heading or paragraph keeps every bullet.
  */
 function liftLeadingOperator(
 	above: string,
@@ -1018,7 +1028,6 @@ function liftLeadingOperator(
 	const plainAbove = plain(above).replace(/ +$/u, "");
 	if (plainAbove.trim() === "") return null;
 	if (!plainAbove.startsWith(indent) || plainAbove.charAt(indent.length) === " ") return null;
-	if (/^ *(?:[-+*]|\d+[.)]) /u.test(plainAbove)) return null;
 	const raised = `${above.replace(/ +$/u, "")} ${lead[2]}`;
 	if (visibleWidth(raised) > width) return null;
 	return [raised, `${row.slice(0, at)}${row.slice(at + 2)}`];
