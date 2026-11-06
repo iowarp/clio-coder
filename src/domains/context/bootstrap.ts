@@ -102,6 +102,8 @@ export interface BootstrapGenerateInput {
 	progress?: BootstrapProgressSink;
 	reportGeneration?: BootstrapGenerationSink;
 	assessDraft?: (draft: BootstrapStructuredOutput) => string | null;
+	/** Sections the evidence supports that a draft omits, each with the evidence that supports it. */
+	missingSections?: (draft: BootstrapStructuredOutput) => ExpectedSection[];
 }
 
 export type BootstrapGenerate = (
@@ -1226,6 +1228,66 @@ function uncoveredCheckerSection(
 	};
 }
 
+/** Strictness flags whose meaning an agent cannot read off ordinary code. */
+const TSCONFIG_STRICT_FLAGS: ReadonlyArray<readonly [string, string]> = [
+	["exactOptionalPropertyTypes", "an optional property is omitted, never assigned `undefined`"],
+	["noUncheckedIndexedAccess", "an index access yields `T | undefined`"],
+	["noImplicitOverride", "an overriding member is marked `override`"],
+	["noPropertyAccessFromIndexSignature", "an index-signature key is read with brackets"],
+];
+
+/**
+ * The root `tsconfig.json` strictness flags a handbook does not already name,
+ * as one convention. Two drafts in a row dropped this line, and it decides
+ * whether code compiles.
+ */
+function tsconfigConvention(cwd: string, handbook: string): string | null {
+	let options: Record<string, unknown> = {};
+	try {
+		const raw = readFileSync(join(cwd, "tsconfig.json"), "utf8")
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/^\s*\/\/.*$/gm, "")
+			.replace(/,(\s*[}\]])/g, "$1");
+		const parsed = JSON.parse(raw) as { compilerOptions?: Record<string, unknown> };
+		options = parsed.compilerOptions ?? {};
+	} catch {
+		// No root tsconfig, or one this reader cannot parse: no convention is stated.
+		return null;
+	}
+	const enabled = TSCONFIG_STRICT_FLAGS.filter(([flag]) => options[flag] === true && !handbook.includes(flag));
+	if (enabled.length === 0) return null;
+	return `\`tsconfig.json\` enables ${enabled.map(([flag, meaning]) => `\`${flag}\` (${meaning})`).join(", ")}.`;
+}
+
+export interface ExpectedSection {
+	title: string;
+	reason: string;
+}
+
+/**
+ * The sections a handbook must carry when the evidence supports them. A draft
+ * from the same model on the same repository kept Change recipes in one run
+ * and dropped the whole section in the next, and nothing said so.
+ */
+function missingHandbookSections(
+	input: Pick<BootstrapGenerateInput, "cwd" | "enforcement">,
+	draft: Pick<BootstrapStructuredOutput, "sections">,
+): ExpectedSection[] {
+	const titles = (draft.sections ?? []).map((section) => section.title);
+	const missing: ExpectedSection[] = [];
+	const checks = (input.enforcement?.checkFiles ?? []).filter((file) => file.failures.length > 0);
+	if (checks.length > 0 && !titles.some((title) => /recipe/i.test(title))) {
+		missing.push({
+			title: "Change recipes",
+			reason: `${checks.map((file) => file.path).join(", ")} report failures a change can only fix by editing files together`,
+		});
+	}
+	if (typeof packageScripts(input.cwd).test === "string" && !titles.some((title) => /\btests?\b/i.test(title))) {
+		missing.push({ title: "Tests", reason: "package.json declares a test script" });
+	}
+	return missing;
+}
+
 function stabilizeGeneratedOutput(
 	input: BootstrapGenerateInput,
 	base: BootstrapStructuredOutput,
@@ -1275,10 +1337,17 @@ function stabilizeGeneratedOutput(
 		...invariants.filter((rule) => existing?.invariants.includes(rule) === true || !restatesArchitecture(rule)),
 	].slice(0, HANDBOOK_TARGETS.invariants);
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
+	const typescriptConvention = tsconfigConvention(
+		input.cwd,
+		[...retainedInvariants, ...conventions, ...(base.sections ?? []).map((section) => section.body)].join("\n"),
+	);
 	// Invariants win over conventions, then both win over section bullets so boundary rules appear once.
-	const retainedConventions = conventions
-		.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
-		.slice(0, HANDBOOK_TARGETS.conventions);
+	const retainedConventions = [
+		...(typescriptConvention ? [typescriptConvention] : []),
+		...conventions
+			.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
+			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
+	];
 	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
 	const verification = verificationSection(input.cwd, tomlFiles);
@@ -1923,6 +1992,7 @@ async function runBootstrapWork(
 	const reportGeneration: BootstrapGenerationSink = (reported) => {
 		if (reportedGeneration === undefined) reportedGeneration = reported;
 	};
+	let enforcementSeen: EnforcementInventory | undefined;
 	if (shouldGenerate) {
 		const depth = input.depth ?? "standard";
 		// The handbook this run writes is its output, not repository evidence. A
@@ -1930,6 +2000,7 @@ async function runBootstrapWork(
 		// previous text; only --apply hands the old handbook over, as existingClioMd.
 		const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter((path) => path !== "CLIO-CODER.md");
 		const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
+		enforcementSeen = enforcement;
 		const anchors = codewiki.files
 			.filter((file) => file.lang !== "config" && file.role !== "test")
 			.sort(
@@ -1964,6 +2035,7 @@ async function runBootstrapWork(
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
 			reportGeneration,
+			missingSections: (draft) => missingHandbookSections({ cwd, enforcement }, draft),
 			// Deterministic sampling repeats an empty draft unless a bounded repair receives grounding feedback.
 			assessDraft: (draft) => {
 				let retained = 0;
@@ -2052,6 +2124,17 @@ async function runBootstrapWork(
 		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
 	if (shouldGenerate && generation.mode !== "existing") output = fitGeneratedHandbook(output);
+	if (shouldGenerate && generation.mode === "model") {
+		for (const section of missingHandbookSections(
+			{ cwd, ...(enforcementSeen ? { enforcement: enforcementSeen } : {}) },
+			output,
+		)) {
+			warn(
+				input.io,
+				`  warning: the generated CLIO-CODER.md has no ${section.title} section although ${section.reason}; rerun \`clio-coder context init --rewrite\` to draft it again.\n`,
+			);
+		}
+	}
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
