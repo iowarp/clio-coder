@@ -1,7 +1,7 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../xdg.js";
+import { assertClioDirLayout, clioCachePath, clioConfigPath, clioDataPath, clioStatePath } from "../xdg.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
 import { discoverSecretMasks } from "./secret-files.js";
@@ -94,6 +94,12 @@ export interface MainSandboxPolicy {
 	absentGitHooks: ReadonlyArray<string>;
 	/** Git config and commondir files that do not exist yet; one a script leaves behind is removed. */
 	absentGitFiles: ReadonlyArray<string>;
+	/**
+	 * Clio's own roots, also in `readOnlyPaths`. The spawn plan creates an absent
+	 * one, because bubblewrap's -try binds skip it and a script could then create
+	 * it, under a writable cache root, with contents Clio later trusts.
+	 */
+	clioDirs: ReadonlyArray<string>;
 	network: true;
 	/** Where each launch looks for secret files to mask: the workspace, then the scratch roots. */
 	secretRoots: { workspace: string; scratchRoots: ReadonlyArray<string> };
@@ -447,6 +453,7 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 		],
 		absentGitHooks: git?.absentHooks ?? [],
 		absentGitFiles: git?.absentFiles ?? [],
+		clioDirs: [...input.clioDirs],
 		network: true,
 		secretRoots: { workspace: input.workspace, scratchRoots: input.scratchRoots },
 		env: input.env ?? DEFAULT_SANDBOX_ENV_POLICY,
@@ -475,7 +482,11 @@ function mainSandboxCacheRoots(): { cacheRoots: string[]; codeCaches: string[] }
 	return { cacheRoots: [cache, npm], codeCaches };
 }
 
-/** The policy for roots an admission decided, with this process's Clio directories kept read-only. */
+/**
+ * The policy for roots an admission decided, with this process's Clio
+ * directories kept read-only. Naming them creates none: doctor describes this
+ * policy on a home that may not have them, and only a spawn needs them.
+ */
 export function mainSandboxPolicy(roots: {
 	workspace: string;
 	scratchRoots: ReadonlyArray<string>;
@@ -483,10 +494,11 @@ export function mainSandboxPolicy(roots: {
 	unixSockets?: UnixSocketMode;
 }): MainSandboxPolicy {
 	const git = mainSandboxGitLayout(roots.workspace);
+	assertClioDirLayout();
 	return resolveMainSandboxPolicy({
 		...roots,
 		...mainSandboxCacheRoots(),
-		clioDirs: [clioConfigDir(), clioDataDir(), clioStateDir(), clioCacheDir()],
+		clioDirs: [clioConfigPath(), clioDataPath(), clioStatePath(), clioCachePath()],
 		...(git !== undefined ? { git } : {}),
 	});
 }
@@ -529,7 +541,8 @@ export type MainSandboxSpawnPlan =
  * and git refuses an empty commondir. `afterExit` removes one the script
  * created; the caller runs it once the sandbox has exited, which ends every
  * process in its PID namespace. The caller spawns the sandbox with the
- * environment scrubbed by `env`.
+ * environment scrubbed by `env`. An absent Clio root is created first so its
+ * read-only bind holds; one that cannot be created refuses the command.
  */
 export function planMainSandboxSpawn(
 	policy: MainSandboxPolicy,
@@ -542,6 +555,19 @@ export function planMainSandboxSpawn(
 			kind: "refused",
 			message: `sandbox: the main-session sandbox is unavailable (${availability.reason ?? "no backend"}); the command was not run`,
 		};
+	}
+	// A read-only bind needs its path to exist, and naming the policy created none.
+	// A dangling link fails here as it did when the policy created the roots.
+	for (const dir of policy.clioDirs) {
+		if (existsSync(dir)) continue;
+		try {
+			mkdirSync(dir, { recursive: true });
+		} catch (error) {
+			return {
+				kind: "refused",
+				message: `sandbox: could not create Clio's directory ${dir} to keep it read-only (${error instanceof Error ? error.message : String(error)}); the command was not run`,
+			};
+		}
 	}
 	const physicalPolicy: MainSandboxPolicy = {
 		...policy,

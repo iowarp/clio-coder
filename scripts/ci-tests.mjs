@@ -42,6 +42,7 @@ export const coreTests = [
 	"skill-frontmatter-cache",
 	"skill-frontmatter-cache-gate",
 	"read-only-mode",
+	"sandbox-clio-roots",
 	"fleet-run-history-prime",
 	"approval-card-arguments",
 	"copilot-sdk-route",
