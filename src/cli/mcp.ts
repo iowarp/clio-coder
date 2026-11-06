@@ -110,6 +110,15 @@ function entryLabel(entries: ReadonlyArray<McpServerEntryScript>): string {
 	return `entry=${spelled.join(", ")}`;
 }
 
+/**
+ * The per-tool classes a declaration asks for, printed before trust is granted
+ * so the operator sees what a project or plugin declaration will classify.
+ */
+function toolClassesLabel(classes: Readonly<Record<string, string>>): string {
+	const names = Object.keys(classes).sort();
+	return names.length === 0 ? "" : ` toolActionClasses=${names.map((name) => `${name}:${classes[name]}`).join(",")}`;
+}
+
 function networkLabel(grant: ReturnType<typeof networkGrant>): string {
 	return grant.network
 		? `network=true (${grant.networkSource === "trust" ? "trust record" : "user declaration"})`
@@ -186,7 +195,7 @@ export function mcpCommandOutput(
 			};
 			const lines = result.servers.map(
 				(server) =>
-					`${server.id} scope=${server.scope}${server.plugin !== undefined ? ` plugin=${server.plugin.id}` : ""} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}${server.scope === "project" ? ` ${entryLabel(server.entryScripts ?? [])}` : ""} ${networkLabel(server)}`,
+					`${server.id} scope=${server.scope}${server.plugin !== undefined ? ` plugin=${server.plugin.id}` : ""} command=${JSON.stringify([server.command, ...server.args])} cwd=${JSON.stringify(server.cwd)} trust=${server.trust.status}${"reason" in server.trust ? ` (${server.trust.reason})` : ""} actionClass=${server.trust.actionClass}${toolClassesLabel(server.toolActionClasses)}${server.scope === "project" ? ` ${entryLabel(server.entryScripts ?? [])}` : ""} ${networkLabel(server)}`,
 			);
 			for (const server of result.servers) {
 				for (const tool of server.tools) lines.push(`  ${tool.capability} actionClass=${tool.actionClass}`);
@@ -237,7 +246,11 @@ export function mcpCommandOutput(
 			const result = trustMcpServer({ ...options, id, ...(actionClass ? { actionClass } : {}), network });
 			if (!result.ok) return fail(1, result.message);
 			const { entryScripts, ...data } = result;
-			return { code: 0, text: `mcp: trusted ${id} ${entryLabel(entryScripts)} ${JSON.stringify(result.record)}`, data };
+			return {
+				code: 0,
+				text: `mcp: trusted ${id} ${entryLabel(entryScripts)}${toolClassesLabel(result.toolActionClasses)} ${JSON.stringify(result.record)}`,
+				data,
+			};
 		}
 		const resolved = resolveMcpServers(options);
 		const server = resolved.servers.find((entry) => entry.id === id);
