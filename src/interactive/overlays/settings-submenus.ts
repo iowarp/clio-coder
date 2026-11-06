@@ -112,7 +112,7 @@ export class ChoiceList implements Component, RowBudgetedBody {
 		if (visible >= 3) {
 			window[visible - 1] = positionRow(
 				theme,
-				{ start: start + 1, end: start + visible - 1, total: lines.length, unit: "rows" },
+				{ start: start + 1, end: start + visible - 1, total: lines.length, unit: "lines" },
 				width,
 			);
 		}

@@ -3997,8 +3997,29 @@ export class SettingsCenter implements Component {
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, height - 1));
-		return fitRows([header, ...renderSectionLane(theme, rows.slice(start, end), width)], width, height);
+		const slots = Math.max(1, height - 1);
+		if (rows.length <= slots) {
+			return fitRows([header, ...renderSectionLane(theme, rows, width)], width, height);
+		}
+		// A cut list says what it hid and whether a hidden section carries a change,
+		// because at 80x24 the last section and its changed mark fell off unannounced.
+		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, slots - 2));
+		const marker = (glyph: string, hidden: typeof rows): string => {
+			const changed = hidden.some((row) => row.badge !== undefined) && !this.effectiveFilterQuery().length;
+			return theme.fg("positionCount", `  ${glyph} ${hidden.length} more${changed ? ` · ${GLYPH.scoped} changed` : ""}`);
+		};
+		const above = rows.slice(0, start);
+		const below = rows.slice(end);
+		return fitRows(
+			[
+				header,
+				...(above.length > 0 ? [marker(GLYPH.up, above)] : []),
+				...renderSectionLane(theme, rows.slice(start, end), width),
+				...(below.length > 0 ? [marker(GLYPH.down, below)] : []),
+			],
+			width,
+			height,
+		);
 	}
 
 	/**
