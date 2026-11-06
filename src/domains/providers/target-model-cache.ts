@@ -5,13 +5,18 @@
  * in settings.yaml made a three-target config carry hundreds of volatile model
  * ids. Cache files keep that snapshot available to a new process without
  * turning the hand-edited settings file into a probe transcript.
+ *
+ * Reading never creates the cache root, and read-only mode
+ * (core/read-only-mode.ts) records nothing: doctor and `run --read-only` probe
+ * targets too, and must leave this cache as they found it.
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readOnlyMode } from "../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { clioCacheDir } from "../../core/xdg.js";
+import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export const TARGET_MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -42,7 +47,7 @@ function targetCacheKey(targetId: string): string {
 	return createHash("sha256").update(targetId).digest("hex").slice(0, 24);
 }
 
-export function targetModelSnapshotPath(targetId: string, cacheDir = clioCacheDir()): string {
+export function targetModelSnapshotPath(targetId: string, cacheDir = clioCachePath()): string {
 	return join(cacheDir, "provider-target-models", `${targetCacheKey(targetId)}.json`);
 }
 
@@ -130,6 +135,7 @@ export function recordTargetModelSnapshot(
 	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt"> = {},
 ): boolean {
 	if (target.id.length === 0 || target.runtime.length === 0) return false;
+	if (readOnlyMode()) return false;
 	const snapshot: TargetModelSnapshot = {
 		version: TARGET_MODEL_CACHE_VERSION,
 		targetId: target.id,
@@ -143,7 +149,9 @@ export function recordTargetModelSnapshot(
 	const modelCreatedAt = normalizedLabels(snapshot.models, options.modelCreatedAt);
 	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
 	try {
-		safeResourceWrite(targetModelSnapshotPath(target.id, options.cacheDir), `${JSON.stringify(snapshot, null, 2)}\n`, {
+		// The writer's root check; reads resolve the root without creating it.
+		const cacheDir = options.cacheDir ?? clioCacheDir();
+		safeResourceWrite(targetModelSnapshotPath(target.id, cacheDir), `${JSON.stringify(snapshot, null, 2)}\n`, {
 			encoding: "utf8",
 		});
 		return true;

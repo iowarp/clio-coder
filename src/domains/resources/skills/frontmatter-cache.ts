@@ -15,14 +15,14 @@
  * change nothing (doctor, `run --read-only`, read-only dispatch, listings).
  * Every process reads an existing cache file. Only a process that opened the
  * gate with `enableFrontmatterCacheWrites` persists parses, prunes entries or
- * creates the cache root, and never inside `withFrontmatterCacheReadOnly`.
+ * creates the cache root, and never in read-only mode (core/read-only-mode.ts).
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readClioVersion } from "../../../core/package-root.js";
+import { readOnlyMode, readOnlyProcess } from "../../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioCacheDir, clioCachePath } from "../../../core/xdg.js";
 
@@ -56,30 +56,21 @@ interface LoadedCache {
 
 let loaded: LoadedCache | null = null;
 let writesOpen = false;
-const readOnlyScope = new AsyncLocalStorage<true>();
 
 /**
  * Let this process persist parses. Called once by the surfaces that already
- * write the operator's state for a writable run: the terminal, a main-agent
- * `run` without `--read-only`, and a dispatched worker without a read-only
- * ceiling. ACP never opens it, since its read-only ceilings arrive per
- * session and per prompt inside one shared process.
+ * write the operator's state: the terminal, a main-agent `run` and a native
+ * dispatched worker. Read-only mode still keeps a `run --read-only` or a
+ * worker under a read-only ceiling a reader. ACP never opens it, since its
+ * read-only ceilings arrive per session and per prompt inside one shared
+ * process.
  */
 export function enableFrontmatterCacheWrites(): void {
 	writesOpen = true;
 }
 
-/**
- * Run `work` as a reader even in a process that opened writes: loads inside
- * it answer from the cache but neither change the cached entries nor flush,
- * so a later writable load cannot persist what a read-only one parsed.
- */
-export function withFrontmatterCacheReadOnly<T>(work: () => T): T {
-	return readOnlyScope.run(true, work);
-}
-
 function writable(): boolean {
-	return writesOpen && readOnlyScope.getStore() !== true;
+	return writesOpen && !readOnlyMode();
 }
 
 function cacheFilePath(): string | null {
@@ -204,9 +195,10 @@ export function cachedFrontmatterParser(
 ): (text: string) => unknown {
 	return (text) => {
 		const cache = currentCache();
-		// A read-only scope leaves the entries as it found them. A process that never
-		// opened writes still keeps its parses in memory; nothing there ever flushes them.
-		const mutable = readOnlyScope.getStore() !== true;
+		// Read-only work inside a process that may still write leaves the entries as it
+		// found them, so a later writable load cannot persist what it parsed. Any other
+		// load keeps its parses in memory, including in a process that never flushes.
+		const mutable = readOnlyProcess() || !readOnlyMode();
 		let hit = cache?.entries.get(filePath);
 		if (cache && hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size && hit.text === text) {
 			const decoded = decodeEntry(hit);

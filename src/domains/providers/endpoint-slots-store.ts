@@ -30,6 +30,10 @@
  *      and an explicit `maxConcurrentRequests` outranks both. See
  *      endpoint-capacity.ts.
  *
+ * Read-only mode (core/read-only-mode.ts) records nothing: doctor and
+ * `run --read-only` probe endpoints too, and must leave this file as they found
+ * it.
+ *
  * Reads are deliberately uncached. The file holds at most
  * MAX_ENDPOINT_SLOT_RECORDS small rows, callers read it once per capacity
  * resolution rather than once per target, and a cache keyed on mtime would
@@ -39,6 +43,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readOnlyMode } from "../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
@@ -164,6 +169,7 @@ export async function recordDiscoveredEndpointSlots(
 ): Promise<void> {
 	if (!Number.isInteger(entry.slots) || entry.slots <= 0) return;
 	if (entry.endpointKey.length === 0 || entry.runtimeId.length === 0) return;
+	if (readOnlyMode()) return;
 	// Checked before the lock because acquiring it recreates the state root, and
 	// again under it because an uninstall can land while this call waits.
 	if (stateRootRemoved()) return;

@@ -15,9 +15,8 @@ const { resetXdgCache, clioConfigDir } = await import("../../src/core/xdg.js");
 resetXdgCache();
 const { readClioVersion } = await import("../../src/core/package-root.js");
 const { loadSkills } = await import("../../src/domains/resources/skills/loader.js");
-const { enableFrontmatterCacheWrites, withFrontmatterCacheReadOnly } = await import(
-	"../../src/domains/resources/skills/frontmatter-cache.js"
-);
+const { enableFrontmatterCacheWrites } = await import("../../src/domains/resources/skills/frontmatter-cache.js");
+const { withReadOnlyMode } = await import("../../src/core/read-only-mode.js");
 const { collectDoctorFindings } = await import("../../src/cli/doctor.js");
 after(() => rmSync(home, { recursive: true, force: true }));
 
@@ -72,7 +71,7 @@ describe("skill frontmatter cache write gate", () => {
 		// The terminal's `/doctor` runs in a process that opened writes.
 		await collectDoctorFindings({ deep: false });
 		ok(!existsSync(cacheFile), "doctor writes no cache");
-		await withFrontmatterCacheReadOnly(async () => {
+		await withReadOnlyMode(async () => {
 			await Promise.resolve();
 			equal(describeSkill(alpha, "alpha"), "Parsed alpha.");
 		});

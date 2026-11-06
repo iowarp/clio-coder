@@ -1,5 +1,6 @@
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
+import { withReadOnlyMode } from "../core/read-only-mode.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
 import {
 	mainSandboxLine,
@@ -23,7 +24,6 @@ import {
 	withDoctorCommand,
 } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
-import { withFrontmatterCacheReadOnly } from "../domains/resources/skills/frontmatter-cache.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import { droppedScratchRoots, effectiveScratchRoots } from "../domains/safety/scratch-roots.js";
 import {
@@ -381,11 +381,12 @@ function foldDoctorFindings(findings: ReadonlyArray<DoctorFinding>): {
  * `/doctor` renders the same list in-session and passes its own providers
  * contract so the deep probe runs against the session's targets.
  *
- * Doctor reads skills for its interop checks but is a reader everywhere, so
- * it never persists their frontmatter, even from inside a writable session.
+ * Doctor loads skills and probes targets but refreshes no cache or prior they
+ * feed, even from inside a writable session; `--fix` repairs the home, not
+ * those.
  */
 export async function collectDoctorFindings(options: DoctorCollectOptions = {}): Promise<DoctorFinding[]> {
-	return withFrontmatterCacheReadOnly(() => collectFindings(options));
+	return withReadOnlyMode(() => collectFindings(options));
 }
 
 async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFinding[]> {
