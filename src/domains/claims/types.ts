@@ -188,10 +188,20 @@ export const HYPOTHESIS_SLATE_SCHEMA = "clio-coder.hypothesis-slate.v1";
 export type HypothesisStatus = "proposed" | "tested" | "supported" | "refuted";
 
 /**
- * One hypothesis of a slate as the main session wrote it (#406). Unlike a claim this is model-authored text, so it is
+ * One hypothesis of a slate the main session wrote, or a worker wrote and the host accepted into the project (#406).
+ * Unlike a claim this is model-authored text, so it is
  * never `grounded`: it records what was proposed and the check that would judge it, nothing more. A later version of
  * the same slate entry with changed content is a new record that `revises` the earlier one; neither is rewritten.
  */
+/**
+ * How a slate reached the log: written by a main-session tool call, or landed in the project by a worker run the host
+ * accepted (a merged task worktree, or a run in the checkout that settled succeeded). Either way the host read the
+ * file from the project; nothing a worker reported about it is recorded.
+ */
+export type HypothesisSource =
+	| { channel: "slate"; sessionId: string | null; toolCallId: string | null; slateSha256: string }
+	| { channel: "worker-slate"; runId: string; receiptDigest: string; slateSha256: string };
+
 export interface HypothesisRecordV1 {
 	v: typeof CLAIM_RECORD_VERSION;
 	type: "hypothesis";
@@ -209,9 +219,9 @@ export interface HypothesisRecordV1 {
 	criterion: { kind: string; check?: string; statement?: string };
 	/** Digest of slate path, hypothesis id, statement, prediction and criterion: the same entry rewritten is one subject. */
 	subject: string;
-	/** The earlier record of the same slate entry this one replaces. */
+	/** The record of the same slate entry this one replaces, which was current when this one was appended. */
 	revises?: string;
-	source: { channel: "slate"; sessionId: string | null; toolCallId: string | null; slateSha256: string };
+	source: HypothesisSource;
 	evidence: "proposed";
 	flagged?: "instruction-markers";
 }
@@ -226,7 +236,7 @@ export interface HypothesisTestRecordV1 {
 	id: string;
 	at: string;
 	project: string;
-	/** The hypothesis record tested: the latest revision of its slate entry when the check ran. */
+	/** The hypothesis record tested: a revision that was current when the check started, bound then. */
 	hypothesis: string;
 	check: string;
 	outcome: Exclude<HypothesisStatus, "proposed">;

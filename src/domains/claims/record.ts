@@ -1,27 +1,32 @@
-import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioDataDir } from "../../core/xdg.js";
 import { recordClaimRegressions } from "../memory/index.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimFromVerifyResult, claimsFromHostVerification, type SealedHostCheck } from "./capture.js";
 import { claimBackingRefs, claimRegressionNote, overturnedAgreements, regressionRecord } from "./edges.js";
-import { type CheckRun, hypothesesFromSlate } from "./hypotheses.js";
+import { type CheckRun, hypothesesFromSlate, type SlateOrigin } from "./hypotheses.js";
 import {
 	appendClaimRegressions,
 	appendClaims,
 	appendHypotheses,
 	appendHypothesisTests,
 	claimsProjectRoot,
+	hypothesisBindings,
 	readClaims,
 } from "./store.js";
 import type { ClaimEdgeRecord, ClaimRecord } from "./types.js";
 
 export const CLAIM_CAPTURE_REGISTRATION_ID = "observer.claims-capture";
-export const HYPOTHESIS_CAPTURE_REGISTRATION_ID = "observer.hypothesis-capture";
+const HYPOTHESIS_CAPTURE_REGISTRATION_ID = "observer.hypothesis-capture";
 
 /** A slate past this size is not read; a hypothesis slate is a few KB. */
 const SLATE_MAX_BYTES = 1024 * 1024;
+/** Verify calls bound but not yet finished; a call another hook blocked never reaches after_tool, so the oldest go. */
+const OPEN_VERIFY_BINDINGS_MAX = 64;
+/** Files of one accepted worker run read as possible slates. */
+const WORKER_SLATE_PATHS_MAX = 64;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -33,38 +38,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function verifyRun(
 	details: Readonly<Record<string, unknown>> | undefined,
+	bound: { check: string; hypotheses: string[] } | undefined,
 	claim: ClaimRecord | null,
 	source: CheckRun["source"],
 	at: string,
 ): CheckRun | null {
-	if (details === undefined || typeof details.check !== "string") return null;
+	if (details === undefined || typeof details.check !== "string" || bound?.check !== details.check) return null;
 	const judgement = details.judgement;
 	if (!isRecord(judgement) || typeof judgement.execution !== "string" || judgement.execution === "unavailable")
 		return null;
-	return { check: details.check, execution: judgement.execution, ...(claim !== null ? { claim } : {}), source, at };
+	return {
+		check: details.check,
+		hypotheses: bound.hypotheses,
+		execution: judgement.execution,
+		...(claim !== null ? { claim } : {}),
+		source,
+		at,
+	};
 }
 
 /**
  * Captures the claim a main-thread `verify` result carries (#406). Only the main session registers it, so a worker's
  * own verify call, which judges the worker's tree under the worker's control, never writes the operator's log; a
  * worker run's checks reach the log through host verification instead. The phase is awaited, so a headless run
- * cannot exit before its claim is on disk.
+ * cannot exit before its claim is on disk. The hypotheses a call tests are bound in before_tool, after admission and
+ * just before the check starts, so a hypothesis proposed or revised while it ran is not credited with its result.
  */
 export function createClaimCaptureRegistration(options: {
 	cwd: () => string;
 	now?: () => Date;
 }): MiddlewareHookRegistration {
 	const now = options.now ?? (() => new Date());
+	const open = new Map<string, { check: string; hypotheses: string[] }>();
 	return {
 		id: CLAIM_CAPTURE_REGISTRATION_ID,
 		description: "record a judged reproduce or numeric-compare verify result in the project's claims log",
-		hooks: ["after_tool"],
+		hooks: ["before_tool", "after_tool"],
 		toolNames: [ToolNames.Verify],
 		evidence: "typed:verify.report@tool-result",
 		awaited: true,
 		evaluate: () => [],
 		async evaluateAsync(input: MiddlewareHookInput) {
 			if (input.toolName !== ToolNames.Verify) return [];
+			const callId = input.toolCallId;
+			if (input.hook === "before_tool") {
+				const check = input.toolArgs?.check;
+				if (callId === undefined || typeof check !== "string") return [];
+				const hypotheses = hypothesisBindings(claimsProjectRoot(options.cwd()), [check]).get(check) ?? [];
+				open.delete(callId);
+				open.set(callId, { check, hypotheses });
+				for (const stale of open.keys()) {
+					if (open.size <= OPEN_VERIFY_BINDINGS_MAX) break;
+					open.delete(stale);
+				}
+				return [];
+			}
+			const bound = callId === undefined ? undefined : open.get(callId);
+			if (callId !== undefined) open.delete(callId);
 			const project = claimsProjectRoot(options.cwd());
 			const at = now().toISOString();
 			const source = {
@@ -76,7 +106,7 @@ export function createClaimCaptureRegistration(options: {
 			const claim = claimFromVerifyResult({ details: input.toolResultDetails, project, at, source });
 			if (claim !== null) await recordClaims([claim], now());
 			// After the claim is on disk, so a test record never names a claim the log does not hold yet.
-			const run = verifyRun(input.toolResultDetails, claim, source, at);
+			const run = verifyRun(input.toolResultDetails, bound, claim, source, at);
 			if (run !== null) await appendHypothesisTests(project, [run]);
 			return [];
 		},
@@ -104,29 +134,91 @@ export function createHypothesisCaptureRegistration(options: {
 		evaluate: () => [],
 		async evaluateAsync(input: MiddlewareHookInput) {
 			const path = input.toolArgs?.path;
-			if (typeof path !== "string" || !path.endsWith(".json")) return [];
+			if (typeof path !== "string") return [];
 			const cwd = options.cwd();
-			const absolute = resolve(cwd, path);
-			let text: string;
-			try {
-				if (statSync(absolute).size > SLATE_MAX_BYTES) return [];
-				text = readFileSync(absolute, "utf8");
-			} catch {
-				// A write that failed or a file removed since leaves no slate to record.
-				return [];
-			}
-			const project = claimsProjectRoot(cwd);
-			const drafts = hypothesesFromSlate({
-				text,
-				path: absolute,
-				project,
+			await recordSlate({
+				absolute: resolve(cwd, path),
+				project: claimsProjectRoot(cwd),
 				at: now().toISOString(),
-				source: { sessionId: input.sessionId ?? null, toolCallId: input.toolCallId ?? null },
+				source: { channel: "slate", sessionId: input.sessionId ?? null, toolCallId: input.toolCallId ?? null },
 			});
-			if (drafts !== null && drafts.length > 0) await appendHypotheses(project, drafts);
 			return [];
 		},
 	};
+}
+
+/** Read a file as it stands in the project and record the hypotheses it holds when it is a slate. */
+async function recordSlate(input: {
+	absolute: string;
+	project: string;
+	at: string;
+	source: SlateOrigin;
+}): Promise<number> {
+	if (!input.absolute.endsWith(".json")) return 0;
+	let text: string;
+	try {
+		if (statSync(input.absolute).size > SLATE_MAX_BYTES) return 0;
+		text = readFileSync(input.absolute, "utf8");
+	} catch {
+		// A write that failed or a file removed since leaves no slate to record.
+		return 0;
+	}
+	const drafts = hypothesesFromSlate({
+		text,
+		path: input.absolute,
+		project: input.project,
+		at: input.at,
+		source: input.source,
+	});
+	if (drafts === null || drafts.length === 0) return 0;
+	return (await appendHypotheses(input.project, drafts)).length;
+}
+
+/**
+ * The hypotheses each declared check of a worker run would test (#406), read just before host verification starts
+ * them and carried to `recordHostVerificationClaims`, so a slate written while the checks ran is not credited.
+ */
+export function bindHostVerificationHypotheses(
+	projectCwd: string,
+	checks: ReadonlyArray<string>,
+): ReadonlyMap<string, ReadonlyArray<string>> {
+	return hypothesisBindings(claimsProjectRoot(projectCwd), checks);
+}
+
+/**
+ * Record the slates a worker run landed in the project once the host accepted it (#406): the paths are the host's own
+ * account of what landed (a merged task worktree's changed paths, or the writes it observed a run in the checkout
+ * make), and each file is read from the project as it now stands. A status the worker wrote is never read as
+ * evidence: only entries still at proposed are recorded, as for a main-session slate.
+ */
+export async function recordAcceptedWorkerSlates(input: {
+	runId: string;
+	receiptDigest: string;
+	projectCwd: string;
+	/** Absolute paths; anything else, or a path outside the project, is ignored. */
+	paths: ReadonlyArray<string>;
+	now?: Date;
+}): Promise<number> {
+	const project = claimsProjectRoot(input.projectCwd);
+	const at = (input.now ?? new Date()).toISOString();
+	const source: SlateOrigin = { channel: "worker-slate", runId: input.runId, receiptDigest: input.receiptDigest };
+	let recorded = 0;
+	const physical = (path: string): string => {
+		try {
+			return realpathSync(path);
+		} catch {
+			return path;
+		}
+	};
+	const absolutes = [...new Set(input.paths.filter((path) => isAbsolute(path)).map(physical))]
+		.filter((absolute) => {
+			if (!isAbsolute(absolute) || !absolute.endsWith(".json")) return false;
+			const inside = relative(project, absolute);
+			return inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside);
+		})
+		.slice(0, WORKER_SLATE_PATHS_MAX);
+	for (const absolute of absolutes) recorded += await recordSlate({ absolute, project, at, source });
+	return recorded;
 }
 
 /**
@@ -138,6 +230,8 @@ export async function recordHostVerificationClaims(input: {
 	receiptDigest: string;
 	checks: ReadonlyArray<SealedHostCheck>;
 	projectCwd: string;
+	/** The hypotheses each check was bound to when host verification started it; a check absent here tests none. */
+	hypotheses?: ReadonlyMap<string, ReadonlyArray<string>>;
 	now?: Date;
 }): Promise<number> {
 	const project = claimsProjectRoot(input.projectCwd);
@@ -150,15 +244,16 @@ export async function recordHostVerificationClaims(input: {
 		at,
 	});
 	if (claims.length > 0) await recordClaims(claims, input.now ?? new Date());
-	// Each check this run executed itself tests the hypotheses naming it; a memo hit or a batch member's shared check is
-	// the other run's evidence and tested them there.
+	// Each check this run started itself tests the hypotheses bound to it; a memo hit or a batch member's shared check is
+	// the other run's evidence and tested them there, and a check that never started tested nothing.
 	const source = { channel: "host-verification" as const, runId: input.runId, receiptDigest: input.receiptDigest };
 	const runs = input.checks
-		.filter((check) => !check.memo && check.evidenceRunId === undefined)
+		.filter((check) => !check.memo && check.evidenceRunId === undefined && check.notRun === undefined)
 		.map((check): CheckRun => {
 			const claim = claims.find((candidate) => candidate.keys.check === check.check);
 			return {
 				check: check.check,
+				hypotheses: [...(input.hypotheses?.get(check.check) ?? [])],
 				execution: check.exitCode === 0 ? "succeeded" : "failed",
 				...(claim !== undefined ? { claim } : {}),
 				source,

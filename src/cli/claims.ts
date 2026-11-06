@@ -238,6 +238,9 @@ function skippedNote(read: ClaimsLogRead): string | null {
 		read.unknownVersion > 0
 			? `${read.unknownVersion} record${read.unknownVersion === 1 ? "" : "s"} of a newer version`
 			: null,
+		read.unlinked > 0
+			? `${read.unlinked} hypothesis record${read.unlinked === 1 ? "" : "s"} that do not follow from earlier records`
+			: null,
 	].filter((part): part is string => part !== null);
 	return parts.length > 0 ? `skipped ${parts.join(", ")}` : null;
 }
@@ -253,7 +256,12 @@ function readJsonSummary(
 		path: read.path,
 		claims: claims.map((claim) => relatedJson(claim, view)),
 		hypotheses: hypotheses.map((hypothesis) => hypothesisJson(hypothesis, view)),
-		skipped: { unreadable: read.unreadable, mismatched: read.mismatched, unknownVersion: read.unknownVersion },
+		skipped: {
+			unreadable: read.unreadable,
+			mismatched: read.mismatched,
+			unknownVersion: read.unknownVersion,
+			unlinked: read.unlinked,
+		},
 	};
 }
 

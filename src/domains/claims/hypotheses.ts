@@ -9,6 +9,7 @@ import {
 	type ClaimSource,
 	HYPOTHESIS_SLATE_SCHEMA,
 	type HypothesisRecordV1,
+	type HypothesisSource,
 	type HypothesisStatus,
 	type HypothesisTestRecordV1,
 } from "./types.js";
@@ -48,6 +49,26 @@ function projectPath(project: string, path: string): string {
 /** A hypothesis record before the log decides whether it revises an earlier one; its id is set then. */
 export type HypothesisDraft = Omit<HypothesisRecordV1, "id" | "revises">;
 
+/** Where a slate came from, before its bytes are hashed. */
+export type SlateOrigin =
+	| Omit<Extract<HypothesisSource, { channel: "slate" }>, "slateSha256">
+	| Omit<Extract<HypothesisSource, { channel: "worker-slate" }>, "slateSha256">;
+
+/** The digest a hypothesis record's `subject` must equal: the same entry rewritten unchanged is one subject. */
+export function hypothesisSubject(
+	record: Pick<HypothesisRecordV1, "slate" | "hypothesis" | "statement" | "prediction" | "criterion">,
+): string {
+	return sha256(
+		canonicalClaimJson({
+			slate: record.slate,
+			hypothesis: record.hypothesis,
+			statement: record.statement,
+			prediction: record.prediction,
+			criterion: record.criterion,
+		}),
+	);
+}
+
 /**
  * The hypotheses a slate holds, or null when the text is not a slate. Only an entry with a slate id, a statement and a
  * falsifiable prediction becomes a record, and only while the slate holds it at `proposed`: the checker refuses any
@@ -58,7 +79,7 @@ export function hypothesesFromSlate(input: {
 	path: string;
 	project: string;
 	at: string;
-	source: Omit<HypothesisRecordV1["source"], "channel" | "slateSha256">;
+	source: SlateOrigin;
 }): HypothesisDraft[] | null {
 	let slate: unknown;
 	try {
@@ -89,7 +110,7 @@ export function hypothesesFromSlate(input: {
 			...(check !== null ? { check } : {}),
 			...(criterionStatement !== null ? { statement: criterionStatement } : {}),
 		};
-		const subject = sha256(canonicalClaimJson({ slate: path, hypothesis: id, statement, prediction, criterion }));
+		const subject = hypothesisSubject({ slate: path, hypothesis: id, statement, prediction, criterion });
 		drafts.push({
 			v: CLAIM_RECORD_VERSION,
 			type: "hypothesis",
@@ -101,7 +122,7 @@ export function hypothesesFromSlate(input: {
 			prediction,
 			criterion,
 			subject,
-			source: { channel: "slate", ...input.source, slateSha256 },
+			source: { ...input.source, slateSha256 },
 			evidence: "proposed",
 			...(containsInstructionMarkers(`${statement}\n${prediction}\n${criterion.statement ?? ""}`)
 				? { flagged: "instruction-markers" as const }
@@ -146,39 +167,40 @@ export function deriveHypothesisRecords(
 	return added;
 }
 
-/** One run of a declared check, with the claim it was judged into when it was judged. */
+/**
+ * One run of a declared check, with the claim it was judged into when it was judged. `hypotheses` are the revisions
+ * bound when the check started; only those are tested, so a hypothesis proposed or revised while the check ran is not.
+ */
 export interface CheckRun {
 	check: string;
+	hypotheses: ReadonlyArray<string>;
 	execution: string;
 	claim?: ClaimRecord;
 	source: ClaimSource;
 	at: string;
 }
 
-/** Whether any current hypothesis in the log names one of these checks, so a capture can skip the locked append. */
-export function hypothesesNameCheck(
-	records: ReadonlyArray<HypothesisRecordV1>,
-	checks: ReadonlyArray<string>,
-): boolean {
-	const wanted = new Set(checks);
-	for (const record of latestHypotheses(records).values())
-		if (record.criterion.check !== undefined && wanted.has(record.criterion.check)) return true;
-	return false;
+/** The current revisions whose criterion names a check: what a run of it that starts now tests. */
+export function hypothesesNaming(records: ReadonlyArray<HypothesisRecordV1>, check: string): string[] {
+	return [...latestHypotheses(records).values()]
+		.filter((record) => record.criterion.check === check)
+		.map((record) => record.id);
 }
 
 /**
- * The test records check runs add: one per current hypothesis whose criterion names the check. The claim decides the
- * outcome; a run without one only marks the hypothesis tested.
+ * The test records check runs add: one per hypothesis bound to the run when it started, which still names the check.
+ * The claim decides the outcome; a run without one only marks the hypothesis tested.
  */
 export function deriveHypothesisTests(
 	history: ReadonlyArray<HypothesisRecordV1>,
 	runs: ReadonlyArray<CheckRun>,
 ): HypothesisTestRecordV1[] {
-	const current = [...latestHypotheses(history).values()];
+	const byId = new Map(history.map((record) => [record.id, record]));
 	const added: HypothesisTestRecordV1[] = [];
 	for (const run of runs) {
-		for (const hypothesis of current) {
-			if (hypothesis.criterion.check !== run.check) continue;
+		for (const id of new Set(run.hypotheses)) {
+			const hypothesis = byId.get(id);
+			if (hypothesis?.criterion.check !== run.check) continue;
 			const outcome: HypothesisTestRecordV1["outcome"] =
 				run.claim === undefined ? "tested" : run.claim.verdict === "agrees" ? "supported" : "refuted";
 			const body: Omit<HypothesisTestRecordV1, "id"> = {

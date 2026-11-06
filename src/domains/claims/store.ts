@@ -12,7 +12,8 @@ import {
 	deriveHypothesisRecords,
 	deriveHypothesisTests,
 	type HypothesisDraft,
-	hypothesesNameCheck,
+	hypothesesNaming,
+	hypothesisSubject,
 } from "./hypotheses.js";
 import {
 	CLAIM_KINDS,
@@ -20,6 +21,7 @@ import {
 	type ClaimEdgeRecord,
 	type ClaimRecord,
 	type ClaimRegressionRecord,
+	type ClaimSource,
 	type HypothesisRecord,
 	type HypothesisTestRecord,
 } from "./types.js";
@@ -131,17 +133,28 @@ export async function appendHypotheses(
 }
 
 /**
- * Append a test record for each current hypothesis whose criterion names a check that ran (#406). The log is read
- * once without the lock first, so a check no hypothesis names never takes it. Returns the records written.
+ * The hypothesis revisions each check would test if it started now (#406), read when the check starts so the test
+ * that follows binds to them and not to whatever is current once it finished. A check no hypothesis names is absent.
  */
+export function hypothesisBindings(project: string, checks: ReadonlyArray<string>): Map<string, string[]> {
+	const bindings = new Map<string, string[]>();
+	const wanted = new Set(checks);
+	if (wanted.size === 0) return bindings;
+	const hypotheses = readClaims(project).hypotheses;
+	for (const check of wanted) {
+		const ids = hypothesesNaming(hypotheses, check);
+		if (ids.length > 0) bindings.set(check, ids);
+	}
+	return bindings;
+}
+
+/** Append a test record for each hypothesis a check run was bound to when it started (#406). Returns the records written. */
 export async function appendHypothesisTests(
 	project: string,
 	runs: ReadonlyArray<CheckRun>,
 ): Promise<HypothesisTestRecord[]> {
 	const written: HypothesisTestRecord[] = [];
-	if (runs.length === 0) return written;
-	const checks = runs.map((run) => run.check);
-	if (!hypothesesNameCheck(readClaims(project).hypotheses, checks)) return written;
+	if (!runs.some((run) => run.hypotheses.length > 0)) return written;
 	await appendLines(claimsLogPath(project), (current) => {
 		const added = deriveHypothesisTests(parseClaimsLog(current, project).hypotheses, runs);
 		written.push(...added);
@@ -164,6 +177,12 @@ export interface ClaimsLogRead {
 	mismatched: number;
 	/** Records of a version this build does not read. */
 	unknownVersion: number;
+	/**
+	 * Hypothesis and test records whose links to earlier records do not hold: a replayed line, a revision that does not
+	 * follow the entry's current record, or a test whose hypothesis or claim is not an earlier record of its check, run
+	 * and verdict. The ledger never writes one; it was added to the log by something else.
+	 */
+	unlinked: number;
 }
 
 function isClaimRecord(value: Record<string, unknown>): boolean {
@@ -212,6 +231,33 @@ function isRegressionRecord(value: Record<string, unknown>): boolean {
 	);
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): boolean {
+	return value === null || typeof value === "string";
+}
+
+function isHypothesisSource(value: unknown): boolean {
+	if (!isObject(value) || typeof value.slateSha256 !== "string") return false;
+	if (value.channel === "slate") return isNullableString(value.sessionId) && isNullableString(value.toolCallId);
+	return value.channel === "worker-slate" && typeof value.runId === "string" && typeof value.receiptDigest === "string";
+}
+
+function isCheckSource(value: unknown): boolean {
+	if (!isObject(value)) return false;
+	if (value.channel === "verify")
+		return (
+			isNullableString(value.sessionId) &&
+			isNullableString(value.toolCallId) &&
+			(value.requestedBy === "model" || value.requestedBy === "harness")
+		);
+	return (
+		value.channel === "host-verification" && typeof value.runId === "string" && typeof value.receiptDigest === "string"
+	);
+}
+
 function isHypothesisRecord(value: Record<string, unknown>): boolean {
 	const criterion = value.criterion as Record<string, unknown> | null | undefined;
 	return (
@@ -227,8 +273,10 @@ function isHypothesisRecord(value: Record<string, unknown>): boolean {
 		typeof criterion === "object" &&
 		criterion !== null &&
 		typeof criterion.kind === "string" &&
-		typeof value.source === "object" &&
-		value.source !== null
+		(criterion.check === undefined || typeof criterion.check === "string") &&
+		(criterion.statement === undefined || typeof criterion.statement === "string") &&
+		(value.revises === undefined || typeof value.revises === "string") &&
+		isHypothesisSource(value.source)
 	);
 }
 
@@ -244,9 +292,72 @@ function isHypothesisTestRecord(value: Record<string, unknown>): boolean {
 		(value.outcome === "tested") === (value.claim === undefined) &&
 		(value.claim === undefined || typeof value.claim === "string") &&
 		typeof value.execution === "string" &&
-		typeof value.source === "object" &&
-		value.source !== null
+		isCheckSource(value.source)
 	);
+}
+
+/**
+ * The links an ordered read admits a hypothesis or test record by (#406). Each record's hash only proves its own bytes;
+ * these prove where it sits: a revision follows the current record of its entry, a test names a hypothesis and claim
+ * that came before it, and the claim is the judgement of the very run the test says it is.
+ */
+interface LinkState {
+	ids: Set<string>;
+	claims: Map<string, { claim: ClaimRecord; line: number }>;
+	hypotheses: Map<string, { record: HypothesisRecord; line: number }>;
+	current: Map<string, HypothesisRecord>;
+	tested: Set<string>;
+}
+
+function sameSource(a: ClaimSource, b: ClaimSource): boolean {
+	if (a.channel === "host-verification" || b.channel === "host-verification")
+		return (
+			a.channel === "host-verification" &&
+			b.channel === "host-verification" &&
+			a.runId === b.runId &&
+			a.receiptDigest === b.receiptDigest
+		);
+	return a.sessionId === b.sessionId && a.toolCallId === b.toolCallId && a.requestedBy === b.requestedBy;
+}
+
+function admitHypothesis(state: LinkState, record: HypothesisRecord, line: number): boolean {
+	if (state.ids.has(record.id) || hypothesisSubject(record) !== record.subject) return false;
+	const key = `${record.slate}\0${record.hypothesis}`;
+	const current = state.current.get(key);
+	// The first record of an entry revises nothing; every later one revises the record current then and changes it.
+	if (
+		current === undefined
+			? record.revises !== undefined
+			: record.revises !== current.id || current.subject === record.subject
+	)
+		return false;
+	state.ids.add(record.id);
+	state.current.set(key, record);
+	state.hypotheses.set(record.id, { record, line });
+	return true;
+}
+
+function admitHypothesisTest(state: LinkState, test: HypothesisTestRecord): boolean {
+	if (state.ids.has(test.id)) return false;
+	const hypothesis = state.hypotheses.get(test.hypothesis);
+	if (hypothesis === undefined || hypothesis.record.criterion.check !== test.check) return false;
+	if (test.claim !== undefined) {
+		const backing = state.claims.get(test.claim);
+		const pair = `${test.hypothesis}\0${test.claim}`;
+		if (
+			backing === undefined ||
+			state.tested.has(pair) ||
+			// Bound when the check started, so the hypothesis was in the log before the claim that check produced.
+			backing.line < hypothesis.line ||
+			backing.claim.keys.check !== test.check ||
+			backing.claim.verdict !== (test.outcome === "supported" ? "agrees" : "disagrees") ||
+			!sameSource(backing.claim.source, test.source)
+		)
+			return false;
+		state.tested.add(pair);
+	}
+	state.ids.add(test.id);
+	return true;
 }
 
 function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
@@ -261,8 +372,18 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		unreadable: 0,
 		mismatched: 0,
 		unknownVersion: 0,
+		unlinked: 0,
 	};
+	const links: LinkState = {
+		ids: new Set(),
+		claims: new Map(),
+		hypotheses: new Map(),
+		current: new Map(),
+		tested: new Set(),
+	};
+	let index = -1;
 	for (const line of text.split("\n")) {
+		index += 1;
 		if (line.trim().length === 0) continue;
 		let value: unknown;
 		try {
@@ -283,7 +404,10 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		if (isClaimRecord(record)) {
 			const claim = record as unknown as ClaimRecord;
 			if (claim.project !== projectRoot || claimRecordId(claim) !== claim.id) read.mismatched += 1;
-			else read.records.push(claim);
+			else {
+				read.records.push(claim);
+				if (!links.claims.has(claim.id)) links.claims.set(claim.id, { claim, line: index });
+			}
 			continue;
 		}
 		if (isEdgeRecord(record) || isRegressionRecord(record)) {
@@ -294,8 +418,15 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		}
 		if (isHypothesisRecord(record) || isHypothesisTestRecord(record)) {
 			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
-			else if (record.type === "hypothesis") read.hypotheses.push(record as unknown as HypothesisRecord);
-			else read.hypothesisTests.push(record as unknown as HypothesisTestRecord);
+			else if (record.type === "hypothesis") {
+				const hypothesis = record as unknown as HypothesisRecord;
+				if (admitHypothesis(links, hypothesis, index)) read.hypotheses.push(hypothesis);
+				else read.unlinked += 1;
+			} else {
+				const test = record as unknown as HypothesisTestRecord;
+				if (admitHypothesisTest(links, test)) read.hypothesisTests.push(test);
+				else read.unlinked += 1;
+			}
 			continue;
 		}
 		read.unreadable += 1;

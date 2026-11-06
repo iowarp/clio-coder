@@ -2,6 +2,8 @@ import { strict as assert, match } from "node:assert";
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { claimLogRecordId } from "../../src/domains/claims/edges.js";
+import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
 	appendClaims,
 	claimFromVerifyResult,
@@ -16,10 +18,62 @@ import {
 	hypothesisStatuses,
 	overturnedAgreements,
 	readClaims,
+	recordAcceptedWorkerSlates,
+	recordHostVerificationClaims,
 } from "../../src/domains/claims/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const source = { channel: "verify", sessionId: "s1", toolCallId: "t1", requestedBy: "model" } as const;
+
+function slateText(
+	hypotheses: ReadonlyArray<{ id: string; check: string; statement?: string; status?: string }>,
+): string {
+	return JSON.stringify({
+		schema: "clio-coder.hypothesis-slate.v1",
+		question: { text: "q" },
+		hypotheses: hypotheses.map((entry) => ({
+			id: entry.id,
+			status: entry.status ?? "proposed",
+			statement: entry.statement ?? `${entry.id} holds`,
+			prediction: "matches the reference",
+			experiment: { successCriterion: { kind: "numeric-compare", verifyId: entry.check } },
+		})),
+	});
+}
+
+/** A main-thread verify call as the tool registry runs it: before_tool when the check starts, after_tool with its result. */
+function verifyCall(registration: ReturnType<typeof createClaimCaptureRegistration>) {
+	let calls = 0;
+	const start = (check = "stats") => {
+		const toolCallId = `c${++calls}`;
+		const started = registration.evaluateAsync?.({
+			hook: "before_tool",
+			toolName: "verify",
+			sessionId: "s1",
+			toolCallId,
+			toolArgs: { check },
+		});
+		return {
+			started,
+			finish: (details: Record<string, unknown>) =>
+				registration.evaluateAsync?.({
+					hook: "after_tool",
+					toolName: "verify",
+					sessionId: "s1",
+					toolCallId,
+					toolResultDetails: details,
+				}),
+		};
+	};
+	return {
+		start,
+		run: async (details: Record<string, unknown>) => {
+			const call = start();
+			await call.started;
+			await call.finish(details);
+		},
+	};
+}
 
 function numericDetails(passed: boolean, validation: string, execution = "succeeded"): Record<string, unknown> {
 	return {
@@ -165,21 +219,8 @@ describe("claims ledger (#406)", () => {
 			const repo = join(env.dir, "repo");
 			mkdirSync(join(repo, ".git"), { recursive: true });
 			const project = claimsProjectRoot(repo);
-			const slate = {
-				schema: "clio-coder.hypothesis-slate.v1",
-				question: { text: "q" },
-				hypotheses: [
-					{
-						id: "H1",
-						status: "proposed",
-						statement: "std is stable",
-						prediction: "std matches the reference",
-						experiment: { successCriterion: { kind: "numeric-compare", verifyId: "stats" } },
-					},
-				],
-			};
 			mkdirSync(join(repo, "research"), { recursive: true });
-			writeFileSync(join(repo, "research", "h.json"), JSON.stringify(slate));
+			writeFileSync(join(repo, "research", "h.json"), slateText([{ id: "H1", check: "stats" }]));
 			const capture = createHypothesisCaptureRegistration({ cwd: () => repo });
 			const wrote = { hook: "after_tool", toolName: "write", toolArgs: { path: "research/h.json" } } as const;
 			await capture.evaluateAsync?.(wrote);
@@ -192,9 +233,7 @@ describe("claims ledger (#406)", () => {
 				return hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(hypothesis?.id ?? "")?.status;
 			};
 			assert.equal(status(), "proposed");
-			const verify = createClaimCaptureRegistration({ cwd: () => repo });
-			const ran = (details: Record<string, unknown>) =>
-				verify.evaluateAsync?.({ hook: "after_tool", toolName: "verify", sessionId: "s1", toolResultDetails: details });
+			const ran = verifyCall(createClaimCaptureRegistration({ cwd: () => repo })).run;
 			await ran(numericDetails(false, "not-run", "timed-out"));
 			assert.equal(status(), "tested");
 			await ran({ ...numericDetails(true, "passed"), checkout: { commit: "c".repeat(40), trackedTreeClean: true } });
@@ -208,6 +247,142 @@ describe("claims ledger (#406)", () => {
 			appendFileSync(claimsLogPath(project), `${JSON.stringify(unbacked)}\n`);
 			assert.equal(readClaims(project).hypothesisTests.length, 3);
 			assert.equal(status(), "refuted");
+			// A forged test with a correct id does not follow from the log either: it cites the disagreeing claim as
+			// support, or a claim the log never held, so neither is admitted and the reader counts both.
+			const disagreeing = readClaims(project).records.find((claim) => claim.verdict === "disagrees");
+			assert.ok(disagreeing);
+			const rehash = (body: Record<string, unknown>) => {
+				const { id: _id, ...rest } = body;
+				return JSON.stringify({ ...rest, id: claimLogRecordId(rest) });
+			};
+			const forged = { ...test, outcome: "supported", claim: disagreeing.id, at: "2099-01-01T00:00:00.000Z" };
+			const invented = { ...forged, claim: "f".repeat(64), at: "2099-01-01T00:00:01.000Z" };
+			appendFileSync(claimsLogPath(project), `${rehash(forged)}\n${rehash(invented)}\n`);
+			const after = readClaims(project);
+			assert.equal(after.mismatched, 0);
+			assert.equal(after.unlinked, 2);
+			assert.equal(after.hypothesisTests.length, 3);
+			assert.equal(status(), "refuted");
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("binds a check's hypotheses when it starts, and rejects replayed or forked revisions", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const capture = createHypothesisCaptureRegistration({ cwd: () => repo });
+			const write = async (text: string) => {
+				writeFileSync(join(repo, "h.json"), text);
+				await capture.evaluateAsync?.({ hook: "after_tool", toolName: "write", toolArgs: { path: "h.json" } });
+			};
+			const verify = verifyCall(createClaimCaptureRegistration({ cwd: () => repo }));
+			const statusOf = (entry: string) => {
+				const read = readClaims(project);
+				const current = read.hypotheses.filter((record) => record.hypothesis === entry).at(-1);
+				return hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(current?.id ?? "")?.status;
+			};
+			// A check already running when the hypothesis is proposed is not its test.
+			const early = verify.start();
+			await early.started;
+			await write(slateText([{ id: "H1", check: "stats" }]));
+			await early.finish({
+				...numericDetails(true, "passed"),
+				checkout: { commit: "c".repeat(40), trackedTreeClean: true },
+			});
+			assert.equal(statusOf("H1"), "proposed");
+			// Nor is a check that started before the hypothesis was revised: the binding names the old revision.
+			const stale = verify.start();
+			await stale.started;
+			await write(slateText([{ id: "H1", check: "stats", statement: "H1 holds, revised" }]));
+			await stale.finish({
+				...numericDetails(true, "passed"),
+				checkout: { commit: "c".repeat(40), trackedTreeClean: true },
+			});
+			assert.equal(statusOf("H1"), "proposed");
+			const [first, revised] = readClaims(project).hypotheses;
+			assert.ok(first && revised);
+			assert.equal(revised.revises, first.id);
+			// A replay of the first revision and a second revision of it both fail admission.
+			const log = claimsLogPath(project);
+			appendFileSync(log, `${JSON.stringify(first)}\n`);
+			const forkBody = { ...first, statement: "H1 forked", revises: first.id, at: "2099-01-01T00:00:00.000Z" };
+			const { id: _forkId, ...forkRest } = { ...forkBody, subject: hypothesisSubject(forkBody) };
+			appendFileSync(log, `${JSON.stringify({ ...forkRest, id: claimLogRecordId(forkRest) })}\n`);
+			const read = readClaims(project);
+			assert.deepEqual(
+				read.hypotheses.map((record) => record.id),
+				[first.id, revised.id],
+			);
+			assert.equal(read.unlinked, 2);
+			assert.equal(read.mismatched, 0);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("tests hypotheses on host checks bound at start, skips checks that never started, and reads accepted worker slates", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			// The worker's slate claims H2 is already supported; the host reads it as proposed, and an entry it marked
+			// supported is not taken at its word.
+			writeFileSync(
+				join(repo, "w.json"),
+				slateText([
+					{ id: "H2", check: "stats" },
+					{ id: "H3", check: "stats", status: "supported" },
+				]),
+			);
+			const outside = join(env.dir, "outside.json");
+			writeFileSync(outside, slateText([{ id: "H9", check: "stats" }]));
+			const recorded = await recordAcceptedWorkerSlates({
+				runId: "run1",
+				receiptDigest: "d".repeat(64),
+				projectCwd: repo,
+				paths: [join(repo, "w.json"), "w.json", outside],
+			});
+			assert.equal(recorded, 1);
+			const [h2] = readClaims(project).hypotheses;
+			assert.equal(h2?.hypothesis, "H2");
+			assert.equal(h2?.source.channel, "worker-slate");
+			const statusOfH2 = () => {
+				const read = readClaims(project);
+				return hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(h2?.id ?? "")?.status;
+			};
+			const bound = new Map([["stats", [h2?.id ?? ""]]]);
+			const report = numericDetails(false, "failed").report as { kind: string; passed: boolean };
+			const check = { check: "stats", argv: ["python3", "stats.py"], memo: false, exitCode: 1 };
+			// A check that could not be started judged nothing and tests nothing.
+			await recordHostVerificationClaims({
+				runId: "run2",
+				receiptDigest: "e".repeat(64),
+				checks: [{ ...check, notRun: "spawn-failed" }],
+				projectCwd: repo,
+				hypotheses: bound,
+			});
+			assert.equal(statusOfH2(), "proposed");
+			// Unbound, a judged check tests nothing either.
+			await recordHostVerificationClaims({
+				runId: "run3",
+				receiptDigest: "f".repeat(64),
+				checks: [{ ...check, report }],
+				projectCwd: repo,
+			});
+			assert.equal(statusOfH2(), "proposed");
+			await recordHostVerificationClaims({
+				runId: "run4",
+				receiptDigest: "a".repeat(64),
+				checks: [{ ...check, report }],
+				projectCwd: repo,
+				hypotheses: bound,
+			});
+			assert.equal(statusOfH2(), "refuted");
 		} finally {
 			env.restore();
 		}
