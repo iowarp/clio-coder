@@ -2286,6 +2286,6 @@ test("the exit summary counts a finished worker whose validation failed as Fleet
 	bus.emit("run.failed", { runId: "run-d", agentId: "verifier", outcome: "canceled" } as never);
 	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
 	match(card, /Workers: 2 validation failed · 1 succeeded · 1 cancelled/u, card);
-	const detail = renderExitSummary(collector.snapshot(), "detailed", 120, false).join("\n");
-	doesNotMatch(detail, /Workers \(4; [^)]*3 succeeded/u, detail);
+	const detail = renderExitSummary(collector.snapshot(), "report", 120, false).join("\n");
+	match(detail, /Workers \(4; 2 validation failed, 1 succeeded, 1 cancelled\)/u, detail);
 });
