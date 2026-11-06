@@ -51,6 +51,7 @@ import { routeFirstOutput } from "./footer/silence-note.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
+import { holdInlineMath } from "./renderers/inline-math.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { renderNoticeRow } from "./renderers/notice.js";
@@ -136,7 +137,8 @@ const EXPORT_MARKDOWN_THEME = {
 };
 const mermaidTransform = createMermaidMarkdownTransform(clioTheme());
 const CHAT_MARKDOWN_OPTIONS = {
-	transform: (text: string, width: number) => {
+	transform: (source: string, width: number) => {
+		const text = holdInlineMath(source, CODE_SPACE);
 		// Both transforms need a lex of the whole answer, so each runs only when the text can use it.
 		if (!mayNeedTableFit(text, width)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
 		const tokens = tableParser.lexer(text);
@@ -918,6 +920,27 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 	);
 }
 
+/**
+ * A paragraph wrapped just before ` - ` or ` + ` starts its next row with what reads as a list bullet
+ * (`- μ)² and the block…`). The operator moves to the end of the row above when it fits there, the way
+ * typesetting breaks after a binary operator. A row above that is itself a list item at the same indent
+ * is a list, not a wrapped paragraph, and is left alone.
+ */
+function liftLeadingOperator(above: string, row: string, width: number): [string, string] | null {
+	const lead = /^( *)([-+]) (?=\S)/u.exec(stripTerminalSequences(row));
+	if (lead === null) return null;
+	const indent = lead[1] ?? "";
+	// Styling may open before the marker, so the marker is found past any escape sequences.
+	const at = row.indexOf(`${lead[2]} `, indent.length);
+	if (at < 0 || stripTerminalSequences(row.slice(0, at)) !== indent) return null;
+	const plainAbove = stripTerminalSequences(above).replace(/ +$/u, "");
+	if (!plainAbove.startsWith(indent) || plainAbove.charAt(indent.length) === " ") return null;
+	if (/^ *(?:[-+*]|\d+[.)]) /u.test(plainAbove)) return null;
+	const raised = `${above.replace(/ +$/u, "")} ${lead[2]}`;
+	if (visibleWidth(raised) > width) return null;
+	return [raised, `${row.slice(0, at)}${row.slice(at + 2)}`];
+}
+
 /** A fence row as Pi draws it, export-tagged or not; a list or a quote nests it behind its own indent. */
 const FENCE_ROW = /^( *)\uFDD0?```/u;
 
@@ -952,6 +975,8 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 	let fenceIndent: string | null = null;
 	// The code line being rejoined: its first row from Pi, then each piece Pi cut off it.
 	let code: string | null = null;
+	// The prose row last drawn and where its parts sit, so a wrap that left an operator leading the next row can move it back.
+	let prose: { raw: string; at: number; count: number } | null = null;
 	const codeKeys: string[] = [];
 	const flushCode = (): void => {
 		if (code === null) return;
@@ -968,6 +993,7 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 	for (const row of padded) {
 		const fence = row.includes("```") ? FENCE_ROW.exec(stripTerminalSequences(row)) : null;
 		if (fence !== null) {
+			prose = null;
 			flushCode();
 			fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
 			if (!bareFences) {
@@ -986,11 +1012,18 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 			}
 			continue;
 		}
-		let parts = memo?.rows.get(row);
-		if (parts === undefined) {
-			parts = fitMarkdownRow(row, width, bareFences);
-			memo?.rows.set(row, parts);
+		let current = row;
+		const lifted = prose === null ? null : liftLeadingOperator(prose.raw, row, width);
+		if (prose !== null && lifted !== null) {
+			rows.splice(prose.at, prose.count, ...fitMarkdownRow(lifted[0], width, bareFences));
+			current = lifted[1];
 		}
+		let parts = memo?.rows.get(current);
+		if (parts === undefined) {
+			parts = fitMarkdownRow(current, width, bareFences);
+			memo?.rows.set(current, parts);
+		}
+		prose = stripTerminalSequences(current).trim() === "" ? null : { raw: current, at: rows.length, count: parts.length };
 		for (const part of parts) rows.push(part);
 	}
 	flushCode();
