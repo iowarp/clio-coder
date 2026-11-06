@@ -45,7 +45,7 @@ const FAKE_SDK = String.raw`
 import { EventEmitter } from "node:events";
 const state = (globalThis.__clioCopilotFake ??= {
 	clients: [], instances: [], sessions: [], deleted: [], disconnected: [], toolResults: [], rejected: [],
-	omitInternals: false, createGate: null, creating: 0,
+	omitInternals: false, createGate: null, creating: 0, order: [], failBaselineOnce: false,
 	auth: { isAuthenticated: true, login: "octo", host: "https://github.com" },
 	models: [
 		{ id: "fake-model", name: "Fake Model", capabilities: { supports: { vision: false, reasoningEffort: false }, limits: { max_context_window_tokens: 64000 } }, policy: { state: "enabled", terms: "" } },
@@ -63,10 +63,12 @@ class FakeSession {
 		// The runtime's own session accounting, which usage.getMetrics() reads back.
 		this.metrics = { totalPremiumRequestCost: 0, totalNanoAiu: 0 };
 		this.metricsFail = false;
-		this.metricsFailOnce = false;
+		this.metricsFailOnce = state.failBaselineOnce;
+		state.failBaselineOnce = false;
 		this.metricsDelayOnce = 0;
 		this.rpc = { usage: { getMetrics: async () => {
 			// The answer reflects the totals at the moment the request was made, however late it arrives.
+			state.order.push("getMetrics " + this.sessionId);
 			const snapshot = { ...this.metrics };
 			if (this.metricsFail) throw new Error("metrics unavailable");
 			if (this.metricsFailOnce) { this.metricsFailOnce = false; throw new Error("metrics unavailable"); }
@@ -91,6 +93,7 @@ class FakeSession {
 	async disconnect() { state.disconnected.push(this.sessionId); }
 	async send(options) {
 		if (this.markedDisconnected) throw new Error("Session disconnected");
+		state.order.push("send " + this.sessionId);
 		this.prompts.push(options.prompt);
 		setTimeout(() => void this.run(options.prompt), 0);
 		return "m";
@@ -127,6 +130,13 @@ class FakeSession {
 			return;
 		}
 		if (prompt.includes("park forever")) { await this.callTool("call_parked"); return; }
+		if (prompt.includes("op:usage-first")) {
+			// As the live runtime did: the call's usage, under the provider's own message id, before the tool request.
+			const name = [...this.tools.keys()][0];
+			this.usage({ model: "fake-model", apiCallId: "msg_provider_1", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.emit("assistant.message", { messageId: "u1", apiCallId: "copilot-call-1", content: "", toolRequests: [{ toolCallId: "call_first", name, arguments: {} }] });
+			return;
+		}
 		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a"); return; }
 		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null); return; }
 		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
@@ -242,6 +252,8 @@ interface FakeState {
 	omitInternals: boolean;
 	createGate: Promise<void> | null;
 	creating: number;
+	order: string[];
+	failBaselineOnce: boolean;
 }
 const fake = (): FakeState => (globalThis as { __clioCopilotFake?: FakeState }).__clioCopilotFake as FakeState;
 
@@ -743,6 +755,28 @@ test("session state containment is physical: no symlink leads a write or a clean
 		rmSync(sessions, { recursive: true, force: true });
 		renameSync(parked, sessions);
 	}
+});
+
+test("the first step of a fresh conversation is measured from a boundary read before the first send", async () => {
+	const started = performance.now();
+	const first = await step({ tools: [readTool], messages: [user("op:usage-first")] }, "fresh-session");
+	const elapsed = performance.now() - started;
+	strictEqual(first.stopReason, "toolUse");
+	ok(elapsed < 1_000, `usage before the tool request completes the step at once, not at the deadline (${elapsed} ms)`);
+	const facts = callSettlementFromMessage(first, "none");
+	deepStrictEqual(facts.billing?.premiumRequests, { kind: "measured", value: 1, source: "provider" });
+	deepStrictEqual(facts.usage?.input, { kind: "measured", value: 50, source: "provider" });
+	const session = fake().sessions.at(-1);
+	ok(session);
+	const own = fake().order.filter((entry) => entry.endsWith(session.sessionId));
+	deepStrictEqual(own.slice(0, 2), [`getMetrics ${session.sessionId}`, `send ${session.sessionId}`]);
+	disposeCopilotConversations("fresh-session");
+
+	// Without a readable starting boundary nothing is assumed: the first step's share is unknown.
+	fake().failBaselineOnce = true;
+	const unbounded = await step({ messages: [user("hello")] }, "unbounded-session");
+	strictEqual(callSettlementFromMessage(unbounded, "none").billing?.premiumRequests.kind, "unknown");
+	disposeCopilotConversations("unbounded-session");
 });
 
 test("a copilot-sdk target admits one request at a time unless its capacity says more", () => {

@@ -161,13 +161,14 @@ class Conversation {
 	/** The open step; events reach no other. */
 	activeStep: Step | null = null;
 	/**
-	 * The runtime's cumulative accounting at the last step boundary, per quantity. A fresh session starts at
-	 * zero. A failed, late or partial reading leaves that quantity invalid: the next good reading becomes the
-	 * new boundary and the growth in between is attributed to no call.
+	 * The runtime's cumulative accounting at the last step boundary, per quantity. The first boundary is read
+	 * right after the session is created, before anything is sent: the SDK documents no starting value for a
+	 * session's totals, so none is assumed. A failed, late or partial reading leaves that quantity invalid: the
+	 * next good reading becomes the new boundary and the growth in between is attributed to no call.
 	 */
 	readonly boundaries: { premiumRequests: MetricsBoundary; nanoAiu: MetricsBoundary } = {
-		premiumRequests: { value: 0, valid: true },
-		nanoAiu: { value: 0, valid: true },
+		premiumRequests: { value: 0, valid: false },
+		nanoAiu: { value: 0, valid: false },
 	};
 	/** Readings are numbered; only the newest may move a boundary. */
 	metricsSeq = 0;
@@ -475,7 +476,7 @@ class Step {
 	private error: string | null = null;
 	private billing: CopilotStepBilling = { premiumRequests: null, nanoAiu: null, modelCalls: 0 };
 	private toolUse: string[] | null = null;
-	/** The tool-requesting call's id, when Copilot gave one, so only its own usage closes the step. */
+	/** The tool-requesting call's id, when Copilot gave one; a settled step without it may still owe an id-less report. */
 	private toolUseCall: string | null = null;
 	private usageEvents = 0;
 	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -614,8 +615,10 @@ class Step {
 			this.servedModel = data.model.trim();
 		}
 		if (typeof data.apiCallId === "string") this.message.responseId = data.apiCallId;
-		// The tool-requesting call's own usage closes its step (see the tool-request case).
-		if (this.toolUse && (this.toolUseCall === null || data.apiCallId === this.toolUseCall)) {
+		// A step is one model call (Copilot's built-ins are off), and the router keeps settled calls' reports
+		// out, so usage reaching the open step is this call's own, whatever id format it carries. Once the tool
+		// request has also arrived, the step is complete (see the tool-request case for the other order).
+		if (this.toolUse) {
 			this.toolUseUsageSeen = true;
 			this.finish("toolUse", this.toolUse);
 		}
@@ -664,6 +667,12 @@ class Step {
 				// usage by the deadline it settles them as unreported; a later report is not moved to another call.
 				this.toolUse = ids;
 				this.toolUseCall = event.data.apiCallId ?? null;
+				// The live runtime can report the call's usage before this message: the step is then already complete.
+				if (this.usageEvents > 0) {
+					this.toolUseUsageSeen = true;
+					this.finish("toolUse", ids);
+					return;
+				}
 				this.toolUseTimer = setTimeout(() => this.finish("toolUse", ids), TOOL_USE_SETTLE_MS);
 				return;
 			}
@@ -802,7 +811,7 @@ async function openConversationHeld(input: {
 			await removeCopilotSessionRecords(sessionId).catch(() => {});
 			throw error;
 		});
-	conversation = new Conversation({
+	const opened = new Conversation({
 		key: input.key,
 		session,
 		client,
@@ -811,7 +820,9 @@ async function openConversationHeld(input: {
 		model: input.model.id,
 		reasoningEffort: input.reasoningEffort,
 	});
-	return conversation;
+	conversation = opened;
+	await acquireBoundaries(opened);
+	return opened;
 }
 
 interface Plan {
@@ -872,6 +883,14 @@ function stepShare(boundary: MetricsBoundary, reading: number | null, own: boole
 	boundary.value = reading;
 	boundary.valid = true;
 	return share;
+}
+
+/** The first boundary of a new session, read before its first send under the same one-second rule. */
+async function acquireBoundaries(conversation: Conversation): Promise<void> {
+	const reading = await readMetrics(conversation);
+	const newest = reading !== null && reading.seq === conversation.metricsSeq;
+	stepShare(conversation.boundaries.premiumRequests, reading?.premium ?? null, false, newest);
+	stepShare(conversation.boundaries.nanoAiu, reading?.nano ?? null, false, newest);
 }
 
 async function runStep(
