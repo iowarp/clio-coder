@@ -147,8 +147,8 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 			ok(row, `missing ${text} at ${width} columns`);
 			return row.indexOf(text);
 		};
-		strictEqual(column("/tmp/welcome-test"), column("Current"));
-		strictEqual(column("Claude"), column("Current"));
+		strictEqual(column("/tmp/welcome-test"), column("Up to date"));
+		strictEqual(column("Claude"), column("Up to date"));
 		strictEqual(column("Choose a model"), column("Browse plugins"));
 		strictEqual(column("Explore commands"), column("Browse plugins"));
 		strictEqual(column("New line"), column("Model picker"));
@@ -158,7 +158,7 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 			match(lines.join("\n"), /… \/usage/u);
 			continue;
 		}
-		const valueColumn = column("Current");
+		const valueColumn = column("Up to date");
 		// Wrapped subscription continuations start on the same value axis.
 		ok(!local.slice(0, valueColumn).includes("Local"));
 	}
