@@ -46,7 +46,9 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 		result = run("trust", "files", "--action-class", "read", "--json");
 		strictEqual(result.status, 0, result.stderr);
 		const trusted = JSON.parse(result.stdout);
-		deepStrictEqual(Object.keys(trusted).sort(), ["entry", "ok", "record"]);
+		// The trust result names the declaration's per-tool classes (8858c4deb); this one declares none.
+		deepStrictEqual(Object.keys(trusted).sort(), ["entry", "ok", "record", "toolActionClasses"]);
+		deepStrictEqual(trusted.toolActionClasses, {});
 		strictEqual(trusted.ok, true);
 		const record = trusted.record;
 		deepStrictEqual(Object.keys(record).sort(), ["actionClass", "digest", "id", "projectRoot", "trustedAt"]);

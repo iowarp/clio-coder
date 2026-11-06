@@ -330,7 +330,10 @@ test("Stop fences deferred preparation and compaction before model calls or late
 								autoCompact: async (_instructions, _trigger, budget) => {
 									compactionSignal = budget?.signal;
 									entered.resolve();
-									return compacted.promise;
+									const result = await compacted.promise;
+									// The production flow checks the signal before it saves, so it never hands back an unsaved summary.
+									budget?.signal?.throwIfAborted();
+									return result;
 								},
 							}),
 				});

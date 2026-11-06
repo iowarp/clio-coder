@@ -248,6 +248,8 @@ test("a dispatch command reports that it started, because its result is an event
 				return new Promise(() => {});
 			},
 		} as unknown as AcpCommandHost["dispatch"],
+		// The run watches its own queue events to say when it waits for a slot (ac0e5b530).
+		bus: { subscribe: () => () => {} } as unknown as AcpCommandHost["bus"],
 	});
 	const result = await invokeAcpCommand({ command: "delegate", argv: ["codex", "summarize the diff"] }, pending);
 	assert.equal(requested, 1);

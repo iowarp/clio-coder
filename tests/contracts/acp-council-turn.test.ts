@@ -153,7 +153,7 @@ test("a denied council runs nothing and says so, and invoking it outside a promp
 			.filter((update) => update.sessionUpdate === "agent_message_chunk")
 			.map((update) => update.content?.text ?? "")
 			.join("");
-		assert.match(text, /\/council was not admitted/);
+		assert.match(text, /\/council did not run: ACP client denied this tool call/);
 		assert.equal(toolCalls(peer.updates).find((update) => update.sessionUpdate === "tool_call_update")?.status, "failed");
 		await assert.rejects(
 			peer.call("_clio-coder/commands/invoke", {

@@ -38,17 +38,21 @@ it("activates every bundled skill from its native package in a workspace with pe
 			recursive: true,
 		});
 		const catalog = discoverLibrary({ cwd }).entries;
-		// 38 = 37 local packages + 1 blessed remote package (wtfp, pinned by
+		// 42 = 41 local packages + 1 blessed remote package (wtfp, pinned by
 		// GitHub tree URL). Installing a remote package clones it over the
 		// network, which this offline test lane must not depend on, so the
 		// remote entry is excluded from the install loop below and its skills
 		// are intentionally not counted in the `skills.length` assertion.
-		strictEqual(catalog.length, 38);
+		strictEqual(catalog.length, 42);
 		const installableCatalog = catalog.filter((entry) => !/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(entry.sourceUrl));
-		strictEqual(installableCatalog.length, 37);
+		strictEqual(installableCatalog.length, 41);
 		const refresh = (project: string) => reloadPluginResources(project);
 		refresh(cwd);
-		for (const entry of installableCatalog) {
+		// Skills first: a pack such as hpc requires a bundled skill, and a plan without requirements refuses it.
+		const skillsFirst = [...installableCatalog].sort(
+			(left, right) => Number(left.kind !== "skill") - Number(right.kind !== "skill"),
+		);
+		for (const entry of skillsFirst) {
 			const result = applyLibraryLifecycle(
 				planLibraryLifecycle({ operation: "install", ref: `${entry.kind}:${entry.name}`, scope: "user", cwd }),
 			);
@@ -56,7 +60,7 @@ it("activates every bundled skill from its native package in a workspace with pe
 		}
 		refresh(cwd);
 		const skills = loadSkills({ cwd }).items;
-		strictEqual(skills.length, 40);
+		strictEqual(skills.length, 49);
 		const context = createContextTool({ getCwd: () => cwd });
 		for (const skill of skills) {
 			strictEqual(skill.source, "plugin", skill.name);

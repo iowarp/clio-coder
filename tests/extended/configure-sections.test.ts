@@ -1026,7 +1026,8 @@ describe("contracts/configure-sections", () => {
 	it("moved controls save only their own setting from the new menu location", async () => {
 		for (const [inputs, path, value] of [
 			[["6\n", "7\n", "on\n", "b\n", "q\n"], ["interface", "smoothStreaming"], "on"],
-			[["3\n", "6\n", "high\n", "Save\n", "b\n", "q\n"], ["fleet", "default", "thinkingLevel"], "high"],
+			// Fleet thinking is item 4 behind Turn preparation (4c13e0757) and node preference (d045ba49f).
+			[["3\n", "4\n", "high\n", "Save\n", "b\n", "q\n"], ["fleet", "default", "thinkingLevel"], "high"],
 			[["7\n", "3\n", "b\n", "q\n"], ["integrations", "git", "commitAttribution"], false],
 		] as const) {
 			const testEnv = isolatedEnv();

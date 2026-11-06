@@ -40,6 +40,7 @@ test("Anthropic named-tool rounds retain the entire tool prefix and resume think
 		thinking?: { type: string; budget_tokens?: number };
 		temperature?: number;
 		output_config?: { effort?: string };
+		messages?: unknown[];
 	};
 	const wire = async (target: EngineModel, rounds: readonly ToolRound[]): Promise<Body> => {
 		const controlled = applyToolRounds(
@@ -71,14 +72,18 @@ test("Anthropic named-tool rounds retain the entire tool prefix and resume think
 	// The next round without a forced choice resumes the configured thinking.
 	const resumed = await wire(managed, []);
 	assert.equal(resumed.thinking?.type, "adaptive");
-	assert.equal(resumed.output_config?.effort, "high");
+	// Pi 1.5 pins a managed-effort model's top-level effort at "low" so the cached prompt never moves; the configured
+	// level rides the trailing effort marker.
+	assert.equal(resumed.output_config?.effort, "low");
+	assert.deepEqual(resumed.messages?.at(-1), { role: "system", content: [], output_config: { effort: "high" } });
 	assert.equal(resumed.tool_choice, undefined);
 	const haiku = getCatalogModelForRuntime("anthropic", "claude-haiku-5-5");
 	assert.ok(haiku);
 	const adaptive = await wire(haiku, []);
 	assert.equal(adaptive.thinking?.type, "adaptive");
 	assert.equal(adaptive.thinking?.budget_tokens, undefined);
-	assert.equal(adaptive.output_config?.effort, "high");
+	assert.equal(adaptive.output_config?.effort, "low");
+	assert.deepEqual(adaptive.messages?.at(-1), { role: "system", content: [], output_config: { effort: "high" } });
 	assert.equal(adaptive.temperature, undefined);
 	const forcedHaiku = await wire(haiku, [{ kind: "required", toolName: "read" }]);
 	// Haiku 5.5 routes required rounds through auto and keeps thinking, so the cached prefix survives (#423).
