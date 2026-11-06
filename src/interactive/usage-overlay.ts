@@ -190,7 +190,7 @@ function callRows(
 	const unsent = (all: Quantity, sent: number): string | undefined => {
 		const known = factKnownValue(all.fact);
 		const left = Number.isFinite(known) ? known - sent : 0;
-		return left > 0 ? `· ${left.toLocaleString("en-US")} never sent` : undefined;
+		return left > 0 ? `sent · ${left.toLocaleString("en-US")} more never sent` : "sent";
 	};
 	type Row = readonly [string, string, string?];
 	const row = (label: string, value: number, note: string | undefined): Row =>

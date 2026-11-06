@@ -825,8 +825,8 @@ test("a long countdown reads in minutes on the rail and says the provider asked 
 			now,
 			"Qwopus3.8",
 		).label;
-	match(status(111), /will retry in 56m52s \(1\/3\) · the server asked to wait 1h · Esc stops/u);
-	match(status(80), /will retry in 56m52s \(1\/3\) · .*asked to wait 1h · Esc stops/u);
+	match(status(111), /will retry in 56m52s \(1\/3\) · the server asked for 1h in all · Esc stops/u);
+	match(status(80), /will retry in 56m52s \(1\/3\) · .*asked for 1h in all · Esc stops/u);
 	match(status(60), /will retry in 56m52s \(1\/3\) · Esc stops/u);
 	doesNotMatch(status(111), /3412s/u);
 });

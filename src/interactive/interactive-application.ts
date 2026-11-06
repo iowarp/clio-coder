@@ -1445,7 +1445,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onSteerSent: (run, text) => steerReceipts.sent(run, text),
 		onLocalEntry: exitSummary.observeLocalEntry,
 		recordFeature,
-		onLocalBashRunning: presentation.setLocalBashRunning,
+		onLocalBashRunning: (running, command, settled) => {
+			// A shell line is the newest history entry, so ↑ recalls it and not a failed turn's prompt above it.
+			if (running) chatRenderer.mutate(() => chatPanel.forgetPromptRecall(), "prompt-recall");
+			presentation.setLocalBashRunning(running, command, settled);
+		},
 		onLocalBashCancelling: presentation.setLocalBashCancelling,
 		returnToLiveEdge: liveEdge,
 		editor,

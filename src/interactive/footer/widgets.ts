@@ -889,7 +889,7 @@ function retryRailLabel(
 			{ text: head, keep: 9 },
 			// What the server said is the cause of the wait; whose wait it is comes after it.
 			{ ...retryCauseFact(retry, now, server), keep: 6 },
-			{ text: asked === null ? null : `${server} asked to wait ${asked}`, short: `asked to wait ${asked}`, keep: 5 },
+			{ text: asked === null ? null : `${server} asked for ${asked} in all`, short: `asked for ${asked} in all`, keep: 5 },
 			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 			// The whole words or none: the short form would cost a name the rail is sized to keep.
 			{ text: MODEL_MOVES.text, keep: 3 },

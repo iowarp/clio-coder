@@ -501,6 +501,8 @@ export interface ChatPanel extends Component {
 	 * admission is visibly not the durable turn it will become.
 	 */
 	appendUser(text: string, status?: () => UserTurnStatus, origin?: string): void;
+	/** Something else was submitted since the last failed turn, so ↑ no longer recalls that turn's prompt. */
+	forgetPromptRecall(): void;
 	/**
 	 * Append a caller-rendered block. Pass `isLive` when the closure reads state
 	 * that keeps changing after the append, so the panel keeps re-rendering it
@@ -2058,6 +2060,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	/** The latest settled receipt eligible for the turn's post-settlement prewarm record. */
 	let lastSettledReceipt: Extract<TranscriptEntry, { role: "assistant" }> | null = null;
 	let promptRecallReceipt: Extract<TranscriptEntry, { role: "assistant" }> | null = null;
+	const forgetPromptRecall = (): void => {
+		if (promptRecallReceipt?.turnUsage) {
+			delete promptRecallReceipt.turnUsage.promptRecall;
+			invalidateEntryCache(promptRecallReceipt);
+		}
+		promptRecallReceipt = null;
+	};
 	let cachedWidth: number | undefined;
 	let cachedRegions: { prefix: readonly string[]; tail: string[] } = { prefix: NO_ROWS, tail: [] };
 	/** The last frame concatenated, built on first request; null until someone asks for it. */
@@ -3007,10 +3016,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	return {
+		forgetPromptRecall,
 		appendUser(text: string, status?: () => UserTurnStatus, origin?: string): void {
 			// A prompt opens the next turn, whose retries are not the last receipt's.
 			lastSettledReceipt = null;
-			lastSettledReceipt = null;
+			// ↑ now recalls this prompt, so the failed receipt above stops offering its own.
+			forgetPromptRecall();
 			appendRow({
 				role: "user",
 				text,

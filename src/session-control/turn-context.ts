@@ -2290,11 +2290,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					// A stop is the operator's own choice, not a fault, and what it left behind is the fact they need.
 					// The card is the one place a stop is reported, so it carries the size the context stayed at.
 					const view = budgetProducer.current();
-					const at = view?.inputTokens != null ? ` at ${footerTokens(view.inputTokens)} tokens` : "";
+					const at = view?.inputTokens != null ? ` at ${footerTokens(view.inputTokens)} tokens` : " as it was";
 					const conclusion =
 						outcome === "cancelled"
 							? compactionFacts.length === 0
-								? `cancelled before anything was saved; context unchanged${at}`
+								? `nothing saved; context still${at.replace(/^ at/u, "")}`
 								: "cancelled before the summary was saved"
 							: compactionFailureMessage(error);
 					lastCompactionCardSettled = compactionOperation !== null && outcome === "cancelled";

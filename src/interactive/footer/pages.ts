@@ -225,7 +225,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	// A run someone stopped did not fail: `12 failed` sat over rows that each read `⊘ cancelled`.
 	const cancelled = rows.filter((row) => row.status === "aborted");
 	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status) && row.status !== "aborted");
-	const meta = [
+	const counts = [
 		active.length > 0 ? `${active.length} active` : null,
 		done.length > 0 ? `${done.length} done` : null,
 		failed.length > 0 ? `${failed.length} failed` : null,
@@ -233,6 +233,9 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	]
 		.filter((part): part is string => part !== null)
 		.join(" · ");
+	// Runs from before this Clio started are history: `12 cancelled` beside an exit card's `0 workers` read as this visit's.
+	const pastOnly = rows.length > 0 && rows.every((row) => row.earlier === true);
+	const meta = pastOnly ? `earlier sessions · ${counts}` : counts;
 	const liveNotices = state.notices.filter((notice) => notice.presentation !== "setting");
 	const notices = formatNotificationPanel(liveNotices, width, {
 		maxRows: liveNotices.length,
