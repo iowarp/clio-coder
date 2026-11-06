@@ -133,6 +133,13 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 		join(cwd, "scripts", "run-tests.mjs"),
 		'spawn(process.execPath, ["--import", "./tests/harness/tmp-root.ts", "--test"]);\n',
 	);
+	mkdirSync(join(cwd, "apps", "web", "tests", "harness"), { recursive: true });
+	writeFileSync(
+		join(cwd, "apps", "web", "package.json"),
+		JSON.stringify({ name: "web", scripts: { test: "node --import ./tests/harness/no-network.ts --test" } }),
+	);
+	writeFileSync(join(cwd, "apps", "web", "tests", "harness", "no-network.ts"), "export const offline = true;\n");
+	const workspace = "Web app tests preload `apps/web/tests/harness/no-network.ts` to block the network.";
 	const claim =
 		"The `test:file` script in `package.json` preloads `tests/harness/tmp-root.ts` and `tests/harness/scratch-env.ts` for isolation.";
 	const launcher = "`scripts/run-tests.mjs` preloads `tests/harness/tmp-root.ts` for every test file.";
@@ -145,7 +152,7 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 				projectName: "harbor",
 				identity: "A widget renderer.",
 				invariants: [claim],
-				conventions: [launcher],
+				conventions: [launcher, workspace],
 				sections: [],
 			};
 		},
@@ -158,6 +165,7 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 		handbook,
 	);
 	ok(handbook.includes(launcher), handbook);
+	ok(handbook.includes(`${workspace}\n`), handbook);
 });
 
 it("carries a hard invariant only while a check that runs still enforces it", async () => {

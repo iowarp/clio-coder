@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, parse, relative, resolve } from "node:path";
+import { dirname, join, parse, posix, relative, resolve } from "node:path";
 import { readCiRunCommands } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
@@ -1032,21 +1032,35 @@ const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
  * Mark a module a line calls preloaded that no package script preloads. A
  * generated handbook called both `tests/harness/tmp-root.ts` and
  * `tests/harness/scratch-env.ts` preloaded; `test:file` preloads only the first,
- * and tests import the second's helpers. A cited file that passes preload flags
- * itself, such as a test runner, is the launcher, not a claimed preload.
+ * and tests import the second's helpers. Scripts of every visible package.json
+ * count, resolved from that package's directory, so a workspace app's own
+ * preload is supported. A cited file that passes preload flags itself, such as a
+ * test runner, is the launcher, not a claimed preload.
  */
 function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCorpus): string {
 	if (!PRELOAD_CLAIM_RE.test(line)) return line;
-	const preloaded = new Set(
-		[...evidence.scriptBodies.values()].flatMap((script) =>
-			[...script.matchAll(PRELOAD_FLAG_RE)].map((match) => (match[2] ?? "").replace(/^\.\//, "")),
-		),
-	);
+	// fileText is lowercased, so every comparison here is.
+	const preloaded = new Set<string>();
+	const addPreloads = (dir: string, script: string): void => {
+		for (const match of script.matchAll(PRELOAD_FLAG_RE)) preloaded.add(posix.join(dir, match[2] ?? "").toLowerCase());
+	};
+	for (const script of evidence.scriptBodies.values()) addPreloads("", script);
+	for (const path of evidence.repositoryPaths) {
+		if (!path.endsWith("/package.json")) continue;
+		try {
+			const scripts = (JSON.parse(evidence.fileText(path) ?? "{}") as { scripts?: unknown }).scripts;
+			if (!scripts || typeof scripts !== "object") continue;
+			for (const script of Object.values(scripts))
+				if (typeof script === "string") addPreloads(posix.dirname(path), script);
+		} catch {
+			// An unparsable manifest preloads nothing.
+		}
+	}
 	return withUnsupportedClaimsMarked(line, PRELOAD_CLAIM_RE, (cited) => {
 		const missing = cited.filter(
 			(path) =>
 				MODULE_FILE_RE.test(path) &&
-				!preloaded.has(path) &&
+				!preloaded.has(path.toLowerCase()) &&
 				!/--(?:import|require|loader|experimental-loader)\b/.test(evidence.fileText(path) ?? ""),
 		);
 		if (missing.length === 0) return null;
