@@ -1836,13 +1836,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		createAgent,
 		noteMainRequest: (runtime, request, stream) => {
 			keepalive.noteRequest(runtime, request, stream);
-			const record: MainRequestRecord = { request, sentAt: Date.now(), promptTokens: null };
+			const record: MainRequestRecord = { request, sentAt: Date.now(), promptTokens: null, cachedTokens: null };
 			state.lastMainRequest = { runtime, record };
-			// The prompt size the provider reports is what a compaction inside this prefix reads from cache (T4).
+			// The prompt size the provider reports is what a compaction inside this prefix reads from cache (T4); its
+			// cache read is the only proof a slot cache (llama.cpp) is holding this prefix.
 			stream.result().then(
 				(message) => {
-					if (message.stopReason !== "error" && message.stopReason !== "aborted")
+					if (message.stopReason !== "error" && message.stopReason !== "aborted") {
 						record.promptTokens = cacheKeepalivePromptTokens(message);
+						record.cachedTokens = message.usage?.cacheRead ?? 0;
+					}
 				},
 				() => {
 					// A failed request leaves no cache entry to read; promptTokens stays null and the prefix is refused.

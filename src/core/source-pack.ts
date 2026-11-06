@@ -37,6 +37,8 @@ interface LoadedPack {
 	mtimeMs: number;
 	dataStart: number;
 	byPath: Map<string, SourcePackEntry>;
+	/** Every `src/...` directory that holds a member, so a directory gone from disk still reads as one. */
+	directories: Set<string>;
 	/** Whether the members are absent on disk, so the pack is what serves them. */
 	serving: boolean;
 }
@@ -72,12 +74,21 @@ function loadPack(packageRoot: string): LoadedPack | null {
 		const index = JSON.parse(readAt(fd, HEADER_BYTES, indexLength).toString("utf8")) as SourcePackIndex;
 		if (index.version !== 1 || !Array.isArray(index.files)) throw new Error(`unsupported source pack: ${file}`);
 		const first = index.files[0]?.path;
+		const directories = new Set<string>();
+		for (const entry of index.files) {
+			for (let cut = entry.path.lastIndexOf("/"); cut > 0; cut = entry.path.lastIndexOf("/", cut - 1)) {
+				const dir = entry.path.slice(0, cut);
+				if (directories.has(dir)) break;
+				directories.add(dir);
+			}
+		}
 		loaded = {
 			file,
 			bytes: stats.size,
 			mtimeMs: stats.mtimeMs,
 			dataStart: HEADER_BYTES + indexLength,
 			byPath: new Map(index.files.map((entry) => [entry.path, entry])),
+			directories,
 			serving: first !== undefined && !existsSync(join(packageRoot, first)),
 		};
 		return loaded;
@@ -133,6 +144,21 @@ export function readPackedSource(
 	} finally {
 		closeSync(fd);
 	}
+}
+
+/**
+ * The pack's mtime when `absolutePath` names a directory that exists only in
+ * the serving pack (`src/interactive` of an installed package), else null.
+ * Like readPackedSource, callers ask only after the path was not found on disk.
+ */
+export function packedSourceDirectory(
+	absolutePath: string,
+	packageRoot: string = resolvePackageRoot(),
+): { mtimeMs: number } | null {
+	const member = packMemberPath(absolutePath, packageRoot);
+	if (member === null) return null;
+	const pack = loadPack(packageRoot);
+	return pack?.serving && pack.directories.has(member) ? { mtimeMs: pack.mtimeMs } : null;
 }
 
 /** Every packed member as a package-relative `src/...` path, sorted, whether or not the pack is serving. */

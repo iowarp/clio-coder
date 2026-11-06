@@ -34,6 +34,14 @@
 	margin: 0;
 	font: 600 18px / 1.3 var(--font-ui);
 }
+.interview-dialog__operator-only {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	margin: var(--space-1) 0 0;
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
 .interview-dialog__header > button {
 	background: transparent;
 	color: var(--ink-muted);

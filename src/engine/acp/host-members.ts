@@ -33,7 +33,7 @@ import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools
 import type { ToolRegistry } from "../../tools/registry.js";
 import { AcpTimeoutError } from "./errors.js";
 import type { AcpBoardActions, AcpInterviewBinding, AcpInterviewChannel } from "./server.js";
-import { ACP_INTERVIEW_CANCEL_METHOD, ACP_INTERVIEW_REQUEST_METHOD } from "./types.js";
+import { ACP_INTERVIEW_CANCEL_METHOD, ACP_INTERVIEW_META_KEY, ACP_INTERVIEW_REQUEST_METHOD } from "./types.js";
 
 export { oracleBriefingFromEntries } from "../../session-control/oracle.js";
 export { followWorkerRuns } from "../../session-control/worker-run-ledger.js";
@@ -280,6 +280,7 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 		const signal = options?.signal;
 		if (signal?.aborted === true) return cancelled();
 		const interviewId = `interview-${randomUUID()}`;
+		const operatorOnly = questions.some((question) => question.operator_only === true);
 		let onAbort: (() => void) | undefined;
 		let wasCancelled = false;
 		const aborted = new Promise<"aborted">((resolve) => {
@@ -295,7 +296,12 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 				.then(() =>
 					bound.transport.request<unknown>(
 						ACP_INTERVIEW_REQUEST_METHOD,
-						{ sessionId, interviewId, questions: wire },
+						{
+							sessionId,
+							interviewId,
+							questions: wire,
+							_meta: { [ACP_INTERVIEW_META_KEY]: { version: 1, operatorOnly } },
+						},
 						bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 					),
 				)
@@ -315,7 +321,7 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 				// An operator's own choice nobody answered closes unanswered, the
 				// same outcome the TUI gives when its window passes; the ask_user
 				// tool picks nothing for it. Any other round keeps the cancel below.
-				if (outcome.err instanceof AcpTimeoutError && questions.some((question) => question.operator_only === true)) {
+				if (outcome.err instanceof AcpTimeoutError && operatorOnly) {
 					const afterSeconds = Math.round((bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS) / 1000);
 					return { answers: [], timedOut: { afterSeconds } };
 				}

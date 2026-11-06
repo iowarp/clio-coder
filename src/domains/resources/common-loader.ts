@@ -154,7 +154,10 @@ export function readRootEntries(
 	}
 }
 
-export function splitYamlFrontmatter(raw: string): FrontmatterSplitResult {
+export function splitYamlFrontmatter(
+	raw: string,
+	parseFrontmatterText: (text: string) => unknown = parseYaml,
+): FrontmatterSplitResult {
 	const opening = raw.match(/^---\r?\n/);
 	if (!opening) return { ok: false, reason: "missing", body: raw };
 
@@ -167,7 +170,7 @@ export function splitYamlFrontmatter(raw: string): FrontmatterSplitResult {
 	const frontmatterText = raw.slice(opening[0].length, closing.index);
 	let parsed: unknown;
 	try {
-		parsed = parseYaml(frontmatterText);
+		parsed = parseFrontmatterText(frontmatterText);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return { ok: false, reason: `invalid YAML: ${reason}`, body };

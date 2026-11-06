@@ -56,6 +56,13 @@ export const ACP_INTERVIEWS_META_KEY = "clio-coder/interviews";
 export const ACP_INTERVIEW_REQUEST_METHOD = "_clio-coder/interview/request";
 export const ACP_INTERVIEW_CANCEL_METHOD = "_clio-coder/interview/cancel";
 /**
+ * `_meta` of every interview request: `{version: 1, operatorOnly}`. An
+ * `operator_only` round is the operator's own choice, which no agent or policy
+ * may answer for them and which closes unanswered when its window passes, so a
+ * client labels that card the way the TUI does.
+ */
+export const ACP_INTERVIEW_META_KEY = "clio-coder/interview";
+/**
  * `clio-coder/workerPermissions` asks the host to forward a dispatched worker's
  * permission ask as `session/request_permission`. The client must also name the
  * notification it takes a withdrawn ask on, because the wire has no way to cancel
