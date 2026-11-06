@@ -4,4 +4,4 @@ This directory hosts standalone prompt packages. A prompt package distributes re
 
 Internal and system prompt fragments remain built into Clio Coder under `src/domains/prompts/fragments/`.
 
-Community prompt package authoring templates and validator guidelines will be introduced in Slice 2 under `library/_authoring/templates/prompt/`.
+The prompt package authoring template lives under `library/_authoring/templates/prompt/`.

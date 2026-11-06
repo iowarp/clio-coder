@@ -1,6 +1,6 @@
 ---
 name: arxiv-literature
-description: Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Prefer the Researcher shadow agent for noisy multi-paper retrieval.
+description: Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Fetches arXiv directly by default and dispatches the researcher shadow agent only when the user asks for a deep or broad survey.
 triggers:
   - search arXiv
   - summarize an arXiv paper
@@ -61,7 +61,7 @@ Pick exactly one:
 
 ## Step 2 — Pick the vehicle
 
-Default every request — single paper, search, compare, and survey alike — to
+Default every request (single paper, search, compare, and survey alike) to
 `web_fetch` directly against arXiv:
 
 - Paper URL/ID: fetch the arXiv page. Clio normalizes it into structured
@@ -82,14 +82,14 @@ Default every request — single paper, search, compare, and survey alike — to
   term or switch to `sortBy=relevance` before concluding that no papers exist.
 
   For a compare request, run one query per paper ID (`id_list=ID` instead of
-  `search_query`) or one broader query covering all of them — whichever stays
+  `search_query`) or one broader query covering all of them, whichever stays
   inside the fetch cap in Step 3.
 
 When a search needs a `cat:` term, read references/arxiv-categories.md.
 
 **Only dispatch the `researcher` shadow agent when the user explicitly asks
 for a deep or broad survey** ("survey the field", "don't just skim arXiv, go
-wide") — never as the default for an ordinary search or compare. Left
+wide"), never as the default for an ordinary search or compare. Left
 unbounded, a dispatched worker has no arXiv-only restriction and no fetch
 budget of its own, and will wander into Semantic Scholar, DBLP, OpenAlex, and
 general web search, taking several minutes to return nothing useful. When you
@@ -128,7 +128,7 @@ recommendation section is filled in. Stop after one search round unless the
 user asks to go deeper; do not keep fetching to "be thorough". One round
 means at most two Atom API fetch attempts total: the initial query plus one
 refinement, or one retry of a failed fetch. Failed attempts (timeout, 429,
-connection error) count against this cap the same as successful ones — a
+connection error) count against this cap the same as successful ones; a
 timeout is not a free retry. Rewording the same query a third time, or
 retrying through a different host/scheme (`http` vs `https`,
 `export.arxiv.org` vs `arxiv.org/search`, an unofficial JSON mirror) after a

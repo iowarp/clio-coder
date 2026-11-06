@@ -7,7 +7,7 @@ triggers:
   - define this feature
   - structure this product brain dump
   - create milestone prompts
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -44,18 +44,18 @@ the user saying so. Markdown only, no external templates, repo-aware.
   doc, PRD, or evidence file named or pathed in the request is material to
   read first (see "Read the repo before asking" below), not more arguments.
 - Nothing is required beyond some text; a blank invocation gets phase 1's
-  own prompt — let the user describe the idea raw — rather than an invented
+  own prompt (let the user describe the idea raw) rather than an invented
   idea.
 
 There is no operator in a headless run: `ask_user` is not registered, so
 any call is refused as an unregistered tool rather than answered, and
 stalling a gate to wait for it never resolves.
 When a gate goes unanswered, do not skip the phase and do not go quiet: run
-it as a monologue instead — state the phase's question, your
+it as a monologue instead: state the phase's question, your
 recommendation (grounded in the repo and any evidence read, or the most
 defensible product default when nothing grounds it), and the reasoning,
 adopt the recommendation, mark it `assumed — confirm`, and move to the next
-phase. All nine phases still run, end to end, in one turn — the phase list
+phase. All nine phases still run, end to end, in one turn. The phase list
 below is the plan to execute, not an outline to abbreviate because no one
 answered the first gate. Never invent evidence or a fact to back an
 assumption; anything genuinely unknown stays an open item, marked as such,
@@ -63,7 +63,7 @@ not a plausible guess.
 
 The nine phases below are the plan; do not open a task list for them.
 `tasks` sits outside this skill's tool surface and any call to it is
-refused. `bash` is also outside this skill's tool surface — verify what you
+refused. `bash` is also outside this skill's tool surface. Verify what you
 wrote with `grep`, `read`, and `find`, never `bash`.
 
 ## Interview mechanics
@@ -85,7 +85,7 @@ wrote with `grep`, `read`, and `find`, never `bash`.
 2. **Core purpose.** Synthesize a 1–3 sentence mission statement. Confirm.
 3. **Top-level features.** Propose 4–8 in-scope features derived from the
    dump. Confirm the set.
-4. **Out of scope.** Propose explicit v1 cuts — what this deliberately does
+4. **Out of scope.** Propose explicit v1 cuts: what this deliberately does
    not do. This list prevents scope creep later; make it real.
 5. **Stack and foundation.** Detect the stack from the repo (manifests, lock
    files, configs); confirm it and inventory what foundation already exists.
@@ -99,14 +99,14 @@ wrote with `grep`, `read`, and `find`, never `bash`.
 9. **Milestones.** Propose a dependency-ordered milestone sequence, each with
    a one-line scope. Confirm.
 
-## Output artifacts (phase 10 — write files)
+## Output artifacts (phase 10: write files)
 
 - **`PRD.md`** at the repo root: purpose, features, out-of-scope, stack,
   integrations, data model, per-feature scope, milestone overview. Markdown
-  only. Never write it anywhere else or under another name — a nested
+  only. Never write it anywhere else or under another name; a nested
   `docs/PRD.md`, a slugged filename, or a report-style name are all wrong.
 - **`milestones/N-<slug>/prompt.md`** for each milestone: a self-contained
-  prompt that a coding agent can execute cold — context, scope, constraints
+  prompt that a coding agent can execute cold: context, scope, constraints
   from the PRD, and done-when criteria. A reader must not need the PRD open
   to act on it.
 
@@ -116,7 +116,7 @@ into a sprint.
 ## Red flags (you are doing it wrong)
 
 - Asking about the stack when package.json answers it.
-- A phase "locked" without the user confirming it, and — in a headless run —
+- A phase "locked" without the user confirming it, and, in a headless run,
   a phase left unconfirmed instead of run as the assumed-confirm monologue.
 - Out-of-scope list that is empty or generic ("no mobile app").
 - Milestone prompts that say "see PRD for details".

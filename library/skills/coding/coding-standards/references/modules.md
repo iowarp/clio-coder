@@ -1,7 +1,7 @@
 # Modules
 
 - Three responsibilities, not three mandatory layers: **domain** (meaning,
-  invariants, pure transitions — no I/O, no ambient time or randomness),
+  invariants, pure transitions; no I/O, no ambient time or randomness),
   **application service** (policy and effect ordering through narrow,
   application-owned ports), **adapter** (one boundary's technology and
   translation; raw external types never leak out of it). Wire concrete

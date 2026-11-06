@@ -16,9 +16,9 @@ entries:
       - architecture for this feature
       - decide the engineering approach
       - compare architecture options
-    version: 0.4.3
+    version: 0.4.4
     sourceUrl: skills/planning/architecture
-    sha256: eb1d7d4aa651ed6f321c42be5c306f21db731c720ac07ece5a40ad90a0a6006a
+    sha256: 2a0939b7dbb00986a70d344a2820814c7f34ab695156f6206923d978efa9ab65
     provides:
       - kind: skill
         name: architecture
@@ -44,14 +44,14 @@ entries:
       - bibtex for this arxiv paper
     version: 0.6.0
     sourceUrl: skills/research/arxiv-literature
-    sha256: d9f4a59c1b348f5dfb5340f787ea52be0ec1d36927f70f85735ec9ffdd882843
+    sha256: c692e5be9049383357811a33a3d95690eba33ec334ecebb147a8f496c5871b5c
     provides:
       - kind: skill
         name: arxiv-literature
         description: Searches arXiv, summarizes or compares papers, and builds a compact
           literature survey as citation-ready, source-linked paper cards, with
           BibTeX export and ID verification through the CiteNexus server when
-          the literature pack is installed. Prefer the Resear
+          the literature pack is installed. Fetches arXiv dir
   - kind: skill
     name: ast-grep
     description: "Structural code search with ast-grep rules: finds code by shape
@@ -88,9 +88,9 @@ entries:
       - build the backlog
       - decompose this plan into tickets
       - create GitHub issues from this architecture
-    version: 0.4.3
+    version: 0.4.4
     sourceUrl: skills/planning/backlog
-    sha256: 3e0c5945d14a48a1f78720af73d2c22a16e8ee6d86511506d24928cd79234136
+    sha256: c56fb1f521cc068649ba68d3644cd655a801584bf5c6ee19f48295903777d38c
     provides:
       - kind: skill
         name: backlog
@@ -182,9 +182,9 @@ entries:
       - parse don't validate
       - illegal states unrepresentable
       - functional core imperative shell
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/coding/coding-standards
-    sha256: bf875396a7ee52902541f3c2ee26b422ec03f372edbbc5bf6ff3a7c87c23214a
+    sha256: 82a68f0955c661c12975f89eacf29045d327e550370a8f7b6829128df21164a0
     provides:
       - kind: skill
         name: coding-standards
@@ -206,9 +206,9 @@ entries:
       - handoff to another agent
       - context is about to be lost
       - write a continuation brief
-    version: 0.5.5
+    version: 0.5.6
     sourceUrl: skills/context/context-handoff
-    sha256: e3959705156a5caa9c46a085283ee285a256ef2a0347121a8ee5242fac21a4a0
+    sha256: f4119e2f7641e6515f420f3123834de360fdb3e4bccb0e681b2bb5f8be61dd70
     provides:
       - kind: skill
         name: context-handoff
@@ -229,9 +229,9 @@ entries:
       - where were we
       - get up to speed
       - resume repository work after a break
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/context/context-prime
-    sha256: d31e219abbc8e7ff6d43f268f068097bb562753a263db2f4866acf0d6f381761
+    sha256: 9139386b02ba9c2b4e4a98e03bbed679bb03eec447c6be50c3cf3a599d4cbb63
     provides:
       - kind: skill
         name: context-prime
@@ -279,9 +279,9 @@ entries:
       - get multiple expert perspectives
       - weigh the architecture options
       - what would experts say
-    version: 0.6.3
+    version: 0.6.4
     sourceUrl: skills/workflow/design-council
-    sha256: 079cd33b7c1ee7ee4939af1a9390a1a6498c7a6543f0c4ea308cb7948ca7d767
+    sha256: 8a52a1275559030c81d97cf95c8520d71af53431652e59c30ead29b5c1d16be5
     provides:
       - kind: skill
         name: design-council
@@ -304,9 +304,9 @@ entries:
       - define numerical tolerances
       - reproduce these results
       - compare solver accuracy
-    version: 0.3.2
+    version: 0.3.3
     sourceUrl: skills/research/experiment-protocol
-    sha256: bfb7a74897cd6a2e5d9fcdcb8ec4fc4fd288495f6404e9b960b2c44c5d3a5b0c
+    sha256: da6ca37f20d7ce65b74ff125fe82e78308b1f4a69bb84d6041648a4b0b93bd86
     provides:
       - kind: skill
         name: experiment-protocol
@@ -373,9 +373,9 @@ entries:
       - install a skill
       - add an agent skill
       - search the skills marketplace
-    version: 0.3.0
+    version: 0.3.1
     sourceUrl: skills/meta/find-skills
-    sha256: 8247e02c46d8869d6ed014cd80854115b4f5711eabc25addbd5158dc1babf21f
+    sha256: b06f8fb7d54dad645df09e489bcefc26044270faf131fea4be287c79c1a46d27
     provides:
       - kind: skill
         name: find-skills
@@ -541,9 +541,9 @@ entries:
     name: materio
     description: "Materio: materials research interviews, supplied-corpus synthesis,
       lab feasibility, task execution and verified paper handoff."
-    version: 0.2.0
+    version: 0.2.1
     sourceUrl: plugins/materio
-    sha256: b13d844666768c1879a3e7f72e321ad04994a7d897c1cbf78d05bc0b34ab01d6
+    sha256: 57a38ba5a0061445f9e75b4cd622bfe9a066eeebd509f78f1b55177076238a20
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -636,28 +636,40 @@ entries:
         description: Prepare a reviewed research-to-paper handoff for the wtf-p workflow.
       - kind: skill
         name: materio-lab-definer
-        description: Structure resource interviews into a feasibility map with gaps and
-          alternatives.
+        description: Interviews the researcher about equipment, compute, licenses,
+          people and access constraints, and writes .research/VIRTUAL-LAB.md
+          with a resource-to-task feasibility map, gaps and alternatives. Use
+          when running define-virtual-lab.
       - kind: skill
         name: materio-literature-reviewer
-        description: Review supplied materials and provided URLs with citation
-          provenance and explicit gaps.
+        description: Reviews the supplied corpus and provided URLs for a confirmed
+          materials research question and writes .research/LITERATURE.md with
+          citation provenance, inspection depth and explicit gaps. Use when
+          running literature-review.
       - kind: skill
         name: materio-research-explorer
-        description: Synthesize candidate materials-science questions and write
-          researcher-confirmed identity.
+        description: Interviews the researcher about a new materials research direction,
+          offers three calibrated candidate questions, and writes the confirmed
+          research identity under .research/. Use when starting a Materio
+          project or running identify-research.
       - kind: skill
         name: materio-task-executor
-        description: Produce type-specific artifacts for one approved materials-science
-          task and verify the files.
+        description: Produces the type-specific artifacts and summary for one approved
+          Materio task under its .research/tasks/ directory, keeping prepared
+          work distinct from measured or computed results. Use when running
+          execute-task.
       - kind: skill
         name: materio-task-verifier
-        description: Independently inspect research task outputs against their approved
-          assumptions, artifacts, and evidence.
+        description: Independently inspects one executed Materio task's outputs against
+          its approved specification, assumptions and evidence, without changing
+          files, and reports findings with a complete, blocked or needs_input
+          verdict. Use after execute-task produces artifacts
       - kind: skill
         name: materio-workflow-planner
-        description: Build a resource-aware dependency plan with researcher assumptions
-          and tagged defaults.
+        description: "Customizes a research workflow with the researcher and writes
+          .research/WORKFLOW.md: stable task IDs, dependency order, researcher
+          assumptions and tagged defaults, checked against the virtual lab. Use
+          when running define-research-tasks."
   - kind: extension
     name: materio
     description: Materials research lab bench with local commands, usage and
@@ -685,9 +697,9 @@ entries:
       - stress-test this design
       - poke holes in this idea
       - clarify this plan one question at a time
-    version: 0.5.4
+    version: 0.5.5
     sourceUrl: skills/workflow/plan-interview
-    sha256: 049157b16e571c530035093da0a3a0c7f74fb8f660867eb3bdba810166365076
+    sha256: 5ea267633c0dab0667b0cefd92de0b7064ae23af8cddb2af4273fe35cc44e246
     provides:
       - kind: skill
         name: plan-interview
@@ -709,9 +721,9 @@ entries:
       - define this feature
       - structure this product brain dump
       - create milestone prompts
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/planning/prd
-    sha256: 610c2d1fc17cc9bb42075da19452853c15c013196016f90d7715c998811604c1
+    sha256: 2000e288ab65b69cd056fc947efc835398f10356511c334b9c97fa21e3612f75
     provides:
       - kind: skill
         name: prd
@@ -734,9 +746,9 @@ entries:
       - problem-first PRD
       - define a falsifiable product hypothesis
       - greenfield product intent
-    version: 0.4.3
+    version: 0.4.4
     sourceUrl: skills/planning/product-intent
-    sha256: 7488657eed0727051ba0af308be173ec4514ef1fb1184e3f165e30bac25cc9cd
+    sha256: 18730b49ec72246c22fba169cdb633e04bc388be883b625f16610c3d3579fa2b
     provides:
       - kind: skill
         name: product-intent
@@ -758,9 +770,9 @@ entries:
       - prototype this state model
       - sanity-check this logic
       - what should this UI look like
-    version: 0.4.1
+    version: 0.4.2
     sourceUrl: skills/coding/prototype
-    sha256: 154b3a6a1187d250219f8c0cd039def56a7b3af9a51203457a04c2fc3a4adcc0
+    sha256: e3665e46e95ed9fe281c0dfcf2bd58ea637d851e38e0fcb69012c1b99f9819f0
     provides:
       - kind: skill
         name: prototype
@@ -825,9 +837,9 @@ entries:
       - diagnose NaNs
       - debug with falsifiable hypotheses
       - scientific root cause
-    version: 0.3.2
+    version: 0.3.3
     sourceUrl: skills/research/scientific-debugging
-    sha256: 57be17bef8bb0cfcc058aec8fa25c04ce5533f8b6c5881dee4f3efc8b76cce14
+    sha256: af9b1626ae8b57117258312449268ffa02daec8b369fbd9283f09aaf399f3f84
     provides:
       - kind: skill
         name: scientific-debugging
@@ -853,9 +865,9 @@ entries:
       - migrate the scientific build system
       - create a maintained fork
       - preserve scientific parity
-    version: 0.4.3
+    version: 0.4.4
     sourceUrl: skills/research/scientific-modernization
-    sha256: d0007ad88697eb732739e46173252e6fc63ded74b98e0bceb9e3d0e4ce8fac1f
+    sha256: bb57e7d4c6b72afcef4dc9ff64a6a6ceab9415dcc57794b421569fb976917c19
     provides:
       - kind: skill
         name: scientific-modernization
@@ -900,9 +912,9 @@ entries:
       - improve this skill
       - why isn't this skill firing
       - prune a skill body
-    version: 0.4.0
+    version: 0.4.1
     sourceUrl: skills/meta/skill-authoring
-    sha256: a959de1f43a465a033a20f5a458387eecd661492c52cec25b4873af579ea7e6e
+    sha256: b67b685a3a59712a3f17f7d1c290621aaf963d94057ca40c0366bfe991f730a7
     provides:
       - kind: skill
         name: skill-authoring
@@ -949,9 +961,9 @@ entries:
       - make this plan executable
       - turn this milestone into a sprint
       - write dependency-ordered vertical slices
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/workflow/sprint-plan
-    sha256: 2d659a8dfd264f0e031f822136047cd7fa84446327ad34ffa0a2d471988c42c1
+    sha256: fb3b3a36cf20a22c599c0fffb6a2825c98cd113bfcebaee0938315244d1d82a9
     provides:
       - kind: skill
         name: sprint-plan
@@ -995,9 +1007,9 @@ entries:
       - code-shaped contracts
       - implementation-ready technical specification
       - specify execution flows
-    version: 0.3.3
+    version: 0.3.4
     sourceUrl: skills/planning/tech-spec
-    sha256: 9433d695db2c4fe9cbdb25032a062862a5673137c6076e64a4530385ade5c8e5
+    sha256: fb0be3dfc87bc3935a30eac10d3b9df2b8887476813dade2e19b8202441d141e
     provides:
       - kind: skill
         name: tech-spec
@@ -1019,9 +1031,9 @@ entries:
       - turn this into a reusable workflow
       - distill this repeated process
       - create a skill from this session
-    version: 0.4.5
+    version: 0.4.6
     sourceUrl: skills/workflow/workflow-capture
-    sha256: 75f5801e72625ae73d3da5d57cef247e44bb70ef9c5774c8c21cac71072f98ed
+    sha256: 85deacd58591bd707f1dfa6d21238528c84aa390d1721708ddd14ded6da292e4
     provides:
       - kind: skill
         name: workflow-capture
