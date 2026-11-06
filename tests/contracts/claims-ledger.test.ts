@@ -9,6 +9,7 @@ import {
 	claimsLogPath,
 	claimsProjectRoot,
 	contradictionConditions,
+	createClaimsDeliveryRegistrations,
 	deriveClaimEdges,
 	overturnedAgreements,
 	readClaims,
@@ -120,6 +121,36 @@ describe("claims ledger (#406)", () => {
 				[[claim.id, "agrees"]],
 			);
 			assert.equal(read.mismatched, 1);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("offers a contested check once per session, and nothing to a task that does not touch it", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const claim = (passed: boolean, clean: boolean, at: string) => {
+				const details = {
+					...numericDetails(passed, passed ? "passed" : "failed"),
+					checkout: { commit: "c".repeat(40), trackedTreeClean: clean },
+				};
+				const built = claimFromVerifyResult({ details, project, at, source });
+				assert.ok(built);
+				return built;
+			};
+			await appendClaims([claim(true, true, "2026-11-06T00:00:01.000Z"), claim(false, false, "2026-11-06T00:00:02.000Z")]);
+			const [delivery] = createClaimsDeliveryRegistrations({ cwd: () => repo });
+			assert.ok(delivery);
+			const turn = (text: string) => delivery.evaluate({ hook: "turn_start", sessionId: "s1", text });
+			assert.equal(turn("summarize the README").length, 0);
+			const first = turn("why does the stats check fail?");
+			assert.equal(first.length, 1);
+			match(first[0]?.kind === "inject_reminder" ? first[0].message : "", /^\[Claims\] Check 'stats'.*Contested/u);
+			// The same state is not offered again in the session.
+			assert.equal(turn("rerun stats please").length, 0);
 		} finally {
 			env.restore();
 		}

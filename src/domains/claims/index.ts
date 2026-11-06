@@ -7,6 +7,16 @@ export {
 	claimText,
 } from "./capture.js";
 export {
+	CLAIMS_DELIVERY_MAX_CHARS,
+	CLAIMS_DELIVERY_MAX_CHECKS,
+	CLAIMS_DELIVERY_REGISTRATION_ID,
+	CLAIMS_DELIVERY_VERIFY_REGISTRATION_ID,
+	checksNamedByText,
+	checksTouchingPath,
+	claimsDeliveryMessage,
+	createClaimsDeliveryRegistrations,
+} from "./delivery.js";
+export {
 	claimBackingRefs,
 	claimConditionsKey,
 	claimStatuses,
