@@ -272,7 +272,7 @@ saved in the global settings only. Removal affects saved configuration and leave
 remote files in place. `clio-coder fleet nodes remove node-a` does the same;
 profile pins or a standing preference must be cleared first.
 
-The desktop app ([gui.md](gui.md)) lists the same SSH nodes on its **Machines** page
+The desktop app ([gui.md](gui.md#switching-machines)) lists the same SSH nodes on its **Machines** page
 and in a sidebar machine switcher. Opening a node starts that node's own GUI over
 SSH (`clio-coder gui --foreground --port 0 --no-open --idle-exit <ms> --token-stdin`,
 with a fresh token on stdin), forwards a loopback port to it, and serves it under

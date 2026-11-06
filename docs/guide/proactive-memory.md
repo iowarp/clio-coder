@@ -209,7 +209,7 @@ a verdict on truth. The log is per project, under
   `clio-coder memory approve <id>` clears the regression after review. Source:
   `src/domains/memory/claim-link.ts`.
 - **Hypotheses.** A hypothesis slate written by the literature pack's
-  hypothesis workflow (see [Resource library](resource-library.md)) is
+  hypothesis workflow (see [Resource library](resource-library.md#science-packs)) is
   recorded in the same ledger. Each hypothesis starts `proposed`. A run of its
   check that records no judged claim marks it `tested`, and the latest judged
   run marks it `supported` (agrees) or `refuted` (disagrees). The status comes
