@@ -22,7 +22,9 @@ import type { TSchema } from "typebox";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
+import { toolFileKind } from "../core/telemetry/file-kind.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import type { ToolSettled } from "../core/telemetry/schemas.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
@@ -282,7 +284,16 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	const telemetryCtx = withToolTelemetryContext(invokeOpts, telemetryContext);
 	const finish = (outcome: ToolOutcome, extra: Parameters<typeof emitFinish>[4], result?: ToolResult): void => {
 		emitFinish(telemetry, spec.name, executedMs, outcome, extra);
-		recordToolSettled(telemetryCtx, spec.name, outcome, executedMs(), parkedMs, extra, result);
+		recordToolSettled(
+			telemetryCtx,
+			spec.name,
+			outcome,
+			executedMs(),
+			parkedMs,
+			extra,
+			result,
+			toolSettledFacets(spec.name, args, result, extra?.skillActivation),
+		);
 	};
 	const hasInvokeOpts = Object.keys(invokeOpts).length > 0;
 	let verdictPromise: ReturnType<typeof registry.invoke>;
@@ -381,6 +392,49 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	return result;
 }
 
+const CHECK_KINDS: ReadonlySet<string> = new Set(["command", "numeric-compare", "perf-budget", "reproduce"]);
+
+type ToolSettledFacets = Pick<ToolSettled, "fileExt" | "checkKind" | "skill" | "capabilities">;
+
+/**
+ * What kind of work a call did, as closed words and names only, so `telemetry insights` classifies a session without
+ * reading a path, an argument or a result. A write or edit keeps only its file's kind by extension, a verify call the
+ * check kind it ran, a context call the skill it loaded, and a gateway call the capabilities it invoked.
+ */
+function toolSettledFacets(
+	tool: string,
+	args: Record<string, unknown>,
+	result: ToolResult | undefined,
+	skillActivation: SkillActivation | undefined,
+): ToolSettledFacets {
+	const facets: ToolSettledFacets = {};
+	if ((tool === ToolNames.Write || tool === ToolNames.Edit) && typeof args.path === "string")
+		facets.fileExt = toolFileKind(args.path);
+	const details = result && isRecord(result.details) ? result.details : undefined;
+	if (tool === ToolNames.Verify && typeof details?.checkKind === "string" && CHECK_KINDS.has(details.checkKind))
+		facets.checkKind = details.checkKind as NonNullable<ToolSettledFacets["checkKind"]>;
+	if (skillActivation !== undefined && skillActivation.name.length <= 512) facets.skill = skillActivation.name;
+	if (tool === ToolNames.Gateway) {
+		const named =
+			args.op === "call"
+				? [args.capability]
+				: args.op === "chain" && Array.isArray(args.steps)
+					? args.steps.map((step) => (isRecord(step) ? step.capability : undefined))
+					: [];
+		const capabilities = [
+			...new Set(
+				named.flatMap((name) =>
+					typeof name === "string" && name.trim().length > 0 && name.trim().length <= 512 ? [name.trim()] : [],
+				),
+			),
+		]
+			.sort()
+			.slice(0, 32);
+		if (capabilities.length > 0) facets.capabilities = capabilities;
+	}
+	return facets;
+}
+
 /** One tool.settled per settled call; tool.decided keeps the safety decision itself (#434). */
 function recordToolSettled(
 	ctx: TelemetryContext | undefined,
@@ -390,6 +444,7 @@ function recordToolSettled(
 	parkedMs: number,
 	extra: Parameters<typeof emitFinish>[4],
 	result: ToolResult | undefined,
+	facets: ToolSettledFacets,
 ): void {
 	if (!ctx) return;
 	const images = result?.kind === "ok" ? (result.images?.length ?? 0) : 0;
@@ -412,6 +467,7 @@ function recordToolSettled(
 								: ("refused" as const),
 					}
 				: {}),
+			...facets,
 		},
 		ctx,
 	);
