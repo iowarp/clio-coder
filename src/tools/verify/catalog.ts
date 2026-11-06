@@ -6,6 +6,7 @@ import { isProjectVerifierCheckId } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
 import { normalizePerfBudget, normalizePerfTolerance, type PerfBudgetSpec } from "./perf.js";
+import { type DeclaredReproduce, normalizeReproduce, REPRODUCE_CATALOG_FIELDS } from "./reproduce.js";
 
 export const PROJECT_VERIFIER_CATALOG_RELATIVE_PATH = ".clio-coder/verifiers.yaml";
 /** The version this build writes. Version 1 files still load; every check there is `kind: command`. */
@@ -31,10 +32,18 @@ export const PROJECT_VERIFIER_CATALOG_CAPS = Object.freeze({
  * the command, parses its stdout as `string -> number | number[]`, and judges
  * it against a reference file under a tolerance. `perf-budget` runs the
  * command and judges its wall time against a budget or a recorded baseline.
+ * `reproduce` checks pinned input digests, runs the command in a clean
+ * environment with a declared seed, and judges its metrics, their units and
+ * their shapes against a reference file or a second clean run.
  */
-export type DeclaredCheckKind = "command" | "numeric-compare" | "perf-budget";
+export type DeclaredCheckKind = "command" | "numeric-compare" | "perf-budget" | "reproduce";
 
-export const DECLARED_CHECK_KINDS: ReadonlyArray<DeclaredCheckKind> = ["command", "numeric-compare", "perf-budget"];
+export const DECLARED_CHECK_KINDS: ReadonlyArray<DeclaredCheckKind> = [
+	"command",
+	"numeric-compare",
+	"perf-budget",
+	"reproduce",
+];
 
 export interface DeclaredNumericCompare {
 	/** Repository-relative JSON file of the same shape as the command's stdout. */
@@ -77,6 +86,7 @@ export interface DeclaredCheck {
 	kind: DeclaredCheckKind;
 	numeric?: DeclaredNumericCompare;
 	perf?: DeclaredPerfBudget;
+	reproduce?: DeclaredReproduce;
 }
 
 export interface DeclaredCheckSource extends DeclaredCheckSourceRef {
@@ -95,7 +105,8 @@ const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs"
  * `nonFinite` rule without a catalog version bump: a file that omits them
  * keeps the original strict-conjunction, non-finite-fails judgement.
  */
-const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "reference", "tolerance", "budget", "baseline"]);
+const KIND_FIELDS = [...new Set(["reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS])];
+const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", ...KIND_FIELDS]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const SHELL_EXECUTABLES = new Set([
 	"bash",
@@ -210,7 +221,7 @@ function validateCheckKind(
 	value: Record<string, unknown>,
 	location: string,
 	version: number,
-): Pick<DeclaredCheck, "kind" | "numeric" | "perf"> | Error {
+): Pick<DeclaredCheck, "kind" | "numeric" | "perf" | "reproduce"> | Error {
 	const kindValue = Object.hasOwn(value, "kind") ? value.kind : "command";
 	if (typeof kindValue !== "string" || !(DECLARED_CHECK_KINDS as ReadonlyArray<string>).includes(kindValue)) {
 		return new Error(`${location}.kind must be one of ${DECLARED_CHECK_KINDS.join(", ")}`);
@@ -221,13 +232,18 @@ function validateCheckKind(
 		command: [],
 		"numeric-compare": ["reference", "tolerance"],
 		"perf-budget": ["budget", "baseline", "tolerance"],
+		reproduce: REPRODUCE_CATALOG_FIELDS,
 	};
-	const stray = ["reference", "tolerance", "budget", "baseline"].filter(
-		(field) => present(field) && !accepted[kind].includes(field),
-	);
+	const stray = KIND_FIELDS.filter((field) => present(field) && !accepted[kind].includes(field));
 	if (stray.length > 0) return new Error(`${location} kind '${kind}' does not accept ${stray.join(", ")}`);
 	if (version === 1 && kind !== "command") return new Error(`${location}.kind requires catalog version 2`);
 	if (kind === "command") return { kind };
+	if (kind === "reproduce") {
+		const fields = Object.fromEntries(REPRODUCE_CATALOG_FIELDS.filter(present).map((field) => [field, value[field]]));
+		const reproduce = normalizeReproduce(fields, location, validateRepositoryFile);
+		if (reproduce instanceof Error) return reproduce;
+		return { kind, reproduce };
+	}
 	if (kind === "numeric-compare") {
 		if (!present("reference")) return new Error(`${location}.reference is required for kind numeric-compare`);
 		if (!present("tolerance")) return new Error(`${location}.tolerance is required for kind numeric-compare`);
