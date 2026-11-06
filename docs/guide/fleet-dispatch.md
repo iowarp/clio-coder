@@ -1727,11 +1727,13 @@ hard block.
   arguments never cross the worker stdout seam), and the worker's context figure.
   It also lists finished runs. `Up` and `Down` (or `k` and `j`) move the cursor, `s`
   steers the selected run, and `x` cancels it.
-- `Enter` on a live run takes the [workers dock](#workers-dock-and-dashboard)
-  over for that run when a pane host is present. It opens the dock or shows a parked one,
+- `w` on a live run takes the [workers dock](#workers-dock-and-dashboard)
+  over for that run when a pane host is present, and the board names the key as `watch in a pane`
+  only then. It opens the dock or shows a parked one,
   and leaves the keyboard in Clio Coder. Moving the cursor retargets an existing dock to the
-  selected live run and never opens one. Without a pane host, and for a finished run,
-  `Enter` toggles the inline worker detail: the phase, the running call
+  selected live run and never opens one. `Enter` and `d` toggle the inline worker detail on
+  every run, with or without a pane host, and `Esc` folds an open detail before it closes the
+  board ([overlay-key-routing.ts](../../src/interactive/overlay-key-routing.ts)). The detail shows the phase, the running call
   with a redacted action descriptor (`bash running npm test`), the bounded tail of the
   worker's own prose, and the full task, route and budget lines. The default list
   stays compact, so a fan-out of scouts costs one row each until an operator
@@ -1884,7 +1886,7 @@ A takeover follows work forward. When the run it shows finishes and a retry of i
 
 #### Dock requests
 
-`/panes show <agent|run>`, the `panes` tool's `show` action and `Enter` on a live run in the Fleet Runs board write a request and take the dock over for that run. They open the dock or show a parked one, and they never move the keyboard, because the caller may be the model. `show` matches live (running or retrying) runs only: an agent id substring first, then a run id prefix, newest first. A target that matches no live run reports `no live run matches <target>` and lists the live agents, so a finished run is inspected with `clio-coder fleet view <runId>` or from the dashboard's board. The Fleet Runs board stays reachable through `/fleet` and `←` on an empty composer.
+`/panes show <agent|run>`, the `panes` tool's `show` action and `w` on a live run in the Fleet Runs board write a request and take the dock over for that run. They open the dock or show a parked one, and they never move the keyboard, because the caller may be the model. `show` matches live (running or retrying) runs only: an agent id substring first, then a run id prefix, newest first. A target that matches no live run reports `no live run matches <target>` and lists the live agents, so a finished run is inspected with `clio-coder fleet view <runId>` or from the dashboard's board. The Fleet Runs board stays reachable through `/fleet` and `←` on an empty composer.
 
 ## Inspect fleet runs from the CLI
 

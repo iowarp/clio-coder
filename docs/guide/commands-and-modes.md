@@ -826,7 +826,7 @@ do not accidentally become steering requests.
 The Fleet Runs board (`/fleet`, `←` on an empty composer, or `Alt+W` without a pane host) makes this control path discoverable: use
 Up/Down or `j`/`k` to select a run, `s` to close the board and prefill its
 exact `@<runId> ` steering prefix, and `x` to cancel a live worker or queued
-retry. At narrow widths, the footer prioritizes available steer/cancel actions over navigation and detail hints; Enter still expands the selected card. Completed runs offer no steer/cancel actions. A steer first reports `queued`; only the worker's
+retry. `Enter` or `d` toggles the selected run's detail, `Esc` folds an open detail before it closes the board, and with a pane host `w` takes the workers dock over for a live run. At narrow widths, the footer prioritizes available steer/cancel actions over navigation and detail hints; Enter still expands the selected card. Completed runs offer no steer/cancel actions. A steer first reports `queued`; only the worker's
 `clio_coder_steer_received` acknowledgement reports `received`. Single-shot
 subprocess runtimes and ACP delegation do not expose a live steering channel
 and are labeled accordingly.
