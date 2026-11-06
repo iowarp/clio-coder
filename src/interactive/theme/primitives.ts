@@ -750,7 +750,7 @@ export function commandBlock(
 		? wrap(text, safe - 2)
 		: options.prose === true
 			? wrap(text, safe - 2).map((row) => theme.fg(role, row))
-		: foldPlain(text, safe - 2).map((row) => theme.fg(role, row));
+			: foldPlain(text, safe - 2).map((row) => theme.fg(role, row));
 	return rows.map((row) => `${gutter} ${row}`);
 }
 
