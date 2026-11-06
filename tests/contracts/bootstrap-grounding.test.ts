@@ -296,6 +296,61 @@ it("keeps every carried invariant when the model repeats one at the end of a ful
 	strictEqual(rules.length, 20, handbook);
 });
 
+it("carries a section title the rewrite dropped with the blocks a running check enforces", async () => {
+	const carried = writeCarryFixture();
+	mkdirSync(join(cwd, "docs"), { recursive: true });
+	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			...carried.map((rule, i) => `${i + 1}. ${rule}`),
+			"",
+			"## Docs and prose",
+			"",
+			"- Write new pages as Markdown under `docs/`; the retired-html check in `scripts/check.js` refuses an HTML tree.",
+			"- Keep sentences short in `docs/guide.md`.",
+			"- Every anchor in `docs/guide.md` resolves; the stale-anchor check in `scripts/check.js` fails on a dead one.",
+			"",
+		].join("\n"),
+	);
+	const modelTitles = ["Change recipes", "Tests", "Git and release", "Gotchas", "Widgets", "Rendering", "Exports"];
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: [],
+				sections: modelTitles.map((title, i) => ({
+					title,
+					body: `- ${title} step ${i + 1} goes through \`renderWidget\` in \`src/widgets/render.ts\`.`,
+				})),
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0] ?? "";
+	ok(docs.includes("Write new pages as Markdown under `docs/`"), handbook);
+	strictEqual(docs.includes("Keep sentences short"), false, handbook);
+	strictEqual(docs.includes("stale-anchor"), false, handbook);
+	const titles = [...handbook.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+	deepStrictEqual(titles, [
+		"Hard invariants",
+		...modelTitles.slice(0, 6),
+		"Docs and prose",
+		"Verification expectations",
+	]);
+});
+
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
 	const draft = {
 		projectName: "harbor",

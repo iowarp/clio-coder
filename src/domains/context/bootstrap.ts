@@ -101,6 +101,12 @@ export interface BootstrapGenerateInput {
 	 * carried forward.
 	 */
 	previousInvariants?: ReadonlyArray<string>;
+	/**
+	 * Custom sections of the handbook a rewrite replaces. Handbook units route a
+	 * section to fleet workers by its title, so a title the draft drops is
+	 * carried with the blocks a check the repository still runs enforces.
+	 */
+	previousSections?: ReadonlyArray<ClioMdSection>;
 	/** What CI runs and which custom checks exist; the model explains each as a rule. */
 	enforcement?: EnforcementInventory;
 	depth?: BootstrapDepth;
@@ -1357,6 +1363,30 @@ function enforcedPreviousInvariants(
 }
 
 /**
+ * Sections of the replaced handbook, cut to the blocks a running check still
+ * enforces and whose citations still ground. A rewrite on mini dropped Docs and
+ * prose, the section documentation workers receive, while its documentation-links,
+ * product-namespace and prompts checks all still ran.
+ */
+function enforcedPreviousSections(
+	input: BootstrapGenerateInput,
+	names: EnforcementNames,
+	corpus: ModelGroundingCorpus,
+): ClioMdSection[] {
+	const carried: ClioMdSection[] = [];
+	for (const section of input.previousSections ?? []) {
+		if (section.title === CHECKER_SECTION_TITLE) continue;
+		const blocks = handbookBlocks(section.body).flatMap((block) => {
+			if (namedEnforcement(block, names).length === 0) return [];
+			const grounded = groundedModelBody(block, corpus);
+			return grounded && namedEnforcement(grounded, names).length > 0 ? [grounded] : [];
+		});
+		if (blocks.length > 0) carried.push({ title: section.title, body: blocks.join("\n") });
+	}
+	return carried;
+}
+
+/**
  * A model rule the checker already states: it names only codes the checker
  * declares in `stated`, or restates one of them in other words.
  */
@@ -1506,7 +1536,9 @@ function stabilizeGeneratedOutput(
 		architectural.length > 0 && restatesCheckerRule(rule, architectural, checkerRules, architecturalTokens);
 	const names = enforcementNames(input);
 	const carryCorpus =
-		(input.previousInvariants?.length ?? 0) > 0 ? (groundingCorpus ?? createModelGroundingCorpus(input)) : null;
+		(input.previousInvariants?.length ?? 0) > 0 || (input.previousSections?.length ?? 0) > 0
+			? (groundingCorpus ?? createModelGroundingCorpus(input))
+			: null;
 	const carried = carryCorpus
 		? enforcedPreviousInvariants(input, names, carryCorpus).filter((rule) => !restatesArchitecture(rule))
 		: [];
@@ -1594,6 +1626,12 @@ function stabilizeGeneratedOutput(
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
+	// A title the draft dropped returns with its enforced blocks, and a later section gives way to it.
+	const carriedSections = new Set<ClioMdSection>();
+	for (const section of carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : []) {
+		const retained = addSection(section) ? ordinarySections.at(-1) : undefined;
+		if (retained) carriedSections.add(retained);
+	}
 	const checkerSection = uncoveredCheckerSection(
 		checkerRules.filter((rule) => !rule.architectural),
 		[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
@@ -1602,7 +1640,8 @@ function stabilizeGeneratedOutput(
 	if (checkerSection) addSection(checkerSection);
 	for (const section of inferredSections) addSection(section);
 	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
-	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);
+	let room = ordinaryLimit - carriedSections.size;
+	const retainedOrdinarySections = ordinarySections.filter((section) => carriedSections.has(section) || room-- > 0);
 	for (const section of retainedOrdinarySections) {
 		if (modelSections.has(section)) onModelSectionRetained?.();
 	}
@@ -2187,6 +2226,7 @@ async function runBootstrapWork(
 	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
 	const replaced = hadClioMd && input.rewriteClioMd === true ? tryReadClioMd(cwd) : null;
 	const previousInvariants = replaced?.ok && replaced.value ? replaced.value.invariants : [];
+	const previousSections = replaced?.ok && replaced.value ? replaced.value.sections : [];
 	const replaceClioMd = input.applyClioMd === true || input.rewriteClioMd === true;
 	if (
 		input.adopt === true &&
@@ -2261,6 +2301,7 @@ async function runBootstrapWork(
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(previousInvariants.length > 0 ? { previousInvariants } : {}),
+			...(previousSections.length > 0 ? { previousSections } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
 			reportGeneration,
 			missingSections: (draft) => missingHandbookSections({ cwd, enforcement }, draft),
@@ -2317,6 +2358,7 @@ async function runBootstrapWork(
 				...(existingParsed ? { existingClioMd: existingParsed } : {}),
 				...(existingClioMdText ? { existingClioMdText } : {}),
 				...(previousInvariants.length > 0 ? { previousInvariants } : {}),
+				...(previousSections.length > 0 ? { previousSections } : {}),
 			},
 			output,
 			() => {
