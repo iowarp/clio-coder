@@ -114,12 +114,39 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 });
 
-it("carries a check-enforced hard invariant through a rewrite, and not one whose check is gone", async () => {
+it("carries a hard invariant only while a check that runs still enforces it", async () => {
 	mkdirSync(join(cwd, "scripts"));
 	writeFileSync(
-		join(cwd, "scripts", "check.js"),
-		'function checkCasePortablePaths() {\n\tfail("case-portable-paths", "paths differ only by case and collide");\n}\n',
+		join(cwd, "package.json"),
+		JSON.stringify({
+			name: "harbor",
+			type: "module",
+			scripts: {
+				check: "node scripts/check.js",
+				prepublishOnly: "node -e \"throw new Error('publish from the release job')\"",
+				"docs:verify": "node scripts/verify-docs.js",
+			},
+		}),
 	);
+	writeFileSync(
+		join(cwd, ".github", "workflows", "ci.yml"),
+		"jobs:\n  build:\n    name: ci (22)\n    steps:\n      - run: pnpm run check\n",
+	);
+	// The widget check is still defined, but its invocation was removed: it no longer fails a change.
+	writeFileSync(
+		join(cwd, "scripts", "check.js"),
+		[
+			"function checkCasePortablePaths() {",
+			'\tfail("case-portable-paths", "paths differ only by case and collide");',
+			"}",
+			"function checkWidgetEntry() {",
+			'\tfail("widget-entry", "widgets render only through renderWidget");',
+			"}",
+			'for (const [name, run] of [["case-portable-paths", checkCasePortablePaths]]) run(name);',
+			"",
+		].join("\n"),
+	);
+	writeFileSync(join(cwd, "scripts", "verify-docs.js"), 'fail("docs-index", "every page is indexed");\n');
 	writeFileSync(
 		join(cwd, "CLIO-CODER.md"),
 		[
@@ -131,6 +158,9 @@ it("carries a check-enforced hard invariant through a rewrite, and not one whose
 			"",
 			"1. Do not add paths that differ only by case: they collide on case-insensitive filesystems (case-portable-paths check in `scripts/check.js`).",
 			"2. Never render widgets from `src/index.ts`: the widget-entry check in `scripts/check.js` refuses it.",
+			"3. Never publish from a workstation: the `prepublishOnly` script in `package.json` throws.",
+			"4. Index every docs page: the docs-index check in `scripts/verify-docs.js` refuses an unindexed one.",
+			"5. Never render widgets outside `src/widgets/render.ts`: the widget-scope check in `scripts/check.js` refuses it.",
 			"",
 		].join("\n"),
 	);
@@ -150,8 +180,11 @@ it("carries a check-enforced hard invariant through a rewrite, and not one whose
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	ok(handbook.includes("1. Do not add paths that differ only by case"), handbook);
+	ok(handbook.includes("Do not add paths that differ only by case"), handbook);
+	ok(handbook.includes("Never publish from a workstation"), handbook);
 	strictEqual(handbook.includes("widget-entry"), false, handbook);
+	strictEqual(handbook.includes("docs-index"), false, handbook);
+	strictEqual(handbook.includes("widget-scope"), false, handbook);
 	strictEqual(handbook.includes("`checkCasePortablePaths`"), false, handbook);
 });
 

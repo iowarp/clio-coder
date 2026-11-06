@@ -11,15 +11,20 @@
  * ["scripts/check-release.mjs"])`) are read in turn. An invocation whose
  * target the scan cannot read is returned as unresolved: CI may run more than
  * the reached list shows, and a reader should not take absence as proof.
+ *
+ * The same scan says which code on that path runs: the programs it read, the
+ * files they import, and within a program the functions something live names.
  */
 import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 export interface CiReach {
 	/** Package scripts a CI command reaches, in package.json order. */
 	reached: string[];
 	/** Invocations on CI's path whose script or program the scan could not resolve, as `source: invocation`. */
 	unresolved: string[];
+	/** Repository programs the commands start, in the order the scan reached them. */
+	programs: string[];
 }
 
 const MAX_PROGRAM_BYTES = 512 * 1024;
@@ -437,13 +442,15 @@ function programEdges(text: string, path: string, scripts: ReadonlyArray<string>
  * The package scripts CI reaches. Commands, script bodies and programs form
  * one work list, each visited once, so a program a reached program starts is
  * read as well (`node scripts/ci.mjs` starting `node scripts/checks.mjs`,
- * which starts `pnpm run lint`).
+ * which starts `pnpm run lint`). With `prePost`, a reached script also reaches
+ * the `pre<name>` and `post<name>` scripts npm runs around it.
  */
 export function ciReach(
 	root: string,
 	ciCommands: ReadonlyArray<string>,
 	scripts: Readonly<Record<string, string>>,
 	visible: ReadonlySet<string>,
+	options: { prePost?: boolean } = {},
 ): CiReach {
 	const names = Object.keys(scripts);
 	const reached = new Set<string>();
@@ -458,12 +465,17 @@ export function ciReach(
 		const entry = `${source}: ${oneLine(invocation)}`;
 		if (!unresolved.includes(entry) && unresolved.length < MAX_UNRESOLVED) unresolved.push(entry);
 	};
-	const follow = (edges: Edges, source: string): void => {
-		for (const name of edges.scripts) {
-			if (reached.has(name)) continue;
-			reached.add(name);
-			pending.push({ command: scripts[name] ?? "", source: `script ${name}` });
+	const reach = (name: string): void => {
+		if (reached.has(name) || scripts[name] === undefined) return;
+		reached.add(name);
+		pending.push({ command: scripts[name] ?? "", source: `script ${name}` });
+		if (options.prePost) {
+			reach(`pre${name}`);
+			reach(`post${name}`);
 		}
+	};
+	const follow = (edges: Edges, source: string): void => {
+		for (const name of edges.scripts) reach(name);
 		for (const program of edges.programs) pending.push({ program });
 		for (const command of edges.shell) pending.push({ command, source });
 		for (const invocation of edges.unresolved) note(source, invocation);
@@ -482,5 +494,152 @@ export function ciReach(
 		seenCommands.add(item.command);
 		follow(shellEdges(item.command, names, visible), item.source);
 	}
-	return { reached: names.filter((name) => reached.has(name)), unresolved };
+	return { reached: names.filter((name) => reached.has(name)), unresolved, programs: [...readPrograms] };
+}
+
+const JS_PROGRAM_RE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+/** A named function declaration up to its parameter list: `export async function checkX(`. */
+const FUNCTION_RE =
+	/(?<![\w$.])(export\s+(?:default\s+)?)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(]*>)?\s*\(/g;
+/** Text that makes a following `function` an expression, whose name binds only inside it. */
+const EXPRESSION_BEFORE_RE = /(?:[=(,:?[!&|]|\b(?:return|yield|await|void|typeof|new))\s*$/;
+/** A relative static or dynamic import: `from "../tests/check.js"`, `import("./x")`, `require("./x")`. */
+const IMPORT_RE = /\b(?:from|import|require)\s*\(?\s*(["'])(\.{1,2}\/[^"'\n]+)\1/g;
+
+/** Whether an offset lies in a string, comment or regex, outside a template's `${…}`. */
+function literalAt(scan: Scan): (at: number) => boolean {
+	const ranges = [...scan.skip].sort((a, b) => a[0] - b[0]);
+	return (at) => {
+		let low = 0;
+		let high = ranges.length - 1;
+		let found = -1;
+		while (low <= high) {
+			const middle = (low + high) >> 1;
+			if ((ranges[middle]?.[0] ?? 0) <= at) {
+				found = middle;
+				low = middle + 1;
+			} else high = middle - 1;
+		}
+		const range = found >= 0 ? ranges[found] : undefined;
+		if (!range || at >= range[1]) return false;
+		if (scan.text[range[0]] !== "`") return true;
+		const inner = scan.text.slice(range[0], at);
+		return inner.lastIndexOf("${") <= inner.lastIndexOf("}");
+	};
+}
+
+interface DeclaredFunction {
+	name: string;
+	/** From `export`/`function` through the body's closing brace. */
+	start: number;
+	end: number;
+	exported: boolean;
+}
+
+/** The brace that opens a function body after its parameter list, past a return type annotation. */
+function bodyOpen(scan: Scan, paramsClose: number): number | null {
+	let previous = ")";
+	let index = paramsClose + 1;
+	const limit = Math.min(scan.text.length, paramsClose + 400);
+	while (index < limit) {
+		const char = scan.text[index] ?? "";
+		const skipped = scan.skip.get(index);
+		if (skipped !== undefined) {
+			index = skipped;
+			previous = char;
+			continue;
+		}
+		if (char === ";") return null;
+		const close = "{([".includes(char) ? scan.close.get(index) : undefined;
+		if (char === "{" && !":|&<,(".includes(previous)) return close === undefined ? null : index;
+		if (close !== undefined) {
+			index = close + 1;
+			previous = scan.text[close] ?? "";
+			continue;
+		}
+		if (!/\s/.test(char)) previous = char;
+		index += 1;
+	}
+	return null;
+}
+
+/** The repository files a JavaScript or TypeScript program imports by relative path. */
+export function staticImports(text: string, path: string, visible: ReadonlySet<string>): string[] {
+	if (!JS_PROGRAM_RE.test(path)) return [];
+	const inLiteral = literalAt(scanProgram(text, false));
+	const found: string[] = [];
+	for (const match of text.matchAll(IMPORT_RE)) {
+		if (inLiteral(match.index ?? 0)) continue;
+		const target = posix.normalize(posix.join(posix.dirname(path), match[2] ?? ""));
+		const resolved = [
+			target,
+			target.replace(/\.js$/, ".ts"),
+			target.replace(/\.js$/, ".tsx"),
+			target.replace(/\.mjs$/, ".mts"),
+			target.replace(/\.cjs$/, ".cts"),
+			`${target}.ts`,
+			`${target}.js`,
+			`${target}/index.ts`,
+			`${target}/index.js`,
+		].find((candidate) => visible.has(candidate));
+		if (resolved && !found.includes(resolved)) found.push(resolved);
+	}
+	return found;
+}
+
+/**
+ * A JavaScript or TypeScript program with each top-level named function that
+ * nothing live names blanked out, newlines kept. Top-level code names a
+ * function by calling it or by listing it (`["case-portable-paths",
+ * checkCasePortablePaths]`); a function a live function names is live; an
+ * exported one is live when `importers` names it. A check whose definition
+ * stayed after its invocation was removed then reports nothing. Other
+ * languages are returned whole.
+ */
+export function liveCode(text: string, path: string, importers: string): string {
+	if (!JS_PROGRAM_RE.test(path)) return text;
+	const scan = scanProgram(text, false);
+	const inLiteral = literalAt(scan);
+	const declared: DeclaredFunction[] = [];
+	for (const match of text.matchAll(FUNCTION_RE)) {
+		const start = match.index ?? 0;
+		if (inLiteral(start) || EXPRESSION_BEFORE_RE.test(text.slice(Math.max(0, start - 40), start))) continue;
+		const paramsClose = scan.close.get(start + match[0].length - 1);
+		const open = paramsClose === undefined ? null : bodyOpen(scan, paramsClose);
+		const end = open === null ? undefined : scan.close.get(open);
+		if (end !== undefined) declared.push({ name: match[2] ?? "", start, end, exported: match[1] !== undefined });
+	}
+	const functions = declared.filter(
+		(inner) => !declared.some((outer) => outer !== inner && outer.start < inner.start && inner.end <= outer.end),
+	);
+	const owner = (at: number) => functions.find((fn) => fn.start <= at && at <= fn.end);
+	const live = new Set<DeclaredFunction>();
+	const namedBy = new Map<DeclaredFunction, DeclaredFunction[]>();
+	for (const fn of functions) {
+		// A property access (`report.checkX`) is not a reference; a spread (`...checkX(`) is.
+		const reference = new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escapeRegExp(fn.name)}(?![\\w$])`, "g");
+		if (fn.exported && new RegExp(reference.source).test(importers)) live.add(fn);
+		for (const match of text.matchAll(reference)) {
+			const at = match.index ?? 0;
+			if (inLiteral(at)) continue;
+			const from = owner(at);
+			if (from === fn) continue;
+			if (!from) live.add(fn);
+			else namedBy.set(from, [...(namedBy.get(from) ?? []), fn]);
+		}
+	}
+	const pending = [...live];
+	for (let fn = pending.shift(); fn; fn = pending.shift()) {
+		for (const named of namedBy.get(fn) ?? []) {
+			if (live.has(named)) continue;
+			live.add(named);
+			pending.push(named);
+		}
+	}
+	let result = text;
+	for (const fn of functions) {
+		if (live.has(fn)) continue;
+		result = `${result.slice(0, fn.start)}${result.slice(fn.start, fn.end + 1).replace(/[^\n]/g, " ")}${result.slice(fn.end + 1)}`;
+	}
+	return result;
 }

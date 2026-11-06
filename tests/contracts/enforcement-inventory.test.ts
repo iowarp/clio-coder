@@ -127,6 +127,51 @@ it("reaches a script only through an invocation that names it, however many prog
 	strictEqual(inventory.ciUnresolved, undefined);
 });
 
+it("marks the check files that run, and reads only the checks something live names", () => {
+	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: pnpm run lint\n");
+	write(
+		"package.json",
+		JSON.stringify({
+			scripts: {
+				lint: "node scripts/check-hygiene.mjs",
+				prepack: "node scripts/check-pack.mjs",
+				"docs:check": "node scripts/check-drift.mjs",
+			},
+		}),
+	);
+	write(
+		"scripts/check-hygiene.mjs",
+		'import { runBoundaryCheck } from "../tests/boundaries/check-imports.js";\nrunBoundaryCheck();\n',
+	);
+	// The seam check is still defined, but nothing calls it any more.
+	write(
+		"tests/boundaries/check-imports.ts",
+		[
+			"export function runBoundaryCheck(): string[] {",
+			"\treturn [...checkEngineImports()];",
+			"}",
+			"function checkEngineImports(): string[] {",
+			'\treturn ["rule1: the engine is imported outside src/engine"];',
+			"}",
+			"function checkSeams(): string[] {",
+			'\treturn ["rule2: a seam is reached without a declaration"];',
+			"}",
+			"",
+		].join("\n"),
+	);
+	write("scripts/check-pack.mjs", 'fail("pack-files", "the tarball holds only dist and docs");\n');
+	const inventory = collectEnforcementInventory(root);
+	const byPath = Object.fromEntries(inventory.checkFiles.map((file) => [file.path, file]));
+	strictEqual(byPath["scripts/check-hygiene.mjs"]?.executed, true);
+	strictEqual(byPath["scripts/check-pack.mjs"]?.executed, true);
+	strictEqual(byPath["scripts/check-drift.mjs"]?.executed, undefined);
+	const imports = byPath["tests/boundaries/check-imports.ts"];
+	strictEqual(imports?.executed, true);
+	deepStrictEqual(imports?.checks, ["checkEngineImports"]);
+	deepStrictEqual(imports?.failures, ["rule1: the engine is imported outside src/engine"]);
+	deepStrictEqual(inventory.executedScripts, ["lint", "prepack"]);
+});
+
 it("reports an invocation whose script it cannot read as unresolved, not as unreached", () => {
 	write(
 		".github/workflows/ci.yml",

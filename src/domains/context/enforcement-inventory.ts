@@ -12,16 +12,22 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CI_FILE_RE, ciRunCommands } from "../../core/ci-commands.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
-import { ciReach } from "./ci-reach.js";
+import { ciReach, liveCode, staticImports } from "./ci-reach.js";
 
 export interface EnforcementCheckFile {
 	path: string;
-	/** Check functions the file defines, in file order; empty when none are named that way. */
+	/** Check functions the file defines and something live names, in file order; empty when none are named that way. */
 	checks: string[];
-	/** Heads of the coded failure messages it emits (`rule6: ...`), with interpolations elided. */
+	/** Heads of the coded failure messages its live code emits (`rule6: ...`), with interpolations elided. */
 	failures: string[];
 	/** Each coded rule the file emits, stated as the file declares it. */
 	rules?: EnforcementRule[];
+	/**
+	 * True when the file runs without anyone choosing to run it: CI, a git hook
+	 * or an npm lifecycle event starts it, or a program they start imports it.
+	 * Any other check file is available, not shown to run.
+	 */
+	executed?: boolean;
 }
 
 export interface EnforcementRule {
@@ -53,10 +59,35 @@ export interface EnforcementInventory {
 	 * When present, a script outside `ciScripts` may still run in CI.
 	 */
 	ciUnresolved?: string[];
+	/**
+	 * The package scripts that run without anyone choosing to run them: those
+	 * CI or a git hook reaches, the npm lifecycle scripts (`prepublishOnly`,
+	 * `prepare`, ...), and the `pre`/`post` scripts around each.
+	 */
+	executedScripts?: string[];
 	checkFiles: EnforcementCheckFile[];
 }
 
 const HOOK_FILE_RE = /^(?:\.pre-commit-config\.ya?ml|lefthook\.ya?ml|\.husky\/[^/_][^/]*)$/;
+/** Scripts npm runs on install, pack, publish and version, unasked. */
+const LIFECYCLE_SCRIPTS = [
+	"preinstall",
+	"install",
+	"postinstall",
+	"prepublish",
+	"preprepare",
+	"prepare",
+	"postprepare",
+	"prepublishOnly",
+	"prepack",
+	"postpack",
+	"publish",
+	"postpublish",
+	"preversion",
+	"version",
+	"postversion",
+	"dependencies",
+];
 const CHECK_NAME_RE = /(?:check|lint|verify|guard|hygiene|drift|gate|validate|boundar|conformance)/i;
 const CHECK_DIR_RE = /^(?:scripts|tools|ci|hack|bin|build|\.github\/scripts)\//;
 const CHECK_TEST_RE = /^tests?\/(?:[^/]+\/)*(?:boundar|architecture|conventions|lint|hygiene)[^/]*(?:\/|$)/i;
@@ -312,6 +343,8 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 		}
 	}
 	const ciCommands: string[] = [];
+	const hookCommands: string[] = [];
+	const hookFiles = visible.filter((file) => HOOK_FILE_RE.test(file));
 	for (const path of visible.filter((file) => CI_FILE_RE.test(file) || HOOK_FILE_RE.test(file)).sort()) {
 		const text = readText(root, path);
 		if (!text) continue;
@@ -319,32 +352,77 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 			const bounded = command.slice(0, MAX_COMMAND_CHARS);
 			if (!ciCommands.includes(bounded)) ciCommands.push(bounded);
 		}
+		if (!HOOK_FILE_RE.test(path)) continue;
+		// A husky hook is a shell script; a pre-commit hook names its command as `entry:`.
+		const commands = path.startsWith(".husky/")
+			? text.split("\n").filter((line) => line.trim().length > 0 && !line.trimStart().startsWith("#"))
+			: [...text.matchAll(/^\s*(?:-\s+)?entry:\s*["']?(.+?)["']?\s*$/gm)].map((match) => match[1] ?? "");
+		hookCommands.push(...commands.map((command) => command.slice(0, MAX_COMMAND_CHARS)));
 	}
 	const allScripts = packageScripts(root);
 	const ciText = ciCommands.join("\n");
-	const reach = ciReach(root, ciCommands, allScripts, new Set(visible));
+	const visibleSet = new Set(visible);
+	const reach = ciReach(root, ciCommands, allScripts, visibleSet);
 	const ciScripts = reach.reached;
+	const executedReach = ciReach(
+		root,
+		[
+			...ciCommands,
+			...hookCommands,
+			...LIFECYCLE_SCRIPTS.filter((name) => name in allScripts).map((name) => `npm run ${name}`),
+		],
+		allScripts,
+		visibleSet,
+		{ prePost: true },
+	);
 	const scripts: Record<string, string> = {};
 	for (const [name, command] of Object.entries(allScripts)) {
 		if (ciScripts.includes(name) || SCRIPT_NAME_RE.test(name)) scripts[name] = command.slice(0, MAX_COMMAND_CHARS);
 	}
 	const referenced = `${ciText}\n${Object.values(scripts).join("\n")}`;
 	const candidates = visible.filter(isCheckFile);
+	// A check file a running program imports runs too: Clio's hygiene script imports its boundary checker.
+	const executed = new Set([...executedReach.programs, ...hookFiles]);
+	const executedText = new Map<string, string>();
+	const pending = [...executed];
+	for (let path = pending.shift(); path !== undefined; path = pending.shift()) {
+		const text = readText(root, path);
+		if (text === null) continue;
+		executedText.set(path, text);
+		for (const imported of staticImports(text, path, visibleSet)) {
+			if (executed.has(imported) || !isCheckFile(imported)) continue;
+			executed.add(imported);
+			pending.push(imported);
+		}
+	}
 	// Files that CI or a check script invokes by path come first: they are the ones that fail a change.
 	candidates.sort((a, b) => Number(referenced.includes(b)) - Number(referenced.includes(a)) || a.localeCompare(b));
 	const checkFiles: EnforcementCheckFile[] = [];
 	for (const path of candidates.slice(0, MAX_CHECK_FILES)) {
 		const text = readText(root, path);
 		if (text === null || text.includes("\u0000")) continue;
-		const failures = failureHeads(text);
-		const rules = checkerRules(text, failures);
-		checkFiles.push({ path, checks: checkNames(text), failures, ...(rules.length > 0 ? { rules } : {}) });
+		const isExecuted = executed.has(path);
+		// An exported check is live when a running program names it; nothing runs an unexecuted file, so all of its exports stay.
+		const importers = isExecuted
+			? [...executedText].flatMap(([other, body]) => (other === path ? [] : [body])).join("\n")
+			: text;
+		const live = liveCode(text, path, importers);
+		const failures = failureHeads(live);
+		const rules = checkerRules(live, failures);
+		checkFiles.push({
+			path,
+			checks: checkNames(live),
+			failures,
+			...(rules.length > 0 ? { rules } : {}),
+			...(isExecuted ? { executed: true } : {}),
+		});
 	}
 	return {
 		ciCommands: ciCommands.slice(0, MAX_CI_COMMANDS),
 		scripts,
 		...(ciScripts.length > 0 ? { ciScripts } : {}),
 		...(reach.unresolved.length > 0 ? { ciUnresolved: reach.unresolved } : {}),
+		...(executedReach.reached.length > 0 ? { executedScripts: executedReach.reached } : {}),
 		checkFiles,
 	};
 }

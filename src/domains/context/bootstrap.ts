@@ -1277,16 +1277,19 @@ interface EnforcementNames {
 /**
  * Every name under which the inventory shows a check failing a change. A
  * check file's path is not one: a rule citing `scripts/check-hygiene.ts` may
- * name a check that file no longer runs.
+ * name a check that file no longer runs. Only executed check files and
+ * executed scripts count: a check left defined after its invocation was
+ * removed, or a script nothing runs, enforces nothing.
  */
 function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
-	const cited = new Set<string>(Object.keys(packageScripts(input.cwd)));
+	const cited = new Set<string>(input.enforcement?.executedScripts ?? []);
 	const named = new Set<string>();
 	const addCode = (code: string): void => {
 		if (/[-\d]/.test(code)) named.add(code);
 		else cited.add(code);
 	};
 	for (const file of input.enforcement?.checkFiles ?? []) {
+		if (file.executed !== true) continue;
 		for (const check of file.checks) named.add(check);
 		for (const failure of file.failures) {
 			const head = /^([\w.:/-]+): /.exec(failure)?.[1];
