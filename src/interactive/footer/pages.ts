@@ -813,13 +813,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? memoryOnRail
 				? ""
 				: theme.fg("activity", "memory reviewing")
-			: // Memory yields the model to the turn on purpose, so its wait is no warning: `mem waiting` in warning ink beside a
-				// retry read as a second fault (N9).
-				guardian === "waiting-capacity"
-				? theme.fg("annotation", w >= 80 ? "memory waits its turn" : "memory waits")
-				: guardian === "unavailable"
-					? theme.fg("unknownValue", "memory unavailable")
-					: "";
+			: // Memory yields the model to the turn on purpose and nothing waits on it, so its wait says nothing: `memory waits`
+				// beside a retry read as a second fault (N9), and in the hint row as a cryptic third party.
+				guardian === "unavailable"
+				? theme.fg("unknownValue", "memory unavailable")
+				: "";
 	const facts = [
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
