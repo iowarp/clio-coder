@@ -51,28 +51,6 @@ test("a worker bash target keeps command boundaries without terminal controls", 
 	ok(bounded.endsWith("…"));
 });
 
-test("an MCP target shows short one-line strings whole and masks secrets", () => {
-	const target = describeCallTarget(
-		"mcp_slurm__slurm_submit",
-		{
-			script: "/home/r/jobs/age.sbatch",
-			partition: "gpu sk-live-9f8e7d6c5b4a39281706f5e4d3c2b1a0",
-			api_token: "plain-value",
-			notes: "one\ntwo",
-			content: "short",
-			long: "z".repeat(97),
-		},
-		undefined,
-		1000,
-	);
-	strictEqual(
-		target,
-		"script=/home/r/jobs/age.sbatch · partition=gpu [redacted:sk-key] · api_token=<string 11 bytes> · " +
-			"notes=<string 7 bytes> · content=<string 5 bytes> · long=<string 97 bytes>",
-	);
-	strictEqual(describeCallTarget("write", { path: "a.txt", content: "hi" }), "a.txt · content=<string 2 bytes>");
-});
-
 const WRITE_VIEW: ApprovalRequestView = {
 	requestId: "req-1",
 	tool: "write",

@@ -8,7 +8,7 @@
  */
 
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
-import { isSecretArgKey, redactSecretString } from "./redaction.js";
+import { isEnvironmentArgKey, isSecretArgKey, redactSecretString } from "./redaction.js";
 
 const ESC_CHAR = String.fromCharCode(27);
 const BEL_CHAR = String.fromCharCode(7);
@@ -438,19 +438,30 @@ const PAYLOAD_ARG_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Argument names that hold a block of credentials, as `env` and `environment`
+ * do for redactToolArgs. Any string there may be a secret no shape rule knows,
+ * such as `SESSION_COOKIE=opaque`, so the card says only its size.
+ */
+const CREDENTIAL_CONTAINER_ARG_KEYS: ReadonlySet<string> = new Set(["cookie", "cookies", "header", "headers"]);
+
+/**
  * A short one-line string of a tool with no curated field list (MCP and other
  * dynamic tools) is usually the decision itself: `slurm_submit` showed
  * `script=<string 66 bytes>` where the operator needed the script path. It
- * renders whole with secrets redacted. Secret-named fields, payload fields,
- * multi-line values and anything over the cap stay summarized.
+ * renders whole with secrets redacted. Secret-named fields, environment and
+ * header containers, payload fields, multi-line values and anything over the
+ * cap stay summarized.
  */
 function shortUnlistedString(tool: string, field: string, value: string): string | null {
 	if (CALL_TARGET_FIELDS[tool] !== undefined) return null;
-	if (isSecretArgKey(field) || PAYLOAD_ARG_KEYS.has(field.toLowerCase())) return null;
+	const key = field.toLowerCase();
+	if (isSecretArgKey(field) || isEnvironmentArgKey(field)) return null;
+	if (PAYLOAD_ARG_KEYS.has(key) || CREDENTIAL_CONTAINER_ARG_KEYS.has(key)) return null;
 	if (value.length > UNLISTED_STRING_MAX_CHARS || /[\r\n]/.test(value)) return null;
+	// Controls go first: `gh<ESC>[0mp_…` hides a token from the shape rules until the escape is stripped.
+	const visible = sanitizeCallTargetText(value);
 	// Display redaction keys on names (`token=`, `--key`); a bare `sk-…` or `ghp_…` value needs the shape rules too.
-	const masked = redactSecretsText(redactSecretString(value), createRedactionTally());
-	const rendered = sanitizeCallTargetText(masked);
+	const rendered = sanitizeCallTargetText(redactSecretsText(redactSecretString(visible), createRedactionTally()));
 	return rendered.length > 0 ? rendered : null;
 }
 

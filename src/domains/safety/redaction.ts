@@ -82,8 +82,9 @@ const SECRET_URL_PARAM_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^&#\s"]`
 const SECRET_URL_SEMICOLON_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^;\s"]`)}`, "uy");
 // A name's run must reach the `=`, so only the run's start can match and the secret word need only be found once. Two
 // stars around the word retried at every occurrence: `api_key_` repeated took 9 s at 320 KB, on a path a frame can wait on.
+// A quoted value is one value, so `PASSWORD="top secret"` hides through its closing quote rather than its first space.
 const SECRET_ASSIGNMENT_RE =
-	/(?<![A-Z0-9_])(?=[A-Z0-9_]*?(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS|PRIVATE|SECRET|TOKEN))([A-Z0-9_]*=)([^\s;&|]+)/giu;
+	/(?<![A-Z0-9_])(?=[A-Z0-9_]*?(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS|PRIVATE|SECRET|TOKEN))([A-Z0-9_]*=)("[^"\r\n]*"|'[^'\r\n]*'|[^\s;&|]+)/giu;
 // `:_authToken=${NPM_TOKEN}` or `--token "$TOKEN"` names a variable instead of
 // holding a credential. Hiding it leaves the operator unable to see what was
 // written. A bare `$name` counts only in the uppercase environment shape, so a
@@ -784,7 +785,7 @@ export function isSecretArgKey(key: string): boolean {
 }
 
 /** Whether an argument key names an environment block, whose every string value is a candidate secret. */
-function isEnvironmentArgKey(key: string): boolean {
+export function isEnvironmentArgKey(key: string): boolean {
 	return ENV_KEY_RE.test(key);
 }
 

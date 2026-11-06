@@ -41,6 +41,7 @@ export const coreTests = [
 	"packed-source-directory",
 	"skill-frontmatter-cache",
 	"fleet-run-history-prime",
+	"approval-card-arguments",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
