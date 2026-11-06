@@ -48,31 +48,38 @@ export interface OperatorShellLineRun {
 
 export async function runOperatorShellLine(input: OperatorShellLineInput): Promise<OperatorShellLineRun> {
 	// Live output and the record are masked as a bash call's are: the record can join the model's context and is written to
-	// the session ledger, and the live frames reach the terminal and an ACP client.
-	const secrets = await bashSecretValues();
-	const stdoutMask = new CumulativeOutputMask(secrets);
-	const stderrMask = new CumulativeOutputMask(secrets);
+	// the session ledger, and the live frames reach the terminal and an ACP client. The command starts in this tick, so a
+	// shutdown that follows can abort it, and a frame that arrives before the credential values are known is not shown.
+	let masks: { stdout: CumulativeOutputMask; stderr: CumulativeOutputMask } | null = null;
+	const secretsReady = bashSecretValues().then((secrets) => {
+		masks = { stdout: new CumulativeOutputMask(secrets), stderr: new CumulativeOutputMask(secrets) };
+		return secrets;
+	});
 	const onUpdate = input.onUpdate;
-	const result = await (input.runBash ?? runBashCommand)(input.command, {
+	const running = (input.runBash ?? runBashCommand)(input.command, {
 		cwd: input.cwd,
 		timeoutMs: OPERATOR_SHELL_TIMEOUT_MS,
 		signal: input.signal,
 		...(onUpdate
 			? {
-					onUpdate: (progress: BashCommandProgress) =>
+					onUpdate: (progress: BashCommandProgress) => {
+						if (masks === null) return;
 						onUpdate({
 							...progress,
-							stdout: stdoutMask.frame(progress.stdout),
-							stderr: stderrMask.frame(progress.stderr),
-						}),
+							stdout: masks.stdout.frame(progress.stdout),
+							stderr: masks.stderr.frame(progress.stderr),
+						});
+					},
 				}
 			: {}),
 	});
+	const [result, secrets] = await Promise.all([running, secretsReady]);
+	const ready = masks ?? { stdout: new CumulativeOutputMask(secrets), stderr: new CumulativeOutputMask(secrets) };
 	const unlabeled = input.excludeFromContext ? null : (input.label?.(input.command, input.cwd) ?? null);
 	const ending = result.aborted || result.timedOut || result.outputCapped ? "cut-off" : "complete";
 	const masked = {
-		stdout: stdoutMask.final(result.stdout, ending),
-		stderr: stderrMask.final(result.stderr, ending),
+		stdout: ready.stdout.final(result.stdout, ending),
+		stderr: ready.stderr.final(result.stderr, ending),
 	};
 	const output = appendStatusNotes(combineBashOutput(masked), result, OPERATOR_SHELL_TIMEOUT_MS, secrets);
 	return {

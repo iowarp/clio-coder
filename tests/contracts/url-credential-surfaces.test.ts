@@ -632,7 +632,8 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 		const wire = JSON.stringify(live.updates());
 		ok(!wire.includes("hunter2"), wire);
 		ok(!result.output.includes("hunter2"), result.output);
-		ok(result.output.includes(SAFE_URL), result.output);
+		// Shell output passes the command-output mask, whose marker names the kind it hid.
+		ok(result.output.includes("https://alice:[redacted:url-userinfo]@git.example.com/r.git"), result.output);
 		const started = live.updates().find((update) => update.sessionUpdate === "tool_call");
 		deepStrictEqual(started?.rawInput, { command: `echo ${SAFE_URL}`, excludeFromContext: false });
 		strictEqual(started?.title, `echo ${SAFE_URL}`);
@@ -641,7 +642,7 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 			sessionId: meta.id,
 			command: "printf 'https://u:hun'; printf 'ter'; sleep 1; printf '2@h/ done\\n'",
 		})) as { output: string };
-		strictEqual(held.output.trim(), "https://u:[redacted]@h/ done");
+		strictEqual(held.output.trim(), "https://u:[redacted:url-userinfo]@h/ done");
 		const frames = live
 			.updates()
 			.filter((update) => update.status === "in_progress" && update.content !== undefined)
