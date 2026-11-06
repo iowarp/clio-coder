@@ -151,13 +151,35 @@ export class ChoiceList implements Component, RowBudgetedBody {
 export type SubmenuTitle = string | ((width: number) => string);
 
 /**
+ * What the settings center reads from an open page to route Esc and draw the
+ * rail. A single page is a SubmenuWrapper; a guided flow of several pages (the
+ * SSH node setup) implements the same three members, so its steps back out one
+ * at a time under the shared Esc rule instead of dropping to the list.
+ */
+export interface SubmenuSurface {
+	/** Where Esc lands when it is not the list behind this page; null means back to the list. */
+	readonly escape: { verb: string; short?: string; back: () => void } | null;
+	/** A text editor, whose Esc keeps what was typed for the next visit. */
+	readonly editsText: boolean;
+	/** The keys this page acts on, other than Esc, for the rail. */
+	railKeys(): ReadonlyArray<HintEntry>;
+}
+
+export function isSubmenuSurface(component: unknown): component is Component & SubmenuSurface {
+	if (component instanceof SubmenuWrapper) return true;
+	if (typeof component !== "object" || component === null) return false;
+	const candidate = component as Partial<SubmenuSurface>;
+	return "escape" in candidate && "editsText" in candidate && typeof candidate.railKeys === "function";
+}
+
+/**
  * One detail page: a title row, the dim note that explains the decision, the
  * page's own body, and the reason a submission was refused when there is one.
  * The page's keys are not drawn here: they ride the dock rail beside Esc, so
  * the commit key and the way out are read from one place at every width, and
  * the two rows a legend took go to the choices on a short terminal.
  */
-export class SubmenuWrapper implements Component, RowBudgetedBody {
+export class SubmenuWrapper implements Component, RowBudgetedBody, SubmenuSurface {
 	/**
 	 * Why the last submission was refused, or null while nothing is wrong. The
 	 * editor sets it instead of closing, so the operator corrects the value with

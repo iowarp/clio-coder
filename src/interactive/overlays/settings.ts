@@ -110,7 +110,7 @@ import {
 	settingsLabelWidth,
 	settingsPathLabel,
 } from "./settings-presentation.js";
-import { type ChoiceItem, ChoiceList, SubmenuWrapper } from "./settings-submenus.js";
+import { type ChoiceItem, ChoiceList, isSubmenuSurface, SubmenuWrapper } from "./settings-submenus.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
 export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
@@ -3314,7 +3314,7 @@ export class SettingsCenter implements Component {
 					this.options.requestRender?.();
 				},
 			},
-			submenu instanceof SubmenuWrapper &&
+			isSubmenuSurface(submenu) &&
 				submenu.escape !== null && {
 					...submenu.escape,
 					back: () => {
@@ -3323,11 +3323,11 @@ export class SettingsCenter implements Component {
 					},
 				},
 			submenu !== null && {
-				verb: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "back to list",
-				short: submenu instanceof SubmenuWrapper && submenu.editsText ? "back" : "to list",
+				verb: isSubmenuSurface(submenu) && submenu.editsText ? "back, keeps draft" : "back to list",
+				short: isSubmenuSurface(submenu) && submenu.editsText ? "back" : "to list",
 				back: () => {
 					// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
-					if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
+					if (isSubmenuSurface(submenu) && submenu.editsText) submenu.handleInput?.("\x1b");
 					this.submenuComponent = null;
 					done();
 				},
@@ -3385,7 +3385,7 @@ export class SettingsCenter implements Component {
 		const esc: HintEntry = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: this.escapeVerb() };
 		const owner = this.keyOwner();
 		if (owner === "submenu") {
-			const keys = this.submenuComponent instanceof SubmenuWrapper ? this.submenuComponent.railKeys() : [];
+			const keys = isSubmenuSurface(this.submenuComponent) ? this.submenuComponent.railKeys() : [];
 			return buildResponsiveHint(keys, esc)(innerWidth);
 		}
 		if (owner === "filter") {

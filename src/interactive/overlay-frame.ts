@@ -736,7 +736,7 @@ export interface RowBudgetedBody {
 	setBodyRows(rows: number): void;
 }
 
-function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
+export function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
 	return typeof (child as Partial<RowBudgetedBody>).setBodyRows === "function";
 }
 
