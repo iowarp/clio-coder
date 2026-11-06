@@ -1,6 +1,6 @@
 /**
  * Dependency-light CLI argument parsing and terminal formatting. This module
- * imports nothing from the domain graph (only `chalk`), so `cli/index.ts` can
+ * imports nothing from the domain graph (only `chalk` and a leaf of core), so `cli/index.ts` can
  * parse argv and dispatch without dragging provider/auth code (and its
  * transitive pi-* externals) into the eagerly loaded startup chunk. `shared.ts`
  * re-exports everything here for the command modules, which already pay for the
@@ -8,9 +8,14 @@
  */
 
 import chalk from "chalk";
+import { colorDisabled } from "../core/terminal-preferences.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
 import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+
+// Chalk reads only FORCE_COLOR, so a terminal asking for no color still got cyan rails and markers from every CLI
+// presenter (first-run configure, select lists). The CLI follows the same rule the TUI theme does.
+if (colorDisabled()) chalk.level = 0;
 
 export function printError(message: string, detail?: string): void {
 	const head = chalk.red("error:");
