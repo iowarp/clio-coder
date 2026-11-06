@@ -10,8 +10,9 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 // Two validated keys that nothing read: a delegated agent's permission ask is
 // decided at once, and entry labels were never displayed. A user file still
 // naming one loads, the key is ignored, and validation lists it as retired so
-// doctor can name it; it must never block loading or an upgrade.
-test("user settings load with retired per-agent keys and list them as retired", async (t) => {
+// doctor can name it; it must never block loading or an upgrade. The v2
+// spelling of the compaction turn mask retires the same way.
+test("user settings load with retired v2 keys and list them as retired", async (t) => {
 	const home = await isolateClioEnv("clio-retired-keys-");
 	t.after(() => home.restore());
 	const file = join(home.dir, "config", "settings.yaml");
@@ -27,6 +28,7 @@ test("user settings load with retired per-agent keys and list them as retired", 
 				"version: 2\nintegrations:\n  externalAgents:\n    entries:\n      - { id: peer, command: peer, labels: { team: a } }\n",
 			path: "integrations.externalAgents.entries[0].labels",
 		},
+		{ yaml: "version: 2\ncontext:\n  compaction:\n    excludeLastTurns: 3\n", path: "context.compaction.excludeLastTurns" },
 	];
 	for (const { yaml, path } of cases) {
 		writeFileSync(file, yaml);
