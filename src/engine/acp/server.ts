@@ -6950,7 +6950,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		) {
 			return deferred("The scheduled turn's session or workspace is not the one this client is bound to.");
 		}
-		if (request.signal.aborted) return deferred("The occurrence was canceled before its turn could be shown.");
+		if (request.signal.aborted) return deferred("The occurrence was cancelled before its turn could be shown.");
 		if (
 			machineLease !== null ||
 			session.activePrompt !== null ||
