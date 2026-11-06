@@ -23,7 +23,6 @@ import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isMainThread } from "node:worker_threads";
-import { resolveClioDirs } from "../../src/core/xdg.js";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 
@@ -254,21 +253,35 @@ function confineClioRootEnv(env: NodeJS.ProcessEnv, runRoot: string): string[] {
 	return dropped;
 }
 
+const clioRoleEnvKeys = {
+	config: "CLIO_CODER_CONFIG_DIR",
+	data: "CLIO_CODER_DATA_DIR",
+	state: "CLIO_CODER_STATE_DIR",
+	cache: "CLIO_CODER_CACHE_DIR",
+} as const;
+
 /**
  * Refuse to run when any root Clio would actually write through escapes the run
  * root. Confining the variables is not enough on its own: `<runRoot>/home` or
- * `<home>/state` can already be a link to a real home, and xdg.ts appends the
- * role after the variables are read. This asks xdg.ts for the same answer the
- * product gets and checks each one physically.
+ * `<home>/state` can already be a link to a real home, and Clio appends the
+ * role after the variables are read. Each root is resolved the way
+ * resolveRole in src/core/xdg.ts does it (trimmed role variable, else
+ * `<CLIO_CODER_HOME>/<role>`) and checked physically. The order is inlined
+ * because a worker thread inherits this preload without tsx's resolver on
+ * Node 22 and cannot import src/. The platform default never applies here,
+ * since the home is pinned first, so a role with no root counts as an escape.
  */
-function assertClioDirsConfined(realRunRoot: string): void {
-	const dirs = resolveClioDirs();
-	const escaped = (Object.keys(dirs) as Array<keyof typeof dirs>).filter(
-		(role) => confinedPath(dirs[role], realRunRoot) === null,
-	);
+function assertClioDirsConfined(env: NodeJS.ProcessEnv, realRunRoot: string): void {
+	const home = env.CLIO_CODER_HOME?.trim();
+	const escaped: string[] = [];
+	for (const [role, key] of Object.entries(clioRoleEnvKeys)) {
+		const dir = env[key]?.trim() || (home ? join(home, role) : "");
+		if (dir.length === 0 || confinedPath(dir, realRunRoot) === null)
+			escaped.push(`${role} root ${dir || "(platform default)"}`);
+	}
 	if (escaped.length === 0) return;
 	throw new Error(
-		`tests/harness/tmp-root.ts: refusing to run, the Clio ${escaped.map((role) => `${role} root ${dirs[role]}`).join(", ")} resolves outside the run root ${realRunRoot}`,
+		`tests/harness/tmp-root.ts: refusing to run, the Clio ${escaped.join(", ")} resolves outside the run root ${realRunRoot}`,
 	);
 }
 
@@ -286,7 +299,7 @@ function assertClioDirsConfined(realRunRoot: string): void {
 				`tests/harness/tmp-root.ts: ignoring inherited ${dropped.join(", ")}; tests use the run root ${runRoot}\n`,
 			);
 		}
-		assertClioDirsConfined(realpathSync(runRoot));
+		assertClioDirsConfined(process.env, realpathSync(runRoot));
 	}
 }
 
