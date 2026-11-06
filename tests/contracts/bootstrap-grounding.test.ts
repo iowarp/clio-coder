@@ -124,7 +124,6 @@ it("carries a hard invariant only while a check that runs still enforces it", as
 			scripts: {
 				check: "node scripts/check.js",
 				prepublishOnly: "node -e \"throw new Error('publish from the release job')\"",
-				"docs:verify": "node scripts/verify-docs.js",
 			},
 		}),
 	);
@@ -146,6 +145,7 @@ it("carries a hard invariant only while a check that runs still enforces it", as
 			"",
 		].join("\n"),
 	);
+	// No command runs the docs check any more.
 	writeFileSync(join(cwd, "scripts", "verify-docs.js"), 'fail("docs-index", "every page is indexed");\n');
 	writeFileSync(
 		join(cwd, "CLIO-CODER.md"),

@@ -73,58 +73,63 @@ it("lists the commands CI runs, the scripts they call, and custom check files wi
 	ok(!("src/main.ts" in byPath));
 });
 
-it("marks which scripts CI reaches, including those a CI-run program spawns, apart from available checks", () => {
-	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: node scripts/qualify.mjs\n");
+it("claims CI reach only for scripts a CI run step invokes by literal name at command position", () => {
 	write(
-		"scripts/qualify.mjs",
+		".github/workflows/ci.yml",
 		[
-			'for (const step of ["typecheck", "lint"]) spawn("pnpm", ["run", step]);',
-			'if (!["release", "dev"].includes(mode)) throw new Error("bad mode");',
+			"jobs:",
+			"  check:",
+			"    steps:",
+			"      - run: CI=1 pnpm -s run lint && npm test",
+			"      - run: node scripts/qualify.mjs",
+			"      - run: echo pnpm run library:check",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression is the input under test.
+			"      - run: pnpm run ${{ matrix.task }}",
+			'      - run: pnpm run "$TASK" # pnpm run release',
+			"      - run: pnpm run app:check",
 			"",
 		].join("\n"),
 	);
+	// Another working directory has its own package.json.
+	write(
+		".github/workflows/app.yml",
+		"defaults:\n  run:\n    working-directory: app\njobs:\n  app:\n    steps:\n      - run: pnpm run dev\n",
+	);
+	// A program CI starts is not read: this argv only looks like a process start.
+	write("scripts/qualify.mjs", 'console.log("pnpm", ["run", "typecheck"]);\nspawn("pnpm", ["run", "dev"]);\n');
 	write(
 		"package.json",
 		JSON.stringify({
 			scripts: {
 				typecheck: "tsc",
+				test: "node --test",
 				lint: "biome check . && pnpm run docs:check",
 				"docs:check": "node scripts/check-drift.mjs",
 				"library:check": "node scripts/pin.mjs --check",
 				release: "node scripts/release.mjs",
 				dev: "tsx watch src/main.ts",
+				"app:check": "cd app && pnpm run release",
 			},
 		}),
 	);
 	const inventory = collectEnforcementInventory(root);
-	deepStrictEqual(inventory.ciScripts, ["typecheck", "lint", "docs:check"]);
+	deepStrictEqual(inventory.ciScripts, ["test", "lint", "docs:check", "app:check"]);
+	ok(inventory.ciCommands.includes("pnpm run dev"));
 	ok("library:check" in inventory.scripts);
-	strictEqual(inventory.ciUnresolved, undefined);
 });
 
-it("reaches a script only through an invocation that names it, however many programs deep", () => {
-	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: node scripts/ci.mjs\n");
-	// A script name near an unrelated invocation is not run by it.
-	write(
-		"scripts/ci.mjs",
-		[
-			'const available = ["library:check"];',
-			'spawn("pnpm", ["run", "typecheck"]);',
-			'execFileSync(process.execPath, ["scripts/checks.mjs"]);',
-			"",
-		].join("\n"),
-	);
-	// The second program runs the first again; the walk visits each program once.
-	write("scripts/checks.mjs", 'spawnSync("pnpm", ["run", "lint"]);\nspawnSync("node", ["scripts/ci.mjs"]);\n');
+it("never counts a git hook's commands as CI", () => {
+	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: echo ok\n");
+	write("lefthook.yml", "pre-commit:\n  commands:\n    pin:\n      run: pnpm run library:check\n");
+	write(".husky/pre-push", "pnpm run lint\n");
 	write(
 		"package.json",
-		JSON.stringify({
-			scripts: { typecheck: "tsc", lint: "biome check .", "library:check": "node scripts/pin.mjs --check" },
-		}),
+		JSON.stringify({ scripts: { lint: "biome check .", "library:check": "node scripts/pin.mjs --check" } }),
 	);
 	const inventory = collectEnforcementInventory(root);
-	deepStrictEqual(inventory.ciScripts, ["typecheck", "lint"]);
-	strictEqual(inventory.ciUnresolved, undefined);
+	strictEqual(inventory.ciScripts, undefined);
+	deepStrictEqual(inventory.ciCommands, ["echo ok"]);
+	deepStrictEqual(inventory.executedScripts, ["lint", "library:check"]);
 });
 
 it("marks the check files that run, and reads only the checks something live names", () => {
@@ -135,10 +140,12 @@ it("marks the check files that run, and reads only the checks something live nam
 			scripts: {
 				lint: "node scripts/check-hygiene.mjs",
 				prepack: "node scripts/check-pack.mjs",
-				"docs:check": "node scripts/check-drift.mjs",
+				"docs:check": "node --import ./scripts/check-env.mjs scripts/check-docs.mjs",
 			},
 		}),
 	);
+	write("scripts/check-env.mjs", "process.env.CHECK = '1';\n");
+	write("scripts/check-docs.mjs", 'fail("docs-table", "every setting has a documented row");\n');
 	write(
 		"scripts/check-hygiene.mjs",
 		'import { runBoundaryCheck } from "../tests/boundaries/check-imports.js";\nrunBoundaryCheck();\n',
@@ -164,47 +171,15 @@ it("marks the check files that run, and reads only the checks something live nam
 	const byPath = Object.fromEntries(inventory.checkFiles.map((file) => [file.path, file]));
 	strictEqual(byPath["scripts/check-hygiene.mjs"]?.executed, true);
 	strictEqual(byPath["scripts/check-pack.mjs"]?.executed, true);
+	// A script a contributor runs by name runs its program and preload; nothing runs check-drift.
+	strictEqual(byPath["scripts/check-docs.mjs"]?.executed, true);
+	strictEqual(byPath["scripts/check-env.mjs"]?.executed, true);
 	strictEqual(byPath["scripts/check-drift.mjs"]?.executed, undefined);
 	const imports = byPath["tests/boundaries/check-imports.ts"];
 	strictEqual(imports?.executed, true);
 	deepStrictEqual(imports?.checks, ["checkEngineImports"]);
 	deepStrictEqual(imports?.failures, ["rule1: the engine is imported outside src/engine"]);
 	deepStrictEqual(inventory.executedScripts, ["lint", "prepack"]);
-});
-
-it("reports an invocation whose script it cannot read as unresolved, not as unreached", () => {
-	write(
-		".github/workflows/ci.yml",
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression is the input under test.
-		"jobs:\n  check:\n    steps:\n      - run: pnpm run ${{ matrix.task }}\n      - run: node scripts/ci.mjs\n",
-	);
-	write("scripts/ci.mjs", 'spawn("pnpm", ["run", process.env.TASK]);\n');
-	write("package.json", JSON.stringify({ scripts: { lint: "biome check .", "library:check": "node scripts/pin.mjs" } }));
-	const inventory = collectEnforcementInventory(root);
-	strictEqual(inventory.ciScripts, undefined);
-	deepStrictEqual(inventory.ciUnresolved, [
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression is the input under test.
-		"CI: pnpm run ${{ matrix.task }}",
-		'scripts/ci.mjs: spawn("pnpm", ["run", process.env.TASK])',
-	]);
-	const prompt = buildBootstrapPrompt({
-		cwd: root,
-		projectType: "javascript",
-		siblingFiles: [],
-		adoption: {
-			cwd: root,
-			homeDir: root,
-			includeGlobal: false,
-			sources: [],
-			rejected: [],
-			importedRules: [],
-			conflicts: [],
-			sourceHash: "fixture",
-			sourceSnapshots: [],
-		},
-		enforcement: inventory,
-	});
-	ok(prompt.includes("process.env.TASK"), prompt);
 });
 
 it("hands the inventory to the bootstrap model", () => {

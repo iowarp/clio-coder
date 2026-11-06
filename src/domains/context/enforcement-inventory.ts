@@ -1,6 +1,6 @@
 /**
  * What a repository enforces, gathered without a model: the commands CI runs,
- * the package scripts those commands reach, and the custom check files with
+ * the package scripts those commands invoke, and the custom check files with
  * the checks they define.
  *
  * Generated handbooks paraphrased the contributor guide, which the agent can
@@ -12,7 +12,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CI_FILE_RE, ciRunCommands } from "../../core/ci-commands.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
-import { ciReach, liveCode, staticImports } from "./ci-reach.js";
+import { changesDirectory, commandReach, liveCode, staticImports } from "./ci-reach.js";
 
 export interface EnforcementCheckFile {
 	path: string;
@@ -23,9 +23,10 @@ export interface EnforcementCheckFile {
 	/** Each coded rule the file emits, stated as the file declares it. */
 	rules?: EnforcementRule[];
 	/**
-	 * True when the file runs without anyone choosing to run it: CI, a git hook
-	 * or an npm lifecycle event starts it, or a program they start imports it.
-	 * Any other check file is available, not shown to run.
+	 * True when a declared command runs the file: a CI run step, a git hook or
+	 * a package script starts it as a program or preload, or a file so run
+	 * value-imports it. Any other check file is a definition nothing is shown
+	 * to run.
 	 */
 	executed?: boolean;
 }
@@ -47,22 +48,17 @@ export interface EnforcementInventory {
 	/** Package scripts that CI reaches or that lint, check, verify, gate or test. */
 	scripts: Record<string, string>;
 	/**
-	 * The package scripts a CI command reaches, directly, through another
-	 * reached script, or through a program CI runs by path, however many
-	 * programs deep. Every other entry in `scripts` is an available check that
-	 * CI is not shown to run.
+	 * The package scripts a CI run step invokes by literal name, at command
+	 * position and from the repository root, directly or through the body of a
+	 * script it invokes. Programs CI starts are not read for what they run in
+	 * turn, so every other entry in `scripts` is not verified as CI-gated, which
+	 * does not show that CI skips it.
 	 */
 	ciScripts?: string[];
 	/**
-	 * Invocations on CI's path whose script or program could not be read
-	 * statically (`pnpm run ${{ matrix.task }}`, `spawn(pm, ["run", name])`).
-	 * When present, a script outside `ciScripts` may still run in CI.
-	 */
-	ciUnresolved?: string[];
-	/**
 	 * The package scripts that run without anyone choosing to run them: those
-	 * CI or a git hook reaches, the npm lifecycle scripts (`prepublishOnly`,
-	 * `prepare`, ...), and the `pre`/`post` scripts around each.
+	 * a CI run step or a git hook invokes, the npm lifecycle scripts
+	 * (`prepublishOnly`, `prepare`, ...), and the `pre`/`post` scripts around each.
 	 */
 	executedScripts?: string[];
 	checkFiles: EnforcementCheckFile[];
@@ -343,38 +339,53 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 		}
 	}
 	const ciCommands: string[] = [];
+	/** CI commands known to run from the repository root, where package.json is the one read here. */
+	const rootCiCommands: string[] = [];
 	const hookCommands: string[] = [];
 	const hookFiles = visible.filter((file) => HOOK_FILE_RE.test(file));
+	const add = (list: string[], command: string): void => {
+		const bounded = command.slice(0, MAX_COMMAND_CHARS);
+		if (!list.includes(bounded)) list.push(bounded);
+	};
 	for (const path of visible.filter((file) => CI_FILE_RE.test(file) || HOOK_FILE_RE.test(file)).sort()) {
 		const text = readText(root, path);
 		if (!text) continue;
-		for (const command of ciRunCommands(text)) {
-			const bounded = command.slice(0, MAX_COMMAND_CHARS);
-			if (!ciCommands.includes(bounded)) ciCommands.push(bounded);
+		const hook = HOOK_FILE_RE.test(path);
+		const commands = ciRunCommands(text);
+		// A git hook runs on a contributor's machine, never in CI.
+		for (const command of commands) add(hook ? hookCommands : ciCommands, command);
+		if (!hook) {
+			// A working directory or a `cd` can point a pipeline's `pnpm run` at another package.
+			if (/\bworking[-_]directory\s*:/.test(text) || commands.some(changesDirectory)) continue;
+			for (const command of commands) add(rootCiCommands, command);
+			continue;
 		}
-		if (!HOOK_FILE_RE.test(path)) continue;
 		// A husky hook is a shell script; a pre-commit hook names its command as `entry:`.
-		const commands = path.startsWith(".husky/")
+		const hookLines = path.startsWith(".husky/")
 			? text.split("\n").filter((line) => line.trim().length > 0 && !line.trimStart().startsWith("#"))
 			: [...text.matchAll(/^\s*(?:-\s+)?entry:\s*["']?(.+?)["']?\s*$/gm)].map((match) => match[1] ?? "");
-		hookCommands.push(...commands.map((command) => command.slice(0, MAX_COMMAND_CHARS)));
+		for (const command of hookLines) add(hookCommands, command);
 	}
 	const allScripts = packageScripts(root);
 	const ciText = ciCommands.join("\n");
 	const visibleSet = new Set(visible);
-	const reach = ciReach(root, ciCommands, allScripts, visibleSet);
-	const ciScripts = reach.reached;
-	const executedReach = ciReach(
-		root,
+	const ciScripts = commandReach(rootCiCommands, allScripts, visibleSet).scripts;
+	const executedScripts = commandReach(
 		[
-			...ciCommands,
+			...rootCiCommands,
 			...hookCommands,
 			...LIFECYCLE_SCRIPTS.filter((name) => name in allScripts).map((name) => `npm run ${name}`),
 		],
 		allScripts,
 		visibleSet,
 		{ prePost: true },
-	);
+	).scripts;
+	// A file a declared command runs: CI, a hook, or any package script, which a contributor runs by name.
+	const declaredPrograms = commandReach(
+		[...rootCiCommands, ...hookCommands, ...Object.values(allScripts)],
+		allScripts,
+		visibleSet,
+	).programs;
 	const scripts: Record<string, string> = {};
 	for (const [name, command] of Object.entries(allScripts)) {
 		if (ciScripts.includes(name) || SCRIPT_NAME_RE.test(name)) scripts[name] = command.slice(0, MAX_COMMAND_CHARS);
@@ -382,7 +393,7 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 	const referenced = `${ciText}\n${Object.values(scripts).join("\n")}`;
 	const candidates = visible.filter(isCheckFile);
 	// A check file a running program imports runs too: Clio's hygiene script imports its boundary checker.
-	const executed = new Set([...executedReach.programs, ...hookFiles]);
+	const executed = new Set([...declaredPrograms, ...hookFiles]);
 	const executedText = new Map<string, string>();
 	const pending = [...executed];
 	for (let path = pending.shift(); path !== undefined; path = pending.shift()) {
@@ -421,8 +432,7 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 		ciCommands: ciCommands.slice(0, MAX_CI_COMMANDS),
 		scripts,
 		...(ciScripts.length > 0 ? { ciScripts } : {}),
-		...(reach.unresolved.length > 0 ? { ciUnresolved: reach.unresolved } : {}),
-		...(executedReach.reached.length > 0 ? { executedScripts: executedReach.reached } : {}),
+		...(executedScripts.length > 0 ? { executedScripts } : {}),
 		checkFiles,
 	};
 }
