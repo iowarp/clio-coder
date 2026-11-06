@@ -343,8 +343,9 @@ const RUNTIME_STEP: Step = {
 			choices: usable.map((entry) => ({
 				value: entry.runtimeId,
 				label: entry.label,
-				// A summary that only repeats the label says nothing the row does not already say.
-				hint: `${entry.summary === entry.label ? "" : `${entry.summary} · `}saved as runtime ${entry.runtimeId}`,
+				// A summary that only repeats the label says nothing the row does not already say, and the runtime's
+				// internal id is a name for settings.yaml, not for this choice.
+				...(entry.summary === entry.label ? {} : { hint: entry.summary }),
 			})),
 			initialIndex: previous >= 0 ? previous : featured >= 0 ? featured : 0,
 			searchable: usable.length > 8,
@@ -1329,13 +1330,19 @@ export async function runOnboardingWizard(
 				: "Add a target",
 		"configure",
 	);
-	presenter.note("Choose what you already use. Clio checks the endpoint and model list when the provider allows it.");
+	// A short terminal keeps the welcome and the line about Esc above the first question: at 15 rows this
+	// sentence pushed the header, and the reason setup started, off the top of the screen.
+	const rows = (streams.out as { rows?: number }).rows ?? 24;
+	if (rows >= 20)
+		presenter.note("Choose what you already use. Clio checks the endpoint and model list when the provider allows it.");
 	// "Nothing is saved" read as false to a first-run user who then found the
 	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
 	// hold no choice of theirs; the sentence is about the choices.
-	presenter.note(
-		"Escape goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only at the review, except a browser sign-in you complete.",
-	);
+	// Under 20 rows the selector's own legend names Esc, so this sentence gives its rows to the header above.
+	if (rows >= 20)
+		presenter.note(
+			"Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only at the review, except a browser sign-in you complete.",
+		);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
 	if (options.mode === "first" && !options.runtime) {

@@ -1,4 +1,13 @@
-import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	type Component,
+	Input,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "../escape-layers.js";
 import { buildResponsiveHint, FocusBox, fitRow, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, type Fact, factRows, GLYPH, selectionRow, statusChip, titleRow } from "../theme/index.js";
@@ -141,19 +150,32 @@ function createAuthDialogController(
 	let revision = 0;
 	let memo: { key: string; rows: string[] } | null = null;
 
-	const view: Component = {
+	let bodyRows = 0;
+	const view: Component & { setBodyRows(rows: number): void } = {
+		setBodyRows(rows: number): void {
+			bodyRows = Math.max(0, Math.floor(rows));
+		},
 		render(width: number): string[] {
 			const key = `${width}|${revision}|${skinEpoch()}`;
 			if (memo?.key !== key) {
 				memo = { key, rows: [titleRow(clioTheme(), title, width), ...renderAuthLines(lines, width)] };
 			}
 			if (promptLabel === null) return memo.rows;
-			return [
-				...memo.rows,
+			const field = [
 				// The label may carry a default id the operator is meant to read whole.
 				...wrapTextWithAnsi(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)), Math.max(1, width)),
 				...(MASKED_PROMPT.test(promptLabel) ? renderMaskedInput(input, width) : renderInputWithDesignCursor(input, width)),
 			];
+			// The field being typed into is what a short dock keeps: the explanation above it yields its last rows
+			// and closes on an ellipsis. At 40x15 the frame cut the field instead, behind `… 2 more rows`.
+			const room = bodyRows - field.length;
+			if (bodyRows <= 0 || memo.rows.length <= room) return [...memo.rows, ...field];
+			if (room <= 0) return field.slice(-Math.max(1, bodyRows));
+			const kept = memo.rows.slice(0, room);
+			const last = (kept[room - 1] ?? "").replace(/\s+$/u, "");
+			kept[room - 1] =
+				visibleWidth(last) + 2 <= width ? `${last} ${GLYPH.ellipsis}` : truncateToWidth(last, width, GLYPH.ellipsis);
+			return [...kept, ...field];
 		},
 		handleInput: (data) => input.handleInput(data),
 		invalidate: () => {
@@ -177,7 +199,11 @@ function createAuthDialogController(
 					box.invalidate();
 				},
 			},
-		{ verb: "cancel sign-in", short: "cancel", back: cancel },
+		{
+			verb: promptLabel !== null && MASKED_PROMPT.test(promptLabel) ? "cancel, nothing saved" : "cancel sign-in",
+			short: "cancel",
+			back: cancel,
+		},
 	];
 
 	const box = new FocusBox(view, {

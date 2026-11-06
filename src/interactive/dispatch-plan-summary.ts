@@ -101,16 +101,26 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 	return { topology, members, sharedTask, cost, deadline };
 }
 
-/** One sentence for what the plan does, used where the card names the call. */
+/**
+ * One sentence for what the plan does, used where the card names the call.
+ * A shared task is named in it, because the card pins this sentence beside the
+ * answer keys: at 40x15 the plan section scrolled away and a council card asked
+ * for approval without saying what the council would be asked.
+ */
 export function planHeadline(summary: PlanSummary): string {
 	const count = summary.members.length;
 	const workers = `${count} ${count === 1 ? "worker" : "workers"}`;
 	const labels = summary.members.map((member) => member.label ?? member.agent).join(", ");
+	const task = summary.sharedTask;
 	switch (summary.topology) {
 		case "council":
-			return `Council of ${count} (${labels}) answers the same task`;
+			return task !== null
+				? `Council of ${count} (${labels}) answers: ${task}`
+				: `Council of ${count} (${labels}) answers the same task`;
 		case "compete":
-			return `${workers} compete on the same task; you pick the result to keep`;
+			return task !== null
+				? `${workers} compete on: ${task}; you pick the result to keep`
+				: `${workers} compete on the same task; you pick the result to keep`;
 		case "sequential":
 			return `${workers} run one after another`;
 		case "pipeline":
@@ -124,12 +134,17 @@ export function planHeadline(summary: PlanSummary): string {
 	}
 }
 
+/** Whether the headline already names the shared task, so the plan section need not repeat it. */
+function headlineNamesTask(summary: PlanSummary): boolean {
+	return summary.sharedTask !== null && (summary.topology === "council" || summary.topology === "compete");
+}
+
 /** Label and value pairs for the card's plan section, member by member. */
 export function planFacts(summary: PlanSummary): Array<{ label: string; value: string }> {
 	const route = (member: PlanMember): string =>
 		[member.target, member.model].filter((part): part is string => part !== null).join(" · ");
 	return [
-		...(summary.sharedTask !== null ? [{ label: "task", value: summary.sharedTask }] : []),
+		...(summary.sharedTask !== null && !headlineNamesTask(summary) ? [{ label: "task", value: summary.sharedTask }] : []),
 		...summary.members.map((member, index) => ({
 			label: member.label ?? `#${index + 1}`,
 			value: [

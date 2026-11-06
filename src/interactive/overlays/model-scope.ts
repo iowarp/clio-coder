@@ -14,7 +14,7 @@
 
 import type { ThinkingLevel } from "../../core/defaults.js";
 import { type Component, type OverlayHandle, type TUI, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { FocusBox, fitHintEntries, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
@@ -131,6 +131,14 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 			const room = context === undefined ? Number.POSITIVE_INFINITY : context.room - 4;
 			return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? deps.ref.model;
 		},
-		footerHint: buildHint([{ key: "Enter", verb: "choose" }], deps.onBack ? "back to models" : "close"),
+		// Fitted, so a 40-column rail keeps the commit key beside the way out rather than dropping it.
+		footerHint: (innerWidth: number) =>
+			fitHintEntries(
+				[
+					{ key: "Enter", verb: "choose", critical: true },
+					deps.onBack ? { key: "Esc", verb: "back to models", short: "back" } : { key: "Esc", verb: "close" },
+				],
+				innerWidth - 3,
+			),
 	});
 }

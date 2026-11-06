@@ -346,7 +346,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		try {
 			await tty.expect("❯ Settings");
 			tty.send(ENTER);
-			await tty.expect("esc back");
+			await tty.expect("Esc back");
 			tty.send(DOWN + ENTER);
 			await tty.expect("Choose the chat model");
 			tty.send(DOWN + ENTER);
@@ -454,7 +454,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		writeFileSync(credentialsFile, originalCredentials, { mode: 0o600 });
 		const tty = terminal(home, ["--section", "targets"]);
 		try {
-			await tty.expect("esc or q quit");
+			await tty.expect("Esc or q quit");
 			tty.send(ENTER);
 			await tty.expect("Where does your model come from?");
 			tty.send(DOWN + ENTER);

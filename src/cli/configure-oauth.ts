@@ -43,6 +43,8 @@ export async function loginOAuthRuntime(
 			},
 		};
 	if (!rl) throw new Error("Sign-in requires a prompt host");
+	// A fresh attempt starts clean: the last attempt's `Sign-in stopped` stood over the new method list and wait.
+	host?.clearMessages();
 	if (runtime.authNotice) report(`note: ${runtime.authNotice}\n`);
 	const manualCodeInput = createDelayedManualCodeInput(
 		rl,

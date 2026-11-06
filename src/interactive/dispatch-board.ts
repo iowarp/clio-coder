@@ -2195,7 +2195,8 @@ export function dispatchBoardHintEntries(
  * the board stays; from the table Esc closes the board.
  */
 export function dispatchBoardEscapeEntry(board: { detailExpanded(): boolean }): HintEntry {
-	return board.detailExpanded() ? { key: "Esc", verb: "hide detail", short: "hide" } : { key: "Esc", verb: "close" };
+	// Enter already says `hide detail`; Esc names where it lands, so the two keys never read as one verb.
+	return board.detailExpanded() ? { key: "Esc", verb: "back to runs", short: "back" } : { key: "Esc", verb: "close" };
 }
 
 /** The keys the frame's rail drops at this width, as rows under the table; the arrows are on the position row. */

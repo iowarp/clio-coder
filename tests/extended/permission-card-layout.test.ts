@@ -77,7 +77,7 @@ for (const columns of [80, 120, 160]) {
 		const body = createPermissionOverlayBody(WRITE_VIEW);
 		const lines = plain(body.render(width));
 		for (const line of lines) ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${line}`);
-		strictEqual(lines[0], "± write · autonomy level default");
+		strictEqual(lines[0], "± write · default autonomy");
 		// The path is folded under its label, never cut: every token survives.
 		const joined = lines
 			.join(" ")
@@ -92,7 +92,7 @@ for (const columns of [80, 120, 160]) {
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
 		match(joined, /\[Enter\] allow\s+runs this one call \[Esc\] deny\s+skips it \[Alt\+X\] stop\s+ends the turn/u);
-		match(lines[0] ?? "", /autonomy level default/u);
+		match(lines[0] ?? "", /default autonomy/u);
 
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");
@@ -311,7 +311,10 @@ test("a card nobody answers denies its call after the window, and the turn conti
 		const card = plain(
 			createPermissionOverlayBody(WRITE_VIEW, undefined, undefined, undefined, f.countdowns[0]).render(76),
 		);
-		match(card.join(" "), /No answer in 5 s denies this call and Clio continues without it\. Any key holds the card\./u);
+		match(
+			card.join(" "),
+			/No answer in 5 s denies this call and Clio continues without it\.\s+Any key\s+holds the card\./u,
+		);
 		f.clock.advance(5_000);
 		const settled = await verdict;
 		strictEqual(settled.kind, "blocked");

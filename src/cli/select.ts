@@ -137,7 +137,7 @@ function headingLines(heading: PromptHeading | undefined, room = Number.POSITIVE
 	});
 }
 
-/** The key legend packed between entries onto as few rows as `room` allows, never breaking `enter select` apart. */
+/** The key legend packed between entries onto as few rows as `room` allows, never breaking `Enter select` apart. */
 function legendRows(parts: ReadonlyArray<string>, room: number): string[] {
 	const rows: string[] = [];
 	for (const part of parts) {
@@ -324,12 +324,12 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 		lines.push(rail.trimEnd());
 		// On the top screen escape and q do the same thing, and listing both as
 		// "quit" reads as two different exits.
-		const legend = ["↑/↓ move", "enter select"];
+		const legend = ["↑↓ move", "Enter select"];
 		// With a filter typed, Esc clears it before it leaves, and the legend names the press it is about to make.
-		if (options.searchable && query.length > 0) legend.push("esc clear filter");
-		else if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`esc ${options.backLabel}`);
-		if (options.searchable) legend.push("type to filter", "ctrl-u clear", "ctrl-c quit");
-		else legend.push(options.backLabel === "quit" ? "esc or q quit" : "q quit");
+		if (options.searchable && query.length > 0) legend.push("Esc clear filter");
+		else if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`Esc ${options.backLabel}`);
+		if (options.searchable) legend.push("type to filter", "Ctrl+U clear", "Ctrl+C quit");
+		else legend.push(options.backLabel === "quit" ? "Esc or q quit" : "q quit");
 		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
 		frame.draw(lines);
 	};
@@ -481,8 +481,8 @@ export async function promptMultiSelect<T>(options: MultiSelectOptions<T>): Prom
 			),
 		);
 		lines.push(rail.trimEnd());
-		const legend = ["↑/↓ move", "space toggle", `enter ${options.confirmLabel ?? "confirm"}`];
-		if (options.backLabel !== undefined) legend.push(`esc ${options.backLabel}`);
+		const legend = ["↑↓ move", "Space toggle", `Enter ${options.confirmLabel ?? "confirm"}`];
+		if (options.backLabel !== undefined) legend.push(`Esc ${options.backLabel}`);
 		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
 		frame.draw(lines);
 	};
@@ -605,9 +605,9 @@ export async function promptText(options: TextPromptOptions): Promise<TextResult
 		if (error !== null) lines.push(`${rail}${chalk.yellow(truncate(error, room))}`);
 		else if (options.hint !== undefined) lines.push(`${rail}${chalk.dim(truncate(options.hint, room))}`);
 		lines.push(rail.trimEnd());
-		const legend = ["enter accept"];
-		if (options.backLabel !== undefined) legend.push(`esc ${options.backLabel}`);
-		legend.push("ctrl-c quit");
+		const legend = ["Enter accept"];
+		if (options.backLabel !== undefined) legend.push(`Esc ${options.backLabel}`);
+		legend.push("Ctrl+C quit");
 		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
 		frame.draw(lines);
 		below = lines.length - fieldIndex;

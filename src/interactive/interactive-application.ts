@@ -838,6 +838,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			if (!overlayLifecycle.canInspectMutation()) return "none";
 			return overlayLifecycle.isInspectingMutation() ? "open" : "closed";
 		},
+		getPermissionTerms: () => (overlayLifecycle?.isShowingPermissionTerms() === true ? "open" : "closed"),
 		resolveVisibleEventSequence: (event) => visibleEventIngress.get(event)?.traceSequence ?? null,
 		resolveStreamIngress: (event) => visibleEventIngress.get(event) ?? null,
 		commitFrame: (reason) => shell.commitCurrentFrame(reason === "teardown" ? 300 : 30_000),
@@ -2126,6 +2127,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				followBoardSelection();
 			},
 			toggleDetail: () => dispatchBoard.toggleDetail(),
+			// Without this the Esc router read every detail as closed, so the rail's `[Esc] hide` closed the whole board.
+			detailExpanded: () => dispatchBoard.detailExpanded(),
 		},
 		watchSelectedDispatch,
 		steerSelectedDispatch,

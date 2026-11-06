@@ -1213,7 +1213,7 @@ test("a worker card with a parent-owned window offers the hold, then says it is 
 			.join("\n");
 	match(card({ remainingMs: 119_000, held: false }), /No answer in 1:59 denies this call.*Any key holds the card\./u);
 	const held = card({ remainingMs: 822_000, held: true });
-	match(held, /Timer held\. No answer in 13:42 denies this call/u);
+	match(held, /Extended for you\. No answer in 13:42 denies this call/u);
 	doesNotMatch(held, /Any key holds/u);
 	match(card(null), /No key pauses this\./u, "a window inside the worker makes no promise a key can keep");
 	const owned = card(null, { ...view, origin: { kind: "worker", agentId: "coder", runId: "run", endsWithTurn: true } });
@@ -2102,6 +2102,22 @@ test("every surface spells a key one way: modifiers title-cased in Ctrl, Alt, Sh
 	strictEqual(keyName("r"), "r");
 	strictEqual(keyName("R"), "R");
 	strictEqual(fitHintEntries([{ key: "alt+x", verb: "stop" }], 80), "[Alt+X] stop");
+});
+
+test("a council card names the task in its pinned headline and does not repeat it in the plan section", async () => {
+	const { planFacts, planHeadline, readDispatchPlan } = await import("../../src/interactive/dispatch-plan-summary.js");
+	const plan = readDispatchPlan(
+		[
+			"dispatch plan: topology=council tasks=2",
+			'  1. role=fast agent=reviewer task_preview="review the mean function"',
+			"     council label=fast",
+			'  2. role=deep agent=reviewer task_preview="review the mean function"',
+			"     council label=deep",
+		].join("\n"),
+	);
+	ok(plan !== null);
+	strictEqual(planHeadline(plan), "Council of 2 (fast, deep) answers: review the mean function");
+	ok(!planFacts(plan).some((fact) => fact.label === "task"));
 });
 
 test("a plan step's worker card names its step, whether the step is announced before or after its run starts", () => {
