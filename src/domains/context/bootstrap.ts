@@ -966,16 +966,17 @@ function statesReviewPolicy(path: string, text: string): boolean {
 }
 
 /**
- * Mark each sentence that places a reviewer requirement in files that state no
- * review policy. Every generated handbook said the `release` environment "in
- * `.github/workflows/release.yml`" requires the owner as reviewer: the path is
- * real, so the citation grounded, but reviewers are a GitHub environment setting
- * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer.
- * The requirement itself may still hold, so the sentence stays, marked as not
- * found in what it cites, rather than vanishing as a safety rule.
+ * Append `(unverified: …)` to each sentence of a line that makes a `claim` the
+ * files it cites do not support; `unsupported` names what is missing, or null.
+ * The claim may still hold, so the sentence stays, marked as not found in what
+ * it cites, rather than vanishing as a safety rule.
  */
-function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGroundingCorpus): string {
-	if (!REVIEW_REQUIREMENT_RE.test(line)) return line;
+function withUnsupportedClaimsMarked(
+	line: string,
+	claim: RegExp,
+	unsupported: (cited: string[]) => string | null,
+): string {
+	if (!claim.test(line)) return line;
 	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
 	const body = line.slice(prefix.length);
 	// Split prose sentences without breaking inside a code span.
@@ -989,7 +990,7 @@ function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGr
 	}
 	sentences.push(body.slice(from));
 	const marked = sentences.map((sentence) => {
-		if (!REVIEW_REQUIREMENT_RE.test(sentence)) return sentence;
+		if (!claim.test(sentence)) return sentence;
 		const cited = [
 			...new Set(
 				[...sentence.matchAll(CODE_TOKEN_RE)]
@@ -998,17 +999,59 @@ function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGr
 					.filter((token) => CONCRETE_FILE_RE.test(token)),
 			),
 		];
-		if (cited.length === 0) return sentence;
-		const supported = cited.some((path) => {
-			const text = evidence.fileText(path);
-			return text === null || statesReviewPolicy(path, text);
-		});
-		if (supported) return sentence;
-		const note = ` (unverified: ${cited.map((path) => `\`${path}\``).join(", ")} states no review policy)`;
+		const missing = cited.length > 0 ? unsupported(cited) : null;
+		if (missing === null) return sentence;
+		const note = ` (unverified: ${missing})`;
 		const end = /([.!?])(\s*)$/.exec(sentence);
 		return end ? `${sentence.slice(0, end.index)}${note}${end[1]}${end[2]}` : `${sentence.trimEnd()}${note}`;
 	});
 	return `${prefix}${marked.join("").trim()}`;
+}
+
+/**
+ * Every generated handbook said the `release` environment "in
+ * `.github/workflows/release.yml`" requires the owner as reviewer: the path is
+ * real, so the citation grounded, but reviewers are a GitHub environment setting
+ * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer.
+ */
+function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGroundingCorpus): string {
+	return withUnsupportedClaimsMarked(line, REVIEW_REQUIREMENT_RE, (cited) => {
+		const supported = cited.some((path) => {
+			const text = evidence.fileText(path);
+			return text === null || statesReviewPolicy(path, text);
+		});
+		return supported ? null : `${cited.map((path) => `\`${path}\``).join(", ")} states no review policy`;
+	});
+}
+
+const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
+const PRELOAD_FLAG_RE = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader)(?:=|\s+)(["']?)([^\s"']+)\1/g;
+const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
+
+/**
+ * Mark a module a line calls preloaded that no package script preloads. A
+ * generated handbook called both `tests/harness/tmp-root.ts` and
+ * `tests/harness/scratch-env.ts` preloaded; `test:file` preloads only the first,
+ * and tests import the second's helpers. A cited file that passes preload flags
+ * itself, such as a test runner, is the launcher, not a claimed preload.
+ */
+function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCorpus): string {
+	if (!PRELOAD_CLAIM_RE.test(line)) return line;
+	const preloaded = new Set(
+		[...evidence.scriptBodies.values()].flatMap((script) =>
+			[...script.matchAll(PRELOAD_FLAG_RE)].map((match) => (match[2] ?? "").replace(/^\.\//, "")),
+		),
+	);
+	return withUnsupportedClaimsMarked(line, PRELOAD_CLAIM_RE, (cited) => {
+		const missing = cited.filter(
+			(path) =>
+				MODULE_FILE_RE.test(path) &&
+				!preloaded.has(path) &&
+				!/--(?:import|require|loader|experimental-loader)\b/.test(evidence.fileText(path) ?? ""),
+		);
+		if (missing.length === 0) return null;
+		return `${missing.map((path) => `\`${path}\``).join(", ")} ${missing.length === 1 ? "is" : "are"} not preloaded by a package script`;
+	});
 }
 
 /**
@@ -1049,7 +1092,9 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 			wrapBareCitations(inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`, evidence),
 			evidence,
 		);
-		const line = inFence ? cited : withUnsupportedReviewRequirementsMarked(cited, evidence);
+		const line = inFence
+			? cited
+			: withUnsupportedPreloadsMarked(withUnsupportedReviewRequirementsMarked(cited, evidence), evidence);
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);

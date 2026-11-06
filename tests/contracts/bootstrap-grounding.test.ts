@@ -116,6 +116,50 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 });
 
+it("marks a module a rule calls preloaded when no package script preloads it", async () => {
+	mkdirSync(join(cwd, "tests", "harness"), { recursive: true });
+	mkdirSync(join(cwd, "scripts"));
+	writeFileSync(
+		join(cwd, "package.json"),
+		JSON.stringify({
+			name: "harbor",
+			type: "module",
+			scripts: { "test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test" },
+		}),
+	);
+	writeFileSync(join(cwd, "tests", "harness", "tmp-root.ts"), "export const root = process.env.TMPDIR;\n");
+	writeFileSync(join(cwd, "tests", "harness", "scratch-env.ts"), "export function isolateEnv(): void {}\n");
+	writeFileSync(
+		join(cwd, "scripts", "run-tests.mjs"),
+		'spawn(process.execPath, ["--import", "./tests/harness/tmp-root.ts", "--test"]);\n',
+	);
+	const claim =
+		"The `test:file` script in `package.json` preloads `tests/harness/tmp-root.ts` and `tests/harness/scratch-env.ts` for isolation.";
+	const launcher = "`scripts/run-tests.mjs` preloads `tests/harness/tmp-root.ts` for every test file.";
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [claim],
+				conventions: [launcher],
+				sections: [],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(
+		handbook.includes(
+			`${claim.slice(0, -1)} (unverified: \`tests/harness/scratch-env.ts\` is not preloaded by a package script).`,
+		),
+		handbook,
+	);
+	ok(handbook.includes(launcher), handbook);
+});
+
 it("carries a hard invariant only while a check that runs still enforces it", async () => {
 	mkdirSync(join(cwd, "scripts"));
 	writeFileSync(
