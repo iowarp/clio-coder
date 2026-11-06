@@ -117,6 +117,8 @@ export interface TurnFailureFacts {
 	stage?: string;
 	errorClass?: string;
 	partialReply?: boolean;
+	/** For a call Clio never sent, its own words for what stopped it, so the rail can name the cause. */
+	reason?: string;
 }
 
 /**

@@ -1370,7 +1370,11 @@ export interface ShellSettlement {
 export function routeBlockerWords(facts: RouteReadinessFacts): string | null {
 	if (!facts.available) return "is unavailable";
 	if (facts.health === "down") return `cannot reach ${facts.targetId}`;
-	if (facts.lastStop === "error") return "failed its last request";
+	if (facts.lastStop === "error") {
+		// The cause rides with the blocker, so a shell line's rail does not leave the reason to the transcript.
+		const cause = facts.lastFailure ? providerFailureRailFacts(facts.lastFailure)?.cause : undefined;
+		return cause ? `failed its last request: ${cause.short ?? cause.text}` : "failed its last request";
+	}
 	if (facts.lastStop === "no_answer") return "gave no answer last turn";
 	return null;
 }
