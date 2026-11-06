@@ -19,6 +19,7 @@ import {
 	holdUnresolvedUserinfo,
 	redactFinalUrlCredentials,
 	redactSecretString,
+	redactStreamingUrlCredentials,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
@@ -1269,6 +1270,83 @@ test("a long run of parameter delimiters stays linear", () => {
 		const started = performance.now();
 		redactUrlCredentials(unit.repeat(Math.ceil(320_000 / unit.length)));
 		ok(performance.now() - started < 1_000, unit);
+	}
+});
+
+// The shapes #446 left showing: a fragment, a JSON-escaped URL, a percent-encoded one, a scheme-relative one and two JDBC forms.
+const ESCAPED_SHAPES: ReadonlyArray<readonly [string, string]> = [
+	["https://h/cb#access_token=ZQXJ", "https://h/cb#access_token=[redacted]"],
+	["https:\\/\\/alice:ZQXJ@h\\/r", "https:\\/\\/alice:[redacted]@h\\/r"],
+	["https%3A%2F%2Falice%3AZQ%40XJ%40h", "https%3A%2F%2Falice%3A[redacted]%40h"],
+	["//alice:ZQXJ@h/x", "//alice:[redacted]@h/x"],
+	["jdbc:oracle:thin:scott/ZQXJ@//db:1521/svc", "jdbc:oracle:thin:scott/[redacted]@//db:1521/svc"],
+	["jdbc:sqlserver://db:1433;password=ZQ@XJ;", "jdbc:sqlserver://db:1433;password=[redacted];"],
+];
+
+test("the URL rule hides a fragment token, an escaped or scheme-relative URL and a JDBC password", () => {
+	for (const [shape, redacted] of ESCAPED_SHAPES) {
+		for (const [text, expected] of [
+			[shape, redacted],
+			[`see ${shape} now`, `see ${redacted} now`],
+			[`{"u":"${shape}","v":1}`, `{"u":"${redacted}","v":1}`],
+		] as const) {
+			strictEqual(redactUrlCredentials(text), expected);
+			strictEqual(redactStreamingUrlCredentials(text, true), expected);
+			ok(!SECRET_LETTERS.test(redactSecretsText(text, createRedactionTally())), text);
+		}
+	}
+});
+
+test("no split of an escaped or JDBC shape shows its password on a streaming surface", async () => {
+	const env = await isolateClioEnv("url-surfaces-escaped-");
+	try {
+		for (const [index, [shape, redacted]] of ESCAPED_SHAPES.entries()) {
+			const text = `see ${shape} next words`;
+			for (let cut = 0; cut <= text.length; cut += 1) {
+				const head = text.slice(0, cut);
+				ok(!SECRET_LETTERS.test(redactStreamingUrlCredentials(head)), `frame ${head}`);
+				ok(!SECRET_LETTERS.test(redactFinalUrlCredentials(head, false)), `cut off ${head}`);
+				const filter = new UrlCredentialStreamFilter();
+				const sent = filter.push(head) + filter.push(text.slice(cut)) + filter.end(true);
+				strictEqual(sent, `see ${redacted} next words`, `append-only split at ${cut}`);
+				const segments = redactSecretSegments([head, text.slice(cut)], createRedactionTally());
+				ok(!SECRET_LETTERS.test(segments.join("")), `segments split at ${cut}`);
+			}
+			const filter = new UrlCredentialStreamFilter();
+			let sent = "";
+			for (const char of text) sent += filter.push(char);
+			strictEqual(sent + filter.end(true), `see ${redacted} next words`);
+			// A feed bound can land anywhere in the shape, which a quote sets apart from the run ahead of it.
+			const bounded = `"${shape}" next words`;
+			for (let cut = 0; cut <= bounded.length; cut += 1) {
+				const lead = "x".repeat(4090) + bounded.slice(0, cut);
+				const rows = feedText(`escaped-${index}-${cut}`, lead, bounded.slice(cut), MESSAGE_STOP).join("");
+				ok(!SECRET_LETTERS.test(rows), `${shape} bound split at ${cut}: ${rows.slice(-60)}`);
+			}
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("ordinary URLs and prose near the escaped shapes stay whole on every surface", () => {
+	for (const text of [
+		"see //cdn.example.com/x.js now",
+		"a // comment: here and a//b:c@d",
+		'{"a":"http:\\/\\/h:8080\\/x","b":"me@corp.com"}',
+		"url https%3A%2F%2Fexample.com%3A443%2Fp ok",
+		"jdbc:oracle:thin:@db:1521:orcl",
+		"jdbc:postgresql://host:5432/db?user=app",
+		"https://h/#/route?x=1 and issue #448",
+		"100% done, path/to//file, ratio 3/4@home",
+		"BASE_TOKENS=100 and --token to pass",
+	]) {
+		strictEqual(redactUrlCredentials(text), text);
+		strictEqual(holdUnresolvedUserinfo(text), text);
+		const filter = new UrlCredentialStreamFilter();
+		let sent = "";
+		for (const char of text) sent += filter.push(char);
+		strictEqual(sent + filter.end(true), text);
 	}
 });
 
