@@ -356,7 +356,7 @@ export interface ChoiceListOptions {
 	initialIndex?: number;
 }
 
-export interface ChoiceList extends Component {
+export interface ChoiceList extends Component, RowBudgetedBody {
 	/** The lead changed; the next render rebuilds it. */
 	touch(): void;
 	selected(): ChoiceListItem | null;
@@ -384,6 +384,7 @@ export function createChoiceList(options: ChoiceListOptions): ChoiceList {
 	};
 	list.onCancel = (): void => options.onCancel();
 	let revision = 0;
+	let rows = 0;
 	let memo: { key: string; lines: string[] } | null = null;
 	const selected = (): ChoiceListItem | null => {
 		const current = list.getSelectedItem();
@@ -392,23 +393,33 @@ export function createChoiceList(options: ChoiceListOptions): ChoiceList {
 	return {
 		render(width: number): string[] {
 			const focused = selected()?.value ?? "";
-			const key = `${width}|${focused}|${revision}|${skinEpoch()}`;
+			const key = `${width}|${rows}|${focused}|${revision}|${skinEpoch()}`;
 			if (memo?.key === key) return memo.lines;
 			const theme = clioTheme();
-			const lines = [...(options.lead?.(width) ?? [])];
-			if (lines.length > 0) lines.push("");
-			for (const item of options.items) {
-				lines.push(
-					...selectionRow(theme, {
-						focused: item.value === focused,
-						label: item.label,
-						...(item.description === undefined ? {} : { description: item.description }),
-						width,
-					}),
-				);
-			}
+			const lay = (describeAll: boolean): string[] => {
+				const lines = [...(options.lead?.(width) ?? [])];
+				if (lines.length > 0) lines.push("");
+				for (const item of options.items) {
+					const focusedRow = item.value === focused;
+					lines.push(
+						...selectionRow(theme, {
+							focused: focusedRow,
+							label: item.label,
+							...(item.description === undefined || !(describeAll || focusedRow) ? {} : { description: item.description }),
+							width,
+						}),
+					);
+				}
+				return lines;
+			};
+			// Short of rows, only the focused choice keeps its consequence under it, the way the settings scope card does.
+			let lines = lay(true);
+			if (rows > 0 && lines.length > rows) lines = lay(false);
 			memo = { key, lines };
 			return lines;
+		},
+		setBodyRows(budget: number): void {
+			rows = Math.max(0, Math.floor(budget));
 		},
 		handleInput: (data: string): void => list.handleInput(data),
 		invalidate(): void {
