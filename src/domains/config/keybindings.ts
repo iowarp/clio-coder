@@ -45,42 +45,76 @@ export interface ClioAppKeybindings {
 
 export type ClioKeybinding = keyof ClioAppKeybindings;
 
-/** Stable application descriptors. Fixed leader suffixes never derive from overrides. */
+/**
+ * The keyboard model, in one rule each:
+ *
+ *   - Ctrl edits text and talks to the terminal (pi's editor defaults, a few portable overrides below).
+ *   - Alt+<letter> runs a Clio action.
+ *   - Ctrl+G then the same letter runs it in any terminal, including ones that do not deliver Alt.
+ *   - `?` on an empty composer shows the card; `/help` lists everything.
+ *
+ * So an action's `leader` letter IS its Alt letter, and an action with no direct key still has its
+ * letter in the menu. Shift+Tab (thinking) is the one non-Alt direct key, kept from pi. Letters are
+ * fixed: rebinding a direct key never moves its menu letter (keyboard-model contract test). `b` and
+ * `j` stay free for an active extension workspace (surfaces/registry.ts).
+ */
 interface AppActionDescriptor {
 	defaultKeys: KeyId | KeyId[];
+	/** Short name every chrome surface shows: the `?` card, the menu, the footer and the welcome. */
+	label: string;
+	/** The sentence `/help` shows. */
 	description: string;
+	/** The slash command that does the same thing, when there is one. */
+	command?: string;
 	scope: "composer";
 	kind: "toggle" | "cycle" | "send" | "exit" | "edit" | "dismiss";
 	repeat: false;
 	leader?: string;
 }
+/** Registry order is presentation order on the `?` card and in the Ctrl+G menu. */
 export const CLIO_APP_KEYBINDINGS = {
-	"clio-coder.library.toggle": {
-		defaultKeys: "alt+l",
-		description: "Library",
-		scope: "composer",
-		kind: "toggle",
-		repeat: false,
-		leader: "l",
-	},
 	"clio-coder.model.select": {
 		defaultKeys: "alt+m",
+		label: "Model",
 		description: "Model picker",
+		command: "/model",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 		leader: "m",
 	},
+	"clio-coder.thinking.cycle": {
+		defaultKeys: "shift+tab",
+		label: "Thinking effort",
+		description: "Cycle thinking effort for this session",
+		command: "/thinking",
+		scope: "composer",
+		kind: "cycle",
+		repeat: false,
+		leader: "t",
+	},
 	"clio-coder.output.cycle": {
 		defaultKeys: "alt+o",
-		description: "Output style",
+		label: "Output detail",
+		description: "Cycle output detail: Compact, Standard, Detailed",
 		scope: "composer",
 		kind: "cycle",
 		repeat: false,
 		leader: "o",
 	},
+	"clio-coder.library.toggle": {
+		defaultKeys: "alt+l",
+		label: "Library",
+		description: "Library: skills, agents, prompts, playbooks, plugins and extensions",
+		command: "/library",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "l",
+	},
 	"clio-coder.status.toggle": {
 		defaultKeys: "alt+u",
+		label: "Dashboard",
 		description: "Dashboard pages: Activity → Context → Status → closed",
 		scope: "composer",
 		kind: "cycle",
@@ -89,7 +123,9 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.dispatchBoard.toggle": {
 		defaultKeys: "alt+w",
-		description: "Workers dock: show or hide (twice quickly closes)",
+		label: "Workers",
+		description: "Workers dock: show or hide (twice quickly closes); the Fleet Runs board without panes",
+		command: "/fleet",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
@@ -97,7 +133,9 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.files.toggle": {
 		defaultKeys: "alt+e",
+		label: "Files",
 		description: "Files pane: show or hide (twice quickly closes)",
+		command: "/files",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
@@ -105,90 +143,138 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.music.toggle": {
 		defaultKeys: "alt+a",
+		label: "Music",
 		description: "Music pane: show or hide (twice quickly closes)",
+		command: "/music",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 		leader: "a",
 	},
-	"clio-coder.thinking.cycle": {
-		defaultKeys: "shift+tab",
-		description: "Thinking effort",
+	"clio-coder.message.interrupt": {
+		// Not alt+enter: in legacy terminal mode it is the same bytes as the
+		// shift+enter newline mapping many operators install.
+		defaultKeys: "alt+s",
+		label: "Send now",
+		description: "Send now: interrupt the run with the draft, or flush the queue",
+		command: "/interrupt",
 		scope: "composer",
-		kind: "cycle",
+		kind: "send",
 		repeat: false,
-		leader: "t",
+		leader: "s",
+	},
+	"clio-coder.queue.open": {
+		// Not alt+up: pi-tui reads the legacy sequence ESC p as alt+up, so that
+		// default would take Alt+P from every non-Kitty terminal.
+		defaultKeys: "alt+q",
+		label: "Queue",
+		description: "Queue: reorder, edit, remove or send queued messages; a puts them all back in the composer",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "q",
+	},
+	"clio-coder.editor.external": {
+		defaultKeys: "alt+g",
+		label: "External editor",
+		description: "Edit the draft in $VISUAL or $EDITOR",
+		scope: "composer",
+		kind: "edit",
+		repeat: false,
+		leader: "g",
+	},
+	"clio-coder.dispatch.background": {
+		defaultKeys: [],
+		label: "Background worker",
+		description: "Move the newest attached dispatch to the background",
+		command: "/background",
+		scope: "composer",
+		kind: "send",
+		repeat: false,
+		leader: "d",
+	},
+	"clio-coder.notifications.dismiss": {
+		defaultKeys: [],
+		label: "Dismiss notice",
+		description: "Dismiss the oldest notification",
+		scope: "composer",
+		kind: "dismiss",
+		repeat: false,
+		leader: "x",
 	},
 	"clio-coder.autonomy.toggle": {
 		defaultKeys: [],
+		label: "Autonomy",
 		description: "Toggle default / YOLO autonomy (this session)",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 		leader: "y",
 	},
-	"clio-coder.message.dequeue": {
-		defaultKeys: "alt+q",
-		description: "Restore queued messages",
-		scope: "composer",
-		kind: "send",
-		repeat: false,
-		leader: "q",
-	},
-	"clio-coder.queue.open": {
-		// Not alt+up: pi-tui reads the legacy sequence ESC p as alt+up, so that
-		// default would take Alt+P from every non-Kitty terminal.
-		defaultKeys: "alt+k",
-		description: "Queue navigator: reorder, edit, remove or send queued messages",
+	"clio-coder.leader": {
+		defaultKeys: "ctrl+g",
+		label: "Actions menu",
+		description: "Open the actions menu: then the same letter as any Alt shortcut",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
-		leader: "n",
 	},
 	"clio-coder.exit": {
 		defaultKeys: "ctrl+d",
+		label: "Exit",
 		description: "Exit empty idle composer with no queued messages",
+		command: "/quit",
 		scope: "composer",
 		kind: "exit",
 		repeat: false,
 	},
 	"clio-coder.suspend": {
 		defaultKeys: "ctrl+z",
+		label: "Suspend",
 		description: "Suspend Clio (resume with fg; unavailable on Windows)",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 	},
-	"clio-coder.leader": {
-		defaultKeys: "ctrl+g",
-		description: "Open contextual action menu",
+	// Rebindable hooks with no default key and no menu letter: their boards are slash commands.
+	"clio-coder.message.dequeue": {
+		defaultKeys: [],
+		label: "Restore queue",
+		description: "Put every queued message back in the composer (the queue's a)",
 		scope: "composer",
-		kind: "toggle",
+		kind: "send",
 		repeat: false,
 	},
 	"clio-coder.tasks.open": {
 		defaultKeys: [],
-		description: "Tasks (/tasks)",
+		label: "Tasks",
+		description: "Tasks (/tasks; ↓ on an empty composer)",
+		command: "/tasks",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 	},
 	"clio-coder.decisions.open": {
 		defaultKeys: [],
+		label: "Decisions",
 		description: "Decisions (/decisions)",
+		command: "/decisions",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 	},
 	"clio-coder.session.tree": {
 		defaultKeys: [],
+		label: "Session tree",
 		description: "Session tree (/tree)",
+		command: "/tree",
 		scope: "composer",
 		kind: "toggle",
 		repeat: false,
 	},
 	"clio-coder.model.cycleForward": {
 		defaultKeys: [],
+		label: "Next model",
 		description: "Next scoped model",
 		scope: "composer",
 		kind: "cycle",
@@ -196,44 +282,11 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.model.cycleBackward": {
 		defaultKeys: [],
+		label: "Previous model",
 		description: "Previous scoped model",
 		scope: "composer",
 		kind: "cycle",
 		repeat: false,
-	},
-	"clio-coder.dispatch.background": {
-		defaultKeys: [],
-		description: "Background attached dispatch",
-		scope: "composer",
-		kind: "send",
-		repeat: false,
-		leader: "s",
-	},
-	"clio-coder.message.interrupt": {
-		// Not alt+enter: in legacy terminal mode it is the same bytes as the
-		// shift+enter newline mapping many operators install.
-		defaultKeys: "alt+s",
-		description: "Send now: interrupt the run with the draft, or flush the queue",
-		scope: "composer",
-		kind: "send",
-		repeat: false,
-		leader: "i",
-	},
-	"clio-coder.editor.external": {
-		defaultKeys: [],
-		description: "Edit expanded draft externally",
-		scope: "composer",
-		kind: "edit",
-		repeat: false,
-		leader: "g",
-	},
-	"clio-coder.notifications.dismiss": {
-		defaultKeys: [],
-		description: "Dismiss oldest notification",
-		scope: "composer",
-		kind: "dismiss",
-		repeat: false,
-		leader: "x",
 	},
 } as const satisfies Record<ClioKeybinding, AppActionDescriptor>;
 
@@ -272,3 +325,12 @@ export const CLIO_KEYBINDINGS = {
 } as const satisfies KeybindingDefinitions;
 
 export const CLIO_APP_KEYBINDING_IDS = Object.keys(CLIO_APP_KEYBINDINGS) as ReadonlyArray<ClioKeybinding>;
+
+/** The app action a slash command duplicates, so a typed command can teach its key. */
+export const ACTION_BY_COMMAND: ReadonlyMap<string, ClioKeybinding> = new Map(
+	CLIO_APP_KEYBINDING_IDS.flatMap((id) => {
+		const descriptor: AppActionDescriptor = CLIO_APP_KEYBINDINGS[id];
+		// Only commands with a key worth learning: a menu letter or a direct default.
+		return descriptor.command !== undefined && descriptor.leader !== undefined ? [[descriptor.command, id] as const] : [];
+	}),
+);

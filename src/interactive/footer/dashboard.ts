@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readHarnessProfile } from "../../core/harness-profile.js";
+import { ACTION_BY_COMMAND } from "../../domains/config/keybindings.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
@@ -12,14 +13,14 @@ import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
-import { getKeybindings, Text } from "../../engine/tui.js";
+import { Text } from "../../engine/tui.js";
 import { normalizeRetrySettings } from "../../session-control/chat-loop-policy.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { FooterPanel } from "../footer-panel.js";
 import { dispatchSegment } from "../footer-panel.js";
-import { formatKeyLabel } from "../keybinding-manager.js";
+import { actionKeyLabel } from "../keybinding-manager.js";
 import type { QuotaProviders } from "../quota-view.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
@@ -60,6 +61,8 @@ export type FooterDashboardMode = "compact" | "expanded";
 export interface FooterDashboardDeps {
 	/** Suppress idle teaching when the welcome already owns it. */
 	getWelcomeVisible?: () => boolean;
+	/** The last slash command the operator typed, so a demo tip can name its key. */
+	getLastCommand?: () => string | null;
 	getQuotaSnapshots?: () => QuotaProviders;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
@@ -385,11 +388,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				agentActive: dispatch.some((row) => row.status === "running"),
 				toolsUsed: Object.values(tools.tools).some((count) => count > 0),
 				contextBusy: (contextLedger?.usedTokens ?? 0) > (contextLedger?.contextWindow ?? Infinity) * 0.4,
-				dashboardKey:
-					getKeybindings()
-						.getKeys("clio-coder.status.toggle")
-						.map((key) => formatKeyLabel(key))
-						.join("/") || "Dashboard",
+				dashboardKey: actionKeyLabel("clio-coder.status.toggle") ?? "Dashboard",
+				shortcutFor: (command) => {
+					const id = ACTION_BY_COMMAND.get(command);
+					if (id === undefined || (readHarnessProfile().features[`key:${id}`] ?? 0) > 0) return null;
+					return actionKeyLabel(id);
+				},
+				lastCommand: deps.getLastCommand?.() ?? null,
+				menuKey: actionKeyLabel("clio-coder.leader") ?? "Ctrl+G",
 			}),
 			notices,
 			endedNotices: deps.getEndedNotifications?.() ?? [],
@@ -442,10 +448,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						page,
 						width,
 						terminalRows() - supplementary.length,
-						getKeybindings()
-							.getKeys("clio-coder.status.toggle")
-							.map((key) => formatKeyLabel(key))
-							.join(" / "),
+						actionKeyLabel("clio-coder.status.toggle") ?? "",
 						scrollOffset,
 					)
 				: renderCompactDashboard(current, width);
