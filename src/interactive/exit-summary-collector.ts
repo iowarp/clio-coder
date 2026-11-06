@@ -4,6 +4,7 @@ import type { FactMetric } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { settledRunCaveat } from "../domains/dispatch/failure-headline.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
@@ -40,6 +41,11 @@ export interface ExitSummarySnapshot {
 		target: string;
 		model: string;
 		outcome: string;
+		/**
+		 * Why a run whose process finished cannot be leaned on, such as `validation failed`, from its sealed record
+		 * through the rule the worker card and Fleet read. The card said `2 succeeded` beside Fleet's two failures.
+		 */
+		against?: string;
 		record: string;
 	}>;
 	permissions: { granted: number; denied: number; expired: number; blocked: number };
@@ -436,8 +442,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		observeRunResult(runId: string, record: WorkerRunResultFacts | null): void {
 			const worker = workers.get(runId);
 			if (!worker || record === null) return;
+			const { against: _prior, ...rest } = worker;
+			const caveat = settledRunCaveat(record);
 			workers.set(runId, {
-				...worker,
+				...rest,
+				...(caveat?.kind === "against" ? { against: caveat.words } : {}),
 				record: record.trust ? summarizeTrustStatus(record.trust).verdict : "unknown",
 			});
 			if (record.toolCounts) workerTools.set(runId, record.toolCounts);

@@ -159,9 +159,17 @@ function internalGitSummary(snapshot: Pick<ExitSummarySnapshot, "internalGit">):
 	return [...shown, ...more];
 }
 
+function workerOutcome(worker: ExitSummarySnapshot["workers"][number]): string {
+	return worker.outcome === "succeeded" && worker.against !== undefined ? worker.against : worker.outcome;
+}
+
 function outcomes(snapshot: ExitSummarySnapshot): string[] {
 	const counts = new Map<string, number>();
-	for (const worker of snapshot.workers) counts.set(worker.outcome, (counts.get(worker.outcome) ?? 0) + 1);
+	// A run that finished but failed its validation reads as Fleet reads it, not as the exit code's success.
+	for (const worker of snapshot.workers) {
+		const outcome = workerOutcome(worker);
+		counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
+	}
 	// Quitting drains the fleet, so a worker still running when the summary was taken did not keep running.
 	return [...counts].map(
 		([outcome, n]) => `${count(n)} ${outcome === "running" ? "stopped by quitting" : plainOutcomeLabel(outcome)}`,
@@ -322,7 +330,7 @@ export function renderExitSummary(
 				`Workers (${count(snapshot.workers.length)}; ${outcomes(snapshot).join(", ")})`,
 				snapshot.workers.map((worker) => [
 					worker.agent,
-					worker.outcome,
+					workerOutcome(worker),
 					`run record ${worker.record}`,
 					routeLabel(worker.target, worker.model),
 					worker.runId,

@@ -2239,3 +2239,53 @@ test("Reply from names only a route that replied; an admission that never sent p
 	const answered = { ...refused, content: [{ type: "text", text: "Done." }], stopReason: "stop" };
 	strictEqual(assistantModelLabel(answered, "mock-router"), "mock-router · cold-b");
 });
+
+test("the exit summary counts a finished worker whose validation failed as Fleet does, never as succeeded", async () => {
+	const { composeTrustStatus } = await import("../../src/domains/evidence/trust-status.js");
+	const { renderExitSummary } = await import("../../src/interactive/exit-summary.js");
+	const { createExitSummaryCollector } = await import("../../src/interactive/exit-summary-collector.js");
+	const { telemetryViewOf } = await import("../harness/telemetry-view.js");
+	const bus = createTelemetryHub();
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: {
+			subscribe: () => () => {},
+			read: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
+		} as never,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as never,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	const trust = (state: "validated" | "failed") =>
+		composeTrustStatus({
+			artifactIntegrity: {
+				state: "verified",
+				source: { kind: "run_seal", id: "run" },
+				authority: { kind: "clio", id: "receipt-integrity" },
+				artifacts: [],
+			},
+			validationGrounding: {
+				state,
+				source: { kind: "run_record", id: "run" },
+				authority: { kind: "validator", id: "result-quality" },
+				artifacts: [],
+			},
+		});
+	for (const [runId, state] of [
+		["run-a", "failed"],
+		["run-b", "failed"],
+		["run-c", "validated"],
+	] as const) {
+		bus.emit("run.started", { runId, agentId: "verifier", targetId: "mini", wireModelId: "m" } as never);
+		bus.emit("run.completed", { runId, agentId: "verifier", outcome: "succeeded" } as never);
+		collector.observeRunResult(runId, { outcome: "succeeded", trust: trust(state), toolCalls: 3 });
+	}
+	bus.emit("run.started", { runId: "run-d", agentId: "verifier", targetId: "mini", wireModelId: "m" } as never);
+	bus.emit("run.failed", { runId: "run-d", agentId: "verifier", outcome: "canceled" } as never);
+	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
+	match(card, /Workers: 2 validation failed · 1 succeeded · 1 cancelled/u, card);
+	const detail = renderExitSummary(collector.snapshot(), "detailed", 120, false).join("\n");
+	doesNotMatch(detail, /Workers \(4; [^)]*3 succeeded/u, detail);
+});

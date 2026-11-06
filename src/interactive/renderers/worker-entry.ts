@@ -19,19 +19,15 @@ import {
 
 /** Bounded worker summaries share the main transcript's output style. */
 
-import type { CompletedRunCaveat } from "../../domains/dispatch/failure-headline.js";
 import {
-	completedRunCaveat,
+	settledRunCaveat,
 	plainOutcomeLabel,
 	refusedCallsWords,
 	STALLED_RUN_HEADLINE,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
 import { fleetNodeTaskBrief } from "../../domains/dispatch/fleet-node-prompt.js";
-import type { TrustSummaryProjection } from "../../domains/evidence/trust-projection.js";
-import { trustStateWord, trustVerdict, validationClause } from "../../domains/evidence/trust-projection.js";
-import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
-import { TRUST_STATUS_AXES } from "../../domains/evidence/trust-status.js";
+import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -220,33 +216,6 @@ function cardPrefix(entry: WorkerEntryState): string {
 	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
-/** The verdict and axis states the shared caveat reads; an axis a partial record leaves out reads as unknown. */
-function trustVerdictOf(trust: CanonicalTrustStatus): Pick<TrustSummaryProjection, "verdict" | "axes"> {
-	const partial = trust as Partial<CanonicalTrustStatus>;
-	const filled = Object.fromEntries(
-		TRUST_STATUS_AXES.map((axis) => [axis, partial[axis] ?? { state: "unknown" }]),
-	) as unknown as CanonicalTrustStatus;
-	return {
-		verdict: trustVerdict(filled),
-		axes: Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [axis, filled[axis].state])) as Record<
-			(typeof TRUST_STATUS_AXES)[number],
-			string
-		>,
-	};
-}
-
-/** The shared caveat on a clean exit, so this card and the Fleet Runs row never disagree about how a run ended. */
-function settledCaveat(result: WorkerRunResultSummary, synthesizes = false): CompletedRunCaveat | null {
-	if (result.outcome !== "succeeded") return null;
-	return completedRunCaveat({
-		...(result.trust !== undefined ? { trust: trustVerdictOf(result.trust) } : {}),
-		...(result.contract !== undefined ? { contract: result.contract } : {}),
-		// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
-		...(result.toolCalls !== undefined && !synthesizes ? { toolCalls: result.toolCalls } : {}),
-		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),
-	});
-}
-
 /**
  * A cancel Clio has asked for and the worker has not answered yet. The abort marks the card first, and the sealed
  * result replaces it once the process exits, so until then the card says stopping, as the board and the strip do.
@@ -260,13 +229,13 @@ function isSynthesis(entry: WorkerEntryState): boolean {
 }
 
 function settledMark(result: WorkerRunResultSummary, synthesizes: boolean): string {
-	const mark = completedRunMark(settledCaveat(result, synthesizes));
+	const mark = completedRunMark(settledRunCaveat(result, synthesizes));
 	return theme.fg(mark.token, mark.glyph);
 }
 
 /** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
 function settledAgainst(result: WorkerRunResultSummary): string | null {
-	const caveat = settledCaveat(result);
+	const caveat = settledRunCaveat(result);
 	return caveat?.kind === "against" ? caveat.words : null;
 }
 
@@ -283,7 +252,7 @@ function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): stri
 	// assignment that needed tools, so "done" would read as a done task.
 	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
-	const caveat = settledCaveat(result, synthesizes);
+	const caveat = settledRunCaveat(result, synthesizes);
 	if (caveat?.kind === "against") {
 		// The run itself ended cleanly, which is all the trailing words claim; the caveat is what to act on.
 		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}it finished`)}`;
@@ -679,7 +648,7 @@ function headerWord(entry: WorkerEntryState): string {
 	if (outcome === "stalled") return "stopped responding";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
-	return settledCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
+	return settledRunCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
 }
 
 /** A settled council member's answer in one line; a running one has none yet, and its live line says what it does. */
