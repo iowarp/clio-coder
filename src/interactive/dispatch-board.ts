@@ -83,6 +83,7 @@ import {
 	approvalWaitWords,
 	compactQuantity,
 	completedRunMark,
+	finishedActionFault,
 	workerActionParts,
 	workerActivityWords,
 	workerPhaseActivity,
@@ -527,12 +528,8 @@ function actionPhrase(action: WorkerAction, tense: "running" | "finished"): stri
 	const verb = functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(parts.verb));
 	const object = parts.object.length === 0 ? "" : theme.fg("toolTarget", ` ${sanitizeCallTargetText(parts.object)}`);
 	const tool = parts.tool === null ? "" : theme.fg("toolCapability", ` (${sanitizeCallTargetText(parts.tool)})`);
-	const failure =
-		action.outcome === "error"
-			? theme.fg("error", ` ${GLYPH.error} failed`)
-			: action.outcome === "blocked"
-				? theme.fg("warning", ` ${GLYPH.error} blocked`)
-				: "";
+	const fault = finishedActionFault(action);
+	const failure = fault === null ? "" : theme.fg(fault.tone, ` ${GLYPH.error} ${fault.words}`);
 	return `${verb}${object}${tool}${failure}`;
 }
 

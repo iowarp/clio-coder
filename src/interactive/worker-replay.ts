@@ -50,6 +50,8 @@ export interface WorkerSettledCall {
 	object?: string;
 	truncated?: true;
 	capability?: string;
+	/** The tool rejected the call before doing any work; why, in plain words. */
+	notRun?: string;
 }
 
 export interface WorkerSettledFields {
@@ -69,6 +71,7 @@ function settledCall(action: WorkerAction): WorkerSettledCall {
 		...(descriptor?.object !== undefined ? { object: descriptor.object } : {}),
 		...(descriptor?.truncated === true ? { truncated: true as const } : {}),
 		...(descriptor?.capability !== undefined ? { capability: descriptor.capability } : {}),
+		...(action.notRun !== undefined ? { notRun: action.notRun } : {}),
 	};
 }
 
@@ -87,7 +90,7 @@ export function workerSettledFields(state: WorkerEntryState): WorkerSettledField
 
 function settledCallFromData(value: unknown): WorkerSettledCall[] {
 	if (value === null || typeof value !== "object") return [];
-	const { tool, verb, object, truncated, outcome, capability } = value as Record<string, unknown>;
+	const { tool, verb, object, truncated, outcome, capability, notRun } = value as Record<string, unknown>;
 	if (typeof tool !== "string" || tool.length === 0) return [];
 	return [
 		{
@@ -97,6 +100,7 @@ function settledCallFromData(value: unknown): WorkerSettledCall[] {
 			...(typeof object === "string" && object.length > 0 ? { object } : {}),
 			...(truncated === true ? { truncated: true as const } : {}),
 			...(typeof capability === "string" && capability.length > 0 ? { capability } : {}),
+			...(typeof notRun === "string" && notRun.length > 0 ? { notRun: notRun.slice(0, 64) } : {}),
 		},
 	];
 }
@@ -118,10 +122,12 @@ export function workerSettledFromData(data: unknown): WorkerSettledFields | null
 
 /** A recorded call as the trail action the card renders. */
 function settledCallAction(call: WorkerSettledCall): WorkerAction {
-	if (call.verb === undefined) return { tool: call.tool, ...(call.outcome ? { outcome: call.outcome } : {}) };
+	const notRun = call.notRun !== undefined ? { notRun: call.notRun } : {};
+	if (call.verb === undefined) return { tool: call.tool, ...(call.outcome ? { outcome: call.outcome } : {}), ...notRun };
 	return {
 		tool: call.tool,
 		...(call.outcome ? { outcome: call.outcome } : {}),
+		...notRun,
 		descriptor: {
 			verb: call.verb,
 			...(call.object !== undefined ? { object: call.object } : {}),

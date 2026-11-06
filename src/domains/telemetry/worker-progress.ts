@@ -87,6 +87,11 @@ export interface WorkerAction {
 	tool: string;
 	/** The finish event's authoritative result; absent on running and legacy calls. */
 	outcome?: "ok" | "error" | "blocked";
+	/**
+	 * The call errored before doing any work because its arguments named nothing the tool could resolve, in plain
+	 * words (`unknown check`). A `verify` it rejected never ran a validator, so it is not a failed check (B02).
+	 */
+	notRun?: string;
 	/** Correlation identity carried by new streams. Absent on legacy events. */
 	toolCallId?: string;
 	/** Absent when the runtime emitted no descriptor, so the name stands alone. */
@@ -238,6 +243,15 @@ export function isThinkingEvent(event: Record<string, unknown>): boolean {
 	return assistantEvent?.type === "thinking_delta";
 }
 
+/** Why an unresolved call did no work, in an operator's words; the tool's own message stays in the feed. */
+function unresolvedCause(reason: string | undefined): string {
+	if (reason === undefined) return "nothing to run";
+	if (/is not a declared check/u.test(reason)) return "unknown check";
+	if (/matches several checks/u.test(reason)) return "ambiguous check";
+	if (/no declared or derivable verification checks/u.test(reason)) return "no checks declared";
+	return "nothing to run";
+}
+
 /** The action a `clio_coder_tool_start`/`clio_coder_tool_finish` event names, or null when it is neither. */
 function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
 	if (event.type !== "clio_coder_tool_start" && event.type !== "clio_coder_tool_finish") return null;
@@ -247,16 +261,23 @@ function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
 	const toolCallId = nonEmptyString(payload?.toolCallId);
 	const rawOutcome = payload?.outcome;
 	const outcome = rawOutcome === "ok" || rawOutcome === "error" || rawOutcome === "blocked" ? rawOutcome : undefined;
+	const notRun = payload?.unresolved === true ? unresolvedCause(nonEmptyString(payload.reason)) : undefined;
 	const raw = isRecord(payload?.action) ? (payload.action as Partial<CallActionDescriptor>) : undefined;
 	const verb = nonEmptyString(raw?.verb);
 	if (verb === undefined)
-		return { tool, ...(toolCallId !== undefined ? { toolCallId } : {}), ...(outcome ? { outcome } : {}) };
+		return {
+			tool,
+			...(toolCallId !== undefined ? { toolCallId } : {}),
+			...(outcome ? { outcome } : {}),
+			...(notRun !== undefined ? { notRun } : {}),
+		};
 	const object = nonEmptyString(raw?.object);
 	const capability = nonEmptyString(raw?.capability);
 	return {
 		tool,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
 		...(outcome ? { outcome } : {}),
+		...(notRun !== undefined ? { notRun } : {}),
 		descriptor: {
 			verb,
 			...(object !== undefined ? { object } : {}),
@@ -602,7 +623,11 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 					action;
 				removePendingAction(finished);
 				currentAction = pendingActions[pendingActions.length - 1] ?? null;
-				recentActions.unshift({ ...finished, ...(action.outcome ? { outcome: action.outcome } : {}) });
+				recentActions.unshift({
+					...finished,
+					...(action.outcome ? { outcome: action.outcome } : {}),
+					...(action.notRun !== undefined ? { notRun: action.notRun } : {}),
+				});
 				if (recentActions.length > WORKER_ACTION_TRAIL_LIMIT) recentActions.length = WORKER_ACTION_TRAIL_LIMIT;
 				noteToolName(finished.tool);
 				touch();

@@ -219,6 +219,12 @@ export interface WorkerActionParts {
  */
 export function workerActionParts(action: WorkerAction, tense: "running" | "finished"): WorkerActionParts {
 	const descriptor = action.descriptor;
+	// A call that never ran keeps its own name as the verb: `checked npm test` claimed a check that did not happen.
+	if (tense === "finished" && action.notRun !== undefined) {
+		const object =
+			descriptor?.object === undefined ? "" : `${descriptor.object}${descriptor.truncated ? GLYPH.ellipsis : ""}`;
+		return { verb: descriptor?.capability ?? action.tool, object, tool: null };
+	}
 	if (descriptor === undefined) return { verb: action.tool, object: "", tool: null };
 	const object =
 		descriptor.object === undefined ? "" : `${descriptor.object}${descriptor.truncated ? GLYPH.ellipsis : ""}`;
@@ -232,6 +238,20 @@ export function workerActionParts(action: WorkerAction, tense: "running" | "fini
 	const tool = descriptor.capability ?? action.tool;
 	if (TOOLS_THE_VERB_NAMES.has(tool)) return { verb, object, tool: null };
 	return object.length > 0 ? { verb, object, tool } : { verb, object: tool, tool: null };
+}
+
+/**
+ * How a finished call ended when it did not succeed, or null for a success. A call its tool rejected before doing
+ * any work did not run, which is not a failure of the work it named: `verify npm test` with an unknown check id never
+ * ran a validator (B02).
+ */
+export function finishedActionFault(
+	action: Pick<WorkerAction, "outcome" | "notRun">,
+): { words: string; tone: "warning" | "error" } | null {
+	if (action.notRun !== undefined) return { words: `did not run · ${action.notRun}`, tone: "warning" };
+	if (action.outcome === "blocked") return { words: "blocked", tone: "warning" };
+	if (action.outcome === "error") return { words: "failed", tone: "error" };
+	return null;
 }
 
 /** Who the wait is on, longest first. The person's own wait names no one, because `your` already does. */

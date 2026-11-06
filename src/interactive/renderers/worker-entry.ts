@@ -52,6 +52,7 @@ import {
 	approvalWaitWords,
 	compactQuantity,
 	completedRunMark,
+	finishedActionFault,
 	workerActionParts,
 	workerPhaseActivity,
 	workerQuietWords,
@@ -589,10 +590,8 @@ function finishedAction(action: WorkerAction): string {
 	const verb = functionText(theme, toolFunction(action.tool), sanitizeCallTargetText(parts.verb));
 	const actionText =
 		parts.object.length === 0 ? verb : `${verb}${theme.fg("toolTarget", ` ${sanitizeCallTargetText(parts.object)}`)}`;
-	const failure = action.outcome === "blocked" ? "blocked" : action.outcome === "error" ? "failed" : null;
-	return failure === null
-		? actionText
-		: `${actionText} ${theme.fg(action.outcome === "blocked" ? "warning" : "error", `${GLYPH.error} ${failure}`)}`;
+	const fault = finishedActionFault(action);
+	return fault === null ? actionText : `${actionText} ${theme.fg(fault.tone, `${GLYPH.error} ${fault.words}`)}`;
 }
 
 /**
