@@ -842,6 +842,30 @@ function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
 	return groundedName(token, evidence) || citedNames(token).some((name) => groundedName(name, evidence));
 }
 
+/**
+ * A slash makes a word a path only when it names one. Two prose words joined
+ * by a slash (verb pairs, the input-output abbreviation) grounded as a
+ * substring somewhere and came back wrapped as code. Patterns pass on to the citation
+ * rule, which grounds their literal pieces.
+ */
+function repositoryPathToken(token: string, evidence: ModelGroundingCorpus): boolean {
+	const path = token.replace(/^\.\//, "").replace(/\/$/, "");
+	if (/[*?<>{}]/.test(path)) return true;
+	if (evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path)) return true;
+	for (const candidate of evidence.repositoryPaths) if (candidate.startsWith(`${path}/`)) return true;
+	return false;
+}
+
+/**
+ * A case hump marks an identifier, except in a proper noun: `TypeScript` and
+ * `GitHub` are PascalCase words, not names in this repository. A PascalCase
+ * word is code only when the index defines it; lowerCamel is always code.
+ */
+function camelCaseIdentifier(token: string, evidence: ModelGroundingCorpus): boolean {
+	if (!/[a-z0-9][A-Z]/.test(token)) return false;
+	return /^[a-z]/.test(token) || evidence.symbolDefinitions.has(token.replace(/\(\)$/, ""));
+}
+
 // Nemotron's accurate first draft cited no names in backticks, so the citation rule dropped every line.
 // Backtick a bare name only when it reads as code and passes the same check a backticked citation faces.
 function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string {
@@ -858,11 +882,12 @@ function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string
 					const script = words[1] === "run" && words.length === 3 ? words[2] : words.length === 2 ? words[1] : undefined;
 					const invocation =
 						words[0] === evidence.packageManager && script !== undefined && evidence.scriptBodies.has(script);
-					// A case hump marks camelCase and PascalCase; a lone capitalized word may start a sentence,
-					// and "e.g" or "bold**" must not count as a name.
+					// "e.g" or "bold**" must not count as a name.
 					const dotted = token.replace(/\b\w{1,2}\./g, "");
 					const codeLike =
-						/[/_@]|[a-z0-9][A-Z]/.test(token) || (dotted.includes(".") && /^\.?[\w-]+(?:\.[\w-]+)*$/.test(dotted));
+						/[_@]/.test(token) ||
+						(token.includes("/") ? repositoryPathToken(token, evidence) : camelCaseIdentifier(token, evidence)) ||
+						(dotted.includes(".") && /^\.?[\w-]+(?:\.[\w-]+)*$/.test(dotted));
 					return invocation || (codeLike && groundedToken(token, evidence)) ? `\`${token}\`${punctuation}` : match;
 				},
 			);
