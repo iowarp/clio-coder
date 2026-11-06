@@ -39,6 +39,7 @@ export const coreTests = [
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
 	"plugin-engine",
+	"bootstrap-grounding",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

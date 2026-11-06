@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
-import { runBootstrap } from "../../src/domains/context/bootstrap.js";
+import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { readClioState } from "../../src/domains/context/state.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -191,4 +191,42 @@ it("records the spend of every bootstrap dispatch, not only the draft that survi
 	strictEqual(generation?.tokenCount, 6000, JSON.stringify(generation));
 	strictEqual(generation?.toolCalls, 9, JSON.stringify(generation));
 	strictEqual(generation?.repairRan, true, JSON.stringify(generation));
+});
+
+it("records no tool call total when a started dispatch left no receipt", async () => {
+	const settled: BootstrapRunTelemetry = {
+		structuredOutputMode: "native-schema",
+		runId: "settled",
+		toolCalls: 3,
+		promptBytes: 1,
+		outputBytes: 1,
+	};
+	// A dispatch that started a worker but returned no receipt has no tool count.
+	const unsettled: BootstrapRunTelemetry = {
+		structuredOutputMode: "native-schema",
+		runId: "unsettled",
+		promptBytes: 1,
+		outputBytes: 1,
+	};
+	await runBootstrap({
+		cwd,
+		generate: async (input) => {
+			input.reportGeneration?.({
+				mode: "model",
+				parserOutcome: "parsed",
+				run: settled,
+				runs: [unsettled, settled],
+			});
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: ["Code under `src/widgets/**` renders through `renderWidget()`."],
+				sections: [],
+			};
+		},
+	});
+	const generation = readClioState(cwd)?.lastBootstrap;
+	strictEqual(generation?.runId, "settled", JSON.stringify(generation));
+	strictEqual(generation?.toolCalls, undefined, JSON.stringify(generation));
 });
