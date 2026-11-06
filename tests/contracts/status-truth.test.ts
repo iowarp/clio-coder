@@ -2192,3 +2192,19 @@ test("a tool preview keeps whole lines and counts the lines it holds back, never
 	match(tail[0] ?? "", /… 3 earlier lines · \/view/u);
 	deepStrictEqual(tail.slice(1), ["d1"]);
 });
+
+test("a worker run's calls that reached the provider count as sent beside the session's own", async () => {
+	const { telemetryCall, telemetryViewOf } = await import("../harness/telemetry-view.js");
+	const { sentCallCount } = await import("../../src/interactive/usage-words.js");
+	const { factKnownValue } = await import("../../src/core/telemetry/known.js");
+	const run = [
+		...telemetryCall("session-1", { usage: { input: 10, output: 2 } }),
+		...telemetryCall("session-1", { usage: { input: 12, output: 3 } }),
+	];
+	const view = telemetryViewOf("session-1", telemetryCall("session-1"), new Map([["run-1", run]]));
+	const worker = view.cost("role").groups.find((group) => group.key === "worker");
+	strictEqual(factKnownValue(worker?.calls.fact ?? { kind: "unknown", reason: "not-observed" }), 2);
+	strictEqual(sentCallCount(view, { roles: ["worker"] }), 2, "both worker rounds went out");
+	strictEqual(sentCallCount(view, { roles: ["main"] }), 1);
+	strictEqual(sentCallCount(view), 3, "the model calls row reconciles with the Models tab");
+});
