@@ -267,7 +267,7 @@ export interface CheckStartRecordV1 {
 	project: string;
 	check: string;
 	run: CheckRunIdentity;
-	/** The current revisions whose criterion named the check when it started; never empty. */
+	/** The current revisions whose criterion named the check when it started; empty when none did. */
 	hypotheses: string[];
 }
 

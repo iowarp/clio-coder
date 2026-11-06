@@ -144,9 +144,11 @@ export async function appendHypotheses(
 
 /**
  * Bind a run's checks to the hypothesis revisions they test, as the run starts (#406). Under the log's lock, each check
- * a current revision names gets a check-start record listing those revisions, and the same lists are returned for the
+ * gets a check-start record listing the current revisions that name it, and the same lists are returned for the
  * producer to test once the check finished; replay admits a test only for a revision its run's start record lists. A
- * check no hypothesis names is absent and writes nothing, and a run already bound keeps its first binding.
+ * check no hypothesis names is still started, with an empty list: its run's identity is then taken, so a start written
+ * for it later, once a hypothesis naming the check appeared, is a second start and binds nothing. A run already bound
+ * keeps its first binding.
  */
 export async function appendCheckStarts(
 	project: string,
@@ -168,7 +170,6 @@ export async function appendCheckStarts(
 				continue;
 			}
 			const hypotheses = hypothesesNaming(log.hypotheses, check);
-			if (hypotheses.length === 0) continue;
 			const body: Omit<CheckStartRecord, "id"> = {
 				v: CLAIM_RECORD_VERSION,
 				type: "check-start",
@@ -352,8 +353,7 @@ function isCheckStartRecord(value: Record<string, unknown>): boolean {
 		typeof value.at === "string" &&
 		typeof value.check === "string" &&
 		isCheckRunIdentity(value.run) &&
-		isStringArray(value.hypotheses) &&
-		value.hypotheses.length > 0
+		isStringArray(value.hypotheses)
 	);
 }
 

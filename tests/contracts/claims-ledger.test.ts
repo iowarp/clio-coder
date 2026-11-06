@@ -391,6 +391,76 @@ describe("claims ledger (#406)", () => {
 		}
 	});
 
+	it("takes a check run's identity at start even when no hypothesis names its check yet", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const log = claimsLogPath(project);
+			const rehash = (body: Record<string, unknown>) => {
+				const { id: _id, ...rest } = body;
+				return `${JSON.stringify({ ...rest, id: claimLogRecordId(rest) })}\n`;
+			};
+			const call = verifyCall(createClaimCaptureRegistration({ cwd: () => repo })).start();
+			await call.started;
+			// While the genuine call runs, a hypothesis naming its check lands, and a start of that running call listing
+			// it is forged; once the genuine judgement is on disk a test citing it is forged too.
+			writeFileSync(join(repo, "h.json"), slateText([{ id: "H1", check: "stats" }]));
+			await createHypothesisCaptureRegistration({ cwd: () => repo }).evaluateAsync?.({
+				hook: "after_tool",
+				toolName: "write",
+				toolArgs: { path: "h.json" },
+			});
+			const [hypothesis] = readClaims(project).hypotheses;
+			assert.ok(hypothesis);
+			const run = { channel: "verify", sessionId: "s1", toolCallId: "c1" };
+			appendFileSync(
+				log,
+				rehash({
+					v: hypothesis.v,
+					type: "check-start",
+					at: "2099-01-01T00:00:00.000Z",
+					project,
+					check: "stats",
+					run,
+					hypotheses: [hypothesis.id],
+				}),
+			);
+			await call.finish({
+				...numericDetails(true, "passed"),
+				checkout: { commit: "c".repeat(40), trackedTreeClean: true },
+			});
+			const [claim] = readClaims(project).records;
+			assert.ok(claim);
+			appendFileSync(
+				log,
+				rehash({
+					v: hypothesis.v,
+					type: "hypothesis-test",
+					at: "2099-01-01T00:00:01.000Z",
+					project,
+					hypothesis: hypothesis.id,
+					check: "stats",
+					outcome: "supported",
+					claim: claim.id,
+					execution: "succeeded",
+					source: claim.source,
+				}),
+			);
+			const read = readClaims(project);
+			assert.deepEqual(
+				read.checkStarts.map((start) => [start.run, start.hypotheses]),
+				[[run, []]],
+			);
+			assert.deepEqual(read.hypothesisTests, []);
+			assert.equal(read.unlinked, 2);
+			assert.equal(hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(hypothesis.id)?.status, "proposed");
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("refuses a slate capture whose file changed before it held the log's lock", async () => {
 		const env = await isolateClioEnv("clio-claims-");
 		try {
@@ -497,7 +567,14 @@ describe("claims ledger (#406)", () => {
 			});
 			assert.equal(statusOfH2(), "proposed");
 			const bound = await bindHostVerificationHypotheses(repo, "run4", ["stats", "unnamed"]);
-			assert.deepEqual([...bound], [["stats", [h2?.id]]]);
+			// A check no hypothesis names is started too, bound to nothing.
+			assert.deepEqual(
+				[...bound],
+				[
+					["stats", [h2?.id]],
+					["unnamed", []],
+				],
+			);
 			await recordHostVerificationClaims({
 				runId: "run4",
 				receiptDigest: "a".repeat(64),
