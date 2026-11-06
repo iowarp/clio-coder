@@ -49,7 +49,7 @@ for (const style of ["compact", "standard", "detailed"] as const) {
 		const lines = panel.render(100).map(stripTerminalSequences);
 		const row = lines.findIndex((line) => line.includes("git restore ."));
 		ok(row >= 0, lines.join("\n"));
-		const grant = lines.findIndex((line) => /\? allowed by you · safety net: git restore discard all/u.test(line));
+		const grant = lines.findIndex((line) => /› allowed by you · safety net: git restore discard all/u.test(line));
 		ok(grant > row, `no grant row under the call:\n${lines.join("\n")}`);
 		strictEqual(grant, row + 1, "the grant sits directly under the call it answered");
 		doesNotMatch(lines.join("\n"), /awaiting approval/u);
@@ -71,6 +71,6 @@ test("compact never folds an allowed call into its neighbors", () => {
 	settle(panel, "read-b", "granted", "read", { path: "/etc/passwd" });
 	settle(panel, "read-c", "none", "read", { path: "/etc/group" });
 	const rendered = panel.render(100).map(stripTerminalSequences).join("\n");
-	match(rendered, /\? allowed by you/u, rendered);
+	match(rendered, /› allowed by you/u, rendered);
 	match(rendered, /\/etc\/passwd/u, rendered);
 });
