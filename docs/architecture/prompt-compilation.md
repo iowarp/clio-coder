@@ -89,7 +89,7 @@ These fragments are not attended-only. Their tiers are in the inventory above.
 - `identity.clio` holds Clio Coder's identity, the rule that claims about the workspace come from files or tools, and the two-state turn ending: done with no closing offer, or waiting on a decision only the operator can make.
 - `operating.contract` is the constitutional posture shared by all three tiers: plain prose, honoring no-tools and no-delegation instructions, batching independent reads, treating safety policy as authoritative, and recording consequential design choices before implementing.
 - `operating.steering` tells the model that a user message arriving between tool results steers the current run, and that a later message wins over an earlier one.
-- `operating.coordinator` routes intent and delegation. An exact operator assignment goes into `task` verbatim without the delegation wording around it. When the operator names a target or model for one dispatch, the coordinator pins it with dispatch's `target` and `model` fields and never edits routing settings for a one-off request. Without an OS sandbox, workers confined by `write_roots` cannot run `bash` or `verify`.
+- `operating.coordinator` routes intent and delegation. An exact operator assignment goes into `task` verbatim without the delegation wording around it. A suspicion goes into `task` or `briefing` as a question to test, never as a finding, and the coordinator does not certify two implementations equivalent until every path that changes the compared state is traced in each. When the operator names a target or model for one dispatch, the coordinator pins it with dispatch's `target` and `model` fields and never edits routing settings for a one-off request. Without an OS sandbox, workers confined by `write_roots` cannot run `bash` or `verify`.
 - `operating.fleet` states that workers run locally unless a pin or preference selects an SSH node, and how the model asks once per session for a node.
 - `operating.discovered-skills` teaches progressive skill discovery through `context(scope="skills")` and carries `{SKILL_ACTIVATION_POLICY}`.
 - `operating.worker` is the assigned-task contract. A task worded as an instruction to dispatch or delegate is the worker's own assignment, and the worker does it itself.
@@ -114,7 +114,7 @@ The safety section swaps the attended approval sentence for this one: "No operat
 
 Other differences from the attended tier:
 
-- The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence` and `tasks` unless a schema is attached directly. Each stays reachable through `gateway(op="find")`.
+- The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence` and `tasks` unless a schema is attached directly. Each stays reachable through `gateway(op="find")`, and a find that names the capability exactly also returns its schema, so the call needs no `describe` round trip ([gateway/index.ts](../../src/tools/gateway/index.ts)).
 - The `ask_user` turn-ending contract never renders, because no operator can answer an interview.
 - No `Routes:` line appears in the runtime block, because the orchestrator passes route sources to attended sessions only.
 - The orchestrator registers task-ranked skills and capability advice for headless main turns as well as attended turns. The advice rides model-only reminder text in the message tail, alongside the system prompt's conditional skills guidance; it does not alter tool schemas ([skills-reminder.ts](../../src/domains/middleware/skills-reminder.ts)).
@@ -163,7 +163,7 @@ The compiler fills these tokens by plain string replacement, one occurrence per 
 | --- | --- | --- |
 | `{CLIO_DOCS_PATH}` | `identity.self-awareness` | `<package root>/docs` |
 | `{CLIO_SRC_PATH}` | `identity.self-awareness` | `<package root>/src` |
-| `{CLIO_CODEWIKI_PATH}` | `identity.self-awareness` | `<package root>/dist/assets/codemap.json` |
+| `{CLIO_SRC_PACKED_NOTE}` | `identity.self-awareness` | In an installed package whose `.ts` source ships in `dist/assets/source.pack`, a sentence saying `read` and `code_nav` open the packed source but `grep`, `find` and `bash` do not see it; in a checkout, the empty string (`sourceIsPacked` in `src/core/source-pack.ts`) |
 | `{CLIO_SETTINGS_PATH}` | `identity.self-awareness` | `settings.yaml` inside the live config directory, so an isolated `CLIO_CODER_HOME` or config override moves it |
 | `{CLIO_STATE_PATH}` | `identity.self-awareness` | The live state directory |
 | `{LIBRARY_ROUTING}` | `identity.docs-routing` | The `clio_library` routing sentence when that capability is registered and admitted, otherwise the empty string |
@@ -215,7 +215,7 @@ A change of autonomy level during a session does not recompile the prompt. The h
 
 ### Project context
 
-The prompts extension captures the project handbook once per session through the context domain. `selectProjectPreload` renders it in full when it fits 24,000 UTF-16 code units and 220 lines. Otherwise it renders the largest safe prefix of each handbook, nearest handbook first, under a `<project-preload>` notice that lists the included and omitted physical line ranges and how to read the rest. The result is classified as `full`, `partial` or `none` and recorded on the compiled prompt as `projectPreload`. `--no-context-files` (`-nc`) suppresses project context entirely. Handbook selection and discovery are in [Project Context](project-context.md).
+The prompts extension captures the project handbook once per session through the context domain. `selectProjectPreload` renders it in full when it fits 24,000 UTF-16 code units and 220 lines. Otherwise it renders the largest safe prefix of each handbook, nearest handbook first, under a `<project-preload>` notice that lists the included and omitted physical line ranges and how to read the rest. The result is classified as `full`, `partial` or `none` and recorded on the compiled prompt as `projectPreload`. The class follows the handbook sources, so with no handbook loaded it is `none` (reason `no-clio-md`) even though the support fragments still put text under `# Project` ([preload.ts](../../src/domains/prompts/preload.ts)). `--no-context-files` (`-nc`) suppresses project context entirely. Handbook selection and discovery are in [Project Context](project-context.md).
 
 ### Operator notes
 

@@ -183,7 +183,7 @@ inference path, whose malformed-path errors remain terminal.
 | **ACP delegation target** | [extension.ts](../../src/domains/dispatch/extension.ts) | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
 | **Custom agent recipe** | `src/domains/agents/` | Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope | Not applicable | Not applicable |
 | **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None** | Legacy inference | Legacy inference errors only |
-| **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, write only the wiki staging directory. It also sets the matching legacy `writeRoots` | Not applicable | All codes |
+| **`clio-coder context wiki`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root (a repair pass reads only the page being repaired and its cited sources), write only the wiki staging directory. It also sets the matching legacy `writeRoots` | Not applicable | All codes |
 | **`clio-coder context init`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | Declared through `declaredScopeIntent()`: read the repository root, no write roots | Not applicable | All codes |
 | **Session slash commands, overlays, watchdog** | `src/session-control/`, `src/interactive/` | **None** | Legacy inference | Legacy inference errors only |
 
