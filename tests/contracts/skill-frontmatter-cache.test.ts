@@ -76,4 +76,15 @@ describe("skill frontmatter cache", () => {
 		equal(description(), "Original one.", "the replaced entry answers the next load");
 	});
 
+	it("parses a frontmatter with a recursive alias every time instead of caching it", () => {
+		mkdirSync(join(clioConfigDir(), "skills", "probe"), { recursive: true });
+		rmSync(cacheFile(), { force: true });
+		writeFileSync(skillFile, "---\nname: probe\ndescription: Cyclic one.\nself: &s\n  again: *s\n---\nBody.\n");
+		equal(description(), "Cyclic one.");
+		equal(description(), "Cyclic one.");
+		const persisted = existsSync(cacheFile())
+			? (JSON.parse(readFileSync(cacheFile(), "utf8")) as { entries: Record<string, unknown> }).entries
+			: {};
+		equal(persisted[skillFile], undefined, "a cyclic parse is never cached");
+	});
 });
