@@ -1089,14 +1089,18 @@ export class ListOverlayView implements Component {
 				const avail = Math.max(1, availableRows - keyLines.length);
 				const lines: string[] = [];
 				if (isSplit && hasDetail) {
-					const detailWidth = Math.max(32, Math.floor(width * 0.45));
-					const listWidth = width - detailWidth - 1;
+					// A space either side of the divider, so a right-aligned row state and the
+					// pane's first word never touch the rule between them.
+					const detailWidth = Math.max(32, Math.floor(width * 0.45)) - 1;
+					const listWidth = width - detailWidth - 3;
 					const listLines = this.renderList(listWidth, avail, filteredItems, renderedRows);
 					const detailLines = this.renderDetail(detailWidth, avail, selectedItem);
 					const rows = Math.min(avail, Math.max(listLines.length, detailLines.length));
 					const separator = theme.fg("border", "│");
 					for (let i = 0; i < rows; i++) {
-						lines.push(`${listLines[i] ?? " ".repeat(listWidth)}${separator}${detailLines[i] ?? " ".repeat(detailWidth)}`);
+						lines.push(
+							`${listLines[i] ?? " ".repeat(listWidth)} ${separator} ${detailLines[i] ?? " ".repeat(detailWidth)}`,
+						);
 					}
 					lines.push(...keyLines);
 					return { lines, headText: this.detailHeadText, drawn: true, takeover: false, paneRows: rows };
