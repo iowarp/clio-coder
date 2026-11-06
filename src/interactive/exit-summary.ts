@@ -257,8 +257,8 @@ export function renderExitSummary(
 		if (gitHooks !== null) add("Git hooks", gitHooks);
 		if (internalGit !== null) add("Internal git", internalGit);
 	} else {
-		// A turn is one operator prompt; a model call is one request the visit's own agents sent, so a turn that used
-		// tools or retried makes several. Worker runs count as workers, not here (E2).
+		// A turn is one operator prompt; a model call is one request sent, so a turn that used tools or retried makes
+		// several. Workers' calls count here as /usage counts them, and `workers` counts their runs.
 		add("Activity", [
 			countLabel(snapshot.turns, "turn"),
 			...(spend.kind === "ready" ? [countLabel(spend.visitCalls, "model call")] : []),

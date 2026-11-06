@@ -2347,6 +2347,13 @@ test("a worker run's calls that reached the provider count as sent beside the se
 	strictEqual(sentCallCount(view, { roles: ["worker"] }), 2, "both worker rounds went out");
 	strictEqual(sentCallCount(view, { roles: ["main"] }), 1);
 	strictEqual(sentCallCount(view), 3, "the model calls row reconciles with the Models tab");
+	const { exitSpend } = await import("../../src/interactive/exit-summary-collector.js");
+	const card = exitSpend(view, "1970-01-01T00:00:00.000Z");
+	strictEqual(
+		card.kind === "ready" ? card.visitCalls : null,
+		3,
+		"the exit card counts the workers' calls as /usage does",
+	);
 });
 
 test("Reply from names only a route that replied; an admission that never sent prints no provenance", async () => {

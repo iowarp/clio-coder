@@ -16,6 +16,7 @@ import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
 	SENT_DISPOSITIONS,
+	sentCallCount,
 	usageCoverage,
 	usageEstimatedCalls,
 	usageEstimates,
@@ -126,8 +127,9 @@ export type ExitSpend =
 			breakdown: string;
 			cost: string;
 			/**
-			 * Model calls this visit's own agents sent since it began, counted as the read model counts `calls`: a retry is
-			 * another attempt of the same call, and worker runs count as workers, not here (E2).
+			 * Model calls sent since the visit began, counted by `sentCallCount` as the /usage model calls row counts them:
+			 * a retry is another attempt of the same call, and a worker run's calls are included. The card once said
+			 * `3 model calls · 2 workers` beside a /usage total of 5, because it left the workers' calls out.
 			 */
 			visitCalls: number;
 			byRole: string;
@@ -207,7 +209,7 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 		tokens: [sessionTokens.total, ...sessionTokens.notes].join(" · "),
 		breakdown: tokenBreakdown(view),
 		cost: session.totals.usd.display,
-		visitCalls: new Set(visit.calls.map((call) => call.callId)).size,
+		visitCalls: sentCallCount(view, { from: visitFrom }),
 		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
 		callTime: callTime === null ? null : usageLineFigure(callTime),
 		callTimeCoverage: usageCoverage(usageGap(callTime), "timing data"),
