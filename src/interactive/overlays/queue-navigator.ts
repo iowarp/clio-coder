@@ -209,7 +209,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			rows.push(
 				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
 					// The row's own word leads, so `later` in the list and the slot it means read as one thing.
-					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "steer, lands at the next slot" : "later, lands when the turn ends"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
+					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "steer, Clio reads it at its next step" : "later, Clio reads it when the turn ends"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
 				}),
 			);
 			const notice = this.sendNotice(selected).flatMap((line) =>
@@ -260,7 +260,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			{ key: "↑↓", verb: "select" },
 			{ key: this.deps.restoreAllLabel().split(" · ")[0] ?? "", verb: "all to editor" },
 			{ key: "⇧↑↓", verb: "move" },
-			{ key: "t", verb: "slot" },
+			{ key: "t", verb: "steer/later" },
 			{ key: "x", verb: "remove" },
 			...(selected?.origin === undefined ? [{ key: "e", verb: "to editor" }] : []),
 			esc,

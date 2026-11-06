@@ -45,7 +45,7 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 			const compact = renderCompactDashboard(state, width);
 			match(compact.map(stripTerminalSequences).join("\n"), /Alt\+G → choose key/u);
 			const queued = queue.render(width);
-			match(queued.map(stripTerminalSequences).join("\n"), /\[Alt\+Q · Alt\+G Q\] restore to editor/u);
+			match(queued.map(stripTerminalSequences).join("\n"), /\[Alt\+Q · Alt\+G Q\] all to editor/u);
 			state.session.leaderArmed = false;
 			state.notices = [notice];
 			const badge = renderCompactDashboard(state, width);
