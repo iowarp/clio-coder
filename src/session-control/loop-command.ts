@@ -1,5 +1,6 @@
 import type { JobPredicate, JobRecord } from "../core/job-types.js";
 import { jobPollFailure } from "../core/job-types.js";
+import { plainOutcomeLabel } from "../domains/dispatch/failure-headline.js";
 import { jobExecutionTimeoutMs, jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolResult } from "../tools/registry.js";
@@ -456,7 +457,7 @@ function dueText(job: JobRecord, now: number): string {
 
 function lastOutcomeText(job: JobRecord): string | null {
 	const last = job.history[job.history.length - 1] ?? null;
-	return last?.evidence ? last.evidence.outcome : null;
+	return last?.evidence ? plainOutcomeLabel(last.evidence.outcome) : null;
 }
 
 /**
@@ -466,7 +467,7 @@ function lastOutcomeText(job: JobRecord): string | null {
  */
 function stateText(job: JobRecord): string {
 	if (job.state === "terminal") {
-		const ended = `ended (${job.reason ?? "unknown"})`;
+		const ended = `ended (${job.reason ? plainOutcomeLabel(job.reason) : "unknown"})`;
 		if (jobIsComplete(job)) return ended;
 		const delivery = job.delivery;
 		if (delivery !== null && (delivery.state === "pending" || delivery.state === "running")) {
@@ -553,7 +554,7 @@ export function loopJobDetail(job: JobRecord, now: number, spend: string | null 
 	const last = job.history[job.history.length - 1] ?? null;
 	if (last?.evidence) {
 		lines.push(
-			`last run ${last.evidence.outcome}${last.evidence.summary ? `: ${preview(last.evidence.summary, SUMMARY_CHARS)}` : ""}${last.evidence.truncated ? " (output truncated)" : ""}`,
+			`last run ${plainOutcomeLabel(last.evidence.outcome)}${last.evidence.summary ? `: ${preview(last.evidence.summary, SUMMARY_CHARS)}` : ""}${last.evidence.truncated ? " (output truncated)" : ""}`,
 		);
 	}
 	if (job.consecutiveFailures > 0)

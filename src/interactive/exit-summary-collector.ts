@@ -348,7 +348,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		const worker = workers.get(run.runId);
 		if (!worker) return;
 		workers.set(run.runId, { ...worker, outcome: run.outcome });
-		highlight(`${run.agentId} ${run.outcome}`, run.runId);
+		highlight(`${run.agentId} ${plainOutcomeLabel(run.outcome)}`, run.runId);
 		noteFiles(deps.dispatch.observedRunWrites?.(run.runId) ?? [], process.cwd(), workerPaths.get(run.runId));
 	};
 	// Like the git hook line, this account is the process's, never reset with the visit.

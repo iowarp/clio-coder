@@ -118,7 +118,7 @@ export function openExtensionViewPanel(tui: TUI, owner: string, deps: Omit<Panel
 		markerId: "extension-panel",
 		title: () => `${extensionOwnerLabel(owner)} · ${deps.panel()?.title ?? "expired"}`,
 		footerHint: buildHint([
-			{ key: "Up/Down/Tab", verb: "select" },
+			{ key: "↑↓/Tab", verb: "select" },
 			{ key: "Enter", verb: "press" },
 			{ key: "PgUp/PgDn", verb: "scroll" },
 		]),
