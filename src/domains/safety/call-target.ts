@@ -8,7 +8,7 @@
  */
 
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
-import { isEnvironmentArgKey, isSecretArgKey, redactSecretString } from "./redaction.js";
+import { isSecretArgKey, redactSecretString } from "./redaction.js";
 
 const ESC_CHAR = String.fromCharCode(27);
 const BEL_CHAR = String.fromCharCode(7);
@@ -419,64 +419,77 @@ function dispatchTaskNames(value: ReadonlyArray<unknown>): string[] {
 /** Longest string argument of an uncurated tool that the card shows whole. */
 const UNLISTED_STRING_MAX_CHARS = 96;
 
-/** Argument names that carry a payload rather than a choice; their size is what the card says. */
-const PAYLOAD_ARG_KEYS: ReadonlySet<string> = new Set([
-	"body",
-	"code",
-	"content",
-	"contents",
-	"data",
-	"diff",
-	"file_text",
-	"input",
-	"new_string",
-	"old_string",
-	"patch",
-	"payload",
-	"stdin",
-	"text",
+/**
+ * Argument names whose short value is usually the decision itself (the script
+ * a scheduler runs, its partition, a job name), compared with case, `_` and
+ * `-` folded so `script_path`, `scriptPath` and `script-path` agree.
+ */
+const SHOWN_STRING_ARG_KEYS: ReadonlySet<string> = new Set([
+	"cwd",
+	"dir",
+	"directory",
+	"file",
+	"filename",
+	"jobname",
+	"module",
+	"name",
+	"partition",
+	"path",
+	"script",
+	"scriptpath",
+	"target",
+	"url",
 ]);
 
-/**
- * Argument names that hold a block of credentials, as `env` and `environment`
- * do for redactToolArgs. Any string there may be a secret no shape rule knows,
- * such as `SESSION_COOKIE=opaque`, so the card says only its size.
- */
-const CREDENTIAL_CONTAINER_ARG_KEYS: ReadonlySet<string> = new Set(["cookie", "cookies", "header", "headers"]);
+/** A plain identifier. A name holding a terminal control or any punctuation beyond `_` and `-` is never one. */
+const PLAIN_ARG_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
 /**
- * A short one-line string of a tool with no curated field list (MCP and other
- * dynamic tools) is usually the decision itself: `slurm_submit` showed
- * `script=<string 66 bytes>` where the operator needed the script path. It
- * renders whole with secrets redacted. Secret-named fields, environment and
- * header containers, payload fields, multi-line values and anything over the
- * cap stay summarized.
+ * Letters, digits, `/ . _ - + : @ ,` and space. Nothing that opens an
+ * assignment, a quote, an escape, an expansion, a query or a fragment (`=`,
+ * quotes, backslash, backtick, `$`, `%`, `?`, `&`, `#`) and no control.
  */
-function shortUnlistedString(tool: string, field: string, value: string): string | null {
+const SHOWN_STRING_VALUE_RE = /^[A-Za-z0-9/._+:@, -]+$/;
+
+/** Userinfo in a URL (`//token@host`, `//u:p@host`) or without one (`u:p@host`). */
+const USERINFO_RE = /\/\/[^/\s]*@|:[^/\s]*@/;
+
+/** An HTTP auth scheme as a word, whose next word is the credential: `Basic dXNlcjpw` fits no token shape. */
+const AUTH_SCHEME_WORD_RE = /(?:^|[\s,:])(?:basic|bearer|digest|negotiate|ntlm)(?=[\s,:]|$)/iu;
+
+/**
+ * A short string of a tool with no curated field list (MCP and other dynamic
+ * tools) is shown only when both its name and its value are plainly safe:
+ * `slurm_submit` asked for approval of `script=<string 66 bytes>` where the
+ * operator needed the script path. This is an allowlist, not redaction: the
+ * name must be one of SHOWN_STRING_ARG_KEYS and the value one line of the
+ * conservative charset, free of userinfo, auth schemes and secret words, and
+ * left unchanged by every secret rule. Anything else, including a value a
+ * rule would only mask, stays summarized by size.
+ */
+function shownUnlistedString(tool: string, field: string, value: string): string | null {
 	if (CALL_TARGET_FIELDS[tool] !== undefined) return null;
-	const key = field.toLowerCase();
-	if (isSecretArgKey(field) || isEnvironmentArgKey(field)) return null;
-	if (PAYLOAD_ARG_KEYS.has(key) || CREDENTIAL_CONTAINER_ARG_KEYS.has(key)) return null;
-	if (value.length > UNLISTED_STRING_MAX_CHARS || /[\r\n]/.test(value)) return null;
-	// Controls go first: `gh<ESC>[0mp_…` hides a token from the shape rules until the escape is stripped.
-	const visible = sanitizeCallTargetText(value);
-	// Display redaction keys on names (`token=`, `--key`); a bare `sk-…` or `ghp_…` value needs the shape rules too.
-	const rendered = sanitizeCallTargetText(redactSecretsText(redactSecretString(visible), createRedactionTally()));
-	return rendered.length > 0 ? rendered : null;
+	if (!PLAIN_ARG_KEY_RE.test(field) || isSecretArgKey(field)) return null;
+	if (!SHOWN_STRING_ARG_KEYS.has(field.toLowerCase().replace(/[-_]/g, ""))) return null;
+	if (value.length > UNLISTED_STRING_MAX_CHARS || !SHOWN_STRING_VALUE_RE.test(value)) return null;
+	if (USERINFO_RE.test(value) || AUTH_SCHEME_WORD_RE.test(value)) return null;
+	// A value that names a secret (`token abc…`, `password hunter2`) is read as holding one.
+	if (isSecretArgKey(value) || redactSecretString(value) !== value) return null;
+	return redactSecretsText(value, createRedactionTally()) === value ? value : null;
 }
 
 /**
  * A boolean or finite number cannot carry pasted content, so it renders as
  * itself: `worktree=true` decides more than `<boolean 1 value>` did. A value
- * under a secret-looking key stays summarized, a short one-line string of an
- * uncurated tool renders redacted (shortUnlistedString), and other strings and
- * objects stay summarized by type and size.
+ * under a secret-looking key stays summarized, a short string of an uncurated
+ * tool renders when its name and value are allowlisted (shownUnlistedString),
+ * and other strings and objects stay summarized by type and size.
  */
 function summarizeUnlistedField(tool: string, field: string, value: unknown): string {
 	if (typeof value === "boolean") return String(value);
 	if (typeof value === "number" && Number.isFinite(value) && !isSecretArgKey(field)) return String(value);
 	if (typeof value === "string") {
-		const shown = shortUnlistedString(tool, field, value);
+		const shown = shownUnlistedString(tool, field, value);
 		if (shown !== null) return shown;
 	}
 	if (tool === "dispatch" && field === "tasks" && Array.isArray(value)) {
@@ -498,9 +511,9 @@ function targetFieldName(value: string): string {
 
 /**
  * Derive the operator-facing object of a call for the approval overlay. Only
- * values in the named tool's allowlist may render, plus short one-line strings
- * of a tool that has no allowlist, redacted. Every other argument is
- * summarized by its field name, type, and size, so an unexpected credential
+ * values in the named tool's allowlist may render, plus short allowlisted
+ * strings of a tool that has no field list (shownUnlistedString). Every other
+ * argument is summarized by its field name, type, and size, so an unexpected credential
  * or pasted document still informs the decision without disclosing content.
  * Returns an empty string when the call carries no arguments.
  */
