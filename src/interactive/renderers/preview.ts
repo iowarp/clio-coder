@@ -1,5 +1,5 @@
 import { truncateToWidth } from "../../engine/tui.js";
-import { clioTheme } from "../theme/index.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 
 /**
  * Count terminal rows after wrapping, including the inspection hint. A block
@@ -54,7 +54,13 @@ export function previewLines(
 		used += line.length;
 	}
 	const first = ordered[0] ?? [];
-	const partial = kept.length === 0 && room > 0 ? (tail ? first.slice(-room) : first.slice(0, room)) : [];
+	// A line taller than the room shows what fits, and an ellipsis says where its rows were cut.
+	const cut = kept.length === 0 && room > 0 ? (tail ? first.slice(-room) : first.slice(0, room)) : [];
+	const partial = cut.map((row, index) =>
+		index === cut.length - 1 && !tail
+			? `${truncateToWidth(row, Math.max(1, width - 1), "", false)}${GLYPH.ellipsis}`
+			: row,
+	);
 	const hidden = lines.length - kept.length - (partial.length > 0 ? 1 : 0);
 	const words = `${hidden} ${tail ? "earlier" : "more"} ${hidden === 1 ? "line" : "lines"}`;
 	const hint = `${prefix}${clioTheme().fg(
