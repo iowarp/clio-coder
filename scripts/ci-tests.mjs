@@ -47,6 +47,7 @@ export const coreTests = [
 	"doctor-unknown-runtime",
 	"plugin-engine",
 	"claims-ledger",
+	"cli-leaf-help",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
