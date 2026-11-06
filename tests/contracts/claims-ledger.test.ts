@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { Value } from "typebox/value";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
+import { RunResultObjectSchema } from "../../src/core/telemetry/schemas.js";
 import { claimLogRecordId } from "../../src/domains/claims/edges.js";
 import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
@@ -28,6 +30,8 @@ import {
 	snapshotAcceptedWorkerSlates,
 } from "../../src/domains/claims/index.js";
 import { runHostVerification } from "../../src/domains/dispatch/host-verification.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const source = { channel: "verify", sessionId: "s1", toolCallId: "t1", requestedBy: "model" } as const;
@@ -618,7 +622,17 @@ describe("claims ledger (#406)", () => {
 			});
 			const [check] = verification?.checks ?? [];
 			assert.equal(check?.notRun, "spawn-failed");
-			assert.ok(check);
+			assert.ok(check && verification);
+			// The persisted run-result object the receipt digest seals keeps the fact, and the object store accepts it.
+			const envelope = fixtureEnvelope("run1");
+			const sealed = finishRunResult({ ...fixtureReceiptDraft(envelope), hostVerification: verification }, envelope, {
+				terminal: { terminalReason: "completed" },
+				processExitCode: 0,
+				frameType: null,
+				usage: undefined,
+			}).settlement.result;
+			assert.equal(sealed.hostVerification?.checks[0]?.notRun, "spawn-failed");
+			assert.ok(Value.Check(RunResultObjectSchema, sealed));
 			await recordHostVerificationClaims({
 				runId: "run1",
 				receiptDigest: "d".repeat(64),
