@@ -859,7 +859,7 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): stri
 			? []
 			: wrapTextWithAnsi(theme.fg("error", `${GLYPH.error} ${why}`), room).map((line) => `${rail}${line}`)),
 		...planStepLines(theme, plan, room).map((line) => `${rail}${line}`),
-		`${rail}${theme.fg("annotation", truncateToWidth(`/fleet for detail · cost ${plan.costText ?? "none, no model calls"}`, room, GLYPH.ellipsis, false))}`,
+		`${rail}${theme.fg("annotation", truncateToWidth(`/fleet for detail · ${plan.costText === null ? "no model calls" : `cost ${plan.costText}`}`, room, GLYPH.ellipsis, false))}`,
 	];
 }
 
@@ -2130,7 +2130,11 @@ function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number): strin
 	const all: HintEntry[] = [...entries, { key: "Esc", verb: "close" }];
 	// The frame fits its rail into the body's width less one cell.
 	const { kept } = fitHintEntryList(all, width - 1);
-	const dropped = all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
+	// Splitting off a watch pane from a terminal this narrow leaves two unreadable halves, so the key goes unadvertised
+	// there and the keys that act on the run fit one row.
+	const dropped = all.filter(
+		(entry) => !kept.includes(entry) && entry.key !== "↑↓" && !(entry.key === "w" && width < 50),
+	);
 	if (dropped.length === 0) return [];
 	const theme = clioTheme();
 	// Keys wrap between entries, never inside one, so a narrow board names every key it takes. Each row sits flush
