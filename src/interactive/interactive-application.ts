@@ -20,6 +20,7 @@ import {
 } from "../domains/extensions/bus-observations.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
+import { bindExtensionOwnerNames, extensionOwnerLabel } from "../domains/extensions/owner-label.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
@@ -101,7 +102,6 @@ import {
 	opensOwnSurface,
 } from "./surfaces/ambient.js";
 import { createExtensionDockHost } from "./surfaces/extension-dock.js";
-import { bindExtensionOwnerNames, extensionOwnerLabel } from "./surfaces/owner-label.js";
 import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registry.js";
 import { renderView } from "./surfaces/view-renderer.js";
 import { followTerminalColors } from "./terminal-color-follow.js";

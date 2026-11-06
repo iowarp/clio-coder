@@ -47,6 +47,7 @@ import {
 	type PanesYaziController,
 	type PanesYaziStatus,
 	type PanesZoomResult,
+	panePeerBinary,
 	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
 import { deliverPeerPrompt, PEER_INBOX_TOKEN } from "../domains/mux/peer-inbox.js";
@@ -428,6 +429,13 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			}
 		},
 
+		peers() {
+			return PANE_PEER_IDS.map((peer) => {
+				const binary = panePeerBinary(peer);
+				return { peer, binary, found: probe(binary) !== null };
+			});
+		},
+
 		async handoff(request): Promise<PanesOpenResult> {
 			const refusal = deps.agentRefusal?.() ?? null;
 			if (refusal !== null) return { status: "refused", reason: refusal };
@@ -449,14 +457,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					reason: `peer handoff workspace is not an existing directory: ${request.cwd ?? deps.getCwd()}`,
 				};
 			}
-			const binary =
-				request.peer === "claude-code"
-					? "claude"
-					: request.peer === "antigravity"
-						? "agy"
-						: request.peer === "clio"
-							? "clio-coder"
-							: request.peer;
+			const binary = panePeerBinary(request.peer);
 			const binaryPath = probe(binary);
 			if (binaryPath === null) {
 				return {

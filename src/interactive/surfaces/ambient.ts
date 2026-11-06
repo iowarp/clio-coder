@@ -1,4 +1,5 @@
 import type { OperatorExtensions } from "../../domains/extensions/operator-extensions.js";
+import { extensionOwnerLabel } from "../../domains/extensions/owner-label.js";
 import type { ExtensionOutputV2, ExtensionPanelV2 } from "../../domains/extensions/public-api-v2.js";
 import type { ExtensionSurfaceEvent } from "../../domains/extensions/surface-model.js";
 import type { View } from "../../domains/extensions/view.js";
@@ -10,7 +11,6 @@ import type { NotificationInput } from "../footer/notifications.js";
 import type { OverlayLifecycleController } from "../overlay-lifecycle.js";
 import { clioTheme, frame } from "../theme/index.js";
 import type { ExtensionDockHost } from "./extension-dock.js";
-import { extensionOwnerLabel } from "./owner-label.js";
 import { renderView } from "./view-renderer.js";
 
 const DRAWING_KEYS = [

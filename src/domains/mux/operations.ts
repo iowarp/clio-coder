@@ -50,6 +50,14 @@ export type PanesPresetId = (typeof PANES_PRESETS)[number]["id"];
 export const PANE_PEER_IDS = ["clio", "claude-code", "codex", "opencode", "antigravity", "pi"] as const;
 export type PanePeerId = (typeof PANE_PEER_IDS)[number];
 
+/** The executable a peer runs as, which is what a missing install is reported under. */
+export function panePeerBinary(peer: PanePeerId): string {
+	if (peer === "claude-code") return "claude";
+	if (peer === "antigravity") return "agy";
+	if (peer === "clio") return "clio-coder";
+	return peer;
+}
+
 export const PANES_PRESET_IDS: ReadonlyArray<PanesPresetId> = PANES_PRESETS.map((preset) => preset.id);
 
 function isPanesPresetId(value: string): value is PanesPresetId {
@@ -292,6 +300,8 @@ export interface PanesOperations {
 	open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult>;
 	/** Open a fixed coding CLI in an owned pane. This is an interactive handoff, not a managed run. */
 	handoff(request: { peer: PanePeerId; brief?: string; cwd?: string }): Promise<PanesOpenResult>;
+	/** Each peer and whether its executable is on this machine, so `/peer` alone can say which ones would open. */
+	peers?(): ReadonlyArray<{ peer: PanePeerId; binary: string; found: boolean }>;
 	/**
 	 * Toggle zoom on one Clio-owned pane, matched like `close` (pane id, label
 	 * substring, then purpose; newest first). Zooming steals focus, so this is

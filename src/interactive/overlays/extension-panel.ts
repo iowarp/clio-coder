@@ -1,3 +1,4 @@
+import { extensionOwnerLabel } from "../../domains/extensions/owner-label.js";
 import type { ExtensionPanel } from "../../domains/extensions/public-api.js";
 import { extensionPlainText } from "../../domains/extensions/runtime-schema.js";
 import {
@@ -10,7 +11,6 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, type RowBudgetedBody, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
-import { extensionOwnerLabel } from "../surfaces/owner-label.js";
 import { clioTheme, emptyState } from "../theme/index.js";
 
 /** Rows the panel shows while the frame has not said how many it has. */

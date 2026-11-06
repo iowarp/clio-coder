@@ -1,3 +1,4 @@
+import { extensionOwnerLabel } from "../../domains/extensions/owner-label.js";
 import type { ExtensionPanelV2 } from "../../domains/extensions/public-api-v2.js";
 import {
 	type Component,
@@ -8,7 +9,6 @@ import {
 	type TUI,
 } from "../../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
-import { extensionOwnerLabel } from "../surfaces/owner-label.js";
 import { type RenderedView, renderView, type ViewTarget } from "../surfaces/view-renderer.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
