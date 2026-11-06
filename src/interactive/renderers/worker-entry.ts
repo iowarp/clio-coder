@@ -245,6 +245,14 @@ function settledCaveat(result: WorkerRunResultSummary, synthesizes = false): Com
 	});
 }
 
+/**
+ * A cancel Clio has asked for and the worker has not answered yet. The abort marks the card first, and the sealed
+ * result replaces it once the process exits, so until then the card says stopping, as the board and the strip do.
+ */
+function isStopping(result: WorkerRunResultSummary | undefined): boolean {
+	return result?.outcome === "canceled" && result.provisional === true;
+}
+
 function isSynthesis(entry: WorkerEntryState): boolean {
 	return entry.council?.label === COUNCIL_SYNTHESIS_LABEL;
 }
@@ -281,6 +289,7 @@ function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): stri
 	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
 	if (caveat?.kind === "refused") return theme.fg("warning", `${GLYPH.warn} finished with ${caveat.words}`);
 	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
+	if (isStopping(result)) return theme.fg("warning", `${GLYPH.cancelled} stopping`);
 	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
 	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
 	return theme.fg("error", `${GLYPH.error} ${plainOutcomeLabel(result.outcomeCode ?? result.outcome)}`);
@@ -482,7 +491,8 @@ function keptWorktreeLines(entry: WorkerEntryState, width: number): string[] {
  * removes a worktree with no work in it and keeps one holding changes, on its branch.
  */
 function cancelLines(entry: WorkerEntryState, width: number): string[] {
-	if (entry.result?.outcome !== "canceled") return [];
+	// What became of the worktree is known only once the process has exited.
+	if (entry.result?.outcome !== "canceled" || isStopping(entry.result)) return [];
 	// The process's own signal note says how it was stopped, not who stopped it, so the card says only that it was.
 	const headline = workerFailureHeadline(entry.result.failureMessage);
 	const why = headline === null || /\bSIG[A-Z]+\b/u.test(headline) ? "cancelled" : headline;
@@ -636,12 +646,21 @@ function headerWord(entry: WorkerEntryState): string {
 	if (isPending(entry) || entry.result === undefined) return "";
 	if (workerNeedsInput(entry)) return "needs input";
 	const outcome = entry.result.outcome;
+	if (isStopping(entry.result)) return "stopping";
 	if (outcome === "canceled") return "cancelled";
 	// The board, the dock and the notice say this state in these words; `stalled` was a second name for it.
 	if (outcome === "stalled") return "stopped responding";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
 	return settledCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
+}
+
+/** A settled council member's answer in one line; a running one has none yet, and its live line says what it does. */
+function councilMemberGist(entry: WorkerEntryState): string {
+	if (isPending(entry) || entry.text.trim().length === 0) return "";
+	const lines = presentedContractAnswer(entry)?.lines ?? entry.text.split("\n");
+	const first = lines.find((line) => line.trim().length > 0) ?? "";
+	return displayText(entry, "gist", first.replace(/^\s*-\s*/u, "").trim());
 }
 
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
@@ -659,7 +678,7 @@ function alignedHeader(
 		: workerNeedsInput(entry)
 			? theme.fg("warning", GLYPH.phaseBlocked)
 			: entry.result?.outcome === "canceled"
-				? theme.fg("toolMetadata", GLYPH.cancelled)
+				? theme.fg(isStopping(entry.result) ? "warning" : "toolMetadata", GLYPH.cancelled)
 				: entry.result?.outcome !== "succeeded"
 					? theme.fg("error", GLYPH.error)
 					: settledMark(entry.result, isSynthesis(entry));
@@ -682,7 +701,11 @@ function alignedHeader(
 		entry.council !== undefined ? councilLabelText(theme, shown, entry.council.color) : theme.fg("workerIdentity", shown);
 	const header = `${prefix}${identity}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shown)))} ${status} ${timer}`;
 	const taskWidth = width - visibleWidth(header) - 2;
-	const task = displayText(entry, "task", fleetNodeTaskBrief(entry.task ?? ""));
+	// A council member was asked the question the prompt above its round already shows, so its row gives its answer.
+	const task =
+		entry.council !== undefined && !isSynthesis(entry)
+			? councilMemberGist(entry)
+			: displayText(entry, "task", fleetNodeTaskBrief(entry.task ?? ""));
 	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
 	if (visibleWidth(header) <= width) return header;
 	// Below the header's minimum width, even its identity yields to elapsed.
@@ -780,7 +803,7 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	const waitRoom =
 		width - RAIL_WIDTH - 2 - (!includeTimer || elapsed === undefined ? 0 : elapsed.length + SEPARATOR.length);
 	// A worker whose heartbeat stopped is doing nothing it can be seen doing, so its last call or phase would read as current.
-	const quiet = workerQuietWords(entry.progress, nowMs);
+	const quiet = workerQuietWords(entry.progress, nowMs, waitRoom);
 	const action = quiet !== null ? null : describedAction(entry, waitRoom);
 	const tokens = entry.telemetry?.row.tokens.display;
 	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
@@ -839,10 +862,10 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	for (let kept = facts.length; kept >= 0; kept -= 1) {
 		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
 		const activityRoom = room - tail.length;
-		// A wait's words carry its time left, so they outrank the spend beside them.
-		const wanted = entry.progress?.awaitingApproval === true ? activity.length : Math.min(24, activity.length);
-		if (activityRoom < 1 || (kept > (entry.progress?.awaitingApproval === true ? 0 : 1) && activityRoom < wanted))
-			continue;
+		// A wait's words carry its time left, and so does a silent worker's countdown, so they outrank the spend beside them.
+		const countsDown = entry.progress?.awaitingApproval === true || quiet !== null;
+		const wanted = countsDown ? activity.length : Math.min(24, activity.length);
+		if (activityRoom < 1 || (kept > (countsDown ? 0 : 1) && activityRoom < wanted)) continue;
 		const shown = fitDisplayText(activity, activityRoom);
 		return truncateToWidth(
 			`${theme.fg("gutter", RAIL)}${styledActivity(shown)}${meta(tail)}`,
@@ -966,15 +989,17 @@ export function renderWorkerEntryLines(
 		].map((row) => redactedRow(row, safeWidth));
 	}
 	const integrity = entry.result?.trust;
+	// A run still stopping has sealed nothing yet, so there is no record to vouch for or check.
+	const stopping = isStopping(entry.result);
 	const provenance =
-		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
+		isPending(entry) || stopping || integrity?.artifactIntegrity.state === "verified"
 			? []
 			: railLines(
 					`run: ${integrity ? trustStateWord("artifactIntegrity", integrity.artifactIntegrity.state) : "integrity unavailable"}; raw output, not admitted as evidence`,
 					"warning",
 					safeWidth,
 				);
-	const qualityText = isPending(entry) ? null : qualityRow(entry.result, entry.runId, inspect);
+	const qualityText = isPending(entry) || stopping ? null : qualityRow(entry.result, entry.runId, inspect);
 	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
