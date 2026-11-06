@@ -20,7 +20,29 @@ const CI_ROOT_FILES = [
 ];
 const MAX_CI_FILE_BYTES = 512 * 1024;
 
-/** `run:` values from CI YAML, both inline and block scalars, one command per line. */
+/**
+ * A shell line that opens, continues or closes a compound command. Inside a
+ * block scalar it is script structure, not a command CI runs: Clio's own
+ * workflow put `fi` into the handbook's list of CI gates.
+ */
+const SHELL_STRUCTURE_RE =
+	/^(?:if|then|else|elif|fi|case|esac|for|while|until|do|done|select|function)\b|^(?:[{}()]|;;|\[\[|!\s)/;
+
+/** The command a script line runs: a branch or loop condition is one, the keywords around it are not. */
+function shellCommand(line: string): string | null {
+	const condition = /^(?:if|elif|while|until)\s+(?:!\s+)?([^;]+)/.exec(line)?.[1]?.trim();
+	if (condition) return SHELL_STRUCTURE_RE.test(condition) ? null : condition;
+	return SHELL_STRUCTURE_RE.test(line) ? null : line;
+}
+
+/**
+ * `run:` values from CI YAML, both inline and block scalars, one command per
+ * line. A block scalar is a shell script: its compound-command keywords are
+ * dropped and `\` continuations joined, while the commands inside a branch or
+ * loop still count, because CI may run them. An empty `run:` opens a
+ * mapping (GitHub's `defaults: run: shell: bash`) unless list items follow, as
+ * in GitLab's `script:` sequences.
+ */
 export function ciRunCommands(text: string): string[] {
 	const commands: string[] = [];
 	const lines = text.split(/\r?\n/);
@@ -30,17 +52,40 @@ export function ciRunCommands(text: string): string[] {
 		const indent = (match[1] ?? "").length;
 		const value = (match[2] ?? "").trim();
 		if (value.length > 0 && !/^[|>][-+]?$/.test(value)) {
-			commands.push(value.replace(/^["']|["']$/g, ""));
+			// Unwrap a quoted YAML scalar, never the quotes of a command that merely starts and ends with one.
+			const quoted = /^(["'])(.*)\1$/.exec(value);
+			commands.push(quoted?.[2] !== undefined && !quoted[2].includes(quoted[1] ?? "") ? quoted[2] : value);
 			continue;
 		}
+		const blockScalar = value.length > 0;
+		let pending = "";
 		for (let next = index + 1; next < lines.length; next += 1) {
 			const line = lines[next] ?? "";
 			if (line.trim().length === 0) continue;
-			if (line.length - line.trimStart().length <= indent) break;
-			const command = line.trim().replace(/^-\s+/, "");
-			if (command.length > 0 && !command.startsWith("#")) commands.push(command);
+			const lineIndent = line.length - line.trimStart().length;
+			if (lineIndent <= indent) break;
 			index = next;
+			const trimmed = line.trim();
+			if (!blockScalar) {
+				// A mapping under `run:` holds settings; only sequence items are commands.
+				if (!trimmed.startsWith("- ")) continue;
+				const command = trimmed.slice(2).trim();
+				if (command.length > 0 && !command.startsWith("#")) commands.push(command);
+				continue;
+			}
+			if (pending.length > 0) pending = `${pending} ${trimmed}`;
+			else if (trimmed.startsWith("#")) continue;
+			else pending = trimmed;
+			if (pending.endsWith("\\")) {
+				pending = pending.slice(0, -1).trimEnd();
+				continue;
+			}
+			const command = shellCommand(pending);
+			if (command) commands.push(command);
+			pending = "";
 		}
+		const command = pending.length > 0 ? shellCommand(pending) : null;
+		if (command) commands.push(command);
 	}
 	return commands;
 }
