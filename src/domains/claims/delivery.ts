@@ -183,7 +183,7 @@ function hypothesisNotes(check: string, read: ClaimsLogRead): Array<{ state: str
 				? `the check ran (${test.execution}) without a judged claim, so nothing supports or refutes it yet`
 				: test.outcome === "supported"
 					? `claim ${short(test.claim)} agrees within the declared tolerance`
-					: `claim ${short(test.claim)} disagrees: the result fell outside the declared tolerance`;
+					: `claim ${short(test.claim)} disagrees: the result did not satisfy the declared comparison`;
 		notes.push({
 			state: `hypothesis\0${hypothesis.id}\0${test.id}`,
 			message: `Hypothesis ${hypothesis.hypothesis} of ${hypothesis.slate} (record ${short(hypothesis.id)}) is ${state.status} in the claims ledger: ${why}. The slate keeps status proposed; report this status from the ledger (clio-coder claims) and leave the slate as written.`,
