@@ -9,6 +9,14 @@ export {
 	decideBackgroundStep,
 } from "./background-budget.js";
 export {
+	type ClaimMemorySource,
+	type ClaimRegressionInput,
+	memoryIdFromClaim,
+	memoryRecordFromClaim,
+	proposeMemoryFromClaim,
+	recordClaimRegressions,
+} from "./claim-link.js";
+export {
 	buildTurnPrefixUserText,
 	buildUserText,
 	COMPACTION_SYSTEM_PROMPT,

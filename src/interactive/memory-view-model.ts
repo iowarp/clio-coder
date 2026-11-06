@@ -87,7 +87,7 @@ function trackRecord(record: MemoryRecord): string[] {
 	return [
 		`Delivered in ${sessions("delivered").size} sessions; held in ${heldElsewhere} later sessions${
 			source !== undefined && held.has(source) ? " and in the session it came from" : ""
-		}; contradicted in ${sessions("contradicted").size}.`,
+		}; contradicted after delivery in ${sessions("contradicted").size} sessions.`,
 		`Last verified ${record.lastVerifiedAt ?? "never"}; learned ${record.createdAt}.`,
 	];
 }

@@ -117,3 +117,59 @@ export interface ClaimRecordV1 {
 }
 
 export type ClaimRecord = ClaimRecordV1;
+
+/**
+ * A typed relation between two claims of one check, derived when the later claim is appended (#406). Edges are their
+ * own lines in the log, so a claim is never rewritten.
+ *
+ * - `contradicts`: the later claim reached the opposite verdict under equal pinned conditions (`claimConditionsKey`);
+ *   a numeric-compare check's working-tree state is not pinned, so an uncommitted edit at the same commit still counts.
+ * - `supersedes`: the later claim judged the same check under changed conditions, such as a new commit or new input
+ *   digests, and replaces the earlier verdict.
+ *
+ * Both sides are Clio's own grounded executions and the rule is deterministic, so an edge carries no suggested state.
+ */
+export type ClaimEdgeKind = "contradicts" | "supersedes";
+
+export interface ClaimEdgeRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "edge";
+	/** SHA-256 of the record's canonical JSON without `id`. */
+	id: string;
+	at: string;
+	project: string;
+	kind: ClaimEdgeKind;
+	/** The later claim. */
+	from: string;
+	/** The earlier claim. */
+	to: string;
+	check: string;
+}
+
+/**
+ * What a contradiction did to memory: the memory records, backed by an agreeing claim the contradiction overturned,
+ * that received a regression. An empty `memory` says no record cited those claims, so none changed.
+ */
+export interface ClaimRegressionRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "regression";
+	id: string;
+	at: string;
+	project: string;
+	/** The `contradicts` edge this regression follows from. */
+	edge: string;
+	/** The disagreeing claim. */
+	from: string;
+	/** The agreeing claims with equal pinned conditions that it overturned. */
+	backing: string[];
+	memory: string[];
+}
+
+export type ClaimEdgeRecord = ClaimEdgeRecordV1;
+export type ClaimRegressionRecord = ClaimRegressionRecordV1;
+
+/**
+ * Where a claim stands after its edges: `superseded` once a later claim replaced it under changed conditions,
+ * `contested` while a claim with equal pinned conditions disagrees with it, else `standing`.
+ */
+export type ClaimStatus = "standing" | "contested" | "superseded";

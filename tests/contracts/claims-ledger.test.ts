@@ -1,12 +1,16 @@
-import { strict as assert } from "node:assert";
+import { strict as assert, match } from "node:assert";
 import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	appendClaims,
 	claimFromVerifyResult,
+	claimStatuses,
 	claimsLogPath,
 	claimsProjectRoot,
+	contradictionConditions,
+	deriveClaimEdges,
+	overturnedAgreements,
 	readClaims,
 } from "../../src/domains/claims/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -45,6 +49,52 @@ describe("claims ledger (#406)", () => {
 		);
 		// A judgement word that contradicts the report is not trusted into a claim.
 		assert.equal(claimFromVerifyResult({ details: numericDetails(false, "passed"), project: "/p", at, source }), null);
+	});
+
+	it("derives contradicts under equal pinned conditions and supersedes under a new commit", () => {
+		const claim = (passed: boolean, commit: string, clean: boolean, at: string) => {
+			const details = {
+				...numericDetails(passed, passed ? "passed" : "failed"),
+				checkout: { commit, trackedTreeClean: clean },
+			};
+			const built = claimFromVerifyResult({ details, project: "/p", at, source });
+			assert.ok(built);
+			return built;
+		};
+		const agreed = claim(true, "c".repeat(40), true, "2026-11-06T00:00:01.000Z");
+		// An uncommitted edit at the same HEAD changes what ran, not the pinned conditions.
+		const disagreed = claim(false, "c".repeat(40), false, "2026-11-06T00:00:02.000Z");
+		const afterCommit = claim(true, "d".repeat(40), true, "2026-11-06T00:00:03.000Z");
+		const first = deriveClaimEdges({ claims: [agreed], edges: [] }, [disagreed]);
+		assert.deepEqual(
+			first.map((edge) => [edge.kind, edge.from, edge.to]),
+			[["contradicts", disagreed.id, agreed.id]],
+		);
+		// The edge names the tree difference rather than calling the conditions the same.
+		match(
+			contradictionConditions(disagreed, agreed),
+			/with uncommitted changes to tracked files where claim \w+ ran on a clean tree$/u,
+		);
+		const [contradiction] = first;
+		assert.ok(contradiction);
+		assert.deepEqual(
+			overturnedAgreements(contradiction, [agreed, disagreed], first).map((item) => item.id),
+			[agreed.id],
+		);
+		assert.deepEqual(claimStatuses([agreed, disagreed], first).get(agreed.id), "contested");
+		const second = deriveClaimEdges({ claims: [agreed, disagreed], edges: first }, [afterCommit]);
+		assert.deepEqual(
+			second.map((edge) => [edge.kind, edge.to]),
+			[
+				["supersedes", agreed.id],
+				["supersedes", disagreed.id],
+			],
+		);
+		const statuses = claimStatuses([agreed, disagreed, afterCommit], [...first, ...second]);
+		assert.deepEqual(
+			[agreed, disagreed, afterCommit].map((item) => statuses.get(item.id)),
+			["superseded", "superseded", "standing"],
+		);
 	});
 
 	it("keys the log by the repository root and drops a line edited after capture", async () => {
