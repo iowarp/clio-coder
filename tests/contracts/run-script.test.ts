@@ -295,6 +295,22 @@ fs.writeFileSync("out/result.txt", "sum=" + input.trim().split(",").map(Number).
 		deepStrictEqual(runDirs(link), runDirs(real));
 	});
 
+	it("writes the logs masked, a token split across writes included, and keeps every other byte", async () => {
+		const root = workspace();
+		const relative = script(
+			root,
+			"token.js",
+			`process.stdout.write(Buffer.from([0xff, 0x0a]));
+process.stdout.write("token ghp_ZQXJ01");
+setTimeout(() => process.stdout.write("23456789ZQXJabcdef\\n"), 100);`,
+		);
+		const result = await tool(root).run({ interpreter: "node", script: relative });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		const log = readFileSync(detailsOf(result).stdoutPath as string);
+		deepStrictEqual(log, Buffer.concat([Buffer.from([0xff, 0x0a]), Buffer.from("token [redacted:github-token]\n")]));
+	});
+
 	it("keeps the stream's final bytes in the result tail", async () => {
 		const root = workspace();
 		const sentinel = `FINAL-${randomBytes(6).toString("hex")}`;

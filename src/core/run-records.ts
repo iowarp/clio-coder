@@ -118,6 +118,7 @@ export interface RunManifest {
 	/** Actual leader outcome before any runner-level failure changed the effective exit code. */
 	leaderExit?: { code: number | null; signal: NodeJS.Signals | null } | null;
 	signal: string | null;
+	/** Bytes the script wrote. The logs hold them with credentials masked, so a log can differ in size. */
 	stdoutBytes: number;
 	stderrBytes: number;
 	logs: { stdout: string; stderr: string };
