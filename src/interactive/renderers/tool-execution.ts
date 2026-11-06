@@ -827,11 +827,12 @@ export function renderToolAwaitingApproval(
 	// The lead row already names a target it can show whole, so `target` only adds what that row cut.
 	const leadShowsTarget = view.target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(view.target);
 	// The axis is a level or a rule, not a requester, so the row says why the call stopped as a sentence.
-	const actionWords = `${view.actionClass.replaceAll("_", " ")} action`;
+	// What the call does in words (`runs a command`), not its class name (`execute action`).
+	const actionWords = actionClassWords(view.actionClass);
 	const why =
 		view.axis.kind === "autonomy"
-			? `${approvalAxisText(view)} asks before ${actionWords}s`
-			: `${approvalAxisText(view)} held this ${actionWords} for you`;
+			? `At ${approvalAxisText(view)}, Clio asks you before a call that ${actionWords}`
+			: `${approvalAxisText(view)} held this call for you; it ${actionWords}`;
 	lines.push(...indentAndWrap(toolMeta(why), width, false));
 	const facts = [
 		...(view.target !== undefined && view.target.length > 0 && !leadShowsTarget ? [["target", view.target]] : []),
@@ -853,7 +854,8 @@ export function renderToolAwaitingApproval(
  * for a standing rule that does not exist.
  */
 export function approvalAxisText(view: Pick<ApprovalRequestView, "axis">): string {
-	if (view.axis.kind === "autonomy") return `autonomy level ${view.axis.level}`;
+	// `default autonomy`, the setting's own words, rather than the field name `autonomy level default`.
+	if (view.axis.kind === "autonomy") return `${view.axis.level} autonomy`;
 	return safetyNetRailText(view.axis.ruleId);
 }
 

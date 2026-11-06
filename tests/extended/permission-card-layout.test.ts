@@ -77,7 +77,7 @@ for (const columns of [80, 120, 160]) {
 		const body = createPermissionOverlayBody(WRITE_VIEW);
 		const lines = plain(body.render(width));
 		for (const line of lines) ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${line}`);
-		strictEqual(lines[0], "± write · autonomy level default");
+		strictEqual(lines[0], "± write · default autonomy");
 		// The path is folded under its label, never cut: every token survives.
 		const joined = lines
 			.join(" ")
@@ -92,7 +92,7 @@ for (const columns of [80, 120, 160]) {
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
 		match(joined, /\[Enter\] allow\s+runs this one call \[Esc\] deny\s+skips it \[Alt\+X\] stop\s+ends the turn/u);
-		match(lines[0] ?? "", /autonomy level default/u);
+		match(lines[0] ?? "", /default autonomy/u);
 
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");
