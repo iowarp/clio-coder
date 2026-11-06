@@ -110,6 +110,19 @@ function renderInputWithDesignCursor(input: Input, width: number): string[] {
 		);
 }
 
+/** A prompt for a secret: what is typed shows as one dot per character, the way the target wizard's key field does. */
+const MASKED_PROMPT = /\b(?:api key|token|secret|password)\b/iu;
+
+function renderMaskedInput(input: Input, width: number): string[] {
+	const theme = clioTheme();
+	const typed = input.getValue().length;
+	const row =
+		typed > 0
+			? `${theme.fg("selectedOption", `${GLYPH.cursor} `)}${theme.fg("inputText", "•".repeat(typed))}`
+			: `${theme.fg("selectedOption", `${GLYPH.cursor} `)}${theme.fg("annotation", "type or paste; each character shows as •")}`;
+	return [fitRow(row, width)];
+}
+
 function createAuthDialogController(
 	title: string,
 	onCancel: () => void,
@@ -139,7 +152,7 @@ function createAuthDialogController(
 				...memo.rows,
 				// The label may carry a default id the operator is meant to read whole.
 				...wrapTextWithAnsi(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)), Math.max(1, width)),
-				...renderInputWithDesignCursor(input, width),
+				...(MASKED_PROMPT.test(promptLabel) ? renderMaskedInput(input, width) : renderInputWithDesignCursor(input, width)),
 			];
 		},
 		handleInput: (data) => input.handleInput(data),
