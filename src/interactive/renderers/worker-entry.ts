@@ -515,7 +515,8 @@ function cancelLines(entry: WorkerEntryState, width: number): string[] {
 	if (entry.result?.outcome !== "canceled" || isStopping(entry.result)) return [];
 	// The process's own signal note says how it was stopped, not who stopped it, so the card says only that it was.
 	const headline = workerFailureHeadline(entry.result.failureMessage);
-	const why = headline === null || /\bSIG[A-Z]+\b/u.test(headline) ? "cancelled" : headline;
+	// So does the worker's own note that its control channel closed, which is how a stop reaches a worker.
+	const why = headline === null || /\bSIG[A-Z]+\b|control channel closed/u.test(headline) ? "cancelled" : headline;
 	const task = entry.result.taskWorktree;
 	const placement = entry.result.placement;
 	const worktree =

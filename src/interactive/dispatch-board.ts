@@ -5,7 +5,11 @@ import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
 import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
-import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import {
+	completedRunCaveat,
+	NEVER_STARTED_WORDS,
+	workerFailureHeadline,
+} from "../domains/dispatch/failure-headline.js";
 import { fleetNodeTaskBrief } from "../domains/dispatch/fleet-node-prompt.js";
 import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
@@ -1423,7 +1427,12 @@ function councilMemberView(
 function memberWhy(row: DispatchBoardRow): { why?: string } {
 	if (!isTerminalStatus(row.status) || row.status === "completed") return {};
 	const why = workerFailureHeadline(terminalDetail(row));
-	return why === null ? {} : { why: sanitizeCallTargetText(why) };
+	if (why === null) return {};
+	// Inside a council the work that stopped is the council, whose own notice names the cause.
+	return {
+		why:
+			why === NEVER_STARTED_WORDS ? "it never started, because its council stopped first" : sanitizeCallTargetText(why),
+	};
 }
 
 /**
@@ -1650,6 +1659,10 @@ const COMPACT_CAVEAT_WORD: Readonly<Record<CompletedRunCaveat["kind"], string>> 
 
 /** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
 function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
+	// A plan whose worker steps finished with warnings reads as its card does, never as a clean done.
+	if (row.plan !== undefined && row.plan.state === "passed" && planWarnedStepCount(row.plan) > 0) {
+		return theme.fg("warning", `${GLYPH.warn} ${width >= NARROW_STATUS_WIDTH ? "done with warnings" : "warnings"}`);
+	}
 	const failure = completedRunFailure(row);
 	// The caveat replaces `done` rather than trailing it: the mark already says the run finished, and the status
 	// column stays narrow enough that the task beside it still reads.
@@ -2100,12 +2113,19 @@ function formatDispatchBoardBody(
 		kept[kept.length - 1] = cutRowWithEllipsis(lastKept, width);
 	}
 	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
+	// A plan's row opens nothing and its root is no dispatch run, so it offers neither Enter nor /view: its card in the
+	// transcript lists every step.
+	const plan = item?.kind === "run" && item.row.plan !== undefined;
 	const where = [
 		`${hidden} more rows`,
-		...(detailExpanded ? [] : [`${detailKey} for detail`]),
-		`/view dispatch:${detail.runId}`,
+		...(detailExpanded || plan ? [] : [`${detailKey} for detail`]),
+		...(plan ? [] : [`/view dispatch:${detail.runId}`]),
 	];
-	while (where.length > 1 && visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) > width) where.pop();
+	const fits = (): boolean => visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) <= width;
+	// The /view handle is the only way to the rows a narrow board cut, so the count shortens and Enter goes first.
+	if (!fits() && where.length > 2) where.splice(1, 1);
+	if (!fits()) where[0] = `${hidden} more`;
+	while (where.length > 1 && !fits()) where.pop();
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
