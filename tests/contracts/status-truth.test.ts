@@ -44,7 +44,11 @@ import {
 	topNotification,
 } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
-import { composerPhasePresentation, idleReadinessPresentation } from "../../src/interactive/footer/widgets.js";
+import {
+	composerPhasePresentation,
+	idleReadinessPresentation,
+	shellSettledPresentation,
+} from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
@@ -213,7 +217,9 @@ test("a retry backoff stays retrying with no failed receipt until exhaustion", (
 	strictEqual(machine.current().phase, "ended");
 	strictEqual(machine.current().summary?.stopReason, "error");
 	strictEqual((screen(panel).match(/✗ Failed/gu) ?? []).length, 1);
-	strictEqual((screen(panel).match(/\[error\]/gu) ?? []).length, 1);
+	// The failure row states the provider's words once, without the store's `[error]` marker beside its ✗.
+	strictEqual((screen(panel).match(/overloaded/gu) ?? []).length, 1);
+	doesNotMatch(screen(panel), /\[error\]/u);
 	match(screen(panel), /✗ Failed · [^\n]*2 retries/u);
 });
 
@@ -2000,4 +2006,27 @@ test("an idle route a worker already got answers from reads ready, not `no reque
 	const facts = { targetId: "mock", available: true, reason: "", health: "healthy" as const, lastStop: null };
 	match(idleReadinessPresentation(facts, 120).label, /no request yet/u);
 	strictEqual(idleReadinessPresentation({ ...facts, workerAnswered: true }, 120).label, "is ready");
+});
+
+test("a settled shell line leads the idle rail in the card's words and keeps the route's blocker beside it", () => {
+	const shell = { command: "make test", exitCode: 2, cancelled: false, killed: false, error: false };
+	const failed = shellSettledPresentation(shell, 120, 0, "Judge-model failed its last request");
+	strictEqual(failed.subject, "your shell");
+	match(failed.label, /^exited 2 · `make test` · Judge-model failed its last request · \/model to switch$/u);
+	const stopped = shellSettledPresentation({ ...shell, exitCode: null, cancelled: true, killed: true }, 120);
+	match(stopped.label, /^stopped · `make test` · killed after it ignored the stop$/u);
+	// At 40 columns the blocker and its way out leave together, never one without the other.
+	doesNotMatch(shellSettledPresentation(shell, 40, 0, "Judge-model failed its last request").label, /\/model/u);
+});
+
+test("a submission that never became a turn settles idle, not into the previous turn's ended state", () => {
+	const r = reducer();
+	r.apply({ type: "agent_start", turnId: "t1" });
+	r.apply({ type: "agent_end", messages: [] });
+	strictEqual(r.apply({ type: "submit_accepted" }).phase, "preparing");
+	strictEqual(r.apply({ type: "submit_settled" }).phase, "idle");
+});
+
+test("an empty composer after a failed turn offers the receipt's and the rail's ways forward", () => {
+	match(footerKeyHint(0, false, 120, "recover") ?? "", /^↑ recalls your prompt/u);
 });
