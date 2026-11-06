@@ -227,7 +227,7 @@ export async function probeAntigravityModelCatalog(
 
 const antigravityCodeRuntime: RuntimeDescriptor = {
 	id: "antigravity-code",
-	displayName: "Antigravity CLI — experimental local delegation",
+	displayName: "Antigravity CLI (experimental)",
 	kind: "subprocess",
 	tier: "subscription",
 	apiFamily: "external-agent-subprocess",
