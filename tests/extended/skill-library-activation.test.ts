@@ -60,7 +60,8 @@ it("activates every bundled skill from its native package in a workspace with pe
 		}
 		refresh(cwd);
 		const skills = loadSkills({ cwd }).items;
-		strictEqual(skills.length, 49);
+		// 51 since hpc-sweep (4556475b1) and hypothesis-workflow (c461e6204) joined their packs.
+		strictEqual(skills.length, 51);
 		const context = createContextTool({ getCwd: () => cwd });
 		for (const skill of skills) {
 			strictEqual(skill.source, "plugin", skill.name);
