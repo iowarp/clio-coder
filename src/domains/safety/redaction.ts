@@ -667,8 +667,19 @@ export class RedactedStringProjection {
 	private completed = false;
 	private committed = 0;
 	private prefix = "";
+	/** The source after `committed`, which no redaction has closed yet. */
+	private uncommitted = "";
+	/** The redacted open run `text` ends with. */
+	private openText = "";
 	private text = "";
 	private restartCount = 0;
+	/**
+	 * `prefix` in the pieces it was appended in, so the end of the text can be
+	 * read without flattening a long reply: loose pieces, and older ones joined
+	 * a few hundred at a time (#428).
+	 */
+	private joined: string[] = [];
+	private loose: string[] = [];
 
 	constructor(private readonly redact: (value: string) => string = redactSecretString) {}
 
@@ -682,14 +693,62 @@ export class RedactedStringProjection {
 		return this.restartCount;
 	}
 
+	/** The length of the last projection. */
+	get length(): number {
+		return this.prefix.length + this.openText.length;
+	}
+
+	/** The last projection from `from` on, read from its pieces so a long text is not flattened to take its end. */
+	textFrom(from: number): string {
+		if (from <= 0) return this.text;
+		let at = this.prefix.length;
+		if (from >= at) return this.openText.slice(from - at);
+		const parts = [this.openText];
+		for (const pieces of [this.loose, this.joined]) {
+			for (let index = pieces.length - 1; index >= 0; index -= 1) {
+				const piece = pieces[index] ?? "";
+				at -= piece.length;
+				if (at <= from) {
+					parts.push(piece.slice(from - at));
+					return parts.reverse().join("");
+				}
+				parts.push(piece);
+			}
+		}
+		return this.text.slice(from);
+	}
+
 	project(source: string, completed = false): string {
 		if (source === this.source && completed === this.completed) return this.text;
 		if (!source.startsWith(this.source)) {
 			this.committed = 0;
 			this.prefix = "";
+			this.uncommitted = source;
+			this.joined = [];
+			this.loose = [];
 			this.restartCount += 1;
+		} else {
+			this.uncommitted = source.slice(this.committed);
 		}
-		const tail = source.slice(this.committed);
+		return this.advance(source, completed);
+	}
+
+	/**
+	 * `project(source, completed)` for a source the caller knows is the last one
+	 * with `delta` appended, without comparing the two: that comparison read the
+	 * whole of a long streamed reply on every frame (#428).
+	 */
+	append(source: string, delta: string, completed = false): string {
+		if (delta.length === 0 && completed === this.completed) {
+			this.source = source;
+			return this.text;
+		}
+		this.uncommitted += delta;
+		return this.advance(source, completed);
+	}
+
+	private advance(source: string, completed: boolean): string {
+		const tail = this.uncommitted;
 		let through = 0;
 		// Whitespace after a non-flag token closes every credential pattern. A flag
 		// can consume the following token, so keep it buffered with its value (#428).
@@ -699,12 +758,20 @@ export class RedactedStringProjection {
 			if (!match[0].includes("-")) through = match.index + match[0].length;
 		}
 		if (through > 0) {
-			this.prefix += this.redact(tail.slice(0, through));
+			const piece = this.redact(tail.slice(0, through));
+			this.prefix += piece;
+			this.loose.push(piece);
+			if (this.loose.length >= 512) {
+				this.joined.push(this.loose.join(""));
+				this.loose = [];
+			}
 			this.committed += through;
 		}
 		// A committed token ends in whitespace, so the open run a hold reads is always in this uncommitted tail (#446).
 		const open = tail.slice(through);
-		this.text = this.prefix + this.redact(completed ? open : holdUnresolvedUserinfo(open));
+		this.uncommitted = open;
+		this.openText = this.redact(completed ? open : holdUnresolvedUserinfo(open));
+		this.text = this.prefix + this.openText;
 		this.source = source;
 		this.completed = completed;
 		return this.text;

@@ -224,4 +224,26 @@ export class AssistantProseProjection {
 		this.finalized = finalized;
 		return this.text + (!finalized && includePending ? this.filter.peek() : "");
 	}
+
+	/** The projected text so far, without the held grapheme. */
+	get projected(): string {
+		return this.text;
+	}
+
+	/**
+	 * `project(source, finalized)` for a source the caller knows is the last one
+	 * with `delta` appended, without reading either: comparing a long streamed
+	 * reply with its previous self cost a pass over the whole reply per frame
+	 * (#428). Returns the projected text this added, or null when the last
+	 * projection was finalized, which only a full `project` can restart.
+	 */
+	append(source: string, delta: string, finalized = true): string | null {
+		if (this.finalized) return null;
+		let added = this.filter.push(delta);
+		if (finalized) added += this.filter.flush();
+		this.text += added;
+		this.source = source;
+		this.finalized = finalized;
+		return added;
+	}
 }
