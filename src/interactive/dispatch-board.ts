@@ -2154,10 +2154,9 @@ export interface DispatchBoardView extends Component, RowBudgetedBody, GrowableB
 	/** Open or close the selected row's worker-progress detail. */
 	toggleDetail(): void;
 	detailExpanded(): boolean;
-	/** Whether Enter on the selected row opens the watch pane instead of its detail. */
 	/** Whether `w` can open the watch pane on the selected run. */
 	canWatch(): boolean;
-	/** Say which rows Enter takes to the watch pane; only a session with a pane host has any. */
+	/** Say which rows `w` takes to the watch pane; only a session with a pane host has any. */
 	setWatchable(predicate: (row: DispatchBoardRow) => boolean): void;
 }
 

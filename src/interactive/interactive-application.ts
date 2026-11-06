@@ -1766,7 +1766,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				})
 			: null;
 	// The workers dock: the workers dashboard beside Clio, opened and hidden by
-	// the workers key, taken over for one run by Enter in the Fleet Runs board,
+	// the workers key, taken over for one run by `w` in the Fleet Runs board,
 	// `/panes show` and the panes tool through the shared operations object.
 	const watchPane =
 		mux && mux.mode !== "none" && deps.createWatchPane

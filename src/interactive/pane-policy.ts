@@ -6,7 +6,7 @@
  * nothing; the native surfaces (transcript, Alt+W board, footer) already carry
  * that state, and the v0.3/v0.4 behavior of opening a hidden viewer pane per
  * dispatch produced panes nobody had asked for. A pane opens only when the
- * operator names a run: Enter in the workers view, `/panes show`, or the
+ * operator names a run: `w` in the Fleet Runs board, `/panes show`, or the
  * `panes` tool acting on the conversation's behalf.
  *
  * The `dispatch` source is the seam for ever marking a dispatch watchable at

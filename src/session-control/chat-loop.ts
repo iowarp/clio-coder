@@ -1258,6 +1258,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emit({ type: "notice", level, surface: "footer", text, key });
 	};
 
+	/** An operator `/context compact` is between its start and its settled card. */
+	let operatorCompactionRunning = false;
+
 	/**
 	 * Transcript notices are first-class `notice` events, never fake
 	 * `message_end` assistant messages: a notice can never become a headless
@@ -1266,9 +1269,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * provider-failure paths) and RunAborted carries abort provenance to the
 	 * status reducer.
 	 */
-	/** An operator `/context compact` is between its start and its settled card. */
-	let operatorCompactionRunning = false;
-
 	const emitNotice = (
 		text: string,
 		level: ChatNoticeEvent["level"] = "info",
