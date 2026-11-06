@@ -2060,3 +2060,19 @@ test("every surface spells a key one way: modifiers title-cased in Ctrl, Alt, Sh
 	strictEqual(keyName("R"), "R");
 	strictEqual(fitHintEntries([{ key: "alt+x", verb: "stop" }], 80), "[Alt+X] stop");
 });
+
+test("a council card names the task in its pinned headline and does not repeat it in the plan section", async () => {
+	const { planFacts, planHeadline, readDispatchPlan } = await import("../../src/interactive/dispatch-plan-summary.js");
+	const plan = readDispatchPlan(
+		[
+			"dispatch plan: topology=council tasks=2",
+			'  1. role=fast agent=reviewer task_preview="review the mean function"',
+			"     council label=fast",
+			'  2. role=deep agent=reviewer task_preview="review the mean function"',
+			"     council label=deep",
+		].join("\n"),
+	);
+	ok(plan !== null);
+	strictEqual(planHeadline(plan), "Council of 2 (fast, deep) answers: review the mean function");
+	ok(!planFacts(plan).some((fact) => fact.label === "task"));
+});
