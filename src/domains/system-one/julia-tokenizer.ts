@@ -1,7 +1,5 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { loadPinnedAsset } from "../../core/pinned-asset.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { registerExactBound } from "./profiles.js";
 import type { Question } from "./types.js";
@@ -40,15 +38,10 @@ let loading: Promise<boolean> | null = null;
 /** Fetches, verifies and registers the counter once per process; false leaves the byte proof in place. */
 export function loadJuliaTokenizer(): Promise<boolean> {
 	loading ??= (async () => {
-		const path = juliaTokenizerPath();
-		let bytes: Buffer | null = existsSync(path) ? readFileSync(path) : null;
-		if (bytes === null || sha256(bytes) !== SHA256) {
-			const response = await fetch(SOURCE, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-			if (!response.ok) throw new Error(`Julia-1 tokenizer download failed: HTTP ${response.status}`);
-			bytes = Buffer.from(await response.arrayBuffer());
-			if (sha256(bytes) !== SHA256) throw new Error("Julia-1 tokenizer download does not match its pinned hash");
-			safeResourceWrite(path, bytes);
-		}
+		const bytes = await loadPinnedAsset(
+			{ label: "the Julia-1 tokenizer", url: SOURCE, sha256: SHA256, path: juliaTokenizerPath() },
+			{ timeoutMs: DOWNLOAD_TIMEOUT_MS },
+		);
 		const count = createBpeCounter(JSON.parse(bytes.toString("utf8")) as TokenizerFile);
 		registerExactBound("julia-1", (question, options) => juliaBound(question, options, count));
 		return true;
@@ -58,10 +51,6 @@ export function loadJuliaTokenizer(): Promise<boolean> {
 		return false;
 	});
 	return loading;
-}
-
-function sha256(bytes: Uint8Array): string {
-	return createHash("sha256").update(bytes).digest("hex");
 }
 
 function juliaBound(question: Question, options: ReadonlyArray<string>, count: TokenCount): string | null {
