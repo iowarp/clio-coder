@@ -318,8 +318,16 @@ export interface RunCommandOptions {
 	share?: boolean;
 }
 
+/** Whether an operator-started run began, waits in the queue for a slot, or never started. */
+export type DispatchAdmission = "started" | "queued" | "refused";
+
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
+	/**
+	 * Told once, at admission, whether the run started, was queued or never started, so a surface that answers
+	 * before the run ends (ACP) says "started" only for a run that did.
+	 */
+	onAdmission?: (admission: DispatchAdmission) => void;
 	/** Resolve a named target before the external workspace warning is shown. */
 	runtimeForTarget?: (targetId: string) => string | null;
 	/** Live session board, snapshotted before operator run admission. */
@@ -396,6 +404,15 @@ function standingLimits(ctx: SlashCommandContext): { turnConstraints?: TurnConst
 	return turnConstraints !== undefined ? { turnConstraints } : {};
 }
 
+/** The first admission a run reports; later reports, including the fallback "refused" once it ends, are ignored. */
+function admissionSignal(): { promise: Promise<DispatchAdmission>; resolve: (admission: DispatchAdmission) => void } {
+	let resolve: (admission: DispatchAdmission) => void = () => {};
+	const promise = new Promise<DispatchAdmission>((settle) => {
+		resolve = settle;
+	});
+	return { promise, resolve };
+}
+
 /** Longer than an admission that finds a free slot takes, so a run that was never held up says nothing. */
 const QUEUED_RUN_NOTICE_MS = 600;
 
@@ -415,28 +432,41 @@ async function runAttributed(
 	share: boolean,
 ): Promise<void> {
 	const { dispatch, notice, bus } = deps;
-	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
-	if (deps.turnConstraints !== undefined) request = { ...request, turnConstraints: deps.turnConstraints };
-	// Nothing else in the transcript says a run is waiting for a slot, since its card opens when it starts.
-	let queuedRunId: string | null = null;
-	const stopWatchingQueue = bus?.subscribe("run.enqueued", (payload) => {
-		if (payload.agentId === request.agentId && payload.requestOrigin === "user") queuedRunId = payload.runId;
-	});
-	const stopWatchingStart = bus?.subscribe("run.started", (payload) => {
-		if (payload.runId === queuedRunId) queuedRunId = null;
-	});
-	const queuedNotice = setTimeout(() => {
-		if (queuedRunId === null) return;
-		notice("info", `${request.agentId} is queued for a worker slot and starts when one frees · /fleet shows the queue`);
-	}, QUEUED_RUN_NOTICE_MS);
-	queuedNotice.unref?.();
-	const stopQueueWatch = (): void => {
-		clearTimeout(queuedNotice);
-		stopWatchingQueue?.();
-		stopWatchingStart?.();
+	// Admission is told exactly once, so a caller that answers on it never says "started" for a run that never did.
+	let admission: DispatchAdmission | null = null;
+	const admit = (next: DispatchAdmission): void => {
+		if (admission !== null) return;
+		admission = next;
+		deps.onAdmission?.(next);
 	};
+	let runId: string | null = null;
+	let stopQueueWatch = (): void => {};
 	try {
+		const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
+		if (deps.turnConstraints !== undefined) request = { ...request, turnConstraints: deps.turnConstraints };
+		// Nothing else in the transcript says a run is waiting for a slot, since its card opens when it starts.
+		let queuedRunId: string | null = null;
+		const stopWatchingQueue = bus?.subscribe("run.enqueued", (payload) => {
+			if (payload.agentId === request.agentId && payload.requestOrigin === "user") queuedRunId = payload.runId;
+		});
+		const stopWatchingStart = bus?.subscribe("run.started", (payload) => {
+			if (payload.runId === queuedRunId) queuedRunId = null;
+		});
+		const queuedNotice = setTimeout(() => {
+			if (queuedRunId === null) return;
+			notice("info", `${request.agentId} is queued for a worker slot and starts when one frees · /fleet shows the queue`);
+			// Every run is enqueued first; one still waiting here was admitted, so its caller need not wait for the slot.
+			admit("queued");
+		}, QUEUED_RUN_NOTICE_MS);
+		queuedNotice.unref?.();
+		stopQueueWatch = (): void => {
+			clearTimeout(queuedNotice);
+			stopWatchingQueue?.();
+			stopWatchingStart?.();
+		};
 		const handle = await dispatch.dispatch(request);
+		runId = handle.runId;
+		admit("started");
 		stopQueueWatch();
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
@@ -470,12 +500,18 @@ async function runAttributed(
 	} catch (err) {
 		stopQueueWatch();
 		const msg = err instanceof Error ? err.message : String(err);
-		if (err instanceof AdmissionCanceledError) {
+		if (admission === "started" && runId !== null) {
+			// The run began, so it has a record to inspect; this is its failure, not a refusal to start.
+			notice("error", `${request.agentId} failed: ${msg} · /view dispatch:${runId}`);
+		} else if (err instanceof AdmissionCanceledError) {
 			notice("info", `${request.agentId} cancelled before it started, so nothing ran`);
 		} else {
 			// Nothing started, so this is a refusal to start and has no run to inspect.
 			notice("error", `${command} refused: ${msg.replace(/^dispatch:\s*/u, "")}`);
 		}
+	} finally {
+		// Whatever ended the attempt before admission, it did not start.
+		admit("refused");
 	}
 }
 
@@ -1002,6 +1038,11 @@ export interface SessionCommandContext {
 	 * prompt, as it always has.
 	 */
 	holdReplyFor?: (operation: Promise<void>) => void;
+	/**
+	 * A surface that answers before a dispatch command's run ends (ACP) waits on its admission, so a run that never
+	 * started reads as the refusal its notice states, never as started.
+	 */
+	awaitDispatchStart?: (admission: Promise<DispatchAdmission>) => void;
 	/**
 	 * Apply a thinking level named on the command line. Returns why it was
 	 * refused so the caller can say so, because the level the operator typed may
@@ -1908,25 +1949,35 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "run") return;
 			const { agentId, task, options } = command;
 			ctx.echoOperatorCommand?.(command.source);
+			const start = admissionSignal();
 			void (async () => {
-				await handleRun(
-					agentId,
-					task,
-					{
-						dispatch: ctx.dispatch,
-						...(ctx.getDecisionBoard ? { getDecisionBoard: ctx.getDecisionBoard } : {}),
-						...(ctx.getAgentRoleFacts ? { getAgentRoleFacts: ctx.getAgentRoleFacts } : {}),
-						io: ctx.io,
-						notice: ctx.notice,
-						runtimeForTarget: (id) => ctx.providers.getTarget(id)?.runtime ?? null,
-						bus: ctx.bus,
-						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
-						...standingLimits(ctx),
-					},
-					options,
-				);
+				try {
+					await handleRun(
+						agentId,
+						task,
+						{
+							onAdmission: start.resolve,
+							dispatch: ctx.dispatch,
+							...(ctx.getDecisionBoard ? { getDecisionBoard: ctx.getDecisionBoard } : {}),
+							...(ctx.getAgentRoleFacts ? { getAgentRoleFacts: ctx.getAgentRoleFacts } : {}),
+							io: ctx.io,
+							notice: ctx.notice,
+							runtimeForTarget: (id) => ctx.providers.getTarget(id)?.runtime ?? null,
+							bus: ctx.bus,
+							...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
+							...standingLimits(ctx),
+						},
+						options,
+					);
+				} catch (error) {
+					// A throw before admission is a run that never started; say so instead of losing it.
+					ctx.notice("error", `run did not start: ${error instanceof Error ? error.message : String(error)}`);
+				} finally {
+					start.resolve("refused");
+				}
 				ctx.render?.();
 			})();
+			ctx.awaitDispatchStart?.(start.promise);
 		},
 	},
 	{
@@ -1967,22 +2018,32 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "delegate") return;
 			ctx.echoOperatorCommand?.(command.source);
 			const share = command.share === true;
+			const start = admissionSignal();
 			void (async () => {
-				await handleDelegate(
-					command.agentId,
-					command.task,
-					{
-						dispatch: ctx.dispatch,
-						io: ctx.io,
-						notice: ctx.notice,
-						bus: ctx.bus,
-						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
-						...standingLimits(ctx),
-					},
-					{ share, readOnly: command.readOnly === true },
-				);
+				try {
+					await handleDelegate(
+						command.agentId,
+						command.task,
+						{
+							onAdmission: start.resolve,
+							dispatch: ctx.dispatch,
+							io: ctx.io,
+							notice: ctx.notice,
+							bus: ctx.bus,
+							...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
+							...standingLimits(ctx),
+						},
+						{ share, readOnly: command.readOnly === true },
+					);
+				} catch (error) {
+					// A throw before admission is a delegation that never started; say so instead of losing it.
+					ctx.notice("error", `delegate did not start: ${error instanceof Error ? error.message : String(error)}`);
+				} finally {
+					start.resolve("refused");
+				}
 				ctx.render?.();
 			})();
+			ctx.awaitDispatchStart?.(start.promise);
 		},
 	},
 	{

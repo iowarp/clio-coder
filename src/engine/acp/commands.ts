@@ -545,7 +545,7 @@ export function invokeAcpCommand(
 			);
 	}
 	const pending: Promise<void>[] = [];
-	const ctx = sessionCommandContext(host, notice, push, pending);
+	const ctx = sessionCommandContext(host, notice, push, pending, rule.name);
 	let outcome: ReturnType<typeof dispatchSlashCommand>;
 	try {
 		outcome = dispatchSlashCommand(parsed, ctx);
@@ -585,6 +585,7 @@ function sessionCommandContext(
 	notice: (level: NoticeLevel, text: string) => void,
 	push: (text: string) => void,
 	pending: Promise<void>[],
+	commandName: string,
 ): SlashCommandContext {
 	const submitTurn = host.submitTurn;
 	// A context operation the operator stopped settles its own canonical
@@ -657,6 +658,16 @@ function sessionCommandContext(
 			pending.push(
 				operation.catch((error: unknown) => {
 					notice("error", `command failed: ${error instanceof Error ? error.message : String(error)}`);
+				}),
+			);
+		},
+		// The reply waits for admission, not the run: a run that never started already left its refusal as a line.
+		awaitDispatchStart: (admission) => {
+			pending.push(
+				admission.then((started) => {
+					if (started === "started") push(`${commandName} started; progress arrives as _clio-coder/event dispatch kinds`);
+					else if (started === "queued")
+						push(`${commandName} queued for a worker slot; progress arrives as _clio-coder/event dispatch kinds`);
 				}),
 			);
 		},
