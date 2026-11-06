@@ -462,7 +462,9 @@ async function runAttributed(
 			notice("error", `${request.agentId} ${STALLED_RUN_HEADLINE} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const why = workerFailureHeadline(receipt.failureMessage) ?? `exit code ${receipt.exitCode}`;
-			notice("error", `${request.agentId} failed: ${why} · ${view}`);
+			// A run that hit its reply limit timed out, as its card header says; `failed` named a second state for it.
+			const ended = receipt.outcome === "timed_out" ? "timed out" : "failed";
+			notice("error", `${request.agentId} ${ended}: ${why} · ${view}`);
 		}
 		if (share) shareReceipt(request.agentId, receipt, deps);
 	} catch (err) {
