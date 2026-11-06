@@ -164,6 +164,11 @@ export async function runClioCommand(
 				}
 			}
 		}
+		// The shell is on screen and taking keys, so Stage 1 loads in slices instead of one long block.
+		if (terminalLease) {
+			const { preloadStage1 } = await import("../entry/stage1-preload.js");
+			await preloadStage1(terminalLease.abortSignal);
+		}
 		const result = await deps.bootOrchestrator({
 			...options,
 			...(startupSettings ? { startupSettings } : {}),

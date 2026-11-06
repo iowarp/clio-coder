@@ -23,7 +23,9 @@ export interface DispatchedRunsSettlement {
 }
 
 function dispatchedBy(dispatch: Pick<DispatchContract, "listRuns">, rootRunId: string): RunEnvelope[] {
-	return dispatch.listRuns().filter((run) => run.id !== rootRunId && run.lineage?.rootRunId === rootRunId);
+	// The ledger selects before it copies rows; a fake that ignores `where` is still filtered here.
+	const ours = (run: Readonly<RunEnvelope>): boolean => run.id !== rootRunId && run.lineage?.rootRunId === rootRunId;
+	return dispatch.listRuns(undefined, ours).filter(ours);
 }
 
 /**

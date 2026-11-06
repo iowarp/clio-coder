@@ -106,8 +106,8 @@ export function recoverAbandonedRuns(ledger: Ledger, options: RunRecoveryOptions
 	let sealed = 0;
 	const unsettled: RunRecoverySummary["unsettled"] = [];
 	const localHost = hostname();
-	for (const row of ledger.list()) {
-		if (!isOpenRunRow(row)) continue;
+	// Only open rows can be abandoned; selecting them first spares cloning every finished row in the ring.
+	for (const row of ledger.list({ where: isOpenRunRow })) {
 		// Transport-scoped liveness: the recorded pid is always a process on
 		// the orchestrator host that created the row (for ssh runs it is the
 		// local ssh client, i.e. the channel itself). On a shared filesystem

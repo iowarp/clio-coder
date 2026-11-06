@@ -33,7 +33,7 @@ import { sumFacts } from "../../src/core/telemetry/pricing.js";
 import { beginCall, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { registerResearchTraceSink } from "../../src/core/telemetry/research-trace.js";
 import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js";
-import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 
@@ -604,6 +604,29 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 		ok(settled?.k === "call.settled");
 		strictEqual(settled.data.stop.detail, "api_key=[redacted:assignment]");
 		ok(rows.some((row) => row.k === "journal.segment_closed"));
+	} finally {
+		await journal.close();
+		await rm(sessionDirectory, { recursive: true, force: true });
+	}
+});
+
+test("a line this process wrote reads back unvalidated only while its bytes are unchanged", async () => {
+	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const journal = await openCallJournal({ directory: sessionDirectory, context, writer });
+	try {
+		telemetryHub().emit("session.opened", {}, context);
+		await journal.flush();
+		const bytes = await readFile(join(sessionDirectory, "journal.jsonl"));
+		const lines = bytes.toString("utf8").split("\n").slice(0, -1);
+		const index = lines.findIndex((line) => line.includes('"k":"session.opened"'));
+		ok(index > 0);
+		strictEqual(scanTelemetrySegment(bytes).rows[index]?.kind, "record");
+		// One byte off the envelope's version, with the CRC recomputed so only schema validation can catch it.
+		const json = (lines[index] as string).slice(0, -10).replace('"v":1', '"v":0');
+		lines[index] = `${json}\t#${crc32(Buffer.from(json, "utf8"))}`;
+		const edited = scanTelemetrySegment(Buffer.from(`${lines.join("\n")}\n`, "utf8"));
+		strictEqual(edited.corruptOffset, null);
+		deepStrictEqual(edited.rows[index], { kind: "skipped", reason: "invalid-record" });
 	} finally {
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });
