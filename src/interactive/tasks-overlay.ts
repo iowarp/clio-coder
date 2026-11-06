@@ -12,7 +12,14 @@ import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { stampLocal } from "./format-time.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
-import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
+import {
+	buildHint,
+	cutRowWithEllipsis,
+	fitRow,
+	selectionLabel,
+	selectionMark,
+	showClioOverlayFrame,
+} from "./overlay-frame.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme, fitUnits, GLYPH } from "./theme/index.js";
 
@@ -509,12 +516,6 @@ export interface OpenTasksOverlayOptions {
 /** An operator task title typed and stepped out of with Esc, offered again by the next `a`. */
 let keptTaskTitle = "";
 
-/** A row the window ends inside of, closed with the ellipsis so the cut never reads as the end of a sentence. */
-function cutRow(line: string, width: number): string {
-	const kept = truncateToWidth(line, Math.max(1, width - 2), "", false).trimEnd();
-	return `${kept} ${dim(GLYPH.ellipsis)}`;
-}
-
 class TasksOverlayBody implements Component, RowBudgetedBody {
 	private history: ReadonlyArray<SessionTaskHistoryBoard> = [];
 	private artifacts: ReadonlyArray<SessionArtifact> = [];
@@ -593,7 +594,7 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 		const lastShown = window.at(-1);
 		const next = layout.lines[end];
 		if (cut && lastShown !== undefined && next !== undefined && next.trim().length > 0) {
-			window[window.length - 1] = cutRow(lastShown, safeWidth);
+			window[window.length - 1] = cutRowWithEllipsis(lastShown, safeWidth);
 		}
 		return [...window, fitRow(position, safeWidth), ...pinned];
 	}

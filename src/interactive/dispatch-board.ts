@@ -29,6 +29,7 @@ import { createFleetPlanRuns, type FleetPlanRuns, type FleetPlanRunView } from "
 import { type RouteFirstOutput, routeFirstOutput } from "./footer/silence-note.js";
 import {
 	centeredWindow,
+	cutRowWithEllipsis,
 	fitHintEntryList,
 	type GrowableBody,
 	type HintEntry,
@@ -799,7 +800,11 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 		theme.fg("body", planProgressText(plan, true, false)),
 		...(plan.finishedAtMs === null
 			? []
-			: [`${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText ?? "no model calls")}`]),
+			: [
+					plan.costText === null
+						? theme.fg("body", "no model calls")
+						: `${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText)}`,
+				]),
 	];
 	const gutter = " ".repeat(CARD_KV_KEY_WIDTH + 1);
 	const steps = planStepLines(theme, plan, Math.max(1, contentWidth - gutter.length));
@@ -1163,9 +1168,13 @@ const TASK_ISLAND_APPROVAL_LABEL_ROOM = 14;
  * `not responding for 9s · Clio stops it in 5s` keeps `not responding`; cutting at the first word left `not`, and
  * `no output for 31s` left `no`, words that say the opposite of what is happening.
  */
-function compactStatusWords(words: string): string {
+function compactStatusWords(words: string, room: number): string {
 	const clause = words.split(" · ")[0] ?? words;
-	return clause.replace(/ for \d[\dhms:.]*$/u, "") || clause;
+	const unclocked = clause.replace(/ for \d[\dhms:.]*$/u, "") || clause;
+	if (unclocked.length <= room) return unclocked;
+	// Down to the phrase's head word, `waiting` for `waiting on the model`, but never a bare negation.
+	const head = unclocked.split(" ");
+	return head.slice(0, /^(?:no|not)$/u.test(head[0] ?? "") ? 2 : 1).join(" ");
 }
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
@@ -1222,7 +1231,15 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		visibleWidth(statusLabel) -
 		(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0);
 	if (row.progress?.awaitingApproval !== true && nameRoom < Math.min(visibleWidth(agentLabel), 8)) {
-		statusLabel = compactStatusWords(statusLabel);
+		statusLabel = compactStatusWords(
+			statusLabel,
+			width -
+				2 -
+				dispatchRowPrefix(theme, row).width -
+				Math.min(visibleWidth(agentLabel), 8) -
+				3 -
+				(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0),
+		);
 	}
 	const statusStr = theme.fg(
 		failure !== null
@@ -1696,7 +1713,10 @@ export function runTableRows(
 	const anyAccount = runs.some((row) => routeWeeklyQuota(row, quota) !== null);
 	const fixed: TableColumn[] = [
 		...(cursor ? [{ label: "", min: 1, max: 1, priority: 10 }] : []),
-		{ label: "status", priority: 10 },
+		// Under sixty columns one long state (`✗ stopped responding`) would set the column for every row and leave the
+		// names a stub, so the column keeps the common words whole and cuts a long one on the ellipsis; the selected
+		// run's detail under the table states it in full.
+		{ label: "status", priority: 10, ...(width < 60 ? { max: 11 } : {}) },
 		{ label: "agent", priority: 9, max: 30 },
 		...(anyNode ? [{ label: "node", priority: 2, max: 12 }] : []),
 		{ label: "elapsed", align: "right" as const, priority: 6, tone: "muted" as const },
@@ -1812,7 +1832,13 @@ export function runTableRows(
 	const lead = fixed
 		.slice(0, agentIndex)
 		.reduce(
-			(sum, _column, index) => sum + Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index])))) + gap,
+			(sum, column, index) =>
+				sum +
+				Math.min(
+					column.max ?? Number.POSITIVE_INFINITY,
+					Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index])))),
+				) +
+				gap,
 			0,
 		);
 	const agentColumn = fixed[agentIndex];
@@ -1835,6 +1861,8 @@ function cellText(cell: string | TableCell | undefined): string {
 
 /** The run identity the board's detail rule names: the agent and its run id. */
 function runRuleTitle(row: DispatchBoardRow): string {
+	// A plan is known by its name; its root id is for the shell command its detail gives.
+	if (row.plan !== undefined) return agentDisplayLabel(row);
 	return `${agentDisplayLabel(row)} · ${row.runId}`;
 }
 
@@ -2030,8 +2058,7 @@ function formatDispatchBoardBody(
 	const nextRow = detail.body[kept.length];
 	const lastKept = kept.at(-1);
 	if (lastKept !== undefined && nextRow !== undefined && /^\s/u.test(stripPaint(nextRow)) && nextRow.trim().length > 0) {
-		kept[kept.length - 1] =
-			`${truncateToWidth(lastKept, Math.max(1, width - 2), "", false).trimEnd()} ${theme.fg("annotation", GLYPH.ellipsis)}`;
+		kept[kept.length - 1] = cutRowWithEllipsis(lastKept, width);
 	}
 	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
 	const where = [

@@ -792,10 +792,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				const steps = preview.waves.reduce((total, wave) => total + wave.steps.length, 0);
 				const first = preview.waves[0]?.steps.length ?? 0;
 				const shape =
-					first >= steps
-						? `${steps} ${steps === 1 ? "step" : "steps"} started`
-						: `${steps} steps, ${first} started and ${steps - first} waiting their turn`;
-				deps.notify("info", `plan ${preview.name}: ${shape} · /fleet follows it`, "fleet-run:started");
+					first >= steps ? `${steps} ${steps === 1 ? "step" : "steps"} running` : `${first} of ${steps} steps running`;
+				deps.notify("info", `plan ${preview.name} started · ${shape} · /fleet follows it`, "fleet-run:started");
 			},
 			onNotice: (text) => deps.stderr(`plan ${preview.name}: ${text}\n`),
 		};
