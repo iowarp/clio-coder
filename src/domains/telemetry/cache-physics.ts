@@ -57,11 +57,15 @@ export function firstDivergentSection(previous: CacheRequestStructure, current: 
 	return current.entries.length < previous.entries.length ? "messages" : null;
 }
 
-/** rePrefilledTokens × (input rate − cache-read rate), labelled the way the call's own cost is (#434). */
+/**
+ * rePrefilledTokens × (input rate − cache-read rate), labelled the way the call's own cost is (#434). Both sides keep
+ * the whole prompt, so a tiered rate map prices them on one tier. The re-prefilled tokens are priced as input even when
+ * the provider billed them as a cache write, so the figure never depends on a cache-write rate the target left out.
+ */
 function bill(
 	rePrefilled: Fact<number>,
 	pricing: EffectivePricing,
-	usage: { uncached: number | null; cacheRead: number | null; cacheWrite: number | null },
+	promptTokens: number | null,
 ): NonNullable<CachePhysics["bill"]> {
 	if (rePrefilled.kind !== "measured") return { usd: rePrefilled, pricedBy: "none" };
 	if (pricing.pricedBy === "free")
@@ -70,12 +74,10 @@ function bill(
 			pricedBy: "free",
 			...(pricing.freeRule !== undefined ? { freeRule: pricing.freeRule } : {}),
 		};
-	if (pricing.rates === null || pricing.pricedBy === "none" || usage.uncached === null || usage.cacheRead === null)
+	if (pricing.rates === null || pricing.pricedBy === "none" || promptTokens === null)
 		return { usd: { kind: "unknown", reason: "provider-omitted" }, pricedBy: "none" };
-	// Moving the re-prefilled tokens to the cache-read rate keeps the prompt size, so a tiered rate map prices both
-	// sides on one tier and the difference is exactly tokens × (input rate − cache-read rate).
-	const actual = { input: usage.uncached, output: 0, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite ?? 0 };
-	const cached = { ...actual, input: actual.input - rePrefilled.value, cacheRead: actual.cacheRead + rePrefilled.value };
+	const actual = { input: rePrefilled.value, output: 0, cacheRead: promptTokens - rePrefilled.value };
+	const cached = { input: 0, output: 0, cacheRead: promptTokens };
 	const usd = Math.max(
 		0,
 		calculatePricingCostUsd(pricing.rates, actual) - calculatePricingCostUsd(pricing.rates, cached),
@@ -125,7 +127,9 @@ export function cachePhysics(input: {
 			};
 		else if (uncached === null || cacheRead === null) rePrefilled = { kind: "unknown", reason: "provider-omitted" };
 		else if (previous.promptTokens !== null)
-			rePrefilled = counted(Math.max(0, Math.min(uncached, previous.promptTokens - cacheRead)));
+			// Anthropic bills a re-prefilled prefix as a cache write and reports only the tail past the last breakpoint as
+			// input, so the prompt not read from cache is input plus cache write; OpenAI shapes report no write (#434).
+			rePrefilled = counted(Math.max(0, Math.min(uncached + (cacheWrite ?? 0), previous.promptTokens - cacheRead)));
 	} else if (structure && !structure.answered) {
 		divergence = notApplicable;
 		rePrefilled = counted(0);
@@ -134,7 +138,11 @@ export function cachePhysics(input: {
 		cache: {
 			firstDivergentSection: divergence,
 			rePrefilledTokens: rePrefilled,
-			bill: bill(rePrefilled, pricing, { uncached, cacheRead, cacheWrite }),
+			bill: bill(
+				rePrefilled,
+				pricing,
+				uncached === null || cacheRead === null ? null : uncached + cacheRead + (cacheWrite ?? 0),
+			),
 		},
 		baseline,
 	};

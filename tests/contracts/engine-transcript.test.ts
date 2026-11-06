@@ -8,12 +8,21 @@ import {
 	normalizeContext,
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { createEngineAgent, replaceEngineMessages, setEngineSystemPrompt } from "../../src/engine/agent.js";
+import {
+	createEngineAgent,
+	engineLiveTurnRequest,
+	replaceEngineMessages,
+	setEngineSystemPrompt,
+} from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { estimateInputTokensFromContext } from "../../src/engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
 import type { AgentMessage, AgentTool } from "../../src/engine/types.js";
-import { runSideQuestion, SIDE_QUESTION_SYSTEM_PROMPT } from "../../src/session-control/side-question.js";
+import {
+	runSideQuestion,
+	SIDE_QUESTION_INSTRUCTION,
+	SIDE_QUESTION_SYSTEM_PROMPT,
+} from "../../src/session-control/side-question.js";
 
 const user: AgentMessage = { role: "user", content: "retained task", timestamp: 1 };
 const tool: AgentTool = {
@@ -144,6 +153,27 @@ test("side questions replace session prompts and tool declarations without chang
 			thinkingLevel: "off",
 		});
 		strictEqual(answer.text, "side answer");
+		deepStrictEqual(agent.state.messages, before);
+		// On the live turn's prefix the round keeps the session prompt and tools and asks in the tail (S12).
+		provider.setResponses([
+			(context) => {
+				strictEqual(getCurrentSystemPrompt(context.messages), "working policy");
+				deepStrictEqual(
+					getCurrentTools(context.messages).map((declared) => declared.name),
+					["inspect"],
+				);
+				ok(JSON.stringify(context.messages.at(-1)).includes(SIDE_QUESTION_INSTRUCTION));
+				return fauxAssistantMessage("live answer");
+			},
+		]);
+		const live = await runSideQuestion({
+			model: agent.state.model,
+			messages: agent.state.messages,
+			question: "where?",
+			thinkingLevel: "off",
+			livePrefix: (history, tail, signal) => engineLiveTurnRequest(agent, history, tail, signal),
+		});
+		strictEqual(live.text, "live answer");
 		deepStrictEqual(agent.state.messages, before);
 	} finally {
 		provider.unregister();

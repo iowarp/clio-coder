@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import {
 	createAssistantMessageEventStream,
 	createInitialSystemMessage,
@@ -11,6 +11,7 @@ import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { compactOpenAI, providerCheckpointCompatibility } from "./apis/openai-compaction.js";
 import { normalizeContext, resolvedRequestContext } from "./context.js";
 import { omitImageBlocks } from "./image-context.js";
+import { withLiveToolDeclarations } from "./live-declarations.js";
 import type { CodexConfiguration, ProviderCheckpointHandle } from "./types.js";
 
 /**
@@ -381,6 +382,38 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		agent,
 		state: () => agent.state,
 		requestCorrelationId: (message) => correlations.get(message),
+	};
+}
+
+/**
+ * What the agent's next turn would send with `messages` (system and tool declarations included) and `tail` after
+ * them, so an out-of-turn round reads that turn's cached prefix: the same system prompt, tools, session key, pinned
+ * prompt split and Codex configuration. Send it with `engineMainStreamSimple` so the cache retention matches too.
+ * Nothing is sent and the agent is not touched (S12).
+ */
+export async function engineLiveTurnRequest(
+	agent: Agent,
+	messages: ReadonlyArray<AgentMessage>,
+	tail: ReadonlyArray<AgentMessage>,
+	signal?: AbortSignal,
+): Promise<{ context: Context; options: Record<string, unknown> }> {
+	let current = [
+		...withLiveToolDeclarations(structuredClone([...messages]), agent.state.systemPrompt, agent.state.tools),
+		...tail,
+	];
+	if (agent.transformContext) current = await agent.transformContext(current, signal);
+	const context = normalizeContext({ messages: await agent.convertToLlm(current) });
+	const pinned = pinnedPrefixes.get(agent);
+	const codex = codexConfigurations.get(agent);
+	return {
+		context,
+		options: {
+			...(agent.sessionId !== undefined ? { sessionId: agent.sessionId } : {}),
+			...(pinned ? { clioCoderPinnedPrefix: pinned } : {}),
+			...(codex ? { codexConfiguration: codex } : {}),
+			...(agent.thinkingBudgets !== undefined ? { thinkingBudgets: agent.thinkingBudgets } : {}),
+			...(agent.transport !== undefined ? { transport: agent.transport } : {}),
+		},
 	};
 }
 

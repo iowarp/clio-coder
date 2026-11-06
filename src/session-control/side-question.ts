@@ -14,9 +14,10 @@ import { openCallScope } from "../domains/telemetry/call-scope.js";
  * produces reaches the session JSONL, the transcript panel, the context ledger,
  * or the task board, and it never becomes a turn.
  *
- * The call goes through the same `src/engine/ai.ts` simple-stream seam compaction
- * uses for its summarization call, which is what keeps this outside the turn state
- * machine without adding an engine seam of its own. Tools are never sent.
+ * The call goes through `src/engine/ai.ts`'s simple-stream seams, which keeps it
+ * outside the turn state machine. Given the live turn's prefix, `/btw` sends the
+ * turn's own system prompt and tool declarations and asks in the message tail, so
+ * it reads the turn's cached prefix (S12); its tools are declared but never run.
  */
 
 import type { ThinkingLevel } from "../core/defaults.js";
@@ -30,21 +31,37 @@ import {
 	speaksOutputConfigFormat,
 } from "../core/response-schema.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
-import { streamSimple } from "../engine/ai.js";
+import { mainStreamSimple, streamSimple } from "../engine/ai.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { stripDeadToolCallMarkup } from "../engine/loop-guard.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
 
 /**
- * The whole system prompt for the round. The session's own compiled prompt is
- * deliberately not reused: it carries the working agreement for a turn that
- * edits files and calls tools, and this round does neither.
+ * The whole system prompt for a round sent without the live turn's prefix, which
+ * then has no working agreement or tools of its own to reuse.
  */
 export const SIDE_QUESTION_SYSTEM_PROMPT = [
 	"You are answering a side question from the operator of a coding session.",
 	"The conversation above is read-only context. Answer the question directly and briefly.",
 	"Do not continue the conversation, do not propose edits, and do not call tools.",
 ].join(" ");
+
+/**
+ * The instruction a round on the live turn's prefix carries in its message tail instead. The session prompt and
+ * tools stay byte-identical to the turn's, so the round reads the turn's cached prefix (S12).
+ */
+export const SIDE_QUESTION_INSTRUCTION = [
+	"Side question from the operator, answered beside the session rather than as a turn.",
+	"The conversation above is read-only context. Answer the question directly and briefly.",
+	"Do not continue the task, do not propose edits, and do not call tools: none of them can run here.",
+].join(" ");
+
+/** What the live turn would send for `messages` with `tail` after them, built by the turn's own agent (S12). */
+export type LiveTurnPrefix = (
+	messages: AgentMessage[],
+	tail: AgentMessage[],
+	signal?: AbortSignal,
+) => Promise<{ context: Parameters<typeof streamSimple>[1]; options: Record<string, unknown> }>;
 
 /** Default output budget for the round. A side question wants an answer, not an essay. */
 export const SIDE_QUESTION_MAX_TOKENS = 2048;
@@ -98,6 +115,12 @@ export interface SideQuestionInput extends SideCallAuth {
 	 * result (#415).
 	 */
 	midTurn?: boolean;
+	/**
+	 * The live turn's request builder. With it the round sends that turn's system prompt, tool declarations, cache
+	 * key and retention, and appends its instruction in the message tail, so it reads the turn's cached prefix
+	 * instead of paying for a prefix of its own (S12). A tool call it answers with is never run.
+	 */
+	livePrefix?: LiveTurnPrefix;
 }
 
 /**
@@ -107,6 +130,7 @@ export interface SideQuestionInput extends SideCallAuth {
  * machine. Only the system prompt and the appended message differ.
  */
 export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question"> {
+	/** Ignored with `livePrefix`, which sends the live turn's own prompt. */
 	systemPrompt: string;
 	/** The one message appended to the read-only copy of the history. */
 	userText: string;
@@ -148,6 +172,8 @@ export interface SideQuestionResult {
 	aborted: boolean;
 	/** The model the provider said answered, absent where the wire reports none. */
 	reportedModel?: string;
+	/** The answer carried a real tool call, which an out-of-turn round never runs. */
+	calledTool?: boolean;
 }
 
 /** Where an out-of-turn round was sent, and who the provider says answered it. */
@@ -221,24 +247,31 @@ function textFromMessage(message: unknown): string {
  */
 export async function runSideQuestion(input: SideQuestionInput): Promise<SideQuestionResult> {
 	const { question, ...rest } = input;
-	const ask = (userText: string) => runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText });
+	const ask = (userText: string) =>
+		runOutOfTurnRound(
+			rest.livePrefix
+				? { ...rest, systemPrompt: "", userText: `${SIDE_QUESTION_INSTRUCTION}\n\n${userText}` }
+				: { ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText },
+		);
 	// History that used tools, sent with none declared, can make a model imitate
 	// a call as text; the operator gets the reason, not the markup (#415). An
 	// aborted partial was never a finished call, so it keeps only its prose.
 	const first = await ask(question);
 	if (first.aborted) return { ...first, text: stripDeadToolCallMarkup(first.text) };
-	if (!onlyToolCallMarkup(first.text)) return first;
+	if (!reachedForTool(first)) return first;
 	// A question the conversation cannot answer makes the model reach for a tool.
 	// One retry that says no tool exists turns that into an answer or a named gap.
 	const retry = await ask(`${question}\n\n${SIDE_QUESTION_NO_TOOLS_RETRY}`);
 	const usage = sumSideQuestionUsage(first.usage, retry.usage);
 	const text = stripDeadToolCallMarkup(retry.text);
 	if (retry.aborted) return { ...retry, usage, text };
-	return { ...retry, usage, text: onlyToolCallMarkup(retry.text) ? SIDE_QUESTION_TOOL_CALL_NOTE : retry.text };
+	return { ...retry, usage, text: reachedForTool(retry) ? SIDE_QUESTION_TOOL_CALL_NOTE : retry.text };
 }
 
-function onlyToolCallMarkup(text: string): boolean {
-	return text.length > 0 && stripDeadToolCallMarkup(text).length === 0;
+/** An answer that is only a tool call: imitated markup in the text, or a real call with no prose beside it. */
+function reachedForTool(result: SideQuestionResult): boolean {
+	const prose = stripDeadToolCallMarkup(result.text);
+	return prose.length === 0 && (result.text.length > 0 || result.calledTool === true);
 }
 
 function sumSideQuestionUsage(a: SideQuestionUsage | null, b: SideQuestionUsage | null): SideQuestionUsage | null {
@@ -258,7 +291,7 @@ function sumSideQuestionUsage(a: SideQuestionUsage | null, b: SideQuestionUsage 
 }
 
 export const SIDE_QUESTION_NO_TOOLS_RETRY =
-	"No tools exist in this side question, so a tool call cannot run. Answer from the conversation above. If it does not contain the answer, say so in one sentence and name the file or command that would answer it.";
+	"No tool can run in this side question, so a tool call does nothing. Answer from the conversation above. If it does not contain the answer, say so in one sentence and name the file or command that would answer it.";
 
 export const SIDE_QUESTION_TOOL_CALL_NOTE =
 	"The model answered with a tool call, which a side question cannot run. Ask this in the main conversation, where tools are available.";
@@ -382,26 +415,40 @@ async function runRound(
 			options.samplingParams = { response_format: responseFormatFor(binding.dialect, binding.schema, binding.name) };
 		}
 
-		const context = {
-			systemPrompt: input.systemPrompt,
-			messages: [
-				// Pi 0.86 stores prompt/tool declarations in history. This tool-free
-				// round has its own prompt and must not inherit those declarations.
-				...closePendingToolCalls(
-					input.messages.filter((message) => message.role !== "system"),
-					input.midTurn === true,
-				),
-				{ role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() },
-			],
-		};
+		const asked = { role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() };
+		const live = input.livePrefix
+			? await input.livePrefix(
+					closePendingToolCalls(input.messages, input.midTurn === true),
+					[asked as AgentMessage],
+					input.signal,
+				)
+			: undefined;
+		input.signal?.throwIfAborted();
+		const context = live
+			? live.context
+			: {
+					systemPrompt: input.systemPrompt,
+					messages: [
+						// Pi 0.86 stores prompt/tool declarations in history. This tool-free
+						// round has its own prompt and must not inherit those declarations.
+						...closePendingToolCalls(
+							input.messages.filter((message) => message.role !== "system"),
+							input.midTurn === true,
+						),
+						asked,
+					],
+				};
+		// The turn's own key, pinned split and transport, under the round's own cap, auth and signal.
+		const sent = live ? { ...live.options, ...options } : options;
 
 		tracking.start(input.model.api);
+		const send = live ? mainStreamSimple : streamSimple;
 		const stream = () =>
 			scope.withContext(() =>
-				streamSimple(
+				send(
 					input.model,
 					context as unknown as Parameters<typeof streamSimple>[1],
-					options as unknown as Parameters<typeof streamSimple>[2],
+					sent as unknown as Parameters<typeof streamSimple>[2],
 				),
 			);
 		// The round's own scope stays innermost, so a journaled round keeps its call either way.
@@ -428,11 +475,15 @@ async function runRound(
 					...(facts ? { callId: facts.callId, attemptId: facts.attemptId } : {}),
 				});
 				const reported = responseModelIdObservationFromRecord(event.message as never, "not-observed");
+				const content = (event.message as { content?: unknown }).content;
+				const calledTool =
+					Array.isArray(content) && content.some((block) => (block as { type?: unknown })?.type === "toolCall");
 				return {
 					text: answer,
 					usage,
 					aborted: false,
 					...(reported.state === "reported" ? { reportedModel: reported.reportedModelId } : {}),
+					...(calledTool ? { calledTool } : {}),
 				};
 			}
 			if (event.type === "error") {
