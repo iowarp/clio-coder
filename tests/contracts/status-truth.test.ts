@@ -2435,6 +2435,7 @@ test("the exit summary counts a finished worker whose validation failed as Fleet
 	match(card, /Workers: 2 validation failed · 1 succeeded · 1 cancelled/u, card);
 	const detail = renderExitSummary(collector.snapshot(), "report", 120, false).join("\n");
 	match(detail, /Workers \(4; 2 validation failed, 1 succeeded, 1 cancelled\)/u, detail);
+	strictEqual(detail.match(/verifier validation failed/gu)?.length, 2, "the timeline says what each run's record says");
 });
 
 test("a chained verify step naming no declared check seals no failed validation and leaves an earlier pass standing", async () => {

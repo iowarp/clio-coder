@@ -222,6 +222,17 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 	};
 }
 
+/**
+ * A settled run's timeline words. The run's settle event said `succeeded` before its sealed record was read, and the
+ * timeline kept `verifier succeeded` beside a Workers row that read `validation failed` from that record, so a success
+ * is claimed only once the record has been read, in the words the Workers row uses.
+ */
+function settledWords(worker: ExitSummarySnapshot["workers"][number]): string {
+	if (worker.outcome !== "succeeded") return worker.outcome;
+	if (worker.record === "not available") return "finished, run record not read";
+	return worker.against ?? worker.outcome;
+}
+
 /** This visit's account. All ledger folds and record reads happen while events arrive. */
 export function createExitSummaryCollector(deps: CollectorDeps) {
 	const now = deps.now ?? (() => performance.now());
@@ -244,12 +255,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const files = new Map<string, number>();
 	const workerPaths = new Map<string, Set<string>>();
 	const failures = new Map<string, number>();
-	const timeline: Array<{ elapsedMs: number; text: string }> = [];
+	/** A settled run's entry names its run, so its words are read from the run's record when the snapshot is taken. */
+	const timeline: Array<{ elapsedMs: number; text: string; runId?: string }> = [];
 	let timelineOmitted = 0;
 	const permissions = { granted: 0, denied: 0, expired: 0, blocked: 0 };
 	const unattended = { questions: 0, permissions: 0 };
-	const highlight = (text: string): void => {
-		timeline.push({ elapsedMs: Math.max(0, now() - startedAt), text });
+	const highlight = (text: string, runId?: string): void => {
+		timeline.push({ elapsedMs: Math.max(0, now() - startedAt), text, ...(runId !== undefined ? { runId } : {}) });
 		if (timeline.length > 32) {
 			timeline.shift();
 			timelineOmitted += 1;
@@ -300,7 +312,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		const worker = workers.get(run.runId);
 		if (!worker) return;
 		workers.set(run.runId, { ...worker, outcome: run.outcome });
-		highlight(`${run.agentId} ${run.outcome}`);
+		highlight(`${run.agentId} ${run.outcome}`, run.runId);
 		noteFiles(deps.dispatch.observedRunWrites?.(run.runId) ?? [], process.cwd(), workerPaths.get(run.runId));
 	};
 	// Like the git hook line, this account is the process's, never reset with the visit.
@@ -489,7 +501,10 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				fileChanges: [...files].map(([path, count]) => ({ path, count })).sort((a, b) => a.path.localeCompare(b.path)),
 				permissions: { ...permissions },
 				unattended: { ...unattended },
-				timeline: [...timeline],
+				timeline: timeline.map(({ elapsedMs, text, runId }) => {
+					const worker = runId !== undefined ? workers.get(runId) : undefined;
+					return { elapsedMs, text: worker ? `${worker.agent} ${settledWords(worker)}` : text };
+				}),
 				timelineOmitted,
 				workers: [...workers.values()],
 				compactions,
