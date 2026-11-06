@@ -23,6 +23,7 @@ import {
 	usageGap,
 	usageLineNotes,
 	usageSaysNothing,
+	usageStillRunning,
 	usageUnmeasured,
 } from "./usage-words.js";
 
@@ -139,14 +140,34 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
  */
 function sessionUsageNotes(view: TelemetryView): string[] {
 	const quantity = (metric: FactMetric) => view.quantity(factRef({ scope: "session", owner: view.sessionId, metric }));
-	const { notes } = usageLineNotes([
-		{ label: "in", quantity: quantity("input") },
-		{ label: "out", quantity: quantity("output") },
-		{ label: "cache read", quantity: quantity("cacheRead") },
-		{ label: "cache write", quantity: quantity("cacheWrite") },
-		{ label: "reasoning", quantity: quantity("reasoning") },
-	]);
+	const { notes } = usageLineNotes(
+		[
+			{ label: "in", quantity: quantity("input") },
+			{ label: "out", quantity: quantity("output") },
+			{ label: "cache read", quantity: quantity("cacheRead") },
+			{ label: "cache write", quantity: quantity("cacheWrite") },
+			{ label: "reasoning", quantity: quantity("reasoning") },
+		],
+		callsStillRunning(view),
+	);
 	return notes;
+}
+
+/** When this process started, as the journal writes times: every attempt it began after this, it also settles. */
+const PROCESS_STARTED_AT = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString();
+
+/**
+ * The session's own calls still out on the wire. This process settles every attempt it starts, so an unsettled one it
+ * began is in flight; one an earlier process began and never settled is a call with no usage data. `/usage` opened
+ * during a wait counted the waiting call as one that had no usage data.
+ */
+function callsStillRunning(view: TelemetryView): number {
+	try {
+		return view.calls({ dispositions: ["incomplete"], from: PROCESS_STARTED_AT }).matched;
+	} catch {
+		// A read model that cannot list calls leaves every gap as the read model counts it.
+		return 0;
+	}
 }
 
 /**
@@ -265,7 +286,11 @@ function sessionValue(view: TelemetryView, elapsed: string | null): string {
 	const unknown = [tokensKnown ? null : "tokens", costShown && !costKnown ? "cost" : null].filter(
 		(part) => part !== null,
 	);
-	const why = tokensKnown ? null : usageCoverage(usageGap(totals.tokens));
+	const running = callsStillRunning(view);
+	const missing = usageCoverage(Math.max(0, usageGap(totals.tokens) - running));
+	const why = tokensKnown
+		? null
+		: [missing, running > 0 ? usageStillRunning(running) : null].filter((part) => part !== null).join(", ") || null;
 	const gap =
 		unknown.length > 0 ? `${unknown.join(" and ")} ${USAGE_NOT_MEASURED}${why === null ? "" : ` (${why})`}` : null;
 	return [
