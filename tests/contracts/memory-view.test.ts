@@ -200,7 +200,10 @@ test("detail names the subject, reach, track record and evidence without treatin
 	match(detail, /Every repository/u);
 	match(detail, /Not when: The repository moved to a different test runner/u);
 	// Outcomes count once per session, and the source session's own hold is named apart.
-	match(detail, /Delivered in 1 sessions; held in 1 later sessions and in the session it came from; contradicted in 0/u);
+	match(
+		detail,
+		/Delivered in 1 sessions; held in 1 later sessions and in the session it came from; contradicted after delivery in 0 sessions/u,
+	);
 	match(detail, /Last verified 2026-10-14T03:00:00.000Z/u);
 	match(detail, /do not prove.*changed the result/u);
 	doesNotMatch(detail, /0\.97|Confidence/u);

@@ -311,7 +311,7 @@ The ACP child pushes session telemetry and the server forwards it to every windo
 | Plan | `plan` with up to 100 entries (`pending`, `in_progress`, `completed`, `blocked`, each with an optional reason) and a truncation flag | The Plan section and the Plan drill-in's plan. A truncated plan shows `The plan shows its first 100 steps.` Without a pushed plan, both read the plan from `_clio-coder/session/board`. |
 | Workspace | `_meta["clio-coder/workspace"]` on the `session/new`, `session/load` and `session/resume` results and on `session_info_update` | The Workspace section. |
 | Trust | `_meta["clio-coder/trust"]` on the same results | The notice under [Untrusted project files](#untrusted-project-files). |
-| Notices | `agent_message_chunk` frames marked `_meta["clio-coder/notice"]` | The task's newest 32 distinct notice texts. |
+| Notices | `agent_message_chunk` frames and `session_info_update` frames marked `_meta["clio-coder/notice"]` | The task's newest 32 distinct notice texts. |
 | Budget | `_meta["clio-coder/budget"]` on a cost ceiling notice | The budget banner described below. |
 | Memory guardian | `_meta["clio-coder/memory"]` on `session_info_update` | A `Memory reviewing` or `Memory waiting` mark beside the task title while the session is live. |
 | Eggs | `_meta["clio-coder/eggs"]` on `session_info_update` | The rubber duck badge while `/eggs` has it active. |

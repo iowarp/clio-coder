@@ -91,6 +91,32 @@ export function buildUserText(
 	return `${buildPreviousContextPrefix(previousContextText)}${activeRequestPrefix}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
 }
 
+/** The checkpoint format and literal rules, shared by the portable template and the live-prefix request. */
+const CHECKPOINT_FORMAT = COMPACTION_USER_PROMPT_TEMPLATE.slice(
+	COMPACTION_USER_PROMPT_TEMPLATE.indexOf("Use this EXACT format:"),
+);
+
+/**
+ * The one message appended to the live main request when the summary is asked inside its cached prefix (T4). The
+ * model has the real transcript above it, so the message names the boundary instead of quoting the history: what is
+ * replaced, where the retained messages start, and the split turn's active request when the cut falls inside it.
+ */
+export function buildLivePrefixUserText(input: {
+	/** Opening of the first message that stays verbatim; absent when the whole conversation is replaced. */
+	retainedFrom?: string;
+	/** The operator's request of a turn the cut splits. */
+	activeRequest?: string;
+	instructions?: string;
+}): string {
+	const scope = input.retainedFrom
+		? `Everything above the message that opens as quoted below will be replaced by the checkpoint you write now. That message and everything after it stay in the context verbatim, so the checkpoint covers only what comes before it.\n<retained-from>\n${input.retainedFrom}\n</retained-from>`
+		: "The whole conversation above will be replaced by the checkpoint you write now.";
+	const active = input.activeRequest?.trim()
+		? `\n\nThe cut falls inside the operator's active turn. Its request:\n<active-request>\n${input.activeRequest}\n</active-request>\nThe ## Goal section must state this request. Record the tool calls already made in this turn, their results, file paths, commands, errors and decisions in Progress and Critical Context.`
+		: "";
+	return `<compaction-request>\nThis message comes from Clio's context engine, not from the operator. Stop the task here: do not call tools, do not answer or continue the conversation, and reply with the checkpoint only.\n\n${scope}${active}\n\nA summary that an earlier compaction placed in the conversation is canonical. Carry forward every still-relevant constraint, decision, active skill, unresolved task, exact identifier and file-state detail from it.\n</compaction-request>\n\nCreate a structured context checkpoint another LLM will use to continue the work.\n\n${CHECKPOINT_FORMAT}${buildOperatorInstructions(input.instructions)}`;
+}
+
 export function buildTurnPrefixUserText(
 	conversationText: string,
 	instructions?: string,

@@ -668,14 +668,26 @@ export class RedactedStringProjection {
 	private committed = 0;
 	private prefix = "";
 	private text = "";
+	private restartCount = 0;
 
 	constructor(private readonly redact: (value: string) => string = redactSecretString) {}
+
+	/** How much of the last projection later appends leave as it is: the redacted tokens already closed. */
+	get settledLength(): number {
+		return this.prefix.length;
+	}
+
+	/** How often a source that did not extend the last one restarted the projection, which drops the settled text. */
+	get restarts(): number {
+		return this.restartCount;
+	}
 
 	project(source: string, completed = false): string {
 		if (source === this.source && completed === this.completed) return this.text;
 		if (!source.startsWith(this.source)) {
 			this.committed = 0;
 			this.prefix = "";
+			this.restartCount += 1;
 		}
 		const tail = source.slice(this.committed);
 		let through = 0;

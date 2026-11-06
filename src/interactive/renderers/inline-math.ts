@@ -21,15 +21,9 @@ export function holdInlineMath(text: string, hold: string): string {
 	return text
 		.split("\n")
 		.map((line) => {
-			const opened = FENCE.exec(line);
-			if (fence !== null) {
-				if (opened?.[1]?.startsWith(fence)) fence = null;
-				return line;
-			}
-			if (opened !== null) {
-				fence = opened[1]?.charAt(0).repeat(3) ?? null;
-				return line;
-			}
+			const outside = fence === null;
+			fence = mathFenceAfter(line, fence);
+			if (!outside || fence !== null) return line;
 			if (!line.includes("$")) return line;
 			// Inline code is copied through untouched: split on backtick runs and set only the parts outside them.
 			return line
@@ -40,6 +34,16 @@ export function holdInlineMath(text: string, hold: string): string {
 				.join("");
 		})
 		.join("\n");
+}
+
+/**
+ * The fence `holdInlineMath` holds open after `line`, given the one open before it. Its state runs across the
+ * whole text, so a caller that sets a text in pieces cuts only where this is null (#428).
+ */
+export function mathFenceAfter(line: string, fence: string | null): string | null {
+	const opened = FENCE.exec(line);
+	if (fence !== null) return opened?.[1]?.startsWith(fence) ? null : fence;
+	return opened === null ? null : (opened[1]?.charAt(0).repeat(3) ?? null);
 }
 
 function setMath(whole: string, source: string, hold: string): string {
