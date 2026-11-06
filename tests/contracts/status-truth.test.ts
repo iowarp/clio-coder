@@ -2103,3 +2103,29 @@ test("every surface spells a key one way: modifiers title-cased in Ctrl, Alt, Sh
 	strictEqual(keyName("R"), "R");
 	strictEqual(fitHintEntries([{ key: "alt+x", verb: "stop" }], 80), "[Alt+X] stop");
 });
+
+test("a plan step's worker card names its step, whether the step is announced before or after its run starts", () => {
+	const stream = createWorkerStream({ readResult: () => null });
+	const start = (runId: string) =>
+		stream.started({
+			runId,
+			assignmentId: "fleet-root",
+			attempt: 0,
+			requestOrigin: "user",
+			agentId: "coder",
+			task: "map the stats",
+			targetId: "local",
+			wireModelId: "worker-model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			pid: 1,
+		} as never);
+	strictEqual(stream.tagPlanStep("run-a", "map-stats"), null, "a step named before its run waits for it");
+	strictEqual(start("run-a")?.entry.planStep, "map-stats");
+	const second = start("run-b")?.entry;
+	strictEqual(second?.planStep, undefined);
+	strictEqual(stream.tagPlanStep("run-b", "check-readme")?.entry, second);
+	strictEqual(second?.planStep, "check-readme");
+	const header = renderWorkerEntryLines(second as never, 100, {}).map(stripTerminalSequences)[0] ?? "";
+	match(header, /coder · check-readme/u);
+});

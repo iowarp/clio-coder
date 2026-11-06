@@ -79,6 +79,8 @@ export interface InteractiveSubscriptionsDeps {
 export interface InteractiveSubscriptions {
 	/** Live worker blocks folded from the dispatch lifecycle, keyed by assignment. */
 	workers: WorkerStream;
+	/** Name the plan step a worker run executes, and repaint its card. */
+	tagPlanStep(runId: string, stepId: string): void;
 	dispose(): void;
 }
 
@@ -297,6 +299,9 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	let disposed = false;
 	return {
 		workers,
+		tagPlanStep(runId, stepId): void {
+			folded(() => workers.tagPlanStep(runId, stepId))(undefined);
+		},
 		dispose(): void {
 			if (disposed) return;
 			disposed = true;

@@ -150,6 +150,8 @@ export interface WorkerEntryState {
 	 * the operator watched it under, rather than as one unattributed voice.
 	 */
 	council?: { group: string; label: string; color?: string; round: number };
+	/** The plan step this run executes, so sibling steps sharing one agent and one task read apart. */
+	planStep?: string;
 	result?: WorkerRunResultSummary;
 	/** Agent origin: the tool call whose execution spawned this run. */
 	parentToolCallId?: string;
@@ -181,6 +183,11 @@ export interface WorkerStreamOptions {
 
 export interface WorkerStream {
 	started(payload: DispatchStartedPayload): WorkerStreamChange | null;
+	/**
+	 * Name the plan step a run executes. The plan announces a step's run around the time the run starts, in either
+	 * order, so a step named before its run is held until the run arrives.
+	 */
+	tagPlanStep(runId: string, stepId: string): WorkerStreamChange | null;
 	progress(payload: DispatchProgressPayload): WorkerStreamChange | null;
 	completed(payload: DispatchCompletedPayload): WorkerStreamChange | null;
 	failed(payload: DispatchFailedPayload): WorkerStreamChange | null;
@@ -282,6 +289,8 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 	 * the operator is already reading.
 	 */
 	const progressByAssignment = new Map<string, WorkerProgressFold>();
+	/** Plan steps named before their run started. */
+	const pendingPlanSteps = new Map<string, string>();
 
 	/** Copy the canonical projection onto the entry fields the block renders. */
 	const applyProgress = (entry: WorkerEntryState, fold: WorkerProgressFold): void => {
@@ -381,11 +390,24 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				pending: true,
 				...(payload.council !== undefined ? { council: { ...payload.council } } : {}),
 				...(payload.parentToolCallId !== undefined ? { parentToolCallId: payload.parentToolCallId } : {}),
+				...(pendingPlanSteps.has(runId) ? { planStep: pendingPlanSteps.get(runId) as string } : {}),
 			};
+			pendingPlanSteps.delete(runId);
 			byAssignment.set(assignmentId, entry);
 			assignmentByRun.set(runId, assignmentId);
 			progressByAssignment.set(assignmentId, progress);
 			return { kind: "created", entry };
+		},
+
+		tagPlanStep(runId, stepId): WorkerStreamChange | null {
+			const entry = currentEntryForRun(runId);
+			if (entry === undefined) {
+				pendingPlanSteps.set(runId, stepId);
+				return null;
+			}
+			if (entry.planStep === stepId) return null;
+			entry.planStep = stepId;
+			return { kind: "updated", entry };
 		},
 
 		progress(payload): WorkerStreamChange | null {
@@ -439,6 +461,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			attemptByAssignment.clear();
 			assignmentByRun.clear();
 			progressByAssignment.clear();
+			pendingPlanSteps.clear();
 		},
 	};
 }
