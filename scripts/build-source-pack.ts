@@ -10,35 +10,44 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
+import { promisify } from "node:util";
+import { brotliCompress, constants as zlibConstants } from "node:zlib";
 import { SOURCE_PACK_RELATIVE_PATH } from "../src/core/source-pack.js";
 import { reportBuildStage } from "./build-output.js";
 import { planSourcePack } from "./source-pack-plan.mjs";
 
 const MAGIC = "CLIOSRC1";
+const brotliCompressAsync = promisify(brotliCompress);
 
-/** The 8-byte magic, a u32 LE index length, the JSON index, then one brotli stream per member. */
-function encodeSourcePack(paths: ReadonlyArray<string>, readMember: (path: string) => Buffer): Buffer {
-	const blobs: Buffer[] = [];
+/**
+ * The 8-byte magic, a u32 LE index length, the JSON index, then one brotli
+ * stream per member. Members compress concurrently on the libuv pool; the
+ * layout follows the sorted path order, so the bytes match a serial encode.
+ */
+async function encodeSourcePack(paths: ReadonlyArray<string>, readMember: (path: string) => Buffer): Promise<Buffer> {
+	const members = await Promise.all(
+		[...paths].sort().map(async (path) => {
+			const bytes = readMember(path);
+			const blob = await brotliCompressAsync(bytes, {
+				params: {
+					[zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+					[zlibConstants.BROTLI_PARAM_SIZE_HINT]: bytes.length,
+				},
+			});
+			return { path, size: bytes.length, blob };
+		}),
+	);
 	const files: Array<{ path: string; offset: number; length: number; size: number }> = [];
 	let offset = 0;
-	for (const path of [...paths].sort()) {
-		const bytes = readMember(path);
-		const blob = brotliCompressSync(bytes, {
-			params: {
-				[zlibConstants.BROTLI_PARAM_QUALITY]: 11,
-				[zlibConstants.BROTLI_PARAM_SIZE_HINT]: bytes.length,
-			},
-		});
-		files.push({ path, offset, length: blob.length, size: bytes.length });
-		blobs.push(blob);
+	for (const { path, size, blob } of members) {
+		files.push({ path, offset, length: blob.length, size });
 		offset += blob.length;
 	}
 	const index = Buffer.from(JSON.stringify({ version: 1, files }), "utf8");
 	const header = Buffer.alloc(MAGIC.length + 4);
 	header.write(MAGIC, 0, "latin1");
 	header.writeUInt32LE(index.length, MAGIC.length);
-	return Buffer.concat([header, index, ...blobs]);
+	return Buffer.concat([header, index, ...members.map((member) => member.blob)]);
 }
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -46,10 +55,7 @@ const startedAt = performance.now();
 const plan = planSourcePack(root);
 const target = join(root, SOURCE_PACK_RELATIVE_PATH);
 mkdirSync(dirname(target), { recursive: true });
-writeFileSync(
-	target,
-	encodeSourcePack(plan.packed, (path) => readFileSync(join(root, path))),
-);
+writeFileSync(target, await encodeSourcePack(plan.packed, (path) => readFileSync(join(root, path))));
 // npm honors a nested .npmignore even under a `files` allowlist. This one is
 // generated beside the pack so the two always agree, and it is gitignored.
 const sourceDir = join(root, "src");

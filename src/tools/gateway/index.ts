@@ -95,7 +95,7 @@ export interface GatewayToolDeps {
 const DESCRIPTION =
 	'Discover builtin, extension and MCP capabilities. op="find" searches; an exact name adds its schema. op="describe" returns a schema; op="call" runs it with args under its own admission; op="chain" runs tool steps. Put capability at top level, its parameters in args. After an argument error, describe the capability before retrying. Chain syntax: op="describe", capability="gateway"; gateway ops are not chain capabilities. Discovery grants no authority.';
 
-export const gatewayToolSurface = {
+export const gatewayToolSurface: ToolSurface = {
 	name: ToolNames.Gateway,
 	description: DESCRIPTION,
 	parameters: Type.Object({
@@ -123,7 +123,7 @@ export const gatewayToolSurface = {
 	}),
 	baseActionClass: "read",
 	executionMode: "sequential",
-} satisfies ToolSurface;
+};
 
 /** A read-only turn starts only MCP servers trusted as read, before any call reaches admission (Z1). */
 function mcpLaunchOptions(options: ToolInvokeOptions | undefined): McpLaunchOptions {

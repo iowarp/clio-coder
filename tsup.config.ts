@@ -130,7 +130,18 @@ export default defineConfig({
 	sourcemap: false,
 	metafile: true,
 	clean: true,
-	dts: false,
+	// The extension author types ship as self-contained bundled declarations,
+	// so an installed extension type-checks without the loose src/ graph or
+	// Clio's bundled devDependencies, and that source can live in the source
+	// pack. package.json `exports` and the scaffold's tsconfig paths name these
+	// files. tsup injects `baseUrl`, which TypeScript 6 rejects as deprecated.
+	dts: {
+		entry: {
+			"extensions/public-api": "src/domains/extensions/public-api.ts",
+			"extensions/testing": "src/domains/extensions/authoring/test-api.ts",
+		},
+		compilerOptions: { ignoreDeprecations: "6.0" },
+	},
 	// The web-tree-sitter runtime (bundled from @vscode/tree-sitter-wasm) is a
 	// UMD that probes `__filename` at module scope; the ESM shim supplies it.
 	shims: true,

@@ -20,7 +20,13 @@
 		"forceConsistentCasingInFileNames": true,
 		"isolatedModules": true,
 		"allowImportingTsExtensions": false,
-		"types": ["node"]
+		"types": ["node"],
+		// The package exports name the bundled declarations in dist/; the
+		// checkout's own templates type-check against source without a build.
+		"paths": {
+			"@iowarp/clio-coder/extensions": ["./src/domains/extensions/public-api.ts"],
+			"@iowarp/clio-coder/extensions/testing": ["./src/domains/extensions/authoring/test-api.ts"]
+		}
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist", "scripts"]

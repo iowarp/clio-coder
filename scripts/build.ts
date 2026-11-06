@@ -29,7 +29,7 @@ if (process.argv.includes("--build-worker")) {
 		// Only recognized informational lines are omitted; warnings and unfamiliar output stay visible.
 		if (/^CLI (?:Building entry:|Using tsconfig:|Using tsup config:|tsup v|Target:|Cleaning output folder)/u.test(plain))
 			return;
-		if (/^ESM (?:Build start$|⚡️? Build success in \d+ms$|dist\/\S+\s+[\d.]+ [KMGT]?B$)/u.test(plain)) return;
+		if (/^(?:ESM|DTS) (?:Build start$|⚡️? Build success in \d+ms$|dist\/\S+\s+[\d.]+ [KMGT]?B$)/u.test(plain)) return;
 		process.stdout.write(present(line));
 	};
 	child.stdout?.on("data", (chunk: Buffer) => {
