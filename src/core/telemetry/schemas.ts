@@ -1359,6 +1359,43 @@ export const HealthSamplesCapturedSchema = Type.Object(
 	closed,
 );
 /**
+ * The file kinds a write or edit records by extension. Anything else is `other`, so the vocabulary stays closed and
+ * an unusual extension cannot carry a name into the journal.
+ */
+export const TOOL_FILE_KINDS = [
+	"md",
+	"tex",
+	"bib",
+	"rst",
+	"txt",
+	"ipynb",
+	"py",
+	"r",
+	"jl",
+	"m",
+	"c",
+	"cpp",
+	"h",
+	"f90",
+	"rs",
+	"go",
+	"java",
+	"js",
+	"ts",
+	"sh",
+	"csv",
+	"tsv",
+	"json",
+	"yaml",
+	"toml",
+	"parquet",
+	"h5",
+	"nc",
+	"npy",
+	"other",
+] as const;
+export type ToolFileKind = (typeof TOOL_FILE_KINDS)[number];
+/**
  * One tool call as the model's tool wrapper settled it; ctx names the session or run, turn, tool call and the model
  * call that asked for it. tool.decided keeps the safety decision itself (#434).
  */
@@ -1376,9 +1413,21 @@ export const ToolSettledSchema = Type.Object(
 		terminate: Type.Optional(Type.Literal(true)),
 		/** Which refusal blocked it: a policy, an unapproved park, or a withheld duplicate of a succeeded call. */
 		blocked: Type.Optional(vocabulary(["refused", "denied-park", "redundant-repeat"])),
+		/**
+		 * The kind of file a write or edit targeted, from its extension alone; the path and name never enter the record.
+		 * `telemetry insights` reads it to tell prose from code and data work.
+		 */
+		fileExt: Type.Optional(vocabulary(TOOL_FILE_KINDS)),
+		/** The declared kind of the check a verify call ran (`src/tools/verify/catalog.ts`). */
+		checkKind: Type.Optional(vocabulary(["command", "numeric-compare", "perf-budget", "reproduce"])),
+		/** The skill a context call loaded; an operator-chosen name, so a share anonymizes it like a rule id. */
+		skill: Type.Optional(ExistingId),
+		/** The capabilities a gateway call or chain invoked, so the tool mix sees `data` or `web_fetch` behind it. */
+		capabilities: Type.Optional(Type.Array(ExistingId, { minItems: 1, maxItems: 32 })),
 	},
 	closed,
 );
+export type ToolSettled = Static<typeof ToolSettledSchema>;
 /**
  * One final safety disposition at a tool decision point, carrying its classification and policy facts. Commands,
  * arguments and policy prose stay out of the journal (#434).

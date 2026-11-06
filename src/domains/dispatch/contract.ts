@@ -472,7 +472,7 @@ export interface DispatchContract {
 	owner?(): DispatchOwner;
 
 	/** List runs from the ledger. Machine-wide: filter through ownership before surfacing rows. */
-	listRuns(status?: RunStatus): ReadonlyArray<RunEnvelope>;
+	listRuns(status?: RunStatus, where?: (run: Readonly<RunEnvelope>) => boolean): ReadonlyArray<RunEnvelope>;
 
 	/** Run/assignment state changes; subscribe before reading, and unsubscribe after observation. */
 	subscribeChanges?(listener: () => void): () => void;

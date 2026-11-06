@@ -1,0 +1,23 @@
+{
+	"mcpServers": {
+		"cite-nexus": {
+			"type": "stdio",
+			"command": "uvx",
+			"args": ["--from", "cite-nexus-mcp==0.2.3", "cite-nexus-mcp", "--no-env-file"],
+			"timeoutMs": 120000,
+			"toolActionClasses": {
+				"batch-citations": "read",
+				"enhance-citation": "read",
+				"find-open-access": "read",
+				"find-scholar-id": "read",
+				"get-citation": "read",
+				"list-providers": "read",
+				"paper-metrics": "read",
+				"related-papers": "read",
+				"resolve-paper": "read",
+				"search-papers": "read",
+				"verify-citation": "read"
+			}
+		}
+	}
+}

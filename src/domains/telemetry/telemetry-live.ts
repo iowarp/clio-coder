@@ -190,6 +190,8 @@ interface ProcessFollow {
 	/** Quota readings by record id: this host's process journals as the seed read them, then this process's appends. */
 	quota: Map<string, TelemetryRecord>;
 	accounts: { size: number; folded: Map<string, AccountQuota> } | null;
+	/** Whether the host's earlier process journals were asked for; only a quota reader needs them. */
+	hostSeeded: boolean;
 }
 
 function owned(owner: string): Owned {
@@ -628,7 +630,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	let processFollow: ProcessFollow | null = null;
 	const followProcess = (): ProcessFollow => {
 		if (processFollow) return processFollow;
-		const follow: ProcessFollow = { off: () => {}, health: null, quota: new Map(), accounts: null };
+		const follow: ProcessFollow = { off: () => {}, health: null, quota: new Map(), accounts: null, hostSeeded: false };
 		follow.off = subscribePersistedTelemetry(`process:${telemetryProcessId()}`, (_owner, event) => {
 			if (event.kind !== "appended") return;
 			const read: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
@@ -645,7 +647,17 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			}
 		});
 		processFollow = follow;
-		// Earlier processes on this host saw the account too; their readings are the baseline a delta needs (#434).
+		return follow;
+	};
+	/**
+	 * Earlier processes on this host saw the account too; their readings are the baseline a delta needs (#434). The seed
+	 * reads every process journal this host kept, so it waits for the first quota reader: a headless run or an ACP turn
+	 * that never shows quota would otherwise read and validate the whole process history on every launch. A session's
+	 * own account readings come from its seed's journals, which `withAccountQuota` bounds to the session's window.
+	 */
+	const seedHostQuota = (follow: ProcessFollow): void => {
+		if (follow.hostSeeded) return;
+		follow.hostSeeded = true;
 		void load()
 			.then((loader) => loader.loadHostQuotaRecordsAsync?.(options.stateDir()))
 			.then((records) => {
@@ -657,12 +669,12 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			.catch(() => {
 				// An unreadable process journal leaves the process's own observations, which quota() always shows.
 			});
-		return follow;
 	};
 
 	/** Each account's newest journaled reading and its window deltas, refolded only when a reading arrived. */
 	const journaledAccounts = (): Map<string, AccountQuota> => {
 		const follow = followProcess();
+		seedHostQuota(follow);
 		if (follow.accounts?.size !== follow.quota.size)
 			follow.accounts = { size: follow.quota.size, folded: foldAccountQuota([...follow.quota.values()]) };
 		return follow.accounts.folded;

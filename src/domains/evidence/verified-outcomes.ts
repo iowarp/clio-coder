@@ -57,9 +57,17 @@ function passedCheckKey(details: Record<string, unknown>): string | null {
 
 /** Kind, check id and judged digests of a passing reproduce or numeric-compare report; null for any other report. */
 function judgedKey(check: string, report: unknown): string | null {
+	return isRecord(report) && report.passed === true ? judgedPayloadKey(check, report) : null;
+}
+
+/**
+ * Kind, check id and judged digests of a reproduce or numeric-compare report, passing or not; null for any other
+ * report. The identity of what was judged: the claims log keys a claim's subject by it (#406).
+ */
+export function judgedPayloadKey(check: string, report: unknown): string | null {
 	if (!isRecord(report)) return null;
 	const kind = report.kind;
-	if (!VERIFIED_CHECK_KINDS.some((verified) => verified === kind) || report.passed !== true) return null;
+	if (!VERIFIED_CHECK_KINDS.some((verified) => verified === kind)) return null;
 	const digests: string[] = [];
 	const digest = (value: unknown): void => {
 		if (isRecord(value) && typeof value.sha256 === "string") digests.push(value.sha256);

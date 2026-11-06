@@ -184,7 +184,7 @@ const READ_COMMANDS = new Set(["inspect", "calls", "cost", "cache", "timeline", 
 export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<number> {
 	if (argv[0] === "--help" || argv[0] === "-h") {
 		process.stdout.write(
-			`${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}`,
+			`${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}${(await import("./telemetry-insights.js")).INSIGHTS_HELP}`,
 		);
 		return 0;
 	}
@@ -196,6 +196,7 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "prune") return runPrune(argv.slice(1));
 	if (argv[0] === "verify") return (await import("./telemetry-verify.js")).runTelemetryVerify(argv.slice(1));
 	if (argv[0] === "doctor") return (await import("./telemetry-doctor.js")).runTelemetryDoctor(argv.slice(1));
+	if (argv[0] === "insights") return (await import("./telemetry-insights.js")).runTelemetryInsights(argv.slice(1));
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 	process.stderr.write(HELP);
 	return 2;
