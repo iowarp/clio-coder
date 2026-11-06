@@ -48,7 +48,12 @@ import {
 import type { Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { fitGeneratedHandbook, handbookBlocks, normalizeHandbookRule } from "./handbook-budget.js";
+import {
+	fitGeneratedHandbook,
+	handbookBlocks,
+	normalizeHandbookRule,
+	type ProtectedHandbook,
+} from "./handbook-budget.js";
 import { instructionUnits } from "./instruction-units.js";
 import { ContextOperationAbortError } from "./operation-result.js";
 import { packageManager } from "./package-manager.js";
@@ -1493,6 +1498,7 @@ function stabilizeGeneratedOutput(
 	base: BootstrapStructuredOutput,
 	onModelSectionRetained?: () => void,
 	groundModelOutput = false,
+	onProtected?: (content: ProtectedHandbook) => void,
 ): BootstrapStructuredOutput {
 	const tomlFiles = input.tomlFiles ?? createTomlFileReader(input.cwd);
 	const existing = input.existingClioMd;
@@ -1644,6 +1650,10 @@ function stabilizeGeneratedOutput(
 	for (const section of retainedOrdinarySections) {
 		if (modelSections.has(section)) onModelSectionRetained?.();
 	}
+	onProtected?.({
+		invariants: protectedInvariants,
+		sectionTitles: [...carriedSections].map((section) => section.title),
+	});
 	return {
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd, tomlFiles),
@@ -2250,6 +2260,7 @@ async function runBootstrapWork(
 	const shouldPropose =
 		input.proposeClioMd === true || (hadClioMd && input.generate !== undefined && !replaceClioMd && input.adopt !== true);
 	let output: BootstrapStructuredOutput;
+	let protectedContent: ProtectedHandbook | undefined;
 	let generation: BootstrapGenerationTelemetry = {
 		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
 		parserOutcome: "not-run",
@@ -2364,6 +2375,9 @@ async function runBootstrapWork(
 				retainedModelSections += 1;
 			},
 			generation.mode === "model",
+			(content) => {
+				protectedContent = content;
+			},
 		);
 		if (generation.mode === "model" && retainedModelSections === 0) {
 			generation = {
@@ -2393,7 +2407,14 @@ async function runBootstrapWork(
 	if (input.adopt === true) {
 		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
-	if (shouldGenerate && generation.mode !== "existing") output = fitGeneratedHandbook(output);
+	if (shouldGenerate && generation.mode !== "existing") {
+		output = fitGeneratedHandbook(output, protectedContent, ({ chars, lines }) =>
+			warn(
+				input.io,
+				`  warning: the carried and authored hard invariants and carried sections exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
+			),
+		);
+	}
 	if (shouldGenerate && generation.mode === "model") {
 		for (const section of missingHandbookSections(
 			{ cwd, ...(enforcementSeen ? { enforcement: enforcementSeen } : {}) },

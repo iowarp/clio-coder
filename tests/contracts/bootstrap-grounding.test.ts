@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
 import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
+import { HANDBOOK_TARGETS, serializeClioMd } from "../../src/domains/context/clio-md.js";
+import { fitGeneratedHandbook } from "../../src/domains/context/handbook-budget.js";
 import { readClioState } from "../../src/domains/context/state.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -403,6 +405,89 @@ it("returns a previous block under a kept title unless the handbook restates it"
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
 	strictEqual(docs, [modelDocs, previousCorpus].join("\n"), handbook);
+});
+
+it("keeps carried invariants and sections whole when model content fills the handbook budget", async () => {
+	const carried = writeCarryFixture();
+	mkdirSync(join(cwd, "docs"), { recursive: true });
+	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
+	const docsRule =
+		"- Every page under `docs/` is reachable from `docs/guide.md`; the corpus check in `scripts/check.js` fails otherwise.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			...carried.map((rule, i) => `${i + 1}. ${rule}`),
+			"",
+			"## Docs and prose",
+			"",
+			docsRule,
+			"",
+		].join("\n"),
+	);
+	// Distinct words per rule, so no rule restates another and only the budget decides what stays.
+	let next = 0;
+	const word = (): string => {
+		next += 1;
+		let n = next;
+		let text = "";
+		for (; n > 0; n = Math.floor(n / 26)) text += String.fromCharCode(97 + (n % 26));
+		return `qu${text}x`;
+	};
+	const filler = (label: string, length: number): string => {
+		let text = `${label} renders through \`src/widgets/render.ts\``;
+		while (text.length < length) text += ` ${word()}`;
+		return `${text}.`;
+	};
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: Array.from({ length: 16 }, (_, i) => filler(`Widget rule ${i + 1}`, 700)),
+				conventions: [],
+				sections: ["Change recipes", "Tests", "Gotchas", "Widgets", "Rendering", "Exports"].map((title) => ({
+					title,
+					body: Array.from({ length: 10 }, (_, i) => `- ${filler(`${title} step ${i + 1}`, 370)}`).join("\n"),
+				})),
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.length <= HANDBOOK_TARGETS.chars, `${handbook.length}`);
+	for (const rule of carried) ok(handbook.includes(rule), handbook);
+	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	strictEqual(docs, docsRule, handbook);
+});
+
+it("keeps protected invariants that alone exceed the budget and reports the overflow", () => {
+	const rules = Array.from({ length: 40 }, (_, i) =>
+		`Rule ${i + 1}: ${"keep every obligation whole ".repeat(25)}`.trim(),
+	);
+	const overflows: Array<{ chars: number; lines: number }> = [];
+	const fitted = fitGeneratedHandbook(
+		{
+			projectName: "harbor",
+			identity: "A widget renderer.",
+			invariants: [...rules, "A model rule `src/widgets/render.ts` gives way."],
+			conventions: [],
+			sections: [],
+		},
+		{ invariants: rules, sectionTitles: [] },
+		(size) => overflows.push(size),
+	);
+	deepStrictEqual(fitted.invariants, rules);
+	strictEqual(overflows.length, 1);
+	strictEqual(overflows[0]?.chars, serializeClioMd(fitted).length);
+	ok((overflows[0]?.chars ?? 0) > HANDBOOK_TARGETS.chars);
 });
 
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
