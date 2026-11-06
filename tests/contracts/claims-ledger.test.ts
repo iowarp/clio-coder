@@ -463,6 +463,42 @@ describe("claims ledger (#406)", () => {
 		}
 	});
 
+	it("records a slate's digest from its bytes as read, even when they are not valid UTF-8", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			// A lone 0xff inside a JSON string decodes to U+FFFD and still parses, so the decoded text hashes differently.
+			const [head = "", tail = ""] = slateText([{ id: "H1", check: "stats", statement: "H1 holds MARK" }]).split("MARK");
+			const bytes = Buffer.concat([Buffer.from(head), Buffer.from([0xff]), Buffer.from(tail)]);
+			const digest = createHash("sha256").update(bytes).digest("hex");
+			writeFileSync(join(repo, "h.json"), bytes);
+			writeFileSync(join(repo, "w.json"), bytes);
+			await createHypothesisCaptureRegistration({ cwd: () => repo }).evaluateAsync?.({
+				hook: "after_tool",
+				toolName: "write",
+				toolArgs: { path: "h.json" },
+			});
+			await recordAcceptedWorkerSlates({
+				runId: "run1",
+				receiptDigest: "e".repeat(64),
+				projectCwd: repo,
+				slates: snapshotAcceptedWorkerSlates({ projectCwd: repo, paths: [join(repo, "w.json")] }),
+			});
+			const read = readClaims(project);
+			assert.deepEqual(
+				read.hypotheses.map((record) => [record.source.channel, record.source.slateSha256]),
+				[
+					["slate", digest],
+					["worker-slate", digest],
+				],
+			);
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("refuses a slate capture whose file changed before it held the log's lock", async () => {
 		const env = await isolateClioEnv("clio-claims-");
 		try {

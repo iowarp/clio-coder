@@ -200,6 +200,7 @@ async function recordSlate(input: {
 	const { snapshot } = input;
 	const drafts = hypothesesFromSlate({
 		text: snapshot.text,
+		slateSha256: snapshot.sha256,
 		path: snapshot.path,
 		project: input.project,
 		at: input.at,

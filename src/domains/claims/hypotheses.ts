@@ -89,10 +89,12 @@ export function isHypothesisSlate(text: string): boolean {
 /**
  * The hypotheses a slate holds, or null when the text is not a slate. Only an entry with a slate id, a statement and a
  * falsifiable prediction becomes a record, and only while the slate holds it at `proposed`: the checker refuses any
- * other status, and a status the model wrote is never read as evidence.
+ * other status, and a status the model wrote is never read as evidence. `slateSha256` is the digest of the file's bytes
+ * as read, which `text` decodes; decoding can change them (a malformed UTF-8 sequence), so the text is not rehashed.
  */
 export function hypothesesFromSlate(input: {
 	text: string;
+	slateSha256: string;
 	path: string;
 	project: string;
 	at: string;
@@ -101,7 +103,7 @@ export function hypothesesFromSlate(input: {
 	const slate = parseSlate(input.text);
 	if (slate === null) return null;
 	const path = projectPath(input.project, input.path);
-	const slateSha256 = sha256(input.text);
+	const slateSha256 = input.slateSha256;
 	const seen = new Set<string>();
 	const drafts: HypothesisDraft[] = [];
 	for (const entry of slate.hypotheses) {
