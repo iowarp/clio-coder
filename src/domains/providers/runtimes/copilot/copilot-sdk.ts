@@ -50,11 +50,17 @@ async function probeCopilotSdk(
 ): Promise<ProbeResult> {
 	ctx.signal?.throwIfAborted();
 	const snapshot = readTargetModelSnapshot(target);
-	if (snapshot && snapshot.models.length > 0 && listed.size > 0) {
+	// The cached listing is used only once this process has the capabilities that go with it.
+	if (snapshot && snapshot.models.length > 0 && snapshot.models.every((id) => listed.has(id))) {
+		const modelCapabilities = Object.fromEntries(snapshot.models.map((id) => [id, listed.get(id) ?? {}]));
+		const capabilityModelId =
+			target.defaultModel && listed.has(target.defaultModel) ? target.defaultModel : snapshot.models[0];
 		return {
 			ok: true,
 			models: [...snapshot.models],
 			modelsSource: "cache",
+			modelCapabilities,
+			...(capabilityModelId ? { capabilityModelId, discoveredCapabilities: listed.get(capabilityModelId) ?? {} } : {}),
 			...(snapshot.modelLabels ? { modelLabels: snapshot.modelLabels } : {}),
 		};
 	}
@@ -76,7 +82,15 @@ async function probeCopilotSdk(
 			listed.set(row.id, modelCapabilities[row.id] as Partial<CapabilityFlags>);
 		}
 		recordTargetModelSnapshot(target, models, { modelLabels });
-		return { ok: true, models, modelLabels, modelCapabilities };
+		const capabilityModelId = target.defaultModel && listed.has(target.defaultModel) ? target.defaultModel : models[0];
+		const discoveredCapabilities = capabilityModelId ? modelCapabilities[capabilityModelId] : undefined;
+		return {
+			ok: true,
+			models,
+			modelLabels,
+			modelCapabilities,
+			...(capabilityModelId && discoveredCapabilities ? { capabilityModelId, discoveredCapabilities } : {}),
+		};
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		const code = (err as { code?: unknown } | null)?.code;

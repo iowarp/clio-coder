@@ -531,7 +531,8 @@ class Step implements StepSink {
 		if (this.toolUseTimer) clearTimeout(this.toolUseTimer);
 		this.start();
 		this.closeOpenBlocks();
-		this.message.copilotBilling = { ...this.billing };
+		// A step that reached no model call billed nothing and records no seat units.
+		if (this.billing.modelCalls > 0) this.message.copilotBilling = { ...this.billing };
 		if (stop === "stop" || stop === "toolUse") {
 			this.message.stopReason = stop;
 			this.stream.push({ type: "done", reason: stop, message: this.message });
