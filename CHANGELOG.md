@@ -4,6 +4,102 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+Clio Coder 0.6.9 makes the terminal tell the truth about what is happening and who it is waiting on. The status rail names the model, worker, server or person a turn waits on, with a clock and the key that stops it, and states a silence with its evidence instead of a spinner. Provider waits read as waits and are sat out in full, a model pick can move a request still waiting on its first output, and a worker's approval card can be held while you read it. Esc and Ctrl+C back out one layer at a time and never throw away typed text, and a stop holds queued messages instead of joining them (#447). Receipts, `/usage`, the exit summary and Fleet Runs count calls and tokens one way and say "not measured" instead of guessing. The line also moves to the Pi SDK 1.5.0, clears every open dependency advisory and closes two installer gaps.
+
+### Upgrade notes
+
+- Ctrl+C at an idle prompt no longer clears a draft. It arms quit for 3 seconds and the footer says `draft kept, printed on quit`. Quitting prints the draft to stderr under `Unsent draft, not delivered to Clio:` and saves nothing.
+- A wait the provider states, as a `Retry-After` header or in its error text such as "try again in 20s", is sat out in full with a countdown in every autonomy level and spends none of `chat.retry.maxRetries`. The waits on one request add up to at most one hour, and a stated wait that would pass that stops the turn and names the wait. `chat.retry.maxDelayMs` now limits only Clio's own backoff.
+- Picking a model with `/model` while a request is still waiting on its first output, or sitting in a retry countdown, moves that request to the new route instead of cancelling it. The journal records `route_moved`. When the new route's window is too small, it cannot read the turn's images, output has started or a tool is running, the pick applies from the next turn and the dialog says why.
+- The parent process now owns a worker's approval window. Any key on the card holds it for up to 15 minutes from when the ask opened, or the configured window if that is longer, and then the fallback applies. Asks queued behind the card restart their window.
+- A stop with Esc, Ctrl+C or Alt+X holds queued messages as separate entries instead of joining them into the composer (#447). Alt+S with an empty composer sends a held queue one message per entry, a new prompt takes it at its first slot, and Alt+Q restores it to the composer. A peer's or other machine-origin entry is dropped with a notice.
+- `install.cmd` always downloads the released `install.ps1` and no longer runs one that sits in the current directory.
+- Pinning a version older than the active one names both versions and says to remove the keys the check named from `settings.yaml`, because the older release's `doctor --fix` cannot repair them.
+- A call the safety judge holds reads `Waiting for the safety judge` on the rail, the pill and the transcript row until it is admitted, instead of reading as running.
+- Settings search matches every term in any order and ignores the filler words a, an, the, to, for, of, my and new.
+- Esc backs out of the innermost layer only. On a permission card it hides details, then terms, and only then denies, and Ctrl+C on the card does the same. In a text field it leaves the field and keeps what was typed. In the resume picker, sign-in, the wizards and the settings filter, the first Esc clears the typed filter or key. In Fleet Runs, Decisions and list detail panes it folds the open detail before closing.
+- An Esc within 1.2 seconds of an Esc that closed an overlay, a key pressed on the `?` quick help card, and an Esc right after the leader menu closes no longer cancel the running turn.
+- In Fleet Runs, Enter and `d` toggle the inline detail on every row, and `w` opens the watch pane. Enter no longer takes the workers dock over. `x` cancels a running plan this session started, and settled runs list newest first.
+- In an interview, `t` opens a free-text field without selecting the focused option, and the new `n` adds a note to an option.
+- Warnings now leave the footer after 60 seconds and errors after 180 seconds, and the dashboard keeps them. A notice about a live condition says `stays until resolved`.
+- A turn that ends on a tool call written as text gets one request to make the call properly, and then settles as no answer instead of Done. A headless run fails with the reason, and `clio-coder run` prints only the prose before such calls on stdout and names them on stderr.
+- `clio-coder run --agent` prints the sealed report's summary and `changed: <paths>` when the streamed answer was only that report, and `Finished with a caveat` when the run ended on a refused call or a malformed answer.
+- CLI output honors `NO_COLOR` and `TERM=dumb`.
+- Key names are spelled one way everywhere, such as `PgUp`, `Alt+T` and `Ctrl+Shift+P`. The active mark is `◉` and a changed setting is `*`.
+- A second `/context compact` while one runs is refused with `a compaction is already running` instead of joining it.
+- Connect asks for a replacement key when a target refuses the stored one with HTTP 401 or 403. Esc keeps the stored key.
+- The exit summary and `/usage` count model calls, worker runs included, and not attempts or calls never sent, and model time runs from send to settle. The footer total shows measured tokens, marks Clio's estimates with `~` and leaves the upper bound to `/usage`.
+- The Pi SDK 1.5.0 validates tool arguments through pi-schema, so numeric strings and single values are coerced for plain JSON Schema and MCP tools, and the validation text a model sees changes.
+
+### Removed
+
+- The floating workspace island over the transcript. Extension islands and the task summary take dock rows.
+- The `@npmcli/arborist` and `npm-packlist` development dependencies. The codewiki build reads `npm pack --dry-run` instead.
+- Run ids on transcript worker cards and the scheduled loop row, the session id in the `/usage` title, the process journal id in `/health`, `via gateway` on tool rows, the `◌ Idle` pill and the `ttft` and `node local` labels on Fleet Runs. Exports, `/tree` and `/view` keep what they need.
+
+### Status rail and waits
+
+- The rail names one subject per session: the target and model at idle and at the start of a turn, the worker beside the main turn, the active task and a running fleet plan. A down or failed target shows the blocker and the next step instead. Esc shows from the first second of every live phase, and a narrow rail drops the subject before the clock or Esc.
+- A silent model wait escalates from `no bytes yet` at 10 seconds to naming Esc at 30 and `may be loading or stuck` at 90. After 60 seconds a transcript row names the last evidence and its age, and it stays after the wait ends. Tool-call markup forming in the stream and a slow preparation step are named.
+- Cold loads, residency and capacity waits name what they wait on: the lock holder, the unload and load, another Clio loading the same model, a slot or capacity holder, a cost-ceiling hold or `target state unknown`. The model picker and scope card show residency where the runtime reports it.
+- A retried attempt no longer settles as failed. The rail holds a `retrying` phase with a countdown, provider waits read `will retry in X, provider asked to wait Y` and count as provider waits rather than attempts, and the attempts collapse into one row and one receipt.
+- Background model calls such as memory review, the safety judge and prewarm appear on the rail. Approval and interview waits never trip the stuck watchdog, and receipts split work time from waiting time.
+- Every overlay that hides the rail keeps a live strip above the footer that names the phase, times the phase rather than the turn and says how to stop the run behind it.
+- Compaction names its stage with a clock, the history it is reading and the summary written so far against its cap. A cancelled one says the context stayed at its size, and a failed `/context compact` states its cause in words.
+- The spinner moves only beside live model, tool or harness work, and a wait on you shows a still mark.
+- A Git probe that times out retries once with 5 seconds, is not cached, and reads `unknown` or `Git did not answer yet` instead of claiming there is no repository.
+
+### Cards and approvals
+
+- A permission card says what the call does and why it asked in words, such as `empties a file`, with the rule id on its `asked under` row. Its terms open as their own layer, every row stays reachable at 40 by 15, and outward calls such as `git push` are titled outward.
+- A held timer reads `no time limit now`, or `extended · no answer in N` on a worker card, and the option a timeout would pick is marked recommended. A worker card names its approval setting and fallback and says only denials are remembered.
+- A call denied because nobody answered reads `no answer in N s, so Clio denied it`. A stopped command says who stopped it and wears the cancel mark, says `killed` when it ignored the stop, and states its limit as `5m`.
+- A confirmation raised by your own action is titled `Confirm`, and Esc cancels it. An interview keeps answers recorded before an Esc and lists what it asked on the Decisions board even when nothing was answered. An unanswered round says how Clio chose for you.
+- A dispatch plan card says who runs, on what, for which task and against what limit, with the sealed fields behind the inspect key.
+
+### Workers and fleet
+
+- A worker card's mark reports the outcome in one word: done, finished with warnings, validation failed, cancelled, stalled or timed out. A failed validation names the validator and its evidence, and a cancelled worker says what happened to its worktree. A kept branch names `git diff HEAD...<branch>` and `git merge <branch>`.
+- A worker whose heartbeat stopped reads `not responding` and takes no steer. A silent worker states the age of its last output, whether that is longer than usual for its route, and the time until the watchdog stops it, and after 90 seconds names `safety.limits.workerResponseSeconds`.
+- A refused call is no longer recorded as failed validation and no longer seals an all-clear, and a `verify` call naming an unknown check reads `did not run · unknown check`.
+- Each plan step opens its own worker card under the plan, plans show on `/fleet` with a settled card and survive a restart, and step counts match the waves. Fleet Runs keeps settled runs from before a restart under `earlier sessions`.
+- A worker retry refused at one alternate route moves on to the next, and the card lists skipped routes in words. An operator `/run` waiting for a slot says it is queued after 600 ms.
+- Councils show members by label and route, answers and synthesis in words, and why each silent member gave no answer.
+- A steer receipt says when the worker's model has the message or that the run stopped first, and interrupting after a steer waits for the live run to finish.
+
+### Receipts, usage and telemetry
+
+- Standard receipts lead with outcome, time and calls, state measured amounts plainly, show cached tokens only when known and name the answering call for a moved turn. A failed turn's receipt offers `↑` to recall its prompt until something newer is sent.
+- Tokens read label first, `in 321 · out 12`, on the board, dock, run detail and Activity page. Unknown figures read `not measured`, said once per line, and a call still out counts as running.
+- A cost total the provider billed itself, which OpenRouter reports, is recorded as measured and priced by the provider, even on an unpriced target. A target declared free stays free.
+- Each operator message's path is journalled as `message.stepped` and shown by `clio-coder telemetry timeline`, and `/view` has a message-path category.
+- The token rate shows only for generation lasting at least 500 ms, in the footer and over ACP.
+- `/health` opens on a plain verdict and gives records dropped with no open journal their own row without a warning.
+
+### Keyboard and composer
+
+- The hint row says what Enter will do with the draft, shows one learning hint at a time and hides them while you type. Rails put the commit verb first and Esc second, and every narrow rail keeps its way out.
+- Ctrl+Z stops Clio's whole process group, so suspend works after `/restart` or a `CLIO_CODER_NODE` rerun, and without job control it says so instead of hanging.
+- Extension band actions are pressed through the leader menu as `<leader> 1` to `9`. `/extensions` gains `r` to restart all extensions after the turn and `v` to put a command in the composer, and an extension command typed right after a turn waits for the reload.
+- A refused exit names what is running and the key for it, and the exit screen names queued messages that quitting abandons.
+
+### Rendering and palette
+
+- The palette is solved against the background the terminal reports, with text at 4.5:1 and frames, dividers and meters at 3:1, on 256-color terminals too. Colors repaint live when the terminal theme changes.
+- A table too wide for the terminal, or whose cells would wrap tall, renders as records. Long paths and URLs break after a slash, code fences open with a quiet language label and wrap once under one mark, and inline math wraps as one run.
+- Tool previews and diffs keep whole lines, count hidden lines and open at the change. Edit diff context lines carry their number in the new file.
+- The transcript names the answering model in words only when it changed, as `Now using` and `Reply from`. Times show in local time, and the activity rail shortens a path in the middle to keep the file name.
+- The launchpad shrinks to 9 rows under 30 terminal rows and 4 rows under 20, and the expanded dashboard uses up to 16 rows on tall terminals.
+- Long replies repaint less: table fit is lexed only when a table could fail it, and row plain text and the operator-lift strip are read from the row memo.
+
+### Providers and install
+
+- The Pi SDK moves to 1.5.0. The pi-tui patch drops from fifteen hunks to thirteen because 1.5.0 fixes styled-whitespace wrapping.
+- GPT-6.1 Terra joins the GPT-6 family rule, so a flat-price row for it compacts below the 272K price boundary.
+- Every open dependency advisory in the development tree is cleared, including vite 8.3.3 and a `source-map-js` override.
+- A provider failure leads with a plain headline and a remedy for that failure, names the target and its URL with credentials hidden, and shows `HTTP 401` instead of a raw status. Reasoning a provider streams shows as thinking even when the target declared none.
+- Setup and `configure` refuse a malformed target URL, retry https when a bare host fails over http, and say what they wait on. Connecting a target that does not answer says so instead of reporting it connected. The thinking level is kept across a model switch.
+
 ## 0.6.8 - 2026-11-04
 
 Clio Coder 0.6.8 reworks the terminal's decision surfaces, makes install and reset behavior predictable, and cuts System One down to what an agent or the safety judge asks for. Permission cards, fleet approvals, pickers, the Library, `/interop` and the expanded footer now share one row and dashboard layout that keeps its keys reachable at any width, and long sessions repaint less. Project configuration is found from any subdirectory, Clio manages what Git sees under `.clio-coder/`, and approvals survive a state reset. System One loses its fixed decision sites, cuts, ranking and dataset. It stays off until `systemOne.use` names a route, and then serves the experimental `consult` tool, a screen on web and MCP results beside the safety judge, and steering triage. Memory off now means off, restricted sessions stop reaching durable memory, and URL passwords and opaque tokens stay hidden on every output surface (#446). At `yolo`, long unattended work continues past a tool budget, a default job clock, repeated provider failures and rate limits (#445).
