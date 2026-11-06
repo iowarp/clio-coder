@@ -2306,3 +2306,29 @@ test("Connect asks for a replacement key when the target refused the stored one,
 	strictEqual(probes, 3);
 	match(notices.at(-1) ?? "", /^connected keyed \(healthy\)$/u);
 });
+
+test("the interview rail names the option move key in a list, first among the keys a narrow rail gives up", async () => {
+	const { createAskUserViewForTesting } = await import("../../src/interactive/overlays/ask-user.js");
+	const { fitHintEntries } = await import("../../src/interactive/overlay-frame.js");
+	const view = createAskUserViewForTesting({ rows: 40 });
+	const pending = view.ask([
+		{ header: "Depth", question: "Which depth?", options: [{ label: "Fast" }, { label: "Thorough" }] },
+		{ header: "Summary", question: "Summary length?", options: [{ label: "Short" }, { label: "Long" }] },
+	]);
+	const hint = view.footerHint();
+	match(hint, /^\[↑↓\] move · \[\?\] details · /u, hint);
+	match(hint, /\[Enter\] record answer · \[Esc\] cancel interview$/u, hint);
+	// The rail leads with the key that records, so the move key stands right after it and leaves before the others.
+	const narrow = fitHintEntries(
+		[
+			{ key: "Enter", verb: "record" },
+			{ key: "↑↓", verb: "move", critical: false },
+			{ key: "?", verb: "details" },
+			{ key: "Esc", verb: "cancel" },
+		],
+		44,
+	);
+	strictEqual(narrow, "[Enter] record · [?] details · [Esc] cancel");
+	view.cancel();
+	await pending.catch(() => {});
+});
