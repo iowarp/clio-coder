@@ -1740,10 +1740,11 @@ describe("transcript block grammar", () => {
 		for (const width of [40, 65]) {
 			const rows = renderToolPreview(edit, width, transcriptDetail("standard")).map(stripTerminalSequences).slice(1);
 			const removed = rows.findIndex((row) => row.startsWith("  │ -24 "));
-			ok(removed >= 0 && rows[removed + 1]?.startsWith("  │     "), rows.join("\n"));
+			// A continuation keeps its sign and marks the number column, so it never reads as a context line.
+			ok(removed >= 0 && rows[removed + 1]?.startsWith("  │ - ↪ "), rows.join("\n"));
 			for (const row of rows) ok(visibleWidth(row) <= width, row);
-			for (const row of rows.filter((line) => !/^ {2}│ ([-+]24 |… \d+ rows)/u.test(line)))
-				ok(/^ {2}│ {5}\S/u.test(row), `a continuation left the content column: ${row}`);
+			for (const row of rows.filter((line) => !/^ {2}│ ([-+]24 |… \d+ more lines?)/u.test(line)))
+				ok(/^ {2}│ [-+] ↪ \S/u.test(row), `a continuation left the content column: ${row}`);
 		}
 	});
 

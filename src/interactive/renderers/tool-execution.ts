@@ -1682,6 +1682,24 @@ function changeStat(result: unknown): { added: number; removed: number } | null 
 	return added + removed > 0 ? { added, removed } : null;
 }
 
+const DIFF_CHANGE_ROW = /^[\s│]*[-+]\s*\d/u;
+const DIFF_CONTINUATION_ROW = new RegExp(`^[\\s│]*[-+ ]\\s*${GLYPH.codeWrap} `, "u");
+
+/**
+ * A preview too short for the whole diff opens at the first changed line: at 40 columns the leading context
+ * filled the rows and the change itself sat behind the marker.
+ */
+function fromFirstChange(rows: readonly string[]): readonly string[] {
+	const first = rows.findIndex((row) => DIFF_CHANGE_ROW.test(stripTerminalSequences(row)));
+	return first > 0 ? rows.slice(first) : rows;
+}
+
+/** What the marker holds back, in diff lines: a wrapped line's continuation rows are not lines of the file. */
+function hiddenDiffLines(hidden: readonly string[]): string {
+	const lines = hidden.filter((row) => !DIFF_CONTINUATION_ROW.test(stripTerminalSequences(row))).length;
+	return lines === 1 ? "1 more line" : `${lines} more lines`;
+}
+
 function renderMutationDiffBlock(diff: string, width: number, color: boolean): string[] {
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	return renderDiffLines(diff, bodyWidth, { color }).map((line) => `${RAIL_NORMAL()}${line}`);
@@ -2491,14 +2509,17 @@ export function renderToolPreview(
 	const result = finished?.result ?? options.partialResult;
 	const diff = finished && !failure ? resultDiff(result) : null;
 	if (diff !== null && detail.diffRows > 0) {
+		const diffRows = renderMutationDiffBlock(redactSecretString(diff), width, options.diffStyle !== "plain");
+		const budget = previewBudget(detail.diffRows, options.terminalRows);
 		rows.push(
 			...previewRows(
-				renderMutationDiffBlock(redactSecretString(diff), width, options.diffStyle !== "plain"),
-				previewBudget(detail.diffRows, options.terminalRows),
+				diffRows.length > budget ? fromFirstChange(diffRows) : diffRows,
+				budget,
 				width,
 				false,
 				RAIL_NORMAL(),
 				BODY_INDENT_VISIBLE_WIDTH,
+				hiddenDiffLines,
 			),
 		);
 	} else if (

@@ -13,13 +13,15 @@ export function previewRows(
 	tail = false,
 	prefix = "",
 	prefixWidth = 0,
+	hiddenWords: (hidden: readonly string[]) => string = (hidden) => `${hidden.length} rows`,
 ): string[] {
 	if (rows.length <= limit) return [...rows];
 	if (limit <= 0) return [];
 	const count = Math.max(0, limit - 1);
+	const hidden = tail ? rows.slice(0, rows.length - count) : rows.slice(count);
 	const hint = `${prefix}${clioTheme().fg(
 		"toolMetadata",
-		truncateToWidth(`… ${rows.length - count} rows · /view`, Math.max(1, width - prefixWidth)),
+		truncateToWidth(`… ${hiddenWords(hidden)} · /view`, Math.max(1, width - prefixWidth)),
 	)}`;
 	return tail ? [hint, ...rows.slice(rows.length - count)] : [...rows.slice(0, count), hint];
 }
