@@ -63,7 +63,10 @@ function attachmentNote(
 	const named = new Map(
 		diagnostics.flatMap((item) => (item.type === "warning" && item.path ? [[item.path, item.message] as const] : [])),
 	);
-	const inlined = paths.filter((filePath) => !named.has(filePath));
+	const partial = new Map(
+		diagnostics.flatMap((item) => (item.type === "info" && item.path ? [[item.path, item.message] as const] : [])),
+	);
+	const inlined = paths.filter((filePath) => !named.has(filePath) && !partial.has(filePath));
 	const byName = paths.filter((filePath) => named.has(filePath));
 	const unreadable = diagnostics.filter((item) => item.type === "error" && item.path);
 	const parts: string[] = [];
@@ -72,6 +75,10 @@ function attachmentNote(
 		const more = inlined.length - shown.length;
 		parts.push(`attached ${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`);
 	}
+	for (const [filePath, pages] of [...partial].slice(0, ATTACHMENT_NOTE_LIMIT))
+		parts.push(
+			`attached ${pages} of ${shortAttachmentPath(filePath, cwd)}, which is all that fits, so Clio reads the rest with its tools`,
+		);
 	for (const filePath of byName.slice(0, ATTACHMENT_NOTE_LIMIT))
 		parts.push(
 			`sent ${shortAttachmentPath(filePath, cwd)} by name only: ${named.get(filePath)}, so Clio reads it in parts with its tools`,
