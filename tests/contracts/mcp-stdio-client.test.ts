@@ -771,3 +771,65 @@ describe("mcp stdio client", () => {
 		await waitFor(() => c.state().status === "closed" && !processAlive(pid));
 	});
 });
+
+describe("mcp stdio client, modern protocol and tasks extension", () => {
+	const countOf = (c: McpClient, line: string): number =>
+		c
+			.stderrTail()
+			.split("\n")
+			.filter((entry) => entry === line).length;
+
+	it("selects 2026-07-28 through server/discover and follows a task to its completed result", async () => {
+		const c = client("modern");
+		const info = await c.initialize();
+		strictEqual(info.protocolVersion, "2026-07-28");
+		deepStrictEqual(info.serverInfo, { name: "fake-modern", version: "2.0" });
+		strictEqual((await c.listTools()).tools[0]?.name, "task");
+		strictEqual((await c.callTool("echo", { text: "direct" })).text, '{"text":"direct"}');
+		const result = await c.callTool("task", { steps: 2 });
+		strictEqual(result.text, "task done");
+		strictEqual(result.structuredContentJson, '{"n":1e400}');
+		await waitFor(() => countOf(c, "tasks/get task-1") === 3);
+	});
+
+	it("reports a failed task as the server's JSON-RPC error", async () => {
+		const c = client("modern");
+		const error = await rejectsWithCode(
+			c.callTool("task", { outcome: "failed" }),
+			"server",
+			/upstream exploded \(code -32603\)/,
+		);
+		deepStrictEqual(error.data, { code: -32603, message: "upstream exploded" });
+		strictEqual(c.state().status, "ready");
+	});
+
+	it("cancels a task that asks for input this client cannot give", async () => {
+		const c = client("modern");
+		await rejectsWithCode(c.callTool("task", { outcome: "input_required" }), "server", /asked for client input/);
+		await waitFor(() => countOf(c, "tasks/cancel task-1") === 1);
+		strictEqual(c.state().status, "ready");
+	});
+
+	it("waits the server's poll interval and cancels the task when the turn aborts", async () => {
+		const c = client("modern");
+		const controller = new AbortController();
+		const call = c.callTool("task", { steps: 1_000, pollIntervalMs: 60_000 }, { signal: controller.signal });
+		await waitFor(() => c.stderrTail().includes("task-1") || c.state().status === "ready");
+		setTimeout(() => controller.abort(), 50);
+		await rejectsWithCode(call, "aborted");
+		await waitFor(() => countOf(c, "tasks/cancel task-1") === 1);
+		strictEqual(countOf(c, "tasks/get task-1"), 0, "no poll before the 60 s interval elapsed");
+		strictEqual(c.state().status, "ready");
+	});
+
+	it("cancels the task when the call's timeout passes", async () => {
+		const c = client("modern");
+		await rejectsWithCode(
+			c.callTool("task", { steps: 1_000 }, { timeoutMs: 200 }),
+			"timeout",
+			/tools\/call timed out after 200ms/,
+		);
+		await waitFor(() => countOf(c, "tasks/cancel task-1") === 1);
+		strictEqual(c.state().status, "ready");
+	});
+});

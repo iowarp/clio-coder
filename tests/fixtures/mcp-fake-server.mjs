@@ -234,7 +234,117 @@ function handleToolList(id, params) {
 	reply(id, { tools: PAGE_ONE, nextCursor: "page-2" });
 }
 
+// Mode "modern" speaks MCP 2026-07-28 with the tasks extension: no initialize,
+// every request must carry the _meta envelope, and tool "task" runs as a task
+// that stays working for args.steps polls and then ends in args.outcome.
+const META_VERSION = "io.modelcontextprotocol/protocolVersion";
+const META_CAPS = "io.modelcontextprotocol/clientCapabilities";
+const TASKS = "io.modelcontextprotocol/tasks";
+const tasks = new Map();
+let taskCounter = 0;
+
+function taskView(task) {
+	const base = {
+		taskId: task.id,
+		status: task.status,
+		createdAt: "2026-11-06T00:00:00Z",
+		lastUpdatedAt: "2026-11-06T00:00:00Z",
+		ttlMs: 60000.0,
+		pollIntervalMs: task.pollIntervalMs,
+	};
+	if (task.status === "completed")
+		base.result = { content: [{ type: "text", text: "task done" }], structuredContent: { n: "HUGE" } };
+	if (task.status === "failed") base.error = { code: -32603, message: "upstream exploded" };
+	if (task.status === "input_required") base.inputRequests = { name: { method: "elicitation/create", params: {} } };
+	return base;
+}
+
+function handleModern(message) {
+	const meta = message.params?._meta;
+	if (message.method !== "server/discover" && meta?.[META_VERSION] !== "2026-07-28") {
+		replyError(message.id, -32602, "missing _meta envelope");
+		return;
+	}
+	const declared = meta?.[META_CAPS]?.extensions?.[TASKS] !== undefined;
+	switch (message.method) {
+		case "server/discover":
+			reply(message.id, {
+				resultType: "complete",
+				supportedVersions: ["2026-07-28"],
+				capabilities: { tools: {}, extensions: { [TASKS]: {} } },
+				instructions: "modern fixture",
+				_meta: { "io.modelcontextprotocol/serverInfo": { name: "fake-modern", version: "2.0" } },
+			});
+			return;
+		case "tools/list":
+			reply(message.id, {
+				resultType: "complete",
+				tools: [{ name: "task", inputSchema: { type: "object" } }, ...PAGE_ONE],
+			});
+			return;
+		case "tools/call": {
+			if (message.params?.name !== "task") {
+				handleToolCall(message.id, message.params);
+				return;
+			}
+			if (!declared) {
+				write({
+					jsonrpc: "2.0",
+					id: message.id,
+					error: {
+						code: -32021,
+						message: "tasks extension required",
+						data: { requiredCapabilities: { extensions: { [TASKS]: {} } } },
+					},
+				});
+				return;
+			}
+			const args = message.params.arguments ?? {};
+			const task = {
+				id: `task-${++taskCounter}`,
+				status: "working",
+				left: Number(args.steps ?? 0),
+				outcome: args.outcome ?? "completed",
+				pollIntervalMs: Number(args.pollIntervalMs ?? 10),
+			};
+			tasks.set(task.id, task);
+			reply(message.id, { resultType: "task", ...taskView(task) });
+			return;
+		}
+		case "tasks/get": {
+			const task = tasks.get(message.params?.taskId);
+			if (!declared || task === undefined) {
+				replyError(message.id, declared ? -32602 : -32021, "no such task");
+				return;
+			}
+			process.stderr.write(`tasks/get ${task.id}\n`);
+			if (task.status === "working") {
+				if (task.left > 0) task.left -= 1;
+				else task.status = task.outcome;
+			}
+			// The completed result carries a literal JSON.stringify cannot write.
+			process.stdout.write(
+				`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { resultType: "complete", ...taskView(task) } }).replace('"HUGE"', "1e400")}\n`,
+			);
+			return;
+		}
+		case "tasks/cancel": {
+			const task = tasks.get(message.params?.taskId);
+			process.stderr.write(`tasks/cancel ${message.params?.taskId}\n`);
+			if (task !== undefined) task.status = "cancelled";
+			reply(message.id, { resultType: "complete" });
+			return;
+		}
+		default:
+			replyError(message.id, -32601, `method not found: ${message.method}`);
+	}
+}
+
 function handleMessage(message) {
+	if (mode === "modern" && typeof message.method === "string" && message.id !== undefined) {
+		handleModern(message);
+		return;
+	}
 	if (typeof message.method !== "string") {
 		const settle = pendingServerRequests.get(message.id);
 		if (settle) {
