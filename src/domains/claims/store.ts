@@ -16,6 +16,8 @@ import {
 	hypothesisSubject,
 } from "./hypotheses.js";
 import {
+	type CheckRunIdentity,
+	type CheckStartRecord,
 	CLAIM_KINDS,
 	CLAIM_RECORD_VERSION,
 	type ClaimEdgeRecord,
@@ -38,9 +40,9 @@ import {
  * whole-file `safeResourceWrite` per claim would make every capture cost the size of the log; an append cannot lose an
  * earlier line, and a line torn by a crash is skipped on read and closed off by the next append.
  *
- * Five line types share the log: `claim`, `edge`, `regression`, `hypothesis` and `hypothesis-test`. Edges, hypothesis
- * revisions and hypothesis tests are derived from the log as it stands under the same lock that appends them, so two
- * sessions capturing at once derive against each other's records.
+ * Six line types share the log: `claim`, `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test`.
+ * Edges, hypothesis revisions, check starts and hypothesis tests are derived from the log as it stands under the same
+ * lock that appends them, so two sessions capturing at once derive against each other's records.
  */
 
 export function claimsProjectRoot(cwd: string): string {
@@ -141,18 +143,46 @@ export async function appendHypotheses(
 }
 
 /**
- * The hypothesis revisions each check would test if it started now (#406), read when the check starts so the test
- * that follows binds to them and not to whatever is current once it finished. A check no hypothesis names is absent.
+ * Bind a run's checks to the hypothesis revisions they test, as the run starts (#406). Under the log's lock, each check
+ * a current revision names gets a check-start record listing those revisions, and the same lists are returned for the
+ * producer to test once the check finished; replay admits a test only for a revision its run's start record lists. A
+ * check no hypothesis names is absent and writes nothing, and a run already bound keeps its first binding.
  */
-export function hypothesisBindings(project: string, checks: ReadonlyArray<string>): Map<string, string[]> {
+export async function appendCheckStarts(
+	project: string,
+	run: CheckRunIdentity,
+	checks: ReadonlyArray<string>,
+	at: string,
+): Promise<Map<string, string[]>> {
 	const bindings = new Map<string, string[]>();
 	const wanted = new Set(checks);
 	if (wanted.size === 0) return bindings;
-	const hypotheses = readClaims(project).hypotheses;
-	for (const check of wanted) {
-		const ids = hypothesesNaming(hypotheses, check);
-		if (ids.length > 0) bindings.set(check, ids);
-	}
+	await appendLines(claimsLogPath(project), (current) => {
+		const log = parseClaimsLog(current, project);
+		const started = new Map(log.checkStarts.map((record) => [runKey(record.run, record.check), record]));
+		const lines: string[] = [];
+		for (const check of wanted) {
+			const earlier = started.get(runKey(run, check));
+			if (earlier !== undefined) {
+				bindings.set(check, [...earlier.hypotheses]);
+				continue;
+			}
+			const hypotheses = hypothesesNaming(log.hypotheses, check);
+			if (hypotheses.length === 0) continue;
+			const body: Omit<CheckStartRecord, "id"> = {
+				v: CLAIM_RECORD_VERSION,
+				type: "check-start",
+				at,
+				project,
+				check,
+				run,
+				hypotheses,
+			};
+			lines.push(JSON.stringify({ ...body, id: claimLogRecordId(body) }));
+			bindings.set(check, hypotheses);
+		}
+		return lines;
+	});
 	return bindings;
 }
 
@@ -178,6 +208,7 @@ export interface ClaimsLogRead {
 	edges: ClaimEdgeRecord[];
 	regressions: ClaimRegressionRecord[];
 	hypotheses: HypothesisRecord[];
+	checkStarts: CheckStartRecord[];
 	hypothesisTests: HypothesisTestRecord[];
 	/** Lines that are not a JSON object, such as a line torn by a crash. */
 	unreadable: number;
@@ -189,9 +220,10 @@ export interface ClaimsLogRead {
 	/** Records of a version this build does not read. */
 	unknownVersion: number;
 	/**
-	 * Hypothesis and test records whose links to earlier records do not hold: a replayed line, a revision that does not
-	 * follow the entry's current record, or a test whose hypothesis or claim is not an earlier record of its check, run
-	 * and verdict. The ledger never writes one; it was added to the log by something else.
+	 * Hypothesis, check-start and test records whose links to earlier records do not hold: a replayed line, a revision
+	 * that does not follow the entry's current record, a second start of one run or one that does not list exactly the
+	 * revisions current then, or a test whose hypothesis its run's start does not list or whose claim is not a later
+	 * record of its check, run and verdict. The ledger never writes one; it was added to the log by something else.
 	 */
 	unlinked: number;
 }
@@ -307,16 +339,52 @@ function isHypothesisTestRecord(value: Record<string, unknown>): boolean {
 	);
 }
 
+function isCheckRunIdentity(value: unknown): boolean {
+	if (!isObject(value)) return false;
+	if (value.channel === "verify") return isNullableString(value.sessionId) && typeof value.toolCallId === "string";
+	return value.channel === "host-verification" && typeof value.runId === "string";
+}
+
+function isCheckStartRecord(value: Record<string, unknown>): boolean {
+	return (
+		value.type === "check-start" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		typeof value.check === "string" &&
+		isCheckRunIdentity(value.run) &&
+		isStringArray(value.hypotheses) &&
+		value.hypotheses.length > 0
+	);
+}
+
+/** One run of one check: a verify call, or a check of a worker run's host verification. */
+function runKey(run: CheckRunIdentity, check: string): string {
+	return JSON.stringify(
+		run.channel === "verify" ? [run.channel, run.sessionId, run.toolCallId, check] : [run.channel, run.runId, check],
+	);
+}
+
+/** The run a test's or claim's source names, or null when it names none a start record could bind. */
+function sourceRunKey(source: ClaimSource, check: string): string | null {
+	if (source.channel === "verify")
+		return source.toolCallId === null
+			? null
+			: runKey({ channel: "verify", sessionId: source.sessionId, toolCallId: source.toolCallId }, check);
+	return runKey({ channel: "host-verification", runId: source.runId }, check);
+}
+
 /**
- * The links an ordered read admits a hypothesis or test record by (#406). Each record's hash only proves its own bytes;
- * these prove where it sits: a revision follows the current record of its entry, a test names a hypothesis and claim
- * that came before it, and the claim is the judgement of the very run the test says it is.
+ * The links an ordered read admits a hypothesis, check-start or test record by (#406). Each record's hash only proves
+ * its own bytes; these prove where it sits: a revision follows the current record of its entry, a run's start lists
+ * the revisions current as it started, and a test names a revision its run's start lists and a claim that followed
+ * that start and is the judgement of the very run the test says it is.
  */
 interface LinkState {
 	ids: Set<string>;
 	claims: Map<string, { claim: ClaimRecord; line: number }>;
 	hypotheses: Map<string, { record: HypothesisRecord; line: number }>;
 	current: Map<string, HypothesisRecord>;
+	starts: Map<string, { record: CheckStartRecord; line: number }>;
 	tested: Set<string>;
 }
 
@@ -347,10 +415,36 @@ function admitHypothesis(state: LinkState, record: HypothesisRecord, line: numbe
 	return true;
 }
 
+/**
+ * A run starts once, bound to exactly the revisions whose criterion named its check then: a second start of the same
+ * run, or one listing anything else, was not written by this ledger.
+ */
+function admitCheckStart(state: LinkState, record: CheckStartRecord, line: number): boolean {
+	const key = runKey(record.run, record.check);
+	if (state.ids.has(record.id) || state.starts.has(key)) return false;
+	const naming = new Set(
+		[...state.current.values()].filter((current) => current.criterion.check === record.check).map(({ id }) => id),
+	);
+	const listed = new Set(record.hypotheses);
+	if (
+		listed.size !== record.hypotheses.length ||
+		listed.size !== naming.size ||
+		![...listed].every((id) => naming.has(id))
+	)
+		return false;
+	state.ids.add(record.id);
+	state.starts.set(key, { record, line });
+	return true;
+}
+
 function admitHypothesisTest(state: LinkState, test: HypothesisTestRecord): boolean {
 	if (state.ids.has(test.id)) return false;
 	const hypothesis = state.hypotheses.get(test.hypothesis);
 	if (hypothesis === undefined || hypothesis.record.criterion.check !== test.check) return false;
+	// Only a revision the run was bound to as it started is tested by it.
+	const runStart = sourceRunKey(test.source, test.check);
+	const start = runStart === null ? undefined : state.starts.get(runStart);
+	if (start === undefined || !start.record.hypotheses.includes(test.hypothesis)) return false;
 	if (test.claim !== undefined) {
 		const backing = state.claims.get(test.claim);
 		const pair = `${test.hypothesis}\0${test.claim}`;
@@ -359,8 +453,8 @@ function admitHypothesisTest(state: LinkState, test: HypothesisTestRecord): bool
 			state.tested.has(pair) ||
 			// Only Clio's own judgement decides a hypothesis.
 			backing.claim.evidence !== "grounded" ||
-			// Bound when the check started, so the hypothesis was in the log before the claim that check produced.
-			backing.line < hypothesis.line ||
+			// The judgement of the run that started there, so it follows the start, which follows the hypothesis.
+			backing.line < start.line ||
 			backing.claim.keys.check !== test.check ||
 			backing.claim.verdict !== (test.outcome === "supported" ? "agrees" : "disagrees") ||
 			!sameSource(backing.claim.source, test.source)
@@ -380,6 +474,7 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		edges: [],
 		regressions: [],
 		hypotheses: [],
+		checkStarts: [],
 		hypothesisTests: [],
 		unreadable: 0,
 		mismatched: 0,
@@ -391,6 +486,7 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		claims: new Map(),
 		hypotheses: new Map(),
 		current: new Map(),
+		starts: new Map(),
 		tested: new Set(),
 	};
 	let index = -1;
@@ -435,11 +531,15 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 			else read.regressions.push(record as unknown as ClaimRegressionRecord);
 			continue;
 		}
-		if (isHypothesisRecord(record) || isHypothesisTestRecord(record)) {
+		if (isHypothesisRecord(record) || isCheckStartRecord(record) || isHypothesisTestRecord(record)) {
 			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
 			else if (record.type === "hypothesis") {
 				const hypothesis = record as unknown as HypothesisRecord;
 				if (admitHypothesis(links, hypothesis, index)) read.hypotheses.push(hypothesis);
+				else read.unlinked += 1;
+			} else if (record.type === "check-start") {
+				const start = record as unknown as CheckStartRecord;
+				if (admitCheckStart(links, start, index)) read.checkStarts.push(start);
 				else read.unlinked += 1;
 			} else {
 				const test = record as unknown as HypothesisTestRecord;

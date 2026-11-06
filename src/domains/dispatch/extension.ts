@@ -8849,13 +8849,14 @@ export function createDispatchBundle(
 					onDiagnostic: (error: unknown) =>
 						reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
 				};
-				// The hypotheses each declared check tests are bound now, before any of them starts (#406), so a slate
-				// that lands while they run is not credited with their results.
+				// The hypotheses each declared check tests are bound now, before any of them starts (#406): a check-start
+				// record per bound check enters the project's log, so a slate that lands while they run is not credited.
 				let hypothesisBindings: ReadonlyMap<string, ReadonlyArray<string>> | undefined;
 				if ((req.resolvedVerification?.length ?? 0) > 0) {
 					try {
-						hypothesisBindings = bindHostVerificationHypotheses(
+						hypothesisBindings = await bindHostVerificationHypotheses(
 							req.taskWorktree?.root ?? lifecycle.cwd,
+							envelope.id,
 							(req.resolvedVerification ?? []).map((check) => check.check),
 						);
 					} catch (error) {

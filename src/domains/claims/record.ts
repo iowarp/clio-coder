@@ -9,12 +9,12 @@ import { claimFromVerifyResult, claimsFromHostVerification, type SealedHostCheck
 import { claimBackingRefs, claimRegressionNote, overturnedAgreements, regressionRecord } from "./edges.js";
 import { type CheckRun, hypothesesFromSlate, isHypothesisSlate, type SlateOrigin } from "./hypotheses.js";
 import {
+	appendCheckStarts,
 	appendClaimRegressions,
 	appendClaims,
 	appendHypotheses,
 	appendHypothesisTests,
 	claimsProjectRoot,
-	hypothesisBindings,
 	readClaims,
 } from "./store.js";
 import type { ClaimEdgeRecord, ClaimRecord } from "./types.js";
@@ -85,9 +85,10 @@ export function createClaimCaptureRegistration(options: {
 			if (input.hook === "before_tool") {
 				const check = input.toolArgs?.check;
 				if (callId === undefined || typeof check !== "string") return [];
-				const hypotheses = hypothesisBindings(claimsProjectRoot(options.cwd()), [check]).get(check) ?? [];
 				open.delete(callId);
-				open.set(callId, { check, hypotheses });
+				const run = { channel: "verify" as const, sessionId: input.sessionId ?? null, toolCallId: callId };
+				const started = await appendCheckStarts(claimsProjectRoot(options.cwd()), run, [check], now().toISOString());
+				open.set(callId, { check, hypotheses: started.get(check) ?? [] });
 				for (const stale of open.keys()) {
 					if (open.size <= OPEN_VERIFY_BINDINGS_MAX) break;
 					open.delete(stale);
@@ -213,14 +214,22 @@ async function recordSlate(input: {
 }
 
 /**
- * The hypotheses each declared check of a worker run would test (#406), read just before host verification starts
- * them and carried to `recordHostVerificationClaims`, so a slate written while the checks ran is not credited.
+ * Bind each declared check of a worker run to the hypotheses it tests (#406), just before host verification starts
+ * them: a check-start record per bound check is appended to the project's log, and the returned bindings are carried
+ * to `recordHostVerificationClaims`, so a slate written while the checks ran is not credited.
  */
-export function bindHostVerificationHypotheses(
+export async function bindHostVerificationHypotheses(
 	projectCwd: string,
+	runId: string,
 	checks: ReadonlyArray<string>,
-): ReadonlyMap<string, ReadonlyArray<string>> {
-	return hypothesisBindings(claimsProjectRoot(projectCwd), checks);
+	now: Date = new Date(),
+): Promise<ReadonlyMap<string, ReadonlyArray<string>>> {
+	return appendCheckStarts(
+		claimsProjectRoot(projectCwd),
+		{ channel: "host-verification", runId },
+		checks,
+		now.toISOString(),
+	);
 }
 
 /**

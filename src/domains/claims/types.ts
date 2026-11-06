@@ -248,3 +248,27 @@ export interface HypothesisTestRecordV1 {
 
 export type HypothesisRecord = HypothesisRecordV1;
 export type HypothesisTestRecord = HypothesisTestRecordV1;
+
+/** The run a check-start record binds: a main-thread verify call, or a worker run's host verification. */
+export type CheckRunIdentity =
+	| { channel: "verify"; sessionId: string | null; toolCallId: string }
+	| { channel: "host-verification"; runId: string };
+
+/**
+ * The hypothesis revisions one run of a check was bound to as it started (#406), appended under the log's lock before
+ * the check executes. Replay admits a test only for a revision its run's first start record lists, and a judged test
+ * only on a claim that follows that record, so a revision appended while the check ran is never credited with it.
+ */
+export interface CheckStartRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "check-start";
+	id: string;
+	at: string;
+	project: string;
+	check: string;
+	run: CheckRunIdentity;
+	/** The current revisions whose criterion named the check when it started; never empty. */
+	hypotheses: string[];
+}
+
+export type CheckStartRecord = CheckStartRecordV1;
