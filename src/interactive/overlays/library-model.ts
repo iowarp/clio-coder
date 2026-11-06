@@ -504,7 +504,7 @@ function packageDetail(
 		here?.update ? statusChip(theme, "warning", libraryUpdateLabel(here.update)) : null,
 		record.refusal ? statusChip(theme, "error", "cannot be installed") : null,
 		// A requirement changes what install will write, so it is said before i is pressed.
-		record.requires?.length ? chip(theme, `needs ${record.requires.join(", ")}`, "warning") : null,
+		record.requires?.length ? chip(theme, `needs ${record.requires.map(refWords).join(", ")}`, "warning") : null,
 		record.copies.length > 0 && !here
 			? chip(theme, `${record.copies.map((copy) => copyPhrase(copy.scope, copy.state)).join(", ")}`, "muted")
 			: null,
