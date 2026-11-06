@@ -428,6 +428,14 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		onRoundTimedOut: (questions, result) => {
 			const open = Math.max(0, questions.length - result.answers.length);
 			const seconds = result.timedOut?.afterSeconds ?? 0;
+			if (questions.some((question) => question.operator_only === true)) {
+				appendNotice(
+					"warn",
+					`No answer within ${seconds}s. This was your own choice to make, so Clio chose nothing, recorded nothing, and ended the turn; the choice stays open.`,
+					busNoticeSink,
+				);
+				return;
+			}
 			appendNotice(
 				"warn",
 				// The question row above already lists each pick marked `chosen by Clio`; this says why and what happens now.

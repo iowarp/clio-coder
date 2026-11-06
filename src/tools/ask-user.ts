@@ -48,6 +48,13 @@ export interface AskUserQuestion {
 	 * callers only, for a choice whose code reads the picked label and nothing else.
 	 */
 	fixedChoices?: boolean;
+	/**
+	 * A choice only the operator may make: which research question or hypothesis
+	 * to pursue, or confirmation of a hazardous experiment. Asked alone; nobody
+	 * answers it for an absent operator, and only the operator's own answer
+	 * becomes a decision marked `operator_choice`.
+	 */
+	operator_only?: true;
 }
 
 export interface AskUserAnswer {
@@ -83,6 +90,8 @@ export interface AskUserDecision {
 	alternatives?: string[];
 	/** Why Clio chose for the operator; derived by the harness. */
 	rationale?: string;
+	/** The operator's own answer to an `operator_only` question; derived by the harness, never model-supplied. */
+	operator_choice?: true;
 }
 
 export interface AskUserResult {
@@ -164,6 +173,12 @@ export const askUserParameters = Type.Object({
 					),
 				),
 				multi_select: Type.Optional(Type.Boolean({ description: "Allow multiple selections." })),
+				operator_only: Type.Optional(
+					Type.Boolean({
+						description:
+							"Operator's own choice (research question, hypothesis, hazard check): asked alone, never answered for them.",
+					}),
+				),
 			}),
 			{ description: "For action=ask: 1 to 4 questions, or exactly 1 when mode=single_question." },
 		),
@@ -279,6 +294,7 @@ function normalizeAskUserQuestions(args: Record<string, unknown>): {
 		if (options.error) return { error: options.error };
 		if (options.options) normalized.options = options.options;
 		if (raw.multi_select === true) normalized.multi_select = true;
+		if (raw.operator_only === true) normalized.operator_only = true;
 		questions.push(normalized);
 	}
 	return { questions };
@@ -340,6 +356,11 @@ function normalizeAskUserCall(args: Record<string, unknown>): { call?: AskUserCa
 	}
 	const questions = normalizeAskUserQuestions(args);
 	if (!questions.questions) return { error: questions.error ?? "invalid questions" };
+	// One question per card keeps the operator's choice from riding on a round
+	// whose other questions an absent operator would have answered for them.
+	if (questions.questions.length > 1 && questions.questions.some((question) => question.operator_only === true)) {
+		return { error: "an operator_only question is asked alone: send it as the only question of its call" };
+	}
 	if (mode.mode === "single_question" && questions.questions.length !== 1) {
 		return {
 			error: `mode=single_question carries exactly 1 question and this call carried ${questions.questions.length}; send them one call at a time, or use mode=round to ask up to 4 together`,
@@ -528,6 +549,7 @@ function transcriptQuestions(questions: ReadonlyArray<AskUserQuestion>): AskUser
 				}
 			: {}),
 		...(question.multi_select === true ? { multi_select: true } : {}),
+		...(question.operator_only === true ? { operator_only: true as const } : {}),
 	}));
 }
 
@@ -594,7 +616,9 @@ function decisionFromAnswer(
 					...(passedOver.length > 0 ? { alternatives: passedOver } : {}),
 					rationale: autoRationale(unattended),
 				}
-			: {}),
+			: question?.operator_only === true
+				? { operator_choice: true as const }
+				: {}),
 	};
 }
 
@@ -609,19 +633,36 @@ function toTranscriptDecision(decision: AskUserDecision): AskUserTranscriptDecis
 		...(decision.source === "agent" ? { source: "agent" as const } : {}),
 		...(decision.alternatives && decision.alternatives.length > 0 ? { alternatives: [...decision.alternatives] } : {}),
 		...(decision.rationale ? { rationale: decision.rationale } : {}),
+		...(decision.operator_choice === true && decision.source !== "agent" ? { operator_choice: true as const } : {}),
 	};
 }
 
-function upsertDecisions(policy: AskUserToolPolicy, decisions: ReadonlyArray<AskUserDecision>): void {
+/**
+ * `fromModel` marks the decisions an `action=complete` call wrote. Those never
+ * replace an operator's own choice: the operator's answer is the record, and a
+ * model restating it under the same key, with any value, changes nothing.
+ */
+function upsertDecisions(
+	policy: AskUserToolPolicy,
+	decisions: ReadonlyArray<AskUserDecision>,
+	fromModel = false,
+): void {
 	for (const decision of decisions) {
-		const normalized = toTranscriptDecision(decision);
+		const normalized = toTranscriptDecision(fromModel ? withoutOperatorChoice(decision) : decision);
 		const existingIndex = policy.decisions.findIndex((item) => item.key === normalized.key);
+		if (fromModel && existingIndex >= 0 && policy.decisions[existingIndex]?.operator_choice === true) continue;
 		if (existingIndex >= 0) policy.decisions[existingIndex] = normalized;
 		else policy.decisions.push(normalized);
 	}
 	if (policy.decisions.length > MAX_DECISIONS) {
 		policy.decisions.splice(0, policy.decisions.length - MAX_DECISIONS);
 	}
+}
+
+function withoutOperatorChoice(decision: AskUserDecision): AskUserDecision {
+	if (decision.operator_choice === undefined) return decision;
+	const { operator_choice: _dropped, ...rest } = decision;
+	return rest;
 }
 
 function deriveAnswerDecisions(
@@ -827,7 +868,7 @@ async function completeInterview(
 	decisions: ReadonlyArray<AskUserDecision> = [],
 ): Promise<ToolResult> {
 	const now = new Date().toISOString();
-	if (decisions.length > 0) upsertDecisions(policy, decisions);
+	if (decisions.length > 0) upsertDecisions(policy, decisions, true);
 	if (summary) policy.summary = summary;
 	if (policy.status !== "cancelled") {
 		policy.status = "complete";
@@ -899,6 +940,55 @@ async function closeAutoResolved(
 		await persistAskUserTranscript(policy, options);
 	}
 	return okInterviewResult(policy, "round_auto_resolved", answers, unattended);
+}
+
+/**
+ * Close an `operator_only` round nobody answered: the window passed in the TUI,
+ * or autonomy is yolo and nobody was asked. Nothing is chosen and no decision
+ * is recorded, and the turn ends, as it does when an ACP client's interview
+ * request times out. The interview closes rather than cancels because the
+ * operator dismissed nothing.
+ */
+async function closeOperatorChoiceUnanswered(
+	policy: AskUserToolPolicy,
+	questions: ReadonlyArray<AskUserQuestion>,
+	requestedAt: string,
+	reason: { away: true } | { afterSeconds: number },
+	standalone: boolean,
+	options: ToolInvokeOptions | undefined,
+): Promise<ToolResult> {
+	const answeredAt = new Date().toISOString();
+	policy.callCount += 1;
+	policy.askedQuestionKeys.add(questionKey(questions));
+	policy.updatedAt = answeredAt;
+	policy.rounds.push({
+		round: policy.rounds.length + 1,
+		requestedAt,
+		answeredAt,
+		questions: transcriptQuestions(questions),
+		answers: [],
+	});
+	policy.status = "complete";
+	policy.endedAt = answeredAt;
+	const why =
+		"away" in reason
+			? "Autonomy is yolo, so the operator was not asked"
+			: `The operator did not answer within ${reason.afterSeconds} s`;
+	const note = `${why}; this question is the operator's own choice, so nothing was chosen.`;
+	policy.summary = policy.summary === undefined ? note : `${policy.summary} ${note}`;
+	if (!standalone) await persistAskUserTranscript(policy, options);
+	const interview = compactInterview(policy, "operator_choice_unanswered");
+	return {
+		kind: "ok",
+		output: [
+			"ask_user result: operator_choice_unanswered",
+			`${note} No decision was recorded and the choice stays open. The turn ends here: do not choose, and do not act as if anything was chosen.`,
+			"",
+			JSON.stringify({ interview }, null, 2),
+		].join("\n"),
+		details: { interview, answers: [], decisions: policy.decisions, operatorChoiceUnanswered: true },
+		terminate: true,
+	};
 }
 
 async function defaultAskUserHandler(): Promise<AskUserResult> {
@@ -987,6 +1077,17 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				);
 			}
 
+			const operatorOnly = questions.some((question) => question.operator_only === true);
+			if (operatorOnly && deps.getAutonomy?.() === "yolo") {
+				return closeOperatorChoiceUnanswered(
+					policy,
+					questions,
+					new Date().toISOString(),
+					{ away: true },
+					standalone,
+					options,
+				);
+			}
 			if (deps.getAutonomy?.() === "yolo") {
 				// The operator is away by contract at yolo (#407): the round never
 				// reaches the surface, and Clio answers it at once the way an
@@ -1029,6 +1130,9 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				});
 				const normalized = normalizeAskUserResult(questions, restoreQuestions(handled, shown, questions));
 				const timedOut = normalized.timedOut;
+				if (operatorOnly && timedOut !== undefined && normalized.answers.length === 0) {
+					return closeOperatorChoiceUnanswered(policy, questions, requestedAt, timedOut, standalone, options);
+				}
 				const result =
 					timedOut === undefined
 						? normalized
@@ -1072,6 +1176,14 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				if (standalone) {
 					policy.status = "complete";
 					policy.endedAt = answeredAt;
+					// A standalone round has no board record of its own. The operator's
+					// own choice still has to reach the board, so it joins the turn's
+					// interview, which the host finalizes when the turn ends.
+					if (operatorOnly && turnPolicy !== undefined) {
+						const chosen = deriveAnswerDecisions(questions, result.answers, turnPolicy);
+						upsertDecisions(turnPolicy, chosen);
+						await persistAskUserTranscript(turnPolicy, options);
+					}
 					return okInterviewResult(policy, "standalone_answered", result.answers);
 				}
 				const derived = deriveAnswerDecisions(questions, result.answers, policy);

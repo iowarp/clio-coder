@@ -151,6 +151,7 @@ function decisionLines(
 		// Clio's own choices, an absent operator's question included (#421), say why.
 		if (decision.source === "agent" && decision.rationale)
 			facts.push({ label: "chosen by Clio", value: decision.rationale });
+		if (decision.operator_choice === true) facts.push({ label: "chosen by", value: "you, as your own choice" });
 	}
 	if (facts.length > 0) {
 		lines.push(

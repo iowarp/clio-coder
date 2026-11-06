@@ -621,6 +621,8 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 		}
 		case "interaction":
 			if (details?.cancelled === true) parts.push("cancelled");
+			// The operator's own choice closed with nobody answering; the call ran, nothing was chosen.
+			else if (details?.operatorChoiceUnanswered === true) parts.push("unanswered, nothing chosen");
 			break;
 		case "external": {
 			const count = numberField(details, "count");

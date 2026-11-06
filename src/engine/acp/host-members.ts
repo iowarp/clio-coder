@@ -31,6 +31,7 @@ import { formatDecisionCorrectionTurn } from "../../session-control/decision-cor
 import type { CouncilDispatchOutcome } from "../../session-control/slash-commands.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import { AcpTimeoutError } from "./errors.js";
 import type { AcpBoardActions, AcpInterviewBinding, AcpInterviewChannel } from "./server.js";
 import { ACP_INTERVIEW_CANCEL_METHOD, ACP_INTERVIEW_REQUEST_METHOD } from "./types.js";
 
@@ -311,6 +312,13 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 			}
 			if (outcome.kind === "failed") {
 				bound.transport.notify(ACP_INTERVIEW_CANCEL_METHOD, { sessionId, interviewId });
+				// An operator's own choice nobody answered closes unanswered, the
+				// same outcome the TUI gives when its window passes; the ask_user
+				// tool picks nothing for it. Any other round keeps the cancel below.
+				if (outcome.err instanceof AcpTimeoutError && questions.some((question) => question.operator_only === true)) {
+					const afterSeconds = Math.round((bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS) / 1000);
+					return { answers: [], timedOut: { afterSeconds } };
+				}
 				// A client that refuses the round (no active turn, malformed) has not
 				// answered it, so the caller sees the same cancel an Esc gives.
 				bound.diagnostics?.(

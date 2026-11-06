@@ -623,7 +623,13 @@ class AskUserOverlayView implements Component {
 		this.railRoom = Math.max(0, Math.floor(cells));
 	}
 
+	/** The operator's own choice: a timeout closes it unanswered and nothing is picked. */
+	private operatorOnly(): boolean {
+		return this.questions.some((question) => question.operator_only === true);
+	}
+
 	private unattendedOutcome(): string {
+		if (this.operatorOnly()) return "closes this choice unanswered";
 		if (this.presentation.tier === "outward") return "declines this outward step";
 		const withOptions = this.questions.filter(questionHasOptions).length;
 		if (withOptions === 0) return "leaves this to Clio's judgment";
@@ -635,6 +641,7 @@ class AskUserOverlayView implements Component {
 
 	/** The same outcome for one narrow row, with its subject: the choice itself when there is only one. */
 	private unattendedOutcomeShort(): string {
+		if (this.operatorOnly()) return "it closes unanswered";
 		if (this.presentation.tier === "outward") return "Clio declines";
 		const only = this.questions.length === 1 ? this.questions[0] : undefined;
 		if (only === undefined) return "Clio picks each recommended option";
@@ -644,7 +651,7 @@ class AskUserOverlayView implements Component {
 
 	/** The option this question's timeout would take, while a timer is part of the round. */
 	private recommendedIndex(question: AskUserQuestion): number {
-		if (this.countdown === null || this.presentation.tier === "outward") return -1;
+		if (this.countdown === null || this.presentation.tier === "outward" || question.operator_only === true) return -1;
 		const index = recommendedOptionIndex(question);
 		const label = question.options?.[index]?.label ?? "";
 		// A label that already says it needs no second word.
@@ -681,7 +688,9 @@ class AskUserOverlayView implements Component {
 				`${GLYPH.warn} ${remaining} left, then ${outcome} · any key holds`,
 				`${GLYPH.warn} ${remaining}, then ${outcome} · key holds`,
 				// The option rows mark the pick as recommended, so the narrowest form can leave the name to them.
-				...(this.presentation.tier === "outward" ? [] : [`${GLYPH.warn} ${remaining}, then Clio picks · key holds`]),
+				...(this.presentation.tier === "outward" || this.operatorOnly()
+					? []
+					: [`${GLYPH.warn} ${remaining}, then Clio picks · key holds`]),
 			];
 			const fits = candidates.find((candidate) => visibleWidth(candidate) <= width);
 			if (fits !== undefined) return [fitRow(theme.fg("warning", fits), width)];
@@ -692,7 +701,9 @@ class AskUserOverlayView implements Component {
 		return wrapTextWithAnsi(
 			theme.fg(
 				"warning",
-				`${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} and Clio continues. Any key holds.`,
+				this.operatorOnly()
+					? `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()}: nothing is chosen and the turn ends. Any key holds.`
+					: `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} and Clio continues. Any key holds.`,
 			),
 			width,
 		);
