@@ -153,7 +153,7 @@ async function interopInspectSnapshot(now: () => number = Date.now): Promise<Int
 
 export async function runInteropInspect(args: ReadonlyArray<string>): Promise<number> {
 	if (args.length > 1 || (args.length === 1 && args[0] !== "--json")) {
-		process.stderr.write("clio-coder interop inspect: usage: clio-coder interop inspect --json\n");
+		process.stderr.write("clio-coder interop inspect: usage: clio-coder interop inspect [--json]\n");
 		return 2;
 	}
 	const snapshot = await interopInspectSnapshot();

@@ -46,6 +46,8 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	})),
 	{ args: ["session", "list", "--help"], usage: /clio-coder session list / },
 	{ args: ["session", "terminate", "some-session", "--help"], usage: /clio-coder session terminate / },
+	{ args: ["interop", "inspect", "--help"], usage: /clio-coder interop <subcommand>/ },
+	{ args: ["interop", "adopt", "claude-code", "--yes", "--help"], usage: /clio-coder interop <subcommand>/ },
 ];
 
 describe("leaf commands answer --help", { concurrency: 4 }, () => {
