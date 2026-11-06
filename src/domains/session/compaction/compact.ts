@@ -8,7 +8,12 @@ import { ProviderCompactionError } from "../../../core/provider-checkpoint-handl
 import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
-import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
+import {
+	buildLivePrefixUserText,
+	buildTurnPrefixUserText,
+	buildUserText,
+	COMPACTION_SYSTEM_PROMPT,
+} from "../../memory/compaction-prompts.js";
 import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
 import { observationEvent, observationTracing, traceObservation } from "../../memory/observation-events.js";
 import type { AdmissionHold, CallJournalOptions, CallScope } from "../../telemetry/call-scope.js";
@@ -151,6 +156,12 @@ export interface CompactInput extends SideCallAuth {
 	entries: ReadonlyArray<SessionEntry>;
 	/** Authoritative main-agent selection; omitted for unknown legacy state. */
 	skillContextState?: SkillContextState | null;
+	/**
+	 * The main route's live prefix as a summarizer, offered only when the compaction model is the live main model.
+	 * Used instead of the portable request when it is the cheaper of the two; null when the prefix is not servable
+	 * from cache (T4).
+	 */
+	livePrefix?: (signal?: AbortSignal) => Promise<LivePrefixSummary | null>;
 	/** Pure source-test seam. Production uses the existing summary stream. */
 	summarize?: (request: {
 		systemPrompt: string;
@@ -202,6 +213,23 @@ export interface CompactInput extends SideCallAuth {
 	 * input cannot produce a different verdict, and each repeat is paid (#422).
 	 */
 	skipSummaryDigest?: string;
+}
+
+/**
+ * The live main-route request as a summarizer (T4): the next turn's prefix, still served by the provider cache, with
+ * the compaction instruction appended as its one new message. Built by session-control from the engine's request.
+ */
+export interface LivePrefixSummary {
+	/** The route the request goes to; a compaction resolved to any other model cannot use it. */
+	model: { id: string; provider: string };
+	/** Base-input-equivalent tokens the request costs before output, with `tail` as the appended message. */
+	inputCost(tail: string): number;
+	/** Estimated input tokens of the whole request, for the window fit check. */
+	inputTokens(tail: string): number;
+	stream(
+		tail: string,
+		options: { maxTokens?: number; signal?: AbortSignal; fetch?: typeof globalThis.fetch },
+	): ReturnType<typeof streamSimple>;
 }
 
 /** Why a pass returned without a summary and without calling the summarizer. */
@@ -891,11 +919,12 @@ async function runSummaryStream(
 	userText: string,
 	systemPrompt: string,
 	maxTokens: number | undefined,
+	prefix?: LivePrefixSummary,
 ): Promise<{ text: string; usage: unknown }> {
 	const scope = await openCallScope(input.telemetry, input.model);
 	try {
 		return await withOAuthRefresh(input, (auth) =>
-			runSummaryAttempt({ ...input, ...auth }, userText, systemPrompt, maxTokens, scope),
+			runSummaryAttempt({ ...input, ...auth }, userText, systemPrompt, maxTokens, scope, prefix),
 		);
 	} finally {
 		await scope.close();
@@ -908,10 +937,12 @@ async function runSummaryAttempt(
 	systemPrompt: string,
 	maxTokens: number | undefined,
 	scope: CallScope,
+	prefix?: LivePrefixSummary,
 ): Promise<{ text: string; usage: unknown }> {
-	scope.startAttempt();
+	// The live prefix keeps the turn's tool declarations and auto choice; the portable request sends no tools.
+	scope.startAttempt(prefix ? { roundKind: "normal", toolChoice: "auto" } : undefined);
 	try {
-		return await scope.withContext(() => runSummaryRequest(input, userText, systemPrompt, maxTokens, scope));
+		return await scope.withContext(() => runSummaryRequest(input, userText, systemPrompt, maxTokens, scope, prefix));
 	} catch (error) {
 		// The request settles its own transport failures; this covers admission and fit checks (#434).
 		scope.settle({ stopReason: input.signal?.aborted ? "aborted" : "error", callInvoked: false });
@@ -925,11 +956,14 @@ async function runSummaryRequest(
 	systemPrompt: string,
 	maxTokens: number | undefined,
 	scope: CallScope,
+	prefix?: LivePrefixSummary,
 ): Promise<{ text: string; usage: unknown }> {
 	const options: Record<string, unknown> = {};
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.headers !== undefined) options.headers = input.headers;
 	if (input.signal !== undefined) options.signal = input.signal;
+	// A portable summary request is never repeated, so a cache write on it is paid for and never read (T4).
+	options.cacheRetention = "none";
 
 	const context = {
 		systemPrompt,
@@ -939,7 +973,7 @@ async function runSummaryRequest(
 	// context, custom instructions and message overhead. This is the shared
 	// estimate, not provider-exact tokenization; never truncate constraints to
 	// make an oversized projected conversation fit.
-	const estimatedInput = estimateAgentContextTokens(context);
+	const estimatedInput = prefix ? prefix.inputTokens(userText) : estimateAgentContextTokens(context);
 	const contextWindow = input.model.contextWindow;
 	if (!Number.isFinite(contextWindow) || contextWindow < 0) {
 		throw new Error("compaction requires a non-negative finite model context window");
@@ -967,7 +1001,8 @@ async function runSummaryRequest(
 	const timestamp = new Date().toISOString();
 	if (observationTracing())
 		traceObservation("compaction-input", {
-			systemPrompt,
+			mode: prefix ? "live-prefix" : "portable",
+			systemPrompt: prefix ? null : systemPrompt,
 			userText,
 			maxTokens: maxTokens ?? null,
 			estimatedInput,
@@ -997,11 +1032,19 @@ async function runSummaryRequest(
 		}
 		// Summarization requests thinking off, as its resolver does. Bare stream
 		// infers an active level from model.reasoning and would undo that choice.
-		const events = streamSimple(
-			input.model,
-			context as unknown as Parameters<typeof streamSimple>[1],
-			options as unknown as Parameters<typeof streamSimple>[2],
-		);
+		// The live prefix instead keeps the turn's own thinking: a change there
+		// drops Anthropic's cached messages.
+		const events = prefix
+			? prefix.stream(userText, {
+					...(maxTokens !== undefined ? { maxTokens } : {}),
+					...(input.signal !== undefined ? { signal: input.signal } : {}),
+					fetch: tracking.fetch,
+				})
+			: streamSimple(
+					input.model,
+					context as unknown as Parameters<typeof streamSimple>[1],
+					options as unknown as Parameters<typeof streamSimple>[2],
+				);
 		let writtenChars = 0;
 		for await (const event of events) {
 			if (input.onSummaryOutput && (event.type === "text_delta" || event.type === "thinking_delta")) {
@@ -1024,6 +1067,10 @@ async function runSummaryRequest(
 				input.signal?.throwIfAborted();
 				if (event.reason === "length" || event.message.stopReason === "length") {
 					throw new Error("compaction summary reached the model output limit; incomplete checkpoint was not saved");
+				}
+				// The live prefix keeps the turn's tools declared; a model that calls one wrote no checkpoint.
+				if (prefix && event.message.content.some((block) => block.type === "toolCall")) {
+					throw new Error("compaction summarizer called a tool instead of writing the checkpoint");
 				}
 				outcome = "success";
 				return { text: textFromAssistant(event.message).trim(), usage };
@@ -1384,6 +1431,38 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				)
 			: undefined;
 	const prefixText = turnPrefix.length > 0 ? represent(turnPrefix, rawTurnPrefix, previousContextText, true) : undefined;
+	// T4: the live request is chosen only when its cached price is below the portable requests' plain input, and it
+	// fits the window with the whole transcript in it.
+	const chooseLivePrefix = async (): Promise<{ port: LivePrefixSummary; tail: string } | undefined> => {
+		if (!input.livePrefix) return undefined;
+		const port = await input.livePrefix(input.signal);
+		input.signal?.throwIfAborted();
+		if (!port || port.model.id !== input.model.id || port.model.provider !== input.model.provider) return undefined;
+		const retainedFrom = retainedOpening(entries, cut.firstKeptEntryIndex);
+		const tail = buildLivePrefixUserText({
+			...(retainedFrom !== undefined ? { retainedFrom } : {}),
+			...(activeRequest !== undefined ? { activeRequest } : {}),
+			...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+		});
+		const portable = [historyText, prefixText].reduce(
+			(tokens, text) =>
+				text === undefined
+					? tokens
+					: tokens + estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(text)] }),
+			0,
+		);
+		const cost = port.inputCost(tail);
+		const window = input.model.contextWindow;
+		const fits = !(window > 0) || port.inputTokens(tail) + Math.min(maxTokens ?? 1024, 1024) <= window;
+		if (observationTracing())
+			traceObservation("compaction-route", {
+				portable,
+				livePrefix: Math.round(cost),
+				fits,
+				chosen: fits && cost < portable,
+			});
+		return fits && cost < portable ? { port, tail } : undefined;
+	};
 	// The exact requests about to be sent, on the route that would serve them.
 	// Credentials and headers stay out; they do not change what is summarized.
 	const summaryDigest = createHash("sha256")
@@ -1408,14 +1487,35 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	commitMemoryOffer?.();
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
-	if (historyText !== undefined) {
+	// T4: on the live main route the summary can be asked inside the cached request prefix, as one call that also
+	// covers a split turn. Memory's substitute is its own content choice and stays portable.
+	const live = memoryOffer === null ? await chooseLivePrefix() : undefined;
+	let liveCovered = false;
+	if (live) {
+		try {
+			const liveSummary = await runSummaryStream(input, live.tail, systemPrompt, maxTokens, live.port);
+			usage = addCompactionUsage(usage, liveSummary.usage);
+			if (liveSummary.text.length === 0) throw new Error("compaction returned an empty history summary");
+			validateHistorySummary(liveSummary.text);
+			summaryParts.push(liveSummary.text);
+			liveCovered = true;
+		} catch (error) {
+			input.signal?.throwIfAborted();
+			// The failed call reported its own usage; the portable requests below still produce the checkpoint.
+			if (observationTracing())
+				traceObservation("compaction-live-prefix-fallback", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+		}
+	}
+	if (!liveCovered && historyText !== undefined) {
 		const historySummary = await runSummaryStream(input, historyText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
 		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
 		validateHistorySummary(historySummary.text);
 		summaryParts.push(historySummary.text);
 	}
-	if (prefixText !== undefined) {
+	if (!liveCovered && prefixText !== undefined) {
 		const prefixSummary = await runSummaryStream(input, prefixText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, prefixSummary.usage);
 		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");
@@ -1497,6 +1597,19 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		...(skillContext !== undefined ? { skillContext } : {}),
 		...(userContext !== undefined ? { userContext } : {}),
 	};
+}
+
+/** How the first retained message opens, as the live transcript shows it, so the summarizer can find the cut. */
+function retainedOpening(entries: ReadonlyArray<SessionEntry>, firstKeptIndex: number): string | undefined {
+	for (const entry of entries.slice(firstKeptIndex)) {
+		const opening = serializeConversation([entry])
+			.split(/\n(?=\[[A-Z][A-Za-z ]*\]: )/u)
+			.find((part) => !part.startsWith("[Assistant thinking]: "))
+			?.replace(/\s+/gu, " ")
+			.trim();
+		if (opening) return opening.length > 240 ? `${opening.slice(0, 240)}…` : opening;
+	}
+	return undefined;
 }
 
 interface TextBlock {
