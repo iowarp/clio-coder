@@ -384,7 +384,8 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		),
 		detach: Type.Optional(
 			Type.Boolean({
-				description: "Return run ids immediately and collect with monitor before final synthesis. Parallel mode only.",
+				description:
+					"Return run ids immediately and collect with monitor before final synthesis. Parallel mode only; not with review or timeout_ms.",
 			}),
 		),
 		review: Type.Optional(
@@ -477,7 +478,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		thinking_level: Type.Optional(StringEnum(THINKING_LEVELS)),
 		cwd: Type.Optional(Type.String({ description: "Default worker working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),
-		max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned." })),
+		max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned (default 20000)." })),
 		result_summary_max_bytes: Type.Optional(
 			Type.Integer({
 				minimum: 1,

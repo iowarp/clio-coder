@@ -675,7 +675,9 @@ export const runScriptToolSurface: ToolSurface = {
 			Type.String({ description: "Working directory, relative to the workspace root (default: the root)." }),
 		),
 		timeout_ms: Type.Optional(
-			Type.Number({ description: `Wall-clock limit in ms (default ${RUN_SCRIPT_CAPS.defaultTimeoutMs}).` }),
+			Type.Number({
+				description: `Wall-clock limit in ms (default ${RUN_SCRIPT_CAPS.defaultTimeoutMs}, max ${RUN_SCRIPT_CAPS.maxTimeoutMs})`,
+			}),
 		),
 		inputs: Type.Optional(
 			Type.Array(Type.String(), {

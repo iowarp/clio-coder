@@ -12,7 +12,7 @@ export const webFetchToolSurface = {
 		headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Request headers." })),
 		body: Type.Optional(Type.String({ description: "Request body (POST/PUT)." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (default 30000)." })),
-		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000)." })),
+		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000, max 5000000)." })),
 		format: Type.Optional(
 			Type.String({ description: "auto (default) converts HTML to Markdown; raw returns the body unconverted." }),
 		),
@@ -34,7 +34,7 @@ export const webReadToolSurface = {
 	parameters: Type.Object({
 		url: Type.String({ description: "Fully-qualified http(s) URL." }),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (default 30000)." })),
-		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000)." })),
+		max_bytes: Type.Optional(Type.Number({ description: "Max bytes returned (default 600000, max 5000000)." })),
 		format: Type.Optional(
 			Type.String({ description: "auto (default) converts HTML to Markdown; raw returns the body unconverted." }),
 		),
