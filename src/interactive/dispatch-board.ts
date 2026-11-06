@@ -813,7 +813,11 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 }
 
 function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, contentWidth: number): string[] {
-	const presentation = dispatchStatusPresentation(row.status);
+	// Warned worker steps make the plan's status a warning here too, as on its row and its card.
+	const presentation =
+		plan.state === "passed" && planWarnedStepCount(plan) > 0
+			? { glyph: GLYPH.warn, label: "done", token: "warning" as const, glyphToken: undefined }
+			: dispatchStatusPresentation(row.status);
 	const units = [
 		`${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`,
 		theme.fg("body", planProgressText(plan, true, false)),
@@ -2125,6 +2129,7 @@ function formatDispatchBoardBody(
 	// The /view handle is the only way to the rows a narrow board cut, so the count shortens and Enter goes first.
 	if (!fits() && where.length > 2) where.splice(1, 1);
 	if (!fits()) where[0] = `${hidden} more`;
+	if (!fits() && where.length > 1) where.shift();
 	while (where.length > 1 && !fits()) where.pop();
 	lines.push(
 		...kept,
