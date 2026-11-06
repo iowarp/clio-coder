@@ -1,0 +1,140 @@
+/**
+ * Verified outcomes per session, and what the session spent per outcome.
+ *
+ * An outcome counts only from a typed field Clio recorded, never from prose a model wrote:
+ *  - a `verify` result whose declared `reproduce` or `numeric-compare` judgement passed;
+ *  - a worker run whose record verifies against its seal and whose host verification passed;
+ *  - a board task marked done whose required checks all have an observed pass.
+ * One verification is one outcome. A check passing again on the same judged payload is the same result, so it is keyed
+ * by check id and payload digests, and a run by its id. A done task is checked by the passes observed while it was
+ * active, and those are often the very check passes or worker runs already counted; a task counts only for a pass of
+ * its own. Its observed rows carry the timestamp of the ledger entry that recorded the pass (`standingChecks`), so a
+ * row whose time is a counted outcome's entry time is that outcome. Two results written in the same millisecond share a
+ * time, so the match errs toward counting the task as already counted, never toward counting it twice.
+ *
+ * The per-outcome figures divide the session's own folded totals, so they keep every mark the totals carry: a lower
+ * bound stays a lower bound, an estimate stays an estimate, and an unpriced spend stays `not measured`.
+ */
+
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { FactSum } from "../../core/telemetry/fact.js";
+import { foldSessionTaskHistory, observedTaskChecks, taskCompletionStanding } from "../session/task-board.js";
+import { readRunTrust } from "./run-trust.js";
+
+/** The declared check kinds whose pass is a verified outcome; `command` and `perf-budget` passes are not. */
+const VERIFIED_CHECK_KINDS = ["reproduce", "numeric-compare"] as const;
+
+export interface VerifiedOutcomeCount {
+	total: number;
+	/** Distinct `reproduce` and `numeric-compare` passes. */
+	checks: number;
+	/** Sealed worker runs whose host verification passed. */
+	workers: number;
+	/** Board tasks done with every required check observed passing, and a pass no other outcome here counts. */
+	tasks: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function str(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
+
+/**
+ * The identity of the result a passing declared check judged, or null when the entry is not one. The judged payload
+ * digests name the result, so rerunning a check on unchanged output is the same outcome and changed output is another.
+ */
+function passedCheckKey(details: Record<string, unknown>): string | null {
+	const report = details.report;
+	const judgement = details.judgement;
+	if (!isRecord(report) || !isRecord(judgement)) return null;
+	const kind = report.kind;
+	if (!VERIFIED_CHECK_KINDS.some((verified) => verified === kind)) return null;
+	if (report.passed !== true || judgement.validation !== "passed" || judgement.execution !== "succeeded") return null;
+	const digests: string[] = [];
+	const digest = (value: unknown): void => {
+		if (isRecord(value) && typeof value.sha256 === "string") digests.push(value.sha256);
+	};
+	digest(report.reference);
+	digest(report.actual);
+	if (Array.isArray(report.runs)) for (const run of report.runs) digest(isRecord(run) ? run.payload : undefined);
+	const conditions = report.conditions;
+	if (isRecord(conditions) && Array.isArray(conditions.inputs)) for (const input of conditions.inputs) digest(input);
+	return `${String(kind)}\0${str(details.check)}\0${digests.join(",")}`;
+}
+
+/** A settled tool result entry's tool, details and ledger time, or null for any other entry. */
+function toolResult(entry: unknown): { tool: string; details: Record<string, unknown>; at: string } | null {
+	if (!isRecord(entry) || entry.kind !== "message" || entry.role !== "tool_result" || !isRecord(entry.payload))
+		return null;
+	const payload = entry.payload;
+	if (payload.isError === true || !isRecord(payload.result) || !isRecord(payload.result.details)) return null;
+	return { tool: str(payload.toolName), details: payload.result.details, at: str(entry.timestamp) };
+}
+
+/** The run ids a dispatch result names: one run's `runId`, or each of a batch's `runs[].runId`. */
+function dispatchRunIds(details: Record<string, unknown>): string[] {
+	const runs = Array.isArray(details.runs) ? details.runs : [details];
+	return runs.flatMap((run) => (isRecord(run) && typeof run.runId === "string" ? [run.runId] : []));
+}
+
+/** Whether a run's sealed record says Clio's own host verification passed on it. */
+function runHostVerified(record: RunTelemetryV1 | null): boolean {
+	if (record === null || record.settled === null) return false;
+	const { integrity, trust } = readRunTrust(record);
+	const grounding = trust.validationGrounding;
+	return (
+		integrity.state === "verified" &&
+		grounding.state === "validated" &&
+		"authority" in grounding &&
+		grounding.authority.id === "host-verification"
+	);
+}
+
+/**
+ * Count a session's verified outcomes. `entries` is the session's whole ledger, every branch included, as its token
+ * and cost totals cover every branch; gateway chain children must already be expanded. `runs` are the worker runs the
+ * session's telemetry references.
+ */
+export function countVerifiedOutcomes(
+	entries: ReadonlyArray<unknown>,
+	runs: ReadonlyArray<RunTelemetryV1 | null>,
+): VerifiedOutcomeCount {
+	const workers = new Set<string>();
+	for (const run of runs) if (run !== null && runHostVerified(run)) workers.add(run.row.runId);
+	const checks = new Set<string>();
+	/** Ledger times of the entries that recorded an outcome counted above. */
+	const counted = new Set<string>();
+	for (const entry of entries) {
+		const result = toolResult(entry);
+		if (result === null) continue;
+		const key = passedCheckKey(result.details);
+		if (key !== null) checks.add(key);
+		const countedRun = result.tool === "dispatch" && dispatchRunIds(result.details).some((id) => workers.has(id));
+		if ((key !== null || countedRun) && result.at !== "") counted.add(result.at);
+	}
+	let tasks = 0;
+	for (const board of foldSessionTaskHistory(entries))
+		for (const task of board.tasks) {
+			if (taskCompletionStanding(task) !== "checked") continue;
+			if (observedTaskChecks(task).passed.some((pass) => !counted.has(pass.observedAt))) tasks += 1;
+		}
+	return { total: checks.size + workers.size + tasks, checks: checks.size, workers: workers.size, tasks };
+}
+
+/**
+ * A session total split evenly over its verified outcomes, with the same coverage: each contribution's known part is
+ * divided and its unknown and absent counts kept, so the renderer marks the share exactly as it marks the total.
+ */
+export function perVerifiedOutcome(sum: FactSum, outcomes: number): FactSum {
+	if (!(outcomes > 0)) throw new RangeError("perVerifiedOutcome needs at least one verified outcome");
+	return {
+		measured: sum.measured / outcomes,
+		estimated: sum.estimated / outcomes,
+		unknownCount: sum.unknownCount,
+		absentCount: sum.absentCount,
+		coverage: { ...sum.coverage },
+	};
+}

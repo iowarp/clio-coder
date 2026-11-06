@@ -10,7 +10,14 @@
 import type { AgentRole } from "../core/telemetry/enums.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { factKnownValue } from "../core/telemetry/known.js";
+import { renderCountSum, renderUsdSum } from "../core/telemetry/render.js";
+import {
+	countVerifiedOutcomes,
+	perVerifiedOutcome,
+	type VerifiedOutcomeCount,
+} from "../domains/evidence/verified-outcomes.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
+import { expandChainMessages } from "../tools/surface.js";
 
 export const USAGE_NOT_MEASURED = "not measured";
 
@@ -188,4 +195,85 @@ export function sentCallCount(view: TelemetryView, filter: { roles?: AgentRole[]
 		// A read model that cannot list calls has no sent count to give; the caller shows its own total instead.
 		return Number.NaN;
 	}
+}
+
+/** A single fact as the one-contribution sum it is, so a share of it renders through the sum renderers. */
+function asSum(fact: Fact<number> | FactSum): FactSum {
+	if (isSum(fact)) return fact;
+	const value = fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0;
+	return {
+		measured: fact.kind === "measured" ? value : 0,
+		estimated: fact.kind === "estimated" ? value : 0,
+		unknownCount: fact.kind === "unknown" ? 1 : 0,
+		absentCount: fact.kind === "absent" ? 1 : 0,
+		coverage: {
+			measured: fact.kind === "measured" ? 1 : 0,
+			estimated: fact.kind === "estimated" ? 1 : 0,
+			unknown: fact.kind === "unknown" ? 1 : 0,
+		},
+	};
+}
+
+/** What a session's verified outcomes cost, in the words `/usage` and the exit card share. */
+export type VerifiedOutcomeWords =
+	| { kind: "none"; words: string }
+	| {
+			kind: "counted";
+			/** `3`. */
+			count: string;
+			/** `2 reproduce or numeric-compare passes`, `1 worker run host-verified`, `1 task done with a passing check`. */
+			parts: string[];
+			/** Session tokens over the outcomes: `4,115`, `≥4,115`, or `not measured`. */
+			tokens: string;
+			/** Session cost over the outcomes: `$0.0041`, `~$0.0041 est`, `$0.00 local`, or `not measured`. */
+			cost: string;
+	  };
+
+/**
+ * The session's verified outcomes from its whole ledger and the worker runs its telemetry references. A run's record
+ * is read and its seal checked here, so a caller reads this once per render, not per row.
+ */
+export function sessionVerifiedOutcomes(view: TelemetryView, entries: ReadonlyArray<unknown>): VerifiedOutcomeCount {
+	let runs: ReturnType<TelemetryView["run"]>[] = [];
+	try {
+		runs = view.runs().map((row) => view.run(row.runId));
+	} catch {
+		// A read model that cannot list runs leaves the runs out; the ledger's own outcomes still count.
+	}
+	return countVerifiedOutcomes(expandChainMessages(entries), runs);
+}
+
+export const NO_VERIFIED_OUTCOME = "none this session, so no per-outcome figure";
+
+/**
+ * The session's tokens and cost per verified outcome. The shares divide the read model's own session totals and are
+ * drawn by the canonical renderers, so an unpriced route reads `not measured` and a partial total keeps its `≥` or
+ * `+?`. With no outcome there is nothing to divide by, and the words say so.
+ */
+export function verifiedOutcomeWords(view: TelemetryView, outcomes: VerifiedOutcomeCount): VerifiedOutcomeWords {
+	if (outcomes.total <= 0) return { kind: "none", words: NO_VERIFIED_OUTCOME };
+	const totals = view.session().totals;
+	const tokenShare = perVerifiedOutcome(asSum(totals.tokens.fact), outcomes.total);
+	const tokens = usageLineFigure({ fact: tokenShare, display: renderCountSum(tokenShare) });
+	const priced = view.cost("role").total.pricedBy;
+	// A spend every call of which was free reads the same per outcome; its display names the free rule.
+	const free = priced.free > 0 && priced.provider + priced["target-rates"] + priced.catalog + priced.none === 0;
+	const costShare = perVerifiedOutcome(asSum(totals.usd.fact), outcomes.total);
+	const cost = free ? totals.usd.display : renderUsdSum(costShare, false);
+	const plural = (n: number, one: string, many: string): string => `${count(n)} ${n === 1 ? one : many}`;
+	return {
+		kind: "counted",
+		count: count(outcomes.total),
+		parts: [
+			...(outcomes.checks > 0
+				? [plural(outcomes.checks, "reproduce or numeric-compare pass", "reproduce or numeric-compare passes")]
+				: []),
+			...(outcomes.workers > 0 ? [plural(outcomes.workers, "worker run host-verified", "worker runs host-verified")] : []),
+			...(outcomes.tasks > 0
+				? [plural(outcomes.tasks, "task done with a passing check", "tasks done with a passing check")]
+				: []),
+		],
+		tokens: usageSaysNothing(tokens) ? USAGE_NOT_MEASURED : tokens,
+		cost,
+	};
 }

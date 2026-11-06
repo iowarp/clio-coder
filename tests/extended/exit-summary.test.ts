@@ -71,3 +71,73 @@ test("the session summary counts what Clio answered while the operator was away 
 	);
 	collector.dispose();
 });
+
+test("the exit card divides the session's spend over its distinct verified outcomes, and never by zero", () => {
+	const passed = (kind: string, check: string, sha256: string, validation = "passed") => ({
+		kind: "message",
+		role: "tool_result",
+		payload: {
+			toolName: "verify",
+			isError: validation !== "passed",
+			result: {
+				details: {
+					check,
+					kind,
+					report: { kind, passed: validation === "passed", actual: { sha256 } },
+					judgement: { execution: "succeeded", validation },
+				},
+			},
+		},
+	});
+	const entries = [
+		passed("reproduce", "repro", "a"),
+		// The same check on the same payload is the same result; a command pass and a failed comparison are not outcomes.
+		passed("reproduce", "repro", "a"),
+		passed("numeric-compare", "fit", "b"),
+		passed("command", "test", "c"),
+		passed("numeric-compare", "fit", "d", "failed"),
+	];
+	const card = (calls: ReturnType<typeof telemetryCall>, ledger: unknown[]) => {
+		const spend = exitSpend(telemetryViewOf("session-1", calls), "1970-01-01T00:00:00.000Z", ledger);
+		ok(spend.kind === "ready");
+		return spend.verified;
+	};
+	const call = (usd: number | null, pricedBy?: "target-rates") =>
+		telemetryCall("session-1", { usage: { input: 1000, output: 200 }, usd, ...(pricedBy ? { pricedBy } : {}) });
+	deepStrictEqual(card(call(null), []), { kind: "none", words: "none this session, so no per-outcome figure" });
+	const unpriced = card(call(null), entries);
+	ok(unpriced.kind === "counted");
+	deepStrictEqual(
+		[unpriced.count, unpriced.parts, unpriced.tokens, unpriced.cost],
+		["2", ["2 reproduce or numeric-compare passes"], "600", "not measured"],
+	);
+	const priced = card(call(0.5, "target-rates"), entries);
+	ok(priced.kind === "counted");
+	deepStrictEqual(priced.cost, "$0.25");
+	// A done task checked by a pass already counted is that pass; one checked by a pass of its own counts once.
+	const at = "2026-11-06T00:00:00.000Z";
+	const row = (task: string, observedAt: string) => ({
+		id: `${task}.observed.0`,
+		description: "check",
+		command: "check",
+		status: "passed",
+		observedAt,
+	});
+	const ledger = {
+		kind: "taskLedger",
+		turnId: "turn-1",
+		parentTurnId: null,
+		boardId: "board-1",
+		activeRunIds: [],
+		timestamp: "2026-11-06T00:01:00.000Z",
+		goals: [{ id: "board", title: "Board", status: "completed" }],
+		subgoals: ["t1", "t2"].map((id) => ({ id, title: id, status: "completed", parentGoalId: "board" })),
+		requiredValidationEvidence: [row("t1", at), row("t2", "2026-11-06T00:00:30.000Z")],
+	};
+	const tasks = card(call(null), [{ ...passed("reproduce", "repro", "a"), timestamp: at }, ledger]);
+	ok(tasks.kind === "counted");
+	deepStrictEqual(
+		[tasks.count, tasks.parts],
+		["2", ["1 reproduce or numeric-compare pass", "1 task done with a passing check"]],
+	);
+});
