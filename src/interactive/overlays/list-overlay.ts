@@ -39,6 +39,7 @@ import {
 	positionRow,
 	rule,
 	selectionRow,
+	wrapPaths,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
@@ -943,9 +944,7 @@ export class ListOverlayView implements Component {
 		if (selectedItem.detailFormat === "rows") {
 			// Rows laid out from the primitives already fit; only prose that was
 			// handed over unwrapped folds here, at the pane's real width.
-			lines = detailLines.flatMap((line) =>
-				visibleWidth(line) <= width ? [line] : wrapTextWithAnsi(line, Math.max(1, width)),
-			);
+			lines = detailLines.flatMap((line) => (visibleWidth(line) <= width ? [line] : wrapPaths(line, Math.max(1, width))));
 		} else {
 			const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
 			lines = md.render(width);
@@ -1216,8 +1215,8 @@ export class ListOverlayView implements Component {
 			// The key rows depend on what the pinned pane head shows, and the pane's
 			// height on how many key rows there are; one pass with every dropped key
 			// finds the head, the second lays out with the keys the head leaves. Keys
-			// leave the cursor its row, or a wanted pane its two, and with eight rows
-			// or more take at most half; past that, the rows they do get are whole
+			// leave the cursor its row, or a wanted pane its two, and take at most half
+			// of eight rows or more and a third of fewer; past that, the rows they do get are whole
 			// and the last one is fitted, with the dim marker for what it still holds.
 			// The overflow counts keys, not rows: shedding a chrome row that moved
 			// one key into the rows and bought a row for three others read as no
@@ -1227,7 +1226,12 @@ export class ListOverlayView implements Component {
 				// A pane that may take the body over keeps its two rows from the keys; a
 				// pane that only stacks is already behind the list's three.
 				const reserve = paneWanted && !isSplit && this.takeoverAllowed ? STACKED_DETAIL_MIN_ROWS : 1;
-				const most = availableRows >= 8 ? Math.floor(availableRows / 2) : Math.max(0, availableRows - reserve);
+				// Under eight rows the keys take a third: four rows of legend over a single item at 40x15 left a
+				// list nobody could scan, and the keys past the marker still work and are listed in /help.
+				const most =
+					availableRows >= 8
+						? Math.floor(availableRows / 2)
+						: Math.max(0, Math.min(Math.max(1, Math.floor(availableRows / 3)), availableRows - reserve));
 				if (rows.length <= most) return rows;
 				overflow = dropped.length;
 				// No row to spare: the keys the rail dropped are off screen.
