@@ -35,7 +35,8 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 		let token: ClioToken = "annotation";
 		switch (level) {
 			case "info":
-				glyph = "·";
+				// A run's cancel settles as `⊘` on its card and the rail, so its notice carries the same mark, not a bare `·`.
+				glyph = /^\S+ cancelled\b/u.test(normalized) ? GLYPH.cancelled : "·";
 				token = "annotation";
 				break;
 			case "success":
