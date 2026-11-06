@@ -28,8 +28,8 @@ try {
 }
 
 // tsup inlines __CLIO_BUILD_COMMIT__ into readBuildProvenance (src/core/build-info.ts);
-// dist/ is unminified by decision, so the function keeps its name.
-const RECORDED = /function readBuildProvenance\(\) \{[^}]*?commit: "([0-9a-f]+)"/;
+// dist/ keeps identifiers (de591ef65 minifies only whitespace and syntax), so the function keeps its name.
+const RECORDED = /function readBuildProvenance\(\)\s*\{[^}]*?commit:\s*"([0-9a-f]+)"/;
 let built;
 for (const name of readdirSync(dist)) {
 	if (!name.endsWith(".js")) continue;
