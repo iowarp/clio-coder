@@ -24,10 +24,38 @@ function fixture(cwd = "/workspace") {
 		leafId: "newest",
 		rootIds: ["oldest"],
 		nodesById: {
-			oldest: { id: "oldest", parentId: null, at: "2026-09-01T00:00:00Z", kind: "user", children: ["branch", "newest"] },
-			branch: { id: "branch", parentId: "oldest", at: "2026-09-02T00:00:00Z", kind: "assistant", children: ["marker"] },
-			marker: { id: "marker", parentId: "branch", at: "2026-09-02T00:00:00Z", kind: "compaction", children: [] },
-			newest: { id: "newest", parentId: "oldest", at: "2026-09-03T00:00:00Z", kind: "assistant", children: [] },
+			oldest: {
+				id: "oldest",
+				preview: "oldest",
+				parentId: null,
+				at: "2026-09-01T00:00:00Z",
+				kind: "user",
+				children: ["branch", "newest"],
+			},
+			branch: {
+				id: "branch",
+				preview: "branch",
+				parentId: "oldest",
+				at: "2026-09-02T00:00:00Z",
+				kind: "assistant",
+				children: ["marker"],
+			},
+			marker: {
+				id: "marker",
+				preview: "marker",
+				parentId: "branch",
+				at: "2026-09-02T00:00:00Z",
+				kind: "compaction",
+				children: [],
+			},
+			newest: {
+				id: "newest",
+				preview: "newest",
+				parentId: "oldest",
+				at: "2026-09-03T00:00:00Z",
+				kind: "assistant",
+				children: [],
+			},
 		},
 	};
 	const switched: string[] = [];
@@ -55,7 +83,7 @@ function fixture(cwd = "/workspace") {
 	);
 	const text = () => stripTerminalSequences(view.render(86).join("\n"));
 	const order = () =>
-		[...text().matchAll(/(?:user|assistant|compaction)\s+(oldest|branch|marker|newest)\b/gu)].map((entry) => entry[1]);
+		[...text().matchAll(/(?:You|Clio|Compacted)\s+(oldest|branch|marker|newest)\b/gu)].map((entry) => entry[1]);
 	return { snapshot, view, text, order, switched, edits, closed: () => closed };
 }
 
@@ -64,7 +92,7 @@ it("toggles the cwd filter and can recover from an empty filtered list", () => {
 	f.view.handleInput("p");
 	match(f.text(), /no turns match the current cwd/u);
 	doesNotMatch(f.text(), /oldest/u);
-	match(stripTerminalSequences(f.view.getHint()), /cwd:current/u);
+	match(stripTerminalSequences(f.view.getHint()), /folder: this/u);
 	f.view.handleInput("\r");
 	deepStrictEqual(f.switched, []);
 	f.view.handleInput("s");
@@ -103,7 +131,7 @@ it("treats p and s as label text while editing and retains filtering and sorting
 	f.view.handleInput("\r");
 	deepStrictEqual(f.edits, [["oldest", "ps", "session"]]);
 	deepStrictEqual(f.order(), ["newest", "branch", "marker", "oldest"]);
-	match(stripTerminalSequences(f.view.getHint()), /cwd:current.*recent/u);
+	match(stripTerminalSequences(f.view.getHint()), /folder: this.*order: newest/u);
 	match(f.text(), /label:"ps"/u);
 });
 

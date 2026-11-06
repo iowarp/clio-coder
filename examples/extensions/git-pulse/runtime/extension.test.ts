@@ -37,17 +37,17 @@ test("pulse reports real branch and dirty paths; the clock tick refreshes and pe
 	const host = await createExtensionTestHost(ROOT, { workspace: cwd });
 	try {
 		const initial = await host.observe({ event: "session_open", reason: "startup" });
-		assert.match(initial?.status?.text ?? "", /Git main · 0 dirty · no upstream/);
+		assert.match(initial?.status?.text ?? "", /main · 0 dirty · no upstream/);
 		writeFileSync(path.join(cwd, "sample.txt"), "prepared fixture\n");
 		assert.deepEqual(await host.advance(4999), []);
 		const [ticked] = await host.advance(1);
-		assert.match(ticked?.band?.t === "text" ? ticked.band.text : "", /main · dirty 1 · no upstream/);
+		assert.match(ticked?.band?.t === "text" ? ticked.band.text : "", /main · 1 dirty · no upstream/);
 		const stored = (await host.state.get<{ dirty: number; checkedAt: number }>("lastSnapshot")).value;
 		assert.equal(stored?.dirty, 1);
 		assert.equal(stored?.checkedAt, 5000);
 		const pulse = await host.command("pulse");
 		assert.equal(pulse.card?.t, "text");
-		assert.match(pulse.text, /dirty 1/);
+		assert.match(pulse.text, /1 dirty/);
 	} finally {
 		await host.dispose();
 		rmSync(cwd, { recursive: true, force: true });
@@ -78,7 +78,7 @@ test("watch observes local ahead/behind and counts a staged rename with newline 
 		assert.match((await host.command("pulse")).text, /ahead 0 · behind 1/);
 		git(cwd, "mv", "? original\nname.txt", "renamed\nname.txt");
 		const renamed = await host.observe({ event: "fs_changed", paths: [".git/index"] });
-		assert.match(renamed?.text ?? "", /dirty 1/);
+		assert.match(renamed?.text ?? "", /1 dirty/);
 		git(cwd, "checkout", "--detach", "-q", initial);
 		assert.match((await host.command("pulse")).text, new RegExp(`detached@${initial.slice(0, 8)}`));
 	} finally {
@@ -95,7 +95,7 @@ test("a non-repository reports unavailable facts without inventing a clean snaps
 		const pulse = await host.command("pulse");
 		assert.match(pulse.text, /Git unavailable/);
 		assert.equal(pulse.status?.tone, "warning");
-		assert.match(pulse.status?.text ?? "", /upstream \?/);
+		assert.match(pulse.status?.text ?? "", /Git unavailable/);
 		assert.equal((await host.state.get<{ dirty: null }>("lastSnapshot")).value?.dirty, null);
 	} finally {
 		await host.dispose();

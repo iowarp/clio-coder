@@ -30,7 +30,7 @@ import {
 	readLibraryInventory,
 	readLibraryPairs,
 } from "../../domains/resources/index.js";
-import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { type OverlayHandle, stripTerminalSequences, type TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
@@ -46,7 +46,12 @@ import {
 	libraryUseInvocation,
 	selectForCategory,
 } from "./library-model.js";
-import { libraryRefreshSummary, openLibraryImportOverlay, openLibraryReviewOverlay } from "./library-review.js";
+import {
+	libraryOutcomeHeadline,
+	libraryRefreshSummary,
+	openLibraryImportOverlay,
+	openLibraryReviewOverlay,
+} from "./library-review.js";
 import { isLibraryTab, LIBRARY_TABS } from "./library-tabs.js";
 import { type ListOverlayHandle, type ListOverlayItem, type ListOverlayTab, openListOverlay } from "./list-overlay.js";
 
@@ -56,12 +61,11 @@ export const LIBRARY_TITLE = "Library";
 
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_BROWSE =
-	"No packages of this kind in the index. Browse counts packages, not runnable components.";
+	"No installable packages of this kind. Components that are already loaded are listed under Installed.";
 const LIBRARY_EMPTY_BROWSE_REMEDY =
-	"b shows loaded components in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
+	"b shows loaded components in Installed. Register a package with clio-coder library register <path>, or press o to import from another local agent.";
 /** @internal exported for contract tests */
-export const LIBRARY_EMPTY_INSTALLED =
-	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which components can run.";
+export const LIBRARY_EMPTY_INSTALLED = "Nothing of this kind is installed or loaded in this project or for your user.";
 const LIBRARY_EMPTY_INSTALLED_REMEDY = "b shows installable packages.";
 const LIBRARY_READ_FAILED_REMEDY = "R reads the Library again; n opens the notices.";
 
@@ -308,7 +312,17 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		};
 		const { ref, reason } = requestRefFor(subject);
 		if (!ref || !allowed[operation]) {
-			deps.notice("warn", reason ?? actions.reasons[0] ?? `${operation} is not available on this row.`);
+			const name = stripTerminalSequences(item?.label ?? "This row").replace(/\s*\[[^\]]*\]$/u, "") || "This row";
+			const installed = actions.update || actions.remove || actions.enable;
+			const fallback =
+				operation === "install"
+					? installed
+						? `${name} is already installed in ${view.scope} scope; u reviews an update and r a removal.`
+						: `${name} cannot be installed from this row.`
+					: installed
+						? `${name} has nothing to ${operation} in ${view.scope} scope.`
+						: `${name} is not installed in ${view.scope} scope, so there is nothing to ${operation}.`;
+			deps.notice("warn", reason ?? actions.reasons[0] ?? fallback);
 			return;
 		}
 		const withRequirements = operation === "install" && pendingWithRequirements === ref;
@@ -329,7 +343,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		if (operation === "install" && !plan.applicable && missing.length > 0 && !withRequirements) {
 			deps.lifecycle.release(plan);
 			pendingWithRequirements = ref;
-			deps.notice("error", `${ref} needs ${missing.join(", ")}; press i again to review them with it.`);
+			deps.notice(
+				"info",
+				`${ref} needs ${missing.join(", ")}, which ${missing.length === 1 ? "is" : "are"} not installed. Press i again to review installing ${missing.length === 1 ? "both" : "them all"}; nothing is written until you confirm.`,
+			);
 			return;
 		}
 		pendingWithRequirements = null;
@@ -359,10 +376,9 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				child = null;
 				restore();
 				const level: NoticeLevel = result.failed > 0 ? "error" : result.committed > 0 ? "success" : "info";
-				deps.notice(
-					level,
-					`${ref}: ${result.committed} committed, ${result.failed} failed, ${result.unattempted} unattempted; session refresh ${libraryRefreshSummary(result.refresh)}.`,
-				);
+				const next = result.committed > 0 ? libraryRefreshSummary(result.refresh) : "";
+				const said = result.outcomes.length > 0 ? libraryOutcomeHeadline(result) : `${ref}: nothing changed`;
+				deps.notice(level, `${said}.${next ? ` ${next}` : ""}`);
 				// A partial batch still redraws: the writes that landed are real.
 				if (result.committed > 0) redraw(selectionId);
 				review.hide();
@@ -421,16 +437,17 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				// reviewed bytes leave no trace, not merely that nothing was installed.
 				releaseLibraryImport(plan);
 				restore();
-				deps.notice("info", `import ${source}: cancelled; nothing was written.`);
+				deps.notice("info", `Import of ${plan.id ?? source} cancelled; nothing was written.`);
 				review.hide();
 			},
 			onDone: (result) => {
 				// Apply released the staged source itself, whether it installed or refused.
 				child = null;
 				restore();
+				const next = result.committed > 0 ? libraryRefreshSummary(result.refresh) : "";
 				deps.notice(
 					result.failed > 0 ? "error" : "success",
-					`import ${source}: ${result.committed} committed, ${result.failed} failed; session refresh ${libraryRefreshSummary(result.refresh)}.`,
+					`${result.outcomes.length > 0 ? libraryOutcomeHeadline(result) : `Could not import ${source}`}.${next ? ` ${next}` : ""}`,
 				);
 				if (result.committed > 0) redraw();
 				review.hide();

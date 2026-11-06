@@ -18,7 +18,7 @@ export function renderReferenceCard(card: PromptReferenceCard, width: number): s
 	const safeWidth = Math.max(8, width);
 	const header = `${theme.fg("toolMetadata", GLYPH.user)} ${theme.style("toolAction", `/${card.command}`, { bold: true })}  ${theme.fg(
 		"toolMetadata",
-		`reference · ${card.source}`,
+		`${card.kind ?? "reference"} · ${card.source}`,
 	)}`;
 	const lines = wrapTextWithAnsi(header, safeWidth);
 	const bodyWidth = Math.max(4, safeWidth - CARD_GUTTER.length);

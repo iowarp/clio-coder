@@ -357,8 +357,8 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 		const text = agent.binary ?? agent.installDir ?? "";
 		items.push({
 			id: `declined:${agent.kind}`,
-			label: `${agent.kind} ${text}`,
-			cells: { lead: agent.kind, text },
+			label: `${interopAgentKind(agent.kind)?.label ?? agent.kind} ${text}`,
+			cells: { lead: interopAgentKind(agent.kind)?.label ?? agent.kind, text },
 			get meta() {
 				return statusChip(clioTheme(), "cancelled", `declined ${when}`.trim());
 			},
@@ -380,8 +380,8 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 		const adoptable = inventory.items.length > 0;
 		items.push({
 			id: `inventory:${agent.kind}`,
-			label: `${agent.kind} ${counts.join(" ")}`,
-			cells: { lead: agent.kind, text: counts.join(", ") || NOTHING_ADOPTABLE },
+			label: `${interopAgentKind(agent.kind)?.label ?? agent.kind} ${counts.join(" ")}`,
+			cells: { lead: interopAgentKind(agent.kind)?.label ?? agent.kind, text: counts.join(", ") || NOTHING_ADOPTABLE },
 			get meta() {
 				// An empty inventory has nothing to plan, so it carries no key cap.
 				return chipRow(
@@ -402,7 +402,9 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 				]);
 				return {
 					head: [
-						titleRow(theme, `Adopt from ${agent.kind}`, width, { meta: `inventory ${inventory.status}` }),
+						titleRow(theme, `Adopt from ${interopAgentKind(agent.kind)?.label ?? agent.kind}`, width, {
+							meta: `inventory ${inventory.status}`,
+						}),
 						...chipRows(
 							theme,
 							[
@@ -601,7 +603,8 @@ function statusLine(
 		theme,
 		"",
 		units([
-			`${keyCap(theme, "u")}${keyCap(theme, "p")} ${theme.fg("fieldValue", wide ? `adopt into ${settings.scope}` : settings.scope)}`,
+			// The scope in effect, then the key that picks the other one.
+			`${theme.fg("annotation", wide ? "Adopts into" : "Scope")} ${theme.fg("fieldValue", settings.scope)} ${keyCap(theme, settings.scope === "user" ? "p" : "u")} ${theme.fg("annotation", settings.scope === "user" ? "project" : "user")}`,
 			`${keyCap(theme, "c")} ${theme.fg("fieldValue", settings.filter ? `${settings.filter}s only` : "all kinds")}`,
 			chip(theme, `${counts.proposed} proposed`, counts.proposed > 0 ? "action" : "muted"),
 			chip(theme, `${counts.connected} connected`, counts.connected > 0 ? "success" : "muted"),

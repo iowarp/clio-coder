@@ -619,7 +619,7 @@ describe("contracts/configure-onboarding", () => {
 			// behind when it was abandoned.
 			ok(screen.slice(0, reopened).includes("A model server"), `step 1's answer was lost:\n${screen}`);
 			ok(!/Target id\s{4,}\S/u.test(screen), "the abandoned step must not leave an answer row behind");
-			ok(screen.includes("Cancelled; target settings not saved"), `no closing line:\n${screen}`);
+			ok(screen.includes("Cancelled; nothing was saved"), `no closing line:\n${screen}`);
 			strictEqual(existsSync(testEnv.settingsFile), false, "a cancelled wizard creates no settings file");
 		} finally {
 			testEnv.cleanup();
@@ -633,7 +633,7 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(result.code, 130);
 			// A user cancel is said once, on the rail, and is not an error.
 			strictEqual(result.stderr, "");
-			ok(plainText(result.transcript()).includes("Cancelled; target settings not saved"));
+			ok(plainText(result.transcript()).includes("Cancelled; nothing was saved"));
 			strictEqual(existsSync(testEnv.settingsFile), false);
 		} finally {
 			testEnv.cleanup();

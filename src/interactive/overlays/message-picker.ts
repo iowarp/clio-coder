@@ -31,6 +31,8 @@ export interface MessagePickerRow {
 	turnId: string;
 	at: string;
 	preview: string;
+	/** The operator message this reply answered, which is what tells otherwise similar replies apart. */
+	asked?: string;
 }
 
 /**
@@ -39,18 +41,22 @@ export interface MessagePickerRow {
  * tests so the overlay layer stays render-only.
  */
 function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePickerRow[] {
-	const assistantTurns = turns.filter((entry) => entry.role === "assistant");
 	const rows: MessagePickerRow[] = [];
-	for (let i = assistantTurns.length - 1; i >= 0; i--) {
-		const turn = assistantTurns[i];
-		if (!turn) continue;
+	let asked: string | undefined;
+	for (const turn of turns) {
+		if (turn.role === "user") {
+			asked = buildTurnPreview({ kind: "user", payload: turn.payload }, PREVIEW_WIDTH);
+			continue;
+		}
+		if (turn.role !== "assistant") continue;
 		rows.push({
 			turnId: turn.turnId,
 			at: turn.timestamp,
 			preview: buildTurnPreview({ kind: "assistant", payload: turn.payload }, PREVIEW_WIDTH),
+			...(asked !== undefined ? { asked } : {}),
 		});
 	}
-	return rows;
+	return rows.reverse();
 }
 
 function formatTimestampForRow(timestamp: string): string {
@@ -67,7 +73,8 @@ function formatTimestampForRow(timestamp: string): string {
 function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): ChoiceItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
-		label: row.preview.replaceAll("**", ""),
+		label: row.asked ? `after “${row.asked.replaceAll("**", "")}”` : row.preview.replaceAll("**", ""),
+		...(row.asked ? { description: `Clio: ${row.preview.replaceAll("**", "")}` } : {}),
 		meta: formatTimestampForRow(row.at),
 	}));
 }
@@ -118,7 +125,7 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 		anchor: "center",
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
 		markerId: "message-picker",
-		title: "Fork conversation; workspace files stay unchanged",
-		footerHint: rows.length > 0 ? buildHint([{ key: "Enter", verb: "select" }]) : buildHint([]),
+		title: "Fork into a new session; workspace files stay unchanged",
+		footerHint: rows.length > 0 ? buildHint([{ key: "Enter", verb: "fork after this reply" }]) : buildHint([]),
 	});
 }

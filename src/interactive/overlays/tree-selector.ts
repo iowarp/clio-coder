@@ -9,6 +9,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
@@ -43,6 +44,8 @@ export interface OpenTreeOverlayDeps {
 
 interface TreeRow {
 	depth: number;
+	/** The tree lines drawn before this row: `├ ` or `└ ` opens a branch, `│ ` continues one beside it. */
+	rail?: string;
 	node: TreeSnapshotNode;
 	sessionId: string;
 	/** This row is the session's active append point: where the next message lands. */
@@ -53,8 +56,13 @@ interface TreeRow {
 
 type Submode = "browse" | "edit-label";
 
+/**
+ * The distinguishing end of a turn id. Ids are time-ordered, so turns written
+ * in the same second share their first characters; the head made every reply
+ * in a quick exchange read as the same turn.
+ */
 function shortTurnId(id: string): string {
-	return id.length > 6 ? id.slice(0, 6) : id;
+	return id.length > 6 ? id.slice(-6) : id;
 }
 
 function clampPreview(text: string, max: number): string {
@@ -132,11 +140,12 @@ function isSwitchable(node: TreeSnapshotNode): boolean {
 
 function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 	const rows: TreeRow[] = [];
-	const walk = (id: string, depth: number): void => {
+	const walk = (id: string, depth: number, rail = "", rest = ""): void => {
 		const node = snapshot.nodesById[id];
 		if (!node) return;
 		rows.push({
 			depth,
+			rail,
 			node,
 			sessionId: snapshot.sessionId,
 			isActiveTip: snapshot.leafId !== null && node.id === snapshot.leafId,
@@ -150,16 +159,41 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 		// conversation and keeps its parent's depth; only a branch point pushes
 		// its children right, which is the thing the operator opened this view
 		// to see.
-		const childDepth = node.children.length > 1 ? depth + 1 : depth;
-		for (const childId of node.children) walk(childId, childDepth);
+		// Each branch opens with a rail glyph and the ones above the last keep a
+		// vertical rail down their rows, so where one branch ends and the next
+		// begins reads at a glance instead of as one continuous column.
+		if (node.children.length > 1) {
+			node.children.forEach((childId, index) => {
+				const last = index === node.children.length - 1;
+				walk(childId, depth + 1, `${rest}${last ? "└ " : "├ "}`, `${rest}${last ? "  " : "│ "}`);
+			});
+			return;
+		}
+		for (const childId of node.children) walk(childId, depth, rest, rest);
 	};
 	for (const rootId of snapshot.rootIds) walk(rootId, 0);
 	return rows;
 }
 
-/** Width budget for the inline preview cell. Sized so the surrounding indent,
- * role marker, and short turn id still fit on an 88-column overlay. */
-const ROW_PREVIEW_BUDGET = 55;
+/**
+ * Who wrote a turn, in the words the transcript uses. The stored kinds
+ * ("user", "assistant", "tool_result") are the session format's vocabulary.
+ */
+const TREE_ROLE_WORDS: Readonly<Record<string, string>> = {
+	user: "You",
+	assistant: "Clio",
+	tool_call: "Tool call",
+	tool_result: "Tool result",
+	system: "System",
+	checkpoint: "Checkpoint",
+	compaction: "Compacted",
+	branch: "Branch",
+};
+const TREE_ROLE_WIDTH = 11;
+
+/** Width budget for the inline preview cell. With no turn id in the row, a wide overlay shows most of a turn;
+ * the row still clips to the overlay width below this. */
+const ROW_PREVIEW_BUDGET = 96;
 
 /**
  * One node as the label of a selection row, and its timestamp as the row's
@@ -172,13 +206,13 @@ function formatTreeRow(
 	opts: { showTimestamps: boolean; width: number; focused?: boolean },
 ): { label: string; meta?: string } {
 	const theme = clioTheme();
-	const indent = "  ".repeat(row.depth);
+	const indent = row.rail ?? "  ".repeat(row.depth);
 	// The active tip is where the next message lands; it gets its own glyph so
 	// a branched session shows exactly one live tip instead of every childless
 	// node reading the same as every other (issue #94). Other leaves still get
 	// a leaf glyph, just not the one that claims to be current.
 	const glyph = row.isActiveTip ? GLYPH.active : isLeaf(row.node) ? GLYPH.running : "○";
-	const turnId = shortTurnId(row.node.id);
+	const who = TREE_ROLE_WORDS[row.node.kind] ?? row.node.kind.replace(/_/gu, " ");
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
 	const labelText = row.node.label ? ` · label:"${row.node.label}"` : "";
 	// Enter cannot switch to a structural row (switchTurn only knows message
@@ -186,7 +220,7 @@ function formatTreeRow(
 	const inertText = row.switchable ? "" : " (fixed)";
 	// A plain copy of the prefix and label drives the width math; the rendered
 	// versions below carry color, so every measurement uses visibleWidth.
-	const plainPrefix = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  `;
+	const plainPrefix = `${indent}${glyph} ${who.padEnd(TREE_ROLE_WIDTH)} `;
 	const previewBudget = Math.min(
 		ROW_PREVIEW_BUDGET,
 		Math.max(1, opts.width - visibleWidth(plainPrefix) - visibleWidth(labelText) - visibleWidth(inertText)),
@@ -197,7 +231,7 @@ function formatTreeRow(
 	// dim key with a muted value. The active tip's glyph renders in accent so it
 	// stands out against every other row.
 	const glyphStyled = row.isActiveTip ? theme.fg("selectedOption", glyph) : theme.fg("annotation", glyph);
-	const styledPrefix = `${indent}${glyphStyled}${theme.fg("annotation", ` ${row.node.kind.padEnd(12)}`)} ${theme.fg("menuDescription", turnId)}  `;
+	const styledPrefix = `${indent}${glyphStyled}${theme.fg("annotation", ` ${who.padEnd(TREE_ROLE_WIDTH)}`)} `;
 	const styledLabel = labelText
 		? `${theme.fg("annotation", " · label:")}${theme.fg("menuDescription", `"${row.node.label}"`)}`
 		: "";
@@ -266,7 +300,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		this.rows = snapshot && (!this.currentCwdOnly || matchesCwd) ? flattenTreeSnapshot(snapshot) : [];
 		if (this.sortOrder === "recent") {
 			this.rows.sort((a, b) => Date.parse(b.node.at) - Date.parse(a.node.at));
-			this.rows = this.rows.map((row) => ({ ...row, depth: 0 }));
+			this.rows = this.rows.map((row) => ({ ...row, depth: 0, rail: "" }));
 		}
 		const selectedIndex = this.rows.findIndex((row) => row.node.id === selectedId);
 		this.highlight = selectedIndex < 0 ? 0 : selectedIndex;
@@ -288,6 +322,15 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		const lines: string[] = [];
 		const lineage = this.snapshot ? forkParentLine(this.snapshot, theme) : null;
 		if (lineage !== null) lines.push(truncateToWidth(lineage, contentWidth, "", true));
+		// What the marks and Enter mean, said once above the turns while there is room for it.
+		const guide =
+			this.rows.length > 0 && (this.bodyRows === 0 || this.bodyRows >= MIN_VISIBLE_ROWS + 3)
+				? theme.fg(
+						"annotation",
+						`${GLYPH.active} is where your next message goes and ${GLYPH.running} ends another branch. Enter on an earlier turn continues from there; later turns stay as a branch.`,
+					)
+				: null;
+		if (guide !== null) lines.push(...wrapTextWithAnsi(guide, contentWidth));
 		if (this.rows.length === 0) {
 			// The overlay navigates the CURRENT session's turn tree; an empty
 			// tree means no turns yet, not a missing session list.
@@ -299,7 +342,11 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		} else {
 			// The list takes what the lineage, the label editor and the status
 			// leave, and gives one row back to the position line while rows hide.
-			const chrome = (lineage !== null ? 1 : 0) + (this.submode === "edit-label" ? 1 : 0) + (this.status ? 1 : 0);
+			const chrome =
+				(lineage !== null ? 1 : 0) +
+				(guide !== null ? wrapTextWithAnsi(guide, contentWidth).length : 0) +
+				(this.submode === "edit-label" ? 1 : 0) +
+				(this.status ? 1 : 0);
 			const budget = Math.max(MIN_VISIBLE_ROWS, (this.bodyRows > 0 ? this.bodyRows : VISIBLE_ROWS) - chrome);
 			const windowed = this.rows.length > budget;
 			const visible = windowed ? Math.max(1, budget - 1) : budget;
@@ -348,14 +395,15 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		if (this.submode === "edit-label") {
 			return buildHint([{ key: "Enter", verb: "commit label" }], "back, keeps draft");
 		}
-		const tsLabel = this.showTimestamps ? "on" : "off";
+		// Each toggle names its current setting in words, not a field:value code.
 		return buildHint([
 			{ key: "↑↓", verb: "move" },
-			{ key: "Enter", verb: "switch" },
 			{ key: "e", verb: "label" },
-			{ key: "p", verb: `cwd:${this.currentCwdOnly ? "current" : "all"}` },
-			{ key: "s", verb: this.sortOrder },
-			{ key: "Shift+T", verb: `ts:${tsLabel}` },
+			{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
+			{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
+			{ key: "Shift+T", verb: `times: ${this.showTimestamps ? "on" : "off"}` },
+			// A narrowing rail drops from the left, so the action the view exists for goes last.
+			{ key: "Enter", verb: "continue from here" },
 		]);
 	}
 
@@ -405,7 +453,9 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			const row = this.currentRow();
 			if (!row) return;
 			if (!row.switchable) {
-				this.setStatus(`[tree] ${row.node.kind} rows mark a moment in the timeline; they are not a place to switch to`);
+				this.setStatus(
+					`${TREE_ROLE_WORDS[row.node.kind] ?? row.node.kind} rows mark a moment in the timeline; they are not a place to switch to.`,
+				);
 				return;
 			}
 			this.deps.onSwitchTurn(row.node.id);
@@ -449,10 +499,10 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			try {
 				this.deps.session.editLabel(row.node.id, this.labelBuffer, row.sessionId);
 				this.keptLabels.delete(row.node.id);
-				this.setStatus(`[tree] label updated on ${shortTurnId(row.node.id)}`);
+				this.setStatus(this.labelBuffer.trim() ? `Label saved on this turn.` : "Label removed from this turn.");
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				this.setStatus(`[tree] editLabel failed: ${msg}`, "error");
+				this.setStatus(`Clio could not save the label: ${msg}`, "error");
 			}
 			this.submode = "browse";
 			this.labelBuffer = "";
