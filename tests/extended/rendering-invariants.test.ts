@@ -141,7 +141,7 @@ describe("Clio rendering invariants", () => {
 	});
 
 	it("keeps every bullet of a list that follows a paragraph with no blank line", () => {
-		// The wrapped-operator lift read the first item as a paragraph continuation and raised its bullet a row.
+		// A list with no blank line above it is still a list: its first bullet stays on its own row.
 		const text =
 			"Gateway capabilities (reached through gateway on demand)\n- Inspect: read files\n- Search: grep the tree";
 		const panel = createChatPanel({ now: () => 1_000 });
