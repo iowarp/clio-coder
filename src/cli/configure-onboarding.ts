@@ -343,8 +343,9 @@ const RUNTIME_STEP: Step = {
 			choices: usable.map((entry) => ({
 				value: entry.runtimeId,
 				label: entry.label,
-				// A summary that only repeats the label says nothing the row does not already say.
-				hint: `${entry.summary === entry.label ? "" : `${entry.summary} · `}saved as runtime ${entry.runtimeId}`,
+				// A summary that only repeats the label says nothing the row does not already say, and the runtime's
+				// internal id is a name for settings.yaml, not for this choice.
+				...(entry.summary === entry.label ? {} : { hint: entry.summary }),
 			})),
 			initialIndex: previous >= 0 ? previous : featured >= 0 ? featured : 0,
 			searchable: usable.length > 8,
