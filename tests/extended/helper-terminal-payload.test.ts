@@ -120,7 +120,13 @@ for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "c
 		deepStrictEqual(names(body.tools), ["write", name]);
 		deepStrictEqual(body.tool_choice, { type: "auto", disable_parallel_tool_use: true });
 		strictEqual((body.thinking as { type: string }).type, "adaptive");
-		deepStrictEqual(body.output_config, { effort: "high" });
+		// Pi 1.5 pins a managed-effort model's top-level effort at "low"; the configured level rides the trailing marker.
+		deepStrictEqual(body.output_config, { effort: "low" });
+		deepStrictEqual((body.messages as unknown[] | undefined)?.at(-1), {
+			role: "system",
+			content: [],
+			output_config: { effort: "high" },
+		});
 		const sibling = id.startsWith("claude-mythos") ? "anthropic.claude-fable-5-1" : `anthropic.${id}`;
 		const bedrock = await wire({ ...catalog("amazon-bedrock", sibling), id: `anthropic.${id}` }, [handoff]);
 		const config = bedrock.toolConfig as { tools: Array<{ toolSpec: { name: string } }>; toolChoice: unknown };
