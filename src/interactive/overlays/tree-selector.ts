@@ -175,6 +175,22 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 	return rows;
 }
 
+/**
+ * Who wrote a turn, in the words the transcript uses. The stored kinds
+ * ("user", "assistant", "tool_result") are the session format's vocabulary.
+ */
+const TREE_ROLE_WORDS: Readonly<Record<string, string>> = {
+	user: "You",
+	assistant: "Clio",
+	tool_call: "Tool call",
+	tool_result: "Tool result",
+	system: "System",
+	checkpoint: "Checkpoint",
+	compaction: "Compacted",
+	branch: "Branch",
+};
+const TREE_ROLE_WIDTH = 11;
+
 /** Width budget for the inline preview cell. Sized so the surrounding indent,
  * role marker, and short turn id still fit on an 88-column overlay. */
 const ROW_PREVIEW_BUDGET = 55;
@@ -196,7 +212,7 @@ function formatTreeRow(
 	// node reading the same as every other (issue #94). Other leaves still get
 	// a leaf glyph, just not the one that claims to be current.
 	const glyph = row.isActiveTip ? GLYPH.active : isLeaf(row.node) ? GLYPH.running : "○";
-	const turnId = shortTurnId(row.node.id);
+	const who = TREE_ROLE_WORDS[row.node.kind] ?? row.node.kind.replace(/_/gu, " ");
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
 	const labelText = row.node.label ? ` · label:"${row.node.label}"` : "";
 	// Enter cannot switch to a structural row (switchTurn only knows message
@@ -204,7 +220,7 @@ function formatTreeRow(
 	const inertText = row.switchable ? "" : " (fixed)";
 	// A plain copy of the prefix and label drives the width math; the rendered
 	// versions below carry color, so every measurement uses visibleWidth.
-	const plainPrefix = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  `;
+	const plainPrefix = `${indent}${glyph} ${who.padEnd(TREE_ROLE_WIDTH)} `;
 	const previewBudget = Math.min(
 		ROW_PREVIEW_BUDGET,
 		Math.max(1, opts.width - visibleWidth(plainPrefix) - visibleWidth(labelText) - visibleWidth(inertText)),
@@ -215,7 +231,7 @@ function formatTreeRow(
 	// dim key with a muted value. The active tip's glyph renders in accent so it
 	// stands out against every other row.
 	const glyphStyled = row.isActiveTip ? theme.fg("selectedOption", glyph) : theme.fg("annotation", glyph);
-	const styledPrefix = `${indent}${glyphStyled}${theme.fg("annotation", ` ${row.node.kind.padEnd(12)}`)} ${theme.fg("menuDescription", turnId)}  `;
+	const styledPrefix = `${indent}${glyphStyled}${theme.fg("annotation", ` ${who.padEnd(TREE_ROLE_WIDTH)}`)} `;
 	const styledLabel = labelText
 		? `${theme.fg("annotation", " · label:")}${theme.fg("menuDescription", `"${row.node.label}"`)}`
 		: "";
@@ -311,7 +327,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			this.rows.length > 0 && (this.bodyRows === 0 || this.bodyRows >= MIN_VISIBLE_ROWS + 3)
 				? theme.fg(
 						"annotation",
-						`${GLYPH.active} is where your next message goes. Enter on an earlier turn continues from there; later turns stay as a branch.`,
+						`${GLYPH.active} is where your next message goes and ${GLYPH.running} ends another branch. Enter on an earlier turn continues from there; later turns stay as a branch.`,
 					)
 				: null;
 		if (guide !== null) lines.push(...wrapTextWithAnsi(guide, contentWidth));
@@ -436,7 +452,9 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			const row = this.currentRow();
 			if (!row) return;
 			if (!row.switchable) {
-				this.setStatus(`[tree] ${row.node.kind} rows mark a moment in the timeline; they are not a place to switch to`);
+				this.setStatus(
+					`${TREE_ROLE_WORDS[row.node.kind] ?? row.node.kind} rows mark a moment in the timeline; they are not a place to switch to.`,
+				);
 				return;
 			}
 			this.deps.onSwitchTurn(row.node.id);
@@ -480,10 +498,10 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			try {
 				this.deps.session.editLabel(row.node.id, this.labelBuffer, row.sessionId);
 				this.keptLabels.delete(row.node.id);
-				this.setStatus(`[tree] label updated on ${shortTurnId(row.node.id)}`);
+				this.setStatus(this.labelBuffer.trim() ? `Label saved on this turn.` : "Label removed from this turn.");
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				this.setStatus(`[tree] editLabel failed: ${msg}`, "error");
+				this.setStatus(`Clio could not save the label: ${msg}`, "error");
 			}
 			this.submode = "browse";
 			this.labelBuffer = "";

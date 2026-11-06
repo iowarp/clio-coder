@@ -24,10 +24,38 @@ function fixture(cwd = "/workspace") {
 		leafId: "newest",
 		rootIds: ["oldest"],
 		nodesById: {
-			oldest: { id: "oldest", parentId: null, at: "2026-09-01T00:00:00Z", kind: "user", children: ["branch", "newest"] },
-			branch: { id: "branch", parentId: "oldest", at: "2026-09-02T00:00:00Z", kind: "assistant", children: ["marker"] },
-			marker: { id: "marker", parentId: "branch", at: "2026-09-02T00:00:00Z", kind: "compaction", children: [] },
-			newest: { id: "newest", parentId: "oldest", at: "2026-09-03T00:00:00Z", kind: "assistant", children: [] },
+			oldest: {
+				id: "oldest",
+				preview: "oldest",
+				parentId: null,
+				at: "2026-09-01T00:00:00Z",
+				kind: "user",
+				children: ["branch", "newest"],
+			},
+			branch: {
+				id: "branch",
+				preview: "branch",
+				parentId: "oldest",
+				at: "2026-09-02T00:00:00Z",
+				kind: "assistant",
+				children: ["marker"],
+			},
+			marker: {
+				id: "marker",
+				preview: "marker",
+				parentId: "branch",
+				at: "2026-09-02T00:00:00Z",
+				kind: "compaction",
+				children: [],
+			},
+			newest: {
+				id: "newest",
+				preview: "newest",
+				parentId: "oldest",
+				at: "2026-09-03T00:00:00Z",
+				kind: "assistant",
+				children: [],
+			},
 		},
 	};
 	const switched: string[] = [];
@@ -55,7 +83,7 @@ function fixture(cwd = "/workspace") {
 	);
 	const text = () => stripTerminalSequences(view.render(86).join("\n"));
 	const order = () =>
-		[...text().matchAll(/(?:user|assistant|compaction)\s+(oldest|branch|marker|newest)\b/gu)].map((entry) => entry[1]);
+		[...text().matchAll(/(?:You|Clio|Compacted)\s+(oldest|branch|marker|newest)\b/gu)].map((entry) => entry[1]);
 	return { snapshot, view, text, order, switched, edits, closed: () => closed };
 }
 
