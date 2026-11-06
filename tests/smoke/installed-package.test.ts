@@ -34,7 +34,8 @@ import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.j
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const TREE_SITTER_MARKER = "node_modules/@vscode/tree-sitter-wasm/wasm/tree-sitter.js";
-const CODE_NAV_EXPORT_MARKER = "var codeNavTool = {";
+// Bundle markers tolerate minified output, where declarations merge (`a=1,Hono=class`) and spacing drops.
+const CODE_NAV_EXPORT_MARKER = /(?<![\w$])codeNavTool\s*=\s*\{/;
 
 interface Result {
 	code: number | null;
@@ -122,12 +123,13 @@ async function run(bin: string, args: string[], cwd: string, env: NodeJS.Process
 	});
 }
 
-function emittedFilesContaining(packageRoot: string, marker: string): Set<string> {
+function emittedFilesContaining(packageRoot: string, marker: string | RegExp): Set<string> {
 	const matches = new Set<string>();
 	for (const entry of readdirSync(join(packageRoot, "dist"), { recursive: true, withFileTypes: true })) {
 		if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
 		const path = join(entry.parentPath, entry.name);
-		if (readFileSync(path, "utf8").includes(marker)) matches.add(realpathSync(path));
+		const text = readFileSync(path, "utf8");
+		if (typeof marker === "string" ? text.includes(marker) : marker.test(text)) matches.add(realpathSync(path));
 	}
 	return matches;
 }
@@ -225,7 +227,7 @@ Compute the requested coefficient and report the value in one line.
 
 /** 43 URL-safe characters, the exact shape the background configuration schema pins. */
 const GUI_TEST_TOKEN = "installed-gui-smoke-token-0123456789abcdefg";
-const HONO_MARKER = "var Hono = class";
+const HONO_MARKER = /(?<![\w$])Hono\s*=\s*class\b/;
 
 /** A `clio-coder gui` child: started from a foreign cwd, torn down with SIGTERM and a bounded SIGKILL fallback. */
 interface WebServer {
@@ -703,11 +705,11 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			// Ordinary npm consumers receive a pi-tui that lacks the editor and search
 			// seams. The built application must carry that implementation itself, and
 			// its engine subclass supplies application-first input over stock Pi.
-			const tuiChunks = emittedFilesContaining(packageRoot, "var TuiAltScreen = class");
+			const tuiChunks = emittedFilesContaining(packageRoot, /(?<![\w$])TuiAltScreen\s*=\s*class\b/);
 			strictEqual(tuiChunks.size, 1, "one bundled patched TUI implementation");
 			const tuiChunk = [...tuiChunks][0];
 			ok(tuiChunk);
-			const instrumentedChunks = emittedFilesContaining(packageRoot, "var InstrumentedTuiAltScreen = class");
+			const instrumentedChunks = emittedFilesContaining(packageRoot, /(?<![\w$])InstrumentedTuiAltScreen\s*=\s*class\b/);
 			strictEqual(instrumentedChunks.size, 1, "one bundled application-input TUI implementation");
 			const instrumentedChunk = [...instrumentedChunks][0];
 			ok(instrumentedChunk);
@@ -822,8 +824,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const overriddenPackageRoot = join(work, "overridden-package-root");
 			mkdirSync(join(overriddenPackageRoot, "dist", "assets"), { recursive: true });
 			copyFileSync(
-				join(packageRoot, "dist", "assets", "codemap.json"),
-				join(overriddenPackageRoot, "dist", "assets", "codemap.json"),
+				join(packageRoot, "dist", "assets", "codemap.json.gz"),
+				join(overriddenPackageRoot, "dist", "assets", "codemap.json.gz"),
 			);
 			const rawOverriddenResult = execFileSync(
 				process.execPath,
@@ -847,6 +849,29 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				join(overriddenPackageRoot, "src", "tools", "codewiki", "code-nav.ts"),
 				"source=clio must load and resolve paths from the explicit package-root override",
 			);
+
+			// Most src/**/*.ts ships inside dist/assets/source.pack; read must still open it by its package path.
+			const packedSource = join(packageRoot, "src", "interactive", "chat-panel.ts");
+			strictEqual(existsSync(packedSource), false, "chat-panel.ts must ship packed, not as a loose file");
+			const readChunks = emittedFilesContaining(packageRoot, /(?<![\w$])readTool\s*=\s*\{/);
+			strictEqual(readChunks.size, 1, "packed dist must contain one read implementation chunk");
+			const readChunk = [...readChunks][0];
+			ok(readChunk);
+			const readChild = `
+				import { pathToFileURL } from "node:url";
+				const loaded = await import(pathToFileURL(process.argv[1]).href);
+				const result = await loaded.createReadTool().run({ path: process.argv[2], offset: 1, limit: 2 });
+				process.stdout.write(JSON.stringify(result));
+			`;
+			const packedRead = JSON.parse(
+				execFileSync(process.execPath, ["--input-type=module", "--eval", readChild, readChunk, packedSource], {
+					cwd: foreign,
+					env: isolatedEnv(home),
+					encoding: "utf8",
+				}),
+			) as { kind: string; output?: string; message?: string };
+			strictEqual(packedRead.kind, "ok", packedRead.message);
+			match(packedRead.output ?? "", /from "\.\.\/core\/assistant-model\.js"/);
 
 			const libraryHome = join(work, "isolated library home with spaces");
 			const libraryProject = join(work, "isolated library project with spaces");
