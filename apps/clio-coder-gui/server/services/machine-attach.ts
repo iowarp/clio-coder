@@ -67,7 +67,7 @@ function freeLoopbackPort(): Promise<number> {
 /** The remote port from the command channel's ready line; rejects when ssh ends or stays silent first. */
 function readyPort(child: ChildProcess, timeoutMs: number): Promise<number> {
 	return new Promise((resolve, reject) => {
-		let output = "";
+		let pending = "";
 		let stderr = "";
 		const finish = (result: number | Error) => {
 			clearTimeout(timer);
@@ -83,13 +83,13 @@ function readyPort(child: ChildProcess, timeoutMs: number): Promise<number> {
 		);
 		timer.unref();
 		const onData = (chunk: Buffer) => {
-			output += chunk.toString("utf8");
-			if (output.length > READY_OUTPUT_LIMIT) {
+			pending += chunk.toString("utf8");
+			if (pending.length > READY_OUTPUT_LIMIT) {
 				finish(new Error("The node's GUI printed too much before reporting ready."));
 				return;
 			}
-			const lines = output.split("\n");
-			output = lines.pop() ?? "";
+			const lines = pending.split("\n");
+			pending = lines.pop() ?? "";
 			for (const line of lines) {
 				const port = parseReadyLine(line);
 				if (port !== null) {
