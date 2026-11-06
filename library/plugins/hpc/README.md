@@ -46,19 +46,21 @@ installing.
 
 ## Offline behavior
 
-The pack makes no network calls of its own. Every skill drives tools installed
-on the cluster, and all of them work on an air-gapped login node, with these
-conditions:
+The pack makes no network calls of its own. Its skills drive tools installed on
+the cluster. On an air-gapped login node they work with these conditions:
 
 - `clio-kit mcp-server slurm` runs each server from its own lock file in a uv
-  environment under `~/.cache/clio-kit` (or `$CLIO_KIT_CACHE_DIR`). The first
+  environment under `$XDG_CACHE_HOME/clio-kit` or `~/.cache/clio-kit` (set
+  `CLIO_KIT_CACHE_DIR` in the declaration's `env` to move it). The first
   launch downloads that environment and fails without network. Every later
   launch from the warm cache works offline. Launch it once while online, or
   copy a warm cache from a connected node.
 - `spack install` needs network or a configured mirror. The skills run it only
   when the user asks. Lookups (`spack find`, `spack location`) are local.
 - Lmod, Darshan, parallel HDF5, MPI-IO and ChronoLog are local or cluster-network
-  tools.
+  tools, so they need no internet access once the site has installed them.
+- The pack declares no Darshan, Spack or ChronoLog MCP server (see below), so
+  nothing else needs a first online launch.
 
 ## Not yet in the pack
 

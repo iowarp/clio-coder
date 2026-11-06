@@ -145,7 +145,7 @@
 		{
 			"name": "hpc",
 			"source": "./library/plugins/hpc",
-			"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. Works on air-gapped login nodes.",
+			"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. The skills drive the cluster's own command-line tools; the clio-kit Slurm server needs one online launch to build its environment before it runs offline.",
 			"version": "0.1.0",
 			"license": "Apache-2.0",
 			"author": {
@@ -212,7 +212,7 @@
 		{
 			"name": "science-data",
 			"source": "./library/plugins/science-data",
-			"description": "Science data pack: declares the clio-kit parquet and pandas MCP servers with per-tool action classes, so reads run and every file-writing tool asks first, plus a skill for exploring HDF5, Parquet and CSV data, with an operator entry for the hdf5 server.",
+			"description": "Science data pack: a skill that reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Reads run and file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
 			"version": "0.1.0",
 			"license": "Apache-2.0",
 			"author": {

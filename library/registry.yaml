@@ -406,11 +406,12 @@ entries:
     name: hpc
     description: "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm
       server, Lmod and Spack software environments, parallel HDF5 and MPI-IO,
-      Darshan I/O analysis, and ChronoLog run records. Works on air-gapped login
-      nodes."
+      Darshan I/O analysis, and ChronoLog run records. The skills drive the
+      cluster's own command-line tools; the clio-kit Slurm server needs one
+      online launch to build its environment before it runs offline."
     version: 0.1.0
     sourceUrl: plugins/hpc
-    sha256: c5fe09d4e6808cbac89a18fb9df1c8be2b1d5a1afdd757f5a4ecd8e1aa8f4865
+    sha256: 1546d769b02e4e2a8d5e38f13f4fdc2a452e6785e3347f69b5c849869d39c19e
     requires:
       - skill:slurm-jobs
     provides:
@@ -726,20 +727,21 @@ entries:
           branches; use worktree-merge.
   - kind: plugin
     name: science-data
-    description: "Science data pack: declares the clio-kit parquet and pandas MCP
-      servers with per-tool action classes, so reads run and every file-writing
-      tool asks first, plus a skill for exploring HDF5, Parquet and CSV data,
-      with an operator entry for the hdf5 server."
+    description: "Science data pack: a skill that reads HDF5, NetCDF, Parquet and
+      CSV with Clio's data tool first, and declares the clio-kit parquet and
+      pandas MCP servers with per-tool action classes for analysis beyond it.
+      Reads run and file-writing tools ask first; each server needs one online
+      launch to build its environment before it runs offline."
     version: 0.1.0
     sourceUrl: plugins/science-data
-    sha256: b19a969ce10388a7c1bd4fd873d6a3022d85d19be4d983722557de030fe814db
+    sha256: f2b1142e320c9263f2d4378350340f64008220ee6c141e22608ea4b67bb8d7f3
     provides:
       - kind: skill
         name: science-data
-        description: "Explores HDF5, Parquet and CSV data through the clio-kit hdf5,
-          parquet and pandas MCP servers: structure, slices, statistics and
-          tests, read-only by default. Not for writing or converting data files;
-          those calls ask first."
+        description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data
+          tool for structure, slices and summary statistics, then the clio-kit
+          parquet and pandas servers for aggregation, group-by and statistical
+          tests, and the hdf5 server or h5py only for what th"
   - kind: skill
     name: scientific-debugging
     description: Diagnoses stalled or cross-system failures and wrong, NaN,

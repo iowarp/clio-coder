@@ -1,9 +1,14 @@
 # Science data pack
 
-Declares two clio-kit MCP servers for scientific data, `parquet` (schema, row
-slices, column aggregates) and `pandas` (tables, statistics, hypothesis tests),
-and a skill that drives them. A third server, `hdf5`, is set up by the operator
-from the entry below. Installing the pack launches nothing.
+A skill for reading scientific data without changing it, and two clio-kit MCP
+servers for the analysis Clio's built-in `data` tool does not do. The skill
+answers with `data` first: structure, CF attributes, hyperslabs and summary
+statistics for HDF5, NetCDF and Parquet, plus CSV and JSON, read-only and with
+no Python. It moves to `parquet` (row slices, filtered column aggregates) and
+`pandas` (group-by, correlations, hypothesis tests, pivots) only for questions
+`data` cannot answer. A third server, `hdf5`, is an optional operator entry
+(below), and h5py through `run_script` is the last resort. Installing the pack
+launches nothing.
 
 ```bash
 clio-coder library install plugin:science-data --project
@@ -93,7 +98,10 @@ is `$XDG_CACHE_HOME/clio-kit` or `~/.cache/clio-kit`.
 
 ## Offline behavior
 
-The servers read local files and make no network calls. clio-kit runs each
+The servers read local files and make no network calls while they run. The
+`data` tool's HDF5 and Parquet readers download once from the npm registry on
+first use and are cached; offline with a cold cache it refuses and names the
+cache path. clio-kit runs each
 server from its own lock file in a uv environment. The first launch downloads
 that environment from PyPI and fails without network. Every later launch from
 the warm cache works offline. A plugin's servers run with the installed plugin

@@ -1,71 +1,73 @@
 ---
 name: science-data
-description: "Explores HDF5, Parquet and CSV data through the clio-kit hdf5, parquet and pandas MCP servers: structure, slices, statistics and tests, read-only by default. Not for writing or converting data files; those calls ask first."
+description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data tool for structure, slices and summary statistics, then the clio-kit parquet and pandas servers for aggregation, group-by and statistical tests, and the hdf5 server or h5py only for what those cannot do. Not for writing or converting data files."
 ---
 
-# Scientific data through the clio-kit servers
+# Scientific data, one tool at a time
 
-Read a dataset's structure and values through the `hdf5`, `parquet` and `pandas`
-servers. Each tool carries an action class: reads run without asking, and every
-tool that can write a file asks the operator first. Never change a data file to
-answer a question about it. Pass absolute file paths, because a server's working
-directory is not the project.
+Answer questions about a data file without changing it, and use the lightest
+tool that can answer. Each step down this list costs more: a server launch, an
+approval, or a Python environment. Never write to a data file to answer a
+question about it. Pass absolute file paths.
 
-## Phase 0 - Are the servers there?
+## 1. The `data` tool first
 
-`gateway(op="find", query="hdf5")` (likewise `parquet` and `pandas`). Each
-pack server needs the operator's one-time `clio-coder mcp trust <id>`. `hdf5`
-is not in the pack: the operator declares it from the pack README. A server
-that is missing, or listed as `untrusted` or `stale`, cannot launch; tell the operator the remedy the
-listing prints, and read the file another way meanwhile. Use
-`gateway(op="describe", capability="mcp_hdf5__read_partial_dataset")` once
-before a call, and take the parameter names it returns.
+`gateway(op="call", capability="data", args={...})` is built in, read-only,
+bounded, and needs no Python and no approval. It covers:
 
-## HDF5 (`mcp_hdf5__*`)
+- `op="inspect"` on HDF5, NetCDF (classic and NetCDF-4), Parquet, CSV/TSV,
+  JSON, JSON Lines and SQLite. For a scientific file it gives the group and
+  variable tree, dtype, shape, dimensions, attributes with their CF metadata
+  (`units`, `_FillValue`, `scale_factor` and the rest), chunking and
+  compression. For Parquet it gives the schema, row groups and footer
+  statistics. Use `variable` to narrow to one dataset or group.
+- `op="select"` reads a hyperslab (`variable`, `start`, `count`, `stride`; at
+  most 2000 elements) or a Parquet row window (`offset`, `limit` up to 1000,
+  `columns`). Values come back raw, with `scale_factor` and `add_offset` not
+  applied. Say so when you quote them.
+- `op="stats"` gives min, max, mean, std and the NaN, infinity, fill and
+  missing counts over a selection. It streams up to `max_bytes` and says when
+  that cap cut the scan short.
 
-The server keeps one open file per session.
+The HDF5 and Parquet readers download once from the npm registry on first use,
+pinned and cached. Offline with a cold cache, the refusal names the URL and the
+cache path: say that, and go to step 4.
 
-1. `open_file` with `path` and `mode="r"`, always. `w` truncates the file, and
-   `r+` and `a` can change it. That is why `open_file` asks every time; say
-   `mode="r"` in your request so the operator can approve it.
-2. `analyze_dataset_structure` or `list_keys` / `visit` map the file. Then
-   `get_shape`, `get_dtype`, `get_chunks` and `list_attributes` /
-   `read_attribute` for each dataset you need, including units.
-3. Read values with `read_partial_dataset` (`start`, `count`) for anything
-   large. Use `read_full_dataset` only once `get_size` shows the dataset is
-   small.
-4. `close_file` when done.
+## 2. The clio-kit `parquet` and `pandas` servers for analysis
 
-`export_dataset` writes a new file and asks first. Use it only when the user
-asks for an export.
+Use these only when `data` cannot answer: grouped or filtered aggregates,
+correlations, statistical tests, pivots, profiling. Find them with
+`gateway(op="find", query="pandas")`. Each needs the operator's one-time
+`clio-coder mcp trust <id>`. If a server is missing, untrusted or stale, give
+the remedy the listing prints.
 
-## Parquet (`mcp_parquet__*`)
+- `mcp_parquet__aggregate_column_tool` (min, max, mean and so on over a row
+  range, with `filter_json`) and `read_slice_tool` with a filter.
+- `mcp_pandas__groupby_operations`, `correlation_analysis`,
+  `hypothesis_testing`, `pivot_table`, `profile_data` and
+  `statistical_summary`, each on a `file_path`.
 
-`summarize_tool` gives the schema, the row count and the file size.
-`read_slice_tool` reads rows `start_row` to `end_row` with optional `columns`
-and `filter_json`, `get_column_preview_tool` pages through one column, and
-`aggregate_column_tool` computes min, max, mean and similar statistics over a
-row range. All four only read.
+These are `read` and run without asking. `mcp_pandas__save_data`, and
+`filter_data` given an `output_file`, write files, so they ask first. Use them
+only when the user asks for a file.
 
-## Tables (`mcp_pandas__*`)
+## 3. The operator's `hdf5` server, rarely
 
-`load_data` reads CSV, Excel, JSON, Parquet or HDF5 with optional `columns` and
-`nrows`. Use `nrows` to look before loading everything. `statistical_summary`,
-`correlation_analysis`, `hypothesis_testing`, `groupby_operations`,
-`pivot_table`, `validate_data` and `profile_data` analyze a file and return
-results without writing.
-`save_data` and `filter_data` (when it is given `output_file`) write files, so
-they ask first.
+The operator may have declared the clio-kit `hdf5` server (the pack README has
+the entry). Use it only for what `data` lacks, such as its access-pattern
+analysis. Its `open_file` asks every time, because its `mode` could truncate the
+file. Request `mode="r"` and say so. `close_file` when done.
 
-## Offline behavior
+## 4. h5py, netCDF4 or pyarrow through `run_script`, last
 
-These servers make no network calls while they run; they read local files. The
-first launch of each one builds its uv environment from PyPI and fails without
-network. After that, launches run from the cache under `~/.cache/clio-kit`
-offline. On an air-gapped node, warm the cache on a connected node first.
+When no tool above can answer, for example `data`'s reader is offline and not
+cached, write a short read-only script that opens the file in read mode (`"r"`)
+and run it with `run_script`, declaring the file in `inputs`. That records the
+command and the file's hash. Never open the file in a writable mode.
 
 ## Final answer
 
-Name each file you read, the dataset paths or columns, and the slice. Quote the
-units an attribute declares, and say so when a file declares none. Report every
-statistic with the call that produced it.
+Name each file, the dataset paths or columns, the slice, and the tool that read
+it. Quote the units an attribute declares, and say when there are none. Report
+each statistic with the call that produced it, and say when a scan was capped
+or values are raw.
