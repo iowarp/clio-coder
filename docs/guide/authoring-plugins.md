@@ -49,7 +49,7 @@ A root `state.json` is rejected, and `plugin.json` must be a regular file at the
 | `compatibility.clio` | Optional SemVer range. Install and load refuse a package whose range excludes the running Clio Coder. |
 | `resources` | Map from `skills`, `prompts`, `agents` or `playbooks` to a relative directory inside the package. |
 | `components` | Up to 1024 component declarations (see [Components and references](#components-and-references)). |
-| `evals` | Retired. A manifest that still declares it keeps loading and Clio ignores the value. The key is accepted until the v0.7.0 compatibility window. |
+| `evals` | Removed in 0.7.0. Install refuses a manifest that declares it, and an installed copy that still declares it lists as invalid and loads no resources. Delete the key from the package manifest and reinstall. |
 
 Resources use ordinary top-level directories (`agents/`, `prompts/`, `skills/`, `playbooks/`), while `assets/` holds shared supporting files. Clio content may instead live under an `ai.iowarp.clio/` directory, as it does in the `materio` plugin, which keeps peer hosts from default-scanning it; top-level directories are recommended for new packages. Portable skills must use the root `skills` directory unless the package is a standalone skill package.
 
