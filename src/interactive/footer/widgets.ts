@@ -981,6 +981,21 @@ function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<Rail
  * A running tool in the grammar of who is acting. A call the model asked for is the harness's process and the model
  * is idle meanwhile; a direct shell line was never the model's at all. Time is the call's own.
  */
+/**
+ * A tool's subject cut to `span` cells. A path loses its middle, so the file it names survives: the rail kept
+ * `/home/akougkas/clio-gym/scratch/…` and dropped the file being read (B03). A command keeps its head.
+ */
+function fitSubject(object: string, span: number): string {
+	if (visibleWidth(object) <= span) return object;
+	const slash = object.lastIndexOf("/");
+	if (/\s/u.test(object) || slash <= 0 || slash === object.length - 1)
+		return truncateToWidth(object, span, GLYPH.ellipsis, false);
+	const base = object.slice(slash);
+	const headRoom = span - visibleWidth(base) - visibleWidth(GLYPH.ellipsis);
+	if (headRoom < 1) return truncateToWidth(`${GLYPH.ellipsis}${base}`, span, GLYPH.ellipsis, false);
+	return `${truncateToWidth(object.slice(0, slash), headRoom, "", false)}${GLYPH.ellipsis}${base}`;
+}
+
 function toolActivity(
 	status: AgentStatus,
 	room: number,
@@ -1046,7 +1061,7 @@ function toolActivity(
 			? verb !== null
 				? `${verb} ${truncateToWidth(name, 18, GLYPH.ellipsis, false)}`
 				: (bareWords ?? `is running ${truncateToWidth(name, room >= 40 ? 18 : 12, GLYPH.ellipsis, false)}`)
-			: `${lead} \`${truncateToWidth(object, span, GLYPH.ellipsis, false)}\`${others > 0 ? ` +${others}` : ""}`;
+			: `${lead} \`${fitSubject(object, span)}\`${others > 0 ? ` +${others}` : ""}`;
 	const label = fitRailFacts(
 		[
 			{ text: phrase, keep: 9 },

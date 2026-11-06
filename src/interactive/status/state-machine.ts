@@ -16,6 +16,7 @@ import {
 	type TurnStopReason,
 	type TurnSummary,
 } from "../../session-control/status-types.js";
+import { workspaceRelative } from "../../tools/presentation.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import { buildSummary, emptyRunTally, foldMessageIntoRunTally, summaryFromRunTally } from "./summary.js";
 import { computeWatchdogTier } from "./watchdog.js";
@@ -147,11 +148,18 @@ function compactPreview(value: unknown): string {
 }
 
 /** The one argument that says what a call is doing, flattened for a single rail row. */
+const PATH_SUBJECT_KEYS = new Set(["path", "file_path"]);
+
 function toolSubject(args: unknown): string | undefined {
 	const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
 	for (const key of ["command", "path", "file_path", "pattern", "query", "url", "symbol", "name"]) {
 		const value = record[key];
-		if (typeof value === "string" && value.trim().length > 0) return value.replace(/\s+/gu, " ").trim();
+		if (typeof value !== "string" || value.trim().length === 0) continue;
+		const text = value.replace(/\s+/gu, " ").trim();
+		if (!PATH_SUBJECT_KEYS.has(key)) return text;
+		// The rail spent its room on `/home/…/scratch/…` and cut the file away; inside the project the path is relative (B03).
+		const relative = workspaceRelative(text, process.cwd());
+		return relative === null ? text : relative.length === 0 ? "." : relative;
 	}
 	return undefined;
 }
