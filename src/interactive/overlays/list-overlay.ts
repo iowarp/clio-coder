@@ -559,8 +559,8 @@ export class ListOverlayView implements Component {
 			this.takeoverAllowed &&
 				this.detailPaneDrawn &&
 				!this.detailPaneSplit && {
-					verb: "hide detail",
-					short: "list",
+					verb: "back to list",
+					short: "back",
 					back: () => {
 						this.showDetail = false;
 						this.detailKeyPending = true;
