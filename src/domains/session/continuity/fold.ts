@@ -381,7 +381,7 @@ function carriedResumeAuthorized(
 	// id. A carry that reuses a real resume's id while rewriting its authority to
 	// another genuine request names an event that never happened.
 	const resumeRecord = context.records.get(resume.entryId);
-	if (!resumeRecord || resumeRecord.event.phase !== "resumed") {
+	if (resumeRecord?.event.phase !== "resumed") {
 		return refuse("the carried resume names no actual resumed record in this input");
 	}
 	if (resumeRecord.identity.handoffId !== chain.handoffId) {
