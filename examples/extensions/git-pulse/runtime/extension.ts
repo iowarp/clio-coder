@@ -100,11 +100,12 @@ async function refresh(ctx: ExtensionContextV2): Promise<ExtensionOutputV2> {
 			: "no upstream";
 	const text = snapshot.error
 		? `Git unavailable: ${snapshot.error}`
-		: `${branch} · dirty ${snapshot.dirty} · ${divergence}`;
+		: `${branch} · ${snapshot.dirty} dirty · ${divergence}`;
 	return {
 		text,
 		status: {
-			text: `Git ${branch} · ${snapshot.dirty ?? "?"} dirty · ${snapshot.error ? "upstream ?" : snapshot.upstream ? `↑${snapshot.ahead ?? "?"} ↓${snapshot.behind ?? "?"}` : "no upstream"}`,
+			// The same words as the band, so the footer, the band and /extensions never disagree.
+			text: snapshot.error ? "Git unavailable" : text,
 			tone: snapshot.error ? "warning" : snapshot.dirty ? "warning" : "neutral",
 		},
 		band: { t: "text", text, tone: snapshot.error ? "warning" : "muted", wrap: "truncate" },

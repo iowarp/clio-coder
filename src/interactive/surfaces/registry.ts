@@ -1,3 +1,4 @@
+import { extensionOwnerLabel } from "../../domains/extensions/owner-label.js";
 import type { ExtensionStatus } from "../../domains/extensions/public-api.js";
 import type { ExtensionSkin } from "../../domains/extensions/public-api-v2.js";
 import type { ActiveExtensionWorkspace, ExtensionSurfaceModel } from "../../domains/extensions/surface-model.js";
@@ -8,7 +9,6 @@ import { GLYPH } from "../theme/glyphs.js";
 import { applySkin, clioTheme, frame } from "../theme/index.js";
 import type { SemanticRole } from "../theme/tokens.js";
 import { skinEpoch } from "../theme/tokens.js";
-import { extensionOwnerLabel } from "./owner-label.js";
 import { renderView } from "./view-renderer.js";
 
 /** Island tiles share a row of the dock, each between these widths, one column apart. */
@@ -284,9 +284,11 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 				// The footer gives its facts up to half the row when wide; one status may use all of it.
 				const room = Math.max(12, Math.floor(width * (width >= 100 ? 0.5 : 0.4)));
 				const statuses = [
+					// An extension with a band already says its piece above the composer on every frame;
+					// repeating it here only crowds out the extensions that have no band.
 					...deps.model.ids().flatMap((id) => {
-						const status = deps.model.entry(id)?.status;
-						return status ? [{ id, status }] : [];
+						const entry = deps.model.entry(id);
+						return entry?.status && !entry.band ? [{ id, status: entry.status }] : [];
 					}),
 					...others,
 				];
