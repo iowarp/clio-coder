@@ -629,7 +629,7 @@ IDs and has no default direct key.
 | Search Esc / Ctrl+C / Ctrl+R | Close search without cancelling unrelated work |
 | PageUp/PageDown, Ctrl+Up/Down | Fullscreen transcript paging / previous-next prompt; overlays own their local navigation |
 | Esc | Cancel completion or one local field/detail first; plain composer cancels bash then the active run |
-| Ctrl+C | Cancel the current search/modal/child; otherwise cancel work, clear draft, or use idle-empty double Ctrl+C to quit |
+| Ctrl+C | Cancel the current search/modal/child; otherwise cancel work, or press twice while idle to quit, keeping any draft |
 
 Reviews, model-scope choices, permissions and interviews own their input. They
 expose no global send, navigation, background or quit actions. Top-level Library,
@@ -685,10 +685,10 @@ first match wins (`resolveApplicationCtrlCAction`, [application-controller.ts](.
 | --- | --- |
 | An overlay owns input (transcript search, Library, Settings, model picker) | Closes that overlay. It does not cancel a running turn and does not exit. Any armed shutdown is disarmed. |
 | A permission card | Denies the parked call, as `Esc` does. It does not cancel the running turn and does not exit. |
-| Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. |
-| Idle with text in the composer | Clears the draft. The press is consumed as an editor action, so it cannot become the hidden first half of an exit. |
+| A `!` shell command running from the composer | Cancels that command. It does not arm shutdown. |
+| Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. The press does not arm shutdown. |
 | Idle with messages queued | Protects the queue and says how to recover it with the bound dequeue key (`Alt+Q` by default). |
-| Idle, empty composer, nothing queued | Arms shutdown. A second `Ctrl+C` within 1,200 ms (`APPLICATION_DOUBLE_TAP_MS`) exits. |
+| Idle, nothing queued | Arms shutdown and leaves any draft in the composer. The footer counts down `Ctrl+C again to quit`, preceded by `draft kept, printed on quit` when the composer holds text. A second `Ctrl+C` within 3,000 ms (`APPLICATION_DOUBLE_TAP_MS`) exits, and the kept draft is printed to stderr after the terminal is restored, under `Unsent draft, not delivered to Clio:`. |
 
 In a permission card, `Esc` denies the one parked call and `Alt+X` stops the turn, because denying one call does not stop the model from asking again. Letters typed while a card is open go to the composer, never to the card. Denying a permission card is a decision, not a dismissal:
 the parked call is cancelled with `User denied this call at the permission
