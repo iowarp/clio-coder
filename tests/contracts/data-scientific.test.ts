@@ -39,7 +39,10 @@ function cdf(
 		parts.push(b);
 	};
 	const count = (value: number): void => {
-		if (!wide) return u32(value);
+		if (!wide) {
+			u32(value);
+			return;
+		}
 		const b = Buffer.alloc(8);
 		b.writeBigUInt64BE(BigInt(value));
 		parts.push(b);
@@ -73,7 +76,7 @@ function cdf(
 			u32(type);
 			count(values.length);
 			const b = Buffer.alloc(values.length * 2);
-			values.forEach((value, index) => b.writeInt16BE(value, index * 2));
+			for (const [index, value] of values.entries()) b.writeInt16BE(value, index * 2);
 			parts.push(b, Buffer.alloc((4 - (b.length % 4)) % 4));
 		}
 		u32(variable.type);
@@ -115,13 +118,13 @@ function cdf(
 
 function f64(values: number[]): Buffer {
 	const b = Buffer.alloc(values.length * 8);
-	values.forEach((value, index) => b.writeDoubleBE(value, index * 8));
+	for (const [index, value] of values.entries()) b.writeDoubleBE(value, index * 8);
 	return b;
 }
 
 function i16(values: number[]): Buffer {
 	const b = Buffer.alloc(values.length * 2);
-	values.forEach((value, index) => b.writeInt16BE(value, index * 2));
+	for (const [index, value] of values.entries()) b.writeInt16BE(value, index * 2);
 	return b;
 }
 
