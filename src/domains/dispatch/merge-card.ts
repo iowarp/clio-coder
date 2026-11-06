@@ -33,7 +33,7 @@ export function mergeCardCauseNote(cause: MergeCardCause): string {
 			// Esc, Ctrl+C, and a handler that went away all settle the round as cancelled.
 			return "the card was dismissed without an answer";
 		case "aborted":
-			return "the run was canceled while the card was open";
+			return "the run was cancelled while the card was open";
 	}
 }
 
