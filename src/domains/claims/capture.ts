@@ -268,6 +268,8 @@ export interface SealedHostCheck {
 	memo: boolean;
 	/** The check's exit code; a judged check that failed its judgement after a clean exit reads 1. */
 	exitCode: number;
+	/** Set when the check never started (refused before launch, no parameters, no executable); it judged nothing. */
+	notRun?: string;
 	report?: { kind: string; passed: boolean };
 	evidenceRunId?: string;
 	tree?: { head: string; fingerprint: string };

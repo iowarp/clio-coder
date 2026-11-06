@@ -407,6 +407,7 @@ async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHost
 			exitCode: 1,
 			durationMs: 0,
 			memo: false,
+			notRun: "unconfigured",
 			outputTail: "reproduce: sealed check carries no parameters",
 		};
 	}
@@ -426,6 +427,7 @@ async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHost
 				...base,
 				exitCode: 1,
 				durationMs: 0,
+				notRun: "refused",
 				outputTail: outputTail(`reproduce refused: ${outcome.refusal.message}`),
 			};
 		case "run-failed":
@@ -434,6 +436,7 @@ async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHost
 				argv: outcome.facts.argv,
 				exitCode: outcome.facts.exitCode === 0 || outcome.facts.exitCode === null ? 1 : outcome.facts.exitCode,
 				durationMs: outcome.facts.durationMs,
+				...(outcome.notStarted === true ? { notRun: "spawn-failed" as const } : {}),
 				outputTail: outputTail(`reproduce ${outcome.message}`),
 			};
 		case "unjudgeable":
@@ -526,6 +529,7 @@ async function runResolvedCheck(input: {
 		exitCode: judgement.exitCode,
 		durationMs: outcome.record.durationMs,
 		memo: false,
+		...(outcome.launched ? {} : { notRun: "spawn-failed" as const }),
 		outputTail: judgement.outputTail ?? outputTail(outcome.report.outputExcerpt),
 		...(artifactPath !== undefined ? { artifactPath } : {}),
 		...(judgement.report !== undefined ? { report: judgement.report } : {}),

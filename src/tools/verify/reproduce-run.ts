@@ -79,7 +79,8 @@ export interface ReproduceRunFacts {
 export type ReproduceOutcome =
 	| { kind: "refused"; refusal: ReproduceRefusal }
 	/** A run did not complete cleanly, so nothing was judged. `run` is 1 or 2. */
-	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; message: string }
+	/** `notStarted` is set when run 1's process could not be created, so nothing ran at all. */
+	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; message: string; notStarted?: true }
 	/** The command completed but its output or the reference could not be judged. */
 	| { kind: "unjudgeable"; message: string; facts: ReproduceRunFacts[] }
 	| { kind: "judged"; report: ReproduceReport; facts: ReproduceRunFacts[] };
@@ -445,6 +446,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 					outputCapped: false,
 				},
 				message: `run ${run} could not start: ${errorText(error)}`,
+				...(run === 1 ? { notStarted: true as const } : {}),
 			};
 		} finally {
 			await environment.dispose();

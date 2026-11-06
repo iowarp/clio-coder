@@ -151,6 +151,8 @@ export interface CodeStepOutcome {
 	stdout: string;
 	/** Canonical JSON of the report; this is the text that crosses plan edges. */
 	output: string;
+	/** Whether the command's process started: false when the step refused before launch or the spawn itself failed. */
+	launched: boolean;
 }
 
 /** Stable stringification of the report, so its digest is reproducible. */
@@ -440,6 +442,8 @@ interface SpawnOutcome {
 	stdout: Buffer;
 	outputBytes: number;
 	spawnError: string | null;
+	/** Whether a process was created; a missing executable fails before one exists. */
+	launched: boolean;
 }
 
 async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: ReadonlyArray<string>): Promise<SpawnOutcome> {
@@ -512,6 +516,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 				stdout: Buffer.concat(stdoutChunks),
 				outputBytes,
 				spawnError,
+				launched: child.pid !== undefined,
 			});
 		};
 		child.on("error", (error) => {
@@ -592,8 +597,10 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 					stdout: Buffer.alloc(0),
 					outputBytes: 0,
 					spawnError: null,
+					launched: false,
 				}
 			: await spawnCommand(input, cwd, argv);
+	const launched = spawned.launched;
 	const primaryDurationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
 	const primaryEvidence =
 		(refusal ??
@@ -719,5 +726,5 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		artifactPaths,
 		reportDigest: codeReportDigest(report),
 	};
-	return { report, record, stdout: spawned.stdout.toString("utf8"), output: canonicalCodeReport(report) };
+	return { report, record, stdout: spawned.stdout.toString("utf8"), output: canonicalCodeReport(report), launched };
 }
