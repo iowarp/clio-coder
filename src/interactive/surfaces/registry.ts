@@ -238,7 +238,7 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 	const board: Component = {
 		render(width) {
 			const budget = islandBudget();
-			return memo("board", `${width}:${budget}`, () => {
+			return memo("board", `${width}:${budget}:${deps.terminalRows?.() ?? 40}`, () => {
 				const active = takes("board");
 				const view = active?.board === "band" ? regionView(active, "board") : undefined;
 				const lines = view ? draw(view, width, BOARD_ROWS) : [];
@@ -259,7 +259,18 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 							? []
 							: pressKeys.filter((press) => press.extensionId === id).map((press) => [press.action, `${leader} ${press.key}`]),
 					);
-					const rows = draw(withBandKeys(band, keys), Math.max(1, width - visibleWidth(owner)), 3);
+					// A short terminal keeps one row per band, so the bands never crowd out the
+					// list or panel the operator opened; the leader menu still lists every action.
+					const bandRows = (deps.terminalRows?.() ?? 40) >= 30 ? 3 : 1;
+					const room = Math.max(1, width - visibleWidth(owner));
+					// One row is the band's first line unwrapped and cut with an ellipsis, so a short
+					// terminal shows "Next: /materio:identify-re…" rather than a lone "Next:".
+					const rows =
+						bandRows === 1
+							? renderView(withBandKeys(band, keys), 1000)
+									.lines.slice(0, 1)
+									.map((row) => truncateToWidth(row.trimEnd(), room, GLYPH.ellipsis, false))
+							: draw(withBandKeys(band, keys), room, bandRows);
 					lines.push(
 						...rows.map((row, index) =>
 							truncateToWidth(`${index === 0 ? owner : indent}${row}`, width, GLYPH.ellipsis, false),
