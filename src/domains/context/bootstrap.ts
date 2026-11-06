@@ -109,7 +109,7 @@ export interface BootstrapGenerateInput {
 	/**
 	 * Custom sections of the handbook a rewrite replaces. Handbook units route a
 	 * section to fleet workers by its title, so a title the draft drops is
-	 * carried with the blocks a check the repository still runs enforces.
+	 * carried with the blocks that name a check the repository still defines.
 	 */
 	previousSections?: ReadonlyArray<ClioMdSection>;
 	/** What CI runs and which custom checks exist; the model explains each as a rule. */
@@ -1337,8 +1337,28 @@ function namesRuleCode(code: string, text: string): boolean {
 	return new RegExp(`\\b${parts[1]}s\\s+(?:[\\w-]+\\s*(?:,|and|or|/|&)\\s*)*${parts[2]}(?![a-z0-9])`).test(lower);
 }
 
+/** Scripts npm runs on install, pack, publish and version without being asked. */
+const LIFECYCLE_SCRIPTS: ReadonlySet<string> = new Set([
+	"preinstall",
+	"install",
+	"postinstall",
+	"prepublish",
+	"preprepare",
+	"prepare",
+	"postprepare",
+	"prepublishOnly",
+	"prepack",
+	"postpack",
+	"publish",
+	"postpublish",
+	"preversion",
+	"version",
+	"postversion",
+	"dependencies",
+]);
+
 interface EnforcementNames {
-	/** Scripts that run unasked: cited only in backticks. */
+	/** Lifecycle scripts package.json declares: cited only in backticks. */
 	scripts: ReadonlySet<string>;
 	/** Single-word failure codes (`lint`): cited in backticks, or named bare before "check" ("the prompts check"). */
 	codes: ReadonlySet<string>;
@@ -1347,14 +1367,13 @@ interface EnforcementNames {
 }
 
 /**
- * Every name under which the inventory shows a check failing a change. A
- * check file's path is not one: a rule citing `scripts/check-hygiene.ts` may
- * name a check that file no longer runs. Only executed check files and
- * executed scripts count: a check left defined after its invocation was
- * removed, or a script nothing runs, enforces nothing.
+ * Every name under which the inventory shows a check failing a change: the
+ * checks and coded failures check files define, and the lifecycle scripts npm
+ * runs unasked. A check file's path is not one: a rule citing
+ * `scripts/check-hygiene.ts` may name a check that file no longer defines.
  */
 function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
-	const scripts = new Set<string>(input.enforcement?.executedScripts ?? []);
+	const scripts = new Set(Object.keys(packageScripts(input.cwd)).filter((name) => LIFECYCLE_SCRIPTS.has(name)));
 	const codes = new Set<string>();
 	const named = new Set<string>();
 	const addCode = (code: string): void => {
@@ -1362,7 +1381,6 @@ function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
 		else codes.add(code);
 	};
 	for (const file of input.enforcement?.checkFiles ?? []) {
-		if (file.executed !== true) continue;
 		for (const check of file.checks) named.add(check);
 		for (const failure of file.failures) {
 			const head = /^([\w.:/-]+): /.exec(failure)?.[1];
@@ -1419,10 +1437,10 @@ function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: Model
 }
 
 /**
- * Sections of the replaced handbook, cut to the blocks a running check still
- * enforces and whose citations still ground. A rewrite on mini dropped Docs and
- * prose, the section documentation workers receive, while its documentation-links,
- * product-namespace and prompts checks all still ran.
+ * Sections of the replaced handbook, cut to the blocks that name a check the
+ * repository still defines and whose citations still ground. A rewrite on mini
+ * dropped Docs and prose, the section documentation workers receive, while its
+ * documentation-links, product-namespace and prompts checks all still existed.
  */
 function enforcedPreviousSections(
 	input: BootstrapGenerateInput,

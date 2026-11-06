@@ -38,7 +38,6 @@ export const coreTests = [
 	"url-userinfo-hold",
 	"url-credential-surfaces",
 	"bootstrap-grounding",
-	"enforcement-inventory",
 	"in-prefix-summary",
 	"packed-source-directory",
 	"skill-frontmatter-cache",

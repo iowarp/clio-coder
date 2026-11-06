@@ -228,7 +228,7 @@ it("carries every previous hard invariant verbatim while its citations still exi
 	);
 });
 
-/** A repository whose CI runs three checks in `scripts/check.js`, and a previous handbook whose invariants they enforce. */
+/** A repository whose `scripts/check.js` defines four checks, and a previous handbook whose invariants three of them and `prepublishOnly` enforce. */
 function writeCarryFixture(): string[] {
 	mkdirSync(join(cwd, "scripts"), { recursive: true });
 	writeFileSync(
@@ -343,7 +343,7 @@ it("keeps every carried invariant when the model repeats one at the end of a ful
 	strictEqual(rules.length, 20, handbook);
 });
 
-it("carries a section title the rewrite dropped with the blocks a running check enforces", async () => {
+it("carries a section title the rewrite dropped with the blocks that name a defined check", async () => {
 	const carried = writeCarryFixture();
 	mkdirSync(join(cwd, "docs"), { recursive: true });
 	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
