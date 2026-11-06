@@ -322,12 +322,16 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		started(payload): WorkerStreamChange | null {
 			if (isContextOperationRun(payload)) return null;
 			const runId = nonEmptyString(payload.runId);
-			const assignmentId = nonEmptyString(payload.assignmentId) ?? runId;
-			if (runId === undefined || assignmentId === undefined) return null;
+			const sharedId = nonEmptyString(payload.assignmentId) ?? runId;
+			if (runId === undefined || sharedId === undefined) return null;
+			if (assignmentByRun.has(runId)) return null;
+			// The steps of one plan dispatch under the plan's root as siblings, all at attempt 0. A run this stream has not
+			// seen, at an attempt it has, is such a sibling rather than a retry, so it is its own work item and its own card.
+			const sibling = byAssignment.has(sharedId) && payload.attempt <= (attemptByAssignment.get(sharedId) ?? -1);
+			const assignmentId = sibling ? runId : sharedId;
 			const runtime = runtimeIdentity(payload);
-			const existing = byAssignment.get(assignmentId);
+			const existing = sibling ? undefined : byAssignment.get(assignmentId);
 			if (existing !== undefined) {
-				if (payload.attempt <= (attemptByAssignment.get(assignmentId) ?? -1)) return null;
 				// A later attempt of work the operator is already watching. The block
 				// keeps its identity, gains a rail line, and streams again. Its origin
 				// is the assignment's, not the retry request's.
