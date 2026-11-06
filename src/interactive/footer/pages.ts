@@ -872,7 +872,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	// A narrow footer spends no row on hints it cannot fit, so there the notice keeps the shared row it always had;
 	// only a quit or leader prompt outranks it.
 	if (narrow)
-		return [firstRow, row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, undefined))];
+		return [firstRow, row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, state.dismissKeyLabel))];
 	const noticeRow = renderNoticeRow(theme, notice, otherNotices, w, key, state.dismissKeyLabel);
 	const hintRow = row(controls);
 	// With nothing else to say on the hint row, the notice keeps the one row it always had.

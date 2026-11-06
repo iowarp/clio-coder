@@ -906,7 +906,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			)?.thinking;
 			// A route with no thinking control can still send reasoning, and what it sent outranks what its catalog row says.
 			if (thinking?.mechanism === "none" && reasoningRoutes.has(routeKey(current?.chat?.target, current?.chat?.model))) {
-				return { label: "off", hasLevels: false, supportedLevels: [], note: "model reasons anyway" };
+				// `think off (model reasons anyway)` read as a contradiction; what the model does is the label.
+				return { label: "on", hasLevels: false, supportedLevels: [], note: "this model always thinks" };
 			}
 			// Before the first probe answers, a local or gateway route's capabilities are guesses: `model has no thinking` showed
 			// on the first frame of a route about to say `think on`. Until then the rail says what was asked for and no more.
