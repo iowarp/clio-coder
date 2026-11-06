@@ -509,6 +509,12 @@ export interface OpenTasksOverlayOptions {
 /** An operator task title typed and stepped out of with Esc, offered again by the next `a`. */
 let keptTaskTitle = "";
 
+/** A row the window ends inside of, closed with the ellipsis so the cut never reads as the end of a sentence. */
+function cutRow(line: string, width: number): string {
+	const kept = truncateToWidth(line, Math.max(1, width - 2), "", false).trimEnd();
+	return `${kept} ${dim(GLYPH.ellipsis)}`;
+}
+
 class TasksOverlayBody implements Component, RowBudgetedBody {
 	private history: ReadonlyArray<SessionTaskHistoryBoard> = [];
 	private artifacts: ReadonlyArray<SessionArtifact> = [];
@@ -581,7 +587,15 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 				? `lines ${this.offset + 1}–${end} of ${total} · PgUp/PgDn page`
 				: `tasks ${range} of ${layout.spans.length} · PgUp/PgDn page`,
 		);
-		return [...layout.lines.slice(this.offset, end), fitRow(position, safeWidth), ...pinned];
+		const window = layout.lines.slice(this.offset, end);
+		// A task the window ends inside reads as cut, not as finished mid-sentence.
+		const cut = layout.spans.some((taskSpan) => taskSpan.line < end && taskSpan.end > end);
+		const lastShown = window.at(-1);
+		const next = layout.lines[end];
+		if (cut && lastShown !== undefined && next !== undefined && next.trim().length > 0) {
+			window[window.length - 1] = cutRow(lastShown, safeWidth);
+		}
+		return [...window, fitRow(position, safeWidth), ...pinned];
 	}
 
 	handleInput(data: string): void {
