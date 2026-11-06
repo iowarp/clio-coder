@@ -19,7 +19,7 @@ type Request = Pick<CallStarted, "roundKind" | "toolChoice">;
 export function createWorkerCallTelemetry(
 	context: WorkerTelemetryContext,
 	target: CallStarted["target"],
-	pricing: EffectivePricing["pricedBy"],
+	pricing: EffectivePricing["pricedBy"] | Pick<EffectivePricing, "pricedBy" | "freeRule">,
 	emit: (frame: WorkerTelemetryFrame) => void,
 ) {
 	const forwarder = createTelemetryForwarder(

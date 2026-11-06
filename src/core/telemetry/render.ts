@@ -1,6 +1,6 @@
 import { formatFooterTokens } from "../display-units.js";
 import type { Fact, FactSum } from "./fact.js";
-import type { Pricing, PricingSum } from "./pricing.js";
+import type { FreeRule, Pricing, PricingSum } from "./pricing.js";
 
 /**
  * The canonical renderer (#434, R5). Every display string a telemetry DTO carries comes from here, and this module
@@ -79,8 +79,22 @@ function renderUnknown(reason: Extract<Fact<unknown>, { kind: "unknown" }>["reas
  * The one cost wording family over a sum's parts. Partly priced says what it knows with `+?` marking the rest (L3);
  * estimates say so (L5); a sum nobody priced has no claim and reads as not measured, never `$0.00`.
  */
-function renderUsdParts(known: number, parts: { estimated: boolean; unpriced: boolean; free: boolean }): string {
-	if (parts.free && !parts.unpriced && !parts.estimated) return "$0.00 local";
+/**
+ * A free amount names the rule that made it free. Only a local-native runtime is "local"; a target that declared
+ * itself free or declared all-zero rates may be a cloud endpoint. A record from before the rule was kept reads as it
+ * always did.
+ */
+function renderFreeUsd(freeRule: FreeRule | undefined): string {
+	if (freeRule === "declared") return "$0.00 free (declared)";
+	if (freeRule === "zero-rates") return "$0.00 free (zero-rates)";
+	return "$0.00 local";
+}
+
+function renderUsdParts(
+	known: number,
+	parts: { estimated: boolean; unpriced: boolean; free: boolean; freeRule?: FreeRule | undefined },
+): string {
+	if (parts.free && !parts.unpriced && !parts.estimated) return renderFreeUsd(parts.freeRule);
 	if (parts.unpriced) return known > 0 ? `${parts.estimated ? "~" : ""}${renderUsd(known)} +?` : COST_NOT_MEASURED;
 	if (parts.estimated) return `~${renderUsd(known)} est`;
 	return renderUsd(known);
@@ -156,14 +170,18 @@ export function renderCompactCount(fact: Fact<number> | FactSum): string {
 	return fact.coverage.measured + fact.coverage.estimated === 0 ? "?" : `≥${known} +?`;
 }
 
-/** A folded USD sum; `free` is true when every priced call was a free target's measured zero. */
-export function renderUsdSum(sum: FactSum, free: boolean): string {
+/**
+ * A folded USD sum; `free` is true when every priced call was a free target's measured zero, and `freeRule` is the
+ * rule they all agree on.
+ */
+export function renderUsdSum(sum: FactSum, free: boolean, freeRule?: FreeRule): string {
 	if (allAbsent(sum)) return renderAbsent("not-applicable");
 	if (contributions(sum) === 0) return COST_NOT_MEASURED;
 	return renderUsdParts(sum.measured + sum.estimated, {
 		estimated: sum.coverage.estimated > 0,
 		unpriced: sum.unknownCount > 0,
 		free,
+		freeRule,
 	});
 }
 
@@ -211,9 +229,9 @@ export function renderFact(fact: Fact<number>, as: Scalar = "count"): string {
 	}
 }
 
-/** A priced fact. `pricedBy: free` is a measured local zero, not a provider's `$0.00`. */
-export function renderUsdFact(fact: Fact<number>, pricedBy: string): string {
-	if (fact.kind === "measured" && pricedBy === "free") return "$0.00 local";
+/** A priced fact. `pricedBy: free` is a measured zero under a named free rule, not a provider's `$0.00`. */
+export function renderUsdFact(fact: Fact<number>, pricedBy: string, freeRule?: FreeRule): string {
+	if (fact.kind === "measured" && pricedBy === "free") return renderFreeUsd(freeRule);
 	if (fact.kind === "estimated") return `~${renderUsd(fact.value)} est`;
 	if (fact.kind === "unknown") return COST_NOT_MEASURED;
 	return renderFact(fact, "usd");
@@ -238,12 +256,17 @@ export function renderFactField(fact: Fact<number>): string {
 
 /** One priced amount, as a cost field renders it. */
 export function renderPricing(pricing: Pricing): string {
-	return renderUsdFact(pricing.usd, pricing.pricedBy);
+	return renderUsdFact(pricing.usd, pricing.pricedBy, pricing.freeRule);
+}
+
+/** Who priced an amount, as a receipt names it: `free (declared)` keeps the free rule beside the source. */
+export function renderPricedBy(pricing: Pick<Pricing, "pricedBy" | "freeRule">): string {
+	return pricing.pricedBy === "free" && pricing.freeRule !== undefined ? `free (${pricing.freeRule})` : pricing.pricedBy;
 }
 
 /** Several priced amounts folded; `+?` and `~` mark the unpriced and estimated parts as on any sum. */
 export function renderPricingSum(sum: PricingSum): string {
-	return renderUsdSum(sum.usd, sum.free);
+	return renderUsdSum(sum.usd, sum.free, sum.freeRule);
 }
 
 export function renderTextFact(fact: Fact<string | boolean | null>): string {

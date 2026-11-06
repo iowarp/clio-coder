@@ -235,11 +235,11 @@ A fact is one of four shapes ([fact.ts](../../src/core/telemetry/fact.ts)):
 
 Every usage and cost field everywhere is a `Fact<number>`: on `call.settled`, on `run.settled`, in the run ledger's rows and in every DTO. Facts carry no arithmetic. A fold returns a `FactSum` (`measured`, `estimated`, `unknownCount`, `absentCount`, and a `coverage` count of measured, estimated and unknown contributions), and the renderer shows a partial sum as a lower bound: `≥1,900,000 (2 calls unknown)`, `≥1.9M +?` in the footer's compact form, and `$1.20 +?` for a partly priced cost. An estimated part marks the whole figure with `~`, and a sum with no known part reads as unknown. A fold keeps the measured subtotal of a partly measured run; it never collapses it to unknown.
 
-Cost is a `Pricing`: `usd` is a `Fact<number>` and `pricedBy` says where the rates came from. `resolveEffectivePricing` ([catalog.ts](../../src/domains/providers/catalog.ts)) resolves the rates and `pricedBy` together, in this order:
+Cost is a `Pricing`: `usd` is a `Fact<number>`, `pricedBy` says where the rates came from, and an optional `freeRule` (`declared`, `zero-rates` or `local-native`) says which rule made a `free` amount free. A sum keeps `freeRule` only when every part states the same one. `resolveEffectivePricing` ([catalog.ts](../../src/domains/providers/catalog.ts)) resolves the rates and `pricedBy` together, in this order:
 
-1. A target's declared `pricing` rate map gives `target-rates`, or `free` when every declared rate is 0. An omitted `cacheRead` or `cacheWrite` counts as 0.
-2. `pricing: free` gives `free`.
-3. A runtime whose tier is `local-native` (`llamacpp` and its variants, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`) gives `free`.
+1. A target's declared `pricing` rate map gives `target-rates`, or `free` (`zero-rates`) when every declared rate is 0. An omitted `cacheRead` or `cacheWrite` counts as 0.
+2. `pricing: free` gives `free` (`declared`).
+3. A runtime whose tier is `local-native` (`llamacpp` and its variants, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`) gives `free` (`local-native`).
 4. A Pi catalog entry for the runtime's catalog provider and wire model gives `catalog`, with an estimated amount.
 5. Otherwise `pricedBy` is `none` and the amount is unknown.
 

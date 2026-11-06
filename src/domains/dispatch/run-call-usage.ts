@@ -4,7 +4,7 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EstimateMethod, Fact, FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
-import { type RunSpendSums, sumFacts, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import { agreedFreeRule, type RunSpendSums, sumFacts, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
 import type { CallSettled, RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { CallTotals, FoldOptions } from "../telemetry/folds.js";
@@ -97,20 +97,29 @@ function weakestPricedBy(used: Set<RunUsageFacts["pricing"]["pricedBy"]>): RunUs
 	return PRICED_BY_STRENGTH.find((strength) => used.has(strength)) ?? "none";
 }
 
+type PricingBasisOf = Pick<RunUsageFacts["pricing"], "pricedBy" | "freeRule">;
+
+/** The weakest pricing of the parts, keeping a free rule only when the run is free and every part states that rule. */
+function runPricingBasis(parts: readonly PricingBasisOf[]): PricingBasisOf {
+	const pricedBy = weakestPricedBy(new Set(parts.map((part) => part.pricedBy)));
+	const freeRule = pricedBy === "free" ? agreedFreeRule(parts) : undefined;
+	return freeRule !== undefined ? { pricedBy, freeRule } : { pricedBy };
+}
+
 /** The pricing behind the contributions the fold counted: a whole-scope snapshot replaces calls and parts (#434). */
-function pricedByOf(
+function pricingBasisOf(
 	records: readonly TelemetryRecord[],
 	folded: ReturnType<typeof foldRunJournal>,
-): RunUsageFacts["pricing"]["pricedBy"] {
-	if (folded.source === "conflict") return "none";
-	if (folded.source === "aggregate") return folded.aggregate?.pricing.pricedBy ?? "none";
-	const used = new Set<RunUsageFacts["pricing"]["pricedBy"]>();
+): PricingBasisOf {
+	if (folded.source === "conflict") return { pricedBy: "none" };
+	if (folded.source === "aggregate") return runPricingBasis(folded.aggregate ? [folded.aggregate.pricing] : []);
+	const used: PricingBasisOf[] = [];
 	for (const attempt of folded.calls.attempts)
-		if (attempt.settled && attempt.settled.disposition !== "never_sent") used.add(attempt.settled.pricing.pricedBy);
+		if (attempt.settled && attempt.settled.disposition !== "never_sent") used.push(attempt.settled.pricing);
 	if (folded.source === "parts")
 		for (const record of records)
-			if (record.k === "run.usage_reported" && record.data.partId !== undefined) used.add(record.data.pricing.pricedBy);
-	return weakestPricedBy(used);
+			if (record.k === "run.usage_reported" && record.data.partId !== undefined) used.push(record.data.pricing);
+	return runPricingBasis(used);
 }
 
 function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<typeof foldRunJournal>): RunUsageFacts {
@@ -128,7 +137,7 @@ function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<t
 		},
 		totalTokens: field("totalTokens", folded.totalTokens),
 		apiCalls: field("apiCalls", folded.apiCalls, "local-count"),
-		pricing: { usd: field("usd", folded.usd, "local-count"), pricedBy: pricedByOf(records, folded) },
+		pricing: { usd: field("usd", folded.usd, "local-count"), ...pricingBasisOf(records, folded) },
 	};
 }
 
@@ -156,7 +165,7 @@ export function runUsageFromCalls(calls: readonly CallSpend[]): { facts: RunUsag
 		apiCalls,
 		pricing: {
 			usd: field("usd", totals.usd, "local-count"),
-			pricedBy: weakestPricedBy(new Set(sent.map((call) => call.pricing.pricedBy))),
+			...runPricingBasis(sent.map((call) => call.pricing)),
 		},
 	};
 	return {

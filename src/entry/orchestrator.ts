@@ -69,7 +69,12 @@ import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { EventPayload } from "../core/telemetry/events.js";
 import type { Fact } from "../core/telemetry/fact.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { noCallRunUsageFacts, pricesCalls, unobservedRunUsageFacts } from "../core/telemetry/pricing.js";
+import {
+	noCallRunUsageFacts,
+	pricesCalls,
+	pricingBasisFields,
+	unobservedRunUsageFacts,
+} from "../core/telemetry/pricing.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
 import type { CallUsage } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
@@ -499,6 +504,7 @@ function applyHeadlessSettingsOverlay(
 interface CompactionResolution extends SideCallAuth {
 	model: EngineModel;
 	pricedBy: ResolvedRuntimeTarget["pricedBy"];
+	freeRule?: ResolvedRuntimeTarget["freeRule"];
 	targetId: string;
 	runtimeId: string;
 	endpointKey: string | null;
@@ -1028,7 +1034,7 @@ function prepareBackgroundMemoryRoute(
 								startAttempt: () => observer?.startAttempt(),
 								withContext: <T>(work: () => T): T => (observer ? observer.withContext(work) : work()),
 								settle(message: unknown) {
-									const settled = callSettlementFromMessage(message, refined.pricedBy);
+									const settled = callSettlementFromMessage(message, refined);
 									facts =
 										settled.usage === null
 											? noCallRunUsageFacts()
@@ -1400,7 +1406,7 @@ async function resolveCompactionModel(
 	}
 	return {
 		model,
-		pricedBy: route.pricedBy,
+		...pricingBasisFields(route),
 		targetId: route.targetId,
 		runtimeId: route.runtime.id,
 		wireModelId: route.wireModelId,
@@ -1676,7 +1682,7 @@ async function runCompactionFlow(
 								role: "compaction",
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
-								pricedBy: resolved.pricedBy,
+								...pricingBasisFields(resolved),
 								onSettled: (facts) => {
 									callIds.add(facts.callId);
 								},
@@ -2705,7 +2711,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			role: "memory",
 			targetId,
 			runtimeId: runtime.id,
-			pricedBy: resolveEffectivePricing(target, runtime, modelId).pricedBy,
+			...pricingBasisFields(resolveEffectivePricing(target, runtime, modelId)),
 		};
 	};
 	// Lesson gate decisions reach the operator through the transcript notice

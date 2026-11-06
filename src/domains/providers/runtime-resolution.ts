@@ -1,4 +1,5 @@
 import { runOverrides } from "../../core/run-overrides.js";
+import { pricingBasisFields } from "../../core/telemetry/pricing.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import { ignoredCapabilityRaises } from "./capabilities.js";
 import type { EffectivePricing } from "./catalog.js";
@@ -109,6 +110,8 @@ export interface ResolvedRuntimeTarget {
 	authRequired: boolean;
 	wireModelId: string;
 	pricedBy: EffectivePricing["pricedBy"];
+	/** The free rule when `pricedBy` is `free` (`resolveEffectivePricing`). */
+	freeRule?: EffectivePricing["freeRule"];
 	requestedThinkingLevel: ThinkingLevel;
 	effectiveThinkingLevel: ThinkingLevel;
 	capabilities: CapabilityFlags;
@@ -561,7 +564,7 @@ export function resolveRuntimeTarget(
 		auth: runtime.auth,
 		authRequired: targetRequiresAuth(target, runtime),
 		wireModelId,
-		pricedBy: resolveEffectivePricing(target, runtime, wireModelId).pricedBy,
+		...pricingBasisFields(resolveEffectivePricing(target, runtime, wireModelId)),
 		requestedThinkingLevel,
 		effectiveThinkingLevel: modelRuntime.thinking.effectiveLevel,
 		capabilities,

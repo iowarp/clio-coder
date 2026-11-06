@@ -2402,7 +2402,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					requestedModel: model.id,
 					reportedModel: { kind: "unknown", reason: "not-observed" },
 				},
-				resolveEffectivePricing(input.target, input.runtime, input.wireModelId).pricedBy,
+				resolveEffectivePricing(input.target, input.runtime, input.wireModelId),
 				emit,
 			)
 		: undefined;
