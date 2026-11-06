@@ -8,10 +8,9 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
-	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, type RowBudgetedBody, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
-import { clioTheme, emptyState } from "../theme/index.js";
+import { clioTheme, emptyState, wrapPaths } from "../theme/index.js";
 
 /** Rows the panel shows while the frame has not said how many it has. */
 const EXTENSION_PANEL_DEFAULT_ROWS = 12;
@@ -35,7 +34,7 @@ function extensionPanelRows(panel: ExtensionPanel, width: number): string[] {
 	const wrap = (text: string): string[] =>
 		plain(text)
 			.split("\n")
-			.flatMap((line) => wrapTextWithAnsi(line, safe));
+			.flatMap((line) => wrapPaths(line, safe));
 	const rows: string[] = [
 		...wrap(panel.title),
 		"─".repeat(Math.min(safe, Math.max(1, visibleWidth(plain(panel.title))))),
@@ -52,7 +51,7 @@ function extensionPanelRows(panel: ExtensionPanel, width: number): string[] {
 				Math.max(0, ...section.items.map((item) => visibleWidth(plain(item.label)))),
 			);
 			for (const item of section.items)
-				rows.push(...wrapTextWithAnsi(`${cell(plain(item.label), labelWidth)}  ${plain(item.value)}`, safe));
+				rows.push(...wrapPaths(`${cell(plain(item.label), labelWidth)}  ${plain(item.value)}`, safe));
 			continue;
 		}
 		const columns = section.columns.map(plain);
@@ -80,8 +79,7 @@ function extensionPanelRows(panel: ExtensionPanel, width: number): string[] {
 		}
 		for (const [index, row] of body.entries()) {
 			if (index > 0) rows.push("");
-			for (const [column, value] of row.entries())
-				rows.push(...wrapTextWithAnsi(`${columns[column] ?? ""}: ${value}`, safe));
+			for (const [column, value] of row.entries()) rows.push(...wrapPaths(`${columns[column] ?? ""}: ${value}`, safe));
 		}
 	}
 	return rows.map((line) => truncateToWidth(line, safe));
