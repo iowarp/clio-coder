@@ -865,7 +865,11 @@ export class Supervisor {
 		if (text && !notices.includes(text))
 			this.publish({
 				type: "session.telemetry",
-				payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { notices: [...notices, text].slice(-32) } },
+				payload: {
+					resource: entry.id,
+					revision: this.revision(entry.id),
+					telemetry: { notices: [...notices, text].slice(-32) },
+				},
 			});
 	}
 	private update(entry: Entry, value: unknown) {
