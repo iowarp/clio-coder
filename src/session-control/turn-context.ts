@@ -2125,6 +2125,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							const prepared = await prepareInPrefixSummary(
 								agentRuntime.agent,
 								last?.runtime === agentRuntime ? last.record : undefined,
+								{ free: agentRuntime.runtimeResolution.pricedBy === "free" },
 								prefixSignal,
 							);
 							return typeof prepared === "string" ? null : prepared;
