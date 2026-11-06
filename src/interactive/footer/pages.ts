@@ -737,12 +737,12 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
 	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
 	// Until the first probe lands the branch is unknown, not absent: say nothing.
-	const git = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
+	const named = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
 	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "  ";
-	const gitWidth =
-		git === ""
-			? 0
-			: Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), Math.max(4, Math.floor(workspaceWidth * 0.3)));
+	const gitRoom = Math.max(4, Math.floor(workspaceWidth * 0.3));
+	// A branch name may lose its middle; the sentence that says there is none is whole or absent (`no Gi…ranch`).
+	const git = state.workspace.branch == null && visibleWidth(named) + visibleWidth(dirtyMarker) > gitRoom ? "" : named;
+	const gitWidth = git === "" ? 0 : Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), gitRoom);
 	const cwdWidth = git === "" ? workspaceWidth : Math.max(1, workspaceWidth - gitWidth - 3);
 	const cwdLabel = theme.fg("workspacePath", fitPathLabel(clean(state.workspace.cwd), cwdWidth));
 	const workspace =
