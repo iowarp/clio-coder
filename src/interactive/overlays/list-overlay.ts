@@ -131,6 +131,12 @@ export interface ListOverlayOptions {
 	title: string;
 	/** Allow long lists to use the full body budget; the outer frame keeps a fixed height. */
 	fullScreen?: boolean;
+	/**
+	 * A reference the operator reads through rather than a menu they pick from:
+	 * on a tall terminal the dock gives it up to half the screen instead of the
+	 * height every menu shares.
+	 */
+	tall?: boolean;
 	items: ReadonlyArray<ListOverlayItem>;
 	/**
 	 * Tabs, drawn as a bar above the filter row and switched with ←/→, which is
@@ -963,6 +969,11 @@ export class ListOverlayView implements Component {
 	/** The rail's room for keys; every entry it would drop is drawn in the body instead. */
 	setRailRoom(cells: number): void {
 		this.railRoom = Math.max(0, Math.floor(cells));
+	}
+
+	/** The dock asks this before it sizes the body; only a `tall` reference grows. */
+	wantsGrowth(): boolean {
+		return this.options.tall === true;
 	}
 
 	/** Called by the mounted overlay's visibility callback before each render. */

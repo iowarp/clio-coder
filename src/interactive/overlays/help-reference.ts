@@ -265,6 +265,7 @@ export function openHelpOverlay(
 	const handle = openListOverlay(tui, {
 		markerId: "help",
 		title: "Help Center",
+		tall: true,
 		items,
 		filterable: true,
 		filterPlaceholder: "type to find a command, key or topic",
