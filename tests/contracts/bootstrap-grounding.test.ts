@@ -822,6 +822,36 @@ it("records the whole generation span when every dispatch failed, not the last r
 	strictEqual(readClioState(cwd)?.lastBootstrap?.durationMs, 11_000, JSON.stringify(readClioState(cwd)?.lastBootstrap));
 });
 
+it("records the generation span when the fallback ran no dispatch", async () => {
+	let clock = 0;
+	const now = mock.method(performance, "now", () => clock);
+	const dispatch = {
+		dispatch: async () => {
+			throw new Error("no dispatch expected");
+		},
+		abort: () => {},
+	} as unknown as DispatchContract;
+	try {
+		await runBootstrap({
+			cwd,
+			generate: modelBootstrapGenerate({
+				dispatch,
+				resolveRoute: () => {
+					clock += 11_000;
+					throw new Error("no bootstrap target configured");
+				},
+				onFallback: () => {},
+			}),
+		});
+	} finally {
+		now.mock.restore();
+	}
+	const generation = readClioState(cwd)?.lastBootstrap;
+	strictEqual(generation?.parserOutcome, "not-run", JSON.stringify(generation));
+	strictEqual(generation?.runId, undefined, JSON.stringify(generation));
+	strictEqual(generation?.durationMs, 11_000, JSON.stringify(generation));
+});
+
 it("records no tool call total when a started dispatch left no receipt", async () => {
 	const settled: BootstrapRunTelemetry = {
 		structuredOutputMode: "native-schema",

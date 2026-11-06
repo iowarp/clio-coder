@@ -2185,6 +2185,10 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 	};
 	const fallbackReason = boundedStateString(telemetry.fallbackReason, 500);
 	if (fallbackReason) state.fallbackReason = fallbackReason;
+	// The generation's own span, kept even when no dispatch ran; one dispatch's
+	// receipt is not the span of several.
+	const durationMs = safeStateCounter(telemetry.durationMs);
+	if (durationMs !== undefined) state.durationMs = durationMs;
 	const run = telemetry.run;
 	if (!run) return state;
 	state.structuredOutputMode = run.structuredOutputMode;
@@ -2218,8 +2222,6 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 		// The project state keeps a plain count, so a total is recorded only when every dispatch measured its own (#434).
 		["tokenCount", measuredTotal(runs)],
 		["toolCalls", across((entry) => entry.toolCalls)],
-		// The generation's own span; one dispatch's receipt is not the span of several.
-		["durationMs", telemetry.durationMs],
 		["promptBytes", across((entry) => entry.promptBytes)],
 		["outputBytes", across((entry) => entry.outputBytes)],
 	] as const) {
