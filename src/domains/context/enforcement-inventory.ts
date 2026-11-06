@@ -37,7 +37,8 @@ const CHECK_FN_RE =
 	/(?:^|\n)\s*(?:export\s+)?(?:async\s+)?(?:function\s+|def\s+)((?:check|lint|verify|validate|guard)[A-Za-z0-9_]*)\s*\(/g;
 
 /** A failure message that leads with a rule code: `rule6: ...`, `E501: ...`, `D14: ...`. */
-const FAILURE_RE = /[`'"]([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:[^`'"\\]|\\.){8,})/g;
+// A body runs to the quote that opened it: stopping at any quote cut "the read model's quantity" at the apostrophe.
+const FAILURE_RE = /([`'"])([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:(?!\1)[^\\]|\\.){8,600})/g;
 /**
  * A failure reported through a helper that names its rule first:
  * `fail("documentation-links", \`missing heading anchor ...\`)`. Clio's own
@@ -45,14 +46,14 @@ const FAILURE_RE = /[`'"]([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:[^`'"\\]|\\.){8,})/g
  * handed the bootstrap model 21 check names with none of their rules.
  */
 const FAILURE_CALL_RE =
-	/\b\w*(?:fail|error|report|violation|issue|problem)\w*\(\s*["'`]([a-z][\w.:-]{1,40})["'`]\s*,\s*["'`]((?:[^`'"\\]|\\.){8,})/gi;
+	/\b\w*(?:fail|error|report|violation|issue|problem)\w*\(\s*["'`]([a-z][\w.:-]{1,40})["'`]\s*,\s*(["'`])((?:(?!\2)[^\\]|\\.){8,600})/gi;
 /**
  * A failure whose code comes from a variable: `${rule}: ...` after
  * `const rule = inSessionControl ? "rule8" : "rule9"`. Clio's boundary checker
  * reports its session-control and engine import rules this way, and the
  * literal form alone left both out of every generated handbook.
  */
-const FAILURE_VAR_RE = /[`'"]\$\{(\w+)\}: ((?:[^`'"\\]|\\.){8,})/g;
+const FAILURE_VAR_RE = /([`'"])\$\{(\w+)\}: ((?:(?!\1)[^\\]|\\.){8,600})/g;
 const RULE_CODE_RE = /^[A-Za-z]{0,12}\d{1,4}[a-z]?$/;
 const MAX_FAILURE_CHARS = 360;
 /** One rule often fails in a few distinct ways; keep the first of each, not every variant. */
@@ -125,19 +126,37 @@ function literalChoices(text: string, name: string, at: number): string[] {
 	return /^[\w.!&|=<>]*$/.test(rest) ? [...new Set(literals)] : [];
 }
 
+/** Text cut to `max` at the last sentence or clause end, marked with an ellipsis, never mid-clause. */
+function clauseBounded(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const cut = text.slice(0, max - 2);
+	const sentence = cut.lastIndexOf(". ");
+	if (sentence > max / 2) return `${cut.slice(0, sentence + 1)} …`;
+	const clause = Math.max(cut.lastIndexOf("; "), cut.lastIndexOf(", "));
+	if (clause > max / 2) return `${cut.slice(0, clause)} …`;
+	return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 1))} …`;
+}
+
 function failureHeads(text: string): string[] {
 	const heads: string[] = [];
 	const perCode = new Map<string, number>();
 	const bodies = new Set<string>();
-	const plain = [...text.matchAll(FAILURE_RE), ...text.matchAll(FAILURE_CALL_RE)].map((match) => ({
-		index: match.index ?? 0,
-		code: match[1] ?? "",
-		body: match[2] ?? "",
-	}));
+	const plain = [
+		...[...text.matchAll(FAILURE_RE)].map((match) => ({
+			index: match.index ?? 0,
+			code: match[2] ?? "",
+			body: match[3] ?? "",
+		})),
+		...[...text.matchAll(FAILURE_CALL_RE)].map((match) => ({
+			index: match.index ?? 0,
+			code: match[1] ?? "",
+			body: match[3] ?? "",
+		})),
+	];
 	const coded = [...text.matchAll(FAILURE_VAR_RE)].flatMap((match) => {
-		const codes = literalChoices(text, match[1] ?? "", match.index ?? 0);
+		const codes = literalChoices(text, match[2] ?? "", match.index ?? 0);
 		if (codes.length === 0 || !codes.every((code) => RULE_CODE_RE.test(code))) return [];
-		return [{ index: match.index ?? 0, code: codes.join("/"), body: match[2] ?? "" }];
+		return [{ index: match.index ?? 0, code: codes.join("/"), body: match[3] ?? "" }];
 	});
 	const matches = [...plain, ...coded].sort((a, b) => a.index - b.index);
 	for (const match of matches) {
@@ -162,7 +181,7 @@ function failureHeads(text: string): string[] {
 		if (body.replace(/[…\s:,]/g, "").length < 8 || bodies.has(`${code}\0${body}`)) continue;
 		bodies.add(`${code}\0${body}`);
 		perCode.set(code, count + 1);
-		heads.push(`${code}: ${body}`.slice(0, MAX_FAILURE_CHARS));
+		heads.push(clauseBounded(`${code}: ${body}`, MAX_FAILURE_CHARS));
 		if (heads.length >= MAX_CHECKS_PER_FILE) break;
 	}
 	return heads;
