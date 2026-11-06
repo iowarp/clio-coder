@@ -337,7 +337,7 @@ export class MemoryOverlayView implements Component {
 			),
 			...(retention
 				? [
-						row("retention", `Lesson retention: ${retention.phase}${retention.reason ? ` · ${retention.reason}` : ""}`, [
+						row("retention", `Saving lessons: ${retention.phase}${retention.reason ? ` · ${retention.reason}` : ""}`, [
 							"## Lesson retention",
 							`Phase: ${retention.phase}`,
 							`Reason: ${retention.reason ?? "none"}`,
@@ -352,7 +352,7 @@ export class MemoryOverlayView implements Component {
 				? [
 						row(
 							"observations",
-							`Continuity preparation: ${observations.enabled ? "on" : "off"}${observations.lastReason ? ` · ${observations.lastReason}` : ""}`,
+							`Notes for compaction: ${observations.enabled ? "on" : "off"}${observations.lastReason ? ` · ${observations.lastReason}` : ""}`,
 							[
 								"## Continuity preparation",
 								"Prepared observations help the existing compactor. They are separate from reusable lessons.",
@@ -371,11 +371,15 @@ export class MemoryOverlayView implements Component {
 				: []),
 			...(spend
 				? [
-						row("spend", formatTaskMemorySpend(spend), [
-							"## Retained telemetry",
-							formatTaskMemorySpend(spend),
-							"Reminder counts measure recorded delivery, not causal usefulness.",
-						]),
+						row(
+							"spend",
+							spend.llmSteps === 0 ? "Memory model use: none yet" : `Memory model use: ${formatTaskMemorySpend(spend)}`,
+							[
+								"## Retained telemetry",
+								formatTaskMemorySpend(spend),
+								"Reminder counts measure recorded delivery, not causal usefulness.",
+							],
+						),
 					]
 				: []),
 			...activityItems(status.activity, "Recent memory steps"),
