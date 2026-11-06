@@ -1,3 +1,4 @@
+import { formatFooterTokens } from "../../core/display-units.js";
 import type { CallRowV1, FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
@@ -87,6 +88,17 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 	};
 }
 
+/**
+ * The session's known tokens: measured plus Clio's estimates, marked `~` when any part is estimated. The measured part
+ * alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252` for the same session.
+ */
+function knownSessionCount(quantity: Quantity): string | null {
+	const fact = quantity.fact;
+	if ("kind" in fact) return fact.kind === "estimated" ? `~${formatFooterTokens(fact.value)}` : measuredCount(quantity);
+	if (fact.coverage.estimated === 0) return measuredCount(quantity);
+	return `~${formatFooterTokens(fact.measured + fact.estimated)}`;
+}
+
 export function footerTelemetry(view: TelemetryView | null | undefined): FooterTelemetry {
 	if (!view) return { kind: "unavailable" };
 	if (view.seeding) return { kind: "reading" };
@@ -107,7 +119,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 	const spend: FooterTelemetry = {
 		kind: "ready",
 		tokens: contributed(session.totals.tokens) ? renderCompactCount(session.totals.tokens.fact) : null,
-		measuredTokens: contributed(session.totals.tokens) ? measuredCount(session.totals.tokens) : null,
+		measuredTokens: contributed(session.totals.tokens) ? knownSessionCount(session.totals.tokens) : null,
 		cost: contributed(session.totals.usd) ? session.totals.usd.display : null,
 		neverSent:
 			contributed(neverSent) && !zero(neverSent) && !("kind" in neverSent.fact)

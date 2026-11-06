@@ -291,8 +291,12 @@ function sessionValue(view: TelemetryView, elapsed: string | null): string {
 	const why = tokensKnown
 		? null
 		: [missing, running > 0 ? usageStillRunning(running) : null].filter((part) => part !== null).join(", ") || null;
+	// Figures a running call will still report are not unmeasured yet, only not in.
+	const pending = running > 0 && missing === null;
 	const gap =
-		unknown.length > 0 ? `${unknown.join(" and ")} ${USAGE_NOT_MEASURED}${why === null ? "" : ` (${why})`}` : null;
+		unknown.length > 0
+			? `${unknown.join(" and ")} ${pending ? "not reported yet" : USAGE_NOT_MEASURED}${why === null ? "" : ` (${why})`}`
+			: null;
 	return [
 		...(elapsed === null ? [] : [theme.fg("annotation", elapsed)]),
 		...known.map((part) => theme.fg("counter", part)),
