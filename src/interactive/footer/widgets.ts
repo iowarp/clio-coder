@@ -590,7 +590,7 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: Ra
 /** The hint row says `Esc stops the run`; the rail uses the same verb so the two never read as two different keys. */
 /** Whole or absent: a bare `Esc` said nothing about what it does, and it outlived the name it should have outranked. */
 const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc stops" };
-const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model to switch", short: "/model" };
+const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model to switch" };
 /** Once output has started a route change waits for the next turn, so the way to another model now runs through Esc. */
 // Whole or absent: a bare `/model` beside a wait named no action, and the action is what the fact is for (HS22).
 const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model to switch" };
