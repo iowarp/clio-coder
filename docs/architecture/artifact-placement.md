@@ -114,7 +114,7 @@ problem.
 | `live/`, `peer-inbox/`, `running-builds/`, `fleet-locks/` | Open-session heartbeats, messages between sessions, the builds running processes loaded, and fleet locks |
 | `jobs/`, `provider-checkpoints/`, `sandbox/`, `fleet-preflight.json` | Background job records, provider checkpoints, sandbox state and the last fleet preflight |
 | `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
-| `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
+| `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json`, `copilot-sdk-consent.json` | Small per-machine stores; the last records which GitHub accounts consented to the copilot-sdk route (no token) |
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
 
 The clean-exit session summary is built from an in-memory snapshot and is not
@@ -127,6 +127,7 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | --- | --- |
 | `v8-compile-cache/` | Node compile cache |
 | `provider-target-models/<key>.json` | Per-target model discovery snapshots |
+| `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one live `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when Clio closes the conversation |
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `system-one/julia-1-<revision>/tokenizer.json` | The Julia-1 tokenizer, downloaded when a `julia-1` engine is bound |

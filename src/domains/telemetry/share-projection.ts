@@ -122,7 +122,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"call.started": CALL,
 	"call.settled": {
 		...CALL,
-		...keep("disposition", "usage", "pricing", "stages", "transport", "interruptedEstimate"),
+		...keep("disposition", "usage", "pricing", "stages", "transport", "interruptedEstimate", "billing"),
 		responseId: "id",
 		cache: {
 			...keep("expectedColdReasons", "rePrefilledTokens", "uncachedPrefillTokens", "verdict", "bill"),

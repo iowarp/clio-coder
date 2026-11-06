@@ -18,7 +18,6 @@ import type {
 	ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { alcfOAuthProvider } from "./alcf-oauth.js";
 import { withClioAnthropicBrowserLogin, withCodexCallbackHandoff } from "./oauth-browser.js";
@@ -131,7 +130,8 @@ function builtinProviders(): EngineOAuthProvider[] {
 	return [
 		fromOAuthAuth("anthropic-max", anthropicProvider().auth.oauth, true, withClioAnthropicBrowserLogin),
 		fromOAuthAuth("openai-codex", openaiCodexProvider().auth.oauth, true, withCodexCallbackHandoff),
-		fromOAuthAuth("github-copilot", githubCopilotProvider().auth.oauth, false),
+		// Pi's github-copilot flow is not registered: it signs in with VS Code's OAuth client id and sends
+		// VS Code's editor headers. Copilot is reached only through the official SDK (`copilot-sdk` runtime).
 	];
 }
 

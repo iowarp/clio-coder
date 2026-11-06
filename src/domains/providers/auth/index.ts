@@ -22,6 +22,8 @@ export {
 	AuthStorage,
 	AuthStorageDamagedError,
 	authNotRequiredStatus,
+	RETIRED_GITHUB_COPILOT_MESSAGE,
+	RETIRED_GITHUB_COPILOT_PROVIDER_ID,
 	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,

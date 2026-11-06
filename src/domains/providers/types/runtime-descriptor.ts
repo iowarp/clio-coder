@@ -30,6 +30,7 @@ export type RuntimeApiFamily =
 	| "rerank-http"
 	| "embeddings-http"
 	| "claude-agent-sdk"
+	| "copilot-sdk"
 	| "claude-code-subprocess"
 	| "external-agent-subprocess";
 

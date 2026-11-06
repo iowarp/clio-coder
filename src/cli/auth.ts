@@ -5,13 +5,17 @@ import { readSettings } from "../core/config.js";
 import {
 	authNotRequiredStatus,
 	openAuthStorage,
+	RETIRED_GITHUB_COPILOT_MESSAGE,
+	RETIRED_GITHUB_COPILOT_PROVIDER_ID,
 	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
 } from "../domains/providers/auth/index.js";
+import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { askYesNo } from "./ask.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import {
@@ -277,6 +281,10 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		parsed.target = picked;
 	}
 
+	if (parsed.target === RETIRED_GITHUB_COPILOT_PROVIDER_ID) {
+		printError(RETIRED_GITHUB_COPILOT_MESSAGE);
+		return 2;
+	}
 	const resolved = resolveCliProviderReference(parsed.target);
 	if (!resolved) {
 		printError(`unknown target or runtime: ${parsed.target}`);
@@ -284,6 +292,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		return 2;
 	}
 
+	if (resolved.runtime.id === "copilot-sdk") return loginCopilotSdk();
 	const auth = openAuthStorage();
 	if (resolved.runtime.authNotice) process.stdout.write(`note: ${resolved.runtime.authNotice}\n`);
 	if (resolved.runtime.auth === "oauth") {
@@ -469,6 +478,29 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 	if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not removed`)) return 1;
 	printOk(`removed credential for ${resolved.authTarget.providerId}`);
 	return 0;
+}
+
+/**
+ * Copilot's credential belongs to the official runtime (`copilot login`); Clio only records this account's
+ * one-time consent, after showing what it bills and whose policy applies.
+ */
+async function loginCopilotSdk(): Promise<number> {
+	const interactive = input.isTTY === true && output.isTTY === true;
+	const rl = interactive ? createInterface({ input, output }) : null;
+	try {
+		const result = await prepareCopilotSdk({
+			...(rl ? { confirm: (question: string) => askYesNo(rl, question, false) } : {}),
+			print: (text) => process.stdout.write(`${text}\n`),
+		});
+		if (!result.ok) {
+			printError(result.message);
+			return 1;
+		}
+		printOk(`GitHub Copilot ready as ${result.account.login}; consent is recorded for this account.`);
+		return 0;
+	} finally {
+		rl?.close();
+	}
 }
 
 export async function runAuthCommand(args: ReadonlyArray<string>): Promise<number> {

@@ -1,3 +1,4 @@
+import { isCopilotRefusal } from "../../core/copilot-refusal.js";
 import { isResponseSchemaRejection } from "../../core/response-schema.js";
 import { isEngineContextOverflow, isProviderContentFilter } from "../../engine/ai.js";
 import { WORKER_STDOUT_UNDRAINED_REASON } from "../../worker/ndjson.js";
@@ -170,6 +171,9 @@ export function classifyFailure(
 		return "internal";
 	}
 	const diagnostic = resultText(result, providerError);
+	// Copilot refused on policy, quota, rate limit or authorization. That is the seat's answer, not endpoint
+	// health: it is surfaced as is and never retried on this or another account or target.
+	if (isCopilotRefusal(diagnostic)) return "policy";
 	// The provider's content filter answered, so the endpoint is up and the
 	// worker runtime did nothing wrong. Charging it to the target breaker let
 	// three filtered scouts in a row park a healthy Mercury endpoint for every

@@ -27,6 +27,7 @@
  */
 
 import { performance } from "node:perf_hooks";
+import { isCopilotRefusal } from "../../core/copilot-refusal.js";
 import type { RetrySettings } from "../../core/defaults.js";
 import { isLiteLLMConnectionFailure } from "../../core/gateway-routing.js";
 import { isProviderAuthRejection } from "../../core/provider-auth-error.js";
@@ -96,7 +97,7 @@ function isModelLoadingErrorMessage(errorMessage: string | null | undefined): bo
  */
 export function isRetryableErrorMessage(errorMessage: string | null | undefined): boolean {
 	if (!errorMessage || errorMessage.length === 0) return false;
-	if (isHarmonyTerminalFailure(errorMessage)) return false;
+	if (isHarmonyTerminalFailure(errorMessage) || isCopilotRefusal(errorMessage)) return false;
 	return isEngineRetryableAssistantError(errorMessage) || MODEL_LOADING_PATTERN.test(errorMessage);
 }
 
@@ -136,6 +137,7 @@ export function classifyRecoveryFailure(input: RecoveryFailureInput): RecoveryFa
 	// dollar amounts can contain "500", which the provider pattern reads as a
 	// server error, and another attempt meets the same ceiling (#423).
 	else if (input.message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) kind = "terminal-provider";
+	else if (isCopilotRefusal(input.message)) kind = "terminal-provider";
 	else if (input.contextOverflow ?? isEngineContextOverflow(input.message)) kind = "context-overflow";
 	// The engine already retried a Harmony server failure once and wrote this
 	// code; its code, not its wording, makes it final here (#435).
@@ -169,7 +171,7 @@ const RATE_LIMIT_PATTERN =
 /** A provider asking for time. Quota and billing exhaustion stay terminal, because waiting does not clear them. */
 export function isRateLimitErrorMessage(errorMessage: string | null | undefined): boolean {
 	if (!errorMessage || errorMessage.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return false;
-	if (isHarmonyTerminalFailure(errorMessage)) return false;
+	if (isHarmonyTerminalFailure(errorMessage) || isCopilotRefusal(errorMessage)) return false;
 	return isEngineRetryableAssistantError(errorMessage) && RATE_LIMIT_PATTERN.test(errorMessage);
 }
 
@@ -220,7 +222,12 @@ export function failureRetryAfterMs(message: unknown, errorMessage: string | nul
  */
 export function statedRetryWaitMs(message: unknown, errorMessage: string | null | undefined): number | null {
 	if (!errorMessage || errorMessage.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return null;
-	if (isHarmonyTerminalFailure(errorMessage) || !isEngineRetryableAssistantError(errorMessage)) return null;
+	if (
+		isHarmonyTerminalFailure(errorMessage) ||
+		isCopilotRefusal(errorMessage) ||
+		!isEngineRetryableAssistantError(errorMessage)
+	)
+		return null;
 	const wait = failureRetryAfterMs(message, errorMessage);
 	return wait !== null && wait > 0 ? wait : null;
 }

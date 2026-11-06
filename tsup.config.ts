@@ -237,7 +237,8 @@ export default defineConfig({
 	// that default, so the Claude Agent SDK needs the explicit entry: without it
 	// esbuild would bundle the optional package into dist/ and reintroduce the
 	// hard requirement that #258 removed. External keeps the lazy
-	// `await import()` in src/engine/claude/sdk-module.ts a real runtime import.
+	// `await import()` in src/engine/claude/sdk-module.ts a real runtime import. The Copilot SDK is a
+	// devDependency on the same terms: src/engine/copilot/sdk-module.ts reaches it only through `await import()`.
 	// The builtin entry is for removeNodeProtocol above.
-	external: ["node:sqlite", "@anthropic-ai/claude-agent-sdk"],
+	external: ["node:sqlite", "@anthropic-ai/claude-agent-sdk", "@github/copilot-sdk"],
 });

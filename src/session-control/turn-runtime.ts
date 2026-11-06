@@ -192,7 +192,10 @@ function modelRequestSlots(
 		? endpointCapacityForStatus(status)
 		: endpointCapacityFor({ target: target.target, runtime: target.runtime });
 	return {
-		limit: capacity && capacity.source !== "local-native-default" ? capacity.limit : null,
+		limit:
+			capacity && capacity.source !== "local-native-default" && capacity.source !== "runtime-default"
+				? capacity.limit
+				: null,
 		workers: holders.leases,
 		reservations: holders.reservations,
 		otherRequests,

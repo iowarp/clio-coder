@@ -42,6 +42,7 @@ export const coreTests = [
 	"skill-frontmatter-cache",
 	"fleet-run-history-prime",
 	"approval-card-arguments",
+	"copilot-sdk-route",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
