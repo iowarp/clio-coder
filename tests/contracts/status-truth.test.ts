@@ -2095,3 +2095,14 @@ test("a summarizing compaction measures its written summary against the output c
 	match(open[1] ?? "", / 1 token, no limit$/u);
 	doesNotMatch(open[1] ?? "", /█/u);
 });
+
+test("a tool preview keeps whole lines and counts the lines it holds back, never wrapped rows", async () => {
+	const { previewLines } = await import("../../src/interactive/renderers/preview.js");
+	const lines = [["a1", "a2"], ["b1"], ["c1", "c2", "c3"], ["d1"]];
+	const head = previewLines(lines, 4, 40).map(stripTerminalSequences);
+	deepStrictEqual(head.slice(0, 3), ["a1", "a2", "b1"], "the third line would be cut between its rows, so it waits");
+	match(head[3] ?? "", /… 2 more lines · \/view/u);
+	const tail = previewLines(lines, 3, 40, true).map(stripTerminalSequences);
+	match(tail[0] ?? "", /… 3 earlier lines · \/view/u);
+	deepStrictEqual(tail.slice(1), ["d1"]);
+});
