@@ -3090,6 +3090,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						options.requestContinuation !== true,
 					);
 				} catch (err) {
+					// A new session or a dispose since submit owns the transcript now; this turn's notice and outcome
+					// row belong to the session it left, as on the turn-control and overflow paths.
+					if (generation !== submitGeneration || disposed) return;
 					const tokens = context.contextUsage().tokens;
 					// The cheaper stages run before the summary and may have applied, so the size is stated, not "unchanged".
 					const size = tokens !== null ? `; context at ${footerTokens(tokens)} tokens` : "";
