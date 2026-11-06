@@ -67,8 +67,14 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 		// ahead/behind/recentCommits stay as session bind captured them. The polling
 		// probe does not read them (two subprocesses for fields the footer never
 		// paints), and the workspace context tool reads the bound snapshot, not this one.
-		const { gitUnknown: _unknown, ...known } = base;
-		liveWorkspaceSnapshot = { ...known, isGit: git.isGit, branch: git.branch, dirty: git.dirty };
+		const { gitUnknown: _unknown, detachedAt: _detached, ...known } = base;
+		liveWorkspaceSnapshot = {
+			...known,
+			isGit: git.isGit,
+			branch: git.branch,
+			dirty: git.dirty,
+			...(git.detachedAt !== undefined ? { detachedAt: git.detachedAt } : {}),
+		};
 	};
 
 	const refreshLiveWorkspaceGit = (force = false): Promise<void> => {

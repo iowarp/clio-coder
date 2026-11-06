@@ -185,6 +185,7 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
 		return {
 			cwd: collapseHomePath(snapshot.cwd),
 			branch: snapshot.branch,
+			...(snapshot.detachedAt !== undefined ? { detachedAt: snapshot.detachedAt } : {}),
 			...(snapshot.pending || snapshot.gitUnknown ? { branchPending: true } : {}),
 			dirty: snapshot.dirty,
 			projectType: snapshot.projectType && snapshot.projectType !== "unknown" ? snapshot.projectType : null,

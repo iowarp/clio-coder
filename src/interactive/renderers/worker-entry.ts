@@ -567,10 +567,11 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
 	const refused = entry.result?.refusedCalls ?? 0;
+	const guarded = entry.result?.guardedCalls ?? 0;
 	if (!inspect) {
 		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
 		if (calls !== undefined) metrics.push(renderCalls(calls));
-		if (refused > 0) metrics.push(refusedCallsWords(refused));
+		if (refused > 0) metrics.push(refusedCallsWords(refused, guarded));
 		const figure = tokens === undefined ? null : compactQuantity(tokens);
 		if (figure !== null) metrics.push(`${figure} tokens`);
 		return metrics;
@@ -579,7 +580,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const context = entry.telemetry?.activity.contextTokens;
 	if (context) metrics.push(`context ${context.display}`);
 	if (calls !== undefined) metrics.push(renderCalls(calls));
-	if (refused > 0) metrics.push(refusedCallsWords(refused));
+	if (refused > 0) metrics.push(refusedCallsWords(refused, guarded));
 	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }

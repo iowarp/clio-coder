@@ -9,7 +9,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
 import { SAFE_EXEC_PIPE_DRAIN_BOUND_MS } from "./safe-exec.js";
-import { knownSecretValues, scrubSandboxEnv } from "./sandbox/env-scrub.js";
+import { holdsNamedCredential, knownSecretValues, scrubSandboxEnv } from "./sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
@@ -220,7 +220,10 @@ function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 	const env = baseToolEnv(source);
-	for (const key of Object.keys(env)) if (isSecretArgKey(key)) Reflect.deleteProperty(env, key);
+	// The argument-key rule alone let bare `FOO_KEY`, `GH_PAT` and `PASSWD` through to every unsandboxed command;
+	// the sandbox's name rule already counts them as credentials. A path under such a name is where one lives and stays.
+	for (const [key, value] of Object.entries(env))
+		if (isSecretArgKey(key) || holdsNamedCredential(key, value)) Reflect.deleteProperty(env, key);
 	return env;
 }
 

@@ -8,8 +8,9 @@ import { bashTool } from "../../src/tools/bash.js";
  * Known credential values never reach a captured shell result: a credential
  * variable's value and a credential Clio resolved are masked, while a value
  * too short to mask safely and a path under a credential name print as they are.
- * The names avoid the `*_TOKEN` and `*_API_KEY` shapes an unsandboxed command
- * never inherits, so the child really prints each value.
+ * An unsandboxed child no longer inherits credential-named variables, so the
+ * command prints each fixture value literally, as output that obtained it some
+ * other way would.
  */
 
 const KEY = "sk-mask-fixture-0123456789abcdef";
@@ -19,7 +20,7 @@ const FIXTURE_ENV = {
 	MASK_FIXTURE_SMTP_PASS: "short7",
 	MASK_FIXTURE_SSH_KEY: "/home/fixture/.ssh/id_ed25519",
 };
-const COMMAND = `printf '%s|%s|%s|%s\\n' "$MASK_FIXTURE_DEPLOY_KEY" "$MASK_FIXTURE_SMTP_PASS" "$MASK_FIXTURE_SSH_KEY" '${RESOLVED}'; sleep 0.2`;
+const COMMAND = `printf '%s|%s|%s|%s\\n' '${KEY}' '${FIXTURE_ENV.MASK_FIXTURE_SMTP_PASS}' '${FIXTURE_ENV.MASK_FIXTURE_SSH_KEY}' '${RESOLVED}'; sleep 0.2`;
 const MASKED = "[redacted:known]|short7|/home/fixture/.ssh/id_ed25519|[redacted:known]";
 
 function fixtureEnv(): void {
