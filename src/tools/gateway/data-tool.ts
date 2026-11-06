@@ -5,9 +5,12 @@ import {
 	type InspectDataResult,
 	inspectData,
 	isDataRefusal,
+	type ScientificResult,
 	type SelectDataOptions,
 	type SelectDataResult,
+	type StatsDataOptions,
 	selectData,
+	statsData,
 	type ValidateDataOptions,
 	type ValidateDataResult,
 	validateData,
@@ -59,7 +62,7 @@ interface CountedResult {
 	next?: string;
 }
 
-type DataResult = InspectDataResult | SelectDataResult | ValidateDataResult;
+type DataResult = InspectDataResult | SelectDataResult | ValidateDataResult | ScientificResult;
 
 function isDataOp(value: string): value is DataOp {
 	return (DATA_OPS as ReadonlyArray<string>).includes(value);
@@ -75,12 +78,21 @@ function countResult(op: DataOp, payload: DataResult): CountedResult {
 		const limit = typeof result.limit === "number" ? result.limit : returned;
 		const hasMore = result.hasMore === true;
 		const total = typeof result.total === "number" ? result.total : hasMore ? null : offset + returned;
+		// A hyperslab has no single continuation offset; its result carries its own advice.
+		const hyperslab = Array.isArray(result.count);
 		return {
 			unit: "entries",
 			shownCount: returned,
 			totalCount: total,
 			truncated: hasMore,
-			...(hasMore ? { next: `offset=${offset + limit}` } : {}),
+			...(hasMore
+				? {
+						next: hyperslab
+							? "pass start and an explicit count for the next window"
+							: // A Parquet window cut to the byte cap continues after the rows actually returned.
+								`offset=${offset + (result.format === "parquet" ? returned : limit)}`,
+					}
+				: {}),
 		};
 	}
 	return { unit: "results", shownCount: 1, totalCount: 1, truncated: false };
@@ -115,7 +127,7 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 			const args = prepareDataArguments(rawArgs);
 			const op = typeof args.op === "string" ? args.op : "";
 			if (!isDataOp(op)) {
-				return { kind: "error", message: `data: op must be inspect, select, or validate; got '${op}'` };
+				return { kind: "error", message: `data: op must be inspect, select, validate, or stats; got '${op}'` };
 			}
 			if (typeof args.path !== "string" || args.path.trim().length === 0) {
 				return { kind: "error", message: "data: path is required" };
@@ -139,6 +151,18 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 				const delimiter = typeof args.delimiter === "string" ? args.delimiter : undefined;
 				const header = headerArg(args.header);
 				const signal = options?.signal;
+				const variable = typeof args.variable === "string" ? args.variable : undefined;
+				const integers = (value: unknown): number[] | undefined =>
+					Array.isArray(value) && value.every((item) => typeof item === "number") ? (value as number[]) : undefined;
+				const start = integers(args.start);
+				const count = integers(args.count);
+				const stride = integers(args.stride);
+				const slab = {
+					...(variable !== undefined ? { variable } : {}),
+					...(start !== undefined ? { start } : {}),
+					...(count !== undefined ? { count } : {}),
+					...(stride !== undefined ? { stride } : {}),
+				};
 				let result: DataResult | DataRefusal;
 				if (op === "inspect") {
 					const inspectOptions: InspectDataOptions = {
@@ -146,6 +170,7 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 						...(delimiter !== undefined ? { delimiter } : {}),
 						...(header !== undefined ? { header } : {}),
 						...(typeof args.table === "string" ? { table: args.table } : {}),
+						...(variable !== undefined ? { variable } : {}),
 						...(typeof args.sample_rows === "number" ? { sampleRows: args.sample_rows } : {}),
 						...(args.max_rows === null || typeof args.max_rows === "number" ? { maxRows: args.max_rows } : {}),
 						signal,
@@ -162,9 +187,20 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 						...(typeof args.pointer === "string" ? { pointer: args.pointer } : {}),
 						...(typeof args.sql === "string" ? { sql: args.sql } : {}),
 						...(typeof args.table === "string" ? { table: args.table } : {}),
+						...slab,
 						signal,
 					};
 					result = await selectData(target, selectOptions);
+				} else if (op === "stats") {
+					const statsOptions: StatsDataOptions = {
+						...(format !== undefined ? { format } : {}),
+						...slab,
+						...(typeof args.offset === "number" ? { offset: args.offset } : {}),
+						...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+						...(typeof args.max_bytes === "number" ? { maxBytes: args.max_bytes } : {}),
+						signal,
+					};
+					result = await statsData(target, statsOptions);
 				} else {
 					const validateOptions: ValidateDataOptions = {
 						...(format !== undefined ? { format } : {}),

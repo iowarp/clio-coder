@@ -71,7 +71,7 @@ Capabilities that the gateway directory implements itself, and the other gateway
 | --- | --- | --- |
 | `clio_docs` | `query` (omit to list the corpus), `limit` | [clio_docs](#cliodocs-retrieve-bundled-documentation-through-the-gateway) |
 | `clio_library` | `query`, `kind`, `ref`, `limit`, `offset` | [clio_library](#cliolibrary-inspect-the-component-catalog-through-the-gateway) |
-| `data` | `op` is `inspect`, `select` or `validate`, plus the format and window arguments | [data](#data-inspect-structured-files-through-the-gateway) |
+| `data` | `op` is `inspect`, `select`, `validate` or `stats`, plus the format, window and hyperslab arguments | [data](#data-inspect-structured-files-through-the-gateway) |
 | `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `vision`, `configure_clio` | Each tool's own schema | The tool's own section |
 | `extension_<id>__<name>` | The tool's schema, from an extension command tool or an api 2 runtime tool | [Extensions](harness-extensions.md) |
 | `mcp_<id>__<tool>` | The MCP server tool's schema | The MCP paragraphs below |
@@ -355,31 +355,47 @@ verify(check="compare-stats")
 
 ## data: inspect structured files through the gateway
 
-Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL, plus `inspect` and `select` for SQLite databases. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and no parser is installed.
+Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL; `inspect` and `select` for SQLite databases; and `inspect`, `select`, and `stats` for HDF5, NetCDF and Parquet. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and nothing is installed into the project or Clio's package.
 
 | Argument | Contract |
 | --- | --- |
 | `op`, `path` | Required operation and file path. |
-| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, or `sqlite`. |
+| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, `sqlite`, `hdf5`, `netcdf`, or `parquet`. The file's signature still decides between HDF5 (which includes NetCDF-4) and classic NetCDF. |
 | `delimiter`, `header` | CSV/TSV overrides; delimiter is one character, header defaults to `auto`. Detection considers comma, tab, semicolon, pipe. |
 | `sample_rows` | Inspection preview; default 10, max 1000. |
 | `max_rows` | Inspect/validate scan bound; default 100000, `null` means scan to EOF. |
-| `offset`, `limit` | Select window; zero-based offset (default 0), result limit (default 50, max 1000). |
+| `offset`, `limit` | Select window; zero-based offset (default 0), result limit (default 50, max 1000). Parquet `stats`: the rows summarized (default all). |
 | `columns` | CSV/TSV projection by header or zero-based index. |
 | `pointer` | JSON RFC 6901 pointer; empty string selects the document. |
 | `sql` | SQLite select: one read-only `SELECT`, `WITH`, `VALUES` or `EXPLAIN` statement, windowed by `offset` and `limit`. |
 | `table` | SQLite: inspect counts and samples this table; select reads it instead of `sql`, with `columns` as a projection. |
+| `variable` | HDF5/NetCDF: a variable or group path; `inspect` narrows to it, `select` and `stats` read it. Parquet `stats`: the column. |
+| `start`, `count`, `stride` | HDF5/NetCDF hyperslab, one entry per dimension: first index (default 0), elements (default the rest of the dimension), step (default 1). |
+| `max_bytes` | `stats`: raw bytes read before the pass stops; default 256 MiB, max 8 GiB. |
 
 `path` is workspace-relative or absolute and uses normal path policy. Inspect returns schema/dimensions and a bounded sample; select returns rows, records, or a JSON value. Validate covers only scanned rows unless `max_rows=null`; `rowCount:null` means scan stopped early. Results include `view={exact,sampled,converted}`: `sampled` means scan stopped before EOF; `exact=false,sampled=false` means a selected value was cut to budget. `$summary`/`$truncated` mark cuts. Samples may be cut while whole-file counts remain exact. `converted` is always false.
 
 CSV cells stay strings. Empty cells and missing sentinels are counted separately, never coerced to zero/null. Numeric precision issues are surfaced (`unsafe-integer`, `excess-digits`, `inexact`, `overflow`, `underflow`, `oversized-literal`); unrepresentable JSON numbers use `$literal` plus precision metadata. No units are inferred; extrema affected by precision loss are approximate. Format/schema validity establishes neither physical meaning nor transformation correctness.
 
-Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777,216; JSONL lines 1,048,576; JSON nesting 1024. Binary/NUL, invalid UTF-8, malformed syntax, unsupported formats, missing pointers, and unknown columns error. Duplicate-key and precision tracking are bounded and report omissions. Gateway observations cap data at 32 KiB and use the shared turn budget. SQLite runs in a child process that opens the database read-only, sets `query_only`, and accepts one statement with a 30 s timeout; a database whose read-only open fails is reopened with `immutable=1`, and the result says changes still in its WAL are not visible. HDF5, NetCDF, and Parquet need `run_script` plus an operator-provided library. After a transform, validate output schema, precision, missing values, and scientific invariants separately.
+Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777,216; JSONL lines 1,048,576; JSON nesting 1024. Binary/NUL, invalid UTF-8, malformed syntax, unsupported formats, missing pointers, and unknown columns error. Duplicate-key and precision tracking are bounded and report omissions. Gateway observations cap data at 32 KiB and use the shared turn budget. SQLite runs in a child process that opens the database read-only, sets `query_only`, and accepts one statement with a 30 s timeout; a database whose read-only open fails is reopened with `immutable=1`, and the result says changes still in its WAL are not visible. After a transform, validate output schema, precision, missing values, and scientific invariants separately.
+
+### Scientific formats
+
+HDF5 and NetCDF-4 are read by h5wasm 0.10.3 (the HDF5 C library compiled to wasm), Parquet by hyparquet 1.31.5, and classic NetCDF (CDF-1, CDF-2 and CDF-5) by a reader built into Clio. The two libraries are not shipped: each is downloaded once on first use as its npm registry tarball, accepted only when its sha256 matches the pin in `src/tools/data/reader-assets.ts`, and unpacked under `<cache>/data-readers/`. A failed download is recorded beside the cache path, and no process on the host tries again for 10 minutes. The refusal names the reader, the URL, the cache path to copy the tarball to on an offline host, and the `run_script` route with h5py, netCDF4 or pyarrow. Classic NetCDF needs no download.
+
+Every call runs in a worker thread with a 120 s ceiling, so a long pass never blocks the session and an abort stops it. Files are opened read-only and read lazily: HDF5 reads only the metadata and chunks a call touches, Parquet reads its footer and then only the column chunks of the row groups in the window.
+
+- `inspect` lists groups, variables (dtype, shape, unlimited dimensions as `null` in `maxshape`, named dimensions), global and per-variable attributes with a `cf` block for `units`, `long_name`, `standard_name`, `_FillValue`, `missing_value`, `scale_factor`, `add_offset`, `calendar`, `valid_min`, `valid_max`, `valid_range` and `coordinates`, plus layout, chunk shape, the filter pipeline with deflate level, and uncompressed size. NetCDF-4 files report `format: "netcdf"` with their dimensions, and the netCDF library's own bookkeeping attributes are hidden. Classic NetCDF also reports each variable's exact on-disk size; HDF5 reports `storageBytes: null`, because the bundled reader exposes no storage size. Parquet pages compressed with SNAPPY, GZIP, ZSTD or BROTLI are decoded; other codecs such as LZ4 are refused with the column named. Parquet reports rows, the schema with physical and logical types, per-column codecs and compressed and uncompressed sizes, row groups, and the footer statistics folded across row groups (min, max, null count, and how many row groups carried them). Nothing is scanned. A result past 28 KiB drops attributes to the `cf` block and a count, then lists fewer variables, and says so.
+- `select` reads a hyperslab. With `count` omitted it returns the first 200 elements in row-major order, fewer if their values render past 24 KiB, and marks the result truncated. An explicit `count` above 2000 elements, or one whose values render past 24 KiB, is refused with `selection-too-large`. Parquet selects a row window (`offset`, `limit` up to 1000, `columns`) and cuts rows to 24 KiB, saying so. Values are raw as stored: `scale_factor` and `add_offset` are not applied and fill values are not masked. Float32 values print at float32 precision; integers past 2^53 and non-finite values are `$literal`; classic NetCDF `char` variables are joined into strings along their last dimension.
+- `stats` reports `min`, `max`, `mean`, population `std`, and `validCount`, `nanCount`, `infCount`, `fillCount` and `missingValueCount` over the selection (Parquet: a numeric column and its nulls). It reads 8 MiB slabs, chunk by chunk for chunked HDF5 data, and stops before `max_bytes` or after 60 s with `complete: false`, `stoppedBy` and the elements actually covered. With `scale_factor` or `add_offset`, an `unpacked` block repeats the summary in unpacked units. Fill and missing values come only from the `_FillValue` and `missing_value` attributes, so an HDF5 dataset-creation fill value (h5py `fillvalue=`) is not counted.
 
 ```text
 gateway(op="call", capability="data", args={op: "inspect", path: "results.csv", max_rows: null})
 gateway(op="call", capability="data", args={op: "select", path: "results.json", pointer: "/runs/0"})
 gateway(op="call", capability="data", args={op: "select", path: "runs.db", sql: "SELECT node, sum(bytes) FROM runs GROUP BY node"})
+gateway(op="call", capability="data", args={op: "inspect", path: "climate.nc", variable: "tas"})
+gateway(op="call", capability="data", args={op: "select", path: "sim.h5", variable: "fields/pressure", start: [0, 0], count: [4, 10], stride: [10, 5]})
+gateway(op="call", capability="data", args={op: "stats", path: "sim.h5", variable: "fields/pressure", max_bytes: 1073741824})
 ```
 
 ## grep: search file contents with ripgrep
