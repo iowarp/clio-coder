@@ -635,7 +635,10 @@ export function buildResponsiveHint(
  */
 function fitHint(hint: string, maxCleanWidth: number): string {
 	const parts = hint.split(" · ");
-	if (parts.length <= 2) return hint;
+	// Two entries narrow too: a fixed `[Enter] fork after this reply · [Esc] close`
+	// used to be cut at the edge with both keys inside the cut, so a 40-column
+	// rail named neither. Narrowed, the way out is what stands.
+	if (parts.length <= 1 || (parts.length === 2 && visibleWidth(hint) <= maxCleanWidth)) return hint;
 	const entries: HintEntry[] = parts.map((part) => {
 		const match = /^\[([^\]]+)\] ([\s\S]+)$/u.exec(part);
 		// A part that is not `[Key] verb` carries no key to classify, so it is
