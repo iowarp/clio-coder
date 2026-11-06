@@ -486,6 +486,15 @@ export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): st
 							: "run `agy` directly to inspect setup, then re-run `clio-coder targets --probe`";
 			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
 		}
+		if (descriptor.runtime === "copilot-sdk") {
+			const next =
+				probe.failureKind === "missing"
+					? "install the Copilot SDK component with `clio-coder tools install copilot-sdk`, then re-run `clio-coder targets --probe`"
+					: probe.failureKind === "authentication"
+						? "sign in with the official GitHub Copilot CLI (`copilot login`); Clio never signs in to Copilot itself"
+						: "check that `copilot login` succeeded and the account has Copilot models enabled, then re-run `clio-coder targets --probe`";
+			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
+		}
 		const where = descriptor.url ? ` ${descriptor.url}` : "";
 		return [
 			`probe failed${latency}:${where} ${probe.error ?? "unknown"}`,

@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { detectDocumentKind, detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { resolvePackageRoot } from "../core/package-root.js";
-import { readPackedSource } from "../core/source-pack.js";
+import { packedSourceDirectory, readPackedSource } from "../core/source-pack.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
@@ -244,7 +244,7 @@ function packedSourceHandle(bytes: Buffer, mtimeMs: number): FileHandle {
 	return handle as unknown as FileHandle;
 }
 
-/** The stat of `filePath`, or of its packed member when the file is absent from an installed package's `src/`. */
+/** The stat of `filePath`, or of its packed member or directory when it is absent from an installed package's `src/`. */
 async function statReadTarget(filePath: string): Promise<{
 	entry: { size: number; mtimeMs: number; isFile(): boolean; isDirectory(): boolean };
 	packed: FileHandle | null;
@@ -254,9 +254,17 @@ async function statReadTarget(filePath: string): Promise<{
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") throw err;
 		const member = readPackedSource(filePath);
-		if (member === null) throw err;
-		const packed = packedSourceHandle(member.bytes, member.mtimeMs);
-		return { entry: await packed.stat(), packed };
+		if (member !== null) {
+			const packed = packedSourceHandle(member.bytes, member.mtimeMs);
+			return { entry: await packed.stat(), packed };
+		}
+		// A directory the pack replaced answers as the loose directory would.
+		const directory = packedSourceDirectory(filePath);
+		if (directory === null) throw err;
+		return {
+			entry: { size: 0, mtimeMs: directory.mtimeMs, isFile: () => false, isDirectory: () => true },
+			packed: null,
+		};
 	}
 }
 

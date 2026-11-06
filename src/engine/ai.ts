@@ -57,6 +57,18 @@ export async function listClaudeSdkModels(target: TargetDescriptor, ctx: ProbeCo
 	return listing.listClaudeSdkModels(target, ctx);
 }
 
+/** Copilot model discovery loads the optional SDK only when a copilot-sdk target is probed. */
+export async function listCopilotSdkModels() {
+	const client = await import("./copilot/client.js");
+	return client.listCopilotModels();
+}
+
+/** The account the official Copilot runtime is signed in as; loads the optional SDK on first use. */
+export async function copilotSdkAccount() {
+	const client = await import("./copilot/client.js");
+	return client.copilotAccount();
+}
+
 export const stream = engineStream;
 
 /**
@@ -255,8 +267,16 @@ export function getEngineSupportedThinkingLevels<TApi extends Api>(model: Model<
 	return piGetSupportedThinkingLevels(model);
 }
 
+const sessionCleanupHooks = new Set<(sessionId?: string) => void>();
+
+/** Engine APIs that hold per-session state (the copilot-sdk conversations) release it with Pi's. */
+export function registerEngineSessionCleanup(hook: (sessionId?: string) => void): void {
+	sessionCleanupHooks.add(hook);
+}
+
 export function cleanupEngineSessionResources(sessionId?: string): void {
 	piCleanupSessionResources(sessionId);
+	for (const hook of sessionCleanupHooks) hook(sessionId);
 }
 
 export function isEngineContextOverflow(errorMessage: string): boolean {

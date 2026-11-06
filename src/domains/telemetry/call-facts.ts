@@ -137,8 +137,20 @@ export function callSettlementFromMessage(
 	);
 	const breakdownIncomplete = providerTotal !== null && providerTotal > breakdown;
 	const totalOnly = breakdownIncomplete && breakdown === 0;
+	// An adapter that knows which counts the provider sent lists them (copilot-sdk): a listed count is the
+	// provider's measurement, and an unlisted one is unknown whatever placeholder it holds. On a call that never
+	// reached its end the lower-bound rule above still applies: a listed positive count is kept, a listed zero
+	// may only mark where the stream stopped and stays unknown.
+	const reportedFields = Array.isArray(usage.reportedFields)
+		? new Set(usage.reportedFields.filter((field): field is string => typeof field === "string"))
+		: null;
 	const read = (key: keyof CallUsage | "totalTokens"): Fact<number> => {
 		const value = amount(usage[key]);
+		if (reportedFields !== null && key !== "totalTokens") {
+			return reportedFields.has(key) && value !== null && Number.isInteger(value) && (terminal || value > 0)
+				? { kind: "measured", value, source: "provider" }
+				: unknown;
+		}
 		if (value === 0 && (!terminal || totalOnly)) return unknown;
 		if (
 			usage.estimated === true ||
@@ -216,7 +228,30 @@ export function callSettlementFromMessage(
 			verdict: "unknown",
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
+		...copilotBilling(raw.copilotBilling),
 		...(interruptedEstimate ? { interruptedEstimate } : {}),
+	};
+}
+
+/** The seat units a copilot-sdk step reported (`CopilotStepBilling`, src/engine/copilot/stream.ts). */
+function copilotBilling(raw: unknown): Pick<CallSettled, "billing"> {
+	const billing = record(raw);
+	if (Object.keys(billing).length === 0) return {};
+	const fact = (value: unknown): Fact<number> =>
+		typeof value === "number" && Number.isFinite(value) && value >= 0
+			? { kind: "measured", value, source: "provider" }
+			: unknown;
+	const calls = billing.modelCalls;
+	return {
+		billing: {
+			provider: "github-copilot",
+			premiumRequests: fact(billing.premiumRequests),
+			nanoAiu: fact(billing.nanoAiu),
+			modelCalls:
+				typeof calls === "number" && Number.isSafeInteger(calls) && calls >= 0
+					? { kind: "measured", value: calls, source: "local-count" }
+					: unknown,
+		},
 	};
 }
 

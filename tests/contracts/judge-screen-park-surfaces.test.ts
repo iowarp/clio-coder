@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import {
 	HEADLESS_PERMISSION_DENIED_MARKER,
 	HEADLESS_PERMISSION_DENIED_REASON,
 } from "../../src/core/headless-permission.js";
+import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
@@ -112,4 +113,63 @@ test("the interactive card shows the same source as its advisory", async () => {
 	match(shown[0] ?? "", /System One reads a result from web_fetch https:\/\/x\.test\/a as directing an AI agent/u);
 	registry.cancelParkedCall(parks[0]?.requestId ?? "", "denied", { denied: true });
 	strictEqual((await pending).kind, "blocked");
+});
+
+test("operator decisions and unattended expiry retain the parked call's journal owner outside the turn", async () => {
+	for (const answer of ["confirm", "cancel", "stopTurn", "expire"] as const) {
+		const registry = screenedRegistry();
+		const bus = createTelemetryHub();
+		let context: TelemetryContext | undefined;
+		let now = 0;
+		let wake: () => void = () => {};
+		bus.subscribe("approval.resolved", (_payload, owner) => {
+			context = owner;
+		});
+		const lifecycle = createOverlayPermissionLifecycle({
+			toolRegistry: registry,
+			bus,
+			dispatch: {},
+			getAutonomy: () => "default",
+			getOverlayState: () => "closed",
+			openPermissionOverlay: () => true,
+			closeOverlay: () => lifecycle.onPermissionOverlayClosed(),
+			appendNotice: () => {},
+			applyApprovalState: () => {},
+			requestRender: () => {},
+			stopActiveTurn: () => {},
+			getUnattendedWindowMs: () => 1000,
+			unattendedTimers: {
+				now: () => now,
+				setTimeout: (callback) => {
+					wake = callback;
+					return callback;
+				},
+				clearTimeout: () => {},
+			},
+		});
+		try {
+			let notifyParked: () => void = () => {};
+			const parked = new Promise<void>((resolve) => {
+				notifyParked = resolve;
+			});
+			registry.onPermissionRequired(() => notifyParked());
+			const pending = registry.invoke(
+				{ tool: ToolNames.Bash, args: { command: COMMAND } },
+				{ sessionId: "session-1", turnId: "turn-1" },
+			);
+			await parked;
+			if (answer === "expire") {
+				now = 1000;
+				wake();
+			} else lifecycle[answer]();
+			strictEqual((await pending).kind, answer === "confirm" ? "ok" : "blocked");
+			deepStrictEqual(context, {
+				sessionId: "session-1",
+				agent: { role: "main", id: "session-1" },
+				turnId: "turn-1",
+			});
+		} finally {
+			lifecycle.dispose();
+		}
+	}
 });

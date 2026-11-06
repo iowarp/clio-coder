@@ -69,7 +69,11 @@ export class ClaudeAgentSdkUnavailableError extends Error {
 }
 
 /** Managed installations must use their paired npm; unmanaged Linux may supply npm elsewhere. */
-export function claudeSdkNpmCommand(node: string, managed: boolean): { file: string; args: string[] } {
+export function claudeSdkNpmCommand(
+	node: string,
+	managed: boolean,
+	preparedPrefixHint = ", or prepare a component prefix and set CLIO_CODER_CLAUDE_SDK_DIR",
+): { file: string; args: string[] } {
 	const paired =
 		process.platform === "win32"
 			? join(dirname(node), "node_modules", "npm", "bin", "npm-cli.js")
@@ -84,7 +88,7 @@ export function claudeSdkNpmCommand(node: string, managed: boolean): { file: str
 		}
 	}
 	throw new Error(
-		`No npm available for Node at ${node}${managed ? " in its managed runtime" : " beside Node or on PATH"}. Install npm through your system's supported method${managed ? " or repair the managed runtime" : " and put it on PATH"}, or prepare a component prefix and set CLIO_CODER_CLAUDE_SDK_DIR. Clio will not download Node or npm.`,
+		`No npm available for Node at ${node}${managed ? " in its managed runtime" : " beside Node or on PATH"}. Install npm through your system's supported method${managed ? " or repair the managed runtime" : " and put it on PATH"}${preparedPrefixHint}. Clio will not download Node or npm.`,
 	);
 }
 

@@ -54,7 +54,6 @@ function envValue(name: string, env?: ProviderEnv): string | undefined {
 }
 
 function apiKeyEnvVars(provider: string): readonly string[] | undefined {
-	if (provider === "github-copilot") return ["COPILOT_GITHUB_TOKEN"];
 	if (provider === "anthropic") {
 		return [ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV];
 	}

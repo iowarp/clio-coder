@@ -55,6 +55,8 @@ interface UnattendedPark {
 	tool: string;
 	actionClass: string;
 	seconds: number;
+	sessionId?: string;
+	turnId?: string;
 }
 
 interface WorkerEscalationEntry {
@@ -331,6 +333,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				payload: {
 					status: "denied",
 					requestId,
+					...(entry.sessionId !== undefined ? { sessionId: entry.sessionId } : {}),
+					...(entry.turnId !== undefined ? { turnId: entry.turnId } : {}),
 					origin: "main",
 					decidedBy: UNATTENDED_DECIDED_BY,
 					tool: entry.tool,
@@ -359,7 +363,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		}
 		denyUnattended(requestId, entry);
 	};
-	const armCountdown = (requestId: string, tool: string, actionClass: string): void => {
+	const armCountdown = (meta: PermissionRequiredMeta, tool: string, actionClass: string): void => {
+		const { requestId } = meta;
 		// Requests settled without this lifecycle (an abort, a cancelled turn)
 		// leave their countdowns behind; the next park is the moment to drop them.
 		for (const known of [...countdowns.keys()]) {
@@ -376,7 +381,14 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				if (onScreenRequestId() === requestId) deps.requestRender();
 			},
 		});
-		countdowns.set(requestId, { countdown, tool, actionClass, seconds: Math.round(windowMs / 1000) });
+		countdowns.set(requestId, {
+			countdown,
+			tool,
+			actionClass,
+			seconds: Math.round(windowMs / 1000),
+			...(meta.sessionId !== undefined ? { sessionId: meta.sessionId } : {}),
+			...(meta.turnId !== undefined ? { turnId: meta.turnId } : {}),
+		});
 	};
 	const countdownReader =
 		(requestId: string): PermissionCountdownReader =>
@@ -542,7 +554,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			}
 			// The window runs from the park whether or not a card can show yet: an
 			// operator who left a picker open is as absent as one who left the card.
-			armCountdown(meta.requestId, call.tool, decision.classification.actionClass);
+			armCountdown(meta, call.tool, decision.classification.actionClass);
 			const advisory = meta.gateReason !== undefined ? gateAdvisory(meta.gateReason, meta.gateBuild) : undefined;
 			if (
 				!deps.openPermissionOverlay(
@@ -640,6 +652,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					payload: {
 						status: "granted",
 						...(permission.meta ? { requestId: permission.meta.requestId } : {}),
+						...(permission.meta?.sessionId !== undefined ? { sessionId: permission.meta.sessionId } : {}),
+						...(permission.meta?.turnId !== undefined ? { turnId: permission.meta.turnId } : {}),
 						origin: "main",
 						decidedBy: "operator",
 						tool: permission.call.tool,
@@ -673,6 +687,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					payload: {
 						status: "denied",
 						...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
+						...(permission?.meta?.sessionId !== undefined ? { sessionId: permission.meta.sessionId } : {}),
+						...(permission?.meta?.turnId !== undefined ? { turnId: permission.meta.turnId } : {}),
 						origin: "main",
 						decidedBy: "operator",
 						...(permission
