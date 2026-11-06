@@ -1,5 +1,5 @@
-import { statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
@@ -165,13 +165,48 @@ const PATH_TOOLS: ReadonlyArray<string> = [ToolNames.Read, ToolNames.Edit, ToolN
  * one follows a `verify` call after claim capture has appended its claim and edges, so a contradiction this call
  * created reaches the model on the same result. They share one offered set.
  */
-export function createClaimsDeliveryRegistrations(options: { cwd: () => string }): MiddlewareHookRegistration[] {
+/**
+ * The offers already made, one `{session, state}` line each, beside the project's claims log. A headless
+ * `run --session` continuation is a new process, so "once per session" has to outlive the process that offered.
+ * Lines are small and appended with O_APPEND; a torn or foreign line is skipped, which at worst offers once more.
+ */
+function offersPath(project: string): string {
+	return claimsLogPath(project).replace(/\.jsonl$/u, ".offers.jsonl");
+}
+
+function readOffers(path: string, session: string): Set<string> {
+	const states = new Set<string>();
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch {
+		// No offers file yet: nothing was offered in this project.
+		return states;
+	}
+	for (const line of text.split("\n")) {
+		try {
+			const value = JSON.parse(line) as { session?: unknown; state?: unknown };
+			if (value.session === session && typeof value.state === "string") states.add(value.state);
+		} catch {
+			// An empty or torn line names no offer.
+		}
+	}
+	return states;
+}
+
+export function createClaimsDeliveryRegistrations(options: {
+	cwd: () => string;
+	now?: () => Date;
+}): MiddlewareHookRegistration[] {
+	const now = options.now ?? (() => new Date());
 	let sessionKey: string | undefined;
+	let loadedFor: string | undefined;
 	const offered = new Set<string>();
+	// Offers made on a fresh session's first turn, before it has an id; written once the id is known.
+	let unrecorded: string[] = [];
 	let cache: { path: string; mtimeMs: number; size: number; read: ClaimsLogRead } | null = null;
 
-	const load = (): ClaimsLogRead | null => {
-		const project = claimsProjectRoot(options.cwd());
+	const load = (project: string): ClaimsLogRead | null => {
 		const path = claimsLogPath(project);
 		let stat: { mtimeMs: number; size: number };
 		try {
@@ -185,23 +220,51 @@ export function createClaimsDeliveryRegistrations(options: { cwd: () => string }
 		return cache.read;
 	};
 
+	const record = (project: string, states: ReadonlyArray<string>): void => {
+		if (sessionKey === undefined || states.length === 0) return;
+		try {
+			const path = offersPath(project);
+			mkdirSync(dirname(path), { recursive: true });
+			const at = now().toISOString();
+			appendFileSync(path, states.map((state) => `${JSON.stringify({ session: sessionKey, state, at })}\n`).join(""), {
+				mode: 0o600,
+			});
+		} catch {
+			// An unwritable state dir only costs a repeat offer in a later process; the delivery itself still stands.
+		}
+	};
+
 	const deliver = (input: MiddlewareHookInput, pick: (read: ClaimsLogRead) => string[]): string[] => {
-		// A new, resumed or forked session starts with nothing offered. The first turn of a fresh session carries no id
-		// yet; the id it gains on the next hook is the same session, so only a change between two ids resets.
-		if (input.sessionId !== undefined && sessionKey !== undefined && input.sessionId !== sessionKey) offered.clear();
+		const project = claimsProjectRoot(options.cwd());
+		// A new, resumed or forked session reads what was offered under its own id. The first turn of a fresh session
+		// carries no id yet; the id it gains on the next hook is the same session, so only a change between ids resets.
+		if (input.sessionId !== undefined && sessionKey !== undefined && input.sessionId !== sessionKey) {
+			offered.clear();
+			unrecorded = [];
+		}
 		if (input.sessionId !== undefined) sessionKey = input.sessionId;
-		const read = load();
+		if (sessionKey !== undefined && loadedFor !== sessionKey) {
+			loadedFor = sessionKey;
+			for (const state of readOffers(offersPath(project), sessionKey)) offered.add(state);
+			record(project, unrecorded);
+			unrecorded = [];
+		}
+		const read = load(project);
 		if (read === null || read.records.length === 0) return [];
 		const statuses = claimStatuses(read.records, read.edges);
 		const messages: string[] = [];
+		const states: string[] = [];
 		for (const check of pick(read)) {
 			if (messages.length >= CLAIMS_DELIVERY_MAX_CHECKS) break;
 			const message = claimsDeliveryMessage(check, read, statuses);
 			const state = claimsDeliveryState(check, read, statuses);
 			if (message === null || offered.has(state)) continue;
 			offered.add(state);
+			states.push(state);
 			messages.push(message);
 		}
+		if (sessionKey === undefined) unrecorded.push(...states);
+		else record(project, states);
 		return messages;
 	};
 
