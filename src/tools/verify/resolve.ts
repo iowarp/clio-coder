@@ -1,3 +1,4 @@
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
@@ -21,7 +22,8 @@ import {
 export type VerifyResolution =
 	| { kind: "list" }
 	| { kind: "frontend" }
-	| { kind: "catalog"; check: DeclaredCheck }
+	/** `run` is the repository-relative run directory a `runs` check judges; its argv already ends with it. */
+	| { kind: "catalog"; check: DeclaredCheck; run?: string }
 	| { kind: "package"; check: DeclaredCheck; packageRoot: string }
 	| { kind: "toolchain"; check: ToolchainCheck; argv: string[] }
 	| { kind: "unavailable"; check: ToolchainCheck }
@@ -100,6 +102,42 @@ export function verifyResolutionArgv(
 	}
 }
 
+const RUN_NAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/u;
+
+/**
+ * One run of a sweep check: `<id>/<run>` names a directory directly under the check's `runs`, and the check's argv
+ * gains that directory as its last argument, written relative to the check's cwd. The run directory is part of the
+ * argv, so the safety scan, the approval card and the claim the result records all name the run that was judged.
+ */
+function resolveRunCheck(workspaceRoot: string, check: DeclaredCheck, run: string): VerifyResolution {
+	if (check.runs === undefined) {
+		return {
+			kind: "unresolved",
+			message: `'${check.id}' declares no runs directory, so it takes no run; call it as check="${check.id}".`,
+		};
+	}
+	if (!RUN_NAME_PATTERN.test(run) || run.length > 128) {
+		return {
+			kind: "unresolved",
+			message: `run '${run}' must be one directory name under ${check.runs} (letters, digits, '.', '_', '-', at most 128 characters).`,
+		};
+	}
+	const declaredRun = path.posix.join(check.runs, run);
+	try {
+		const resolved = resolveSafeCwd(declaredRun, workspaceRoot);
+		if (!statSync(resolved).isDirectory()) throw new Error("not a directory");
+		resolveSafeCwd(realpathSync(resolved), realpathSync(workspaceRoot));
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		return {
+			kind: "unresolved",
+			message: `run directory ${declaredRun} is not a directory inside the workspace (${reason}).`,
+		};
+	}
+	const argument = path.posix.relative(check.cwd === "." ? "" : check.cwd, declaredRun) || ".";
+	return { kind: "catalog", check: { ...check, command: [...check.command, argument] }, run: declaredRun };
+}
+
 function resolveWithDiscovery(
 	workspaceRoot: string,
 	args: Record<string, unknown>,
@@ -114,7 +152,22 @@ function resolveWithDiscovery(
 	if (!discovery.ok) return { kind: "unresolved", message: discovery.reason };
 	const declared = discovery.sources.flatMap((source) => source.checks);
 	const hit = declared.find((candidate) => candidate.id === check);
-	if (hit?.source.kind === "project-catalog") return { kind: "catalog", check: hit };
+	if (hit?.source.kind === "project-catalog") {
+		if (hit.runs !== undefined) {
+			return {
+				kind: "unresolved",
+				message: `'${check}' judges one run under ${hit.runs}; call it as check="${check}/<run>", where <run> is one directory there.`,
+			};
+		}
+		return { kind: "catalog", check: hit };
+	}
+	const separator = check.indexOf("/");
+	if (separator > 0) {
+		const owner = declared.find(
+			(candidate) => candidate.source.kind === "project-catalog" && candidate.id === check.slice(0, separator),
+		);
+		if (owner !== undefined) return resolveRunCheck(workspaceRoot, owner, check.slice(separator + 1));
+	}
 	if (hit?.source.kind === "package.json") {
 		return { kind: "package", check: hit, packageRoot: path.dirname(hit.source.path) };
 	}

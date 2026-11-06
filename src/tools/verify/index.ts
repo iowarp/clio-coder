@@ -85,7 +85,14 @@ async function runResolvedVerify(
 		case "catalog": {
 			// The declared kind rides on the result as a typed field, so telemetry records it without reading the report.
 			const result = await runProjectCheck(resolution.check, options);
-			return { ...result, details: { ...result.details, checkKind: resolution.check.kind } };
+			return {
+				...result,
+				details: {
+					...result.details,
+					checkKind: resolution.check.kind,
+					...(resolution.run !== undefined ? { run: resolution.run } : {}),
+				},
+			};
 		}
 		case "package": {
 			const result = await runScriptCheck(resolution.check.id, args, options);

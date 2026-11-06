@@ -134,7 +134,9 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 			for (const check of source.checks) {
 				const tags = check.tags.length > 0 ? ` [${check.tags.join(", ")}]` : "";
 				const kind = check.kind === "command" ? "" : ` (${check.kind})`;
-				lines.push(`- ${check.id}${kind}${tags}: ${check.description}`);
+				const runs =
+					check.runs === undefined ? "" : ` One run per call: ${check.id}/<run>, <run> a directory under ${check.runs}.`;
+				lines.push(`- ${check.id}${kind}${tags}: ${check.description}${runs}`);
 			}
 		}
 		if (derived.length > 0) {

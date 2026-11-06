@@ -14,6 +14,7 @@ import {
 	renderNumericReport,
 	ulpDistance,
 } from "../../src/tools/verify/numeric.js";
+import { resolveVerifyCall, verifyResolutionArgv } from "../../src/tools/verify/resolve.js";
 import {
 	extractNumericPayloadText,
 	JUDGED_CHECK_MAX_OUTPUT_BYTES,
@@ -661,6 +662,61 @@ describe("numeric-compare through the verify runner", () => {
 			validation: "exit-code",
 			scientificValidity: "not established by this check",
 		});
+	});
+});
+
+describe("a sweep check judges one run per call", () => {
+	it("appends the named run directory to the argv, judges that run, and refuses bare, escaping and per-run-incapable uses", async () => {
+		const reading = [
+			"node",
+			"-e",
+			"process.stdout.write(require('fs').readFileSync(process.argv[1] + '/m.json', 'utf8'))",
+		];
+		const check = {
+			id: "sweep-err",
+			description: "Error of one run",
+			kind: "numeric-compare",
+			command: reading,
+			reference: "zero.json",
+			tolerance: { absolute: 0.01 },
+			runs: "sweeps/s/runs",
+			cwd: ".",
+			timeoutMs: 30_000,
+			tags: [],
+		};
+		const root = workspace({
+			".clio-coder/verifiers.yaml": catalog(check),
+			"zero.json": JSON.stringify({ err: 0 }),
+			"sweeps/s/runs/0/m.json": JSON.stringify({ err: 0.001 }),
+			"sweeps/s/runs/1/m.json": JSON.stringify({ err: 0.5 }),
+		});
+		process.chdir(root);
+		const run = resolveVerifyCall(root, { check: "sweep-err/1" });
+		deepStrictEqual(verifyResolutionArgv(run, { check: "sweep-err/1" }, root), [...reading, "sweeps/s/runs/1"]);
+		strictEqual(resolveVerifyCall(root, { check: "sweep-err" }).kind, "unresolved");
+		strictEqual(resolveVerifyCall(root, { check: "sweep-err/.." }).kind, "unresolved");
+		strictEqual(resolveVerifyCall(root, { check: "sweep-err/2" }).kind, "unresolved");
+		const passed = await verifyTool.run({ check: "sweep-err/0" });
+		strictEqual(passed.details?.run, "sweeps/s/runs/0");
+		strictEqual((passed.details?.report as { passed: boolean }).passed, true);
+		const failed = await verifyTool.run({ check: "sweep-err/1" });
+		strictEqual((failed.details?.report as { passed: boolean }).passed, false);
+		const { reference: _reference, tolerance: _tolerance, ...base } = check;
+		const zeroDigest = createHash("sha256")
+			.update(JSON.stringify({ err: 0 }))
+			.digest("hex");
+		for (const fields of [
+			{ kind: "perf-budget", budget: { wallTimeMs: 1000 } },
+			{
+				kind: "reproduce",
+				inputs: [{ path: "zero.json", sha256: zeroDigest }],
+				compare: "twice",
+				tolerance: { absolute: 0.01 },
+			},
+		]) {
+			const parsed = parseProjectVerifierCatalogText(catalog({ ...base, ...fields }), root);
+			ok(!parsed.ok && parsed.reason.endsWith(`kind '${fields.kind}' does not accept runs`), JSON.stringify(parsed));
+		}
 	});
 });
 
