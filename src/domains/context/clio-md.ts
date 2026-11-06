@@ -64,16 +64,18 @@ const FOOTER_RE = /<!--\s*clio:fingerprint v1\s*\n([\s\S]*?)\n\s*-->/;
 /**
  * Size targets for a generated handbook. The parser warns past them, the
  * bootstrap clamps model output to them, and the merge caps to them. Ten
- * invariants, eight conventions and 4000-character sections hold a change
+ * model invariants, eight conventions and 4000-character sections hold a change
  * recipe section as large as the one that decided real tasks, while the whole
- * file still preloads in full.
+ * file still preloads in full. The file holds up to twenty invariants because
+ * the import rules a project's checker declares lead the model's own ten.
  */
 export const HANDBOOK_TARGETS = {
 	lines: 200,
 	chars: 24_000,
 	conventions: 8,
 	conventionChars: 600,
-	invariants: 10,
+	invariants: 20,
+	modelInvariants: 10,
 	invariantChars: 800,
 	sections: 8,
 	sectionChars: 4000,

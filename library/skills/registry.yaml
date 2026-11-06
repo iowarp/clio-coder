@@ -127,8 +127,8 @@ skills:
     sha256: e230399c3062da5280281efc330c556df78a2286c062b06ac8d08f0c27acad75
   - name: slurm-jobs
     path: research/slurm-jobs
-    version: 0.1.2
-    sha256: a0c7f9d2437e1c6d1f228b7dc91449f3ba0e59629f7a25f7dbf69b15b29d2459
+    version: 0.2.0
+    sha256: 631f79734fc59a94f84064601521e89745e7d63ff0ef1555668a15d451581e97
   # ── workflow ──
   - name: design-council
     path: workflow/design-council

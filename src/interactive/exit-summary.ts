@@ -13,12 +13,30 @@ import {
 	frame,
 	innerDivider,
 } from "./theme/index.js";
+import { USAGE_NOT_MEASURED } from "./usage-words.js";
 
 const count = (value: number): string => value.toLocaleString("en-US");
 const countLabel = (value: number | string, noun: string): string =>
 	`${typeof value === "number" ? count(value) : value} ${noun}${value === 1 || value === "1" ? "" : "s"}`;
 
 const SPEND_NOT_AVAILABLE = "not available";
+
+/**
+ * `3 outcomes · 2 reproduce or numeric-compare passes · 1 worker run host-verified · 4,115 tokens each · ~$0.0041 est
+ * each`, or the words saying there is nothing to divide by. A share keeps the session row's own mark, so an unpriced
+ * route reads `cost not measured` here as it does on /usage.
+ */
+function verifiedFacts(spend: ExitSummarySnapshot["spend"]): string[] {
+	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
+	const verified = spend.verified;
+	if (verified.kind === "none") return [verified.words];
+	return [
+		countLabel(verified.count, "outcome"),
+		...verified.parts,
+		verified.tokens === USAGE_NOT_MEASURED ? `tokens ${USAGE_NOT_MEASURED}` : `${verified.tokens} tokens each`,
+		verified.cost === USAGE_NOT_MEASURED ? `cost ${USAGE_NOT_MEASURED}` : `${verified.cost} each`,
+	];
+}
 
 /** What joins the facts of one row, and the only place a narrow row may break (E4). */
 const FACT_SEPARATOR = " · ";
@@ -251,6 +269,7 @@ export function renderExitSummary(
 		]);
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.tokens) : [SPEND_NOT_AVAILABLE]);
 		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE, visitTime]);
+		add("Verified", verifiedFacts(spend));
 		// What Clio decided while the operator was away is never folded away.
 		if (unattended !== null) add("Unattended", unattended);
 		// Nor is a hook that runs outside the sandbox on the next git command.
@@ -276,6 +295,7 @@ export function renderExitSummary(
 		]);
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.breakdown) : [SPEND_NOT_AVAILABLE]);
 		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE]);
+		add("Verified", verifiedFacts(spend));
 		if (snapshot.compactions > 0) add("Compactions", [count(snapshot.compactions)]);
 		if (unattended !== null) add("Unattended", unattended);
 		if (gitHooks !== null) add("Git hooks", gitHooks);

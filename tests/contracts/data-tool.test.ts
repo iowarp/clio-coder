@@ -115,7 +115,7 @@ describe("data tool", () => {
 			["4", "-999", "D"],
 		]);
 		for (const [args, expected] of [
-			[{ op: "count", path: "obs.csv" }, "data: op must be inspect, select, or validate; got 'count'"],
+			[{ op: "count", path: "obs.csv" }, "data: op must be inspect, select, validate, or stats; got 'count'"],
 			[{ op: "inspect", path: "   " }, "data: path is required"],
 		] as const) {
 			const result = await byName(args);

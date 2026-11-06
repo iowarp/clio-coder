@@ -259,7 +259,7 @@ function trustStatusFor(server: McpServerDeclaration, projectRoot: string, state
 		return {
 			status: "stale",
 			actionClass: "unknown",
-			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, ${server.plugin !== undefined ? "timeout, or the plugin's content" : entries.length > 0 ? "timeout, or entry scripts" : "or timeout"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
+			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, timeout, ${server.plugin !== undefined ? "tool action classes, or the plugin's content" : entries.length > 0 ? "tool action classes, or entry scripts" : "or tool action classes"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
 		};
 	}
 	return { status: "trusted", actionClass: record.actionClass, ...(record.network === true ? { network: true } : {}) };
@@ -295,9 +295,16 @@ export interface TrustMcpServerOptions extends McpTrustOptions {
 export type TrustMcpServerResult =
 	/**
 	 * `entry` lists the project files the record binds; empty when it pins none.
-	 * `entryScripts` carries each binding's real path and hash for display.
+	 * `entryScripts` carries each binding's real path and hash for display, and
+	 * `toolActionClasses` the per-tool classes the trusted declaration carries.
 	 */
-	| { ok: true; record: McpTrustRecord; entry: string[]; entryScripts: McpServerEntryScript[] }
+	| {
+			ok: true;
+			record: McpTrustRecord;
+			entry: string[];
+			entryScripts: McpServerEntryScript[];
+			toolActionClasses: Record<string, McpTrustActionClass>;
+	  }
 	| { ok: false; message: string };
 
 /** Record trust for one project-declared server at its current digest. */
@@ -342,7 +349,13 @@ export function trustMcpServer(options: TrustMcpServerOptions): TrustMcpServerRe
 	records.push(record);
 	const refused = writeTrustState(records, options.configDir);
 	if (refused !== null) return { ok: false, message: refused };
-	return { ok: true, record, entry: entries.map((entry) => entry.path), entryScripts: entries };
+	return {
+		ok: true,
+		record,
+		entry: entries.map((entry) => entry.path),
+		entryScripts: entries,
+		toolActionClasses: { ...server.toolActionClasses },
+	};
 }
 
 export type UntrustMcpServerResult = { ok: true; removed: boolean } | { ok: false; message: string };

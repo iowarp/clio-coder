@@ -1,14 +1,15 @@
 ---
 name: slurm-jobs
-description: "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations."
+description: "Submits a batch script or job array to Slurm through the clio-kit Slurm MCP server, polls every task to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations."
 triggers:
   - submit this job to slurm
+  - submit a slurm job array
   - run this on the cluster
   - sbatch this script
   - check my slurm job
   - cancel my slurm job
   - is the queue busy
-version: 0.1.2
+version: 0.2.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -44,9 +45,12 @@ scheduler.
 2. If the server is missing, stop and tell the operator to declare it (the
    entry is in the Slurm guide, `docs/guide/slurm.md`) and to run
    `clio-coder doctor`, which reports `clio-kit`, the declaration, and
-   `sbatch`. If it is listed `untrusted` or `stale`, give the remedy the
-   listing prints. Do not fall back to `bash` with `sbatch`: the operator chose
-   the mediated path.
+   `sbatch`. Tell the operator to give the entry an absolute `cwd` such as a
+   scratch directory: jobs run from the server's working directory, and
+   without `cwd` that is Clio's config directory, where the job logs then land.
+   If the server is listed `untrusted` or `stale`, give the remedy the listing
+   prints. Do not fall back to `bash` with `sbatch`: the operator chose the
+   mediated path.
 3. `gateway(op="describe", capability="mcp_slurm__slurm_submit")` once, and
    use the parameter names it returns. Do not guess them.
 
@@ -61,15 +65,20 @@ reads may ask too.
 
 `mcp_slurm__slurm_cluster` with the target partition, no node details. Confirm
 the partition exists and is up. Read the script with `read` and check that its
-`#SBATCH` lines agree with the resources you are about to request; the call's
-`cores`, `memory`, `time_limit`, and `partition` win over the script, so a
-disagreement is a bug to fix now.
+`#SBATCH` lines agree with the resources you are about to request. The server
+copies the script to a temporary file, writes the call's `cores`, `memory`,
+`time_limit`, `job_name`, and `partition` as `#SBATCH` lines ahead of the
+script's own, and redirects output to `logs/slurm_output/` under the server's
+working directory, so a disagreement is a bug to fix now. The job runs from
+that working directory, not the script's: use absolute paths inside the script.
 
 ## Phase 2 - Submit
 
 `mcp_slurm__slurm_submit` with `script_path` and explicit `cores`, `memory`,
-`time_limit`, `job_name`, and `partition`. Set `array` only for an array job.
-Record the returned job id verbatim at once, in your working notes and in the
+`time_limit`, `job_name`, and `partition`. Set `array` only for an array job,
+and read references/arrays.md before submitting one: in array mode the
+script's own `#SBATCH` lines do not apply, and each task is polled by its own
+id. Record the returned job id verbatim at once, in your working notes and in the
 `tasks` board if one is open. Submission is not idempotent: never resubmit
 because a reply was slow. Look for the job with `mcp_slurm__slurm_list`
 filtered by your user and the job name first.
@@ -99,7 +108,8 @@ it reached `CANCELLED`.
 
 ## Final answer
 
-End with a line in exactly this form, one per job:
+End with a line in exactly this form, one per job, and for an array one per
+task, with `<job id>` written as `<array job id>_<task id>`:
 
 ```text
 Slurm job <job id>: <terminal state>, exit <code>, stdout <path>, stderr <path>

@@ -201,12 +201,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.Data]: {
-		objective: "Inspect, select, or validate CSV/TSV, JSON, and JSON Lines files with bounded memory and honest counts.",
+		objective:
+			"Inspect, select, validate, or summarize CSV/TSV, JSON, JSON Lines and SQLite, and HDF5, NetCDF and Parquet scientific data (variables, dimensions, CF attributes, chunking, hyperslabs, statistics), with bounded memory and honest counts.",
 		uiLabel: "Data",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			DATA_OBSERVATION_SELF_CAP_BYTES,
-			"Lower limit or sample_rows, project fewer columns, or select by pointer to inspect omitted content.",
+			"Lower limit or sample_rows, project fewer columns, select by pointer, or inspect one variable to see omitted content.",
 		),
 		costLatency: "local_medium",
 		examples: [
@@ -215,6 +216,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 				args: { op: "inspect", path: "data.csv", sample_rows: 3 },
 			},
 			{ goal: "Select one value from JSON by pointer", args: { op: "select", path: "config.json", pointer: "/version" } },
+			{ goal: "Summarize one NetCDF or HDF5 variable", args: { op: "stats", path: "climate.nc", variable: "tas" } },
 		],
 	},
 	[ToolNames.MemoryRecall]: {

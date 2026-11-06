@@ -143,6 +143,16 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "hpc",
+			"source": "./library/plugins/hpc",
+			"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. The skills drive the cluster's own command-line tools; the clio-kit Slurm server needs one online launch to build its environment before it runs offline.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
 			"name": "map-codebase",
 			"source": "./library/skills/planning/map-codebase",
 			"description": "Interactive codebase maps from verified repository structure, symbols and imports, rendered natively as standalone HTML.",
@@ -200,6 +210,16 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "science-data",
+			"source": "./library/plugins/science-data",
+			"description": "Science data pack: a skill that reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Reads run and file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
 			"name": "scientific-debugging",
 			"source": "./library/skills/research/scientific-debugging",
 			"description": "Diagnoses stalled or cross-system failures and wrong, NaN, nondeterministic, or unexpectedly slow scientific results through falsifiable hypotheses across distinct fault classes, with evidence-cited verdicts before any fix. Not for designing benchmarks or pre-registered experiments; use experiment-protocol.",
@@ -234,8 +254,8 @@
 		{
 			"name": "slurm-jobs",
 			"source": "./library/skills/research/slurm-jobs",
-			"description": "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
-			"version": "0.1.2",
+			"description": "Submits a batch script or job array to Slurm through the clio-kit Slurm MCP server, polls every task to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
+			"version": "0.2.0",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
