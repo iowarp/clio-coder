@@ -380,7 +380,8 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 				input: "q\n",
 			});
 			strictEqual(firstRunCancel.code, 130, firstRunCancel.stdout + firstRunCancel.stderr);
-			match(firstRunCancel.stdout, /Clio needs a model before it can do anything else/u);
+			// The notice wraps to the terminal (5906516d3), so the sentence may break across lines.
+			match(firstRunCancel.stdout, /Clio needs a model before it can do anything\s+else/u);
 			match(firstRunCancel.stderr, /configuration cancelled/u);
 		} finally {
 			firstRun.cleanup();
