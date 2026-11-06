@@ -1,5 +1,6 @@
 import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
+import { parseCouncilReport } from "../domains/agents/index.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
@@ -12,7 +13,7 @@ import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/w
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
 import { plainTrustVerdict, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
-import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
 import type { TelemetryContract, TelemetryRunSummary, TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetrySnapshot } from "../domains/telemetry/index.js";
@@ -28,6 +29,7 @@ import { createFleetPlanRuns, type FleetPlanRuns, type FleetPlanRunView } from "
 import { type RouteFirstOutput, routeFirstOutput } from "./footer/silence-note.js";
 import {
 	centeredWindow,
+	cutRowWithEllipsis,
 	fitHintEntryList,
 	type GrowableBody,
 	type HintEntry,
@@ -36,7 +38,12 @@ import {
 } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
-import { liveWorkerAnswerText, presentWorkerContractAnswer } from "./renderers/worker-answer.js";
+import {
+	councilCollectedWords,
+	councilSynthesisLines,
+	liveWorkerAnswerText,
+	presentWorkerContractAnswer,
+} from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import {
 	animationStep,
@@ -253,7 +260,8 @@ export interface DispatchBoardPhase {
  */
 function formatDispatchPhaseCell(phase: DispatchBoardPhase | undefined, width = PHASE_COLUMN_WIDTH): string | null {
 	if (phase === undefined) return null;
-	return truncateToWidth(`w${phase.wave} ${phase.stepId}`, Math.max(1, width), "…", false);
+	// The step is what the plan card names; its wave is a scheduling detail the run's own detail row states.
+	return truncateToWidth(phase.stepId, Math.max(1, width), "…", false);
 }
 
 /** Columns the compact island reserves for the phase cell when it can afford them. */
@@ -763,9 +771,18 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 					: plan.state === "unsettled"
 						? "no result"
 						: mark.word;
+		// A step whose worker has ended is finishing while the plan records it, not still running.
+		const finishing = !stopped && step.state === "running" && step.worker?.settled === true;
 		// A stopped step's exit code is the signal the stop sent, not a result; its duration still says how far it got.
 		const detail = stopped ? step.detail?.replace(/^exit -?\d+ · /u, "") : step.detail;
-		const facts = [word, ...(detail !== undefined ? [detail] : []), step.label];
+		// The worker's own caveat rides the step, so a step that passed reads the refused call its run's row shows.
+		const caveat = stopped ? null : (step.worker?.caveat ?? null);
+		const facts = [
+			finishing ? "finishing" : word,
+			...(caveat !== null ? [caveat] : []),
+			...(detail !== undefined && detail !== caveat ? [detail] : []),
+			step.label,
+		];
 		const lead = `${theme.fg(mark.token, mark.glyph)} ${theme.fg("body", step.stepId.padEnd(nameWidth))}  `;
 		return truncateToWidth(
 			`${lead}${theme.fg(mark.token, facts[0] ?? "")}${theme.fg("annotation", facts.length > 1 ? ` · ${facts.slice(1).join(" · ")}` : "")}`,
@@ -783,7 +800,11 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 		theme.fg("body", planProgressText(plan, true, false)),
 		...(plan.finishedAtMs === null
 			? []
-			: [`${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText ?? "no model calls")}`]),
+			: [
+					plan.costText === null
+						? theme.fg("body", "no model calls")
+						: `${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText)}`,
+				]),
 	];
 	const gutter = " ".repeat(CARD_KV_KEY_WIDTH + 1);
 	const steps = planStepLines(theme, plan, Math.max(1, contentWidth - gutter.length));
@@ -838,7 +859,7 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): stri
 			? []
 			: wrapTextWithAnsi(theme.fg("error", `${GLYPH.error} ${why}`), room).map((line) => `${rail}${line}`)),
 		...planStepLines(theme, plan, room).map((line) => `${rail}${line}`),
-		`${rail}${theme.fg("annotation", truncateToWidth(`/fleet for detail · cost ${plan.costText ?? "none, no model calls"}`, room, GLYPH.ellipsis, false))}`,
+		`${rail}${theme.fg("annotation", truncateToWidth(`/fleet for detail · ${plan.costText === null ? "no model calls" : `cost ${plan.costText}`}`, room, GLYPH.ellipsis, false))}`,
 	];
 }
 
@@ -956,7 +977,15 @@ function dispatchCardBody(
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
-	const phaseCell = formatDispatchPhaseCell(row.phase, contentWidth);
+	const phaseCell =
+		row.phase === undefined
+			? null
+			: truncateToWidth(
+					`${row.phase.stepId} · wave ${row.phase.wave + 1} of its plan`,
+					Math.max(1, contentWidth),
+					"…",
+					false,
+				);
 	const fullTask = row.taskSummary
 		? cardWrappedValueLines(theme, "task", theme.fg("body", row.taskSummary), contentWidth)
 		: [];
@@ -1052,7 +1081,7 @@ function dispatchCardBody(
 		bodyLines.push(...cardWrappedValueLines(theme, "detail", theme.fg("annotation", detail), contentWidth));
 	bodyLines.push(
 		...taskLines,
-		...(phaseCell === null ? [] : [cardUnitsLine(theme, "phase", [theme.fg("info", phaseCell)], contentWidth)]),
+		...(phaseCell === null ? [] : [cardUnitsLine(theme, "step", [theme.fg("info", phaseCell)], contentWidth)]),
 		...(options.expanded === true
 			? cardWrappedValueLines(theme, "target", theme.fg("body", route), contentWidth)
 			: [targetLine]),
@@ -1134,6 +1163,20 @@ function formatRowRoute(row: Pick<DispatchBoardRow, "targetId" | "wireModelId">)
 /** The most of a worker's name an approval's words give way to on the island, so a long name clips first. */
 const TASK_ISLAND_APPROVAL_LABEL_ROOM = 14;
 
+/**
+ * A status phrase cut to what a narrow row still reads whole: its first clause, then without its trailing clock.
+ * `not responding for 9s · Clio stops it in 5s` keeps `not responding`; cutting at the first word left `not`, and
+ * `no output for 31s` left `no`, words that say the opposite of what is happening.
+ */
+function compactStatusWords(words: string, room: number): string {
+	const clause = words.split(" · ")[0] ?? words;
+	const unclocked = clause.replace(/ for \d[\dhms:.]*$/u, "") || clause;
+	if (unclocked.length <= room) return unclocked;
+	// Down to the phrase's head word, `waiting` for `waiting on the model`, but never a bare negation.
+	const head = unclocked.split(" ");
+	return head.slice(0, /^(?:no|not)$/u.test(head[0] ?? "") ? 2 : 1).join(" ");
+}
+
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
 	if (row.plan !== undefined) return planIslandLines(theme, row, row.plan, width);
@@ -1188,7 +1231,15 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 		visibleWidth(statusLabel) -
 		(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0);
 	if (row.progress?.awaitingApproval !== true && nameRoom < Math.min(visibleWidth(agentLabel), 8)) {
-		statusLabel = statusLabel.split(" ")[0] ?? statusLabel;
+		statusLabel = compactStatusWords(
+			statusLabel,
+			width -
+				2 -
+				dispatchRowPrefix(theme, row).width -
+				Math.min(visibleWidth(agentLabel), 8) -
+				3 -
+				(elapsed.length > 0 ? visibleWidth(elapsed) + 3 : 0),
+		);
 	}
 	const statusStr = theme.fg(
 		failure !== null
@@ -1292,6 +1343,8 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 function councilMemberTail(row: DispatchBoardRow): string {
 	const progress = row.progress;
 	if (progress === undefined) return "";
+	// A synthesis tail the report reader could not take whole is a cut piece of JSON; the record holds it readably.
+	if (row.council?.label === COUNCIL_SYNTHESIS_LABEL && /^\s*[{[]/u.test(progress.tailText)) return "";
 	const presented = presentWorkerContractAnswer(
 		progress.tailText,
 		row.resultContract,
@@ -1330,7 +1383,8 @@ function councilMemberView(
 		round: council.round,
 		route: formatRowRoute(row),
 		status: { ...presentation },
-		tailText: sanitizeCallTargetText(councilMemberTail(row)),
+		// Each line of the answer stays its own line: one flattened paragraph ran a claim into its citation.
+		tailText: sanitizeMultilineDisplayText(councilMemberTail(row)).text,
 		droppedLines: row.progress?.droppedLines ?? 0,
 		...(isTerminalStatus(row.status) ? { settled: true } : {}),
 	};
@@ -1384,13 +1438,30 @@ function foldCouncilGroup(
 		.sort(([left], [right]) => left.localeCompare(right))
 		// biome-ignore lint/style/noNonNullAssertion: every entry was inserted with its own council badge.
 		.map(([, row]) => councilMemberView(row, row.council!));
+	// The synthesis run seals the whole council as one report. Its members' answers are already the columns above it,
+	// so the board reads only the council's own answer out of it, and a council that only collected has none to show.
+	const report =
+		synthesisRow !== null && isTerminalStatus(synthesisRow.status)
+			? parseCouncilReport(synthesisRow.progress?.tailText ?? null)
+			: null;
+	const collected = report?.synthesis.kind === "none";
+	const synthesis =
+		synthesisRow === null || collected
+			? null
+			: {
+					// biome-ignore lint/style/noNonNullAssertion: the synthesis row was matched on its own council badge.
+					...councilMemberView(synthesisRow, synthesisRow.council!),
+					...(report !== null
+						? { tailText: sanitizeMultilineDisplayText(councilSynthesisLines(report).join("\n")).text, droppedLines: 0 }
+						: {}),
+				};
 	const selectedInGroup =
 		selectedRunId != null && rows.some((row) => row.runId === selectedRunId) ? selectedRunId : undefined;
 	return {
 		group,
 		members,
-		// biome-ignore lint/style/noNonNullAssertion: the synthesis row was matched on its own council badge.
-		synthesis: synthesisRow === null ? null : councilMemberView(synthesisRow, synthesisRow.council!),
+		synthesis,
+		...(collected && report !== null ? { collectedNote: councilCollectedWords(report) } : {}),
 		status: { ...presentation },
 		...(task !== undefined ? { task: sanitizeCallTargetText(task) } : {}),
 		round,
@@ -1638,14 +1709,15 @@ export function runTableRows(
 	const quota = options.quota ?? [];
 	const cursor = options.selectedRunId !== undefined;
 	const runs = items.flatMap((item) => (item.kind === "run" ? [item.row] : []));
-	const anyPhase = options.compact !== true && runs.some((row) => row.phase !== undefined);
 	const anyNode = options.compact !== true && runs.some((row) => row.node !== undefined && row.node !== "local");
 	const anyAccount = runs.some((row) => routeWeeklyQuota(row, quota) !== null);
 	const fixed: TableColumn[] = [
 		...(cursor ? [{ label: "", min: 1, max: 1, priority: 10 }] : []),
-		{ label: "status", priority: 10 },
-		{ label: "agent", priority: 9, max: 24 },
-		...(anyPhase ? [{ label: "phase", priority: 2, max: 14, tone: "info" as const }] : []),
+		// Under sixty columns one long state (`✗ stopped responding`) would set the column for every row and leave the
+		// names a stub, so the column keeps the common words whole and cuts a long one on the ellipsis; the selected
+		// run's detail under the table states it in full.
+		{ label: "status", priority: 10, ...(width < 60 ? { max: 11 } : {}) },
+		{ label: "agent", priority: 9, max: 30 },
 		...(anyNode ? [{ label: "node", priority: 2, max: 12 }] : []),
 		{ label: "elapsed", align: "right" as const, priority: 6, tone: "muted" as const },
 		{ label: "in", align: "right" as const, priority: 4 },
@@ -1665,7 +1737,6 @@ export function runTableRows(
 				`${theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph)} ${theme.fg(group.status.token, group.status.label)}`,
 				selected ? theme.style("selectedOption", name, { bold: true }) : theme.fg("dispatchAction", name),
 			);
-			if (anyPhase) cells.push("");
 			if (anyNode) cells.push("");
 			cells.push(group.elapsed, "", "", "");
 			if (anyAccount) cells.push("");
@@ -1696,7 +1767,6 @@ export function runTableRows(
 				runStatusCell(theme, row, options.tick, width),
 				`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
 			);
-			if (anyPhase) cells.push("");
 			if (anyNode) cells.push("");
 			// A plan's workers have their own rows, so its row sums nothing a reader could mistake for measured.
 			cells.push(elapsed, "", "", { text: row.plan.costText ?? "no model calls", tone: "muted" });
@@ -1710,11 +1780,13 @@ export function runTableRows(
 				: { text: label ? `${label} ${tableFigure(text)}` : text };
 		const cells: Array<string | TableCell> = [];
 		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
+		// A plan step's worker carries its step on its name, `coder · map-stats`: as a column of its own the step was
+		// the first thing a row under 130 columns dropped, which left two workers of one plan reading the same.
+		const step = row.phase === undefined ? "" : theme.fg("info", ` · ${sanitizeCallTargetText(row.phase.stepId)}`);
 		cells.push(
 			runStatusCell(theme, row, options.tick, width),
-			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
+			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}${step}`,
 		);
-		if (anyPhase) cells.push(formatDispatchPhaseCell(row.phase, 14) ?? "");
 		if (anyNode) cells.push(row.node ?? "local");
 		// Unmeasured and not started are different facts, and the cost cell is wide enough to say which.
 		const costCell: TableCell = pending
@@ -1754,6 +1826,23 @@ export function runTableRows(
 	// clause clips before it costs the row its cost or phase; below sixteen
 	// cells the table drops its quietest columns instead.
 	const gap = 2;
+	// The run's name is what a narrow row is read by, so it shrinks into the room the status leaves before it would
+	// be dropped: a board of bare `● running` rows says nothing about which run is which.
+	const agentIndex = fixed.findIndex((column) => column.label === "agent");
+	const lead = fixed
+		.slice(0, agentIndex)
+		.reduce(
+			(sum, column, index) =>
+				sum +
+				Math.min(
+					column.max ?? Number.POSITIVE_INFINITY,
+					Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index])))),
+				) +
+				gap,
+			0,
+		);
+	const agentColumn = fixed[agentIndex];
+	if (agentColumn !== undefined) agentColumn.max = Math.max(6, Math.min(agentColumn.max ?? 24, width - lead));
 	const used = fixed.reduce((sum, column, index) => {
 		const natural = Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index]))));
 		return sum + Math.min(natural, column.max ?? Number.POSITIVE_INFINITY);
@@ -1772,6 +1861,8 @@ function cellText(cell: string | TableCell | undefined): string {
 
 /** The run identity the board's detail rule names: the agent and its run id. */
 function runRuleTitle(row: DispatchBoardRow): string {
+	// A plan is known by its name; its root id is for the shell command its detail gives.
+	if (row.plan !== undefined) return agentDisplayLabel(row);
 	return `${agentDisplayLabel(row)} · ${row.runId}`;
 }
 
@@ -1811,6 +1902,37 @@ function rowSignature(row: DispatchBoardRow): string {
  * granted rows; an open detail then renders whole and the frame's cut marks
  * what is missing.
  */
+/** A painted row's text, for reading its shape. */
+function stripPaint(text: string): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: only the row's escape sequences are removed.
+	return text.replace(/\u001b\[[0-9;]*m/gu, "");
+}
+
+/** What a column the width dropped holds, in the words the run's detail uses for it. */
+const DROPPED_COLUMN_WORDS: Readonly<Record<string, string>> = {
+	in: "tokens",
+	out: "tokens",
+	cost: "cost",
+	phase: "plan step",
+	node: "node",
+	elapsed: "time",
+	account: "account",
+	activity: "activity",
+};
+
+/**
+ * The table's dropped-column note, said as where the facts are rather than as column labels: `in, out not shown`
+ * named two columns a person never saw, while the selected run's detail under the table states every one of them.
+ */
+function boardColumnNote(note: string): string {
+	const plain = stripPaint(note).replace(/\s+/gu, " ").trim();
+	const match = /^\S+\s+(.+?) not shown at this width$/u.exec(plain);
+	if (match?.[1] === undefined) return plain;
+	const words = [...new Set(match[1].split(", ").map((label) => DROPPED_COLUMN_WORDS[label.trim()] ?? label.trim()))];
+	const list = words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+	return `${GLYPH.ellipsis} detail below has ${list}`;
+}
+
 function formatDispatchBoardBody(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	width: number,
@@ -1846,13 +1968,17 @@ function formatDispatchBoardBody(
 	// rides under the window instead of being counted as one, which made the total change with the width.
 	const tableLines = runTableRows(items, width, { selectedRunId });
 	const table = tableLines.slice(0, items.length);
-	const columnNote = tableLines
-		.slice(items.length)
-		.map((line) => line.trim())
-		.join(" ");
+	const columnNote = boardColumnNote(
+		tableLines
+			.slice(items.length)
+			.map((line) => line.trim())
+			.join(" "),
+	);
 	// On a short board the note would cost the selected run's status row, which says more than which columns left.
 	const notes =
-		columnNote.length === 0 || budget < 10 ? [] : [truncateToWidth(columnNote, width, GLYPH.ellipsis, false)];
+		columnNote.length === 0 || budget < 10
+			? []
+			: [theme.fg("annotation", truncateToWidth(columnNote, width, GLYPH.ellipsis, false))];
 	// What an earlier Clio recorded sits under its own rule, so a row from before this process never passes for one
 	// of its own at a glance, at any width or without colour.
 	const firstEarlier = items.findIndex(itemFromEarlierSession);
@@ -1927,6 +2053,13 @@ function formatDispatchBoardBody(
 	if (room <= 0) return lines;
 	const kept = detail.body.slice(0, Math.max(0, room - 1));
 	const hidden = detail.body.length - kept.length;
+	// A fact the cut lands inside of wraps onto the next row, which starts blank under its key; the last row kept
+	// then closes with the ellipsis, so `its answer was not in the` never reads as the whole of it.
+	const nextRow = detail.body[kept.length];
+	const lastKept = kept.at(-1);
+	if (lastKept !== undefined && nextRow !== undefined && /^\s/u.test(stripPaint(nextRow)) && nextRow.trim().length > 0) {
+		kept[kept.length - 1] = cutRowWithEllipsis(lastKept, width);
+	}
 	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
 	const where = [
 		`${hidden} more rows`,
@@ -1997,22 +2130,31 @@ function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number): strin
 	const all: HintEntry[] = [...entries, { key: "Esc", verb: "close" }];
 	// The frame fits its rail into the body's width less one cell.
 	const { kept } = fitHintEntryList(all, width - 1);
-	const dropped = all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
+	// Splitting off a watch pane from a terminal this narrow leaves two unreadable halves, so the key goes unadvertised
+	// there and the keys that act on the run fit one row.
+	const dropped = all.filter(
+		(entry) => !kept.includes(entry) && entry.key !== "↑↓" && !(entry.key === "w" && width < 50),
+	);
 	if (dropped.length === 0) return [];
 	const theme = clioTheme();
-	// Keys wrap between entries, never inside one, so a narrow board names every key it takes.
+	// Keys wrap between entries, never inside one, so a narrow board names every key it takes. Each row sits flush
+	// right, over the rail's own keys, so the two read as one key rail in two rows rather than as loose body text.
+	const room = Math.max(1, width - 1);
 	const rows: string[] = [];
 	let current = "";
 	for (const entry of dropped) {
 		const unit = `[${keyName(entry.key)}] ${entry.short ?? entry.verb}`;
 		const joined = current.length === 0 ? unit : `${current} · ${unit}`;
-		if (current.length > 0 && visibleWidth(joined) > width) {
+		if (current.length > 0 && visibleWidth(joined) > room) {
 			rows.push(current);
 			current = unit;
 		} else current = joined;
 	}
 	if (current.length > 0) rows.push(current);
-	return rows.map((row) => theme.fg("keyboardHint", truncateToWidth(row, width, GLYPH.ellipsis, false)));
+	return rows.map((row) => {
+		const shown = truncateToWidth(row, room, GLYPH.ellipsis, false);
+		return `${" ".repeat(Math.max(0, room - visibleWidth(shown)))}${theme.fg("keyboardHint", shown)}`;
+	});
 }
 
 export function createDispatchBoardView(
@@ -2410,6 +2552,25 @@ const FLEET_PLAN_ROW_STATUS: Record<FleetPlanRunView["state"], DispatchBoardStat
 	unsettled: "stale",
 };
 
+/** The plan with each agent step's worker run read in, so a step never says less than that run's own row. */
+function planWithWorkers(plan: FleetPlanRunView, workers: ReadonlyMap<string, DispatchBoardRow>): FleetPlanRunView {
+	if (!plan.steps.some((step) => step.runId !== undefined && workers.has(step.runId))) return plan;
+	return {
+		...plan,
+		steps: plan.steps.map((step) => {
+			const row = step.runId === undefined ? undefined : workers.get(step.runId);
+			if (row === undefined) return step;
+			const caveat = completedRunFailure(row);
+			return { ...step, worker: { settled: isTerminalStatus(row.status), caveat: caveat?.words ?? null } };
+		}),
+	};
+}
+
+/** The plan as its settled card reads it, with each step's worker run from these rows. */
+export function planWithWorkerRows(plan: FleetPlanRunView, rows: ReadonlyArray<DispatchBoardRow>): FleetPlanRunView {
+	return planWithWorkers(plan, new Map(rows.map((row) => [row.runId, row])));
+}
+
 function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
 	return {
 		runId: plan.rootId,
@@ -2540,17 +2701,24 @@ export function createDispatchBoardStore(
 	return {
 		plans,
 		rows() {
-			const planRows = plans.runs().map((plan) => fleetPlanRow(plan, Date.now()));
+			const workers = projectRows(false);
+			const byRun = new Map(workers.map((row) => [row.runId, row]));
+			const planRows = plans.runs().map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now()));
 			const earlier = historyRows();
-			if (planRows.length === 0 && earlier.length === 0) return boardOrder(projectRows(false));
+			if (planRows.length === 0 && earlier.length === 0) return boardOrder(workers);
 			// This process's runs lead; what an earlier Clio recorded follows as its own section, newest first.
 			return [
-				...boardOrder([...projectRows(false), ...planRows.filter((row) => row.earlier !== true)]),
+				...boardOrder([...workers, ...planRows.filter((row) => row.earlier !== true)]),
 				...boardOrder([...planRows.filter((row) => row.earlier === true), ...earlier]),
 			];
 		},
 		activeRows: () => projectRows(true),
-		liveRows: () => [...plans.live().map((plan) => fleetPlanRow(plan, Date.now())), ...projectRows(true)],
+		liveRows: () => {
+			const live = plans.live();
+			if (live.length === 0) return projectRows(true);
+			const byRun = new Map(projectRows(false).map((row) => [row.runId, row]));
+			return [...live.map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now())), ...projectRows(true)];
+		},
 		workerRows: () => projectRows(false),
 		reconcile() {
 			projection.reconcileRuns();

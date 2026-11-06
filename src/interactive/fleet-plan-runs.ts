@@ -12,6 +12,14 @@ export interface FleetPlanStepView {
 	state: FleetPlanStepState;
 	/** Observed facts of a settled step, such as `exit 1 · 107ms`. Absent until it settles. */
 	detail?: string;
+	/** The worker run an agent step started, so the board can read the step beside that run's own row. */
+	runId?: string;
+	/**
+	 * What the step's worker run says of itself, joined on by the board: whether it has ended, and the caveat its
+	 * own row carries. The plan records a step a moment after its worker ends, and a step that passed can still have
+	 * had a call refused, so without this the plan and the run's row disagreed.
+	 */
+	worker?: { settled: boolean; caveat: string | null };
 }
 
 export interface FleetPlanRunView {
@@ -120,7 +128,11 @@ export function createFleetPlanRuns(
 			});
 		},
 		stepDispatched(rootId, event) {
-			updateStep(rootId, event.stepId, (step) => ({ ...step, state: event.replayed ? "replayed" : "running" }));
+			updateStep(rootId, event.stepId, (step) => ({
+				...step,
+				state: event.replayed ? "replayed" : "running",
+				...(event.kind === "agent" ? { runId: event.assignmentId } : {}),
+			}));
 		},
 		stepSettled(rootId, outcome) {
 			const detail = settledDetail(outcome);

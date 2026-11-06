@@ -34,14 +34,22 @@ const WORKER_PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, wo
 export function workerQuietWords(
 	progress: Pick<WorkerProgressSnapshot, "quietSinceMs"> | undefined,
 	now = Date.now(),
+	room?: number,
 ): string | null {
 	if (progress?.quietSinceMs === undefined) return null;
 	// The watchdog reaps a worker whose heartbeat stays silent past its window and grace, so the words count down to
 	// that end rather than leaving the operator to guess whether anything will happen.
 	const quietMs = Math.max(0, now - progress.quietSinceMs);
 	const endsInMs = DEFAULT_HEARTBEAT_SPEC.windowMs + DEFAULT_HEARTBEAT_SPEC.graceMs - quietMs;
-	const end = endsInMs >= 1000 ? `Clio stops it in ${formatWaitClock(endsInMs)}` : "Clio is stopping it";
-	return `not responding for ${formatWaitClock(quietMs)} · ${end}`;
+	const left = formatWaitClock(endsInMs);
+	const end = endsInMs >= 1000 ? `Clio stops it in ${left}` : "Clio is stopping it";
+	// A narrow row keeps the countdown, which is what happens next, and lets the age of the silence go first.
+	const forms = [
+		`not responding for ${formatWaitClock(quietMs)} · ${end}`,
+		`not responding · ${end}`,
+		endsInMs >= 1000 ? `not responding · stops in ${left}` : "not responding · stopping",
+	];
+	return room === undefined ? (forms[0] ?? null) : (forms.find((form) => form.length <= room) ?? forms.at(-1) ?? null);
 }
 
 /**

@@ -785,16 +785,26 @@ export class ClioEditor extends Editor {
 				: steer
 					? fitHintEntries(
 							[
-								...(steer.live && !steer.queued ? [{ key: "Enter", verb: `send to ${steer.agentId}`, short: "send" }] : []),
+								// Sending is what a typed steer is for, so a narrow rail keeps it before it keeps the way out.
+								...(steer.live && !steer.queued
+									? [{ key: "Enter", verb: `send to ${steer.agentId}`, short: "send", critical: true }]
+									: []),
 								{ key: "Esc", verb: "cancel steer, keep text", short: "cancel" },
 							],
-							Math.max(1, room - (scroll ? visibleWidth(scroll) + 3 : 0)),
+							// The steer's keys take the approval's stretch: the composer's clear left cost them the send key at 40 columns.
+							Math.max(1, this.approvalLabelRoom(width) - (scroll ? visibleWidth(scroll) + 3 : 0)),
 						)
 					: "";
 		const right = [scroll ? theme.fg("positionCount", scroll) : "", theme.base("keyboardHint", hint)]
 			.filter(Boolean)
 			.join(theme.fg("separator", " · "));
-		this.renderedBottomRail = this.bottomRail(width, theme, rail, right);
+		this.renderedBottomRail = this.bottomRail(
+			width,
+			theme,
+			rail,
+			right,
+			steer && mode !== "CONFIRM" ? this.approvalLabelRoom(width) : undefined,
+		);
 		return this.renderedBottomRail;
 	}
 

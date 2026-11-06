@@ -540,6 +540,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		bus: deps.app.bus,
 		...(deps.app.onContextClear ? { onContextClear: (options) => deps.app.onContextClear?.(options, deps.io) } : {}),
 		stderr: (text) => io.stderr(text),
+		appendBlock: (render) => {
+			chatPanel.appendReplayBlock(render);
+			tui.requestRender();
+		},
 		refreshFooter: () => footer.refresh(),
 		toggleFooter: () => footer.toggleExpanded(),
 		...(deps.dismissNotification ? { dismissNotification: deps.dismissNotification } : {}),
