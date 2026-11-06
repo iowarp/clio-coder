@@ -1735,7 +1735,7 @@ function renderEntryLines(
 	// a switch, or a failover inside the turn. Repeating it on every turn cost a
 	// row per answer and said nothing new.
 	if (entry.models?.length && !(entry.models.length === 1 && entry.sameModelAsBefore === true))
-		blocks.push({ kind: "prose", lines: renderNoticeRow(`Model ${entry.models.join(" → ")}`, "info", width) });
+		blocks.push({ kind: "prose", lines: renderNoticeRow(`Reply from ${entry.models.join(" → ")}`, "info", width) });
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${skinEpoch()}`;
 	// Reasoning stays between the prose and actions that surround it, one block
