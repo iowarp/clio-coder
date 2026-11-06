@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import { type FileHandle, open, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { Readable } from "node:stream";
 import { Type } from "typebox";
 import { detectDocumentKind, detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { resolvePackageRoot } from "../core/package-root.js";
+import { readPackedSource } from "../core/source-pack.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
@@ -214,6 +216,48 @@ async function readInto(handle: FileHandle, buffer: Buffer, position: number, le
 async function readExact(handle: FileHandle, position: number, length: number): Promise<Buffer> {
 	const size = Math.max(0, length);
 	return readInto(handle, Buffer.allocUnsafe(size), position, size);
+}
+
+/**
+ * A packed source member served through the FileHandle calls the reader
+ * makes, so a file inside the installed package's source pack reads exactly
+ * like the loose file it replaced. Its identity is the pack's mtime.
+ */
+function packedSourceHandle(bytes: Buffer, mtimeMs: number): FileHandle {
+	const stats = { size: bytes.length, mtimeMs, isFile: () => true, isDirectory: () => false };
+	const handle = {
+		async read(buffer: Buffer, offset: number, length: number, position: number) {
+			const bytesRead = position >= bytes.length ? 0 : bytes.copy(buffer, offset, position, position + length);
+			return { bytesRead, buffer };
+		},
+		async stat() {
+			return stats;
+		},
+		async readFile() {
+			return Buffer.from(bytes);
+		},
+		createReadStream(options?: { start?: number }) {
+			return Readable.from([bytes.subarray(options?.start ?? 0)]);
+		},
+		async close() {},
+	};
+	return handle as unknown as FileHandle;
+}
+
+/** The stat of `filePath`, or of its packed member when the file is absent from an installed package's `src/`. */
+async function statReadTarget(filePath: string): Promise<{
+	entry: { size: number; mtimeMs: number; isFile(): boolean; isDirectory(): boolean };
+	packed: FileHandle | null;
+}> {
+	try {
+		return { entry: await stat(filePath), packed: null };
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") throw err;
+		const member = readPackedSource(filePath);
+		if (member === null) throw err;
+		const packed = packedSourceHandle(member.bytes, member.mtimeMs);
+		return { entry: await packed.stat(), packed };
+	}
 }
 
 interface ForwardScan {
@@ -838,7 +882,7 @@ export const readTool: ToolSpec = {
 			// threadpool thread forever and no signal can interrupt it, so only
 			// a regular file is ever opened. The stat identity stamps the
 			// results below that never open the file.
-			const entry = await stat(filePath);
+			const { entry, packed } = await statReadTarget(filePath);
 			file = { bytes: entry.size, mtimeMs: entry.mtimeMs };
 			if (!entry.isFile())
 				return { kind: "error", message: notAFileMessage(filePath, entry.isDirectory()), details: { file } };
@@ -856,7 +900,7 @@ export const readTool: ToolSpec = {
 			// front for concurrent OBSERVE siblings; finalize reconciles it to
 			// the bytes returned and the finally block refunds an error path.
 			commitObservationReservation(reservation);
-			handle = await open(filePath, "r");
+			handle = packed ?? (await open(filePath, "r"));
 			// The descriptor's own identity is what every read below describes.
 			const opened = await handle.stat();
 			file = { bytes: opened.size, mtimeMs: opened.mtimeMs };
