@@ -96,7 +96,7 @@ test("Anthropic call and target retention override the existing environment fall
 	}
 });
 
-test("only the subscription main thread defaults Anthropic to the 1h TTL (#422)", async () => {
+test("only the main thread defaults Anthropic to the 1h TTL (#422)", async () => {
 	const previous = process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
 	delete process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
 	const ttl1h = async (...args: Parameters<typeof request>) =>
@@ -104,7 +104,8 @@ test("only the subscription main thread defaults Anthropic to the 1h TTL (#422)"
 	try {
 		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), true);
 		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5"), false);
-		strictEqual(await ttl1h(anthropic, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), false);
+		strictEqual(await ttl1h(anthropic, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), true);
+		strictEqual(await ttl1h(anthropic, "claude-haiku-5-5"), false);
 		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5", "short", undefined, engineMainStreamSimple), false);
 		process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION = "short";
 		strictEqual(await ttl1h(anthropicMax, "claude-haiku-5-5", undefined, undefined, engineMainStreamSimple), false);
