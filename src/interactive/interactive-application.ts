@@ -565,8 +565,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		cwd: process.cwd(),
 		getSessionWorkspace: () => deps.session?.current()?.workspace ?? null,
 		// The workspace probe lands after first paint now; ask for the frame that
-		// shows the branch chip once it does.
-		onRefreshed: () => tui.requestRender(),
+		// shows the branch chip once it does. The footer keeps the text it last
+		// composed until it is refreshed, so a frame alone repainted the old
+		// branch, or `no Git branch`, until the next five-second tick composed it.
+		onRefreshed: () => {
+			refreshPresentationFooter();
+			tui.requestRender();
+		},
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
 	});
 	const { refreshLiveWorkspaceGit } = workspaceFacts;
