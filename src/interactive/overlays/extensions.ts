@@ -234,11 +234,15 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					for (const command of own)
 						use.push({
 							label: "Command",
-							value: `${theme.fg("inlineCode", `/${command.invocation}`)} ${theme.fg("body", sanitizeCallTargetText(command.description))} ${
+							// The command and whether it runs now lead; what it does follows, so the
+							// state is never lost at the end of a wrapped description.
+							value: [
+								theme.fg("inlineCode", `/${command.invocation}`),
 								command.available
 									? statusChip(theme, "ok", "ready")
-									: statusChip(theme, "warning", command.reason ?? "unavailable")
-							}`,
+									: statusChip(theme, "warning", command.reason ?? "unavailable"),
+								theme.fg("body", sanitizeCallTargetText(command.description)),
+							].join(theme.fg("divider", " · ")),
 						});
 					if (runtime?.status) use.push({ label: "Status", value: sanitizeCallTargetText(runtime.status.text) });
 					if (runtime?.reason) use.push({ label: "Reason", value: runtime.reason, tone: "warning" });
@@ -352,6 +356,9 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		items: buildItems(),
 		filterable: true,
 		explicitSearch: true,
+		// The detail is where an extension's commands, state and recovery live, so a
+		// wide terminal draws it beside the list instead of under it in a few rows.
+		layout: "split",
 		unit: "rows",
 		emptyMessage: EXTENSIONS_EMPTY,
 		hints: (selected) => [
