@@ -26,7 +26,9 @@ test("Help projects only the canonical public allowlist and never forwards priva
 			.filter((path) => path !== "README.md")
 			.sort(),
 	);
-	assert.equal(publicHelpUrl("/docs/guide/tool-usage.md"), "https://coder.iowarp.ai/docs/guide/tool-usage.html");
+	// Every page the site renders links to the URL site/build.mjs gives it.
+	for (const { path } of catalog.filter((page) => page.path !== "README.md"))
+		assert.equal(publicHelpUrl(`/docs/${path}`), `https://coder.iowarp.ai/docs/${path.replace(/\.md$/u, ".html")}`, path);
 	for (const path of [
 		"/docs",
 		"/docs/architecture/safety-model.md",
