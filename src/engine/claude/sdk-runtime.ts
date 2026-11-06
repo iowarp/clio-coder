@@ -20,6 +20,8 @@ import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { withTelemetryContext } from "../../core/telemetry/context.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { resolveClaudeLaunchCredential } from "../../domains/providers/auth/index.js";
+import { getCatalogModelForRuntime } from "../../domains/providers/catalog.js";
+import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { mainGrantsUnavailable } from "../../domains/safety/worker-permit.js";
@@ -111,14 +113,61 @@ function effortForThinking(level: WorkerRunInput["thinkingLevel"] | undefined): 
 	}
 }
 
-function thinkingForInput(input: WorkerRunInput): ThinkingConfig | undefined {
-	const level = input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel ?? "off";
-	if (level === "off") return { type: "disabled" };
-	const budgetTokens = input.runtimeResolution?.request.budgetTokens;
-	if (typeof budgetTokens === "number" && Number.isFinite(budgetTokens) && budgetTokens > 0) {
-		return { type: "enabled", budgetTokens, display: "summarized" };
+interface ClaudeThinkingResolution {
+	level: WorkerRunInput["thinkingLevel"];
+	mechanism: string | undefined;
+	request: { reasoningEffort?: string; budgetTokens?: number } | undefined;
+}
+
+/**
+ * The model's thinking capability from the same source the native anthropic
+ * path reads: the dispatch's runtime resolution, else the catalog row resolved
+ * at the requested level. The catalog is what says a Claude 5 model cannot turn
+ * thinking off (its level map nulls `off`) and that it takes an effort level,
+ * not a token budget (`forceAdaptiveThinking`).
+ */
+function thinkingResolutionForInput(input: WorkerRunInput): ClaudeThinkingResolution {
+	const resolution = input.runtimeResolution;
+	if (resolution !== undefined) {
+		return {
+			level: resolution.effectiveThinkingLevel,
+			mechanism: resolution.thinking.mechanism,
+			request: resolution.request,
+		};
 	}
-	return { type: "adaptive", display: "summarized" };
+	const requested = input.thinkingLevel ?? "off";
+	const model = getCatalogModelForRuntime(input.target.runtime, input.wireModelId);
+	if (model === undefined) return { level: requested, mechanism: undefined, request: undefined };
+	const resolved = resolveModelRuntimeCapabilitiesForModel(model, requested);
+	return { level: resolved.thinking.effectiveLevel, mechanism: resolved.thinking.mechanism, request: resolved.request };
+}
+
+/**
+ * The SDK's `thinking` and `effort` options for this run, in the form the model
+ * takes, as the native anthropic path sends them: an adaptive-thinking model
+ * gets `adaptive` with an effort level and never a budget, a budget model gets
+ * `enabled` with its token budget and no effort, and only a level that resolved
+ * to `off` sends `disabled`. A model the catalog does not know keeps the
+ * adaptive default the SDK applies to current models.
+ */
+export function thinkingOptionsForInput(input: WorkerRunInput): { thinking: ThinkingConfig; effort?: EffortLevel } {
+	const resolved = thinkingResolutionForInput(input);
+	if (resolved.level === "off") return { thinking: { type: "disabled" } };
+	const budgetTokens = resolved.request?.budgetTokens;
+	if (
+		resolved.mechanism === "budget-tokens" ||
+		(resolved.mechanism === undefined && typeof budgetTokens === "number" && budgetTokens > 0)
+	) {
+		return {
+			thinking: {
+				type: "enabled",
+				...(typeof budgetTokens === "number" && Number.isFinite(budgetTokens) && budgetTokens > 0 ? { budgetTokens } : {}),
+				display: "summarized",
+			},
+		};
+	}
+	const effort = (resolved.request?.reasoningEffort ?? effortForThinking(resolved.level)) as EffortLevel | undefined;
+	return { thinking: { type: "adaptive", display: "summarized" }, ...(effort !== undefined ? { effort } : {}) };
 }
 
 function systemPromptForInput(input: WorkerRunInput): NonNullable<Options["systemPrompt"]> {
@@ -747,10 +796,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	};
 	const disallowedTools = claudeToolsOutsideProfile(allowedToolSet);
 	if (disallowedTools.length > 0) options.disallowedTools = disallowedTools;
-	const thinking = thinkingForInput(input);
-	if (thinking !== undefined) options.thinking = thinking;
-	const effort = (input.runtimeResolution?.request.reasoningEffort ??
-		effortForThinking(input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel)) as EffortLevel | undefined;
+	const { thinking, effort } = thinkingOptionsForInput(input);
+	options.thinking = thinking;
 	if (effort !== undefined) options.effort = effort;
 	if (isClaudeCodeSessionId(input.sessionId)) options.sessionId = input.sessionId.trim();
 
