@@ -9,6 +9,7 @@
 
 import type { AgentRole } from "../core/telemetry/enums.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 
 export const USAGE_NOT_MEASURED = "not measured";
@@ -169,11 +170,20 @@ export const SENT_DISPOSITIONS = ["sent_unsettled", "settled_no_usage", "settled
 /**
  * Model calls that went out, counted once per call across its attempts. `/usage` counted the memory guardian's skipped
  * steps as model calls (20) beside an exit card that counted the 11 that were sent; both count this now.
+ *
+ * A worker run's calls live in its own journal, not among the session's attempts, so they are counted from the run's
+ * fold, whose call count is the requests that reached the provider. The Session tab read `worker calls 0 sent · 13
+ * more never sent` after workers that ran 13 real rounds, because only the session's own attempts were listed here.
  */
 export function sentCallCount(view: TelemetryView, filter: { roles?: AgentRole[]; from?: string } = {}): number {
 	try {
 		const calls = view.calls({ ...filter, dispositions: [...SENT_DISPOSITIONS] }).calls;
-		return new Set(calls.map((call) => call.callId)).size;
+		const own = new Set(calls.map((call) => call.callId)).size;
+		if (filter.roles !== undefined && !filter.roles.includes("worker")) return own;
+		const runs = view
+			.runs()
+			.filter((run) => filter.from === undefined || run.firstAt === null || run.firstAt >= filter.from);
+		return own + runs.reduce((sum, run) => sum + factKnownValue(run.apiCalls.fact), 0);
 	} catch {
 		// A read model that cannot list calls has no sent count to give; the caller shows its own total instead.
 		return Number.NaN;

@@ -2332,3 +2332,100 @@ test("the interview rail names the option move key in a list, first among the ke
 	view.cancel();
 	await pending.catch(() => {});
 });
+
+test("a worker run's calls that reached the provider count as sent beside the session's own", async () => {
+	const { telemetryCall, telemetryViewOf } = await import("../harness/telemetry-view.js");
+	const { sentCallCount } = await import("../../src/interactive/usage-words.js");
+	const { factKnownValue } = await import("../../src/core/telemetry/known.js");
+	const run = [
+		...telemetryCall("session-1", { usage: { input: 10, output: 2 } }),
+		...telemetryCall("session-1", { usage: { input: 12, output: 3 } }),
+	];
+	const view = telemetryViewOf("session-1", telemetryCall("session-1"), new Map([["run-1", run]]));
+	const worker = view.cost("role").groups.find((group) => group.key === "worker");
+	strictEqual(factKnownValue(worker?.calls.fact ?? { kind: "unknown", reason: "not-observed" }), 2);
+	strictEqual(sentCallCount(view, { roles: ["worker"] }), 2, "both worker rounds went out");
+	strictEqual(sentCallCount(view, { roles: ["main"] }), 1);
+	strictEqual(sentCallCount(view), 3, "the model calls row reconciles with the Models tab");
+});
+
+test("Reply from names only a route that replied; an admission that never sent prints no provenance", async () => {
+	const { assistantModelLabel } = await import("../../src/core/assistant-model.js");
+	const panel = createChatPanel({ getRunTarget: () => "mock-router" });
+	panel.appendUser("two");
+	panel.applyEvent({ type: "agent_start" } as never);
+	const refused = {
+		role: "assistant",
+		provider: "openai-completions",
+		model: "cold-b",
+		content: [],
+		stopReason: "error",
+		errorMessage: "cannot load 'cold-b' on 'mock-router': the server holds 1 model at a time",
+		usage: { input: 0, output: 0, totalTokens: 0 },
+	};
+	panel.applyEvent({ type: "message_start", message: { ...refused } } as never);
+	const settled = {
+		...refused,
+		callInvoked: false,
+		failure: { invoked: false, stage: "admission", httpStatus: null, errorClass: "admission_refused" },
+	};
+	panel.applyEvent({ type: "message_end", message: settled } as never);
+	panel.applyEvent({ type: "agent_end", messages: [settled] } as never);
+	const output = screen(panel);
+	doesNotMatch(output, /Reply from/u, output);
+	match(output, /cannot load 'cold-b'/u);
+	const exported = assistantModelLabel(settled);
+	strictEqual(exported, null, "the transcript export names no model for a call never sent");
+	const answered = { ...refused, content: [{ type: "text", text: "Done." }], stopReason: "stop" };
+	strictEqual(assistantModelLabel(answered, "mock-router"), "mock-router · cold-b");
+});
+
+test("the exit summary counts a finished worker whose validation failed as Fleet does, never as succeeded", async () => {
+	const { composeTrustStatus } = await import("../../src/domains/evidence/trust-status.js");
+	const { renderExitSummary } = await import("../../src/interactive/exit-summary.js");
+	const { createExitSummaryCollector } = await import("../../src/interactive/exit-summary-collector.js");
+	const { telemetryViewOf } = await import("../harness/telemetry-view.js");
+	const bus = createTelemetryHub();
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: {
+			subscribe: () => () => {},
+			read: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
+		} as never,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as never,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	const trust = (state: "validated" | "failed") =>
+		composeTrustStatus({
+			artifactIntegrity: {
+				state: "verified",
+				source: { kind: "run_seal", id: "run" },
+				authority: { kind: "clio", id: "receipt-integrity" },
+				artifacts: [],
+			},
+			validationGrounding: {
+				state,
+				source: { kind: "run_record", id: "run" },
+				authority: { kind: "validator", id: "result-quality" },
+				artifacts: [],
+			},
+		});
+	for (const [runId, state] of [
+		["run-a", "failed"],
+		["run-b", "failed"],
+		["run-c", "validated"],
+	] as const) {
+		bus.emit("run.started", { runId, agentId: "verifier", targetId: "mini", wireModelId: "m" } as never);
+		bus.emit("run.completed", { runId, agentId: "verifier", outcome: "succeeded" } as never);
+		collector.observeRunResult(runId, { outcome: "succeeded", trust: trust(state), toolCalls: 3 });
+	}
+	bus.emit("run.started", { runId: "run-d", agentId: "verifier", targetId: "mini", wireModelId: "m" } as never);
+	bus.emit("run.failed", { runId: "run-d", agentId: "verifier", outcome: "canceled" } as never);
+	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
+	match(card, /Workers: 2 validation failed · 1 succeeded · 1 cancelled/u, card);
+	const detail = renderExitSummary(collector.snapshot(), "report", 120, false).join("\n");
+	match(detail, /Workers \(4; 2 validation failed, 1 succeeded, 1 cancelled\)/u, detail);
+});

@@ -505,7 +505,16 @@ class UsageOverlayBody implements Component {
 			body = [
 				theme.fg("annotation", "Account-wide limits · filled = used · shared across sessions and devices"),
 				"",
-				...renderQuotaAccounts(quota, contentWidth),
+				// An empty tab said only that nothing was journaled; it now says what would fill it.
+				...(quota.length > 0
+					? renderQuotaAccounts(quota, contentWidth)
+					: wrapTextWithAnsi(
+							theme.fg(
+								"annotation",
+								"No account quota is known. It appears here once a signed-in subscription target reports its limits; local and API-key targets report none.",
+							),
+							contentWidth,
+						)),
 			];
 		else if (this.tab === 2)
 			body = [

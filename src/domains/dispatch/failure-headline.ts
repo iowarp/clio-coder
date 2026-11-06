@@ -6,7 +6,10 @@
  */
 
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
-import { trustFailureWords } from "../evidence/trust-projection.js";
+import { trustFailureWords, trustVerdict } from "../evidence/trust-projection.js";
+import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
+import { TRUST_STATUS_AXES } from "../evidence/trust-status.js";
+import type { RunResultSummary } from "./run-result-facts.js";
 
 /**
  * A run released before it started because the work around it had already stopped. Whoever stopped that work speaks
@@ -186,4 +189,38 @@ export function completedRunCaveat(facts: CompletedRunFacts): CompletedRunCaveat
 	const refused = facts.refusedCalls ?? 0;
 	if (refused > 0) return { kind: "refused", words: refusedCallsWords(refused) };
 	return facts.toolCalls === 0 ? { kind: "no-tools", words: "ran no tools" } : null;
+}
+
+/** The verdict and axis states the shared caveat reads; an axis a partial record leaves out reads as unknown. */
+function trustVerdictOf(trust: CanonicalTrustStatus): Pick<TrustSummaryProjection, "verdict" | "axes"> {
+	const partial = trust as Partial<CanonicalTrustStatus>;
+	const filled = Object.fromEntries(
+		TRUST_STATUS_AXES.map((axis) => [axis, partial[axis] ?? { state: "unknown" }]),
+	) as unknown as CanonicalTrustStatus;
+	return {
+		verdict: trustVerdict(filled),
+		axes: Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [axis, filled[axis].state])) as Record<
+			(typeof TRUST_STATUS_AXES)[number],
+			string
+		>,
+	};
+}
+
+/**
+ * The caveat a sealed run result carries on a clean exit. The worker card, the Fleet Runs row and the exit summary
+ * read it from the same record, so a worker whose process finished but whose validation failed never reads as
+ * succeeded on one of them.
+ */
+export function settledRunCaveat(
+	result: Pick<RunResultSummary, "outcome" | "trust" | "contract" | "toolCalls" | "refusedCalls">,
+	synthesizes = false,
+): CompletedRunCaveat | null {
+	if (result.outcome !== "succeeded") return null;
+	return completedRunCaveat({
+		...(result.trust !== undefined ? { trust: trustVerdictOf(result.trust) } : {}),
+		...(result.contract !== undefined ? { contract: result.contract } : {}),
+		// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
+		...(result.toolCalls !== undefined && !synthesizes ? { toolCalls: result.toolCalls } : {}),
+		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),
+	});
 }
