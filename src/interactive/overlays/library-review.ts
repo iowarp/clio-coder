@@ -156,8 +156,10 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 		});
 	if (step.content?.resources.length)
 		facts.push({
-			label: "Projects",
-			value: step.content.resources.map((item) => `${item.kind}:${item.name}${item.valid ? "" : " (invalid)"}`).join(", "),
+			label: "Adds",
+			value: resourceSummary(
+				step.content.resources.map((item) => ({ kind: item.kind, name: `${item.name}${item.valid ? "" : " (invalid)"}` })),
+			),
 		});
 	if (step.dependencies.missing.length)
 		facts.push({ label: "Missing", value: `requires ${step.dependencies.missing.join(", ")}`, tone: "warning" });
@@ -356,6 +358,15 @@ function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: Librar
 	return "resource evidence from before refresh; no session refresh applied";
 }
 
+/** Resources grouped by kind with a count each: "6 skills: a, b; 20 prompts: c, d" reads faster than 26 kind:name refs. */
+function resourceSummary(items: ReadonlyArray<{ kind: string; name: string }>): string {
+	const groups = new Map<string, string[]>();
+	for (const item of items) groups.set(item.kind, [...(groups.get(item.kind) ?? []), item.name]);
+	return [...groups]
+		.map(([kind, names]) => `${names.length} ${names.length === 1 ? kind : `${kind}s`}: ${names.join(", ")}`)
+		.join("; ");
+}
+
 /** A path under the home folder as ~/…, the way the footer and the setup screens print it. */
 function shortenHomePath(target: string): string {
 	const home = homedir();
@@ -405,12 +416,14 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 				? outcome.identity.kind === "extension"
 					? "no skills, agents, prompts or playbooks; an extension adds its commands and status instead"
 					: "nothing Clio can load from it"
-				: verification.resources
-						.map(
-							(item) =>
-								`${item.kind}:${item.name} ${item.available ? "available" : `unavailable (${item.reason ?? "no reason recorded"})`}`,
-						)
-						.join(", ");
+				: [
+						resourceSummary(verification.resources.filter((item) => item.available)),
+						...verification.resources
+							.filter((item) => !item.available)
+							.map((item) => `not available: ${item.kind}:${item.name} (${item.reason ?? "no reason recorded"})`),
+					]
+						.filter(Boolean)
+						.join("; ");
 		// Nothing loads from a package that is gone; the fact would only restate it.
 		if (verification.effective || verification.resources.length > 0)
 			facts.push({ label: "Loads", value: label ? `${label}: ${loaded}` : loaded, tone: "muted" });
@@ -524,13 +537,13 @@ function formatLibraryImportReview(
 		...(plan.version ? [{ label: "Version", value: plan.version }] : []),
 		...(plan.destination ? [{ label: "Destination", value: plan.destination }] : []),
 		{
-			label: "Projects",
+			label: "Adds",
 			value:
 				plan.outcomes.length === 0
 					? "no resources"
-					: `${plan.outcomes.length} resource${plan.outcomes.length === 1 ? "" : "s"}: ${plan.outcomes
-							.map((outcome) => `${outcome.kind}:${outcome.name} (${outcome.status})`)
-							.join(", ")}`,
+					: resourceSummary(
+							plan.outcomes.map((outcome) => ({ kind: outcome.kind, name: `${outcome.name} (${outcome.status})` })),
+						),
 			tone: "info",
 		},
 		...plan.unsupported.map(

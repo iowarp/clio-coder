@@ -28,6 +28,7 @@ import {
 	type LibraryProvidedResource,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
+import { wrapTextWithAnsi } from "../../engine/tui.js";
 import { displaySafe } from "../display-safe.js";
 import {
 	type ClioTheme,
@@ -309,7 +310,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 		const here = ownerScopeOf(subject.record, view.scope);
 		const reasons: string[] = [];
 		if (subject.record.refusal) reasons.push(subject.record.refusal);
-		if (!here) reasons.push(`No ${view.scope} copy; install writes one. Press s to select the other scope.`);
+		if (!here) reasons.push(`Not in ${view.scope} scope yet, so there is nothing to update or remove; s switches scope.`);
 		return {
 			install: !here && !subject.record.refusal,
 			remove: !!here,
@@ -470,7 +471,8 @@ function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] 
 
 /** Each reason an action is absent, right under the keys it explains, as an info chip on its own row. */
 function noteRows(theme: ClioTheme, reasons: ReadonlyArray<string>, width: number): string[] {
-	return reasons.flatMap((reason) => chipRows(theme, [statusChip(theme, "info", safe(reason))], width));
+	// Plain dim prose: an info glyph here read as one more key beside the key caps above it.
+	return reasons.flatMap((reason) => wrapTextWithAnsi(theme.fg("annotation", safe(reason)), Math.max(1, width)));
 }
 
 /** The description last, rendered as Markdown at the pane's width so its code spans and emphasis keep their styling. */
