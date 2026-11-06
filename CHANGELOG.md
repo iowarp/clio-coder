@@ -4,23 +4,24 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool reads HDF5, NetCDF and Parquet and summarizes their arrays. A new `reproduce` check kind reruns a computation from sha256-pinned inputs in a clean environment and judges the results against a tolerance, and every judged `reproduce` or `numeric-compare` check is recorded in a per-project claims ledger that names contradictions and superseded results and offers them to the agent when a task touches the check (#406). `/usage` and the exit summary count tokens and cost per verified outcome, and `clio-coder telemetry insights` sorts sessions into research task categories and autonomy levels. Four library packs cover HPC, science data, literature and life science, and `ask_user` can mark a choice that only the operator makes. GitHub Copilot becomes a target through the official Copilot SDK. Compaction summarizes inside a cached prefix when that is cheaper, the desktop app opens a fleet node's own GUI over SSH, command output masks credential shapes, more URL credential forms stay hidden (#448), streaming answers repaint less (#428), and the package is smaller.
+Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool reads HDF5, NetCDF and Parquet and summarizes their arrays. A new `reproduce` check kind reruns a computation from sha256-pinned inputs in a clean environment and judges the results against a tolerance, and every judged `reproduce` or `numeric-compare` check is recorded in a per-project claims ledger that names contradictions and superseded results and offers them to the agent when a task touches the check (#406). `/usage` and the exit summary count tokens and cost per verified outcome, and `clio-coder telemetry insights` sorts sessions into research task categories and autonomy levels. Four library packs cover HPC, science data, literature and life science, and `ask_user` can mark a choice that only the operator makes. GitHub Copilot becomes a target through the official Copilot SDK. Compaction summarizes inside a cached prefix when that is cheaper, the desktop app opens a fleet node's own GUI over SSH, command output masks credential shapes, more URL credential forms stay hidden (#448), streaming answers repaint less (#428), every key follows one keyboard model, and the package is smaller.
 
 ### Upgrade notes
 
-- The `lmstudio-native` and `ollama-native` runtime ids stay removed and are not aliased. Every surface that refuses a target still naming one now names its replacement, `runtime: lmstudio` or `runtime: ollama`: `run`, `targets use`, dispatch, `configure`, TUI startup, the provider status reason and `targets --json`. `run --api-key` tells such a target from an absent one.
+- The `lmstudio-native` and `ollama-native` runtime ids, removed in 0.5.6, stay removed and are not aliased. Every surface that refuses a target still naming one now names its replacement, `runtime: lmstudio` or `runtime: ollama`: `run`, `targets use`, dispatch, `configure`, TUI startup, the provider status reason and `targets --json`. `run --api-key` tells such a target from an absent one.
 - A plugin manifest whose `ai.iowarp.clio` block carries the `evals` key is refused at install with a message naming the key, the release and the fix, and an installed copy that carries it lists as an invalid plugin. Delete the key from the manifest and reinstall.
 - The retired version 2 settings key `context.compaction.excludeLastTurns` no longer stops `settings.yaml` from loading. The key is ignored, `doctor` names it and `doctor --fix` removes it. `context.workingSet.protectLastTurns` remains.
+- Some keys move to one keyboard model (see Keyboard below): the queue navigator is `Alt+Q`, which no longer restores the queue from the composer (`a` in the navigator does), and in the `Ctrl+G` menu send now is `s` and background is `d`. Action IDs are unchanged, so a `keybindings.json` keeps applying to the same actions.
 - The `github-copilot` login is retired because it impersonated VS Code. A credential stored under `github-copilot` is ignored, and `auth login github-copilot` and a model on that provider are refused with a message naming the official `copilot login` and a `copilot-sdk` target. `COPILOT_GITHUB_TOKEN` no longer maps to a login.
 - An unsandboxed `bash` command no longer inherits environment variables with bare credential names such as `FOO_KEY`, `GH_PAT`, `SMTP_PASS` or `PASSWD`. A value under such a name that is a path or a URL without credentials stays, so `KUBECONFIG` and `VAULT_ADDR` still reach the command.
 - What `bash`, `run_script`, an operator shell line and a `panes` read print is masked before the model, the transcript or a log sees it. A credential value of 8 or more characters that the command's environment holds or that Clio resolved reads `[redacted:known]`, and URL userinfo and username tokens, secret URL parameters, PEM keys, AWS, GitHub, `sk-`, Slack and Google keys, JWTs and `Authorization` headers are masked by shape. A plain `key: value` assignment is not masked by its shape, so build output such as `max_tokens: 128000000` keeps its numbers. `run_script` writes `stdout.log` and `stderr.log` through the same mask, and `run.json` still counts the bytes the script wrote.
 - The installed package ships most TypeScript source packed in `dist/assets/source.pack`. `read` serves a packed file or directory, but `grep`, `find` and `bash` do not see packed files. A checkout keeps its real files. Clio's own code map ships as `dist/assets/codemap.json.gz`, and `code_nav` is the way to query it.
-- The Ruby and C# tree-sitter grammars and the HDF5 and Parquet reader libraries download on first use, each accepted only on a sha256 match and kept under Clio's cache directory. Offline, Ruby and C# files are indexed by line patterns and `code_nav` says so with a `grammarNote`, and the `data` tool refuses HDF5, NetCDF-4 and Parquet with the reader, the URL, the cache path and the `run_script` route. A failed download is not retried for 10 minutes by any process.
+- The Ruby and C# tree-sitter grammars and the HDF5 and Parquet reader libraries download on first use, each accepted only on a sha256 match and kept under Clio's cache directory. Offline, Ruby and C# files are indexed by line patterns and `code_nav` says so with a `grammarNote`, and the `data` tool refuses HDF5, NetCDF-4 and Parquet with the reader, the URL, the cache path and the `run_script` route. A failed download is not retried for 10 minutes. Other processes honor that wait through a failure record in the cache directory, so when the directory is not writable the next process tries again at once.
 - `./extensions` and `./extensions/testing` resolve their types from `dist/extensions/public-api.d.ts` and `dist/extensions/testing.d.ts`.
 - The API-key `anthropic` runtime gives its main thread the 1-hour prompt cache. Workers and side calls keep the 5-minute cache, and a target's `cache.retention` or `CLIO_CODER_ANTHROPIC_CACHE_RETENTION` still decides first.
 - A free price names its rule. `$0.00 local` is shown only for a local-native runtime, and a target priced free reads `$0.00 free (declared)` or `$0.00 free (zero-rates)`.
 - Over ACP, startup notices such as `No CLIO-CODER.md detected` arrive as `session_info_update` with `_meta["clio-coder/notice"]` instead of reply text. `/run` and `/delegate` reply only after admission: `started` or `queued` for an admitted run, and otherwise the refusal and its reason at error level.
-- An MCP client asks a server for `server/discover` first and speaks MCP 2026-07-28 when it answers, otherwise falling back to the 2025-06-18 `initialize` handshake. A server that stays silent for 1 second gets the handshake too.
+- An MCP client asks a server for `server/discover` first and speaks MCP 2026-07-28 when it answers. A server that answers with any other error, or stays silent for 1 second, gets the 2025-06-18 `initialize` handshake. A server that answers that it does not support MCP 2026-07-28 is refused, and the error names the versions it supports.
 - An approval card for an uncurated tool, such as an MCP tool, shows a string argument in full only under an allowlisted key (`path`, `file`, `filename`, `script`, `script_path`, `cwd`, `dir`, `directory`, `name`, `job_name`, `partition`, `module`, `target`, or `url` without userinfo or query) whose value is one line of at most 96 safe characters. Every other string reads `<string N bytes>`. The TUI, ACP and the desktop app show the same values, and `slurm_submit` shows its script path.
 - `date` runs as a read-only inspector. Setting the clock with `-s`, `--set` or a bare `MMDDhhmm` date and reading dates from a file with `-f` stay refused.
 
@@ -32,12 +33,14 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - ChronoLog 4.0 is unreleased. `hpc-chronolog` uses `chrono-mcp` from the released 3.x line (latest 3.4.0) and treats a 4.0 development build as unreleased.
 - The literature pack's citation checks confirm that a work exists and that its metadata matches. They do not judge whether the work supports the claim it is cited for.
 - MCP `tasks/cancel` is not verified live against clio-kit's web server.
+- The Copilot SDK's session filesystem re-verifies its cache root and session directory before every write and delete, but a window remains between that check and the call that follows, because Node has no descriptor-relative directory calls. Using it needs write access to the user's own cache directory and a race on each operation.
+- `clio-coder run --read-only` still lets Node write its V8 compile cache under `<cache>/v8-compile-cache` when Clio's cache directory already exists, because the cache is enabled before arguments are parsed. On a home Clio has not set up, the run sets it up first, which creates an empty `cache/` directory.
 
 ### Removed
 
 - The Pi `github-copilot` OAuth login, with its VS Code client id and headers, and the `COPILOT_GITHUB_TOKEN` mapping. Use a `copilot-sdk` target.
-- The Ruby and C# tree-sitter grammars from the package (5.1 MB and 2.1 MB). They download on first use.
-- Loose `src/` TypeScript files outside the public type closure, now packed, and the uncompressed `codemap.json` from the package. The code map drops from 5.3 MB to 0.88 MB.
+- The Ruby and C# tree-sitter grammars from the package (2.1 MB and 5.1 MB). They download on first use.
+- Loose `src/` TypeScript files other than the extension scaffold templates, now packed, and the uncompressed `codemap.json` from the package. The public extension types ship as bundled declarations. The code map drops from 5.3 MB to 0.88 MB.
 - The blue token Clio sent herdr, which has no color for it.
 
 ### Science data and verification
@@ -53,7 +56,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - Each judged `reproduce` or `numeric-compare` check, from a main-thread `verify` call or a worker run's host verification, appends a claim to an append-only log in the state directory, keyed by the repository root, with the commit, inputs, seed, platform and per-metric verdicts it ran under. A claim states whether the results agreed within the declared tolerance and never that a result is right. `clio-coder claims [list] [--check <id>] [--json]` lists them and `clio-coder claims show <id-prefix>` shows one.
 - The opposite verdict under the same pinned conditions adds a `contradicts` edge and both claims read `contested`. A claim whose pinned conditions changed, such as a new commit or new input digests, adds `supersedes` edges and the earlier claims read `superseded`. Each edge names what matched and how the working trees differed. When a disagreement overturns an agreement, every memory record citing the agreeing claim gets a regression and leaves the prompt until approved again. `memory propose --from-claim <id-prefix>` proposes an unapproved record resting on one claim.
 - When the operator's text or a `verify`, `read`, `edit` or `write` call touches a check with contested or superseded claims, the main agent gets one `[Claims]` message about it in the message tail. A check is offered once per session, across processes, and again only when its contradiction or supersede state changes. Workers get none.
-- The literature pack's hypothesis workflow records each hypothesis in the claims ledger as proposed, tested, supported or refuted, decided only by grounded claims from a valid source.
+- The literature pack's hypothesis workflow records each hypothesis of a slate the main session writes in the claims ledger as proposed. A run of the check its success criterion names marks it tested, and a judged claim from that run supports it when the claim agrees and refutes it when the claim disagrees. The latest judged run decides.
 - `/usage` and the exit summary's `Verified` row show tokens and cost per verified outcome in the brief, standard and report styles. A worker whose host checks repeat a pass the main thread already counted adds no outcome.
 - `clio-coder telemetry insights [--project [<dir>]] [--json]` gives each recorded session a research task category or marks it as software work, scores its autonomy from 1 to 5, and prints per project the category mix, the autonomy spread and the share of sessions with a verified outcome. It reads only content-free telemetry and nothing leaves the machine.
 - A TUI approval denied because nobody answered is journaled with its session and turn.
@@ -64,7 +67,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - The `science-data` pack 0.1.0 adds the `science-data` skill, which routes HDF5, NetCDF and Parquet through the `data` tool, and the clio-kit Parquet and pandas MCP servers with per-tool action classes.
 - The `literature` pack 0.2.0 adds `citation-check` through the CiteNexus MCP server (cite-nexus-mcp 0.2.3) and `hypothesis-workflow`, and `arxiv-literature` 0.6.0 exports BibTeX.
 - The `life-science` pack 0.1.0 adds `pdb-structures`, `uniprot-proteins` and `pubchem-compounds`, which look up PDB, UniProt and PubChem through `web_fetch`.
-- A pack's clio-kit or CiteNexus MCP server needs one online launch to build its uv environment, and works offline after that.
+- A pack's clio-kit or CiteNexus MCP server needs one online launch to build its uv environment, and starts offline after that. CiteNexus lookups still need the network: offline, each citation is reported unavailable, never not found.
 
 ### MCP
 
@@ -89,8 +92,9 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 ### Desktop app
 
-- The desktop app opens a fleet node's own GUI over SSH under `/m/<id>`. The sidebar's machine switcher and the Open action on Machines start the node's app when it is not running and wait for it to become ready. The launch token crosses on stdin through `clio-coder gui --token-stdin`, a node running a different package version or build is refused with the install command that fixes it, a dropped link reconnects with backoff, and a remote view is labelled with the node's host.
+- The desktop app opens a fleet node's own GUI over SSH under `/m/<id>`. The sidebar's machine switcher and the Open action on Machines start the node's app when it is not running and wait for it to become ready. The launch token crosses on stdin through `clio-coder gui --token-stdin`, a node running a different package version is refused with the install command that fixes it, and so is a different build when both sides report theirs, a dropped link reconnects with backoff, and a remote view is labeled with the node's host.
 - The Notices list includes notices that arrive as `session_info_update`.
+- Help links every guide the website publishes to its page. Six published guides, among them `built-in-agents`, `proactive-memory` and `system-one`, opened the docs index instead, because Help kept its own copy of the list; it now reads the website's catalog.
 
 ### Safety
 
@@ -100,12 +104,19 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 ### Terminal
 
-- A list right after a paragraph or heading keeps every bullet. A cancelled run is spelled one way, a reasoning excerpt is labelled `Thinking`, and a worker card names a tool guard, not a safety rule, when one stops a call.
+- A list right after a paragraph or heading keeps every bullet. A cancelled run is spelled one way, a reasoning excerpt is labeled `Thinking`, and a worker card names a tool guard, not a safety rule, when one stops a call.
 - The footer updates when a workspace Git probe lands and shows `detached at <sha>` on a detached HEAD instead of `no Git branch`.
 - A `/model` switch that throws says the model did not change. `/quit` help names the music pane among the docks it closes, and a shell card is sized by its masked output.
 - A streaming answer renders its settled blocks once and re-lexes only the open tail, strips OSC 133 markers only from rows that start with one, and leaves unchanged rows alone each frame (#428).
 - Startup loads its second stage in slices behind the instant shell, and the fleet board reads earlier worker runs in slices, so typing is not blocked. Parsed `SKILL.md` frontmatter is cached in `skill-frontmatter.json`.
 - `read` on a directory says `is a directory, not a file. List its entries with ls.`
+
+### Keyboard
+
+- One keyboard model: Ctrl edits, Alt+letter runs a Clio action, and Ctrl+G then the same letter runs it in any terminal. Send now is `Ctrl+G s` (was `i`), the queue is `Alt+Q`/`Ctrl+G q` (was `Alt+K`/`n`), background is `Ctrl+G d` (was `s`), and the external editor gains `Alt+G`.
+- `Alt+Q` no longer restores the queue from the composer; in the queue navigator `a` puts every message back in the draft. `clio-coder.message.dequeue` keeps its ID with no default key.
+- Hints, the `?` card, the welcome and the footer spell each action one way: its direct key, or `Ctrl+G` and the letter. In Terminal.app, where Option types text, they spell the `Ctrl+G` route. `/help` still lists every route, and its keyboard topic states the three rules.
+- With demo guidance on, the idle footer offers `? Keys`, and running a slash command that has a key shows one tip naming the key until you press it.
 
 ### Context handbook
 
@@ -124,13 +135,6 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 - `dist` is minified with every function and class name kept, so stack traces name the same symbols. The Node bundles shrink from 17.22 MB to 13.97 MB.
 - Source pack members compress concurrently, and the extension type declarations ship bundled.
-
-### Keyboard
-
-- One keyboard model: Ctrl edits, Alt+letter runs a Clio action, and Ctrl+G then the same letter runs it in any terminal. Send now is `Ctrl+G s` (was `i`), the queue is `Alt+Q`/`Ctrl+G q` (was `Alt+K`/`n`), background is `Ctrl+G d` (was `s`), and the external editor gains `Alt+G`.
-- `Alt+Q` no longer restores the queue from the composer; in the queue navigator `a` puts every message back in the draft. `clio-coder.message.dequeue` keeps its ID with no default key.
-- Hints, the `?` card, the welcome and the footer spell each action one way: its direct key, or `Ctrl+G` and the letter. In Terminal.app, where Option types text, they spell the `Ctrl+G` route. `/help` still lists every route, and its keyboard topic states the three rules.
-- With demo guidance on, the idle footer offers `? Keys`, and running a slash command that has a key shows one tip naming the key until you press it.
 
 ## 0.6.9 - 2026-11-06
 
