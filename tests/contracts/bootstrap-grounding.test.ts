@@ -543,6 +543,23 @@ it("returns a previous block under a kept title unless the handbook restates it"
 	strictEqual(docs, [modelDocs, previousCorpus].join("\n"), handbook);
 });
 
+/** Rules of distinct words, so no rule restates another and only the budget decides what stays. */
+function distinctFiller(): (label: string, length: number) => string {
+	let next = 0;
+	const word = (): string => {
+		next += 1;
+		let n = next;
+		let text = "";
+		for (; n > 0; n = Math.floor(n / 26)) text += String.fromCharCode(97 + (n % 26));
+		return `qu${text}x`;
+	};
+	return (label, length) => {
+		let text = `${label} renders through \`src/widgets/render.ts\``;
+		while (text.length < length) text += ` ${word()}`;
+		return `${text}.`;
+	};
+}
+
 it("keeps carried invariants and sections whole when model content fills the handbook budget", async () => {
 	const carried = writeCarryFixture();
 	mkdirSync(join(cwd, "docs"), { recursive: true });
@@ -566,20 +583,7 @@ it("keeps carried invariants and sections whole when model content fills the han
 			"",
 		].join("\n"),
 	);
-	// Distinct words per rule, so no rule restates another and only the budget decides what stays.
-	let next = 0;
-	const word = (): string => {
-		next += 1;
-		let n = next;
-		let text = "";
-		for (; n > 0; n = Math.floor(n / 26)) text += String.fromCharCode(97 + (n % 26));
-		return `qu${text}x`;
-	};
-	const filler = (label: string, length: number): string => {
-		let text = `${label} renders through \`src/widgets/render.ts\``;
-		while (text.length < length) text += ` ${word()}`;
-		return `${text}.`;
-	};
+	const filler = distinctFiller();
 	await runBootstrap({
 		cwd,
 		rewriteClioMd: true,
@@ -602,6 +606,74 @@ it("keeps carried invariants and sections whole when model content fills the han
 	for (const rule of carried) ok(handbook.includes(rule), handbook);
 	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
 	strictEqual(docs, docsRule, handbook);
+});
+
+/**
+ * A rewrite whose model content fills the handbook's line budget, so a section
+ * the final fit does not reserve finds no room. Returns the Docs section.
+ */
+async function docsUnderFullBudget(
+	previousDocs: string[],
+	modelDocs: string[],
+	conventions: string[],
+): Promise<string> {
+	const carried = writeCarryFixture();
+	mkdirSync(join(cwd, "docs"), { recursive: true });
+	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			...carried.map((rule, i) => `${i + 1}. ${rule}`),
+			"",
+			"## Docs and prose",
+			"",
+			...previousDocs,
+			"",
+		].join("\n"),
+	);
+	const filler = distinctFiller();
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: Array.from({ length: 16 }, (_, i) => filler(`Widget rule ${i + 1}`, 700)),
+				conventions,
+				sections: [
+					...["Change recipes", "Tests", "Gotchas", "Widgets", "Rendering", "Exports"].map((title) => ({
+						title,
+						body: Array.from({ length: 40 }, (_, i) => `- ${filler(`${title} step ${i + 1}`, 90)}`).join("\n"),
+					})),
+					{ title: "Docs and prose", body: modelDocs.join("\n") },
+				],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.trimEnd().split("\n").length <= HANDBOOK_TARGETS.lines, handbook);
+	return handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+}
+
+const DOCS_RULE =
+	"- Every page under `docs/` is reachable from `docs/guide.md`; the corpus check in `scripts/check.js` fails otherwise.";
+
+it("protects a previous block the model already wrote when model content fills the handbook budget", async () => {
+	strictEqual(await docsUnderFullBudget([DOCS_RULE], [DOCS_RULE], []), DOCS_RULE);
+});
+
+it("returns a previous block a model rule restates, since the final fit may cut that rule", async () => {
+	const names = "Name each page in kebab case; the corpus check in `scripts/check.js` reads page names.";
+	const docs = await docsUnderFullBudget([DOCS_RULE, `- ${names}`], [DOCS_RULE], [names]);
+	strictEqual(docs, [DOCS_RULE, `- ${names}`].join("\n"));
 });
 
 it("keeps protected invariants that alone exceed the budget and reports the overflow", () => {

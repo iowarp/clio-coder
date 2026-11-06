@@ -1659,6 +1659,8 @@ function stabilizeGeneratedOutput(
 	}
 	for (const rule of carried) if (!authoredInvariants.includes(rule)) pushUnique(protectedInvariants, rule);
 	for (const rule of authoredInvariants) pushUnique(protectedInvariants, rule);
+	// A previous section block counts as stated only by a rule the final fit cannot cut.
+	const protectedTokens = protectedInvariants.map(handbookRuleTokens);
 	const modelInvariants = invariants.filter(
 		(rule) => !protectedInvariants.includes(rule) && !restatesArchitecture(rule) && !duplicatesCarried(rule),
 	);
@@ -1697,7 +1699,7 @@ function stabilizeGeneratedOutput(
 		if (VERIFICATION_SECTION_RE.test(section.title)) return false;
 		const restatesKept = (tokens: ReadonlySet<string>): boolean =>
 			carriedSection
-				? restatesLexically(tokens, keptRuleTokens)
+				? restatesLexically(tokens, protectedTokens)
 				: restatesHandbookRule(tokens, uncarriedRuleTokens) || restatesLexically(tokens, carriedTokens);
 		const body = handbookBlocks(section.body)
 			.filter(
@@ -1726,8 +1728,9 @@ function stabilizeGeneratedOutput(
 		if (sanitized) addSection(sanitized, true);
 	}
 	// A previous section returns under its title when the draft dropped the title. Under a kept title, each
-	// enforced block returns unless a kept rule or the kept section restates it: naming the same check is not
-	// stating the same instruction. A carried section is not cut for a later one.
+	// enforced block returns unless a protected rule or the kept section restates it: naming the same check is
+	// not stating the same instruction. A section holding a previous block is protected, even when the model
+	// already wrote the block, so neither the section limit nor the final fit cuts it.
 	const carriedSections = new Set<ClioMdSection>();
 	for (const section of carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : []) {
 		const key = section.title.replace(/\s+/g, " ").trim().toLowerCase();
@@ -1738,14 +1741,15 @@ function stabilizeGeneratedOutput(
 			if (retained) carriedSections.add(retained);
 			continue;
 		}
-		const sectionTokens = [...keptRuleTokens, ...handbookBlocks(current.body).map(handbookRuleTokens)];
-		const missing = handbookBlocks(section.body).filter(
-			(block) => !restatesLexically(handbookRuleTokens(block), sectionTokens),
+		const blocks = handbookBlocks(section.body).filter(
+			(block) => !restatesLexically(handbookRuleTokens(block), protectedTokens),
 		);
-		if (missing.length === 0) continue;
-		const merged = { ...current, body: [current.body, ...missing].join("\n") };
+		if (blocks.length === 0) continue;
+		const currentTokens = handbookBlocks(current.body).map(handbookRuleTokens);
+		const missing = blocks.filter((block) => !restatesLexically(handbookRuleTokens(block), currentTokens));
+		const merged = missing.length === 0 ? current : { ...current, body: [current.body, ...missing].join("\n") };
 		ordinarySections[index] = merged;
-		if (modelSections.delete(current)) modelSections.add(merged);
+		if (merged !== current && modelSections.delete(current)) modelSections.add(merged);
 		carriedSections.add(merged);
 	}
 	const checkerSection = uncoveredCheckerSection(
