@@ -132,6 +132,17 @@ interface RepositoryState {
 	tracked: Set<string>;
 }
 
+/**
+ * HEAD and whether tracked files match it, for a judged check that runs in the live checkout; null outside a
+ * repository. A numeric-compare result carries it so the claim it becomes names the commit it held at (#406).
+ */
+export async function checkoutState(
+	workspaceRoot: string,
+): Promise<{ commit: string; trackedTreeClean: boolean } | null> {
+	const state = await repositoryState(workspaceRoot, []);
+	return state === null ? null : { commit: state.commit, trackedTreeClean: state.trackedTreeClean };
+}
+
 async function repositoryState(workspaceRoot: string, inputs: ReadonlyArray<string>): Promise<RepositoryState | null> {
 	let toplevel: string;
 	let commit: string;

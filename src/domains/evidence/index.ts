@@ -77,3 +77,4 @@ export type {
 	RunEvidence,
 } from "./types.js";
 export { EVIDENCE_TAGS, FAILURE_CAUSE_TAG_ORDER, FAILURE_CAUSE_TAGS } from "./types.js";
+export { judgedPayloadKey } from "./verified-outcomes.js";

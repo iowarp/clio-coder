@@ -24,7 +24,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "yaml";
-import { ALL_TOOL_NAMES } from "../src/core/tool-names.js";
+import { ALL_TOOL_NAMES, isMcpToolName } from "../src/core/tool-names.js";
 import { splitToolList } from "../src/domains/resources/common-loader.js";
 import { SKILL_BODY_LINE_BUDGET } from "../src/domains/resources/skills/authoring-check.js";
 import { normalizedSkillHash } from "../src/domains/resources/skills/content-hash.js";
@@ -126,7 +126,9 @@ function toolSurfaceErrors(skillPath: string, fm: Record<string, unknown>): stri
 		const declared = toolSurfaceEntries(fm[key]);
 		if (declared === null) continue;
 		for (const entry of declared) {
-			if (CLIO_TOOL_NAMES.has(entry)) continue;
+			// A full MCP capability name (`mcp_<id>__<tool>`) is Clio's own spelling;
+			// Claude Code names MCP tools `mcp__<server>__<tool>`, so it stays inert there.
+			if (CLIO_TOOL_NAMES.has(entry) || isMcpToolName(entry)) continue;
 			const canonical = ALL_TOOL_NAMES.find((tool) => tool === entry.toLowerCase());
 			errors.push(
 				canonical
