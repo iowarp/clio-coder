@@ -367,6 +367,17 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			// root back, and again under it because the removal can land while this
 			// call waits for a sibling process to finish its own critical section.
 			if (stateRootRemoved()) return;
+			// Dispatch drains persist on every shutdown, twice for a headless run. A clean ledger whose disk rows are
+			// already in ring order and within the cap would rewrite runs.json byte for byte under the lock with two
+			// fsyncs, so it adopts those rows instead. A lowered cap still evicts through the write below.
+			if (dirty.size === 0) {
+				const disk = readRuns();
+				const capped = capRuns(mergeRunsById(disk, runs, dirty), resolveMaxRuns(opts?.maxRuns));
+				if (capped.length === disk.length && capped.every((run, index) => run === disk[index])) {
+					runs = capped;
+					return;
+				}
+			}
 			const target = runsPath();
 			await withRunsLock(target, async () => {
 				if (stateRootRemoved()) return;
