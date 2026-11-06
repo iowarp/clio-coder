@@ -528,7 +528,7 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 | `clio-coder/context` | `usage_update` update | The projected context ledger. |
 | `clio-coder/plan` | `plan` update and each entry | Real task status, board identity, and omitted counts. |
 | `clio-coder/agent` | message, thought, notice, and tool-call `session/update` frames | Orchestrator attribution plus delegated agents. |
-| `clio-coder/notice` | `agent_message_chunk` | `{level}` for a transcript notice or replayed compaction summary. |
+| `clio-coder/notice` | `agent_message_chunk`, `session_info_update` | `{level}` on a transcript notice or replayed compaction summary chunk; `{level, text}` on a `session_info_update` carrying a startup notice (for example a missing CLIO-CODER.md), sent once per process on the first prompt. |
 | `clio-coder/replay` | replayed updates and events | `{turn}` on history, `{run: true}` on a replayed dispatch frame; absent on live frames. |
 | `clio-coder/run-result` | `run.completed` and `run.failed` events | Run result facts. |
 | `clio-coder/decision`, `clio-coder/workerAsk`, `clio-coder/dispatchPlan` | `session/request_permission` | Classification, worker provenance, and plan view. |
