@@ -265,7 +265,11 @@ export function liveWorkStrip(
 		const owned = ownedWith(0);
 		const tailCells = (parts: ReadonlyArray<string | null>): number =>
 			parts.filter((part): part is string => part !== null).reduce((sum, part) => sum + 3 + visibleWidth(part), 0);
-		const bare = `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
+		// A running call's actor is the claim (`you run`, `Clio runs`), so even the barest form keeps it.
+		const bare =
+			loose.subject !== undefined
+				? `${glyph} ${theme.fg("activeModelIdentity", loose.subject)} ${clocked(railFree(loose.label))}`
+				: `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
 		// A stop already asked for owes nothing more; anything else a person may want to stop says how.
 		const stoppable = facts.status.phase !== "cancelling";
 		// What runs behind the turn is fitted to the cells the lead and tail leave, so a worker's wait cause shortens

@@ -440,7 +440,8 @@ test("a lock, an unload, a switch and a load each say their own thing, and a loc
 	});
 	strictEqual(held.subject, "Clio");
 	match(held.label, /is waiting for another Clio/);
-	match(held.label, /pid 4242 is loading Big-model/);
+	match(held.label, /that session is loading Big-model/);
+	doesNotMatch(held.label, /pid|4242/);
 	match(wait({ stage: "lock", holder: null, since: at }).label, /who holds it is unknown/);
 	match(
 		wait({ stage: "lock", holder: { pid: 1, host: "other", self: false, wants: null }, since: at }).label,
@@ -819,9 +820,9 @@ test("a long countdown reads in minutes on the rail and says the provider asked 
 			now,
 			"Qwopus3.8",
 		).label;
-	match(status(111), /in 56m52s · provider asked for 1h · Esc stops/u);
-	match(status(80), /in 56m52s · provider asked for 1h · Esc stops/u);
-	match(status(60), /provider wait 56m52s · Esc/u);
+	match(status(111), /will retry in 56m52s \(1\/3\) · the server asked to wait 1h · Esc stops/u);
+	match(status(80), /will retry in 56m52s \(1\/3\) · .*asked to wait 1h · Esc stops/u);
+	match(status(60), /will retry in 56m52s \(1\/3\) · Esc stops/u);
 	doesNotMatch(status(111), /3412s/u);
 });
 
@@ -857,7 +858,7 @@ test("a provider's waits count up against no limit, and Clio's own retries still
 
 	const row = (status: Partial<RetryStatusPayload>) =>
 		formatRetryStatus({ ...third, phase: "scheduled", delayMs: 8000, ...status } as RetryStatusPayload);
-	match(row({ retryAfterMs: 8000 }), /^3rd provider wait, next attempt in 8s \(provider asked for 8s\)/u);
+	match(row({ retryAfterMs: 8000 }), /^3rd provider wait: will retry in 8s, provider asked to wait 8s/u);
 	match(row({ phase: "retrying" }), /^retrying after 3rd provider wait/u);
 	match(row({ phase: "cancelled" }), /^cancelled during 3rd provider wait/u);
 

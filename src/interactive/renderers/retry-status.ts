@@ -13,7 +13,7 @@ const AVAILABLE_DIAGNOSTIC = /\s*\.\.\. \[available diagnostic: \/view transcrip
 
 /** The wait the provider named, beside the one Clio is actually sitting out. */
 function askedFor(status: RetryStatusPayload): string {
-	return status.retryAfterMs !== undefined ? ` (provider asked for ${formatStatedWait(status.retryAfterMs)})` : "";
+	return status.retryAfterMs !== undefined ? `, provider asked to wait ${formatStatedWait(status.retryAfterMs)}` : "";
 }
 
 /** A stop on the wait budget ran out of nothing: no attempt was made, and the row says what the provider said and why. */
@@ -67,7 +67,8 @@ function rawRetryStatus(status: RetryStatusPayload, unbounded: boolean): string 
 	if (status.onProviderWait === true) {
 		if (status.phase === "waiting" || status.phase === "scheduled") {
 			const left = status.phase === "waiting" ? (status.seconds ?? 0) * 1000 : (status.delayMs ?? 0);
-			return `${waitName(status)}, next attempt in ${formatStatedWait(left)}${askedFor(status)}${suffix}`;
+			// The rail's words: the countdown is what remains, and the provider's number is the whole wait it asked for.
+			return `${waitName(status)}: will retry in ${formatStatedWait(left)}${askedFor(status)}${suffix}`;
 		}
 		if (status.phase === "retrying") return `retrying after ${waitName(status)}${suffix}`;
 		if (status.phase === "cancelled") return `cancelled during ${waitName(status)}${suffix}`;
