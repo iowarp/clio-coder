@@ -25,6 +25,7 @@ import {
 	readClaims,
 	recordAcceptedWorkerSlates,
 	recordHostVerificationClaims,
+	snapshotAcceptedWorkerSlates,
 } from "../../src/domains/claims/index.js";
 import { runHostVerification } from "../../src/domains/dispatch/host-verification.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -373,22 +374,42 @@ describe("claims ledger (#406)", () => {
 			const project = claimsProjectRoot(repo);
 			// The worker's slate claims H2 is already supported; the host reads it as proposed, and an entry it marked
 			// supported is not taken at its word.
-			writeFileSync(
-				join(repo, "w.json"),
-				slateText([
-					{ id: "H2", check: "stats" },
-					{ id: "H3", check: "stats", status: "supported" },
-				]),
-			);
+			const workerSlate = slateText([
+				{ id: "H2", check: "stats" },
+				{ id: "H3", check: "stats", status: "supported" },
+			]);
+			writeFileSync(join(repo, "w.json"), workerSlate);
+			writeFileSync(join(repo, "notes.json"), JSON.stringify({ not: "a slate" }));
 			const outside = join(env.dir, "outside.json");
 			writeFileSync(outside, slateText([{ id: "H9", check: "stats" }]));
+			const accept = () =>
+				snapshotAcceptedWorkerSlates({
+					projectCwd: repo,
+					paths: [join(repo, "w.json"), "w.json", join(repo, "notes.json"), outside],
+				});
+			// Bytes that replace an accepted slate after the host accepted the run are not the run's: nothing is recorded
+			// and the drift is named.
+			const replaced = accept();
+			assert.equal(replaced.length, 1);
+			writeFileSync(join(repo, "w.json"), slateText([{ id: "H4", check: "stats" }]));
+			assert.deepEqual(
+				await recordAcceptedWorkerSlates({
+					runId: "run0",
+					receiptDigest: "c".repeat(64),
+					projectCwd: repo,
+					slates: replaced,
+				}),
+				{ recorded: 0, drifted: [realpathSync(join(repo, "w.json"))] },
+			);
+			assert.equal(readClaims(project).hypotheses.length, 0);
+			writeFileSync(join(repo, "w.json"), workerSlate);
 			const recorded = await recordAcceptedWorkerSlates({
 				runId: "run1",
 				receiptDigest: "d".repeat(64),
 				projectCwd: repo,
-				paths: [join(repo, "w.json"), "w.json", outside],
+				slates: accept(),
 			});
-			assert.equal(recorded, 1);
+			assert.deepEqual(recorded, { recorded: 1, drifted: [] });
 			const [h2] = readClaims(project).hypotheses;
 			assert.equal(h2?.hypothesis, "H2");
 			assert.equal(h2?.source.channel, "worker-slate");

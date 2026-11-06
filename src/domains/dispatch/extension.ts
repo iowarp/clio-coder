@@ -16,9 +16,11 @@ import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import {
+	type AcceptedWorkerSlates,
 	bindHostVerificationHypotheses,
 	recordAcceptedWorkerSlates,
 	recordHostVerificationClaims,
+	snapshotAcceptedWorkerSlates,
 } from "../claims/index.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
@@ -9217,6 +9219,32 @@ export function createDispatchBundle(
 					}
 				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
+				// A hypothesis slate the worker wrote enters the log only once the host accepted the run into the project
+				// (#406): a merged task worktree's changed paths, or the observed writes of a run in the checkout that
+				// settled succeeded; nothing the worker reported is used. The bytes are read here, in the same synchronous
+				// step that accepted the run, and recorded after the receipt is sealed only while the files still hold them.
+				let acceptedSlates: AcceptedWorkerSlates = [];
+				const checkoutChanges = receiptDraft.checkoutChanges;
+				const acceptedPaths =
+					finalOutcome !== "succeeded"
+						? []
+						: req.taskWorktree !== undefined
+							? worktreeReceipt?.applied === true
+								? (worktreeReceipt.changedPaths ?? []).map((path) => resolvePath(req.taskWorktree?.root ?? lifecycle.cwd, path))
+								: []
+							: checkoutChanges !== undefined
+								? checkoutChanges.changedPaths.map((path) => resolvePath(checkoutChanges.cwd, path))
+								: [...observedRunEffects.mutatedPaths];
+				if (acceptedPaths.some((path) => path.endsWith(".json"))) {
+					try {
+						acceptedSlates = snapshotAcceptedWorkerSlates({
+							projectCwd: req.taskWorktree?.root ?? lifecycle.cwd,
+							paths: acceptedPaths,
+						});
+					} catch (error) {
+						reportDispatchDiagnostic(`read hypothesis slates for ${envelope.id}`, error);
+					}
+				}
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -9261,28 +9289,21 @@ export function createDispatchBundle(
 						reportDispatchDiagnostic(`record claims for ${envelope.id}`, error);
 					}
 				}
-				// A hypothesis slate the worker wrote enters the log only once the host accepted the run into the project
-				// (#406): a merged task worktree's changed paths, or the observed writes of a run in the checkout that
-				// settled succeeded. The host reads each file from the project; nothing the worker reported is used.
-				const checkoutChanges = receiptDraft.checkoutChanges;
-				const acceptedPaths =
-					finalOutcome !== "succeeded"
-						? []
-						: req.taskWorktree !== undefined
-							? worktreeReceipt?.applied === true
-								? (worktreeReceipt.changedPaths ?? []).map((path) => resolvePath(req.taskWorktree?.root ?? lifecycle.cwd, path))
-								: []
-							: checkoutChanges !== undefined
-								? checkoutChanges.changedPaths.map((path) => resolvePath(checkoutChanges.cwd, path))
-								: [...observedRunEffects.mutatedPaths];
-				if (acceptedPaths.some((path) => path.endsWith(".json"))) {
+				if (acceptedSlates.length > 0) {
 					try {
-						await recordAcceptedWorkerSlates({
+						const ingested = await recordAcceptedWorkerSlates({
 							runId: receipt.runId,
 							receiptDigest: receipt.digest,
 							projectCwd: req.taskWorktree?.root ?? lifecycle.cwd,
-							paths: acceptedPaths,
+							slates: acceptedSlates,
 						});
+						if (ingested.drifted.length > 0)
+							reportDispatchDiagnostic(
+								`record hypotheses for ${envelope.id}`,
+								new Error(
+									`not recorded, changed after the host accepted the run: ${ingested.drifted.map((path) => relative(lifecycle.cwd, path) || path).join(", ")}`,
+								),
+							);
 					} catch (error) {
 						reportDispatchDiagnostic(`record hypotheses for ${envelope.id}`, error);
 					}

@@ -7,7 +7,7 @@ import { recordClaimRegressions } from "../memory/index.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimFromVerifyResult, claimsFromHostVerification, type SealedHostCheck } from "./capture.js";
 import { claimBackingRefs, claimRegressionNote, overturnedAgreements, regressionRecord } from "./edges.js";
-import { type CheckRun, hypothesesFromSlate, type SlateOrigin } from "./hypotheses.js";
+import { type CheckRun, hypothesesFromSlate, isHypothesisSlate, type SlateOrigin } from "./hypotheses.js";
 import {
 	appendClaimRegressions,
 	appendClaims,
@@ -154,10 +154,13 @@ export function createHypothesisCaptureRegistration(options: {
 
 /** A file's bytes as read at one moment, and their sha256. */
 interface SlateSnapshot {
-	path: string;
-	text: string;
-	sha256: string;
+	readonly path: string;
+	readonly text: string;
+	readonly sha256: string;
 }
+
+/** The slates of a worker run's accepted paths, with their bytes as the host accepted them. */
+export type AcceptedWorkerSlates = ReadonlyArray<SlateSnapshot>;
 
 /** A `.json` file's bytes as they stand, or null when it is absent, unreadable or past the slate bound. */
 function slateBytes(absolute: string): Buffer | null {
@@ -221,23 +224,17 @@ export function bindHostVerificationHypotheses(
 }
 
 /**
- * Record the slates a worker run landed in the project once the host accepted it (#406): the paths are the host's own
- * account of what landed (a merged task worktree's changed paths, or the writes it observed a run in the checkout
- * make), and each file is read from the project as it now stands. A status the worker wrote is never read as
- * evidence: only entries still at proposed are recorded, as for a main-session slate.
+ * The slates among the paths the host just accepted from a worker run (#406), with their bytes as accepted: the paths
+ * are the host's own account of what landed (a merged task worktree's changed paths, or the writes it observed a run
+ * in the checkout make). The caller reads them in the same synchronous step that accepted the run, so a file replaced
+ * while the receipt is sealed is not credited to the run. A path that is not absolute, not `.json`, outside the
+ * project or not a hypothesis slate is dropped.
  */
-export async function recordAcceptedWorkerSlates(input: {
-	runId: string;
-	receiptDigest: string;
+export function snapshotAcceptedWorkerSlates(input: {
 	projectCwd: string;
-	/** Absolute paths; anything else, or a path outside the project, is ignored. */
 	paths: ReadonlyArray<string>;
-	now?: Date;
-}): Promise<number> {
+}): AcceptedWorkerSlates {
 	const project = claimsProjectRoot(input.projectCwd);
-	const at = (input.now ?? new Date()).toISOString();
-	const source: SlateOrigin = { channel: "worker-slate", runId: input.runId, receiptDigest: input.receiptDigest };
-	let recorded = 0;
 	const physical = (path: string): string => {
 		try {
 			return realpathSync(path);
@@ -252,11 +249,38 @@ export async function recordAcceptedWorkerSlates(input: {
 			return inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside);
 		})
 		.slice(0, WORKER_SLATE_PATHS_MAX);
+	const slates: SlateSnapshot[] = [];
 	for (const absolute of absolutes) {
 		const snapshot = snapshotSlate(absolute);
-		if (snapshot !== null) recorded += (await recordSlate({ snapshot, project, at, source })) ?? 0;
+		if (snapshot !== null && isHypothesisSlate(snapshot.text)) slates.push(snapshot);
 	}
-	return recorded;
+	return slates;
+}
+
+/**
+ * Record the slates `snapshotAcceptedWorkerSlates` read when the host accepted a worker run, keyed by its sealed
+ * receipt. Each is recorded from its accepted bytes and only while the file still holds them; a slate that changed
+ * since is not recorded and is returned in `drifted`. A status the worker wrote is never read as evidence: only
+ * entries still at proposed are recorded, as for a main-session slate.
+ */
+export async function recordAcceptedWorkerSlates(input: {
+	runId: string;
+	receiptDigest: string;
+	projectCwd: string;
+	slates: AcceptedWorkerSlates;
+	now?: Date;
+}): Promise<{ recorded: number; drifted: string[] }> {
+	const project = claimsProjectRoot(input.projectCwd);
+	const at = (input.now ?? new Date()).toISOString();
+	const source: SlateOrigin = { channel: "worker-slate", runId: input.runId, receiptDigest: input.receiptDigest };
+	let recorded = 0;
+	const drifted: string[] = [];
+	for (const snapshot of input.slates) {
+		const written = await recordSlate({ snapshot, project, at, source });
+		if (written === null) drifted.push(snapshot.path);
+		else recorded += written;
+	}
+	return { recorded, drifted };
 }
 
 /**

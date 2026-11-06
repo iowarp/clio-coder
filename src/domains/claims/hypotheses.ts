@@ -69,6 +69,23 @@ export function hypothesisSubject(
 	);
 }
 
+/** A slate's parsed top level, or null when the text is not a hypothesis slate. */
+function parseSlate(text: string): { hypotheses: unknown[] } | null {
+	let slate: unknown;
+	try {
+		slate = JSON.parse(text);
+	} catch {
+		return null;
+	}
+	return isRecord(slate) && slate.schema === HYPOTHESIS_SLATE_SCHEMA && Array.isArray(slate.hypotheses)
+		? { hypotheses: slate.hypotheses }
+		: null;
+}
+
+export function isHypothesisSlate(text: string): boolean {
+	return parseSlate(text) !== null;
+}
+
 /**
  * The hypotheses a slate holds, or null when the text is not a slate. Only an entry with a slate id, a statement and a
  * falsifiable prediction becomes a record, and only while the slate holds it at `proposed`: the checker refuses any
@@ -81,13 +98,8 @@ export function hypothesesFromSlate(input: {
 	at: string;
 	source: SlateOrigin;
 }): HypothesisDraft[] | null {
-	let slate: unknown;
-	try {
-		slate = JSON.parse(input.text);
-	} catch {
-		return null;
-	}
-	if (!isRecord(slate) || slate.schema !== HYPOTHESIS_SLATE_SCHEMA || !Array.isArray(slate.hypotheses)) return null;
+	const slate = parseSlate(input.text);
+	if (slate === null) return null;
 	const path = projectPath(input.project, input.path);
 	const slateSha256 = sha256(input.text);
 	const seen = new Set<string>();
