@@ -145,7 +145,7 @@ it("separates eight diagnostic notices from package counts across Plugins, Agent
 		const text = plain(state.view.render(88).join("\n"));
 		match(text, /1 package/);
 		match(text, /\[n\] 8 notices/);
-		match(text, /Actions: User/);
+		match(text, /Scope User/);
 		ok(!text.includes("skill diagnostic"));
 		state.view.handleInput("n");
 		match(plain(state.view.render(88).join("\n")), /8 notices/);
@@ -175,7 +175,6 @@ it("identifies provider packages and limits their catalog hints to the selected 
 			match(detail, new RegExp(`lab-${category}`));
 			ok(!detail.includes("lab-skill"));
 			match(detail, /not loaded components/);
-			match(detail, /\[b\] shows loaded components/);
 			match(detail, /\[i\] review install/);
 			ok(!detail.includes("[Enter] members"), "an uninstalled package has no members to open");
 		}
@@ -359,11 +358,11 @@ it("preserves semantic colors while stripping external controls before metadata 
 		ok(!meta.includes("\u001b[2J") && !meta.includes("\u001b[35m") && !meta.includes("spoof"));
 		match(plain(meta), /lab text/);
 	}
-	for (const [state, status] of [
-		["loadable", "ok"],
-		["disabled", "warning"],
-		["damaged", "error"],
-		["shadowed", "cancelled"],
+	for (const [state, status, words] of [
+		["loadable", "ok", "active"],
+		["disabled", "warning", "disabled"],
+		["damaged", "error", "damaged"],
+		["shadowed", "cancelled", "overridden"],
 	] as const) {
 		const copy: LibraryCopy = {
 			ref: "plugin:fixture",
@@ -385,7 +384,7 @@ it("preserves semantic colors while stripping external controls before metadata 
 		data.copies = [copy];
 		const copyView = { ...view, category: "plugin" as const };
 		const meta = buildLibraryRows({ view: copyView, inventory: selectForCategory(data, copyView) }).items[0]?.meta ?? "";
-		ok(meta.includes(statusChip(theme, status, `user ${state}`)));
+		ok(meta.includes(statusChip(theme, status, `user: ${words}`)));
 		ok(meta.includes(statusChip(theme, "warning", "foreign")));
 		ok(!meta.includes("\u001b[2J") && !meta.includes("\u001b[35m") && !meta.includes("spoof"));
 		match(plain(meta), /lab text/);

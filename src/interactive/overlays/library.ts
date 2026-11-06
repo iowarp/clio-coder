@@ -30,7 +30,7 @@ import {
 	readLibraryInventory,
 	readLibraryPairs,
 } from "../../domains/resources/index.js";
-import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { type OverlayHandle, stripTerminalSequences, type TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
@@ -312,7 +312,17 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		};
 		const { ref, reason } = requestRefFor(subject);
 		if (!ref || !allowed[operation]) {
-			deps.notice("warn", reason ?? actions.reasons[0] ?? `${operation} is not available on this row.`);
+			const name = stripTerminalSequences(item?.label ?? "This row").replace(/\s*\[[^\]]*\]$/u, "") || "This row";
+			const installed = actions.update || actions.remove || actions.enable;
+			const fallback =
+				operation === "install"
+					? installed
+						? `${name} is already installed in ${view.scope} scope; u reviews an update and r a removal.`
+						: `${name} cannot be installed from this row.`
+					: installed
+						? `${name} has nothing to ${operation} in ${view.scope} scope.`
+						: `${name} is not installed in ${view.scope} scope, so there is nothing to ${operation}.`;
+			deps.notice("warn", reason ?? actions.reasons[0] ?? fallback);
 			return;
 		}
 		const withRequirements = operation === "install" && pendingWithRequirements === ref;
