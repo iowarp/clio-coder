@@ -4239,6 +4239,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			} catch (err) {
 				if (err instanceof Error && err.name === "AbortError") {
 					// A forced compaction skips every cheaper stage, so a stop before the summary saved left the context as it was.
+					// Its card already says so with the size it stayed at; a notice beside it said the same thing twice.
+					if (context.lastCompactionCardSettled()) return;
 					const tokens = context.contextUsage().tokens;
 					emitNotice(
 						`[/context compact] cancelled; context unchanged${tokens !== null ? ` at ${footerTokens(tokens)} tokens` : ""}`,

@@ -380,6 +380,8 @@ export interface TurnContext {
 		providerFallbackReason?: string,
 	): Promise<boolean>;
 	lastCompactionWasNoGain(): boolean;
+	/** The last reduction that ended in a stop or failure settled its own transcript card, which already says so. */
+	lastCompactionCardSettled(): boolean;
 	cancelCompaction(): void;
 	postToolContinuationGuard(
 		agentRuntime: AgentRuntime,
@@ -2278,6 +2280,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	let reductionInFlight: Promise<boolean> | null = null;
+	let lastCompactionCardSettled = false;
 	const runAutoCompact: TurnContext["runAutoCompact"] = (...args) => {
 		if (reductionInFlight) {
 			if (args[7]) return Promise.reject(new Error("Another context reduction is already in progress."));
@@ -2287,6 +2290,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		compactionController = controller;
 		const operationArgs: Parameters<TurnContext["runAutoCompact"]> = [...args];
 		operationArgs[6] = args[6] ? AbortSignal.any([args[6], controller.signal]) : controller.signal;
+		lastCompactionCardSettled = false;
 		const operation = performAutoCompact(...operationArgs)
 			.then(
 				(changed) => {
@@ -2303,12 +2307,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					const outcome =
 						operationArgs[6]?.aborted || (error instanceof Error && error.name === "AbortError") ? "cancelled" : "failed";
 					// A stop is the operator's own choice, not a fault, and what it left behind is the fact they need.
+					// The card is the one place a stop is reported, so it carries the size the context stayed at.
+					const view = budgetProducer.current();
+					const at = view?.inputTokens != null ? ` at ${footerTokens(view.inputTokens)} tokens` : " as it was";
 					const conclusion =
 						outcome === "cancelled"
 							? compactionFacts.length === 0
-								? "cancelled before anything was saved; context unchanged"
+								? `nothing saved; context still${at.replace(/^ at/u, "")}`
 								: "cancelled before the summary was saved"
 							: compactionFailureMessage(error);
+					lastCompactionCardSettled = compactionOperation !== null && outcome === "cancelled";
 					compactionOperation?.finish(outcome, conclusion, {
 						facts: compactionFacts,
 						...(compactionTokens ? { tokens: compactionTokens } : {}),
@@ -2540,6 +2548,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
 		lastCompactionWasNoGain: () => lastCompactionNoGain,
+		lastCompactionCardSettled: () => lastCompactionCardSettled,
 		navigationRevision: () => navigationEpoch,
 		cancelCompaction: () => compactionController?.abort(),
 

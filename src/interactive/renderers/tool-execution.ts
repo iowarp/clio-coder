@@ -873,7 +873,9 @@ function operatorGrantRows(
 ): string[] {
 	const axis = "result" in call ? call.operatorGrant : undefined;
 	if (axis === undefined) return [];
-	return indentAndWrap(`${yellow(GLYPH.classInteraction)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
+	// The operator's own mark: `?` is the class of a call that asks, and read as a question still open under a call
+	// that had already been allowed.
+	return indentAndWrap(`${yellow(GLYPH.user)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
 }
 
 /**
@@ -1304,7 +1306,10 @@ function sublineParts(
 				: toolMeta(` · ${cardDuration}`)
 			: stoppingCall(call) && status === "running"
 				? stoppingGlyph(meta)
-				: statusGlyph(status, meta);
+				: status === "running" && row.spec.class === "interaction"
+					? // The person owns this wait: a ticking `● 5.7s` read as Clio still working on it (HS11).
+						` ${theme.fg("attentionRail", GLYPH.phaseBlocked)}${toolMeta(" waiting for you")}`
+					: statusGlyph(status, meta);
 	const compose = (inline: string): SublineParts =>
 		ledger !== null
 			? { lead: `${head(inline)}${ledger.facts}`, tail: `${tail}${ledger.offload}` }

@@ -17,10 +17,14 @@ import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, positionRow, rule } from "./theme/index.js";
 import {
+	sentCallCount,
 	USAGE_NOT_MEASURED,
 	usageCoverage,
+	usageEstimatedCalls,
+	usageEstimates,
 	usageFigure,
 	usageGap,
+	usageLineFigure,
 	usageLineNotes,
 	usageSaysNothing,
 	usageStillRunning,
@@ -55,10 +59,6 @@ function nonZero(quantity: Quantity | null | undefined): quantity is Quantity {
 	return "kind" in fact
 		? fact.kind === "unknown" || fact.kind === "estimated" || (fact.kind === "measured" && fact.value > 0)
 		: fact.unknownCount > 0 || factKnownValue(fact) > 0;
-}
-
-function hasUnknown(quantity: Quantity): boolean {
-	return "kind" in quantity.fact ? quantity.fact.kind === "unknown" : quantity.fact.unknownCount > 0;
 }
 
 /** Some call fed this sum, so its value (a measured zero, a local `$0.00`, or `not measured`) is worth a row. */
@@ -113,8 +113,9 @@ function tokensText(display: string): string {
 /** Whole-session token rows, optionally for one model group; every value is the read model's own display. */
 function tokenRows(view: TelemetryView, model?: string): Array<readonly [string, string, string?]> {
 	// Each row is the figure alone; the coverage row above the table says once how many calls reported nothing (F4).
+	// One mark at most: `≥~27,252` stacked two qualifiers; the usage data row says once which calls Clio estimated.
 	const display = (metric: FactMetric) =>
-		usageFigure(
+		usageLineFigure(
 			view.quantity(
 				factRef({
 					scope: "session",
@@ -150,7 +151,8 @@ function sessionUsageNotes(view: TelemetryView): string[] {
 		],
 		callsStillRunning(view),
 	);
-	return notes;
+	const estimates = usageEstimates(usageEstimatedCalls(quantity("total")));
+	return [...notes, ...(estimates !== null ? [estimates] : [])];
 }
 
 /** When this process started, as the journal writes times: every attempt it began after this, it also settles. */
@@ -171,6 +173,38 @@ function callsStillRunning(view: TelemetryView): number {
 }
 
 /**
+ * Calls per agent as the exit card counts them: the ones that went out, with the attempts that never left beside them.
+ * A role whose every step was skipped reads `0 · 8 never sent` rather than eight model calls nobody made.
+ */
+function callRows(
+	view: TelemetryView,
+	groups: ReadonlyArray<{ key: string; calls: Quantity }>,
+): Array<readonly [string, string, string?]> {
+	const caption = (key: string): string => ROLE_CAPTION[key as AgentRole] ?? `${key} calls`;
+	const total = sentCallCount(view);
+	if (Number.isNaN(total))
+		return [
+			...groups.map((group) => [caption(group.key), group.calls.display] as const),
+			["model calls", view.cost("role").total.calls.display],
+		];
+	const unsent = (all: Quantity, sent: number): string | undefined => {
+		const known = factKnownValue(all.fact);
+		const left = Number.isFinite(known) ? known - sent : 0;
+		return left > 0 ? `sent · ${left.toLocaleString("en-US")} more never sent` : "sent";
+	};
+	type Row = readonly [string, string, string?];
+	const row = (label: string, value: number, note: string | undefined): Row =>
+		note === undefined ? [label, value.toLocaleString("en-US")] : [label, value.toLocaleString("en-US"), note];
+	const rows = groups.map((group) => {
+		const sent = sentCallCount(view, { roles: [group.key as AgentRole] });
+		const note = unsent(group.calls, sent);
+		return row(caption(group.key), sent, note);
+	});
+	const note = unsent(view.cost("role").total.calls, total);
+	return [...rows, row("model calls", total, note)];
+}
+
+/**
  * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
  * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
  */
@@ -178,7 +212,6 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 	const session = view.session();
 	const byRole = view.cost("role");
 	const cache = view.cache();
-	const tokenCoverage = session.totals.tokens;
 	const neverSent = session.own.counts.dispositions.neverSent;
 	const groups = [...byRole.groups].sort((a, b) =>
 		a.key === "main" ? -1 : b.key === "main" ? 1 : a.key.localeCompare(b.key),
@@ -188,15 +221,11 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 	const v = cache.verdicts;
 	return kvBlock(
 		[
-			...groups.map(
-				(group) => [ROLE_CAPTION[group.key as AgentRole] ?? `${group.key} calls`, group.calls.display] as const,
-			),
-			["model calls", byRole.total.calls.display],
+			...callRows(view, groups),
 			["harness overhead", session.overhead.share.display],
-			...(hasUnknown(tokenCoverage) && sessionUsageNotes(view).length > 0
-				? [["usage data", sessionUsageNotes(view).join(" · ")] as const]
-				: []),
-			...(nonZero(neverSent)
+			...(sessionUsageNotes(view).length > 0 ? [["usage data", sessionUsageNotes(view).join(" · ")] as const] : []),
+			// The calls rows carry their never-sent count beside them; a separate row is needed only when they could not.
+			...(nonZero(neverSent) && Number.isNaN(sentCallCount(view))
 				? [["never sent", `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"}`] as const]
 				: []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
@@ -276,7 +305,7 @@ export interface OpenUsageOverlayOptions {
 function sessionValue(view: TelemetryView, elapsed: string | null): string {
 	const theme = clioTheme();
 	const totals = view.session().totals;
-	const tokenFigure = usageFigure(totals.tokens);
+	const tokenFigure = usageLineFigure(totals.tokens);
 	const tokensKnown = !usageSaysNothing(tokenFigure);
 	const costShown = contributed(totals.usd);
 	const costKnown = costShown && !usageUnmeasured(totals.usd);

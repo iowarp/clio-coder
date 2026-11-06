@@ -3,6 +3,7 @@ import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import type { JobRecord } from "../core/job-types.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { CompactionPayload } from "../core/telemetry/live-events.js";
 import { motionEnabled } from "../core/terminal-preferences.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
@@ -67,6 +68,7 @@ import type { CompactionRailFacts } from "./footer/widgets.js";
 import {
 	activeTaskRail,
 	compactionRailLabel,
+	compactionSettledPresentation,
 	composerPhasePresentation,
 	idleReadinessPresentation,
 	type RouteReadinessFacts,
@@ -599,6 +601,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let localBashCancelledAt: number | null = null;
 	/** The last direct shell line, until a model turn settles after it; idle leads with it while it is the newest event. */
 	let lastShell: ShellSettlement | null = null;
+	/** A compaction that stopped or failed since the last turn or shell line; the rail leads with it until either. */
+	let lastCompactionStop: "cancelled" | "failed" | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
@@ -750,6 +754,19 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		dropCheck.unref();
 	};
 	unsubscribeTelemetry.push(deps.telemetry.read?.subscribe("health", checkDrops) ?? (() => {}));
+	// A compaction's end is the rail's newest fact until a turn or shell line replaces it.
+	if (typeof deps.bus?.subscribe === "function") {
+		unsubscribeTelemetry.push(
+			deps.bus.subscribe("compaction.started", () => {
+				lastCompactionStop = null;
+			}),
+			deps.bus.subscribe("compaction.ended", (payload: CompactionPayload) => {
+				lastCompactionStop = payload?.outcome === "cancelled" || payload?.outcome === "failed" ? payload.outcome : null;
+				footer?.refresh();
+				requestRender();
+			}),
+		);
+	}
 
 	/** What a running plan is doing in rail words: the step it runs now, or that it is stopping. */
 	const planRailWords = (plan: FleetPlanRunView): string => {
@@ -855,6 +872,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
 				...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
 			};
+			if (lastCompactionStop !== null && !detail) {
+				const blocker = routeBlockerWords(routeFacts);
+				return compactionSettledPresentation(lastCompactionStop, width, reserved, phaseModelName(status), blocker);
+			}
 			if (lastShell !== null && !detail) {
 				const blocker = routeBlockerWords(routeFacts);
 				return shellSettledPresentation(
@@ -867,8 +888,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			const readiness = idleReadinessPresentation(routeFacts, width, reserved, phaseModelName(status));
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
-			const quiet = readiness.glyph === GLYPH.queued && target.health.status === "healthy";
-			return { ...readiness, ...(quiet ? { label: "is idle" } : {}), detail };
+			const quiet =
+				(readiness.glyph === GLYPH.queued || readiness.glyph === GLYPH.ok) && target.health.status === "healthy";
+			return { ...readiness, ...(quiet ? { label: "is idle", glyph: GLYPH.queued } : {}), detail };
 		},
 		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
 		getBesideCard: (room) =>
@@ -1279,6 +1301,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		root,
 		setLocalBashRunning(running, command, settled) {
 			lastShell = running ? null : (settled ?? null);
+			lastCompactionStop = null;
 			localBashStartedAt = running ? Date.now() : null;
 			localBashCommand = running ? (command ?? null) : null;
 			localBashCancelledAt = null;
@@ -1312,6 +1335,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		setLastTurnSummary: (summary) => {
 			lastTurnSummary = summary;
 			lastShell = null;
+			lastCompactionStop = null;
 		},
 		resetForNewSession: () => {
 			resetLoopJobs();
@@ -1322,6 +1346,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolTruncatedResults = 0;
 			lastTurnSummary = null;
 			lastShell = null;
+			lastCompactionStop = null;
 			liveGeneration = false;
 			statusController.reset();
 			// A timed notice spoke about a moment in the session that just ended; a pinned one states a condition still true.

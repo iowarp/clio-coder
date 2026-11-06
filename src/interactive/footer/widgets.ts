@@ -495,17 +495,23 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 	}
 }
 
-/** The verb for a call the harness executes, and the words when its arguments name no object. */
-const HARNESS_TOOL_ACTIVITY: Readonly<Record<string, { verb: string; bare: string }>> = {
-	[ToolNames.Write]: { verb: "is writing", bare: "is writing a file" },
-	[ToolNames.Edit]: { verb: "is editing", bare: "is editing a file" },
-	[ToolNames.Read]: { verb: "is reading", bare: "is reading a file" },
-	[ToolNames.Bash]: { verb: "is running", bare: "is running a command" },
-	[ToolNames.RunScript]: { verb: "is running", bare: "is running a script" },
-	[ToolNames.Grep]: { verb: "is searching for", bare: "is searching" },
-	[ToolNames.Find]: { verb: "is finding", bare: "is finding files" },
-	[ToolNames.CodeNav]: { verb: "is looking up", bare: "is navigating code" },
+/**
+ * The verb for a call the harness executes, the words when its arguments name no object, and the present tense a short
+ * actor takes on a narrow rail (`Clio runs`, `you run`), where `your shell is running` would cost the command its text.
+ */
+const HARNESS_TOOL_ACTIVITY: Readonly<Record<string, { verb: string; bare: string; tight: string; mine: string }>> = {
+	[ToolNames.Write]: { verb: "is writing", bare: "is writing a file", tight: "writes", mine: "write" },
+	[ToolNames.Edit]: { verb: "is editing", bare: "is editing a file", tight: "edits", mine: "edit" },
+	[ToolNames.Read]: { verb: "is reading", bare: "is reading a file", tight: "reads", mine: "read" },
+	[ToolNames.Bash]: { verb: "is running", bare: "is running a command", tight: "runs", mine: "run" },
+	[ToolNames.RunScript]: { verb: "is running", bare: "is running a script", tight: "runs", mine: "run" },
+	[ToolNames.Grep]: { verb: "is searching for", bare: "is searching", tight: "searches", mine: "search" },
+	[ToolNames.Find]: { verb: "is finding", bare: "is finding files", tight: "finds", mine: "find" },
+	[ToolNames.CodeNav]: { verb: "is looking up", bare: "is navigating code", tight: "looks up", mine: "look up" },
 };
+
+/** Below this terminal width a running call names its actor in the short form, the same on the rail and the strip. */
+const TOOL_ACTOR_TIGHT_WIDTH = 70;
 
 /** These calls leave the next step with a person or a worker, so the model's turn is what is waiting. */
 const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
@@ -539,6 +545,8 @@ export interface RailSubject {
 	name: string;
 	/** Set by the fitter: whether the name kept its place in front of the state. */
 	shown: boolean;
+	/** Where the name ranks among the facts, when it is part of the claim rather than a courtesy beside it. */
+	keep?: number;
 }
 
 /** Below the way out, above every fact that only adds detail. */
@@ -551,7 +559,10 @@ const RAIL_SUBJECT_KEEP = 6.5;
  */
 function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: RailSubject): string {
 	const [head, ...rest] = facts.filter((fact): fact is RailFact & { text: string } => fact.text !== null);
-	const named: RailFact & { text: string } = { text: subject?.name ?? "", keep: RAIL_SUBJECT_KEEP };
+	const named: RailFact & { text: string } = {
+		text: subject?.name ?? "",
+		keep: subject?.keep ?? RAIL_SUBJECT_KEEP,
+	};
 	if (subject !== undefined) subject.shown = false;
 	if (head === undefined) return "";
 	const cost = (fact: RailFact, text: string): number =>
@@ -670,16 +681,23 @@ function admissionFacts(
 		case "lock": {
 			// The lock is Clio's machinery; what the operator needs is who is changing the server's models and to what.
 			const holder = admission.holder;
-			const who = holder === null ? null : `${holder.host ? `Clio on ${holder.host} ` : ""}pid ${holder.pid}`;
+			// A process id is not a name an operator knows a session by; the host is, when it is another machine.
+			const who = holder === null ? null : holder.host ? `the Clio session on ${holder.host}` : "that session";
 			const doing = holder?.wants ? `is loading ${nickname(holder.wants)}` : "is changing the loaded model";
 			const held: RailFact = {
 				text: holder === null ? "who holds it is unknown" : holder.self ? `this Clio ${doing}` : `${who} ${doing}`,
-				...(holder === null ? {} : { short: holder.self ? "this Clio" : `pid ${holder.pid}` }),
+				...(holder === null
+					? {}
+					: holder.self
+						? { short: "this Clio" }
+						: holder.wants
+							? { short: `loading ${nickname(holder.wants)}` }
+							: {}),
 				// With room to name the owner, naming it outranks the long form of the way out.
 				keep: room >= 58 ? RAIL_ACTION_KEEP : 6,
 			};
 			return {
-				head: holder?.self === true ? "is waiting for its own model load" : "is waiting for another Clio",
+				head: holder?.self === true ? "is waiting for its own model load" : "is waiting for another Clio session",
 				tight: "is waiting its turn",
 				subject: "Clio",
 				facts: [elapsed, held, way],
@@ -790,7 +808,7 @@ function retryCauseFact(retry: RetryOverlay | undefined, now: number, server: st
 				: { text: `${server} has said not loaded for ${wholeSeconds(age)}`, short: `not loaded ${wholeSeconds(age)}` };
 		}
 		case "capacity":
-			return { text: `${server} says it is busy`, short: "server busy" };
+			return { text: `${server} says it is busy`, short: `${server} is busy` };
 		case "rate-limit":
 			return { text: `${server} is rate limiting`, short: "rate limited" };
 		default:
@@ -846,50 +864,35 @@ function retryRailLabel(
 			slot,
 		);
 	}
-	// A countdown the provider asked for needs a verb of its own: with no count the first fact stood where the state
-	// belongs and read `Judge-model mock says it is busy`.
-	const waiting = onWait
-		? room >= 40
-			? `is waiting to retry${count === null ? "" : ` (${count})`}`
-			: (count ?? "will retry")
-		: attempts;
+	// One sentence at every width: the countdown is the state (`will retry in 3s`), so it never reads beside a
+	// provider's longer number as two clocks, and what the server asked for says it is the whole wait it asked for.
 	const left = retry?.dueAt !== undefined ? formatStatedWait(Math.max(0, retry.dueAt - now)) : null;
 	const asked =
 		retry?.retryAfterMs !== undefined && retry.retryAfterMs > 0 ? formatStatedWait(retry.retryAfterMs) : null;
-	// A narrow rail says whose wait it is in the countdown's own words, which leaves the cells to spell out the way out.
-	if (asked !== null && left !== null && room < 70) {
-		return fitRailFacts(
-			[
-				{ text: waiting, keep: 9 },
-				{ text: `provider wait ${left}`, short: `in ${left}`, keep: 8, distinguishes: true },
-				{ ...retryCauseFact(retry, now, server), keep: 6 },
-				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
-				{ text: MODEL_MOVES.text, keep: 5 },
-			],
-			room,
-			slot,
-		);
-	}
+	// A count stays with its countdown at every width: `will retry in 8s (3rd wait)`, and where that and Esc do not fit
+	// side by side, the shorter `3rd wait, retry in 8s`.
+	const esc = 3 + visibleWidth(ESC_CANCELS.text ?? "");
+	const head =
+		left === null
+			? onWait
+				? `${room >= 40 ? "is waiting to retry" : "waiting to retry"}${count === null ? "" : ` (${count})`}`
+				: attempts
+			: count === null
+				? `will retry in ${left}`
+				: visibleWidth(`will retry in ${left} (${count})`) + esc <= room
+					? `will retry in ${left} (${count})`
+					: onWait
+						? `${count}, retry in ${left}`
+						: `retry ${count} in ${left}`;
 	return fitRailFacts(
 		[
-			{ text: waiting, keep: 9 },
-			// What the server said is the state here; whose wait it is comes after it.
-			{ ...retryCauseFact(retry, now, server), keep: 7 },
-			{
-				// What the server said outranks the long form of the countdown beside it.
-				text: left === null ? null : retry?.cause !== undefined && room < 90 ? `in ${left}` : `next attempt in ${left}`,
-				...(left === null ? {} : { short: `in ${left}` }),
-				keep: 8,
-			},
-			// Whose wait this is, after what the server said: a long countdown has to say it is not Clio's choice.
-			{
-				text: asked === null ? null : `provider asked for ${asked}`,
-				short: "provider asked",
-				keep: retry?.cause !== undefined ? 6 : 7,
-			},
+			{ text: head, keep: 9 },
+			// What the server said is the cause of the wait; whose wait it is comes after it.
+			{ ...retryCauseFact(retry, now, server), keep: 6 },
+			{ text: asked === null ? null : `${server} asked for ${asked} in all`, short: `asked for ${asked} in all`, keep: 5 },
 			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 			// The whole words or none: the short form would cost a name the rail is sized to keep.
-			{ text: MODEL_MOVES.text, keep: 5 },
+			{ text: MODEL_MOVES.text, keep: 3 },
 		],
 		room,
 		slot,
@@ -983,50 +986,72 @@ function toolActivity(
 	verb: string | null,
 	elapsedFrom: (from: number) => string | null,
 	modelName: string | undefined,
-	slot?: RailSubject,
+	slot: RailSubject | undefined,
+	width: number,
 ): { label: string; subject?: string } {
 	const tool = status.tool;
-	const subject = tool?.operatorShell === true ? "your shell" : "Clio";
+	const mine = tool?.operatorShell === true;
 	const name = tool?.toolName ?? "tool";
 	const owned = MODEL_OWNED_TOOL_ACTIVITY[name];
-	if (owned !== undefined && tool?.operatorShell !== true)
-		return { label: fitRailFacts([{ text: owned, keep: 9 }], room, slot) };
+	if (owned !== undefined && !mine) return { label: fitRailFacts([{ text: owned, keep: 9 }], room, slot) };
 	const activity = Object.hasOwn(HARNESS_TOOL_ACTIVITY, name) ? HARNESS_TOOL_ACTIVITY[name] : undefined;
 	const object = tool?.toolSubject ?? null;
 	const elapsed = tool?.startedAt ?? status.toolStartedAt;
 	const others = (status.activeTools ?? []).length - 1;
 	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 	const tier = computeWatchdogTier(silentMs);
-	const full = verb ?? activity?.verb ?? "is running";
-	// The way out is owed its cells from the start, and the name of what is running gives them up.
-	const wayOut = verb === null ? 6 : 0;
-	// Who is acting is part of the claim: the command's text gives up cells for the subject before the subject goes.
-	const subjectCells = slot !== undefined && room >= 30 ? visibleWidth(subject) + 1 : 0;
-	const lead = room - wayOut - subjectCells >= 24 ? full : full.replace(/^is /u, "");
-	const span = object === null ? null : Math.max(4, Math.min(48, room - visibleWidth(lead) - 9 - wayOut - subjectCells));
+	// Who is acting is the claim itself: at 60 and 40 columns `running \`trap…\`` read the same for your shell and
+	// Clio's command. A narrow terminal gives the actor its short form and a present-tense verb instead of dropping it,
+	// and the choice keys on the terminal's width so the rail and the strip spell it the same.
+	// The operator's own line reads `you` on a narrow rail in every state, as its card does (`you are stopping`).
+	const tight = width < TOOL_ACTOR_TIGHT_WIDTH && (verb === null || mine);
+	const subject = mine ? (tight ? "you" : "your shell") : "Clio";
+	const full =
+		verb !== null
+			? mine && tight
+				? verb.replace(/^is /u, "are ")
+				: verb
+			: tight
+				? mine
+					? (activity?.mine ?? "run")
+					: (activity?.tight ?? "runs")
+				: (activity?.verb ?? "is running");
+	const clockText = elapsed === undefined ? null : elapsedFrom(elapsed);
+	// The facts that outrank the command's text are owed their cells before the text takes the rest.
+	const wayOut = verb === null ? 3 + visibleWidth(ESC_CANCELS.text ?? "") : 0;
+	const clockCells = clockText === null ? 0 : 3 + Math.max(2, visibleWidth(clockText));
+	const subjectCells = slot !== undefined ? visibleWidth(subject) + 1 : 0;
+	const othersCells = others > 0 ? 2 + String(others).length : 0;
+	const spare = room - wayOut - clockCells - subjectCells - othersCells;
+	// A stop keeps its "is": `Clio stopping` read as a label, and the command text gives up the cells instead.
+	const lead = tight || verb !== null || spare - visibleWidth(full) >= 24 ? full : full.replace(/^is /u, "");
+	const span = object === null ? null : Math.max(4, Math.min(48, spare - visibleWidth(lead) - 3));
+	const bareObject = activity === undefined ? "a command" : (/^is \S+ (.+)$/u.exec(activity.bare)?.[1] ?? null);
+	const bareWords = tight ? (bareObject === null ? full : `${full} ${bareObject}`) : activity?.bare;
 	const phrase =
 		object === null || span === null
 			? verb !== null
 				? `${verb} ${truncateToWidth(name, 18, GLYPH.ellipsis, false)}`
-				: (activity?.bare ?? `is running ${truncateToWidth(name, room >= 40 ? 18 : 12, GLYPH.ellipsis, false)}`)
+				: (bareWords ?? `is running ${truncateToWidth(name, room >= 40 ? 18 : 12, GLYPH.ellipsis, false)}`)
 			: `${lead} \`${truncateToWidth(object, span, GLYPH.ellipsis, false)}\`${others > 0 ? ` +${others}` : ""}`;
 	const label = fitRailFacts(
 		[
 			{ text: phrase, keep: 9 },
-			{ text: elapsed === undefined ? null : elapsedFrom(elapsed), keep: 8 },
+			{ text: clockText, keep: 8 },
 			{ ...ESC_CANCELS, text: verb === null ? ESC_CANCELS.text : null, keep: RAIL_ACTION_KEEP },
 			// The harness sees a tool's output; a direct shell line's goes straight to its card, so its silence is unknown here.
 			{
 				text:
-					verb === null && tier >= 3 && tool?.operatorShell !== true
+					verb === null && tier >= 3 && !mine
 						? `no output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}`
 						: null,
 				keep: 5,
 			},
-			{ text: tool?.operatorShell !== true && modelName ? `requested by ${modelName}` : null, keep: 3 },
+			{ text: !mine && modelName ? `requested by ${modelName}` : null, keep: 3 },
 		],
 		room,
-		slot === undefined ? undefined : Object.assign(slot, { name: subject }),
+		// A running call's actor outranks its clock: without it the rail cannot say whose command this is.
+		slot === undefined ? undefined : Object.assign(slot, { name: subject }, verb === null ? { keep: 8.5 } : {}),
 	);
 	return { label, subject };
 }
@@ -1155,7 +1180,7 @@ export function composerPhasePresentation(
 			]);
 			break;
 		case "tool_running": {
-			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName, slot);
+			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName, slot, width);
 			return done({ ...phase, ...activity });
 		}
 		case "tool_blocked":
@@ -1177,7 +1202,7 @@ export function composerPhasePresentation(
 		case "stuck":
 			if (status.resumePhase === "tool_running" && status.tool) {
 				// Its own process has gone quiet, which is not the model having no output.
-				return done({ ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName, slot) });
+				return done({ ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName, slot, width) });
 			}
 			if (status.resumePhase === "retrying" && status.retry) {
 				label = retryRailLabel(status, room, now, elapsedFrom, slot, server);
@@ -1217,6 +1242,7 @@ export function composerPhasePresentation(
 					elapsedFrom,
 					undefined,
 					slot,
+					width,
 				);
 				return done({ ...phase, ...stopping });
 			}
@@ -1237,6 +1263,8 @@ export function composerPhasePresentation(
 			const short = room < 24;
 			// Cancelling a request does not call back a load it started: the server may finish it regardless.
 			const leftLoading = status.modelRequest?.abandonedLoad === true;
+			// The run was cancelled, not the model: `Judge-model was cancelled` named the wrong thing, so no subject leads it.
+			if ((stop === "cancelled" || stop === "aborted") && slot !== undefined) slot.name = "";
 			label =
 				stop === "error"
 					? fit(failedTurnFacts({ text: "failed", keep: 9 }, status.summary?.failure))
@@ -1244,7 +1272,7 @@ export function composerPhasePresentation(
 						? fit([{ text: short ? "stopped" : "stopped generating tool arguments", keep: 9 }])
 						: stop === "cancelled" || stop === "aborted"
 							? fit([
-									{ text: short ? "cancelled" : "was cancelled", keep: 9 },
+									{ text: "run cancelled", keep: 9 },
 									{ text: leftLoading ? `${server} may finish the load` : null, short: "may still load", keep: 5 },
 								])
 							: stop === "length"
@@ -1351,7 +1379,8 @@ export function idleReadinessPresentation(
 						{ text: "is not checked yet", short: "unchecked", keep: 9 },
 						{ text: `${server} has not answered a check`, keep: 4 },
 					]);
-	return { glyph: GLYPH.queued, ...quiet, label, ...shown() };
+	// Ready reads with one mark whether or not a request has gone yet: a passed check is what `✓` claims (HS01).
+	return { glyph: facts.health === "healthy" ? GLYPH.ok : GLYPH.queued, ...quiet, label, ...shown() };
 }
 
 /** How a direct shell line settled, as its card states it. */
@@ -1394,7 +1423,9 @@ export function shellSettledPresentation(
 	routeNote: string | null = null,
 ): RailPhasePresentation {
 	const room = railActivityRoom(width, reserved);
-	const slot: RailSubject = { name: "your shell", shown: false };
+	// A narrow rail names the operator `you` while the line runs, stops and settles, so the three read as one actor.
+	const tight = width < TOOL_ACTOR_TIGHT_WIDTH;
+	const slot: RailSubject = { name: tight ? "you" : "your shell", shown: false };
 	const quoted = (span: number): string =>
 		`\`${truncateToWidth(shell.command, Math.max(4, span), GLYPH.ellipsis, false)}\``;
 	const outcome: { glyph: string; token: ClioToken; head: string; tight: string; tail: RailFact | null } = shell.error
@@ -1408,19 +1439,28 @@ export function shellSettledPresentation(
 					tail: shell.killed ? { text: "killed after it ignored the stop", short: "killed", keep: 7 } : null,
 				}
 			: shell.exitCode === 0
-				? { glyph: GLYPH.ok, token: "success", head: "finished", tight: "finished", tail: null }
+				? {
+						glyph: GLYPH.ok,
+						token: "success",
+						head: "finished",
+						tight: "ran",
+						tail: tight ? { text: "finished", keep: 8 } : null,
+					}
 				: {
 						glyph: GLYPH.error,
 						token: "warning",
 						head: shell.exitCode === null ? "ended without an exit code" : `exited ${shell.exitCode}`,
-						tight: shell.exitCode === null ? "no exit code" : `exit ${shell.exitCode}`,
-						tail: null,
+						tight: "ran",
+						tail: tight ? { text: shell.exitCode === null ? "no exit code" : `exit ${shell.exitCode}`, keep: 8 } : null,
 					};
-	const span = Math.min(40, room - visibleWidth(outcome.head) - 16);
+	const verb = tight ? outcome.tight : room >= 30 ? outcome.head : outcome.tight;
+	const span = Math.min(40, room - visibleWidth(verb) - 16 - visibleWidth(slot.name));
+	// On a narrow rail the command is the verb's object (`you ran \`false\` · exit 1`), as the card words it.
+	const head = tight && span >= 6 ? `${verb} ${quoted(span)}` : verb;
 	const label = fitRailFacts(
 		[
-			{ text: room >= 30 ? outcome.head : outcome.tight, keep: 9 },
-			{ text: span >= 8 ? quoted(span) : null, keep: 5 },
+			{ text: head, ...(head !== verb ? { short: verb } : {}), keep: 9 },
+			{ text: !tight && span >= 8 ? quoted(span) : null, keep: 5 },
 			...(outcome.tail ? [outcome.tail] : []),
 			// The way to another model goes with the blocker it answers, whole or not at all.
 			{
@@ -1439,6 +1479,41 @@ export function shellSettledPresentation(
 		label,
 		subject: slot.name,
 		subjectShown: slot.shown,
+	};
+}
+
+/**
+ * Idle after a compaction that stopped or failed: its outcome is the newest thing that happened, so it leads, as a
+ * shell line's does. Going straight to `is ready` left the rail saying nothing about the card just above it.
+ */
+export function compactionSettledPresentation(
+	outcome: "cancelled" | "failed",
+	width: number,
+	reserved = 0,
+	/** The model that was summarizing, which the rail named while it ran. */
+	subjectName?: string,
+	/** What blocks the route's next prompt, in idle readiness's words, or null when nothing does. */
+	blocker: string | null = null,
+): RailPhasePresentation {
+	const room = railActivityRoom(width, reserved);
+	const cancelled = outcome === "cancelled";
+	// The same subject the running stage had (`Judge-model is summarizing`), so the stop reads as its end.
+	const slot: RailSubject | undefined = subjectName !== undefined ? { name: subjectName, shown: false } : undefined;
+	const label = fitRailFacts(
+		[
+			{ text: cancelled ? "stopped compacting" : "could not compact", keep: 9 },
+			{ text: cancelled ? null : "/context compact retries", short: "/context compact", keep: 7 },
+			{ text: blocker ?? "ready for a prompt", short: blocker ?? "ready", keep: 5 },
+		],
+		room,
+		slot,
+	);
+	return {
+		glyph: cancelled ? GLYPH.cancelled : GLYPH.error,
+		token: cancelled ? "counter" : "warning",
+		live: false,
+		label,
+		...(slot !== undefined ? { subjectShown: slot.shown } : {}),
 	};
 }
 

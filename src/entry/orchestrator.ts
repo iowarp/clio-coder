@@ -2100,9 +2100,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (snapshot.verdict === "trusted") continue;
 		for (const file of snapshot.files) {
 			if (file.text !== null || file.error !== undefined) {
-				const notice = `[clio-coder:trust] ${projectSurfaceTrustNotice(snapshot, file.path)}`;
+				const notice = projectSurfaceTrustNotice(snapshot, file.path);
+				// The tag tells a stderr reader which program spoke; a notice inside Clio needs no tag and showed it raw.
 				if (holdTrustNotices) heldTrustNotices.push(notice);
-				else bootStderr(`${notice}\n`);
+				else bootStderr(`[clio-coder:trust] ${notice}\n`);
 			}
 		}
 	}

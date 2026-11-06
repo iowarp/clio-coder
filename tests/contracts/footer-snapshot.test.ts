@@ -97,9 +97,9 @@ test("footer totals come from the read model: unknown usage stays partial, never
 				const text = rows.map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
 				if (scenario === "never-sent") match(text, /(?:0 tok|session 0 tokens) · 1 never sent/u);
 				if (scenario === "golden") {
-					// Two calls have unknown usage; the footer states the measured 5.3k and leaves the bound to /usage.
-					match(text, /(?:5\.3k tok|session 5\.3k tokens) · 1 never sent/u);
-					ok(!/at least|some calls unknown|≥5\.3k/u.test(text));
+					// Two calls have unknown usage; the footer states the bound with the one mark /usage and the exit card use.
+					match(text, /(?:≥5\.3k tok|session ≥5\.3k tokens) · 1 never sent/u);
+					ok(!/at least|some calls unknown|~5\.3k/u.test(text));
 					match(text, /\$0\.01 \+\?/u);
 				}
 				if (scenario === "unbound") match(text, /not available/u);

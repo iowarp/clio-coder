@@ -153,17 +153,24 @@ function healthSummary(data: HealthData): { text: string; ok: boolean } {
 			const owner = names[index];
 			return owner ? journalLosses(journal, owner) : [];
 		}),
-		// The table counts these in its own `no journal open` row under `dropped`, so the verdict uses the same word.
-		loss(measured(health.producer.unownedRecords), "dropped because no journal was open for them"),
 		loss(measured(health.producer.sinkFailures), "refused by a journal"),
 	].filter((entry) => entry.count > 0);
+	// Records no session or run owned when they were emitted had no journal to go to. They are counted, under the same
+	// word as the table's `no journal open` row, but they are not a journal failing, so they do not raise the mark (H4).
+	const unowned = measured(health.producer.unownedRecords);
+	const ownerless =
+		unowned > 0
+			? ` ${records(unowned)} ${unowned === 1 ? "was" : "were"} dropped because no journal was open for ${unowned === 1 ? "it" : "them"}.`
+			: "";
 	const total = losses.reduce((sum, entry) => sum + entry.count, 0);
 	const [only] = losses;
 	const saving =
 		losses.length === 0
 			? health.journals.length === 0
 				? "Clio has no journal open yet, so nothing is being saved."
-				: "Everything Clio records is being saved."
+				: unowned > 0
+					? "Every open journal is saving what it is sent."
+					: "Everything Clio records is being saved."
 			: losses.length === 1 && only
 				? `${records(only.count)} ${only.sentence}.`
 				: `Clio lost ${records(total)}: ${losses.map((entry) => `${renderCount(entry.count)} ${entry.phrase}`).join(", ")}.`;
@@ -179,7 +186,7 @@ function healthSummary(data: HealthData): { text: string; ok: boolean } {
 					? `Responsiveness is normal apart from one pause of ${lag.max.display}.`
 					: "Responsiveness is normal.";
 	return {
-		text: `${saving} ${responsive}`,
+		text: `${saving}${ownerless} ${responsive}`,
 		ok: losses.length === 0 && health.journals.length > 0 && (slowest === null || slowest <= SLOW_TICK_MS),
 	};
 }
@@ -251,7 +258,7 @@ function healthLines(data: HealthData, width: number): string[] {
 		if (health.journals.length === 0)
 			lines.push(
 				...missing("No journal is open in this process yet."),
-				...chipRows(theme, [unit("dropped with no journal open", unowned.display, lost(unowned)), ...outside], safe),
+				...chipRows(theme, [unit("dropped with no journal open", unowned.display), ...outside], safe),
 			);
 		else
 			lines.push(
@@ -424,7 +431,7 @@ function journalRows(
 						[
 							theme.fg("footerIdentity", NO_JOURNAL),
 							...counts(journals[0] as Journal).map((count) =>
-								count.label === "dropped" ? lossCell(unowned) : ({ text: "–" } as TableCell),
+								count.label === "dropped" ? ({ text: unowned.display } as TableCell) : ({ text: "–" } as TableCell),
 							),
 						],
 					]),
@@ -432,7 +439,8 @@ function journalRows(
 	};
 	// The ids are for someone matching a journal on disk, so they come after the counts, whole or not at all.
 	const idRow = (name: OwnerName | undefined): string[] => {
-		if (!name || name.id.length === 0) return [];
+		// The process journal's id names nothing an operator can act on; a session or run id is what /resume and /view take.
+		if (!name || name.id.length === 0 || name.label === "this Clio process") return [];
 		const inline = `${name.label} id ${name.id}`;
 		if (visibleWidth(inline) <= width) return [theme.fg("annotation", inline)];
 		return visibleWidth(name.id) <= width ? [theme.fg("annotation", name.id)] : [];
@@ -451,7 +459,13 @@ function journalRows(
 	for (const [index, journal] of journals.entries()) {
 		const name = names[index];
 		const heading = theme.style("groupHeading", name?.label ?? journal.owner, { bold: true });
-		const id = name && name.id.length > 0 && visibleWidth(`${name.label}  ${name.id}`) <= width ? name.id : null;
+		const id =
+			name &&
+			name.id.length > 0 &&
+			name.label !== "this Clio process" &&
+			visibleWidth(`${name.label}  ${name.id}`) <= width
+				? name.id
+				: null;
 		lines.push(id === null ? heading : `${heading}  ${theme.fg("annotation", id)}`);
 		lines.push(
 			...chipRows(
@@ -466,7 +480,7 @@ function journalRows(
 	}
 	if (unowned !== null) {
 		lines.push(theme.style("groupHeading", NO_JOURNAL, { bold: true }));
-		lines.push(`  ${theme.fg("fieldName", "dropped")} ${theme.fg("warning", unowned.display)}`);
+		lines.push(`  ${theme.fg("fieldName", "dropped")} ${theme.fg("counter", unowned.display)}`);
 	}
 	return [...lines, ...below, ...explain];
 }
