@@ -748,14 +748,16 @@ export class ListOverlayView implements Component {
 	}
 
 	/**
-	 * The focused two-column row in full: its whole lead, then its whole text, wrapped under a quiet rule and held to
+	 * The focused two-column row in full: its lead, then its whole text, wrapped under a quiet rule and held to
 	 * FOCUS_LINE_ROWS rows. A row the width did not cut is stated too, so the reserved rows never read as empty.
 	 */
 	private focusLineRows(width: number, focused: ListOverlayItem | undefined): string[] {
 		const theme = clioTheme();
 		const cells = focused?.cells;
 		const rows: string[] = [this.padLine(`  ${innerDivider(theme, Math.max(1, width - 4))}`, width)];
-		const body = cells ? `${theme.fg("menuOption", cells.lead)}  ${theme.fg("menuDescription", cells.text)}` : "";
+		// The short lead is whole where it exists; the text is what the row cut, so it gets the rows.
+		const lead = cells?.narrowLead ?? cells?.lead ?? "";
+		const body = cells ? `${theme.fg("menuOption", lead)}  ${theme.fg("menuDescription", cells.text)}` : "";
 		const wrapped = body.length === 0 ? [] : wrapTextWithAnsi(body, Math.max(1, width - 4));
 		for (let index = 0; index < FOCUS_LINE_ROWS - 1; index += 1) {
 			const row = wrapped[index] ?? "";
