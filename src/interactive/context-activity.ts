@@ -8,6 +8,7 @@ import type {
 } from "../core/telemetry/live-events.js";
 import type { Component } from "../engine/tui.js";
 import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { footerTokens } from "../session-control/compaction-lines.js";
 import {
 	CONTEXT_KIND_TITLES,
 	outcomeTone,
@@ -35,6 +36,8 @@ export interface ContextActivitySnapshot {
 	completedAtMs: number | null;
 	current: number | null;
 	total: number | null;
+	/** What the counts measure; absent counts items. */
+	unit?: "tokens";
 	detail: string | null;
 	stages?: ReadonlyArray<ContextActivityPhase>;
 }
@@ -122,28 +125,36 @@ export function formatContextActivityRailLines(
 	// trail and the step label; weighting stages equally filled 40% of the bar
 	// before a four-minute draft began (index finishes in under a second).
 	// Known counts fill the bar. Unknown work advances an unfilled marker
-	// monotonically within the stage without claiming a percentage (flywheel r4/1).
+	// monotonically within the stage without claiming a percentage (flywheel r4/1);
+	// A stage that streams tokens names its measure at the bar's end, or says
+	// nothing is measurable yet, so the reading survives a rail too narrow for the message row.
+	const measure = !settled ? tokenMeasure(activity) : "";
+	const barWidth = measure && width - visibleWidth(measure) - 1 >= 12 ? width - visibleWidth(measure) - 1 : width;
 	const known =
 		activity.total !== null && activity.total > 0 && activity.current !== null
 			? Math.max(0, Math.min(1, activity.current / activity.total))
 			: activity.status === "completed"
 				? 1
 				: null;
-	const filled = done ? width : known === null ? 0 : Math.min(width - 1, Math.floor(known * width));
+	const filled = done ? barWidth : known === null ? 0 : Math.min(barWidth - 1, Math.floor(known * barWidth));
 	const stageElapsed = Math.max(
 		0,
 		(activity.completedAtMs ?? now) - (activity.phaseStartedAtMs ?? activity.startedAtMs),
 	);
 	const marker =
-		known === null && !done && !failed ? Math.floor(((width - 1) * stageElapsed) / (stageElapsed + 30_000)) : filled;
-	const remaining = width - marker;
+		known === null && !done && !failed ? Math.floor(((barWidth - 1) * stageElapsed) / (stageElapsed + 30_000)) : filled;
+	const remaining = barWidth - marker;
 	rows.push(
 		theme.fg(tone, GLYPH.barFull.repeat(known === null ? 0 : filled)) +
 			theme.fg("meterFree", GLYPH.barEmpty.repeat(known === null ? marker : 0)) +
 			(!done ? theme.fg(tone, failed ? GLYPH.error : cancelled ? GLYPH.cancelled : "▸") : "") +
-			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done ? 0 : 1)))),
+			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done ? 0 : 1)))) +
+			(barWidth < width ? ` ${theme.fg("toolMetadata", measure)}` : ""),
 	);
-	const counts = activity.current !== null && activity.total !== null ? ` · ${activity.current}/${activity.total}` : "";
+	const counts =
+		activity.unit !== "tokens" && activity.current !== null && activity.total !== null
+			? ` · ${activity.current}/${activity.total}`
+			: "";
 	const timing = activity.timing;
 	const detail = timing
 		? ` · ${Math.max(0, Math.floor(((activity.completedAtMs ?? now) - timing.startedAtMs) / 1000))}s / ${Math.round(timing.timeoutMs / 1000)}s limit · run ${plain(timing.runId)}`
@@ -172,6 +183,23 @@ export function formatContextActivityRailLines(
 		rows.push(padAnsi(message, width, GLYPH.ellipsis));
 	}
 	return rows;
+}
+
+/**
+ * A summary's written size, in the footer's units, against the output cap it
+ * fills toward. Without a cap it is a count and the bar stays indeterminate;
+ * before the first token nothing is measurable, and the rail says so.
+ */
+function tokenMeasure(activity: ContextActivitySnapshot): string {
+	if (activity.unit !== "tokens") return "";
+	if (activity.current === null) return "no output yet";
+	const written = footerTokens(activity.current);
+	if (activity.total !== null && activity.total > 0) {
+		// Padded to the cap's own width, so the bar keeps its length as the count grows.
+		const cap = footerTokens(activity.total);
+		return `${written.padStart(cap.length)} of ${cap} tokens`;
+	}
+	return `${written} ${activity.current === 1 ? "token" : "tokens"}, no limit`;
 }
 
 export function createContextProgressRail(
@@ -270,6 +298,7 @@ export function createContextActivityStore(
 			completedAtMs: terminal ? raw.at : null,
 			current: typeof raw.current === "number" && Number.isFinite(raw.current) ? raw.current : null,
 			total: typeof raw.total === "number" && Number.isFinite(raw.total) ? raw.total : null,
+			...(raw.unit === "tokens" ? { unit: "tokens" as const } : {}),
 			detail: typeof raw.detail === "string" && raw.detail.length > 0 ? raw.detail : null,
 			...(raw.timing &&
 			Number.isFinite(raw.timing.startedAtMs) &&
