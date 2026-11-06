@@ -71,7 +71,7 @@ The focused test `tests/contracts/installed-package-ci.test.ts` imports this mod
 - Dist integrity: `dist/cli/index.js` and `dist/worker/entry.js` must carry the `#!/usr/bin/env node` shebang, and no shared chunk may carry one.
 - Pack-report mode: when `--tarball` and `--report` are both supplied, the script checks the tarball's sha512 integrity and size against the report, rejects unsafe tar paths, and compares the tarball's file inventory to the report. It then extracts the tarball and audits the extracted `package/` root.
 - `FORBIDDEN` rules reject `patches/`, retired `docs/html/`, Python bytecode, `.map` files, `benchmarks/`, unshipped `scripts/` files, `.tsbuildinfo`, `.env` files and `node_modules/`.
-- `SIZE_BUDGETS` assigns each payload class (grammars, codemap, dist bundles, gui client, src, docs, and the library/examples/models/root group) a byte ceiling. The total unpacked ceiling is their sum. `MAX_TARBALL_BYTES` is 16,500,000 and `MAX_ENTRY_COUNT` is 3,000. The inline comments record that budgets are re-pinned only with explicit maintainer approval.
+- `SIZE_BUDGETS` assigns each payload class (grammars, codemap, dist bundles, gui client, src, docs, and the library/examples/models/root group) a byte ceiling. The total unpacked ceiling is their sum. `MAX_TARBALL_BYTES` is 17,000,000 and `MAX_ENTRY_COUNT` is 3,000. The inline comments record that budgets are re-pinned only with explicit maintainer approval.
 
 The required file and prefix lists are read from `scripts/release-manifest.json`, which the same file's comment says is shared with a packaging contract test.
 
