@@ -625,12 +625,19 @@ export function buildWelcomeDashboardLines(
 			);
 		},
 	);
+	// Between the art's width and the hints column's, the art and facts stand as
+	// one block in the middle of the panel, with the tagline under its left edge,
+	// rather than leaving the panel's right half empty.
+	const blockWidth = Math.max(0, ...rows.map((row) => visibleWidth(row)));
+	const inset = sideBySide && !showHints ? " ".repeat(Math.max(0, Math.floor((room - blockWidth) / 2))) : "";
+	if (inset.length > 0) for (const [index, row] of rows.entries()) rows[index] = fit(`${inset}${row}`);
 	// The launchpad is an island like every other framed block, so it shares the
 	// one frame recipe and its action row sits under the standard inner divider.
 	const versionTag = titleBrand ? "" : theme.fg("brandCopper", `v${version}`);
 	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
 	const action = actionRow(theme, stats, leftRoom);
-	const taglineRows = room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room) : [];
+	const taglineRows =
+		room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room - inset.length).map((row) => `${inset}${row}`) : [];
 	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(action) - visibleWidth(versionTag)));
 	const title = titleBrand
 		? `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
