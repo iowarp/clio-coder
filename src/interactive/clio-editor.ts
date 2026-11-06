@@ -607,7 +607,8 @@ export class ClioEditor extends Editor {
 		} else if (mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
 			// The stage, its clock and Esc are the claim here, so they get the room before the name does (J2-F04).
-			const room = this.railLabelRoom(width) - reserved - 2;
+			// The status rail's own room: the composer-shaped stretch cost a 40-column compaction its Esc (R5).
+			const room = statusRailLabelRoom(width) - reserved - 2;
 			const named = this.chrome.getCompactionLabel?.(room - Math.max(4, Math.min(24, Math.floor(width / 3))) - 1) ?? null;
 			const alone = this.chrome.getCompactionLabel?.(room) ?? null;
 			// The name is the first thing to go: a rail that cannot hold it beside the clock and Esc drops it, not them.
@@ -639,7 +640,7 @@ export class ClioEditor extends Editor {
 		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
 		const actor = mode === "CONFIRM" ? undefined : status?.subject;
 		const nameCap = Math.max(4, Math.min(24, Math.floor(width / 3)));
-		const labelRoom = statusRail ? statusRailLabelRoom(width) : this.railLabelRoom(width);
+		const labelRoom = statusRail || mode === "COMPACTING" ? statusRailLabelRoom(width) : this.railLabelRoom(width);
 		const netRoom = labelRoom - reserved;
 		const separator = theme.fg("separator", " · ");
 		const facts = statusRail ? (status.detail?.split(" · ") ?? []).map((fact) => theme.fg("annotation", fact)) : [];
@@ -833,7 +834,8 @@ export class ClioEditor extends Editor {
 		// A body that stops asking to grow returns to the shared height, so the slice is also capped at what it was given.
 		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : Math.min(entry.rowsUsed, bodyRows));
 		const pad = " ".repeat(gutter);
-		const plainTitle = entry.frame.dockTitle();
+		// A title that can shorten itself is told the rail's room, the way an approval's title is.
+		const plainTitle = entry.frame.dockTitle({ room, actor: "" });
 		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", plainTitle, { bold: true });
 		// A question holds the rail like a card does, so it says what it is not holding up too.
 		const beside = entry.frame.dockAwaitingInput?.()

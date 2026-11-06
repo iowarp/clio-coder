@@ -185,7 +185,10 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								? null
 								: sessionTokens(theme, spend.tokens === null ? "0" : spend.measuredTokens, width),
 							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
-							spend.cost === null ? null : theme.fg("counter", spend.cost),
+							// A bare `not measured` beside the token count read as the tokens' own qualifier.
+							spend.cost === null
+								? null
+								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
 			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
 		],
@@ -245,14 +248,18 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		}),
 	);
 	// How a run ended can be longer than the activity column, and it is the row's whole point.
+	// One row each: the cause in the run's own words, without the worker's stderr dump, and where the rest is.
 	for (const row of listed) {
-		if (row.status !== "completed" && row.outcomeDetail) {
-			lines.push(
-				...wrapTextWithAnsi(
-					theme.fg("annotation", `${clean(row.agentId)}: ${clean(row.outcomeDetail)} · /view dispatch:${row.runId}`),
-					width,
-				),
-			);
+		// A run the operator cancelled already says so in its row; only a cause beyond that earns a line.
+		if (row.status !== "completed" && row.outcomeDetail && !/^operator abort\b/u.test(row.outcomeDetail)) {
+			const where = ` · /view dispatch:${row.runId}`;
+			const cause =
+				clean(row.outcomeDetail)
+					.split(/;\s*stderr:/u)[0]
+					?.trim() ?? "";
+			const lead = `${clean(row.agentId)}: ${cause}`;
+			const room = Math.max(8, width - visibleWidth(where));
+			lines.push(theme.fg("annotation", `${truncateToWidth(lead, room, GLYPH.ellipsis, false)}${where}`));
 		}
 	}
 	if (listed.length < history.length) {
@@ -737,12 +744,12 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
 	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
 	// Until the first probe lands the branch is unknown, not absent: say nothing.
-	const git = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
+	const named = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
 	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "  ";
-	const gitWidth =
-		git === ""
-			? 0
-			: Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), Math.max(4, Math.floor(workspaceWidth * 0.3)));
+	const gitRoom = Math.max(4, Math.floor(workspaceWidth * 0.3));
+	// A branch name may lose its middle; the sentence that says there is none is whole or absent (`no Gi…ranch`).
+	const git = state.workspace.branch == null && visibleWidth(named) + visibleWidth(dirtyMarker) > gitRoom ? "" : named;
+	const gitWidth = git === "" ? 0 : Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), gitRoom);
 	const cwdWidth = git === "" ? workspaceWidth : Math.max(1, workspaceWidth - gitWidth - 3);
 	const cwdLabel = theme.fg("workspacePath", fitPathLabel(clean(state.workspace.cwd), cwdWidth));
 	const workspace =
@@ -806,13 +813,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? memoryOnRail
 				? ""
 				: theme.fg("activity", "memory reviewing")
-			: // Memory yields the model to the turn on purpose, so its wait is no warning: `mem waiting` in warning ink beside a
-				// retry read as a second fault (N9).
-				guardian === "waiting-capacity"
-				? theme.fg("annotation", w >= 80 ? "memory waits its turn" : "memory waits")
-				: guardian === "unavailable"
-					? theme.fg("unknownValue", "memory unavailable")
-					: "";
+			: // Memory yields the model to the turn on purpose and nothing waits on it, so its wait says nothing: `memory waits`
+				// beside a retry read as a second fault (N9), and in the hint row as a cryptic third party.
+				guardian === "unavailable"
+				? theme.fg("unknownValue", "memory unavailable")
+				: "";
 	const facts = [
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",

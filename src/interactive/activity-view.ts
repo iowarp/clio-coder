@@ -98,7 +98,18 @@ export function renderActivityHeatmap(
 		lines.push(`${padAnsi(theme.fg("body", rowLabels[row] ?? ""), gutter)}${cells.trimEnd()}`);
 	}
 	const legend = LEVEL_TOKENS.map((_, index) => levelCell(index)).join(" ");
-	const captionText = caption.length > 0 ? ` ${theme.fg("annotation", `· ${caption}`)}` : "";
-	lines.push(`${" ".repeat(gutter)}${theme.fg("body", "Less")} ${legend} ${theme.fg("body", "More")}${captionText}`);
+	const legendRow = `${" ".repeat(gutter)}${theme.fg("body", "Less")} ${legend} ${theme.fg("body", "More")}`;
+	// The caption's facts sit beside the legend while they fit and wrap whole below it, never cut (`80 sessions in t`).
+	const facts = caption.length > 0 ? caption.split(" · ") : [];
+	let row = legendRow;
+	for (const fact of facts) {
+		const joined = `${row} ${theme.fg("annotation", `· ${fact}`)}`;
+		if (visibleWidth(joined) <= contentWidth) row = joined;
+		else {
+			lines.push(row);
+			row = `${" ".repeat(gutter)}${theme.fg("annotation", fact)}`;
+		}
+	}
+	lines.push(row);
 	return lines.map((line) => (visibleWidth(line) > contentWidth ? padAnsi(line, contentWidth) : line));
 }

@@ -45,7 +45,8 @@ export type OutcomeTone = "success" | "warning" | "error" | "annotation";
 
 export function outcomeTone(outcome: ContextOperationOutcome): OutcomeTone {
 	if (outcome === "failed") return "error";
-	if (outcome === "cancelled") return "warning";
+	// A cancel the operator asked for is quiet, as a cancelled turn's receipt is; a warning's colour said something broke.
+	if (outcome === "cancelled") return "annotation";
 	if (outcome === "unchanged") return "annotation";
 	return "success";
 }

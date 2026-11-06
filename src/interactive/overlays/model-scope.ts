@@ -13,7 +13,7 @@
  */
 
 import type { ThinkingLevel } from "../../core/defaults.js";
-import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import { type Component, type OverlayHandle, type TUI, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
@@ -33,20 +33,27 @@ export interface OpenModelScopeOverlayDeps {
 	ref: PendingModelScope;
 	/** Called only for an applying choice. */
 	onChoose: (scope: ModelScopeChoice) => void;
-	/** Called for the explicit Cancel row and for Esc. Nothing has changed yet. */
+	/** Called for the explicit Cancel row, and for Esc when there is nothing to go back to. Nothing has changed yet. */
 	onCancel: () => void;
+	/**
+	 * Esc from a card the picker opened: back to the picker with the same row
+	 * selected, because backing out of the destination is not abandoning the pick.
+	 */
+	onBack?: () => void;
 	/** What choosing does to the turn in flight, asked on every frame so it stays true up to the Enter. */
 	turnEffect?: () => string | null;
 	/** What the swap costs the session's history, when it costs anything. Sized once: choosing does not change it. */
 	switchCost?: string | null;
 	/** Whether the model is loaded where it would run, as the picker showed it, so the choice is made knowing the wait. */
 	residency?: string | null;
+	/** The route in use now, named the way the composer names it, so the card reads as a change from one to the other. */
+	current?: string | null;
 }
 
 /** The swap as the operator typed it, for the dialog title. */
 export function formatPendingModelScope(ref: PendingModelScope): string {
-	const thinking = ref.thinkingLevel ? ` thinking=${ref.thinkingLevel}` : "";
-	return `${ref.target}/${ref.model}${thinking}`;
+	const thinking = ref.thinkingLevel ? ` with thinking ${ref.thinkingLevel}` : "";
+	return `${ref.target} · ${ref.model}${thinking}`;
 }
 
 /** Three outcomes, least durable first, matching the settings center's order. */
@@ -55,22 +62,22 @@ function buildModelScopeItems(): ChoiceItem[] {
 		{
 			value: "session",
 			label: "Apply this session",
-			description: "route this session only; settings.yaml is untouched",
+			description: "Live now and not saved; the next session starts from the saved model",
 		},
 		{
 			value: "project",
 			label: "Apply and save for this project",
-			description: "save in .clio-coder/settings.local.yaml",
+			description: "Saved in this project's .clio-coder/settings.local.yaml, live now",
 		},
 		{
 			value: "global",
 			label: "Apply and save globally",
-			description: "also the orchestrator route the next launch starts on",
+			description: "Saved in your user settings.yaml for every project, live now",
 		},
 		{
 			value: "cancel",
 			label: "Cancel",
-			description: "keep the current model",
+			description: "Nothing changes; Clio keeps the current model",
 		},
 	];
 }
@@ -89,7 +96,7 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		deps.onCancel();
 	};
 	list.onCancel = (): void => {
-		deps.onCancel();
+		(deps.onBack ?? deps.onCancel)();
 	};
 
 	const effect: Component = {
@@ -97,7 +104,9 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 			const room = Math.max(1, width);
 			const theme = clioTheme();
 			const text = deps.turnEffect?.();
+			const current = deps.current?.trim();
 			return [
+				...(current ? [...wrapTextWithAnsi(theme.fg("annotation", `Now on ${current}`), room), ""] : []),
 				...(text ? [...wrapTextWithAnsi(theme.fg("accent", text), room), ""] : []),
 				...(deps.residency ? [...wrapTextWithAnsi(theme.fg("annotation", deps.residency), room), ""] : []),
 				...(deps.switchCost ? [...wrapTextWithAnsi(theme.fg("annotation", deps.switchCost), room), ""] : []),
@@ -110,7 +119,18 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		anchor: "center",
 		width: MODEL_SCOPE_OVERLAY_WIDTH,
 		markerId: "model-scope",
-		title: `Apply ${formatPendingModelScope(deps.ref)}`,
-		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
+		// A narrow rail keeps the model being applied and gives up the connection's name first.
+		title: (context?: { room: number }) => {
+			const thinking = deps.ref.thinkingLevel ? ` with thinking ${deps.ref.thinkingLevel}` : "";
+			const candidates = [
+				`Apply ${formatPendingModelScope(deps.ref)}`,
+				`Apply ${deps.ref.model}${thinking}`,
+				`Apply ${deps.ref.model}`,
+				deps.ref.model,
+			];
+			const room = context === undefined ? Number.POSITIVE_INFINITY : context.room - 4;
+			return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? deps.ref.model;
+		},
+		footerHint: buildHint([{ key: "Enter", verb: "choose" }], deps.onBack ? "back to models" : "close"),
 	});
 }

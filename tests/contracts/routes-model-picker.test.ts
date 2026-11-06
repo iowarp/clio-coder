@@ -72,9 +72,12 @@ test("model picker uses state marks and target health without origin or health g
 		match(plain.find((line) => line.includes("active-model") && !line.includes("current")) ?? "", /✓ active-model/);
 		match(plain.find((line) => line.includes("favorite-model")) ?? "", /★ favorite-model/);
 		match(plain.find((line) => line.includes("recent-model")) ?? "", /↺ recent-model/);
-		for (const id of ["scoped", "default"]) {
+		for (const [id, words] of [
+			["scoped", "in the model cycle"],
+			["default", "its connection's default"],
+		] as const) {
 			view.setSelectedValue(id);
-			match(view.render(width).map(stripTerminalSequences).join("\n"), new RegExp(`${id} next-target`));
+			match(view.render(width).map(stripTerminalSequences).join("\n"), new RegExp(words));
 		}
 		doesNotMatch(plain.join("\n"), /[◆◇●◐○]/u);
 		if (width === 60) match(plain[0] ?? "", /…\s*$/u);

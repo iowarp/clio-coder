@@ -55,9 +55,19 @@ const UNDETERMINED_STATUS_PROBE: GitStatusProbeResult = { ...EMPTY_STATUS_PROBE,
 /** What a gate question got back: Git's answer, or nothing because it ran out of time. */
 type GateAnswer = { out: string | null; timedOut: boolean };
 
+/**
+ * Whether Git gave no answer at all: it ran out of time, or the process could not start (`EAGAIN`, `EMFILE`, `ENOMEM`
+ * under load carry a string code, where Git's own refusal carries its numeric exit status). Either is unknown, never no:
+ * a spawn that failed under load left the footer reading `no Git branch` in a real repository.
+ */
 function timedOut(err: unknown): boolean {
 	const error = err as { killed?: boolean; code?: unknown; signal?: unknown } | null;
-	return error?.killed === true || error?.code === "ETIMEDOUT" || error?.signal === "SIGTERM";
+	return (
+		error?.killed === true ||
+		error?.code === "ETIMEDOUT" ||
+		error?.signal === "SIGTERM" ||
+		(typeof error?.code === "string" && error.code !== "ENOENT")
+	);
 }
 
 function gateSync(cwd: string, args: string[]): GateAnswer {

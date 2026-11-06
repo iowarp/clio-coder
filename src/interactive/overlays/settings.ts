@@ -76,11 +76,10 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
-import { backOutOneLayer, type EscapeLayers, innermostEscapeLayer } from "../escape-layers.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry, innermostEscapeLayer } from "../escape-layers.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import {
-	buildHint,
 	buildResponsiveHint,
 	centeredWindow,
 	fitRows,
@@ -394,7 +393,7 @@ function joinNotes(...notes: Array<string | undefined>): string | undefined {
 	return present.length > 0 ? present.join(" ") : undefined;
 }
 
-const DRAFT_EDITOR_HINT = (verb: string): string => buildHint([{ key: "Enter", verb }], "back, keeps draft");
+const DRAFT_EDITOR_KEYS = (verb: string): HintEntry[] => [{ key: "Enter", verb }];
 
 function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
@@ -405,7 +404,7 @@ function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 			keptSettingDrafts.delete(`text:${title}`);
 			done(val);
 		};
-		return new SubmenuWrapper(title, input, DRAFT_EDITOR_HINT("confirm"), joinNotes(restored, note));
+		return new SubmenuWrapper(title, input, DRAFT_EDITOR_KEYS("confirm"), joinNotes(restored, note));
 	};
 }
 
@@ -555,7 +554,7 @@ function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBu
 		const wrapper = new SubmenuWrapper(
 			title,
 			input,
-			DRAFT_EDITOR_HINT("confirm"),
+			DRAFT_EDITOR_KEYS("confirm"),
 			joinNotes(restored, numberSettingNote(rule)),
 		);
 		input.onSubmit = (val) => {
@@ -600,7 +599,7 @@ function editEnumListSubmenu(title: string, legal: readonly string[]): SettingSu
 		const wrapper = new SubmenuWrapper(
 			title,
 			input,
-			DRAFT_EDITOR_HINT("confirm"),
+			DRAFT_EDITOR_KEYS("confirm"),
 			joinNotes(restored, `Comma-separated, from ${legal.join(", ")}; blank activates none.`),
 		);
 		input.onSubmit = (val) => {
@@ -884,13 +883,10 @@ function scopedModelsSubmenu(
 		new SubmenuWrapper(
 			"Choose the model cycle set",
 			new ScopedModelChecklist(selectedRefs, providers, done),
-			buildHint(
-				[
-					{ key: "Space", verb: "toggle" },
-					{ key: "Enter", verb: "continue" },
-				],
-				"back",
-			),
+			[
+				{ key: "Space", verb: "toggle" },
+				{ key: "Enter", verb: "continue" },
+			],
 			"Target entries cycle by target, using its default model when switching targets. Model entries pin one exact target/model reference.",
 		);
 }
@@ -992,7 +988,10 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 				presentationKind: "destructive-action" as const,
 			},
 		];
-		const details = `URL: ${target?.url ?? "(none)"} · Default model: ${target?.defaultModel ?? "(none)"} · Last probe: ${status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never"} · Failure reason: ${status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none")}`;
+		const details = `URL: ${target?.url ?? "(none)"} · Default model: ${target?.defaultModel ?? "(none)"} · Last probe: ${status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never"} ${(() => {
+			const reason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : null);
+			return reason === null ? "" : ` · Failure reason: ${reason}`;
+		})()}`;
 		const note = chatEligible ? details : `Not chat-eligible: its runtime is not HTTP/native. · ${details}`;
 		return selectListSubmenu(
 			`Target ${targetId}`,
@@ -1201,7 +1200,7 @@ const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
 		active = new SubmenuWrapper(
 			"Before Clio answers",
 			list,
-			buildHint([{ key: "Enter", verb: "toggle or apply" }], "back to list"),
+			[{ key: "Enter", verb: "toggle or apply" }],
 			"Choose which preparation Clio may start before responding.",
 		);
 	};
@@ -1242,7 +1241,7 @@ function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSe
 		const wrapper = new SubmenuWrapper(
 			control.label,
 			input,
-			DRAFT_EDITOR_HINT("review"),
+			DRAFT_EDITOR_KEYS("review"),
 			joinNotes(restored, controlInstructions(control, "settings")),
 		);
 		input.onSubmit = (value) => {
@@ -1251,11 +1250,46 @@ function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSe
 				keptSettingDrafts.delete(`control:${control.path}`);
 				done(value);
 			} catch (error) {
-				wrapper.setProblem(error instanceof Error ? error.message : String(error));
+				wrapper.setProblem(valueProblem(error));
 			}
 		};
 		return wrapper;
 	};
+}
+
+/**
+ * Why a typed value was refused, about the value. The validator checks a copy of
+ * the whole file with the value in it, and its error is written for a broken
+ * file: it named settings.yaml as failing validation and sent the operator to
+ * fix keys in it and run doctor, when the file was untouched and only the
+ * typed value was wrong.
+ */
+function valueProblem(error: unknown): string {
+	if (error instanceof SettingsValidationError && error.issues.length > 0) {
+		const reasons = error.issues.map((issue) => plainValueReason(issue.message));
+		return `Not accepted: ${reasons.join("; ")}. The setting is unchanged.`;
+	}
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** The validator's `expected a number >= 0, got -3` in the operator's words: `it must be 0 or more, and -3 is not`. */
+function plainValueReason(message: string): string {
+	const bound = /^expected a number (>=|<=|>|<) (\S+), got (.+)$/u.exec(message);
+	if (bound) {
+		const [, op, limit, got] = bound;
+		const words =
+			op === ">="
+				? `${limit} or more`
+				: op === "<="
+					? `${limit} or less`
+					: op === ">"
+						? `more than ${limit}`
+						: `less than ${limit}`;
+		return `it must be ${words}, and ${got} is not`;
+	}
+	const kind = /^expected a number, got (.+)$/u.exec(message);
+	if (kind) return `it must be a number, and ${kind[1]} is not`;
+	return message;
 }
 
 function commonControlItem(control: SettingControl, live: () => Readonly<ClioSettings>): SettingsCenterItem {
@@ -2069,10 +2103,13 @@ export function targetRows(
 		const liveHealth = activitySegment ?? routeBreakerSegment(routes) ?? healthSegment;
 		const breakerText = routes.length > 0 ? ` · Breaker: ${routes.map(routeBreakerPhrase).join("; ")}` : "";
 		const runtime = status?.runtime?.id ?? target.runtime;
+		// A down target's latency is how fast the connection was refused, which read as a healthy `2 ms` beside `down`.
 		const latency =
-			status?.health.latencyMs === null || status?.health.latencyMs === undefined ? "—" : `${status.health.latencyMs} ms`;
+			status?.health.latencyMs === null || status?.health.latencyMs === undefined || status.health.status === "down"
+				? "—"
+				: `${status.health.latencyMs} ms`;
 		const lastProbe = status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never";
-		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none");
+		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : null);
 		const valueSegments = [
 			liveHealth,
 			{ text: `  ${target.id}`, tone: "neutral" as const },
@@ -2084,7 +2121,8 @@ export function targetRows(
 		const item = settingItem(`targets.${target.id}`, value, {
 			label: target.id,
 			description: `URL: ${target.url ?? "(none)"} · Default model: ${target.defaultModel ?? "(none)"}`,
-			help: `Last probe: ${lastProbe} · Failure reason: ${failureReason}${breakerText}`,
+			// A target with no failure says nothing about one; `Failure reason: none` read as a failure at a glance.
+			help: `Last probe: ${lastProbe}${failureReason === null ? "" : ` · Failure reason: ${failureReason}`}${breakerText}`,
 			submenu: targetActionsSubmenu(target.id, options),
 			affordance: options?.connectTarget ? "Enter: use, connect, probe, edit, remove" : "Enter: use, probe, edit, remove",
 			presentationKind: "status",
@@ -2099,7 +2137,7 @@ export function targetRows(
 			url: target.url ?? "(none)",
 			defaultModel: target.defaultModel ?? "(none)",
 			lastProbe,
-			failureReason,
+			failureReason: failureReason ?? "none",
 		};
 		return item;
 	});
@@ -3043,12 +3081,24 @@ function sectionCount(section: SettingsCenterSection, whole: SettingsCenterSecti
 	const filtered = whole !== section;
 	if (section.id === "targets") {
 		const count = whole.items.filter((item) => item.targetConsole !== undefined).length;
-		const size = `${count} ${count === 1 ? "connection" : "connections"}`;
-		return filtered ? `${size} · ${matches} ${matches === 1 ? "match" : "matches"}` : size;
+		const noun = count === 1 ? "connection" : "connections";
+		// An action row such as Add a target is not a connection. A filter that
+		// found only the action read `0 of 2 connections` beside `1 match`, so a
+		// filtered lane counts rows, the same unit the match count uses.
+		if (!filtered) return `${count} ${noun}`;
+		const rows = whole.items.filter((item) => item.presentationKind !== "group-header").length;
+		return `${matches} of ${rows} ${rows === 1 ? "row" : "rows"}`;
 	}
 	const count = whole.items.filter((item) => item.presentationKind !== "group-header").length;
 	const noun = count === 1 ? "setting" : "settings";
 	return filtered ? `${matches} of ${count} ${noun}` : `${count} ${noun}`;
+}
+
+/** Where Esc on the scope card returns: the editor or the choice list the value came from. */
+interface ScopeCardBack {
+	verb: "back to edit" | "back to choices";
+	short?: string;
+	back: () => void;
 }
 
 export class SettingsCenter implements Component {
@@ -3258,13 +3308,23 @@ export class SettingsCenter implements Component {
 		return [
 			this.filterDraft !== null && {
 				verb: "cancel filter",
+				short: "cancel",
 				back: () => {
 					this.filterDraft = null;
 					this.options.requestRender?.();
 				},
 			},
+			submenu instanceof SubmenuWrapper &&
+				submenu.escape !== null && {
+					...submenu.escape,
+					back: () => {
+						submenu.escape?.back();
+						done();
+					},
+				},
 			submenu !== null && {
 				verb: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "back to list",
+				short: submenu instanceof SubmenuWrapper && submenu.editsText ? "back" : "to list",
 				back: () => {
 					// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
 					if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
@@ -3274,6 +3334,7 @@ export class SettingsCenter implements Component {
 			},
 			this.filterQuery.length > 0 && {
 				verb: "clear filter",
+				short: "clear filter",
 				back: () => {
 					this.filterQuery = "";
 					this.normalizeSelection();
@@ -3283,12 +3344,13 @@ export class SettingsCenter implements Component {
 			this.level === "rows" &&
 				this.sections().length > 0 && {
 					verb: "back to sections",
+					short: "to sections",
 					back: () => {
 						this.level = "sections";
 						done();
 					},
 				},
-			{ verb: "close settings", back: () => this.options.onCancel() },
+			{ verb: "close settings", short: "close", back: () => this.options.onCancel() },
 		];
 	}
 
@@ -3318,11 +3380,14 @@ export class SettingsCenter implements Component {
 	 * nothing, and lose Tab first at 108 columns, the one key that changes lanes.
 	 */
 	railHint(innerWidth: number): string {
-		const verb = this.escapeVerb();
-		// The destination keeps its words on a narrow rail; `back` alone would not say which level.
-		const esc: HintEntry = { key: "Esc", verb };
+		// The destination keeps its words on a narrow rail (`to sections`, never a bare `back`), and the
+		// short spelling leaves a 40-column rail room for the key that opens the row.
+		const esc: HintEntry = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: this.escapeVerb() };
 		const owner = this.keyOwner();
-		if (owner === "submenu") return buildResponsiveHint([], esc)(innerWidth);
+		if (owner === "submenu") {
+			const keys = this.submenuComponent instanceof SubmenuWrapper ? this.submenuComponent.railKeys() : [];
+			return buildResponsiveHint(keys, esc)(innerWidth);
+		}
 		if (owner === "filter") {
 			return buildResponsiveHint([{ key: "Enter", verb: "apply filter", short: "apply" }], esc)(innerWidth);
 		}
@@ -3557,11 +3622,7 @@ export class SettingsCenter implements Component {
 			return;
 		}
 		if (item.submenu) {
-			this.submenuComponent = item.submenu(item.editValue ?? item.currentValue, (selectedValue) => {
-				this.submenuComponent = null;
-				if (selectedValue !== undefined) this.prepareScopeConfirm(item, selectedValue);
-				this.options.requestRender?.();
-			});
+			this.openValueEditor(item, item.editValue ?? item.currentValue);
 			return;
 		}
 		if (item.values && item.values.length > 0) {
@@ -3578,7 +3639,15 @@ export class SettingsCenter implements Component {
 			});
 			const list = new ChoiceList(choices);
 			list.setSelectedIndex(Math.max(0, item.values.indexOf(selectedValue)));
-			list.onSelect = (choice) => this.prepareScopeConfirm(item, choice.value);
+			list.onSelect = (choice) =>
+				this.prepareScopeConfirm(item, choice.value, {
+					verb: "back to choices",
+					short: "choices",
+					back: () => {
+						this.pendingValue = choice.value;
+						this.activateSelectedItem();
+					},
+				});
 			list.onCancel = () => {
 				this.submenuComponent = null;
 				this.options.requestRender?.();
@@ -3587,13 +3656,29 @@ export class SettingsCenter implements Component {
 			this.submenuComponent = new SubmenuWrapper(
 				item.label,
 				list,
-				buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
+				[{ key: "Enter", verb: "choose" }],
 				`Now ${formatSettingsValue(item.configPath, item.currentValue)}${timing === null ? "" : ` · a change applies ${timing}`}`,
 			);
 		}
 	}
 
-	private prepareScopeConfirm(item: SettingsCenterItem, value: string): void {
+	/** The item's own editor, opened on `value`; what it submits goes to the scope card, and Esc there comes back here. */
+	private openValueEditor(item: SettingsCenterItem, value: string): void {
+		const submenu = item.submenu;
+		if (!submenu) return;
+		this.submenuComponent = submenu(value, (selectedValue) => {
+			this.submenuComponent = null;
+			if (selectedValue !== undefined)
+				this.prepareScopeConfirm(item, selectedValue, {
+					verb: "back to edit",
+					short: "edit",
+					back: () => this.openValueEditor(item, selectedValue),
+				});
+			this.options.requestRender?.();
+		});
+	}
+
+	private prepareScopeConfirm(item: SettingsCenterItem, value: string, back?: ScopeCardBack): void {
 		let plan: SettingsChangePlan | null;
 		try {
 			plan = this.options.prepareChange(item, value);
@@ -3607,7 +3692,7 @@ export class SettingsCenter implements Component {
 			this.options.requestRender?.();
 			return;
 		}
-		this.openScopeConfirm(plan);
+		this.openScopeConfirm(plan, back);
 	}
 
 	private showChangeError(item: SettingsCenterItem, value: string, error: unknown): void {
@@ -3618,12 +3703,7 @@ export class SettingsCenter implements Component {
 		list.onSelect = (choice) => {
 			this.submenuComponent = null;
 			if (choice.value === "edit") {
-				if (item.submenu)
-					this.submenuComponent = item.submenu(value, (next) => {
-						this.submenuComponent = null;
-						if (next !== undefined) this.prepareScopeConfirm(item, next);
-						this.options.requestRender?.();
-					});
+				if (item.submenu) this.openValueEditor(item, value);
 				else this.activateSelectedItem();
 			}
 			this.options.requestRender?.();
@@ -3632,18 +3712,14 @@ export class SettingsCenter implements Component {
 			this.submenuComponent = null;
 			this.options.requestRender?.();
 		};
-		const wrapper = new SubmenuWrapper(
-			"Change not saved",
-			list,
-			buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
-		);
-		wrapper.setProblem(error instanceof Error ? error.message : String(error));
+		const wrapper = new SubmenuWrapper("Change not saved", list, [{ key: "Enter", verb: "choose" }]);
+		wrapper.setProblem(valueProblem(error));
 		this.submenuComponent = wrapper;
 		this.options.requestRender?.();
 	}
 
 	/** Hold one immutable plan while the operator chooses its destination. */
-	private openScopeConfirm(plan: SettingsChangePlan): void {
+	private openScopeConfirm(plan: SettingsChangePlan, back?: ScopeCardBack): void {
 		const restart = !plan.sessionCapable && plan.propagation.some((entry) => entry.timing === "next-session");
 		const landing = restart ? "applied after a restart" : "live now";
 		const options: ChoiceItem[] = [
@@ -3704,12 +3780,10 @@ export class SettingsCenter implements Component {
 		})();
 		const affected = [...new Set(plan.leaves.map((leaf) => settingsPathLabel(leaf.path)))];
 		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} · ${plan.impact}`;
-		this.submenuComponent = new SubmenuWrapper(
-			title,
-			list,
-			buildHint([{ key: "Enter", verb: "choose" }], "back to list"),
-			note,
-		);
+		const card = new SubmenuWrapper(title, list, [{ key: "Enter", verb: "choose" }], note);
+		// Esc backs out one layer, to the value being reviewed; only the Cancel row ends the change.
+		if (back !== undefined) card.escape = back;
+		this.submenuComponent = card;
 	}
 
 	private displayValueFor(item: SettingsCenterItem, selected: boolean): { value: string; pending: boolean } {
@@ -3752,13 +3826,14 @@ export class SettingsCenter implements Component {
 		return {
 			sectionLabel: section.label,
 			sectionDescription: SETTINGS_SECTION_DESCRIPTIONS[section.id],
-			position: `${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
+			position: `section ${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
 			counts: { label: this.sectionCount(section), changed: selectable.filter((entry) => isModified(entry)).length },
 			item,
 			...(fullValue === null ? {} : { fullValue }),
 			origin,
 			pinned: item !== null && this.isPinned(item),
 			pinnable: isShortcutRow(item),
+			rowKeysLive: this.keyOwner() === "rows",
 			...(home ? { homeLabel: home.label } : {}),
 		};
 	}
@@ -3925,8 +4000,29 @@ export class SettingsCenter implements Component {
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, height - 1));
-		return fitRows([header, ...renderSectionLane(theme, rows.slice(start, end), width)], width, height);
+		const slots = Math.max(1, height - 1);
+		if (rows.length <= slots) {
+			return fitRows([header, ...renderSectionLane(theme, rows, width)], width, height);
+		}
+		// A cut list says what it hid and whether a hidden section carries a change,
+		// because at 80x24 the last section and its changed mark fell off unannounced.
+		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, slots - 2));
+		const marker = (glyph: string, hidden: typeof rows): string => {
+			const changed = hidden.some((row) => row.badge !== undefined) && !this.effectiveFilterQuery().length;
+			return theme.fg("positionCount", `  ${glyph} ${hidden.length} more${changed ? ` · ${GLYPH.scoped} changed` : ""}`);
+		};
+		const above = rows.slice(0, start);
+		const below = rows.slice(end);
+		return fitRows(
+			[
+				header,
+				...(above.length > 0 ? [marker(GLYPH.up, above)] : []),
+				...renderSectionLane(theme, rows.slice(start, end), width),
+				...(below.length > 0 ? [marker(GLYPH.down, below)] : []),
+			],
+			width,
+			height,
+		);
 	}
 
 	/**
@@ -4025,9 +4121,27 @@ export class SettingsCenter implements Component {
 		const visible = Math.max(1, height - 1);
 		const [start] = centeredWindow(lines.length, starts[selected] ?? 0, visible);
 		const window = lines.slice(start, start + visible);
+		// The count is of the rows a cursor can land on, the same thing the section's
+		// title counts: lines would add the group headings, so a title of 12 settings
+		// sat over `1–10 of 13 rows`.
+		const ordinals = section.items.flatMap((item, index) =>
+			this.isSelectableRow(item) && item.id !== "targets" ? [starts[index] ?? 0] : [],
+		);
+		const shown = ordinals.flatMap((line, ordinal) =>
+			line >= start && line < start + window.length ? [ordinal + 1] : [],
+		);
 		return [
 			...window,
-			renderRowsPosition(theme, { start: start + 1, end: start + window.length, total: lines.length }, width),
+			renderRowsPosition(
+				theme,
+				{
+					start: shown[0] ?? 0,
+					end: shown.at(-1) ?? 0,
+					total: ordinals.length,
+					unit: section.id === "targets" ? "rows" : "settings",
+				},
+				width,
+			),
 		];
 	}
 
@@ -4066,12 +4180,16 @@ export class SettingsCenter implements Component {
 			if (item) trail.push(item.label);
 		}
 		const query = this.filterQuery.trim();
+		// The page's own size, in the words its position row uses. A bare `1/12` here
+		// was the section's index and read as a count of the settings below it.
 		const meta =
 			query.length > 0
 				? `/${query}`
-				: section
-					? `${sections.findIndex((entry) => entry.id === section.id) + 1}/${sections.length}`
-					: "";
+				: this.level === "sections" && !this.submenuComponent
+					? `${sections.length} sections`
+					: section && !this.submenuComponent
+						? this.sectionCount(section)
+						: "";
 		return titleRow(theme, trail.join(" › "), width, meta.length > 0 ? { meta } : {});
 	}
 
@@ -4081,8 +4199,17 @@ export class SettingsCenter implements Component {
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = centeredWindow(rows.length, selectedLine, height);
-		return fitRows(renderSectionLane(clioTheme(), rows.slice(start, end), width), width, height);
+		if (rows.length <= height) return fitRows(renderSectionLane(clioTheme(), rows, width), width, height);
+		// A list longer than its rows says how much is below it, the way the rows page does.
+		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, height - 1));
+		return fitRows(
+			[
+				...renderSectionLane(clioTheme(), rows.slice(start, end), width),
+				renderRowsPosition(clioTheme(), { start: start + 1, end, total: rows.length, unit: "sections" }, width),
+			],
+			width,
+			height,
+		);
 	}
 
 	private renderRowsPage(width: number, height: number): string[] {
@@ -4124,8 +4251,13 @@ export interface OpenSettingsOverlayDeps {
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "project" | "global"): string {
 	const scopedRefs = id === "scope" ? parseScopedModelSelection(value) : null;
-	const displayValue = scopedRefs ? (scopedRefs.length > 0 ? scopedRefs.join(", ") : "(empty)") : value;
 	const path = settingsV2PathForRow(id);
+	// The notice reads the value the way the row does (`$7.50`, `On`), not as it was typed.
+	const displayValue = scopedRefs
+		? scopedRefs.length > 0
+			? scopedRefs.join(", ")
+			: "(empty)"
+		: formatSettingsValue(path, value);
 	const label = settingControl(path)?.label ?? SETTINGS_LABELS_BY_ID[id as keyof typeof SETTINGS_LABELS_BY_ID] ?? path;
 	return `${label} set to ${displayValue} (${scope === "global" ? "saved globally" : scope === "project" ? "saved for this project" : "this session"})`;
 }
@@ -4228,7 +4360,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		margin: SETTINGS_OVERLAY_MARGIN,
 		markerId: "settings",
 		title: "Settings",
-		// A submenu renders its own choose/back legend, so `railHint` says only where Esc lands there.
+		// A submenu's keys and where Esc lands from it both ride this rail.
 		footerHint: (innerWidth) => center.railHint(innerWidth),
 	});
 	return {

@@ -83,24 +83,21 @@ for (const columns of [80, 120, 160]) {
 			.join(" ")
 			.replace(/\s*▌\s*/gu, " ")
 			.replace(/\s+/g, " ");
-		for (const token of [
-			"task-03-protocol-arc-melting-and-aging.md",
-			"content=<string 4173 bytes>",
-			"sha256 6e068cd0028e23c4",
-		]) {
+		for (const token of ["task-03-protocol-arc-melting-and-aging.md", "sha256 6e068cd0028e23c4"]) {
 			ok(joined.includes(token), `${columns}: lost "${token}"`);
 		}
 		doesNotMatch(joined, /…/u, "nothing is ellipsized");
+		doesNotMatch(joined, /content=</u, "the size placeholder is left to the mutation row");
 		ok(lines.length <= 10, `${lines.length} rows: the folded card stays short`);
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
-		match(joined, /\[Enter\] allow\s+runs this one write call \[Esc\] deny\s+skips it \[alt\+x\] stop\s+ends the turn/u);
+		match(joined, /\[Enter\] allow\s+runs this one call \[Esc\] deny\s+skips it \[alt\+x\] stop\s+ends the turn/u);
 		match(lines[0] ?? "", /autonomy level default/u);
 
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");
 		ok(opened.includes("Hard-blocked actions remain blocked."));
-		ok(opened.includes("Approval: Approval authorizes one write call to write."));
+		ok(opened.includes("Approval allows this one call to write, which writes files."));
 		ok(opened.includes("Reversible: yes."));
 		body.toggleTerms();
 		strictEqual(body.isShowingTerms(), false);
@@ -117,7 +114,7 @@ test("worker terms say an approval covers one call and a denial holds within the
 	match(folded, /deny\s+skips it; an identical call in this run is refused without asking/u);
 	body.toggleTerms();
 	const terms = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
-	match(terms, /same tool, arguments, approval axis, and safety classification/u);
+	match(terms, /remembers a denial of exactly this call/u);
 	match(terms, /Each call still passes the safety net/u);
 	match(terms, /refuses identical calls/u);
 	doesNotMatch(terms, /authorizes one|only.*exact request/u);
@@ -130,7 +127,8 @@ test("the footer names the terms key and drops it before any answer key", () => 
 	doesNotMatch(wide, /allow once/u);
 	match(wide, /\[alt\+x\] stop turn/u);
 	const open = permissionOverlayHint(100, false, "closed", "open");
-	match(open, /\[alt\+t\] hide terms/u);
+	match(open, /\[Esc\] hide terms/u);
+	doesNotMatch(open, /\[alt\+t\]/u);
 	// The longer modifier labels shorten at the 80-column box.
 	strictEqual(
 		permissionOverlayHint(80, false, "closed", "closed"),

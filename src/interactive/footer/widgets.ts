@@ -167,9 +167,9 @@ function cell(text: string, width: number): string {
 export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, registered?: number | null): string {
 	const available =
 		typeof registered === "number" && Number.isFinite(registered) && registered > 0
-			? `${Math.floor(registered)} avail`
+			? `${Math.floor(registered)} available`
 			: null;
-	if (!snapshot) return `${available ?? "none"} · 0${GLYPH.error}`;
+	if (!snapshot) return available ?? "none";
 	const entries = Object.entries(snapshot.tools)
 		.filter(([name, count]) => count > 0 && name.toLowerCase() !== "dispatch")
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -183,7 +183,9 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 		typeof snapshot.truncatedResults === "number" && snapshot.truncatedResults > 0
 			? ` · trunc ${formatFooterTokens(snapshot.truncatedResults)}`
 			: "";
-	return `${prefix}${active}${truncated} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
+	// `1✗` read as a glyph puzzle; a count of failures says what it counts, and none is not worth a chip.
+	const failed = snapshot.errors > 0 ? ` · ${formatFooterTokens(snapshot.errors)} failed` : "";
+	return `${prefix}${active}${truncated}${failed}`;
 }
 
 /** Short truthful occupancy label shared by compact and expanded surfaces. */
@@ -264,10 +266,8 @@ export function liveTokenValue(
 	const turnInput = telemetry?.kind === "ready" ? (telemetry.turn?.input ?? null) : null;
 	const input = context > 0 ? formatFooterTokens(context) : turnInput;
 	const parts = [
-		output > 0
-			? theme.fg("counter", `${GLYPH.down} ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`)
-			: null,
-		input !== null ? theme.fg("counter", `${GLYPH.up} ${input}`) : null,
+		output > 0 ? theme.fg("counter", `out ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`) : null,
+		input !== null ? theme.fg("counter", `in ${input}`) : null,
 	];
 	const joined = joinChips(theme, parts);
 	return joined.length > 0 ? joined : null;
@@ -299,11 +299,12 @@ export function lastTurnDetails(
 	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
 	const measured = turn
 		? [
-				turn.input === null ? null : `${GLYPH.up} ${turn.input}`,
-				turn.output === null ? null : `${GLYPH.down} ${turn.output}`,
+				// Label first, as the receipt and the exit card write tokens (U5).
+				turn.input === null ? null : `in ${turn.input}`,
+				turn.output === null ? null : `out ${turn.output}`,
 			]
 				.filter(Boolean)
-				.join(" ")
+				.join(" · ")
 		: "";
 	const cache = turn
 		? [
@@ -558,8 +559,14 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: Ra
 	const ranked = [...rest, ...(subject !== undefined && subject.name.length > 0 ? [named] : [])].sort(
 		(a, b) => b.keep - a.keep,
 	);
-	const chosen = new Map<RailFact, string>([[head, head.text]]);
-	let used = visibleWidth(head.text);
+	// The head keeps its long words only when the way out and the name still fit beside them: `waiting for a response`
+	// used to cost the rail its subject at 60 columns, where `Judge-model is waiting` said more.
+	const owedByAll = ranked
+		.filter((fact) => fact.keep >= RAIL_SUBJECT_KEEP)
+		.reduce((sum, fact) => sum + cost(fact, fact.short ?? fact.text), 0);
+	const headText = head.short !== undefined && visibleWidth(head.text) + owedByAll > room ? head.short : head.text;
+	const chosen = new Map<RailFact, string>([[head, headText]]);
+	let used = visibleWidth(headText);
 	for (const [index, fact] of ranked.entries()) {
 		const owed = ranked
 			.slice(index + 1)
@@ -601,9 +608,9 @@ export interface CompactionRailFacts {
 }
 
 const COMPACTION_STAGE_WORDS: Partial<Record<ContextActivityPhase, readonly [string, string]>> = {
-	compact: ["is preparing to compact", "preparing"],
-	summarize: ["is summarizing history", "summarizing"],
-	state: ["is saving the summary", "saving"],
+	compact: ["is preparing to compact", "is preparing"],
+	summarize: ["is summarizing history", "is summarizing"],
+	state: ["is saving the summary", "is saving"],
 };
 
 /**
@@ -617,7 +624,8 @@ export function compactionRailLabel(
 	subject?: RailSubject,
 ): string {
 	const words = facts ? COMPACTION_STAGE_WORDS[facts.phase] : undefined;
-	const [head, tight] = words ?? ["is compacting context", "compacting"];
+	// The tight form keeps its verb, so a named subject still reads as a sentence (`Judge-model summarizing`).
+	const [head, tight] = words ?? ["is compacting context", "is compacting"];
 	const elapsedMs = facts ? Math.max(0, now - facts.startedAtMs) : 0;
 	const elapsed = Math.floor(elapsedMs / 1000);
 	return fitRailFacts(
@@ -1066,8 +1074,10 @@ export function composerPhasePresentation(
 	};
 	const waitLabel = (head: string, tight: string): string => {
 		const from = waitFrom();
+		// A mid room keeps the verb: `Judge-model waiting` dropped the word that made the strip a sentence.
+		const mid = head.startsWith("is waiting") && room >= 12 ? "is waiting" : tight;
 		return fit([
-			{ text: room >= 40 ? head : tight, keep: 9 },
+			{ text: room >= 40 ? head : mid, ...(room >= 40 && head !== mid ? { short: mid } : {}), keep: 9 },
 			{ text: elapsedFrom(from), keep: 8 },
 			...modelWaitFacts(status, now, from, server),
 		]);

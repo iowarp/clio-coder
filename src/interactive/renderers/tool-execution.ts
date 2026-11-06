@@ -889,7 +889,13 @@ function blockReasonClause(reason: string): string {
  * A refusal's tail in an operator's words. `short` and the denial reason are written for the model and the audit,
  * so the action class and the third-person "User" stay there, in /view.
  */
+/** The first words of the denial Clio writes for a card nobody answered (`unattendedPermissionReason`). */
+const UNATTENDED_REFUSAL = /^The operator did not answer this \S+ approval within (\d+) s/u;
+
 function refusalTail(reason: string): string {
+	// `The operator did not answer…, so Clio…` lost its point to the cut; the operator is the reader here.
+	const unattended = UNATTENDED_REFUSAL.exec(reason);
+	if (unattended) return `no answer in ${unattended[1]} s, so Clio denied it`;
 	const clause = blockReasonClause(reason);
 	if (/^User denied this call/u.test(clause)) return clause.replace(/^User denied/u, "you denied");
 	const blocked = /^(\S+ blocked: )([a-z_]+)( in \S+)?$/u.exec(clause);
@@ -2057,6 +2063,9 @@ function bashStopRow(execution: BashTranscriptExecution, width: number, killed =
 	return settledRow([`stopped ${took} after you asked`, `stopped after ${took}`, took]);
 }
 
+/** The note the shell runner appends after a non-zero exit, which the card's `exit N` fact already states. */
+const EXIT_NOTE = /^\[command exited with code -?\d+\]$/mu;
+
 /** The notes the shell runner appends to a stopped command's output, which the card states in its own words instead. */
 const STOP_NOTES = /^\[command (?:aborted|terminated by (?<signal>[A-Z0-9]+))\]$/gmu;
 
@@ -2087,8 +2096,11 @@ export function renderBashTranscriptExecution(
 ): string[] {
 	const stopped = execution.cancelled === true ? withoutStopNotes(execution.output) : null;
 	if (stopped !== null) execution = { ...execution, output: stopped.output };
+	// The header already says `exit 1`; the runner's `[command exited with code 1]` repeated it as the body and its size.
+	const exitNote = !execution.running && EXIT_NOTE.test(execution.output);
+	if (exitNote) execution = { ...execution, output: execution.output.replace(EXIT_NOTE, "").replace(/\s+$/u, "") };
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
-	const totalBytes = stopped !== null ? shownBytes : (execution.totalBytes ?? shownBytes);
+	const totalBytes = stopped !== null || exitNote ? shownBytes : (execution.totalBytes ?? shownBytes);
 	const args: Record<string, unknown> = { command: execution.command };
 	const details = {
 		resultSize: {
@@ -2437,6 +2449,9 @@ export function renderToolPreview(
 	// A refused skill load states its reason on the row; its message is the
 	// model's instruction and stays in /view.
 	if (finished !== undefined && skillRefusalOf(finished) !== null) return rows;
+	// A call Clio denied because nobody answered states that on its row and in the notice under it; the body is the
+	// model's instruction (`name it as an open decision in your final reply`), which stays in /view.
+	if (finished?.outcome === "blocked" && UNATTENDED_REFUSAL.test(finished.blockReason ?? "")) return rows;
 	const skill = finished ? skillLoadFacts(finished) : null;
 	// The tool surface a loaded skill declares and the one line that says what
 	// it is for; Compact keeps the row alone.

@@ -33,6 +33,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { displaySafe } from "../display-safe.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "../escape-layers.js";
 import {
 	buildResponsiveHint,
 	createCachedBody,
@@ -631,6 +632,18 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 		spec.onCancel();
 	};
 
+	// Esc backs out one layer: the path list first, then the review, which cancels without writing anything.
+	const reviewLayers = (): EscapeLayers => [
+		body.detail && {
+			verb: "hide paths",
+			short: "hide",
+			back: () => {
+				body.detail = false;
+				tui.requestRender();
+			},
+		},
+		{ verb: "cancel", back: cancel },
+	];
 	const focus = new ReviewFocusBox(body, {
 		// Keys are matched by name rather than by raw bytes: under the kitty
 		// keyboard protocol Esc arrives as CSI 27 u, and a byte comparison left
@@ -659,7 +672,7 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 					return;
 				}
 				if (matchesKey(data, "escape")) {
-					cancel();
+					backOutOneLayer(reviewLayers());
 					return;
 				}
 				if (data === "d") {
@@ -686,8 +699,11 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 			body.outcome
 				? buildResponsiveHint([{ key: "R", verb: "retry refresh" }], { key: "Esc", verb: "close" })(innerWidth)
 				: buildResponsiveHint(
-						[...(spec.applicable ? [{ key: "Enter", verb: spec.verb }] : []), { key: "d", verb: "paths" }],
-						{ key: "Esc", verb: "cancel" },
+						[
+							...(spec.applicable ? [{ key: "Enter", verb: spec.verb }] : []),
+							{ key: "d", verb: body.detail ? "hide paths" : "paths" },
+						],
+						escapeHintEntry(reviewLayers()) ?? { key: "Esc", verb: "cancel" },
 					)(innerWidth),
 	});
 

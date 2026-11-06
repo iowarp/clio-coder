@@ -137,7 +137,7 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		deepStrictEqual(meta.origin, { kind: "main" });
 		strictEqual(meta.exposure, "local");
 		strictEqual(meta.reversibility, "limited");
-		ok(String(meta.authorizationCopy).includes("one execute call to bash"));
+		ok(String(meta.authorizationCopy).includes("one call to bash, which runs a command"));
 		ok(String(meta.consequenceCopy).length > 0);
 		ok(String(meta.reversibilityCopy).startsWith("Reversible:"));
 		ok(String(meta.requestedByCopy).includes("autonomy level (default)"));

@@ -1,14 +1,21 @@
 import type { Component } from "../../engine/tui.js";
-import { getKeybindings, Input, isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	getKeybindings,
+	Input,
+	isKeyRelease,
+	matchesKey,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, type RowBudgetedBody } from "../overlay-frame.js";
+import type { HintEntry, RowBudgetedBody } from "../overlay-frame.js";
 import { clioTheme, errorState, GLYPH, positionRow, selectionRow, titleRow } from "../theme/index.js";
 
 /**
  * The detail pages the settings center opens inside its own lane: a value
  * picker, a scope decision, a text or number editor, a refused change. They
- * share one wrapper so every page names itself the same way, explains itself
- * in the same dim note, and ends on the same key legend.
+ * share one wrapper so every page names itself the same way and explains
+ * itself in the same dim note; its keys ride the dock rail with Esc.
  */
 
 export interface ChoiceItem {
@@ -105,7 +112,7 @@ export class ChoiceList implements Component, RowBudgetedBody {
 		if (visible >= 3) {
 			window[visible - 1] = positionRow(
 				theme,
-				{ start: start + 1, end: start + visible - 1, total: lines.length, unit: "rows" },
+				{ start: start + 1, end: start + visible - 1, total: lines.length, unit: "lines" },
 				width,
 			);
 		}
@@ -145,9 +152,10 @@ export type SubmenuTitle = string | ((width: number) => string);
 
 /**
  * One detail page: a title row, the dim note that explains the decision, the
- * page's own body, the reason a submission was refused when there is one, and
- * the key legend. The body is given the rows the page does not spend on its
- * own chrome, so a long picker windows itself instead of being cut.
+ * page's own body, and the reason a submission was refused when there is one.
+ * The page's keys are not drawn here: they ride the dock rail beside Esc, so
+ * the commit key and the way out are read from one place at every width, and
+ * the two rows a legend took go to the choices on a short terminal.
  */
 export class SubmenuWrapper implements Component, RowBudgetedBody {
 	/**
@@ -157,16 +165,27 @@ export class SubmenuWrapper implements Component, RowBudgetedBody {
 	 */
 	private problem: string | null = null;
 	private rows = 0;
+	/**
+	 * Where Esc lands when it is not the list behind this page: the scope card
+	 * goes back to the value it was opened from, so a typed value survives the
+	 * press. Null means back to the list.
+	 */
+	escape: { verb: string; short?: string; back: () => void } | null = null;
 
 	constructor(
 		private readonly title: SubmenuTitle,
 		private readonly child: Component,
-		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back to list"),
+		private readonly keys: ReadonlyArray<HintEntry> = [{ key: "Enter", verb: "confirm" }],
 		private readonly note?: string,
 	) {}
 
 	setProblem(problem: string | null): void {
 		this.problem = problem;
+	}
+
+	/** The keys this page acts on, other than Esc, for the rail. */
+	railKeys(): ReadonlyArray<HintEntry> {
+		return this.keys;
 	}
 
 	/** A text editor, whose Esc keeps what was typed for the next visit. */
@@ -178,32 +197,47 @@ export class SubmenuWrapper implements Component, RowBudgetedBody {
 		this.rows = Math.max(0, Math.floor(rows));
 	}
 
+	/**
+	 * Rows go, in order, to the title, the refusal, the body's first rows, one
+	 * row of the note, the rest of the body, the rest of the note, and last the
+	 * blank row between note and body. A short terminal loses the explanation's
+	 * tail, never the choices or the reason a value was refused.
+	 */
 	render(width: number): string[] {
 		const theme = clioTheme();
 		const safe = Math.max(1, width);
 		const title = typeof this.title === "function" ? this.title(safe) : this.title;
-		const head = [titleRow(theme, title, safe)];
-		if (this.note) {
-			// The note explains the page; the body is the page. A long note keeps
-			// at most what leaves the body six rows, and says where it was cut.
-			const wrapped = wrapTextWithAnsi(theme.fg("annotation", this.note), safe);
-			const budget = this.rows > 0 ? Math.max(2, this.rows - 7) : wrapped.length;
-			const kept = wrapped.slice(0, budget);
-			const last = kept.at(-1);
-			head.push(
-				...(wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept),
-			);
-		}
-		head.push("");
+		const head = titleRow(theme, title, safe);
+		const note = this.note ? wrapTextWithAnsi(theme.fg("annotation", this.note), safe) : [];
 		const problem = this.problem === null ? [] : errorState(theme, this.problem, safe);
-		const tail = ["", theme.fg("keyboardHint", this.hint)];
-		if (this.rows > 0 && isRowBudgeted(this.child)) {
-			this.child.setBodyRows(Math.max(1, this.rows - head.length - problem.length - tail.length));
+		const child = this.child;
+		const budget = (rows: number): void => {
+			if (isRowBudgeted(child)) child.setBodyRows(rows);
+		};
+		const style = (lines: string[]): string[] =>
+			lines.map((line) => theme.base(child instanceof Input ? "inputText" : "menuOption", line));
+		budget(0);
+		if (this.rows <= 0)
+			return [head, ...note, ...(note.length > 0 ? [""] : []), ...style(child.render(safe)), ...problem];
+		const natural = child.render(safe).length;
+		let left = Math.max(0, this.rows - 1 - problem.length);
+		const bodyFloor = Math.min(natural, left, 3);
+		left -= bodyFloor;
+		const noteFloor = Math.min(note.length, left, 1);
+		left -= noteFloor;
+		const bodyRows = bodyFloor + Math.min(natural - bodyFloor, left);
+		left -= bodyRows - bodyFloor;
+		const noteRows = noteFloor + Math.min(note.length - noteFloor, left);
+		left -= noteRows - noteFloor;
+		const spacer = noteRows > 0 && left > 0 ? [""] : [];
+		budget(Math.max(1, bodyRows));
+		const keptNote = note.slice(0, noteRows);
+		const last = keptNote.at(-1);
+		if (noteRows < note.length && last !== undefined) {
+			keptNote[keptNote.length - 1] = `${truncateToWidth(last, Math.max(1, safe - 1), "", false)}${GLYPH.ellipsis}`;
 		}
-		const body = this.child
-			.render(safe)
-			.map((line) => theme.base(this.child instanceof Input ? "inputText" : "menuOption", line));
-		return [...head, ...body, ...problem, ...tail];
+		const body = style(child.render(safe)).slice(0, Math.max(1, bodyRows));
+		return [head, ...keptNote, ...spacer, ...body, ...problem];
 	}
 
 	handleInput(data: string): void {

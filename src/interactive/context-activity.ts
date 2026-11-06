@@ -82,13 +82,13 @@ export function formatContextActivityRailLines(
 	const settled = activity.completedAtMs !== null;
 	const done = settled && activity.status === "completed";
 	const cancelled = outcome === "cancelled";
-	// A stop reports through the failed status but is the operator's choice, so it reads as a warning, not an error mark.
+	// A stop reports through the failed status but is the operator's choice, so it wears the cancel mark, not an error's.
 	const failed = activity.status === "failed" && !cancelled;
 	const stages = phasesFor(activity);
 	const index = done ? stages.length : Math.max(0, stages.indexOf(activity.phase));
 	const elapsed = formatCompactMs(Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs));
 	const tone = outcome ? outcomeTone(outcome) : failed ? "error" : done ? "success" : "contextAction";
-	const glyph = cancelled ? GLYPH.warn : failed ? GLYPH.error : done ? GLYPH.ok : spinnerFrame(tick);
+	const glyph = cancelled ? GLYPH.cancelled : failed ? GLYPH.error : done ? GLYPH.ok : spinnerFrame(tick);
 	const title = theme.fg(tone, `${glyph} ${CONTEXT_KIND_TITLES[activity.kind]}`);
 	const step = settled
 		? outcome
@@ -140,7 +140,7 @@ export function formatContextActivityRailLines(
 	rows.push(
 		theme.fg(tone, GLYPH.barFull.repeat(known === null ? 0 : filled)) +
 			theme.fg("meterFree", GLYPH.barEmpty.repeat(known === null ? marker : 0)) +
-			(!done ? theme.fg(tone, failed ? GLYPH.error : cancelled ? GLYPH.warn : "▸") : "") +
+			(!done ? theme.fg(tone, failed ? GLYPH.error : cancelled ? GLYPH.cancelled : "▸") : "") +
 			theme.fg("meterFree", GLYPH.barEmpty.repeat(Math.max(0, remaining - (done ? 0 : 1)))),
 	);
 	const counts = activity.current !== null && activity.total !== null ? ` · ${activity.current}/${activity.total}` : "";

@@ -23,11 +23,13 @@ import {
 import { buildResponsiveHint, createCachedBody, FocusBox, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
 import {
 	animationStep,
+	chipRows,
 	choiceRows,
 	clioTheme,
 	factRows,
 	formatWaitClock,
 	GLYPH,
+	keyCap,
 	markdownTheme,
 	positionRow,
 	sectionRule,
@@ -142,9 +144,23 @@ function formatHandoffReviewBody(
 	const rendered = new Markdown(document, 0, 0, markdownTheme(theme))
 		.render(contentWidth)
 		.map((line) => theme.base("decisionExplanation", line));
-	const choices = choiceRows(theme, [...CHOICES], contentWidth);
-	const head = factRows(theme, [{ label: "goal", value: goal }], contentWidth);
-	const budget = rows > 0 ? Math.max(4, rows - head.length - 1 - choices.length) : HANDOFF_REVIEW_VISIBLE_ROWS;
+	let choices = choiceRows(theme, [...CHOICES], contentWidth);
+	let head = factRows(theme, [{ label: "goal", value: goal }], contentWidth);
+	// A short dock gives up, in order, the goal (the document's own Goal line says
+	// it) and then each key's consequence, so the document keeps four rows and all
+	// three keys stay on screen. The frame's cut at 40x15 hid the keys behind
+	// `… 10 more rows` under a second position row.
+	const MIN_DOCUMENT_ROWS = 4;
+	const roomFor = (): number => rows - head.length - 1 - choices.length;
+	if (rows > 0 && roomFor() < MIN_DOCUMENT_ROWS) head = [];
+	if (rows > 0 && roomFor() < MIN_DOCUMENT_ROWS) {
+		choices = chipRows(
+			theme,
+			CHOICES.map((choice) => `${keyCap(theme, choice.key)} ${theme.fg("menuDescription", choice.verb)}`),
+			contentWidth,
+		);
+	}
+	const budget = rows > 0 ? Math.max(1, roomFor()) : HANDOFF_REVIEW_VISIBLE_ROWS;
 	const fits = rendered.length <= budget;
 	const pane = windowRows(rendered, scroll, fits ? budget : budget - 1);
 	const count = `${rendered.length} line${rendered.length === 1 ? "" : "s"}`;

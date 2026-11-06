@@ -919,6 +919,6 @@ describe("provider transport boundary", () => {
 			() => undefined,
 		);
 		const text = view.render(240).join("\n").replace(ANSI_PATTERN, "");
-		ok(text.includes("source provider catalog, not verified live: HTTP 503 · "), text);
+		ok(text.includes(" · provider catalog, not verified live: HTTP 503"), text);
 	});
 });
