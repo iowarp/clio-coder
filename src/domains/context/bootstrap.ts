@@ -102,8 +102,8 @@ export interface BootstrapGenerateInput {
 	existingClioMdText?: string;
 	/**
 	 * Hard invariants of the handbook a rewrite replaces. The draft ignores
-	 * them as source; each one a check the repository still runs enforces is
-	 * carried forward.
+	 * them as source; each one whose cited paths and symbols still exist is
+	 * carried forward verbatim.
 	 */
 	previousInvariants?: ReadonlyArray<string>;
 	/**
@@ -1402,23 +1402,18 @@ function namedEnforcement(rule: string, names: EnforcementNames): string[] {
 }
 
 /**
- * The previous handbook's hard invariants that a check the repository still
- * runs enforces, grounded like a model line. A rewrite drafts afresh, and a
- * small model left four such rules (case-colliding paths, retired HTML docs,
+ * The previous handbook's hard invariants, verbatim, while every path and
+ * symbol each one cites still grounds. A rewrite drafts afresh, and small
+ * models left check-enforced rules (case-colliding paths, retired HTML docs,
  * the gitignored-literal join, the throwing `prepublishOnly`) out of Hard
- * invariants while every one of their checks still failed on them. A rule
- * whose check is gone, or whose citations no longer ground, is not carried.
+ * invariants, and reworded the published-tag rule only `CONTRIBUTING.md`
+ * states. A rule whose citations no longer ground is not carried.
  */
-function enforcedPreviousInvariants(
-	input: BootstrapGenerateInput,
-	names: EnforcementNames,
-	corpus: ModelGroundingCorpus,
-): string[] {
+function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: ModelGroundingCorpus): string[] {
 	const carried: string[] = [];
 	for (const invariant of input.previousInvariants ?? []) {
-		if (namedEnforcement(invariant, names).length === 0) continue;
-		const grounded = groundedModelLine(invariant, corpus);
-		if (grounded && namedEnforcement(grounded, names).length > 0) pushUnique(carried, grounded);
+		const rule = invariant.replace(/\s+/g, " ").trim();
+		if (groundedModelLine(rule, corpus) !== null) pushUnique(carried, rule);
 	}
 	return carried;
 }
@@ -1602,7 +1597,7 @@ function stabilizeGeneratedOutput(
 			? (groundingCorpus ?? createModelGroundingCorpus(input))
 			: null;
 	const carried = carryCorpus
-		? enforcedPreviousInvariants(input, names, carryCorpus).filter((rule) => !restatesArchitecture(rule))
+		? groundedPreviousInvariants(input, carryCorpus).filter((rule) => !restatesArchitecture(rule))
 		: [];
 	const carriedTokens = carried.map(handbookRuleTokens);
 	// Only a model invariant that restates a carried one in its words gives way. Sharing a check, a script or a
