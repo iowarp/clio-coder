@@ -590,8 +590,10 @@ function permissionFacts(
 	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
 	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
 	const target = targetText !== undefined && targetText.length > 0 ? targetBlock(theme, targetText, risk, width) : [];
-	const facts: Fact[] = identity.ruleFact === null ? [] : [identity.ruleFact];
+	// Why before the rule's name: on a short card the reason (it writes outside this workspace) is what decides it.
+	const facts: Fact[] = [];
 	if (view.netReason !== undefined && view.netReason.length > 0) facts.push({ label: "why", value: view.netReason });
+	if (identity.ruleFact !== null) facts.push(identity.ruleFact);
 	if (view.consequence !== undefined && view.consequence.length > 0) {
 		facts.push({ label: "effect", value: view.consequence.join("\n") });
 	}
@@ -1265,13 +1267,15 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	): string {
 		const theme = clioTheme();
 		const holds = clause.holds.length > 0 ? ` · ${clause.holds}` : "";
+		// `1–1/14` read as a fraction; the short forms keep the words `of` and `rows`, the way every position row says it.
+		const range = start === end ? `${start}` : `${start}–${end}`;
 		const candidates = [
-			`${clause.outcome}${holds} · ${start}–${end} of ${total} rows · ↑↓ scroll`,
-			`${clause.outcome}${holds} · ${start}–${end}/${total} · ↑↓ scroll`,
+			`${clause.outcome}${holds} · ${range} of ${total} rows · ↑↓ scroll`,
+			`${clause.outcome} · ${range} of ${total} rows · ↑↓ scroll`,
 			// A 40-column rail keeps only the answer keys, so the arrows stay on this row as long as any form fits.
-			`${clause.outcome}${holds} · ${start}–${end}/${total} · ↑↓`,
-			`${clause.outcome} · ${start}–${end}/${total} · ↑↓`,
-			`${clause.outcome} · ${start}–${end}/${total}`,
+			`${clause.outcome} · ${range} of ${total} rows · ↑↓`,
+			`${clause.outcome} · ${range} of ${total} · ↑↓`,
+			`${clause.outcome} · ${range} of ${total}`,
 		];
 		const text = candidates.find((candidate) => visibleWidth(candidate) <= width) ?? candidates.at(-1) ?? "";
 		const timer = text.startsWith(`${clause.outcome}${holds}`) ? `${clause.outcome}${holds}` : clause.outcome;
