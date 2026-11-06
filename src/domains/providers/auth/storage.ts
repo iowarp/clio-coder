@@ -17,6 +17,24 @@ import {
 
 // Refresh before clock skew or request latency can make a locally valid token fail (#427).
 const OAUTH_EXPIRY_MARGIN_MS = 5 * 60_000;
+
+/**
+ * Pi's `github-copilot` login impersonated VS Code (its OAuth client id and editor headers). Clio no
+ * longer registers it, and a credential an older home stored under this id is never resolved or sent.
+ */
+export const RETIRED_GITHUB_COPILOT_PROVIDER_ID = "github-copilot";
+export const RETIRED_GITHUB_COPILOT_MESSAGE =
+	"The 'github-copilot' login is retired: it impersonated VS Code. Sign in with the official `copilot login` and use a target on the `copilot-sdk` runtime instead; a credential stored under 'github-copilot' is ignored.";
+
+function retiredCopilotStatus(providerId: string): AuthStatus {
+	return {
+		providerId,
+		available: false,
+		credentialType: null,
+		source: "none",
+		detail: RETIRED_GITHUB_COPILOT_MESSAGE,
+	};
+}
 /** The journal's UTC form; an older credential stamped otherwise just omits its updatedAt (#434). */
 const UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -445,6 +463,7 @@ export class AuthStorage {
 		providerId: string,
 		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
 	): AuthStatus {
+		if (providerId === RETIRED_GITHUB_COPILOT_PROVIDER_ID) return retiredCopilotStatus(providerId);
 		this.reload();
 		if (opts?.targetId && this.runtimeOverrides.has(opts.targetId)) {
 			return {
@@ -691,6 +710,7 @@ export class AuthStorage {
 		providerId: string,
 		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
 	): Promise<AuthResolution> {
+		if (providerId === RETIRED_GITHUB_COPILOT_PROVIDER_ID) return retiredCopilotStatus(providerId);
 		this.reload();
 		if (opts?.targetId) {
 			const override = this.runtimeOverrides.get(opts.targetId);

@@ -5,6 +5,8 @@ import { readSettings } from "../core/config.js";
 import {
 	authNotRequiredStatus,
 	openAuthStorage,
+	RETIRED_GITHUB_COPILOT_MESSAGE,
+	RETIRED_GITHUB_COPILOT_PROVIDER_ID,
 	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
@@ -277,6 +279,10 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		parsed.target = picked;
 	}
 
+	if (parsed.target === RETIRED_GITHUB_COPILOT_PROVIDER_ID) {
+		printError(RETIRED_GITHUB_COPILOT_MESSAGE);
+		return 2;
+	}
 	const resolved = resolveCliProviderReference(parsed.target);
 	if (!resolved) {
 		printError(`unknown target or runtime: ${parsed.target}`);

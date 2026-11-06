@@ -119,11 +119,25 @@ function resolved(api: Api): EngineRegisteredApiProvider {
 	return provider;
 }
 
+/**
+ * Pi's stream adapters add Copilot request headers to any model whose provider is `github-copilot`, and
+ * that provider's catalog carries VS Code's editor headers. Clio reaches Copilot only through the official
+ * SDK, so a model claiming that provider (a runtime plugin, a hand-built model) is refused before dispatch.
+ */
+function refuseRetiredCopilotProvider(model: Model<Api>): void {
+	if (model.provider === "github-copilot") {
+		throw new Error(
+			"Clio does not stream through Pi's github-copilot provider; use a target on the copilot-sdk runtime.",
+		);
+	}
+}
+
 function dispatchEngineStream(
 	model: Model<Api>,
 	context: Context,
 	requested?: StreamOptions,
 ): AssistantMessageEventStream {
+	refuseRetiredCopilotProvider(model);
 	registerEngineBuiltins();
 	const options = withClioIdentity(requested);
 	if (compatUniverse) return compatUniverse.stream(model, context, options);
@@ -135,6 +149,7 @@ function dispatchEngineStreamSimple(
 	context: Context,
 	requested?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	refuseRetiredCopilotProvider(model);
 	registerEngineBuiltins();
 	const options = withClioIdentity(requested);
 	if (compatUniverse) return compatUniverse.streamSimple(model, context, options);
