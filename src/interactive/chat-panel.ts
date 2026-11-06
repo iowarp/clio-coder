@@ -45,7 +45,7 @@ import {
 	turnNoAnswerSentence,
 	writtenCallsFact,
 } from "../session-control/chat-loop-messages.js";
-import { coldReasonText } from "../session-control/cold-reasons.js";
+import { coldReasonList } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
 import { editPreviewDiff } from "./mutation-preview.js";
@@ -1378,7 +1378,7 @@ function renderTurnUsageLine(
 	}
 	if (spend?.cost != null) facts.push(spend.cost);
 	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
-		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
+		facts.push(`prompt read again after ${coldReasonList(usage.coldReasons)}`);
 	}
 	// How many calls had no usage data closes the line once, after the figures it qualifies (F4).
 	if (spend?.coverage) facts.push(spend.coverage);
@@ -1452,7 +1452,9 @@ function renderToolSegmentLines(
 		stopRequestedAt !== null && seg.executionStarted && shellActor(seg).actor !== undefined
 			? [stopSentRow(Math.max(0, nowMs - stopRequestedAt), width)]
 			: [];
-	const rows = renderToolPreview(call, width, detail, {
+	// A started process names who runs it while it runs, as its settled row does, so a stop reads `Clio is stopping`.
+	const running = seg.executionStarted ? { ...call, ...shellActor(seg) } : call;
+	const rows = renderToolPreview(stopRow.length > 0 ? { ...running, stopping: true } : running, width, detail, {
 		...options,
 		terminalRows,
 		partialResult: seg.partialResult,

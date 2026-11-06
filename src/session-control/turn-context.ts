@@ -170,7 +170,7 @@ import {
 	toolNamesFromAgentState,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
-import { coldReasonText } from "./cold-reasons.js";
+import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens, renderCompactionSummaryLine, renderEvictionSkipLine } from "./compaction-lines.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
@@ -771,7 +771,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// the reuse the provider actually reported.
 	const noteExpectedCold = (reasons: ReadonlyArray<string>): void => {
 		if (deps.emitCacheNotice) deps.emitCacheNotice(reasons);
-		else deps.emitNotice(`[context engine] cache may be cold: ${reasons.map(coldReasonText).join(", ")}`);
+		else deps.emitNotice(coldCacheNoticeText(reasons));
 	};
 	const noteColdReason = (reason: ExpectedColdReason): void => {
 		if (!state.streaming) {
@@ -2911,8 +2911,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							if (idle) idleReuseNoticeStamp = idleStamp;
 							if (recompile) recompileReuseNoticeStamp = recompileStamp;
 							const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : `${Math.floor(elapsedMs / 60_000)}m`;
-							const reason = [idle ? `idle ${elapsed}` : "", recompile ? "prompt changed" : ""].filter(Boolean).join(", ");
-							const text = `cache may be cold: about ${inclusiveInputTokens.toLocaleString("en-US")} tokens may be read again (${reason})`;
+							const reason = [idle ? `${elapsed} idle` : "", recompile ? "a prompt change" : ""].filter(Boolean).join(" and ");
+							const text = `next reply may be slower: about ${inclusiveInputTokens.toLocaleString("en-US")} prompt tokens may be read again after ${reason}`;
 							if (deps.emitCacheReuseNotice) deps.emitCacheReuseNotice(text);
 							else deps.emitNotice(text);
 						};

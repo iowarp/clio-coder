@@ -1342,6 +1342,90 @@ export function idleReadinessPresentation(
 	return { glyph: GLYPH.queued, ...quiet, label, ...shown() };
 }
 
+/** How a direct shell line settled, as its card states it. */
+export interface ShellSettlement {
+	command: string;
+	exitCode: number | null;
+	cancelled: boolean;
+	/** The process ignored the stop and was killed. */
+	killed: boolean;
+	/** The line never ran, or the runner failed around it. */
+	error: boolean;
+}
+
+/**
+ * What blocks the next prompt on this route, in the words idle readiness leads with, or null when nothing does. A shell
+ * outcome on the rail keeps it as a lesser fact, so the operator still sees why a prompt would fail.
+ */
+export function routeBlockerWords(facts: RouteReadinessFacts): string | null {
+	if (!facts.available) return "is unavailable";
+	if (facts.health === "down") return `cannot reach ${facts.targetId}`;
+	if (facts.lastStop === "error") return "failed its last request";
+	if (facts.lastStop === "no_answer") return "gave no answer last turn";
+	return null;
+}
+
+/**
+ * Idle after a direct shell line: the line's outcome is the newest thing that happened, so it leads, in the card's own
+ * words. Falling back to the last model turn's outcome left `failed its last request` under a shell card reading `⊘`, and
+ * the two read as one event (N7). A route blocker stays as a lesser fact, named by its model.
+ */
+export function shellSettledPresentation(
+	shell: ShellSettlement,
+	width: number,
+	reserved = 0,
+	/** The route's blocker with its model's name, when the next prompt would meet one. */
+	routeNote: string | null = null,
+): RailPhasePresentation {
+	const room = railActivityRoom(width, reserved);
+	const slot: RailSubject = { name: "your shell", shown: false };
+	const quoted = (span: number): string =>
+		`\`${truncateToWidth(shell.command, Math.max(4, span), GLYPH.ellipsis, false)}\``;
+	const outcome: { glyph: string; token: ClioToken; head: string; tight: string; tail: RailFact | null } = shell.error
+		? { glyph: GLYPH.error, token: "warning", head: "could not run", tight: "could not run", tail: null }
+		: shell.cancelled
+			? {
+					glyph: GLYPH.cancelled,
+					token: "counter",
+					head: "stopped",
+					tight: "stopped",
+					tail: shell.killed ? { text: "killed after it ignored the stop", short: "killed", keep: 7 } : null,
+				}
+			: shell.exitCode === 0
+				? { glyph: GLYPH.ok, token: "success", head: "finished", tight: "finished", tail: null }
+				: {
+						glyph: GLYPH.error,
+						token: "warning",
+						head: shell.exitCode === null ? "ended without an exit code" : `exited ${shell.exitCode}`,
+						tight: shell.exitCode === null ? "no exit code" : `exit ${shell.exitCode}`,
+						tail: null,
+					};
+	const span = Math.min(40, room - visibleWidth(outcome.head) - 16);
+	const label = fitRailFacts(
+		[
+			{ text: room >= 30 ? outcome.head : outcome.tight, keep: 9 },
+			{ text: span >= 8 ? quoted(span) : null, keep: 5 },
+			...(outcome.tail ? [outcome.tail] : []),
+			// The way to another model goes with the blocker it answers, whole or not at all.
+			{
+				text: routeNote === null ? null : `${routeNote} · ${MODEL_SWITCHES.text}`,
+				...(routeNote === null ? {} : { short: routeNote }),
+				keep: 4,
+			},
+		],
+		room,
+		slot,
+	);
+	return {
+		glyph: outcome.glyph,
+		token: outcome.token,
+		live: false,
+		label,
+		subject: slot.name,
+		subjectShown: slot.shown,
+	};
+}
+
 export function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
