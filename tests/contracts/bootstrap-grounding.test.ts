@@ -238,8 +238,9 @@ function writeCarryFixture(): string[] {
 	return carried;
 }
 
-it("removes only the model rules a carried invariant covers, not every rule naming its check", async () => {
-	writeCarryFixture();
+it("removes a model rule only when it restates a carried invariant, not when it shares its check", async () => {
+	const carried = writeCarryFixture();
+	const approval = "Get maintainer approval before disabling the case-portable-paths check in `scripts/check.js`.";
 	const recipe =
 		"Renaming `src/widgets/render.ts`: update the export in `src/index.ts` in the same commit; the case-portable-paths check in `scripts/check.js` refuses a case-only rename.";
 	await runBootstrap({
@@ -251,8 +252,11 @@ it("removes only the model rules a carried invariant covers, not every rule nami
 				projectName: "harbor",
 				identity: "A widget renderer.",
 				invariants: [
-					// The same script and file as the carried rule, in other words: it states nothing new.
+					// The carried rule in nearly its own words gives way to it.
+					"Never join a gitignored directory name into a literal string: the gitignored-literal check in `scripts/check.js` refuses it.",
+					// The same script and file as a carried rule, with an obligation of its own.
 					"The `prepublishOnly` script in `package.json` throws, so publication runs only from the release job.",
+					approval,
 					"Keep each widget's tests beside it under `src/widgets/`; the case-portable-paths check in `scripts/check.js` also runs on test file names.",
 				],
 				conventions: [
@@ -263,8 +267,10 @@ it("removes only the model rules a carried invariant covers, not every rule nami
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	ok(handbook.includes("Never publish from a workstation"), handbook);
-	strictEqual(handbook.includes("publication runs only from the release job"), false, handbook);
+	for (const rule of carried) ok(handbook.includes(rule), handbook);
+	strictEqual(handbook.includes("into a literal string"), false, handbook);
+	ok(handbook.includes("publication runs only from the release job"), handbook);
+	ok(handbook.includes(approval), handbook);
 	ok(handbook.includes("Keep each widget's tests beside it under `src/widgets/`"), handbook);
 	ok(handbook.includes("`renderWidget` returns a string and never touches the DOM"), handbook);
 	ok(handbook.includes(recipe), handbook);
@@ -354,7 +360,7 @@ it("carries a section title the rewrite dropped with the blocks a running check 
 	]);
 });
 
-it("returns a previous block under a kept title only when the handbook no longer names its check", async () => {
+it("returns a previous block under a kept title unless the handbook restates it", async () => {
 	const carried = writeCarryFixture();
 	mkdirSync(join(cwd, "docs"), { recursive: true });
 	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
@@ -378,8 +384,8 @@ it("returns a previous block under a kept title only when the handbook no longer
 			"",
 		].join("\n"),
 	);
-	const modelDocs =
-		"- Link each new page from `docs/guide.md`; the retired-html check in `scripts/check.js` refuses HTML.";
+	// Names the corpus check for another instruction. The previous retired-html block restates carried invariant 2.
+	const modelDocs = "- Name each page in kebab case; the corpus check in `scripts/check.js` also reads page names.";
 	await runBootstrap({
 		cwd,
 		rewriteClioMd: true,

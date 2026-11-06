@@ -1337,14 +1337,6 @@ function namedEnforcement(rule: string, names: EnforcementNames): string[] {
 	return [...found];
 }
 
-/** What a rule cites besides the enforcement it names: its files, symbols and commands. */
-function citedSubjects(rule: string, names: EnforcementNames): string[] {
-	return [...rule.matchAll(/`([^`\n]+)`/g)]
-		.map((match) => (match[1] ?? "").trim())
-		.filter((token) => namedEnforcement(`\`${token}\``, names).length === 0)
-		.map((token) => token.toLowerCase());
-}
-
 /**
  * The previous handbook's hard invariants that a check the repository still
  * runs enforces, grounded like a model line. A rewrite drafts afresh, and a
@@ -1548,24 +1540,9 @@ function stabilizeGeneratedOutput(
 		? enforcedPreviousInvariants(input, names, carryCorpus).filter((rule) => !restatesArchitecture(rule))
 		: [];
 	const carriedTokens = carried.map(handbookRuleTokens);
-	const carriedCoverage = carried.map((rule) => ({
-		enforcement: new Set(namedEnforcement(rule, names)),
-		subjects: new Set(citedSubjects(rule, names)),
-	}));
-	// A model invariant duplicates a carried one when it reads the same, or when it names only enforcement and
-	// subjects one carried invariant names: it then states no obligation that invariant does not. Sharing a
-	// check alone is not enough; a rename recipe that names the case check still asks for other edits.
-	const duplicatesCarried = (rule: string): boolean => {
-		if (restatesHandbookRule(handbookRuleTokens(rule), carriedTokens)) return true;
-		const enforcement = namedEnforcement(rule, names);
-		if (enforcement.length === 0) return false;
-		const subjects = citedSubjects(rule, names);
-		return carriedCoverage.some(
-			(coverage) =>
-				enforcement.every((name) => coverage.enforcement.has(name)) &&
-				subjects.every((subject) => coverage.subjects.has(subject)),
-		);
-	};
+	// Only a model invariant that restates a carried one in its words gives way. Sharing a check, a script or a
+	// cited file does not show it states no other obligation: approval before disabling a check is its own rule.
+	const duplicatesCarried = (rule: string): boolean => restatesHandbookRule(handbookRuleTokens(rule), carriedTokens);
 	// Checker import rules, carried rules and authored rules lead and are never cut: a model rule gives way to
 	// them, and the cap applies to model rules alone. When they exceed the target on their own they all stay,
 	// and the handbook parser warns that hard invariants exceed it.
@@ -1631,15 +1608,10 @@ function stabilizeGeneratedOutput(
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
-	// A previous section returns under its title when the draft dropped the title. Under a kept title, a block
-	// returns when the handbook no longer names its check. A carried section is not cut for a later one.
+	// A previous section returns under its title when the draft dropped the title. Under a kept title, each
+	// enforced block returns unless a kept rule or the kept section restates it: naming the same check is not
+	// stating the same instruction. A carried section is not cut for a later one.
 	const carriedSections = new Set<ClioMdSection>();
-	const stated = new Set(
-		namedEnforcement(
-			[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
-			names,
-		),
-	);
 	for (const section of carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : []) {
 		const key = section.title.replace(/\s+/g, " ").trim().toLowerCase();
 		const index = ordinarySections.findIndex((kept) => kept.title.replace(/\s+/g, " ").trim().toLowerCase() === key);
@@ -1649,10 +1621,9 @@ function stabilizeGeneratedOutput(
 			if (retained) carriedSections.add(retained);
 			continue;
 		}
+		const sectionTokens = [...keptRuleTokens, ...handbookBlocks(current.body).map(handbookRuleTokens)];
 		const missing = handbookBlocks(section.body).filter(
-			(block) =>
-				namedEnforcement(block, names).some((name) => !stated.has(name)) &&
-				!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens),
+			(block) => !restatesHandbookRule(handbookRuleTokens(block), sectionTokens),
 		);
 		if (missing.length === 0) continue;
 		const merged = { ...current, body: [current.body, ...missing].join("\n") };
