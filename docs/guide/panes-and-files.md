@@ -319,7 +319,7 @@ The managed profile also shows hidden files and git status.
 What is not themed by Clio Coder is herdr's own chrome: the sidebar, tab bar,
 borders, and agent rows come from herdr's `config.toml`, and herdr has no
 per-pane styling on its socket. `clio-coder panes theme` takes no arguments and prints Clio Coder's tokens
-as a herdr `[theme.custom]` block (`accent`, `green`, `blue`, `red`, `yellow`, `selection_bg`, `active_row_bg`) drawn for the detected background, dark when unknown.
+as a herdr `[theme.custom]` block (`accent`, `green`, `red`, `yellow`, `selection_bg`, `active_row_bg`) drawn for the detected background, dark when unknown.
 Paste it into herdr's `config.toml` and reload herdr's config. Writing or merging that block on your behalf would cross Clio Coder's rule of
 writing nothing outside its own roots, so Clio does not offer it (#273).
 With `interface.panes.files.profile: user`, nothing is themed and the engine runs on your own configuration.
