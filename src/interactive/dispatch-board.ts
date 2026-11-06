@@ -2155,7 +2155,7 @@ function hiddenRunsSummary(hidden: ReadonlyArray<DispatchBoardItem>): string {
  * the helper audience while answering the operator's own /council question, so it counts: without it a running
  * council left the dock and the rail empty.
  */
-export function isOperatorFleetRun(row: Pick<DispatchBoardRow, "agentAudience" | "council">): boolean {
+function isOperatorFleetRun(row: Pick<DispatchBoardRow, "agentAudience" | "council">): boolean {
 	return row.council !== undefined || !isHelperRun(row);
 }
 
@@ -2427,7 +2427,7 @@ function fleetPlanRow(plan: FleetPlanRunView, now: number): DispatchBoardRow {
  * whatever their outcome. Opening the board puts the cursor on the first row, so that row is the run the operator
  * most likely came for; ordering settled runs by outcome put an old failure above the run that just finished.
  */
-export function boardOrder(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
+function boardOrder(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
 	const live = (row: DispatchBoardRow): boolean => !isTerminalStatus(row.status);
 	return [...rows].sort((a, b) => {
 		if (live(a) !== live(b)) return live(a) ? -1 : 1;
