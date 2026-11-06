@@ -92,6 +92,7 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
+import { enableFrontmatterCacheWrites } from "../domains/resources/index.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
@@ -620,6 +621,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		return observeExternalWorkerRun(input, emit, (observedEmit) => startClaudeSdkWorkerRun(input, observedEmit));
 	}
 	if (input.runtime.kind === "subprocess") return startExternalCliWorkerRun(input, emit);
+	// A worker process serves one run, so the run's ceiling decides whether its
+	// skill loads may persist frontmatter parses.
+	if (input.readOnly !== true) enableFrontmatterCacheWrites();
 
 	// pi-ai is process-local. The orchestrator registers Clio API providers in
 	// providers/extension.ts, but the worker subprocess starts a fresh process,

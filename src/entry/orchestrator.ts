@@ -244,6 +244,7 @@ import { quotaProviderIdForRuntime } from "../domains/quota/registry.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
+	enableFrontmatterCacheWrites,
 	installedSkillNames,
 	installSkill,
 	modelVisibleSkills,
@@ -2010,6 +2011,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const { registerRunningBuild } = await import("../core/running-build.js");
 	const bootSurface = options.acp ? "acp" : options.headless ? "run" : "tui";
 	registerRunningBuild(bootSurface);
+	// Opened before the first skill load so a cold boot's parses persist. ACP stays
+	// a reader: its read-only ceilings are per session and per prompt in one process.
+	if (bootSurface === "tui" || (bootSurface === "run" && options.headless?.constraints?.readOnly !== true)) {
+		enableFrontmatterCacheWrites();
+	}
 	// Every session this boot opens names its surface in the live record (#439).
 	(await import("../domains/session/heartbeat.js")).configureSessionHeartbeat({
 		surface: bootSurface,

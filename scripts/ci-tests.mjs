@@ -40,6 +40,7 @@ export const coreTests = [
 	"in-prefix-summary",
 	"packed-source-directory",
 	"skill-frontmatter-cache",
+	"skill-frontmatter-cache-gate",
 	"fleet-run-history-prime",
 	"approval-card-arguments",
 	"copilot-sdk-route",

@@ -285,6 +285,11 @@ export function clioCacheDir(): string {
 	return cachedCacheDir;
 }
 
+/** The cache root without creating it, for a reader that must leave the home as it found it. */
+export function clioCachePath(): string {
+	return cachedCacheDir ?? resolveClioDirs().cache;
+}
+
 export function clioStatePath(): string {
 	return cachedStateDir ?? resolveClioDirs().state;
 }

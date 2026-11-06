@@ -146,6 +146,7 @@ export {
 	type SkillCatalogViewInput,
 } from "./skills/catalog-view.js";
 export { normalizedSkillHash } from "./skills/content-hash.js";
+export { enableFrontmatterCacheWrites } from "./skills/frontmatter-cache.js";
 export { type LexicalMatchMode, lexicalMatches } from "./skills/lexical-match.js";
 export {
 	defaultSkillRoots,
