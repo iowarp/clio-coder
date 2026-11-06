@@ -684,13 +684,13 @@ first match wins (`resolveApplicationCtrlCAction`, [application-controller.ts](.
 | State | What Ctrl+C does |
 | --- | --- |
 | An overlay owns input (transcript search, Library, Settings, model picker) | Closes that overlay. It does not cancel a running turn and does not exit. Any armed shutdown is disarmed. |
-| A permission card | Denies the parked call, as `Esc` does. It does not cancel the running turn and does not exit. |
+| A permission card | Backs out one layer, as `Esc` does: it first closes open details, then open terms, and only then denies the parked call. It does not cancel the running turn and does not exit. |
 | A `!` shell command running from the composer | Cancels that command. It does not arm shutdown. |
 | Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. The press does not arm shutdown. |
 | Idle with messages queued | Protects the queue and says how to recover it with the bound dequeue key (`Alt+Q` by default). |
 | Idle, nothing queued | Arms shutdown and leaves any draft in the composer. The footer counts down `Ctrl+C again to quit`, preceded by `draft kept, printed on quit` when the composer holds text. A second `Ctrl+C` within 3,000 ms (`APPLICATION_DOUBLE_TAP_MS`) exits, and the kept draft is printed to stderr after the terminal is restored, under `Unsent draft, not delivered to Clio:`. |
 
-In a permission card, `Esc` denies the one parked call and `Alt+X` stops the turn, because denying one call does not stop the model from asking again. Letters typed while a card is open go to the composer, never to the card. Denying a permission card is a decision, not a dismissal:
+In a permission card, `Esc` first closes open details and then open terms, and from the card itself denies the one parked call. `Alt+X` stops the turn, because denying one call does not stop the model from asking again. Letters typed while a card is open go to the composer, never to the card. Denying a permission card is a decision, not a dismissal:
 the parked call is cancelled with `User denied this call at the permission
 prompt. It will not run; no approval is pending.` (`User denied this call and
 stopped the turn. The turn is over.` after `Alt+X`), and a parked *worker*
@@ -754,8 +754,9 @@ is next slot.
 
 ### Queued messages after a stop
 
-`Esc`, `Ctrl+C` and `Alt+X` at a permission card end the run and send nothing.
-Queued messages stay in the panel as separate entries, in order, and a notice
+An operator stop (`Esc` or `Ctrl+C` on a running turn, or `Alt+X`) ends the run and sends nothing.
+At a permission card, `Esc` denies only the one parked call, so the run and its queue go on. A loop-guard stop and a cancelled job keep their own settlement.
+After an operator stop, queued messages stay in the panel as separate entries, in order, and a notice
 says how many wait and which keys act on them. `Alt+S` with an empty composer
 sends them in order, each as its own user message. A new prompt takes them at
 its first slot. `Alt+Q` restores them to the composer. A peer's or other
