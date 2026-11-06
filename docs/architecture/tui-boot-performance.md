@@ -21,7 +21,7 @@ Stage 0 draws before the application loads, so its static module closure is kept
 
 ### Stage 1 work in slices
 
-While Stage 0 takes keys, the boot path gives the event loop a full turn, input poll included, between its larger pieces of work. [stage1-preload.ts](../../src/entry/stage1-preload.ts) imports the composition root's largest subgraphs one slice at a time. Before the interactive application builds, the orchestrator also reads the fleet board's earlier worker runs, one run's journal per turn ([fleet-run-history.ts](../../src/interactive/fleet-run-history.ts)). The board's first read during the build takes those rows instead of reading every journal in one block. A read for another directory or worktree root ignores the primed rows and reads the ledger itself.
+While Stage 0 takes keys, the boot path gives the event loop a full turn, input poll included, between its larger pieces of work. [stage1-preload.ts](../../src/entry/stage1-preload.ts) imports the composition root's largest subgraphs one slice at a time. At its last phase boundary, before the chat loop starts producers whose notices reach only the built application, the orchestrator also reads the fleet board's earlier worker runs, one run's journal per turn ([fleet-run-history.ts](../../src/interactive/fleet-run-history.ts)). A closed lease stops that read before the next journal and stops boot at the boundary. The board's first read during the build takes those rows instead of reading every journal in one block. A read for another directory or worktree root ignores the primed rows and reads the ledger itself.
 
 ### Compile cache
 
