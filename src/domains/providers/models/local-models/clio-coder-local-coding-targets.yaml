@@ -178,6 +178,23 @@
         static:
           force_nonempty_content: true
         lmstudio: unsupported
+- family: nemotron-3.5-bolt-74b-a9b
+  matchPatterns:
+    - nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB
+    - nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16
+    - nvidia-nemotron-3.5-bolt-74b-a9b
+    - nemotron-3.5-bolt-74b-a9b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    vision: true
+    audio: false
+    contextWindow: 262144
+  quirks:
+    outputTokens: 16384
 - family: qwen3.5-4b
   matchPatterns:
     - Qwen/Qwen3.5-4B
