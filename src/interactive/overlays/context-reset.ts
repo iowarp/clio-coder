@@ -21,8 +21,7 @@ export interface OpenContextResetOverlayDeps {
  * context" alone left the operator to guess which files that was, and whether
  * a project with none of them would change at all.
  */
-function previewLines(cwd: string): string[] {
-	const preview = contextResetPreview(cwd);
+function previewLines(preview: ReturnType<typeof contextResetPreview>): string[] {
 	return [
 		preview.removes.length === 0
 			? "Clio has generated no project context here yet, so Preserve changes no file."
@@ -39,25 +38,46 @@ export function contextResetOptions(choice: ContextResetMutationChoice): Context
 	return choice === "delete-clio-md" ? { all: true, confirmed: true, confirmedAll: true } : { confirmed: true };
 }
 
-/** Three intentional outcomes, ordered with the least destructive action first. */
-const CHOICES = [
-	{
-		value: "preserve-clio-md",
-		label: "Preserve CLIO-CODER.md",
-		description: "remove generated context and keep the project handbook",
-	},
-	{
-		value: "delete-clio-md",
-		label: "Delete CLIO-CODER.md",
-		description: "remove generated context and the project handbook",
-	},
-	{ value: "cancel", label: "Cancel", description: "close without changing any files" },
-] as const;
+/**
+ * Three intentional outcomes, ordered with the least destructive action first.
+ * Each row says what it changes in this project, so a choice that changes
+ * nothing reads that way on the row the operator is about to press.
+ */
+function choices(preview: ReturnType<typeof contextResetPreview>) {
+	const generated = preview.removes.length > 0;
+	return [
+		{
+			value: "preserve-clio-md",
+			label: "Preserve CLIO-CODER.md",
+			description: generated
+				? "remove generated context and keep the project handbook"
+				: "changes no file here: there is no generated context to remove",
+		},
+		{
+			value: "delete-clio-md",
+			label: "Delete CLIO-CODER.md",
+			description: preview.handbook
+				? generated
+					? "remove generated context and the project handbook"
+					: "remove the project handbook"
+				: generated
+					? "remove generated context; there is no handbook here"
+					: "changes no file here: there is no handbook or generated context",
+		},
+		{ value: "cancel", label: "Cancel", description: "close without changing any files" },
+	] as const;
+}
 
 /** Open the `/context reset` choice dialog. Cancel paths never reach onReset. */
 export function openContextResetOverlay(tui: TUI, deps: OpenContextResetOverlayDeps): OverlayHandle {
+	const state = contextResetPreview(deps.cwd ?? process.cwd());
+	const items = choices(state);
 	const list = createChoiceList({
-		items: CHOICES,
+		items,
+		// When Preserve would change no file, the focus starts on Cancel: the only
+		// row left that changes anything deletes the handbook, and Enter must
+		// never land on that unasked.
+		initialIndex: state.removes.length > 0 ? 0 : 2,
 		onSelect: (item) => {
 			if (item.value === "preserve-clio-md" || item.value === "delete-clio-md") {
 				deps.onReset(item.value);
@@ -67,7 +87,7 @@ export function openContextResetOverlay(tui: TUI, deps: OpenContextResetOverlayD
 		},
 		onCancel: () => deps.onCancel(),
 	});
-	const lines = previewLines(deps.cwd ?? process.cwd());
+	const lines = previewLines(state);
 	const preview: Component = {
 		render(width) {
 			const theme = clioTheme();
