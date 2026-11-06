@@ -52,14 +52,16 @@ test("summaries frame their payload and bash replay retains output, exit, cancel
 	const replay = bashExecutionToText(message);
 	match(replay, /`printf result`/u);
 	match(replay, /```\nresult\n```/u);
-	match(replay, /code 2/u);
+	match(replay, /\bcode 2$/mu);
 	match(replay, /truncated/iu);
 	match(replay, /\/saved\/output/u);
-	const canceled = bashExecutionToText({ ...message, output: "", cancelled: true, truncated: false });
-	match(canceled, /`printf result`/u);
-	match(canceled, /no output/u);
-	match(canceled, /cancelled/u);
-	doesNotMatch(canceled, /code 2|\/saved\/output/u);
+	for (const exitCode of [2, 7]) {
+		const canceled = bashExecutionToText({ ...message, exitCode, output: "", cancelled: true, truncated: false });
+		match(canceled, /`printf result`/u);
+		match(canceled, /no output/u);
+		match(canceled, /cancelled/u);
+		doesNotMatch(canceled, /\bcode\s+[+-]?\d+\b|\/saved\/output/u);
+	}
 });
 
 test("prompt arguments retain quoted, positional, slice and raw substitution semantics and Pi 1.0 defaults", () => {
