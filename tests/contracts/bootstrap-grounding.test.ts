@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -267,6 +267,33 @@ it("removes only the model rules a carried invariant covers, not every rule nami
 	ok(handbook.includes("Keep each widget's tests beside it under `src/widgets/`"), handbook);
 	ok(handbook.includes("`renderWidget` returns a string and never touches the DOM"), handbook);
 	ok(handbook.includes(recipe), handbook);
+});
+
+it("keeps every carried invariant when the model repeats one at the end of a full list", async () => {
+	const carried = writeCarryFixture();
+	const widgetRules = Array.from(
+		{ length: 19 },
+		(_, i) => `Widget ${i + 1} renders only through \`renderWidget\` in \`src/widgets/render.ts\`.`,
+	);
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [...widgetRules, carried[2] ?? ""],
+				conventions: [],
+				sections: [],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const hard = handbook.split("## Hard invariants")[1]?.split("\n## ")[0] ?? "";
+	const rules = [...hard.matchAll(/^\d+\. (.+)$/gm)].map((match) => match[1]);
+	deepStrictEqual(rules.slice(0, carried.length), carried, handbook);
+	strictEqual(rules.length, 20, handbook);
 });
 
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {

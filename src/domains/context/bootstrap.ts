@@ -1529,17 +1529,23 @@ function stabilizeGeneratedOutput(
 				subjects.every((subject) => coverage.subjects.has(subject)),
 		);
 	};
+	// Checker import rules, carried rules and authored rules lead and are never cut: a model rule gives way to
+	// them, and the cap applies to model rules alone. When they exceed the target on their own they all stay,
+	// and the handbook parser warns that hard invariants exceed it.
+	const authoredInvariants = existing?.invariants ?? [];
+	const protectedInvariants: string[] = [];
+	for (const rule of architectural) {
+		if (!authoredInvariants.includes(rule.sentence)) pushUnique(protectedInvariants, rule.sentence);
+	}
+	for (const rule of carried) if (!authoredInvariants.includes(rule)) pushUnique(protectedInvariants, rule);
+	for (const rule of authoredInvariants) pushUnique(protectedInvariants, rule);
+	const modelInvariants = invariants.filter(
+		(rule) => !protectedInvariants.includes(rule) && !restatesArchitecture(rule) && !duplicatesCarried(rule),
+	);
 	const retainedInvariants = [
-		...architectural.map((rule) => rule.sentence).filter((rule) => !invariants.includes(rule)),
-		...carried.filter((rule) => !invariants.includes(rule)),
-		// Authored invariants always stay; only a generated one gives way.
-		...invariants.filter(
-			(rule) =>
-				existing?.invariants.includes(rule) === true ||
-				carried.includes(rule) ||
-				(!restatesArchitecture(rule) && !duplicatesCarried(rule)),
-		),
-	].slice(0, HANDBOOK_TARGETS.invariants);
+		...protectedInvariants,
+		...modelInvariants.slice(0, Math.max(0, HANDBOOK_TARGETS.invariants - protectedInvariants.length)),
+	];
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
 	const typescriptConvention = tsconfigConvention(
 		input.cwd,
