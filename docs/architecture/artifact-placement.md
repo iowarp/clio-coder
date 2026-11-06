@@ -115,7 +115,7 @@ problem.
 | `jobs/`, `provider-checkpoints/`, `sandbox/`, `fleet-preflight.json` | Background job records, provider checkpoints, sandbox state and the last fleet preflight |
 | `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json`, `copilot-sdk-consent.json` | Small per-machine stores; the last records which GitHub accounts consented to the copilot-sdk route (no token) |
-| `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
+| `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v4/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
 
 The clean-exit session summary is built from an in-memory snapshot and is not
 persisted. Route history is a fold over `run.settled` records in the run journals
