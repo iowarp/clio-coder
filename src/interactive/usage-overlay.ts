@@ -2,6 +2,7 @@ import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
+import type { VerifiedOutcomeCount } from "../domains/evidence/verified-outcomes.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
@@ -17,7 +18,9 @@ import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, positionRow, rule } from "./theme/index.js";
 import {
+	NO_VERIFIED_OUTCOME,
 	sentCallCount,
+	sessionVerifiedOutcomes,
 	USAGE_NOT_MEASURED,
 	usageCoverage,
 	usageEstimatedCalls,
@@ -29,6 +32,7 @@ import {
 	usageSaysNothing,
 	usageStillRunning,
 	usageUnmeasured,
+	verifiedOutcomeWords,
 } from "./usage-words.js";
 
 const DEFAULT_CONTENT_WIDTH = 104;
@@ -208,7 +212,12 @@ function callRows(
  * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
  * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
  */
-function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, contentWidth: number): string[] {
+function summaryBlock(
+	view: TelemetryView,
+	recall: RecallTelemetry | null,
+	verified: VerifiedOutcomeCount | null,
+	contentWidth: number,
+): string[] {
 	const session = view.session();
 	const byRole = view.cost("role");
 	const cache = view.cache();
@@ -229,6 +238,7 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 				? [["never sent", `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"}`] as const]
 				: []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
+			...(verified !== null ? verifiedRows(view, verified) : []),
 			...tokenRows(view),
 			...(cached
 				? [
@@ -250,6 +260,20 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 		],
 		contentWidth,
 	);
+}
+
+/**
+ * The session's verified outcomes and what each cost, beside the totals they divide. Cost per outcome is the cost row's
+ * own mark, so an unpriced route reads `not measured` on both; with no outcome there is no per-outcome row at all.
+ */
+function verifiedRows(view: TelemetryView, outcomes: VerifiedOutcomeCount): Array<readonly [string, string, string?]> {
+	const words = verifiedOutcomeWords(view, outcomes);
+	if (words.kind === "none") return [["verified outcomes", "none", NO_VERIFIED_OUTCOME.replace(/^none /u, "")]];
+	return [
+		["verified outcomes", words.count, words.parts.join(" · ")],
+		["tokens per outcome", words.tokens],
+		["cost per outcome", words.cost],
+	];
 }
 
 /** The Models tab: one block per `target/model`, the reported model where the provider named one. */
@@ -281,6 +305,8 @@ interface UsageData {
 	/** Why `view` is null: no read model at all, or no session for it to read yet. */
 	missing: string;
 	recall: RecallTelemetry | null;
+	/** The session's verified outcomes, re-read with the recall fold rather than per frame; null without a ledger. */
+	verified: VerifiedOutcomeCount | null;
 }
 
 export interface OpenUsageOverlayOptions {
@@ -521,7 +547,9 @@ class UsageOverlayBody implements Component {
 				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
 				theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
 				"",
-				...(data.view ? summaryBlock(data.view, data.recall, contentWidth) : [theme.fg("annotation", data.missing)]),
+				...(data.view
+					? summaryBlock(data.view, data.recall, data.verified, contentWidth)
+					: [theme.fg("annotation", data.missing)]),
 				"",
 				rule(theme, contentWidth),
 				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
@@ -570,10 +598,15 @@ export function openUsageOverlay(
 	const quotaFeed = createQuotaSummaryFeed({ onUpdate: () => tui.requestRender() });
 	const readRecall = () => (options?.getSessionEntries ? foldRecallTelemetry(options.getSessionEntries()) : null);
 	let recall = readRecall();
+	const readVerified = (): VerifiedOutcomeCount | null => {
+		const view = readModel?.live() ?? null;
+		return view && options?.getSessionEntries ? sessionVerifiedOutcomes(view, options.getSessionEntries()) : null;
+	};
+	let verified = readVerified();
 	const now = options?.now ?? (() => Date.now());
 	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
-		() => ({ view: readModel?.live() ?? null, missing: readModel ? NOT_STARTED : NOT_AVAILABLE, recall }),
+		() => ({ view: readModel?.live() ?? null, missing: readModel ? NOT_STARTED : NOT_AVAILABLE, recall, verified }),
 		() => {
 			quotaFeed.peekSnapshots();
 			return readModel?.quota().providers ?? [];
@@ -618,6 +651,7 @@ export function openUsageOverlay(
 	// Spend changes arrive as persisted batches, at most 10 Hz; the ledger's recall fold is re-read then, not per frame.
 	const refresh = () => {
 		recall = readRecall();
+		verified = readVerified();
 		tui.requestRender();
 	};
 	const offs = readModel

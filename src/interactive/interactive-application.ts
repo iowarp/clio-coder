@@ -592,6 +592,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.session ? { session: deps.session } : {}),
 		getTurns: sessionTranscript.liveSessionTurns,
 		getToolCounts: () => presentation.toolCounts(),
+		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
 		...(deps.gitHookChanges !== undefined ? { gitHookChanges: deps.gitHookChanges } : {}),
 		getModel: () => {
 			const settings = deps.getSettings?.();
