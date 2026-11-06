@@ -1,14 +1,14 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "hpc",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. The skills drive the cluster's own command-line tools; the clio-kit Slurm server needs one online launch to build its environment before it runs offline.",
 	"license": "Apache-2.0",
 	"author": {
 		"name": "IOWarp"
 	},
 	"repository": "https://github.com/iowarp/clio-coder",
-	"keywords": ["hpc", "slurm", "lmod", "spack", "mpi-io", "parallel-hdf5", "darshan", "chronolog"],
+	"keywords": ["hpc", "slurm", "parameter-sweep", "lmod", "spack", "mpi-io", "parallel-hdf5", "darshan", "chronolog"],
 	"extensions": {
 		"ai.iowarp.clio": {
 			"manifestVersion": 1,
@@ -21,6 +21,11 @@
 					"kind": "script",
 					"id": "darshan-summary",
 					"path": "assets/scripts/darshan_summary.py"
+				},
+				{
+					"kind": "script",
+					"id": "sweep",
+					"path": "assets/scripts/sweep.py"
 				},
 				{
 					"kind": "skill",
@@ -42,6 +47,12 @@
 					"kind": "skill",
 					"id": "hpc-chronolog",
 					"path": "skills/hpc-chronolog/SKILL.md"
+				},
+				{
+					"kind": "skill",
+					"id": "hpc-sweep",
+					"path": "skills/hpc-sweep/SKILL.md",
+					"requires": ["script:sweep"]
 				}
 			]
 		}

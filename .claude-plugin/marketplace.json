@@ -146,7 +146,7 @@
 			"name": "hpc",
 			"source": "./library/plugins/hpc",
 			"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. The skills drive the cluster's own command-line tools; the clio-kit Slurm server needs one online launch to build its environment before it runs offline.",
-			"version": "0.1.0",
+			"version": "0.2.0",
 			"license": "Apache-2.0",
 			"author": {
 				"name": "IOWarp"

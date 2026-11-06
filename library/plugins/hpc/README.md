@@ -18,6 +18,7 @@ installing.
 | Skill | What it does | Drives |
 | --- | --- | --- |
 | `slurm-jobs` (required package) | Submits a job or job array, polls each task to a terminal state, reports each task's exit and output | `mcp_slurm__*` from `clio-kit mcp-server slurm` |
+| `hpc-sweep` | Plans a parameter sweep as a job array with a dry run, submits it on the operator's word, checks each run with a declared verify check, and writes a results table that keeps failed and unverified runs | `assets/scripts/sweep.py`, `mcp_slurm__*`, `verify`, `clio-coder claims` |
 | `hpc-modules` | Finds and loads Lmod modules and Spack installs, keeping each load in the shell that uses it | `module`, `$LMOD_CMD`, `spack` over `bash` |
 | `hpc-parallel-io` | Correctness rules and tuning for parallel HDF5 and MPI-IO, checked by readback and Darshan counters | `h5pcc`, `h5py`, `mpirun`, `lfs` |
 | `hpc-darshan` | Summarizes a Darshan log and names the counters behind each I/O finding | `darshan-parser` through `assets/scripts/darshan_summary.py` |
@@ -76,6 +77,14 @@ command-line tools directly instead.
 `assets/scripts/darshan_summary.py` is the pack's declared check script
 (stdlib Python 3.10+). It reads darshan-parser's text output and never writes
 to the log. It was written against the darshan-util 3.5.0 output format.
+
+`assets/scripts/sweep.py` (Python 3.10+) plans and tabulates sweeps. It reads
+the sweep file as YAML when PyYAML is importable and as JSON otherwise, writes
+only under the sweep's `sweeps/<name>/` directory in the project, and never
+submits. Its per-run verdicts come from the claims Clio records when
+`verify(check="<id>/<run>")` judges a run, which needs a
+`.clio-coder/verifiers.yaml` check that declares `runs`; the `hpc-sweep` skill
+shows the entry. Task states come from `sacct`, read-only.
 
 ## Licenses and terms
 
