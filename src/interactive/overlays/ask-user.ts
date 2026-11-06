@@ -655,10 +655,10 @@ class AskUserOverlayView implements Component {
 		if (countdown === null) return [];
 		const theme = clioTheme();
 		if (countdown.state() === "held") {
-			const esc = innermostEscapeLayer(this.escapeLayers());
+			// The keys are the rail's; this row only says the clock stopped, which nothing else on screen says.
 			const line = headers
-				? `${GLYPH.phaseBlocked} timer held · Enter: record · Esc: ${esc?.verb ?? "cancel interview"}`
-				: `${GLYPH.phaseBlocked} held · Enter: record · Esc: ${esc?.short ?? esc?.verb ?? "cancel"}`;
+				? `${GLYPH.phaseBlocked} timer held · nothing is chosen until you answer`
+				: `${GLYPH.phaseBlocked} timer held`;
 			return headers
 				? wrapTextWithAnsi(theme.fg("annotation", line), width)
 				: [fitRow(theme.fg("annotation", line), width)];
@@ -1033,7 +1033,7 @@ class AskUserOverlayView implements Component {
 		const kept = this.railKept(entries, this.railRoom);
 		// The fit keeps entries from the end, so the keys with another home give way first:
 		// the question's position row can point at the move key, and the count stands in for `a`.
-		const givesWayFirst = (entry: HintEntry): boolean => entry.key === "←/→" || entry.key === "a";
+		const givesWayFirst = (entry: HintEntry): boolean => entry.key === "Tab/Shift+Tab" || entry.key === "a";
 		const dropped = entries
 			.filter((entry) => !kept.includes(entry))
 			.sort((left, right) => Number(givesWayFirst(right)) - Number(givesWayFirst(left)));
@@ -1179,7 +1179,8 @@ class AskUserOverlayView implements Component {
 			entries.push({ key: "t", verb: "other answer", short: "other" });
 		}
 		entries.push(...scroll);
-		if (this.questions.length > 1) entries.push({ key: "←/→", verb: "question" });
+		// Tab moves between questions in the list and in the text field alike, so both rails name the same key.
+		if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
 		entries.push(record);
 		return { entries, esc };

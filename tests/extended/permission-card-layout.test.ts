@@ -114,7 +114,7 @@ test("worker terms say an approval covers one call and a denial holds within the
 	match(folded, /deny\s+skips it; an identical call in this run is refused without asking/u);
 	body.toggleTerms();
 	const terms = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
-	match(terms, /same tool, arguments, approval axis, and safety classification/u);
+	match(terms, /remembers a denial of exactly this call/u);
 	match(terms, /Each call still passes the safety net/u);
 	match(terms, /refuses identical calls/u);
 	doesNotMatch(terms, /authorizes one|only.*exact request/u);

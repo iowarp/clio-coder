@@ -268,7 +268,7 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 		case "system":
 			return "The call can change state outside the workspace or state the classifier cannot safely bound.";
 		case "worker":
-			return "A dispatched worker is parked until you answer or its window runs out. This run remembers a denial for the same tool, arguments, approval axis, and safety classification, and never an approval; other runs are unaffected.";
+			return "A dispatched worker is parked until you answer or its window runs out. This run remembers a denial of exactly this call, and never an approval; other runs are unaffected.";
 	}
 }
 

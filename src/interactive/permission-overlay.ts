@@ -480,7 +480,7 @@ function compactCountdownClause(
 		const ending = view.workerFallback === "fail" ? "fails the run" : "denies";
 		if (!countdown.held) return { outcome: `${GLYPH.warn} ${left} ${ending}`, holds: "key holds", tone: "warning" };
 		return {
-			outcome: `${GLYPH.phaseBlocked} held, ${left} ${ending}`,
+			outcome: `${GLYPH.phaseBlocked} held · no answer in ${left} ${ending}`,
 			holds: "",
 			tone: countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation",
 		};
