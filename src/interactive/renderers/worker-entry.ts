@@ -8,9 +8,9 @@ import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
 import {
+	councilCollectedWords,
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
-	councilCollectedWords,
 	presentCouncilReport,
 	presentWorkerContractAnswer,
 	safeWorkerAnswerText,
