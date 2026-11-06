@@ -872,12 +872,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			};
 			if (lastCompactionStop !== null && !detail) {
 				const blocker = routeBlockerWords(routeFacts);
-				return compactionSettledPresentation(
-					lastCompactionStop,
-					width,
-					reserved,
-					`${phaseModelName(status)} ${blocker ?? "is ready"}`,
-				);
+				return compactionSettledPresentation(lastCompactionStop, width, reserved, phaseModelName(status), blocker);
 			}
 			if (lastShell !== null && !detail) {
 				const blocker = routeBlockerWords(routeFacts);

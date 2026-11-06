@@ -1003,13 +1003,19 @@ function toolActivity(
 	// Who is acting is the claim itself: at 60 and 40 columns `running \`trap…\`` read the same for your shell and
 	// Clio's command. A narrow terminal gives the actor its short form and a present-tense verb instead of dropping it,
 	// and the choice keys on the terminal's width so the rail and the strip spell it the same.
-	const tight = width < TOOL_ACTOR_TIGHT_WIDTH && verb === null;
+	// The operator's own line reads `you` on a narrow rail in every state, as its card does (`you are stopping`).
+	const tight = width < TOOL_ACTOR_TIGHT_WIDTH && (verb === null || mine);
 	const subject = mine ? (tight ? "you" : "your shell") : "Clio";
-	const full = tight
-		? mine
-			? (activity?.mine ?? "run")
-			: (activity?.tight ?? "runs")
-		: (verb ?? activity?.verb ?? "is running");
+	const full =
+		verb !== null
+			? mine && tight
+				? verb.replace(/^is /u, "are ")
+				: verb
+			: tight
+				? mine
+					? (activity?.mine ?? "run")
+					: (activity?.tight ?? "runs")
+				: (activity?.verb ?? "is running");
 	const clockText = elapsed === undefined ? null : elapsedFrom(elapsed);
 	// The facts that outrank the command's text are owed their cells before the text takes the rest.
 	const wayOut = verb === null ? 3 + visibleWidth(ESC_CANCELS.text ?? "") : 0;
@@ -1414,7 +1420,9 @@ export function shellSettledPresentation(
 	routeNote: string | null = null,
 ): RailPhasePresentation {
 	const room = railActivityRoom(width, reserved);
-	const slot: RailSubject = { name: "your shell", shown: false };
+	// A narrow rail names the operator `you` while the line runs, stops and settles, so the three read as one actor.
+	const tight = width < TOOL_ACTOR_TIGHT_WIDTH;
+	const slot: RailSubject = { name: tight ? "you" : "your shell", shown: false };
 	const quoted = (span: number): string =>
 		`\`${truncateToWidth(shell.command, Math.max(4, span), GLYPH.ellipsis, false)}\``;
 	const outcome: { glyph: string; token: ClioToken; head: string; tight: string; tail: RailFact | null } = shell.error
@@ -1428,19 +1436,28 @@ export function shellSettledPresentation(
 					tail: shell.killed ? { text: "killed after it ignored the stop", short: "killed", keep: 7 } : null,
 				}
 			: shell.exitCode === 0
-				? { glyph: GLYPH.ok, token: "success", head: "finished", tight: "finished", tail: null }
+				? {
+						glyph: GLYPH.ok,
+						token: "success",
+						head: "finished",
+						tight: "ran",
+						tail: tight ? { text: "finished", keep: 8 } : null,
+					}
 				: {
 						glyph: GLYPH.error,
 						token: "warning",
 						head: shell.exitCode === null ? "ended without an exit code" : `exited ${shell.exitCode}`,
-						tight: shell.exitCode === null ? "no exit code" : `exit ${shell.exitCode}`,
-						tail: null,
+						tight: "ran",
+						tail: tight ? { text: shell.exitCode === null ? "no exit code" : `exit ${shell.exitCode}`, keep: 8 } : null,
 					};
-	const span = Math.min(40, room - visibleWidth(outcome.head) - 16);
+	const verb = tight ? outcome.tight : room >= 30 ? outcome.head : outcome.tight;
+	const span = Math.min(40, room - visibleWidth(verb) - 16 - visibleWidth(slot.name));
+	// On a narrow rail the command is the verb's object (`you ran \`false\` · exit 1`), as the card words it.
+	const head = tight && span >= 6 ? `${verb} ${quoted(span)}` : verb;
 	const label = fitRailFacts(
 		[
-			{ text: room >= 30 ? outcome.head : outcome.tight, keep: 9 },
-			{ text: span >= 8 ? quoted(span) : null, keep: 5 },
+			{ text: head, ...(head !== verb ? { short: verb } : {}), keep: 9 },
+			{ text: !tight && span >= 8 ? quoted(span) : null, keep: 5 },
 			...(outcome.tail ? [outcome.tail] : []),
 			// The way to another model goes with the blocker it answers, whole or not at all.
 			{
@@ -1470,24 +1487,30 @@ export function compactionSettledPresentation(
 	outcome: "cancelled" | "failed",
 	width: number,
 	reserved = 0,
-	/** The route's readiness after it, in its model's words: what the next prompt meets. */
-	next: string | null = null,
+	/** The model that was summarizing, which the rail named while it ran. */
+	subjectName?: string,
+	/** What blocks the route's next prompt, in idle readiness's words, or null when nothing does. */
+	blocker: string | null = null,
 ): RailPhasePresentation {
 	const room = railActivityRoom(width, reserved);
 	const cancelled = outcome === "cancelled";
+	// The same subject the running stage had (`Judge-model is summarizing`), so the stop reads as its end.
+	const slot: RailSubject | undefined = subjectName !== undefined ? { name: subjectName, shown: false } : undefined;
 	const label = fitRailFacts(
 		[
-			{ text: cancelled ? "compaction stopped" : "compaction failed", keep: 9 },
+			{ text: cancelled ? "stopped compacting" : "could not compact", keep: 9 },
 			{ text: cancelled ? null : "/context compact retries", short: "/context compact", keep: 7 },
-			{ text: next, keep: 5 },
+			{ text: blocker ?? "ready for a prompt", short: blocker ?? "ready", keep: 5 },
 		],
 		room,
+		slot,
 	);
 	return {
 		glyph: cancelled ? GLYPH.cancelled : GLYPH.error,
 		token: cancelled ? "counter" : "warning",
 		live: false,
 		label,
+		...(slot !== undefined ? { subjectShown: slot.shown } : {}),
 	};
 }
 
