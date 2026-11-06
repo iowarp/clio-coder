@@ -167,9 +167,9 @@ function cell(text: string, width: number): string {
 export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, registered?: number | null): string {
 	const available =
 		typeof registered === "number" && Number.isFinite(registered) && registered > 0
-			? `${Math.floor(registered)} avail`
+			? `${Math.floor(registered)} available`
 			: null;
-	if (!snapshot) return `${available ?? "none"} · 0${GLYPH.error}`;
+	if (!snapshot) return available ?? "none";
 	const entries = Object.entries(snapshot.tools)
 		.filter(([name, count]) => count > 0 && name.toLowerCase() !== "dispatch")
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -183,7 +183,9 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 		typeof snapshot.truncatedResults === "number" && snapshot.truncatedResults > 0
 			? ` · trunc ${formatFooterTokens(snapshot.truncatedResults)}`
 			: "";
-	return `${prefix}${active}${truncated} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
+	// `1✗` read as a glyph puzzle; a count of failures says what it counts, and none is not worth a chip.
+	const failed = snapshot.errors > 0 ? ` · ${formatFooterTokens(snapshot.errors)} failed` : "";
+	return `${prefix}${active}${truncated}${failed}`;
 }
 
 /** Short truthful occupancy label shared by compact and expanded surfaces. */
@@ -264,10 +266,8 @@ export function liveTokenValue(
 	const turnInput = telemetry?.kind === "ready" ? (telemetry.turn?.input ?? null) : null;
 	const input = context > 0 ? formatFooterTokens(context) : turnInput;
 	const parts = [
-		output > 0
-			? theme.fg("counter", `${GLYPH.down} ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`)
-			: null,
-		input !== null ? theme.fg("counter", `${GLYPH.up} ${input}`) : null,
+		output > 0 ? theme.fg("counter", `out ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`) : null,
+		input !== null ? theme.fg("counter", `in ${input}`) : null,
 	];
 	const joined = joinChips(theme, parts);
 	return joined.length > 0 ? joined : null;
@@ -299,11 +299,12 @@ export function lastTurnDetails(
 	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
 	const measured = turn
 		? [
-				turn.input === null ? null : `${GLYPH.up} ${turn.input}`,
-				turn.output === null ? null : `${GLYPH.down} ${turn.output}`,
+				// Label first, as the receipt and the exit card write tokens (U5).
+				turn.input === null ? null : `in ${turn.input}`,
+				turn.output === null ? null : `out ${turn.output}`,
 			]
 				.filter(Boolean)
-				.join(" ")
+				.join(" · ")
 		: "";
 	const cache = turn
 		? [

@@ -185,7 +185,8 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								? null
 								: sessionTokens(theme, spend.tokens === null ? "0" : spend.measuredTokens, width),
 							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
-							spend.cost === null ? null : theme.fg("counter", spend.cost),
+							// A bare `not measured` beside the token count read as the tokens' own qualifier.
+							spend.cost === null ? null : theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
 			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
 		],
@@ -247,13 +248,14 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	// How a run ended can be longer than the activity column, and it is the row's whole point.
 	// One row each: the cause in the run's own words, without the worker's stderr dump, and where the rest is.
 	for (const row of listed) {
-		if (row.status !== "completed" && row.outcomeDetail) {
+		// A run the operator cancelled already says so in its row; only a cause beyond that earns a line.
+		if (row.status !== "completed" && row.outcomeDetail && !/^operator abort\b/u.test(row.outcomeDetail)) {
 			const where = ` · /view dispatch:${row.runId}`;
 			const cause =
 				clean(row.outcomeDetail)
 					.split(/;\s*stderr:/u)[0]
 					?.trim() ?? "";
-			const lead = `${clean(row.agentId)}: ${cause === "operator abort" ? "cancelled at your request" : cause}`;
+			const lead = `${clean(row.agentId)}: ${cause}`;
 			const room = Math.max(8, width - visibleWidth(where));
 			lines.push(theme.fg("annotation", `${truncateToWidth(lead, room, GLYPH.ellipsis, false)}${where}`));
 		}
