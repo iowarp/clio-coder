@@ -35,7 +35,7 @@ import {
 	renderPerfBaseline,
 } from "./perf.js";
 import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
-import { type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
+import { checkoutState, type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
 import {
 	type DeclaredProjectEntry,
@@ -458,6 +458,8 @@ async function runJudgedCheck(
 	cwd: string,
 	options?: { signal?: AbortSignal },
 ): Promise<ToolResult> {
+	// Read before the command runs, so it names the tree the command saw rather than one the command left behind.
+	const checkout = check.kind === "numeric-compare" ? await checkoutState(cwd) : null;
 	let result: SafeCommandResult;
 	try {
 		result = await runCommandVector(file, vector, {
@@ -496,7 +498,12 @@ async function runJudgedCheck(
 				: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
 	if (report instanceof Error) return { kind: "error", message: `verify: ${report.message}`, details: facts };
 	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
-	const details = { ...facts, report, judgement: judgement(execution, report.passed ? "passed" : "failed") };
+	const details = {
+		...facts,
+		report,
+		judgement: judgement(execution, report.passed ? "passed" : "failed"),
+		...(checkout !== null ? { checkout } : {}),
+	};
 	if (!report.passed) return { kind: "error", message: `verify: ${rendered}`, details };
 	return { kind: "ok", output: `${rendered}\n`, details };
 }

@@ -87,6 +87,7 @@ import { yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
+import { createClaimCaptureRegistration } from "../domains/claims/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule, diffSettings } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
@@ -4430,6 +4431,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const unsubscribeOutcomeResume = bus.subscribe("session.reattached", seedOutcomeFromSession);
 	termination.onDrain(() => unsubscribeOutcomeResume());
 	middleware.registerHook(turnOutcomeCollector);
+	// Only the main session writes claims (#406): a worker's own verify call judges a tree the worker controls, so its
+	// checks reach the log through host verification instead. The verify tool judges against process.cwd(), so the claim
+	// is scoped to the project that cwd lies in.
+	middleware.registerHook(createClaimCaptureRegistration({ cwd: () => process.cwd() }));
 
 	// turn_end assessors, fired by the chat-loop when the final assistant
 	// message of a run lands. Tool-prose first so its hard-block interruption

@@ -81,6 +81,7 @@ Usage:
   clio-coder fleet nodes|run|status|view|code-steps|verify|drain|resume  run playbooks on the fleet, status, code steps, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
+  clio-coder claims [show <id>]   list the project's recorded reproduce and numeric-compare claims
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
@@ -316,6 +317,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["components", async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs)],
 	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
+	["claims", async (subArgs) => (await import("./claims.js")).runClaimsCommand(subArgs)],
 	["semantic", async (subArgs) => (await import("./semantic.js")).runSemanticCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
 	["telemetry", async (subArgs) => (await import("./telemetry.js")).runTelemetryCommand(subArgs)],

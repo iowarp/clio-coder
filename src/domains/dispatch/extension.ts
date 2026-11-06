@@ -15,6 +15,7 @@ import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
+import { recordHostVerificationClaims } from "../claims/index.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
@@ -9227,6 +9228,20 @@ export function createDispatchBundle(
 						usage: finalCallUsage?.facts,
 					},
 				);
+				// Host-verified reproduce and numeric-compare verdicts become claims in the operator's project, keyed by the
+				// sealed receipt (#406). Awaited so a headless run cannot exit first; a failed write never fails the run.
+				if (receipt.hostVerification !== undefined && receipt.hostVerification.checks.length > 0) {
+					try {
+						await recordHostVerificationClaims({
+							runId: receipt.runId,
+							receiptDigest: receipt.digest,
+							checks: receipt.hostVerification.checks,
+							projectCwd: req.taskWorktree?.root ?? lifecycle.cwd,
+						});
+					} catch (error) {
+						reportDispatchDiagnostic(`record claims for ${envelope.id}`, error);
+					}
+				}
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
 					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
 						.then((posted) => {
