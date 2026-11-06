@@ -147,6 +147,14 @@ const OPAQUE_SUBTREES: ReadonlyArray<RegExp> = [
 	/^output\.structured\.data$/u,
 ];
 
+/**
+ * Declared subtrees `labelledRunHashes` does not list. A route decision's candidate evaluations and agent selection
+ * carry five hashes per candidate route, so a home with a wide catalog reached 685 entries, past run.settled's 512,
+ * and every worker run failed to settle. `routeDecision.decisionHash` already commits to all of them, and
+ * run.settled keeps only the executed route, so listing them added nothing a reader of the record can resolve.
+ */
+const UNLISTED_SUBTREES: ReadonlyArray<RegExp> = [/^routeDecision\.(?:candidateEvaluations|agentSelection)$/u];
+
 /** The declaration for one normalized result field path, or null when the set does not declare it. */
 function runHashDeclaration(path: string, agentId: string): RunHashDeclaration | null {
 	const row = DECLARATIONS.find((candidate) => candidate.path.test(path));
@@ -184,6 +192,7 @@ export function labelledRunHashes(draft: object, agentId: string): RunHash[] {
 	const hashes: RunHash[] = [];
 	const visit = (value: unknown, path: string, pattern: string) => {
 		if (OPAQUE_SUBTREES.some((subtree) => subtree.test(pattern))) return;
+		if (UNLISTED_SUBTREES.some((subtree) => subtree.test(pattern))) return;
 		if (Array.isArray(value)) {
 			for (const [index, item] of value.entries()) visit(item, `${path}[${index}]`, `${pattern}[]`);
 			return;
