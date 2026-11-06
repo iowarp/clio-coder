@@ -175,7 +175,7 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			const names = rest.map((tile) => tile.title).join(", ");
 			const lead =
 				from === 0 ? "Islands" : `${rest.length} more ${rest.length === 1 ? "island" : "islands"} need a taller terminal`;
-			const row = `${theme.fg("sectionHeading", lead)}${theme.fg("border", " · ")}${theme.fg("annotation", names)}`;
+			const row = `${theme.fg("sectionHeading", lead)}${theme.fg("separator", " · ")}${theme.fg("annotation", names)}`;
 			return truncateToWidth(row, width, GLYPH.ellipsis, false);
 		};
 		if (budget < ISLAND_BODY_ROWS) return budget > 0 ? [left(0)] : [];
@@ -320,7 +320,7 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			return (
 				memo("footer", String(width), () => {
 					const theme = clioTheme();
-					const separator = theme.fg("border", " · ");
+					const separator = theme.fg("separator", " · ");
 					const exit = theme.fg("keyboardHint", deps.leaveHint());
 					const title = theme.fg("sectionHeading", active.title);
 					const view = active.regions.includes("footer") ? regionView(active, "footer") : undefined;

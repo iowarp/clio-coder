@@ -474,6 +474,8 @@ function awarenessLabel(stats: WelcomeDashboardStats): string {
 function gitSummary(stats: WelcomeDashboardStats): string {
 	const workspace = stats.workspace;
 	if (workspace === null) return "Checking…";
+	// A probe that ran out of time is no answer: a real repository read `No Git repository` under load.
+	if (workspace.gitUnknown === true) return "Git did not answer yet";
 	if (!workspace.isGit) return "No Git repository";
 	return [
 		workspaceBranch(stats) || "Detached HEAD",

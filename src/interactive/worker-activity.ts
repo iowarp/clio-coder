@@ -46,9 +46,8 @@ export function workerQuietWords(
 
 /**
  * A worker's model gone quiet, widest form first, for a row to pick the one that fits. The main rail's tiers apply:
- * past 30 s the words carry the age of the last evidence; past 90 s they also say that Clio puts no time limit on a
- * worker's model wait and how to end it, because a worker has no stall timer and an operator who waits for one would
- * wait forever. Null while the worker shows evidence, runs a tool, waits on a person, or has gone quiet as a process,
+ * past 30 s the words carry the age of the last evidence; past 90 s they also name the reply limit after which Clio ends
+ * the call, and how to end it sooner. Null while the worker shows evidence, runs a tool, waits on a person, or has gone quiet as a process,
  * which `workerQuietWords` says instead.
  *
  * A worker waiting on its model also says whether the wait is unusual, from `history`: this session's worker calls on
@@ -88,21 +87,36 @@ function workerSilenceForms(
 				: `this route has taken up to ${slowest}`;
 	const verdict = known === null ? "usual unknown" : longer ? "longer than usual" : `up to ${slowest} before`;
 	if (silentMs < TIER_THRESHOLDS_MS.tier3) return [`${claim} · ${usual}`, `${claim} · ${verdict}`, claim];
+	// A reply that runs past the worker reply limit is ended, so the words name the limit when Clio knows it.
+	const limitMs = readWorkerResponseLimitMs();
+	// A setting in whole minutes reads as minutes: `10m`, not `10m0s`.
+	const limitWords =
+		limitMs === null ? null : limitMs % 60_000 === 0 ? `${limitMs / 60_000}m` : formatWaitClock(limitMs);
+	const limit = limitWords === null ? null : `reply limit ${limitWords}`;
+	const wide =
+		limitWords === null ? "x in /fleet stops it" : `Clio ends a reply after ${limitWords} · x in /fleet stops it`;
+	const short = limit === null ? "x in /fleet stops it" : `${limit} · x in /fleet stops it`;
 	// With no history the limit outranks `usual unknown`, so that clause trails where a row drops it first.
 	const middle =
 		known === null
-			? [`${claim} · no time limit · x in /fleet stops it · ${verdict}`, `${claim} · no time limit · x in /fleet stops it`]
+			? [`${claim} · ${short} · ${verdict}`, `${claim} · ${short}`]
 			: [
-					`${claim} · ${verdict} · no time limit · x in /fleet stops it`,
-					`${claim} · ${verdict} · no time limit`,
+					`${claim} · ${verdict} · ${short}`,
+					...(limit === null ? [] : [`${claim} · ${verdict} · ${limit}`]),
 					`${claim} · ${verdict}`,
 				];
-	return [
-		`${claim} · ${usual} · Clio sets no time limit · x in /fleet stops it`,
-		...middle,
-		`${claim} · no time limit`,
-		claim,
-	];
+	return [`${claim} · ${usual} · ${wide}`, ...middle, ...(limit === null ? [] : [`${claim} · ${limit}`]), claim];
+}
+
+let readWorkerResponseLimitMs: () => number | null = () => null;
+
+/**
+ * Where the silence words read the worker reply limit (`safety.limits.workerResponseSeconds`) from. A worker's model
+ * call that runs past it is ended and the run settles as timed out, so the words name it rather than claim a wait
+ * with no end; the composition root binds it to live settings.
+ */
+export function bindWorkerResponseLimit(read: () => number | null): void {
+	readWorkerResponseLimitMs = read;
 }
 
 /** The silence form that fits `room`, or the widest one with no room given. */

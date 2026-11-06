@@ -37,6 +37,7 @@ import type { ChatLoopEvent, RetryStatusPayload } from "../session-control/chat-
 import {
 	classifyTurnEnding,
 	endedOnCancelledInterview,
+	endedWithFailedChange,
 	extractText,
 	isSelfExplainingAbort,
 	proseBeforeWrittenCalls,
@@ -44,7 +45,7 @@ import {
 	turnNoAnswerSentence,
 	writtenCallsFact,
 } from "../session-control/chat-loop-messages.js";
-import { coldReasonText } from "../session-control/cold-reasons.js";
+import { coldReasonList } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
 import { editPreviewDiff } from "./mutation-preview.js";
@@ -72,6 +73,7 @@ import {
 	renderToolAwaitingApproval,
 	renderToolExecution,
 	renderToolPreview,
+	stopSentRow,
 	type ToolExecutionFinished,
 	type ToolFoldFamily,
 	toolFoldFamily,
@@ -369,6 +371,11 @@ type ToolSegment = {
 	 */
 	cardAttached?: true;
 	/**
+	 * Every worker card under this call settled cancelled, so the call was stopped rather than failed: the dispatch
+	 * tool reports a cancelled run as an error, and its row read ✗ above a card that read ⊘.
+	 */
+	cardsCancelled?: true;
+	/**
 	 * What a finished call rendered to, so a long live turn pays only for its running calls: every settled row
 	 * re-rendered on each update cost about 5 MB per frame at 320 calls. A finished call has no clock in its rows.
 	 * `changeSettledCall` drops all of this, and the fold over this call sees its revision move.
@@ -533,6 +540,8 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
+	/** When the operator asked the running turn to stop, on the panel's clock; null while no stop is pending. */
+	getStopRequestedAt?: () => number | null;
 	/** The target the running turn was sent to, which the wire protocol on its messages does not say. */
 	getRunTarget?: () => string | null;
 	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
@@ -1056,9 +1065,13 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 			for (const wrapped of wrapTextWithAnsi(row, width)) out.push(`${SECONDARY()}${wrapped}${RESET}`);
 		return out;
 	}
+	// The row's ✗ already says it failed; `✗ [error] cannot load…` said it twice in the store's own marker. /view keeps it.
 	const shown = unbounded
 		? providerErrorEvidence(seg.text)
-		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null });
+		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null }).replace(
+				/^\[error\] /u,
+				"",
+			);
 	for (const line of shown.split("\n")) {
 		for (const wrapped of wrapTextWithAnsi(line, width)) {
 			out.push(`${RED_CRIT()}${wrapped}${RESET}`);
@@ -1374,7 +1387,7 @@ function renderTurnUsageLine(
 	}
 	if (spend?.cost != null) facts.push(spend.cost);
 	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
-		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
+		facts.push(`prompt read again after ${coldReasonList(usage.coldReasons)}`);
 	}
 	// How many calls had no usage data closes the line once, after the figures it qualifies (F4).
 	if (spend?.coverage) facts.push(spend.coverage);
@@ -1413,6 +1426,7 @@ function renderToolSegmentLines(
 	unbounded: boolean,
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
+	stopRequestedAt: number | null = null,
 ): string[] {
 	const call = {
 		toolCallId: seg.id,
@@ -1435,6 +1449,7 @@ function renderToolSegmentLines(
 		notRun: seg.notRun,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
+		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
 		...shellActor(seg),
 	};
@@ -1442,13 +1457,21 @@ function renderToolSegmentLines(
 	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
 	if (seg.finished) return renderToolPreview(finished, width, detail, { ...options, terminalRows });
 	seg.live ??= new LiveToolView();
-	return renderToolPreview(call, width, detail, {
+	// A command the model asked for keeps running until its process exits, so a stop that went out is its own row.
+	const stopRow =
+		stopRequestedAt !== null && seg.executionStarted && shellActor(seg).actor !== undefined
+			? [stopSentRow(Math.max(0, nowMs - stopRequestedAt), width)]
+			: [];
+	// A started process names who runs it while it runs, as its settled row does, so a stop reads `Clio is stopping`.
+	const running = seg.executionStarted ? { ...call, ...shellActor(seg) } : call;
+	const rows = renderToolPreview(stopRow.length > 0 ? { ...running, stopping: true } : running, width, detail, {
 		...options,
 		terminalRows,
 		partialResult: seg.partialResult,
 		live: seg.live,
 		...(seg.previewDiff !== undefined ? { previewDiff: seg.previewDiff } : {}),
 	});
+	return [...rows, ...stopRow];
 }
 
 /** Shell-class calls say who started the process. Anything else already reads as a named action. */
@@ -1486,6 +1509,7 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		resultSummary: seg.resultSummary,
 		actionClass: seg.actionClass,
 		cardAttached: seg.cardAttached,
+		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
 		...shellActor(seg),
 	};
@@ -1596,6 +1620,7 @@ function renderEntryLines(
 	terminalRows: number,
 	previous?: TranscriptEntry,
 	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry">,
+	stopRequestedAt: number | null = null,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
@@ -1740,7 +1765,15 @@ function renderEntryLines(
 				flushReasoning("action");
 				let rows = seg.finished && seg.settledRows?.key === settledKey ? seg.settledRows : undefined;
 				if (rows === undefined) {
-					const lines = renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows);
+					const lines = renderToolSegmentLines(
+						seg,
+						width,
+						nowMs,
+						unboundedToolBodies,
+						detail,
+						terminalRows,
+						seg.finished ? null : stopRequestedAt,
+					);
 					rows = { key: settledKey, lines, body: hasToolBody(lines) };
 					if (seg.finished) seg.settledRows = rows;
 				}
@@ -1884,6 +1917,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const telemetryShown = (state: WorkerEntryState, view: TelemetryView | null): string =>
 		`${state.runId}\0${workerTelemetryDisplay(view?.run(state.runId) ?? null)}`;
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
+	/** A dispatch call whose every card settled cancelled reads as stopped on its own row too. */
+	const markCancelledDispatch = (toolCallId: string | undefined): void => {
+		if (toolCallId === undefined) return;
+		const cards = dispatchGroups.get(toolCallId) ?? [];
+		if (cards.length === 0 || !cards.every((card) => card.state.result?.outcome === "canceled")) return;
+		const parent = findSpawningCall(toolCallId);
+		if (parent === undefined || parent.segment.cardsCancelled === true) return;
+		parent.segment.cardsCancelled = true;
+		changeSettledCall(parent.segment);
+		invalidateEntryCache(parent.entry);
+	};
 	const workerRenderOptions = (
 		entry: TranscriptEntry,
 	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry" | "routeFirstOutput"> => {
@@ -2345,7 +2389,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 										? "No answer"
 										: endedOnCancelledInterview(messages)
 											? "Cancelled"
-											: "Done"),
+											: endedWithFailedChange(messages)
+												? "Done, last change failed"
+												: "Done"),
 				};
 				// Only the newest failure is one ↑ away; a later turn's prompt sits in front of an older one.
 				if (promptRecallReceipt?.turnUsage) {
@@ -2742,6 +2788,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					terminalRows,
 					previous,
 					workerRenderOptions(entry),
+					options.getStopRequestedAt?.() ?? null,
 				);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
@@ -2896,6 +2943,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				invalidateEntryCache(existing);
 				const lead = state.parentToolCallId === undefined ? undefined : dispatchGroups.get(state.parentToolCallId)?.[0];
 				if (lead !== undefined && lead !== existing) invalidateEntryCache(lead);
+				markCancelledDispatch(state.parentToolCallId);
 				markDirty();
 				return;
 			}

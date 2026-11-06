@@ -465,7 +465,9 @@ function layoutOptionRows(
 	return {
 		rows: items.map((item, index) => {
 			const focused = index === focusedIndex;
-			const tag = index === recommendedIndex ? ` ${theme.fg("annotation", "recommended")}` : "";
+			// Set off from the label, so `Fast recommended` cannot read as the option's name.
+			const tag =
+				index === recommendedIndex ? `${theme.fg("divider", " · ")}${theme.fg("annotation", "recommended")}` : "";
 			// The free-text key, on the row it belongs to, when neither rail nor legend has room for it.
 			const pointer = otherPointer !== null && item.value === "other" ? ` ${theme.fg("keyboardHint", otherPointer)}` : "";
 			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}${pointer}`;
@@ -625,12 +627,13 @@ class AskUserOverlayView implements Component {
 		return "picks each recommended option, or leaves it to Clio's judgment";
 	}
 
-	/** The same outcome for one narrow row: the choice itself when there is only one. */
+	/** The same outcome for one narrow row, with its subject: the choice itself when there is only one. */
 	private unattendedOutcomeShort(): string {
-		if (this.presentation.tier === "outward") return "declines";
+		if (this.presentation.tier === "outward") return "Clio declines";
 		const only = this.questions.length === 1 ? this.questions[0] : undefined;
-		if (only === undefined) return "recommended";
-		return only.options?.[recommendedOptionIndex(only)]?.label ?? "Clio decides";
+		if (only === undefined) return "Clio picks each recommended option";
+		const label = only.options?.[recommendedOptionIndex(only)]?.label;
+		return label === undefined ? "Clio decides" : `Clio picks ${label}`;
 	}
 
 	/** The option this question's timeout would take, while a timer is part of the round. */
@@ -652,10 +655,10 @@ class AskUserOverlayView implements Component {
 		if (countdown === null) return [];
 		const theme = clioTheme();
 		if (countdown.state() === "held") {
-			const esc = innermostEscapeLayer(this.escapeLayers());
+			// The keys are the rail's; this row only says the clock stopped, which nothing else on screen says.
 			const line = headers
-				? `${GLYPH.phaseBlocked} timer held · Enter: record · Esc: ${esc?.verb ?? "cancel interview"}`
-				: `${GLYPH.phaseBlocked} held · Enter: record · Esc: ${esc?.short ?? esc?.verb ?? "cancel"}`;
+				? `${GLYPH.phaseBlocked} timer held · nothing is chosen until you answer`
+				: `${GLYPH.phaseBlocked} timer held`;
 			return headers
 				? wrapTextWithAnsi(theme.fg("annotation", line), width)
 				: [fitRow(theme.fg("annotation", line), width)];
@@ -664,16 +667,21 @@ class AskUserOverlayView implements Component {
 		if (left === null) return [];
 		const remaining = formatUnattendedRemaining(left);
 		if (!headers) {
-			// The outcome is what gives way: a long option's label must not cut the time or the key that stops it.
-			const frame = `${GLYPH.warn} ${remaining} then  · key holds`;
-			const outcome = truncateToWidth(
-				this.unattendedOutcomeShort(),
-				Math.max(1, width - visibleWidth(frame)),
-				GLYPH.ellipsis,
-				false,
-			);
-			const short = `${GLYPH.warn} ${remaining} then ${outcome} · key holds`;
-			return [fitRow(theme.fg("warning", short), width)];
+			// The widest sentence that fits. `4:57 then recommended · key holds` read as a fragment, so
+			// every form keeps a verb; the outcome is what gives way, never the time or the key that holds it.
+			const outcome = this.unattendedOutcomeShort();
+			const candidates = [
+				`${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} · any key holds`,
+				`${GLYPH.warn} ${remaining} left, then ${outcome} · any key holds`,
+				`${GLYPH.warn} ${remaining}, then ${outcome} · key holds`,
+				// The option rows mark the pick as recommended, so the narrowest form can leave the name to them.
+				...(this.presentation.tier === "outward" ? [] : [`${GLYPH.warn} ${remaining}, then Clio picks · key holds`]),
+			];
+			const fits = candidates.find((candidate) => visibleWidth(candidate) <= width);
+			if (fits !== undefined) return [fitRow(theme.fg("warning", fits), width)];
+			const frame = `${GLYPH.warn} ${remaining}, then  · key holds`;
+			const cut = truncateToWidth(outcome, Math.max(1, width - visibleWidth(frame)), GLYPH.ellipsis, false);
+			return [fitRow(theme.fg("warning", `${GLYPH.warn} ${remaining}, then ${cut} · key holds`), width)];
 		}
 		return wrapTextWithAnsi(
 			theme.fg(
@@ -888,7 +896,10 @@ class AskUserOverlayView implements Component {
 							"positionCount",
 							this.harnessInterview
 								? this.harnessPosition()
-								: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
+								: // A confirmation the operator's own key raised is one choice, not a numbered question in a round.
+									this.confirmation && this.questions.length === 1
+									? "Choose one"
+									: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
 							{ bold: true },
 						),
 						width,
@@ -1022,7 +1033,7 @@ class AskUserOverlayView implements Component {
 		const kept = this.railKept(entries, this.railRoom);
 		// The fit keeps entries from the end, so the keys with another home give way first:
 		// the question's position row can point at the move key, and the count stands in for `a`.
-		const givesWayFirst = (entry: HintEntry): boolean => entry.key === "←/→" || entry.key === "a";
+		const givesWayFirst = (entry: HintEntry): boolean => entry.key === "Tab/Shift+Tab" || entry.key === "a";
 		const dropped = entries
 			.filter((entry) => !kept.includes(entry))
 			.sort((left, right) => Number(givesWayFirst(right)) - Number(givesWayFirst(left)));
@@ -1135,9 +1146,10 @@ class AskUserOverlayView implements Component {
 		const state = this.currentState();
 		const esc = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: "cancel interview", short: "cancel" };
 		if (this.phase !== "asking" || !question || !state) return { entries: [], esc };
-		const recordAnswer =
-			this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
-			"record answer";
+		const recordAnswer = this.confirmation
+			? "choose"
+			: (this.presentation.requiredActions.find((action) => action.id === "record-answer")?.label.toLowerCase() ??
+				"record answer");
 		// Back on an answered question, Enter swaps the answer rather than adding one.
 		const record: HintEntry =
 			state.answer.trim().length > 0
@@ -1167,7 +1179,8 @@ class AskUserOverlayView implements Component {
 			entries.push({ key: "t", verb: "other answer", short: "other" });
 		}
 		entries.push(...scroll);
-		if (this.questions.length > 1) entries.push({ key: "←/→", verb: "question" });
+		// Tab moves between questions in the list and in the text field alike, so both rails name the same key.
+		if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
 		entries.push(record);
 		return { entries, esc };

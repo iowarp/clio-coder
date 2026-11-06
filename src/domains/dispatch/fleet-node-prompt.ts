@@ -60,6 +60,16 @@ function fleetNodeAnswerDirective(kind: ResultContract["kind"]): string | null {
  * given, so it has to name that step: left to the persona, a documenter read "the documentation step" as someone else's
  * job, and a verifier and a coder took up the plan.
  */
+/**
+ * The operator's own task inside a rendered plan-step task: what the step was asked to do, without the chain
+ * directive Clio appended for the worker's model. Surfaces that word a run's task read this, so the step instructions
+ * stay in the prompt and the record. A task without the directive comes back as it was.
+ */
+export function fleetNodeTaskBrief(task: string): string {
+	const at = task.search(/\s+Your step in this chain is `[^`]*`\. Do that step now\./u);
+	return at > 0 ? task.slice(0, at).trimEnd() : task;
+}
+
 export function renderFleetNodeTask(task: string, kind: ResultContract["kind"], stepId: string): string {
 	const step = `Your step in this chain is \`${stepId}\`. Do that step now. Earlier steps are finished and later ones belong to other workers.`;
 	const directive = fleetNodeAnswerDirective(kind);

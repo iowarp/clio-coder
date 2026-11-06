@@ -164,7 +164,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
-import { coldReasonText } from "./cold-reasons.js";
+import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens } from "./compaction-lines.js";
 import {
 	DRAFT_MAX_TOKENS,
@@ -1541,7 +1541,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				type: "notice",
 				level: "info",
 				surface: "footer",
-				text: `cache may be cold: ${reasons.map(coldReasonText).join(", ")}`,
+				text: coldCacheNoticeText(reasons),
 				key: "context.cache.cold",
 				coldReasons: [...reasons],
 			}),

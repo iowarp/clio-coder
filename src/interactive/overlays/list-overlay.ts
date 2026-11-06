@@ -131,6 +131,12 @@ export interface ListOverlayOptions {
 	title: string;
 	/** Allow long lists to use the full body budget; the outer frame keeps a fixed height. */
 	fullScreen?: boolean;
+	/**
+	 * A reference the operator reads through rather than a menu they pick from:
+	 * on a tall terminal the dock gives it up to half the screen instead of the
+	 * height every menu shares.
+	 */
+	tall?: boolean;
 	items: ReadonlyArray<ListOverlayItem>;
 	/**
 	 * Tabs, drawn as a bar above the filter row and switched with ←/→, which is
@@ -145,6 +151,8 @@ export interface ListOverlayOptions {
 	onTabChange?: (tabId: string) => void;
 	/** Enables the type-to-filter input row. */
 	filterable?: boolean;
+	/** What the empty filter row says it searches; a bare `>` said nothing. Defaults to `type to filter`. */
+	filterPlaceholder?: string;
 	/** Start in the list; / enters search, whose letters and arrows belong to the input. */
 	explicitSearch?: boolean;
 	/** Persistent, width-aware scope/mode text, including when the selected tab is empty. */
@@ -968,6 +976,11 @@ export class ListOverlayView implements Component {
 		this.railRoom = Math.max(0, Math.floor(cells));
 	}
 
+	/** The dock asks this before it sizes the body; only a `tall` reference grows. */
+	wantsGrowth(): boolean {
+		return this.options.tall === true;
+	}
+
 	/** Called by the mounted overlay's visibility callback before each render. */
 	setViewportRows(rows: number): void {
 		this.viewportRows = Math.max(1, Math.floor(rows));
@@ -1047,6 +1060,12 @@ export class ListOverlayView implements Component {
 		if (this.options.filterable) {
 			this.input.focused = this.isFilterFocused;
 			filterRows = this.input.render(width).map((line) => theme.base("searchQuery", line));
+			if (this.filterText.length === 0 && width > 6) {
+				// The prompt and its cursor at their own width, so the words follow the cursor instead of the padding.
+				const prompt = this.input.render(3).map((line) => theme.base("searchQuery", line))[0] ?? "";
+				const placeholder = this.options.filterPlaceholder ?? "type to filter";
+				filterRows = [truncateToWidth(`${prompt} ${theme.fg("annotation", placeholder)}`, width, GLYPH.ellipsis, false)];
+			}
 		}
 		// The dock's rows are the budget. When they would leave no row for the
 		// cursor, the chrome gives way: an empty, unfocused filter first, then the

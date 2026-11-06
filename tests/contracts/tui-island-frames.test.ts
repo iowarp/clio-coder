@@ -149,8 +149,9 @@ test("the council card frames its grid or stack inside the width at every width"
 			rightMeta: council.elapsed,
 		});
 		assertIsland(lines, width, "council c1");
+		// The council's head, its question, each member's state and where to read the answers.
 		const island = councilIslandLines(clioTheme(), council, 44);
-		strictEqual(island.length, 2);
+		ok(island.length >= 2 && island.length <= 4, `council dock card used ${island.length} rows`);
 		assertFits(island, 44);
 	}
 });

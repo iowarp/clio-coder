@@ -39,7 +39,7 @@ import {
 	sectionRule,
 	type Tone,
 } from "../theme/index.js";
-import { fitIdentityLabel, modelNickname } from "../theme/labels.js";
+import { fitIdentityLabel, fitPathLabel, modelNickname } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import {
@@ -185,7 +185,10 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								? null
 								: sessionTokens(theme, spend.tokens === null ? "0" : spend.measuredTokens, width),
 							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
-							spend.cost === null ? null : theme.fg("counter", spend.cost),
+							// A bare `not measured` beside the token count read as the tokens' own qualifier.
+							spend.cost === null
+								? null
+								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
 			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
 		],
@@ -245,14 +248,18 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		}),
 	);
 	// How a run ended can be longer than the activity column, and it is the row's whole point.
+	// One row each: the cause in the run's own words, without the worker's stderr dump, and where the rest is.
 	for (const row of listed) {
-		if (row.status !== "completed" && row.outcomeDetail) {
-			lines.push(
-				...wrapTextWithAnsi(
-					theme.fg("annotation", `${clean(row.agentId)}: ${clean(row.outcomeDetail)} · /view dispatch:${row.runId}`),
-					width,
-				),
-			);
+		// A run the operator cancelled already says so in its row; only a cause beyond that earns a line.
+		if (row.status !== "completed" && row.outcomeDetail && !/^operator abort\b/u.test(row.outcomeDetail)) {
+			const where = ` · /view dispatch:${row.runId}`;
+			const cause =
+				clean(row.outcomeDetail)
+					.split(/;\s*stderr:/u)[0]
+					?.trim() ?? "";
+			const lead = `${clean(row.agentId)}: ${cause}`;
+			const room = Math.max(8, width - visibleWidth(where));
+			lines.push(theme.fg("annotation", `${truncateToWidth(lead, room, GLYPH.ellipsis, false)}${where}`));
 		}
 	}
 	if (listed.length < history.length) {
@@ -696,8 +703,8 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
-/** The widest stats a row carries, `272K/272K (100.0%) | last 999 tps`. */
-const STATS_RESERVE_WIDTH = 33;
+/** The widest stats a row carries, `272K/272K (100.0%) · last 999 tok/s`. */
+const STATS_RESERVE_WIDTH = 35;
 
 /** Workspace and counts above; notices and active harness facts below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
@@ -706,7 +713,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const narrow = w <= 60;
 	const fit = (text: string, room = w) =>
 		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
-	const separator = theme.fg("border", " · ");
+	const separator = theme.fg("separator", " · ");
 	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
 	// The streaming turn's live rate, else the newest settled main call's from the read model (#434).
 	const newest = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
@@ -725,9 +732,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const flowing = state.throughput !== null && (state.status.phase === "writing" || state.status.phase === "thinking");
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")}`
+			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tok/s")}`
 			: "";
-	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
+	// The row's one separator: a `|` beside the `·` of the workspace read as a table rule with nothing under it (F3).
+	const metrics = [counter, speed].filter(Boolean).join(theme.fg("separator", " · "));
 	const statsCap = Math.floor(w * 0.4);
 	const values = visibleWidth(metrics) <= statsCap ? metrics : counter;
 	// Once a figure shows, the stats column keeps its widest width (and the dirty
@@ -736,14 +744,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
 	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
 	// Until the first probe lands the branch is unknown, not absent: say nothing.
-	const git = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
+	const named = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
 	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "  ";
-	const gitWidth =
-		git === ""
-			? 0
-			: Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), Math.max(4, Math.floor(workspaceWidth * 0.3)));
+	const gitRoom = Math.max(4, Math.floor(workspaceWidth * 0.3));
+	// A branch name may lose its middle; the sentence that says there is none is whole or absent (`no Gi…ranch`).
+	const git = state.workspace.branch == null && visibleWidth(named) + visibleWidth(dirtyMarker) > gitRoom ? "" : named;
+	const gitWidth = git === "" ? 0 : Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), gitRoom);
 	const cwdWidth = git === "" ? workspaceWidth : Math.max(1, workspaceWidth - gitWidth - 3);
-	const cwdLabel = theme.fg("workspacePath", fitIdentityLabel(clean(state.workspace.cwd), cwdWidth));
+	const cwdLabel = theme.fg("workspacePath", fitPathLabel(clean(state.workspace.cwd), cwdWidth));
 	const workspace =
 		git === ""
 			? cwdLabel
@@ -783,7 +791,9 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		? typeof state.session.shutdownArmed === "string"
 			? state.session.shutdownArmed
 			: "Ctrl+C again to quit"
-		: state.session.leaderArmed
+		: // The leader also opens the action menu, whose own rail lists the keys: a second legend under it said `choose key`
+			// for a choice already on screen.
+			state.session.leaderArmed && !surfaceOwnsKeys
 			? leaderKey
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
@@ -802,12 +812,12 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		guardian === "reviewing"
 			? memoryOnRail
 				? ""
-				: theme.fg("activity", "mem reviewing")
-			: guardian === "waiting-capacity"
-				? theme.fg("warning", "mem waiting")
-				: guardian === "unavailable"
-					? theme.fg("unknownValue", "mem unavailable")
-					: "";
+				: theme.fg("activity", "memory reviewing")
+			: // Memory yields the model to the turn on purpose and nothing waits on it, so its wait says nothing: `memory waits`
+				// beside a retry read as a second fault (N9), and in the hint row as a cryptic third party.
+				guardian === "unavailable"
+				? theme.fg("unknownValue", "memory unavailable")
+				: "";
 	const facts = [
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",

@@ -11,6 +11,7 @@ import type { RunResultObject } from "../../core/telemetry/schemas.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
 import type { DispatchContract } from "../dispatch/contract.js";
+import { plainOutcomeLabel } from "../dispatch/failure-headline.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
 import type { RunEnvelope } from "../dispatch/types.js";
@@ -772,7 +773,7 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 				artifact(
 					env.id,
 					env.sessionId,
-					safeTitle(`${env.outcome ?? env.status} · ${env.task}`, "Run evidence"),
+					safeTitle(`${plainOutcomeLabel(env.outcome ?? env.status)} · ${env.task}`, "Run evidence"),
 					parseTime(env.endedAt),
 					[
 						env.id,
@@ -807,7 +808,8 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 }
 
 function runTitle(env: RunEnvelope): string {
-	return safeTitle(`${env.outcome ?? env.status} · ${env.agentId} · ${env.task}`, env.id);
+	// The list leads with the outcome in the words the board and card use: `cancelled`, not the ledger's `canceled`.
+	return safeTitle(`${plainOutcomeLabel(env.outcome ?? env.status)} · ${env.agentId} · ${env.task}`, env.id);
 }
 
 /** Finished runs by their sealed run record: the `run` category, whose id `/view verify` names (#434). */

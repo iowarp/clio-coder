@@ -295,7 +295,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "context-reset";
 		deps.transitions.handle = openContextResetOverlayFactory(deps.tui, {
 			onReset: resetContext,
-			onCancel: deps.closeOverlay,
+			// The same receipt /rewind gives, so a cancelled reset is told apart from one that did nothing.
+			onCancel: () => {
+				deps.closeOverlay();
+				deps.notify("info", "context reset cancelled; no files changed", "context-reset:outcome");
+			},
 		});
 		deps.requestRender();
 	};

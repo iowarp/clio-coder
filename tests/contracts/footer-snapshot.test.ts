@@ -69,7 +69,7 @@ test("compact footer names an unknown serving window without a percentage", () =
 	state.context.used = 100;
 	state.context.contextWindow = null;
 	const rows = renderCompactDashboard(state, 100).map(stripTerminalSequences).join("\n");
-	match(rows, /100\/unknown/u);
+	match(rows, /100 in context/u);
 	strictEqual(/\?%/u.test(rows), false);
 });
 

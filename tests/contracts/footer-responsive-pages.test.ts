@@ -47,13 +47,13 @@ test("compact throughput keeps the estimate marker and omits unavailable rates",
 	state.context.used = null;
 	state.throughput = { tokensPerSecond: 12.3, outputTokens: 123, durationMs: 10000, estimated: true };
 	const plain = () => renderCompactDashboard(state, 120).map(stripTerminalSequences).join("\n");
-	match(plain(), /≈12\s*tps/);
+	match(plain(), /≈12\s*tok\/s/);
 	state.throughput.estimated = false;
-	match(plain(), /12\s*tps/);
+	match(plain(), /12\s*tok\/s/);
 	doesNotMatch(plain(), /≈12/);
 	for (const rate of [0, NaN, Infinity]) {
 		state.throughput.tokensPerSecond = rate;
-		doesNotMatch(plain(), /tps/);
+		doesNotMatch(plain(), /tok\/s/);
 	}
 });
 

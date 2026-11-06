@@ -256,8 +256,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getThinkingLabel: () => editorChrome.getThinkingLabel(),
 		getMotionEnabled: () => editorChrome.getMotionEnabled?.() ?? settings.interface.demo !== false,
 		getThinking: () => editorChrome.getThinking?.() ?? { label: editorChrome.getThinkingLabel(), hasLevels: false },
-		getHarnessStatus: (width, reserved, identityCells) =>
-			editorChrome.getHarnessStatus?.(width, reserved, identityCells) ?? null,
+		getHarnessStatus: (width, reserved) => editorChrome.getHarnessStatus?.(width, reserved) ?? null,
 		getLiveWorkStrip: (width, escVerb) => editorChrome.getLiveWorkStrip?.(width, escVerb) ?? null,
 		getBesideCard: (room) => editorChrome.getBesideCard?.(room) ?? null,
 		getWorkspaceRail: (width) => editorChrome.getWorkspaceRail?.(width) ?? null,

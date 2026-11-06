@@ -370,6 +370,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 						body.isCardScrollable(),
 						body.isShowingChoices(),
 						view.origin.kind === "worker" && !deps.app.chat.isStreaming() ? "stop" : undefined,
+						body.isShowingReadingKeys(),
 					),
 			});
 			if (!overlayTransitions.showPermission(handle)) {

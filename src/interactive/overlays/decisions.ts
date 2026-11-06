@@ -2,13 +2,25 @@ import { classifyDecisionPresentation, decisionFactsForAnswer } from "../../doma
 import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/entries.js";
 import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { DecisionSelection } from "../../session-control/decision-correction.js";
-import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	fitHintEntries,
+	fitHintEntryList,
+	fitRow,
+	type HintEntry,
+	selectionLabel,
+	selectionMark,
+	showClioOverlayFrame,
+	windowRows,
+} from "../overlay-frame.js";
 import {
 	chipRow,
+	chipRows,
 	clioTheme,
 	emptyState,
 	factRows,
 	GLYPH,
+	keyCap,
+	positionRow,
 	rule,
 	sectionRule,
 	statusChip,
@@ -147,6 +159,15 @@ function decisionLines(
 	return lines;
 }
 
+/** The board's rows, and where the selected decision sits in them so a window can keep it in view. */
+interface DecisionsBoardLines {
+	lines: string[];
+	/** First row of the selected decision's block, from its interview's header when it is that interview's first. */
+	selectedStart: number;
+	/** One past the selected decision's last row. */
+	selectedEnd: number;
+}
+
 function formatDecisionsOverlayBodyLines(
 	interviews: ReadonlyArray<DecisionLedgerEntry>,
 	selectedIndex = 0,
@@ -154,31 +175,38 @@ function formatDecisionsOverlayBodyLines(
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 	now = Date.now(),
 	editingKey: string | null = null,
-): string[] {
+): DecisionsBoardLines {
 	const width = Math.max(1, Math.floor(contentWidth));
 	const theme = clioTheme();
 	if (interviews.length === 0) {
-		return emptyState(theme, "No interview decisions have been recorded on this branch.", width, {
-			remedy: "Completed and cancelled ask_user interviews appear here.",
+		const lines = emptyState(theme, "No questions have been answered on this branch yet.", width, {
+			remedy: "When Clio asks you something and you answer or cancel it, the answer is listed here.",
 		}).map((line) => fitRow(line, width));
+		return { lines, selectedStart: 0, selectedEnd: 0 };
 	}
 	const selected = selectableRows(interviews)[selectedIndex];
 	const lines: string[] = [];
+	let selectedStart = 0;
+	let selectedEnd = 0;
 	for (let interviewIndex = 0; interviewIndex < interviews.length; interviewIndex += 1) {
 		const interview = interviews[interviewIndex];
 		if (!interview) continue;
 		if (interviewIndex > 0) lines.push(rule(theme, width));
+		const headerStart = lines.length;
 		lines.push(...interviewHeader(interview, width, now));
 		if (interview.decisions.length === 0) {
-			lines.push(
-				...emptyState(theme, "No compact decisions were recorded.", width).map((line) => fitRow(`  ${line}`, width)),
-			);
+			const words =
+				interview.interviewStatus === "complete"
+					? "Finished without recording an answer."
+					: "Cancelled before an answer was recorded.";
+			lines.push(...emptyState(theme, words, Math.max(1, width - 2)).map((line) => fitRow(`  ${line}`, width)));
 			continue;
 		}
-		for (const decision of interview.decisions) {
+		interview.decisions.forEach((decision, decisionIndex) => {
 			const isSelected =
 				selected?.interview.interviewId === interview.interviewId && selected.decision.key === decision.key;
 			const rowKey = decisionRowKey(interview.interviewId, decision.key);
+			const start = lines.length;
 			lines.push(
 				...decisionLines(
 					decision,
@@ -188,9 +216,13 @@ function formatDecisionsOverlayBodyLines(
 					rowKey === editingKey ? undefined : keptCorrections.get(rowKey),
 				),
 			);
-		}
+			if (isSelected) {
+				selectedStart = decisionIndex === 0 ? headerStart : start;
+				selectedEnd = lines.length;
+			}
+		});
 	}
-	return lines;
+	return { lines, selectedStart, selectedEnd };
 }
 
 class DecisionsOverlayBody implements Component {
@@ -200,17 +232,30 @@ class DecisionsOverlayBody implements Component {
 	/** The decision the open correction field belongs to, whose kept draft is in the field rather than under the row. */
 	private correctionKey: string | null = null;
 	private status: { kind: "ok" | "warning"; text: string } | null = null;
+	/** Rows the dock grants, or zero before the first dock render. */
+	private rows = 0;
+	private railRoom = 0;
+	/** First board row in view, kept between frames so the window moves only when the selection leaves it. */
+	private offset = 0;
 
 	constructor(
 		private readonly getInterviews: () => ReadonlyArray<DecisionLedgerEntry>,
 		private readonly options: OpenDecisionsOverlayOptions,
 	) {}
 
+	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
+	}
+
+	setRailRoom(cells: number): void {
+		this.railRoom = Math.max(0, Math.floor(cells));
+	}
+
 	render(width: number): string[] {
 		const interviews = this.readInterviews();
 		const rows = selectableRows(interviews);
 		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, Math.max(0, rows.length - 1)));
-		const body = formatDecisionsOverlayBodyLines(
+		const board = formatDecisionsOverlayBodyLines(
 			interviews,
 			this.selectedIndex,
 			this.expandedKey,
@@ -219,9 +264,11 @@ class DecisionsOverlayBody implements Component {
 			this.correctionKey,
 		);
 		const theme = clioTheme();
+		// What stays under the board whatever it scrolls to: the open field, the last outcome, and the keys the rail drops.
+		const tail: string[] = [];
 		if (this.correctionInput) {
-			body.push(sectionRule(theme, width, "New direction"));
-			body.push(
+			tail.push(sectionRule(theme, width, "New direction"));
+			tail.push(
 				...this.correctionInput
 					.render(Math.max(1, width))
 					.map((line) =>
@@ -236,9 +283,35 @@ class DecisionsOverlayBody implements Component {
 			);
 		}
 		if (this.status) {
-			body.push(...wrapTextWithAnsi(statusChip(theme, this.status.kind, this.status.text), Math.max(1, width)));
+			tail.push(...wrapTextWithAnsi(statusChip(theme, this.status.kind, this.status.text), Math.max(1, width)));
 		}
-		return body;
+		const dropped = this.droppedKeys();
+		if (dropped.length > 0) {
+			tail.push(
+				...chipRows(
+					theme,
+					dropped.map((entry) => `${keyCap(theme, entry.key)} ${theme.fg("menuDescription", entry.verb)}`),
+					width,
+				),
+			);
+		}
+		return [...this.windowBoard(board, Math.max(1, this.rows - tail.length), width), ...tail];
+	}
+
+	/** The board cut to `room` rows around the selected decision, with a position row when anything is out of view. */
+	private windowBoard(board: DecisionsBoardLines, room: number, width: number): string[] {
+		if (this.rows <= 0 || board.lines.length <= room) {
+			this.offset = 0;
+			return board.lines;
+		}
+		const page = Math.max(1, room - 1);
+		const span = board.selectedEnd - board.selectedStart;
+		if (board.selectedStart < this.offset) this.offset = board.selectedStart;
+		else if (board.selectedEnd > this.offset + page)
+			this.offset = span >= page ? board.selectedStart : board.selectedEnd - page;
+		const { window, start, position } = windowRows(board.lines, this.offset, page);
+		this.offset = start;
+		return position ? [...window, positionRow(clioTheme(), { ...position, unit: "lines" }, width)] : window;
 	}
 
 	handleInput(data: string): void {
@@ -252,6 +325,7 @@ class DecisionsOverlayBody implements Component {
 			return;
 		}
 		if (rows.length === 0) return;
+		if (this.status !== null && this.status.kind === "warning") this.status = null;
 		if (matchesKey(data, "up")) {
 			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
 			this.expandedKey = null;
@@ -273,6 +347,11 @@ class DecisionsOverlayBody implements Component {
 			return;
 		}
 		if (matchesKey(data, "s")) {
+			if (selected.decision.status !== "active") {
+				this.status = { kind: "warning", text: "Already superseded. c gives it a new direction." };
+				this.requestRender();
+				return;
+			}
 			try {
 				this.options.onSupersede(selectionFor(selected));
 				this.status = { kind: "ok", text: "Decision superseded." };
@@ -289,17 +368,38 @@ class DecisionsOverlayBody implements Component {
 		this.correctionInput?.invalidate();
 	}
 
-	footerHint(): string {
-		if (this.correctionInput) return buildHint([{ key: "Enter", verb: "submit" }], "back, keeps draft");
-		const selected = selectableRows(this.readInterviews())[this.selectedIndex];
-		const drafted =
-			selected !== undefined && keptCorrections.has(decisionRowKey(selected.interview.interviewId, selected.decision.key));
-		return buildHint([
-			{ key: "↑↓", verb: "select" },
-			{ key: "Enter", verb: "expand" },
-			{ key: "s", verb: "supersede" },
+	/** The keys that act on what is on screen now: a board with nothing to select offers only Esc. */
+	private railEntries(): HintEntry[] {
+		if (this.correctionInput) {
+			return [
+				{ key: "Enter", verb: "send", critical: true },
+				{ key: "Esc", verb: "back, keeps draft", short: "back" },
+			];
+		}
+		const rows = selectableRows(this.readInterviews());
+		const selected = rows[this.selectedIndex];
+		if (selected === undefined) return [{ key: "Esc", verb: "close" }];
+		const rowKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
+		const drafted = keptCorrections.has(rowKey);
+		return [
+			...(rows.length > 1 ? [{ key: "↑↓", verb: "select" }] : []),
+			{ key: "Enter", verb: this.expandedKey === rowKey ? "fold" : "expand" },
+			...(selected.decision.status === "active" ? [{ key: "s", verb: "supersede" }] : []),
 			{ key: "c", verb: drafted ? "resume draft" : "correct" },
-		]);
+			{ key: "Esc", verb: "close" },
+		];
+	}
+
+	/** The keys the rail drops at this room, fitted by the same call the rail makes, so the two never disagree. */
+	private droppedKeys(): HintEntry[] {
+		if (this.railRoom <= 0) return [];
+		const all = this.railEntries();
+		const { kept } = fitHintEntryList(all, this.railRoom);
+		return all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
+	}
+
+	footerHint(innerWidth: number): string {
+		return fitHintEntries(this.railEntries(), innerWidth - 3);
 	}
 
 	private readInterviews(): ReadonlyArray<DecisionLedgerEntry> {
@@ -320,7 +420,7 @@ class DecisionsOverlayBody implements Component {
 		input.onSubmit = (value) => {
 			const correction = value.trim();
 			if (correction.length === 0) {
-				this.status = { kind: "warning", text: "Enter the operator's new direction." };
+				this.status = { kind: "warning", text: "Type the new direction first, or Esc to go back." };
 				this.requestRender();
 				return;
 			}
@@ -372,6 +472,6 @@ export function openDecisionsOverlay(
 		width: DECISIONS_OVERLAY_WIDTH,
 		markerId: "decisions",
 		title: () => "Decisions",
-		footerHint: () => body.footerHint(),
+		footerHint: (innerWidth) => body.footerHint(innerWidth),
 	});
 }

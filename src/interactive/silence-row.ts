@@ -12,7 +12,7 @@ import type { AgentStatus } from "../session-control/status-types.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { formatWaitClock } from "./theme/index.js";
 
-/** The first escalation the transcript records; the rail's own `no bytes yet` and `Esc cancels` come before it. */
+/** The first escalation the transcript records; the rail's own `no bytes yet` and `Esc stops` come before it. */
 export const SILENCE_ROW_AFTER_MS = 60_000;
 
 function clockTime(at: number): string {
@@ -114,7 +114,7 @@ export function createSilenceTranscriptRow(deps: {
 					if (row.endedAt === null) {
 						const silent = formatWaitClock(Math.max(0, clock() - w.evidenceAt));
 						return renderNoticeRow(
-							`${w.missing} from ${w.model} for ${silent} · last event: ${w.evidence} · Esc cancels · /model moves it`,
+							`${w.missing} from ${w.model} for ${silent} · last event: ${w.evidence} · Esc stops · /model to reroute`,
 							"warning",
 							width,
 						);

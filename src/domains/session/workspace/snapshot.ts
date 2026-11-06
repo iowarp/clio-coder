@@ -24,6 +24,8 @@ export interface WorkspaceSnapshot {
 	capturedAt: string;
 	/** Set only on the placeholder returned before the first probe lands: its Git fields are unknown, not absent. */
 	pending?: true;
+	/** Git did not answer in time, so whether this is a repository is unknown; the next probe asks again. */
+	gitUnknown?: true;
 }
 
 export function emptyWorkspaceSnapshot(cwd: string): WorkspaceSnapshot {
@@ -60,6 +62,7 @@ function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
 		remoteUrl: git.remoteUrl,
 		projectType,
 		capturedAt: new Date().toISOString(),
+		...(git.undetermined === true ? { gitUnknown: true as const } : {}),
 	};
 }
 
@@ -83,6 +86,8 @@ const landedProbes = new Map<string, { snapshot: WorkspaceSnapshot; at: number }
 const inFlightProbes = new Map<string, Promise<WorkspaceSnapshot>>();
 
 function remember(cwd: string, snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+	// An unknown answer is not reused: the next caller asks Git again.
+	if (snapshot.gitUnknown === true) return snapshot;
 	landedProbes.set(cwd, { snapshot, at: performance.now() });
 	return snapshot;
 }

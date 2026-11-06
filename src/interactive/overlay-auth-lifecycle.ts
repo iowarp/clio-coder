@@ -129,15 +129,20 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 					status.reason ||
 					status.health.lastError ||
 					(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
+				// Configured is not reachable: `connected offline-audit (down)` claimed a connection the probe had just
+				// failed to make, so a route that does not answer reads as not answering, with the reason.
+				const answers = status.available && health !== "down";
 				dialog.controller.setLines([
 					`Target: ${targetId}`,
 					`Runtime: ${runtimeId}`,
-					status.available ? `Target ready (${health})` : `Target check failed (${health})`,
+					answers ? `Target ready (${health})` : `Target does not answer (${health})`,
 					detail,
 				]);
 				deps.notify(
-					status.available ? "info" : "warning",
-					status.available ? `connected ${targetId} (${health})` : `connect ${targetId} failed (${health})`,
+					answers ? "info" : "warning",
+					answers
+						? `connected ${targetId} (${health})`
+						: `${targetId} does not answer (${health}): ${detail}. Its settings are unchanged; Edit URL fixes an address.`,
 					`connect:${targetId}`,
 				);
 				deps.refreshFooter();

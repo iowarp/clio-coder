@@ -28,7 +28,9 @@ test("production panel bounds a provider failure while View and export retain re
 	const panel = createChatPanel();
 	panel.applyEvent(event);
 	const rendered = plain(panel.render(80));
-	assert.match(rendered, /\[error\].*HTTP 503/);
+	// The row's ✗ marks the failure; the store's `[error]` marker stays in /view.
+	assert.match(rendered, /✗ HTTP 503/);
+	assert.doesNotMatch(rendered, /\[error\]/);
 	assert.match(rendered, /Model unavailable/);
 	assert.ok(rendered.length < 1500);
 	assert.doesNotMatch(rendered, /fixture-secret-value|END-EVIDENCE/);
@@ -331,7 +333,8 @@ test("unfinished JSON message projects useful prose and waiting/running do not r
 		const panel = createChatPanel();
 		panel.applyEvent({ type: "retry_status", status: { phase, attempt: 1, maxAttempts: 2, errorMessage: raw } });
 		const row = plain(panel.render(43)).trim();
-		assert.equal(row.split("\n").length, 1);
+		// Two rows at most: the reason breaks between facts rather than mid-word (N3).
+		assert.ok(row.split("\n").length <= 2);
 		assert.doesNotMatch(row, /\{"message|payload payload/);
 		const artifact = panel.inspectionArtifacts()[0];
 		assert.ok(artifact);

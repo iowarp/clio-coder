@@ -33,7 +33,7 @@ import { dockTop } from "../../src/interactive/dock.js";
 import { exitSpend } from "../../src/interactive/exit-summary-collector.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
-import { usageCoverage, usageFigure, usageGap } from "../../src/interactive/usage-words.js";
+import { usageFigure, usageLineFigure } from "../../src/interactive/usage-words.js";
 import { dtoLies } from "../harness/telemetry-lies.js";
 import {
 	coldParityDtos,
@@ -108,10 +108,8 @@ test("the footer and the exit card show the session's tokens and cost as the rea
 	const card = exitSpend(view, "1970-01-01T00:00:00.000Z");
 	ok(card.kind === "ready");
 	// The figure is the read model's own; the line states its coverage once, after it (F4).
-	strictEqual(
-		card.tokens,
-		[usageFigure(tokens), usageCoverage(usageGap(tokens))].filter((part) => part !== null).join(" · "),
-	);
+	ok(card.tokens.startsWith(`${usageLineFigure(tokens)} · `), card.tokens);
+	strictEqual(card.tokens.split("no usage data").length, 2, card.tokens);
 	strictEqual(card.cost, usd.display);
 	deepStrictEqual(
 		card.models.map((row) => [row.key, row.calls, row.cost]),

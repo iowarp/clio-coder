@@ -35,6 +35,8 @@ export interface FleetPlanRunView {
 	costText: string | null;
 	/** Why the run ended without its steps settling, such as a refused workspace lock. */
 	failure?: string;
+	/** Read from its durable root because an earlier Clio process ran it. */
+	earlier?: true;
 }
 
 export interface FleetPlanRuns {

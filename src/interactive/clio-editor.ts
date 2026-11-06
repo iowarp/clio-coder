@@ -30,12 +30,9 @@ import {
 	rule,
 	withThemeContext,
 } from "./theme/index.js";
-import { exactRouteLabel, modelNickname, statusRailLabelRoom, type TargetIdentity } from "./theme/labels.js";
+import { modelNickname, statusRailLabelRoom, type TargetIdentity } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { createComposerSurfacePainter } from "./theme/yolo-surface.js";
-
-/** The longest wording work beside the state usually takes on the rail, `verifier waiting on the model · 1m23s · you can send`. */
-const WORK_BESIDE_STATE_COLS = 52;
 
 /**
  * The slice of Pi's Editor the suggestion list needs and keeps private. Pi
@@ -93,18 +90,18 @@ export interface EditorChrome {
 		/** The rail has nothing worth a permanent slot to say about this route right now. */
 		quiet?: boolean;
 	};
-	/** `identityCells` is what the rail will spend naming the exact route instead of the short nickname. */
 	getHarnessStatus?: (
 		width: number,
 		/** Cells the rail has already given to what sits beside the state. */
 		reserved?: number,
-		identityCells?: number,
 	) => {
 		label: string;
 		glyph: string;
 		token: ClioToken;
 		live: boolean;
 		subject?: string;
+		/** Whether the subject kept its place in front of the label; absent means the rail decides by room. */
+		subjectShown?: boolean;
 		detail?: string;
 		namesRoute?: boolean;
 	} | null;
@@ -589,7 +586,7 @@ export class ClioEditor extends Editor {
 				: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
 					? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
 					: "";
-		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("border", " · "));
+		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("separator", " · "));
 		const note = this.draftNote(width);
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		let suffix = join([position, draftLabel, note ? theme.fg("draftState", note) : ""]);
@@ -610,7 +607,8 @@ export class ClioEditor extends Editor {
 		} else if (mode === "COMPACTING") {
 			lead = theme.fg("harnessAction", spinner);
 			// The stage, its clock and Esc are the claim here, so they get the room before the name does (J2-F04).
-			const room = this.railLabelRoom(width) - reserved - 2;
+			// The status rail's own room: the composer-shaped stretch cost a 40-column compaction its Esc (R5).
+			const room = statusRailLabelRoom(width) - reserved - 2;
 			const named = this.chrome.getCompactionLabel?.(room - Math.max(4, Math.min(24, Math.floor(width / 3))) - 1) ?? null;
 			const alone = this.chrome.getCompactionLabel?.(room) ?? null;
 			// The name is the first thing to go: a rail that cannot hold it beside the clock and Esc drops it, not them.
@@ -642,66 +640,45 @@ export class ClioEditor extends Editor {
 		// A rail stating who else is acting names them, not the model, which is idle meanwhile.
 		const actor = mode === "CONFIRM" ? undefined : status?.subject;
 		const nameCap = Math.max(4, Math.min(24, Math.floor(width / 3)));
-		const labelRoom = statusRail ? statusRailLabelRoom(width) : this.railLabelRoom(width);
+		const labelRoom = statusRail || mode === "COMPACTING" ? statusRailLabelRoom(width) : this.railLabelRoom(width);
 		const netRoom = labelRoom - reserved;
-		const separator = theme.fg("border", " · ");
+		const separator = theme.fg("separator", " · ");
 		const facts = statusRail ? (status.detail?.split(" · ") ?? []).map((fact) => theme.fg("annotation", fact)) : [];
 		const quietState = status?.live === false && status.glyph === GLYPH.queued;
 		const phrased = (state: string): string => [state, ...facts].filter(Boolean).join(separator);
 		const named = (who: string, state = activity): string =>
 			[lead, who && theme.fg("activeModelIdentity", who), phrased(state)].filter(Boolean).join(" ");
 		const pickLabel = (): string => {
-			// Idle and the start of a turn say where the prompt goes, whole. Once the
-			// model answers, what it is doing needs the room and the transcript has the route.
-			const exact = exactRouteLabel(route);
-			const atRouteMoment =
-				mode === "PREPARING" || (mode !== "CONFIRM" && mode !== "COMPACTING" && status?.namesRoute === true);
-			// A narrow rail would pay for the full route with the wait's elapsed, which outranks any name.
-			const routeAffordable = width >= 60 || status?.live !== true;
-			// Work beside the state rewords itself every few seconds, and the route's spelling must not follow it in and out of fit.
-			if (
-				actor === undefined &&
-				workspace === null &&
-				exact !== null &&
-				atRouteMoment &&
-				routeAffordable &&
-				facts.length === 0
-			) {
-				const routed = status
-					? this.chrome.getHarnessStatus?.(width, reserved, visibleWidth(lead) + visibleWidth(exact) + 2)
-					: null;
-				const candidate = named(exact, routed && mode !== "PREPARING" ? theme.fg(routed.token, routed.label) : activity);
-				if (visibleWidth(candidate) <= netRoom) return candidate;
-			}
+			const who = actor ?? nickname;
 			if (!statusRail) {
 				const whole =
 					actor === undefined && workspace !== null
 						? [lead, workspace, activity].filter(Boolean).join(" ")
-						: named(truncateToWidth(actor ?? nickname, nameCap, GLYPH.ellipsis, false));
+						: who.length > 0 && visibleWidth(who) <= nameCap
+							? named(who)
+							: `${lead} ${stateAlone}`;
+				// The name is whole or absent: `Judge-mod…` named nothing and cost the state its room (R1).
 				return !activity || visibleWidth(whole) <= netRoom ? whole : `${lead} ${stateAlone}`;
 			}
-			// Identity is the first thing a state-bearing rail gives up: it takes only what the state and the way out leave over.
-			// Work beside the state rewords itself every few seconds. The name is judged against the longest of those
-			// rewordings and is whole or absent, so it holds for a given width instead of blinking with them (J1-F12).
-			const workRoom = facts.length > 0 ? Math.max(visibleWidth(phrased("")), WORK_BESIDE_STATE_COLS) : 0;
-			const stateRoom = visibleWidth(activity) + (workRoom > 0 ? visibleWidth(separator) + workRoom : 0);
-			const spare = netRoom - visibleWidth(lead) - 1 - stateRoom - 1;
-			if (actor === undefined && workspace !== null && visibleWidth(workspace) <= spare) {
-				return [lead, workspace, phrased(activity)].join(" ");
+			// The fitter already weighed the subject against the state, its clock and the way out; it is the one name the
+			// session gives this actor, so it never alternates with a longer spelling of the route (R6).
+			const shown = status.subjectShown ?? visibleWidth(who) <= nameCap;
+			if (actor === undefined && workspace !== null && shown && visibleWidth(workspace) <= visibleWidth(who)) {
+				const withWorkspace = [lead, workspace, phrased(activity)].join(" ");
+				if (visibleWidth(withWorkspace) <= netRoom) return withWorkspace;
 			}
-			const who = actor ?? nickname;
-			const nameRoom = Math.min(nameCap, spare);
-			if (visibleWidth(who) <= nameRoom || (facts.length === 0 && nameRoom >= 6)) {
-				return named(truncateToWidth(who, nameRoom, GLYPH.ellipsis, false));
-			}
-			// With no name in front of it the state reads on its own: `waiting`, not `is waiting`. Facts beside the
-			// state leave whole from their end, and a quiet state yields to the work it would crowd off the rail.
+			// Work beside the state rewords itself every few seconds; its facts leave whole from their end, and a quiet state
+			// yields to the work it would crowd off the rail.
 			const shorter = facts.map((_, index) => facts.slice(0, facts.length - index));
+			const withSubject = (parts: readonly string[]): string =>
+				[lead, theme.fg("activeModelIdentity", who), [activity, ...parts].join(separator)].join(" ");
+			const subjectLed = shown ? [...shorter.map(withSubject), withSubject([])] : [];
 			const candidates = [
-				...shorter.map((parts) => [stateAlone, ...parts]),
-				...(quietState ? shorter : []),
-				[stateAlone],
-			].map((parts) => `${lead} ${parts.join(separator)}`);
+				...subjectLed,
+				...shorter.map((parts) => `${lead} ${[stateAlone, ...parts].join(separator)}`),
+				...(quietState ? shorter.map((parts) => `${lead} ${parts.join(separator)}`) : []),
+				`${lead} ${stateAlone}`,
+			];
 			return candidates.find((candidate) => visibleWidth(candidate) <= netRoom) ?? `${lead} ${stateAlone}`;
 		};
 		const label = pickLabel();
@@ -732,7 +709,7 @@ export class ClioEditor extends Editor {
 		const fitted = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
 		const right = [truncateToWidth(label, fitted, GLYPH.ellipsis, false), suffix]
 			.filter(Boolean)
-			.join(theme.fg("border", " · "));
+			.join(theme.fg("separator", " · "));
 		return renderEditorRail(theme, width, { left, leftRaw: true, right, rightRaw: true }, rail);
 	}
 
@@ -768,7 +745,7 @@ export class ClioEditor extends Editor {
 				: "";
 		// The bar alone is a shape to guess at; the word says what fills it.
 		const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
-		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("border", " · "));
+		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("separator", " · "));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
 		// The current task takes only what the rail's state left over, and an active loop outranks it.
@@ -816,7 +793,7 @@ export class ClioEditor extends Editor {
 					: "";
 		const right = [scroll ? theme.fg("positionCount", scroll) : "", theme.base("keyboardHint", hint)]
 			.filter(Boolean)
-			.join(theme.fg("border", " · "));
+			.join(theme.fg("separator", " · "));
 		this.renderedBottomRail = this.bottomRail(width, theme, rail, right);
 		return this.renderedBottomRail;
 	}
@@ -847,7 +824,8 @@ export class ClioEditor extends Editor {
 		// A body that stops asking to grow returns to the shared height, so the slice is also capped at what it was given.
 		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : Math.min(entry.rowsUsed, bodyRows));
 		const pad = " ".repeat(gutter);
-		const plainTitle = entry.frame.dockTitle();
+		// A title that can shorten itself is told the rail's room, the way an approval's title is.
+		const plainTitle = entry.frame.dockTitle({ room, actor: "" });
 		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", plainTitle, { bold: true });
 		// A question holds the rail like a card does, so it says what it is not holding up too.
 		const beside = entry.frame.dockAwaitingInput?.()
@@ -909,7 +887,7 @@ export class ClioEditor extends Editor {
 		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
 		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
 			.filter(Boolean)
-			.join(theme.fg("border", " · "));
+			.join(theme.fg("separator", " · "));
 		return {
 			card: [
 				this.topRail(width, theme, rail, label, up, room),

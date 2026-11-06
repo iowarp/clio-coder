@@ -44,7 +44,11 @@ import {
 	topNotification,
 } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
-import { composerPhasePresentation, idleReadinessPresentation } from "../../src/interactive/footer/widgets.js";
+import {
+	composerPhasePresentation,
+	idleReadinessPresentation,
+	shellSettledPresentation,
+} from "../../src/interactive/footer/widgets.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { modelListTurnEffect, routeTurnEffect } from "../../src/interactive/overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle } from "../../src/interactive/overlay-permission-lifecycle.js";
@@ -64,7 +68,12 @@ import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
-import { approvalWaitWords, workerActivityWords, workerSilenceWords } from "../../src/interactive/worker-activity.js";
+import {
+	approvalWaitWords,
+	bindWorkerResponseLimit,
+	workerActivityWords,
+	workerSilenceWords,
+} from "../../src/interactive/worker-activity.js";
 import {
 	classifyTurnEnding,
 	noteWrittenCalls,
@@ -213,7 +222,9 @@ test("a retry backoff stays retrying with no failed receipt until exhaustion", (
 	strictEqual(machine.current().phase, "ended");
 	strictEqual(machine.current().summary?.stopReason, "error");
 	strictEqual((screen(panel).match(/✗ Failed/gu) ?? []).length, 1);
-	strictEqual((screen(panel).match(/\[error\]/gu) ?? []).length, 1);
+	// The failure row states the provider's words once, without the store's `[error]` marker beside its ✗.
+	strictEqual((screen(panel).match(/overloaded/gu) ?? []).length, 1);
+	doesNotMatch(screen(panel), /\[error\]/u);
 	match(screen(panel), /✗ Failed · [^\n]*2 retries/u);
 });
 
@@ -372,7 +383,7 @@ test("a cold load keeps its state, clock and way out at every width and never sa
 		match(label, /Esc/);
 		doesNotMatch(label, /request sent|no bytes|waiting for a response/);
 	}
-	match(composerPhasePresentation(status, 200, at + 12_000).label, /target reports loading/);
+	match(composerPhasePresentation(status, 200, at + 12_000).label, /the server reports loading/);
 });
 
 test("the load that confirmed residency closes the wait for it, and the response gets its own clock", () => {
@@ -461,7 +472,7 @@ test("silence alone never claims a load, and only a word from the target earns o
 	const at = 1_000_000;
 	const late = at + 100_000;
 	const silent = composerPhasePresentation(waitOnRequest({}, at), 200, late).label;
-	match(silent, /target state unknown/);
+	match(silent, /cannot tell if the server is working/);
 	doesNotMatch(silent, /loading/);
 	const probed = composerPhasePresentation(waitOnRequest({ probedResidency: "absent" }, at), 200, late).label;
 	match(probed, /not resident at last probe/);
@@ -527,9 +538,9 @@ test("a backoff says what the target said it is waiting on, and nothing when it 
 			200,
 			at,
 		).label;
-	match(backoff("model-loading"), /target has said not loaded for 20/);
-	match(backoff("capacity"), /at capacity/);
-	match(backoff("rate-limit"), /rate limited/);
+	match(backoff("model-loading"), /the server has said not loaded for 20/);
+	match(backoff("capacity"), /the server says it is busy/);
+	match(backoff("rate-limit"), /the server is rate limiting/);
 	doesNotMatch(backoff(undefined), /loading|capacity|limited|not loaded/);
 	strictEqual(retryWaitCause({ kind: "model-loading", message: "Model is unloaded." }), "model-loading");
 	strictEqual(retryWaitCause({ kind: "transient-provider", message: "503: server overloaded" }), "capacity");
@@ -554,7 +565,7 @@ test("a cancel that leaves a load behind and a restore that outlives the cancel 
 		200,
 		at + 2_000,
 	).label;
-	match(ended, /was cancelled · target may finish the load/);
+	match(ended, /was cancelled · the server may finish the load/);
 	const stopping = composerPhasePresentation(
 		{
 			...INITIAL_STATUS,
@@ -808,8 +819,9 @@ test("a long countdown reads in minutes on the rail and says the provider asked 
 			now,
 			"Qwopus3.8",
 		).label;
-	match(status(111), /in 56m52s · provider asked for 1h · Esc cancels/u);
-	match(status(80), /provider wait 56m52s · Esc cancels/u);
+	match(status(111), /in 56m52s · provider asked for 1h · Esc stops/u);
+	match(status(80), /in 56m52s · provider asked for 1h · Esc stops/u);
+	match(status(60), /provider wait 56m52s · Esc/u);
 	doesNotMatch(status(111), /3412s/u);
 });
 
@@ -1840,12 +1852,23 @@ test("a silent worker says whether its wait is usual for the route only from two
 	const late = { ...waiting, evidenceAtMs: now - 95_000 };
 	strictEqual(
 		workerSilenceWords(late, { now, history: null, room: 60 }),
-		"no output for 1m35s · no time limit · x in /fleet stops it",
+		"no output for 1m35s · x in /fleet stops it · usual unknown",
 	);
 	strictEqual(
 		workerSilenceWords(late, { now, history: { calls: 4, slowestMs: 400 }, room: 40 }),
 		"no output for 1m35s · longer than usual",
 	);
+	// A worker reply that runs past safety.limits.workerResponseSeconds is ended, so the words name that limit and
+	// never claim the wait has none.
+	bindWorkerResponseLimit(() => 600_000);
+	try {
+		const bounded = workerSilenceWords(late, { now, history: null });
+		match(bounded ?? "", /Clio ends a reply after 10m/u);
+		doesNotMatch(bounded ?? "", /no time limit/u);
+		strictEqual(workerSilenceWords(late, { now, history: null, room: 40 }), "no output for 1m35s · reply limit 10m");
+	} finally {
+		bindWorkerResponseLimit(() => null);
+	}
 });
 
 test("an opened Fleet Runs detail keeps its trust row on screen and says how many runs it hides", () => {
@@ -1999,4 +2022,27 @@ test("an idle route a worker already got answers from reads ready, not `no reque
 	const facts = { targetId: "mock", available: true, reason: "", health: "healthy" as const, lastStop: null };
 	match(idleReadinessPresentation(facts, 120).label, /no request yet/u);
 	strictEqual(idleReadinessPresentation({ ...facts, workerAnswered: true }, 120).label, "is ready");
+});
+
+test("a settled shell line leads the idle rail in the card's words and keeps the route's blocker beside it", () => {
+	const shell = { command: "make test", exitCode: 2, cancelled: false, killed: false, error: false };
+	const failed = shellSettledPresentation(shell, 120, 0, "Judge-model failed its last request");
+	strictEqual(failed.subject, "your shell");
+	match(failed.label, /^exited 2 · `make test` · Judge-model failed its last request · \/model to switch$/u);
+	const stopped = shellSettledPresentation({ ...shell, exitCode: null, cancelled: true, killed: true }, 120);
+	match(stopped.label, /^stopped · `make test` · killed after it ignored the stop$/u);
+	// At 40 columns the blocker and its way out leave together, never one without the other.
+	doesNotMatch(shellSettledPresentation(shell, 40, 0, "Judge-model failed its last request").label, /\/model/u);
+});
+
+test("a submission that never became a turn settles idle, not into the previous turn's ended state", () => {
+	const r = reducer();
+	r.apply({ type: "agent_start", turnId: "t1" });
+	r.apply({ type: "agent_end", messages: [] });
+	strictEqual(r.apply({ type: "submit_accepted" }).phase, "preparing");
+	strictEqual(r.apply({ type: "submit_settled" }).phase, "idle");
+});
+
+test("an empty composer after a failed turn offers the receipt's and the rail's ways forward", () => {
+	match(footerKeyHint(0, false, 120, "recover") ?? "", /^↑ recalls your prompt/u);
 });

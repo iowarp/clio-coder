@@ -1,6 +1,7 @@
 import { parseJsonObjectPayload, parseVerifierPayload } from "../core/json-payload.js";
 import { renderFactField } from "../core/telemetry/render.js";
-import { workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
+import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { holdCutOffText, redactUrlCredentials } from "../domains/safety/redaction.js";
@@ -155,9 +156,28 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	// A person reading the run learns what went wrong in words before the machine line repeats the record's own detail.
 	const headline = receipt.exitCode !== 0 ? workerFailureHeadline(receipt.failureMessage) : null;
 	const failed = headline === null ? "" : `\nFailed: ${headline}\n`;
+	// A run that finished with a refused call or a wrong-format answer says so in the words its worker card and board
+	// row use, so a script reading exit 0 and a person reading the card are told the same thing.
+	// A run that called no tools is only a hint on the card, and an answer-only worker legitimately calls none, so the
+	// print states the two caveats that change what the answer is worth.
+	const found = receipt.exitCode === 0 ? receiptCaveat(receipt) : null;
+	const caveat = found?.kind === "no-tools" ? null : found;
+	const finishedWith = caveat === null ? "" : `\nFinished with a caveat: ${caveat.words}\n`;
 	return redactUrlCredentials(
-		`${answer.length > 0 ? `${answer}\n` : ""}${block}${failed}${formatResultLine(receipt, limitations.length)}\n`,
+		`${answer.length > 0 ? `${answer}\n` : ""}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length)}\n`,
 	);
+}
+
+/** The completion caveat from the receipt's own counts, through the one rule every run surface uses. */
+function receiptCaveat(receipt: RunResult): CompletedRunCaveat | null {
+	// Older and synthetic receipts can lack the per-tool counts; a missing count says nothing either way.
+	const refusedCalls = (receipt.toolStats ?? []).reduce((sum, stat) => sum + (stat.blocked ?? 0), 0);
+	const contract = receipt.quality?.resultContract?.conformance;
+	return completedRunCaveat({
+		toolCalls: receipt.toolCalls,
+		...(refusedCalls > 0 ? { refusedCalls } : {}),
+		...(contract !== undefined ? { contract } : {}),
+	});
 }
 
 function formatResultLine(r: RunResult, notVerified: number): string {

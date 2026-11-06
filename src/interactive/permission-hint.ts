@@ -1,5 +1,5 @@
 import type { EscapeLayers } from "./escape-layers.js";
-import { escapeHintEntry, innermostEscapeLayer } from "./escape-layers.js";
+import { escapeHintEntry } from "./escape-layers.js";
 import type { HintEntry } from "./overlay-frame.js";
 
 /**
@@ -69,16 +69,10 @@ export function permissionHintEntries(
 		// card already states what the keys do in one row. It sits before the
 		// inspect key so the narrowing drops it first.
 		// The terms key is inert while the mutation is open, so the rail does not offer it then.
-		...(terms === undefined || inspection === "open"
+		// Open, the terms close on Esc as well, and the Esc entry below already says so.
+		...(terms === undefined || terms === "open" || inspection === "open"
 			? []
-			: [
-					{
-						key: PERMISSION_TERMS_KEY,
-						verb: terms === "open" ? "hide terms" : "terms",
-						short: terms === "open" ? "hide terms" : "terms",
-						critical: false,
-					},
-				]),
+			: [{ key: PERMISSION_TERMS_KEY, verb: "terms", short: "terms", critical: false }]),
 		// A card taller than its rows scrolls (BT-005). The open mutation names the
 		// same keys itself below.
 		...(scrollable && inspection !== "open" ? [{ key: "↑↓", verb: "scroll", critical: false }] : []),
@@ -124,9 +118,4 @@ export function permissionEscapeLayers(
 		terms === "open" && { verb: "hide terms", back: actions.hideTerms },
 		{ verb: "deny", back: actions.deny },
 	];
-}
-
-/** The word the card's Esc carries right now. */
-export function permissionEscapeVerb(inspection: PermissionInspectionHint, terms: PermissionTermsHint): string {
-	return innermostEscapeLayer(permissionEscapeLayers(inspection, terms, NO_ACTIONS))?.verb ?? "deny";
 }

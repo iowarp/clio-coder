@@ -26,6 +26,7 @@ import {
 	STALLED_RUN_HEADLINE,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
+import { fleetNodeTaskBrief } from "../../domains/dispatch/fleet-node-prompt.js";
 import type { TrustSummaryProjection } from "../../domains/evidence/trust-projection.js";
 import { trustStateWord, trustVerdict, validationClause } from "../../domains/evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
@@ -636,7 +637,8 @@ function headerWord(entry: WorkerEntryState): string {
 	if (workerNeedsInput(entry)) return "needs input";
 	const outcome = entry.result.outcome;
 	if (outcome === "canceled") return "cancelled";
-	if (outcome === "stalled") return "stalled";
+	// The board, the dock and the notice say this state in these words; `stalled` was a second name for it.
+	if (outcome === "stalled") return "stopped responding";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
 	return settledCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
@@ -665,7 +667,12 @@ function alignedHeader(
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
 	const word = width >= HEADER_WORD_MIN_WIDTH && !pending ? headerWord(entry) : null;
-	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(HEADER_WORD_WIDTH)}`)}`;
+	// The column fits the widest word among the siblings, so a rare long one still lines the cards up.
+	const wordWidth = Math.max(
+		HEADER_WORD_WIDTH,
+		...(siblings ?? []).map((sibling) => (isPending(sibling) ? 0 : visibleWidth(headerWord(sibling)))),
+	);
+	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(wordWidth)}`)}`;
 	const name = workerName(entry);
 	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
 	const prefix = cardPrefix(entry);
@@ -675,7 +682,7 @@ function alignedHeader(
 		entry.council !== undefined ? councilLabelText(theme, shown, entry.council.color) : theme.fg("workerIdentity", shown);
 	const header = `${prefix}${identity}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shown)))} ${status} ${timer}`;
 	const taskWidth = width - visibleWidth(header) - 2;
-	const task = displayText(entry, "task", entry.task ?? "");
+	const task = displayText(entry, "task", fleetNodeTaskBrief(entry.task ?? ""));
 	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
 	if (visibleWidth(header) <= width) return header;
 	// Below the header's minimum width, even its identity yields to elapsed.
@@ -781,7 +788,8 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 	const facts = [
 		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
 		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
-		...(calls === undefined ? [] : [renderCalls(calls, "call")]),
+		// An unknown count says nothing a person can use; `unknown calls` read as a fact about the worker.
+		...(calls === undefined || compactQuantity(calls) === null ? [] : [renderCalls(calls, "call")]),
 	];
 	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too. The form
 	// is picked for the room the facts beside it leave, so the row never cuts a clause mid-word.

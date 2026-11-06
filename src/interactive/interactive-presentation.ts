@@ -42,7 +42,6 @@ import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
 import type { TurnPreparationStep } from "../session-control/turn-state.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
-import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
 import { createBackgroundCallTracker } from "./background-calls.js";
 import type { ChatPanel } from "./chat-panel.js";
@@ -55,14 +54,19 @@ import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
 import { admissionHint } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
-import { createDispatchBoardStore, createDispatchBoardView, dispatchStatusPresentation } from "./dispatch-board.js";
+import {
+	createDispatchBoardStore,
+	createDispatchBoardView,
+	dispatchStatusPresentation,
+	summaryFleetRuns,
+} from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFleetDock } from "./fleet-dock.js";
 import { readDurableFleetPlans } from "./fleet-plan-history.js";
 import type { FleetPlanRunView } from "./fleet-plan-runs.js";
-import { readDurableWorkerRuns } from "./fleet-run-history.js";
+import { readDurableWorkerRuns, recordedRunUsage } from "./fleet-run-history.js";
 import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
@@ -78,6 +82,10 @@ import {
 	compactionRailLabel,
 	composerPhasePresentation,
 	idleReadinessPresentation,
+	type RouteReadinessFacts,
+	routeBlockerWords,
+	type ShellSettlement,
+	shellSettledPresentation,
 } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
@@ -100,7 +108,7 @@ import { clioTheme, GLYPH } from "./theme/index.js";
 import { formatWaitClock, modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
-import { workerActivityWords } from "./worker-activity.js";
+import { bindWorkerResponseLimit, workerActivityWords } from "./worker-activity.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 /** How long one `/skill <name>` listing serves later keystrokes. */
@@ -232,7 +240,7 @@ export interface InteractivePresentation {
 	root: Component;
 	changeOutputStyle(mutation: () => void): void;
 	announceSettingChanges(): void;
-	setLocalBashRunning(running: boolean, command?: string): void;
+	setLocalBashRunning(running: boolean, command?: string, settled?: ShellSettlement): void;
 	/** The operator asked the running shell line to stop; it has not necessarily gone yet. */
 	setLocalBashCancelling(): void;
 	getQuotaSnapshots(): QuotaProviders;
@@ -375,6 +383,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	});
 	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
+	// Read per render, so a limit changed in /settings is the one a silent worker's words name.
+	bindWorkerResponseLimit(() => {
+		const seconds = (deps.getSettings?.() ?? settings).safety.limits.workerResponseSeconds;
+		return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+	});
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
@@ -451,6 +464,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
+		getStopRequestedAt: () => {
+			const status = statusController.current();
+			return status.phase === "cancelling" ? (status.cancelRequestedAt ?? null) : null;
+		},
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
 		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
 		requestRender,
@@ -491,6 +508,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		deps.telemetry,
 		() => readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
 		() => readDurableWorkerRuns(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+		recordedRunUsage,
 	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
@@ -589,6 +607,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let composerEditor: ClioEditor | null = null;
 	let localBashCommand: string | null = null;
 	let localBashCancelledAt: number | null = null;
+	/** The last direct shell line, until a model turn settles after it; idle leads with it while it is the newest event. */
+	let lastShell: ShellSettlement | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
 		providers: deps.providers,
@@ -677,13 +697,15 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				localBashCancelledAt !== null ||
 				(footerDeps.getAgentStatus?.() ?? statusController.current()).phase === "cancelling";
 			if (stopping && text.trim().length === 0) return "stopping";
-			return draftKeyContext(
+			const context = draftKeyContext(
 				text,
 				deps.chat.isStreaming(),
 				deps.chat.turnPreparation().phase !== "idle",
 				localBashStartedAt !== null,
 				(token) => deps.extensionCommands?.().some((row) => row.available && row.invocation === token) ?? false,
 			);
+			// A failed turn is the newest thing on screen until a shell line or another turn follows it.
+			return context === "idle" && lastShell === null && lastTurnSummary?.stopReason === "error" ? "recover" : context;
 		},
 		getKeyHintFacts: () => {
 			const current = deps.getSettings?.();
@@ -757,10 +779,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return {
 			// The strip over a dock reads the phase with the rail's own name and compaction facts, so the two cannot disagree (F2).
 			actor: phaseModelName(status),
+			...(deps.getSettings?.().chat?.target ? { target: deps.getSettings?.().chat?.target ?? "" } : {}),
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-			workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
+			workers: summaryFleetRuns(dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()),
 			background: backgroundCalls.active(),
 			workerActivity: (row, room) =>
 				row.plan !== undefined
@@ -768,9 +791,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					: // A queued run's progress reads `starting`, which it is not until it has a slot.
 						row.status === "enqueued"
 						? "waiting for a slot"
-						: row.progress
-							? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
-							: dispatchStatusPresentation(row.status).label,
+						: // Its last phase reads `finishing`, which is work ending on its own; the board says `stopping`.
+							row.status === "cancelling"
+							? "stopping"
+							: row.progress
+								? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
+								: dispatchStatusPresentation(row.status).label,
 			now: Date.now(),
 		};
 	};
@@ -797,7 +823,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { targetId: route?.target, modelId };
 		},
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
-		getHarnessStatus: (width, reserved = 0, identityCells) => {
+		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 			const detail = railDetail(currentLiveWork(), width);
 			const route = deps.getSettings?.().chat;
@@ -805,10 +831,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				const name = phaseModelName(status);
 				// With room to spare the phase gives up its lesser facts to the work beside it: the rail dropped a whole
 				// `verifier waiting for a slot` to keep `requested by Judge-model` (HS10). A narrow rail keeps the phase whole.
-				// Beside other work a phase must say whose it is, so a rail wide enough to name it holds that name back from the
-				// lesser facts too. A narrower rail has no name to show, and reserving for one would only cost the phase its clock.
-				const named = width >= 100 ? visibleWidth(name) + 1 : 0;
-				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 + named : 0;
+				// The subject competes inside the fitter, so nothing is reserved for it here.
+				const beside = detail !== null && width >= 80 ? visibleWidth(detail) + 3 : 0;
 				const presented = composerPhasePresentation(
 					status,
 					width,
@@ -816,8 +840,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					name,
 					undefined,
 					reserved + beside,
-					identityCells,
 					runningCompaction(),
+					route?.target ?? undefined,
 				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
@@ -831,21 +855,26 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			const last = lastTurnSummary;
 			const onRoute = last !== null && last.targetId === route.target && last.modelId === route.model;
-			const readiness = idleReadinessPresentation(
-				{
-					targetId: route.target,
-					available: target.available,
-					reason: target.reason,
-					health: target.health.status,
-					lastStop: onRoute ? last.stopReason : null,
-					workerAnswered:
-						(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
-					...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
-				},
-				width,
-				reserved,
-				identityCells,
-			);
+			const routeFacts: RouteReadinessFacts = {
+				targetId: route.target,
+				available: target.available,
+				reason: target.reason,
+				health: target.health.status,
+				lastStop: onRoute ? last.stopReason : null,
+				workerAnswered:
+					(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
+				...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
+			};
+			if (lastShell !== null && !detail) {
+				const blocker = routeBlockerWords(routeFacts);
+				return shellSettledPresentation(
+					lastShell,
+					width,
+					reserved,
+					blocker === null ? null : `${phaseModelName(status)} ${blocker}`,
+				);
+			}
+			const readiness = idleReadinessPresentation(routeFacts, width, reserved, phaseModelName(status));
 			if (!detail) return readiness;
 			// Beside running work a healthy route's small print gives way; a blocker or a doubt still reads first.
 			const quiet = readiness.glyph === GLYPH.queued && target.health.status === "healthy";
@@ -960,8 +989,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	composerEditor = editor;
+	// The setting the operator chose, not the rail's reading of it: a capability probe landing after launch moved the
+	// label and announced `Think Off` as if someone had changed it (F5).
 	const readSettingState = () => ({
-		thinking: editorChrome.getThinkingLabel(),
+		thinking: deps.getSettings?.()?.chat?.thinkingLevel ?? "off",
 		output: editorChrome.getOutputStyle?.() ?? "standard",
 		autonomy: editorChrome.getAutonomy?.() ?? "default",
 	});
@@ -971,12 +1002,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const previous = lastSettingState;
 		lastSettingState = next;
 		const changes: string[] = [];
-		const title = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-		if (next.thinking !== previous.thinking) changes.push(`Think ${title(next.thinking)}`);
+		if (next.thinking !== previous.thinking) changes.push(`Thinking set to ${next.thinking}`);
 		if (next.output !== previous.output)
-			changes.push(`Verbose ${{ compact: "Minimal", standard: "Default", detailed: "Detailed" }[next.output]}`);
+			changes.push(
+				`Transcript detail set to ${{ compact: "minimal", standard: "default", detailed: "detailed" }[next.output]}`,
+			);
 		if (next.autonomy !== previous.autonomy)
-			changes.push(`Autonomy ${next.autonomy === "yolo" ? "YOLO" : title(next.autonomy)}`);
+			changes.push(`Autonomy set to ${next.autonomy === "yolo" ? "YOLO" : next.autonomy}`);
 		if (changes.length)
 			notifications.add({
 				level: "info",
@@ -1118,6 +1150,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 				isFooterExpanded: () => footer.isExpanded(),
 				isFleetBoardOpen: () => deps.getOverlayState?.() === "dispatch-board",
+				getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
 			}),
 			editor,
 			contextProgress: createContextProgressRail(
@@ -1252,7 +1285,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		chatRenderer,
 		io,
 		root,
-		setLocalBashRunning(running, command) {
+		setLocalBashRunning(running, command, settled) {
+			lastShell = running ? null : (settled ?? null);
 			localBashStartedAt = running ? Date.now() : null;
 			localBashCommand = running ? (command ?? null) : null;
 			localBashCancelledAt = null;
@@ -1285,6 +1319,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		toolCounts: () => footerToolCounts,
 		setLastTurnSummary: (summary) => {
 			lastTurnSummary = summary;
+			lastShell = null;
 		},
 		resetForNewSession: () => {
 			resetLoopJobs();
@@ -1294,6 +1329,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			footerToolErrors = 0;
 			footerToolTruncatedResults = 0;
 			lastTurnSummary = null;
+			lastShell = null;
 			liveGeneration = false;
 			statusController.reset();
 			// A timed notice spoke about a moment in the session that just ended; a pinned one states a condition still true.

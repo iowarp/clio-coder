@@ -1,7 +1,15 @@
 import type { ConfigureWizardHost, HostedTargetOptions } from "../cli/configure-host.js";
 import type { SelectOptions, SelectResult, TextPromptOptions, TextResult } from "../cli/select.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { Input, isKeyRelease, matchesKey, stripTerminalSequences, wrapTextWithAnsi } from "../engine/tui.js";
+import {
+	Input,
+	isKeyRelease,
+	matchesKey,
+	stripTerminalSequences,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "../engine/tui.js";
 import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "./escape-layers.js";
 import { maybeOpenExternalUrl } from "./open-external-url.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
@@ -14,7 +22,77 @@ import {
 	selectionMark,
 	showClioOverlayFrame,
 } from "./overlay-frame.js";
-import { clioTheme } from "./theme/index.js";
+import { type ClioTheme, clioTheme } from "./theme/index.js";
+
+/**
+ * A note wrapped on its words, with a word wider than the row (a settings path)
+ * shortened in its middle so it stays one readable token instead of breaking
+ * mid-word across two rows.
+ */
+function wrapNote(line: string, width: number): string[] {
+	const room = Math.max(4, width);
+	const words = line.split(" ").map((word) => {
+		if (visibleWidth(word) <= room) return word;
+		const tail = Math.ceil((room - 1) * 0.6);
+		return `${word.slice(0, room - 1 - tail)}…${word.slice(word.length - tail)}`;
+	});
+	return wrapTextWithAnsi(words.join(" "), room);
+}
+
+/**
+ * A note on one row. A row that ends in a path keeps the file name: the path
+ * gives up its middle, because `~/…/config/settings.yaml` still says where the
+ * result goes and `~/clio-gym/scratch/…` does not.
+ */
+function noteRow(line: string, width: number): string {
+	if (visibleWidth(line) <= width) return line;
+	const words = line.split(" ");
+	const last = words.at(-1) ?? "";
+	const before = words.slice(0, -1).join(" ");
+	const room = width - visibleWidth(before) - 1;
+	if (words.length > 1 && last.includes("/") && room >= 12) {
+		const tail = Math.ceil((room - 1) * 0.6);
+		return `${before} ${last.slice(0, room - 1 - tail)}…${last.slice(last.length - tail)}`;
+	}
+	return truncateToWidth(line, width, "…");
+}
+
+/** At most `max` rows, the last marked when more were cut. */
+function capRows(rows: string[], max: number, width: number): string[] {
+	if (rows.length <= max) return rows;
+	const kept = rows.slice(0, max);
+	const last = kept.at(-1) ?? "";
+	kept[max - 1] = visibleWidth(last) + 2 <= width ? `${last} …` : truncateToWidth(last, width, "…");
+	return kept;
+}
+
+/** The step's question in bold, the lines under it dimmed, the way the CLI prints them. */
+function askTone(theme: ClioTheme, row: string, index: number): string {
+	return index === 0 ? theme.style("body", row, { bold: true }) : theme.fg("annotation", row);
+}
+
+/**
+ * The head of a step too tall for its rows: the question, then as many lines
+ * under it as fit, then the newest notes behind a row that counts the rest.
+ */
+function questionFirst(
+	theme: ClioTheme,
+	notes: ReadonlyArray<string>,
+	asks: ReadonlyArray<string>,
+	room: number,
+	width: number,
+): string[] {
+	const askRows = asks.slice(0, Math.max(1, Math.min(asks.length, room)));
+	const noteRoom = room - askRows.length;
+	if (noteRoom >= notes.length) return [...notes, ...askRows];
+	if (noteRoom < 1) return askRows;
+	const left = notes.length - (noteRoom - 1);
+	return [
+		theme.fg("annotation", noteRow(`… ${left} earlier ${left === 1 ? "note" : "notes"}`, width)),
+		...notes.slice(left),
+		...askRows,
+	];
+}
 
 interface PendingChoice {
 	kind: "select";
@@ -225,40 +303,107 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			);
 			return fitRows(rows, width, this.bodyRows);
 		}
+		return fitRows(this.renderPrompt(pending, width), width, this.bodyRows);
+	}
+
+	/**
+	 * A step in the rows the dock has. The question and the choices outrank the
+	 * notes above them: when the step does not fit, each note shrinks to one
+	 * marked row, then the lines under the question do, then the oldest notes give
+	 * way to a row that counts them, and a list still too long for its rows
+	 * windows around the selection with a row that says where it is. Nothing is
+	 * cut without a mark. The selected choice's description wraps in full under
+	 * it, so a narrow dock still reads what the choice means.
+	 */
+	private renderPrompt(pending: PendingChoice | PendingText, width: number): string[] {
+		const theme = clioTheme();
+		const budget = this.bodyRows;
 		// A prompt that follows a failure is there because of it, so everything reported since the last answer stays up.
 		const fresh = this.messages.slice(this.freshFrom);
-		for (const line of fresh.length > 0 ? fresh : this.messages.slice(-1))
-			rows.push(...wrapTextWithAnsi(theme.fg("body", line), width));
+		const notes = fresh.length > 0 ? fresh : this.messages.slice(-1);
 		const heading = pending.options.heading;
-		const headings = (typeof heading === "string" ? [heading] : [...(heading ?? [])]).filter((line) => line.trim());
-		for (const line of headings) rows.push(...wrapTextWithAnsi(stripTerminalSequences(line), width));
-		if (pending.kind === "text" && pending.options.hint) rows.push(...wrapTextWithAnsi(pending.options.hint, width));
-		if (this.problem) rows.push(theme.fg("error", this.problem));
-		// Prompt controls keep their rows even when review instructions wrap at 40 columns.
-		const room = Math.max(1, this.bodyRows - Math.min(rows.length, this.bodyRows - 2));
-		rows.length = Math.min(rows.length, Math.max(0, this.bodyRows - room));
+		const asks = [
+			...(typeof heading === "string" ? [heading] : [...(heading ?? [])]),
+			...(pending.kind === "text" && pending.options.hint ? [pending.options.hint] : []),
+		]
+			.map((line) => stripTerminalSequences(line))
+			.filter((line) => line.trim());
+		const problem = this.problem ? wrapTextWithAnsi(theme.fg("error", this.problem), width) : [];
+		const field =
+			pending.kind === "text"
+				? pending.options.mask
+					? // A masked field still shows where typing goes; an empty one was a blank row under the prompt.
+						[
+							this.input.getValue().length > 0
+								? theme.fg("inputText", `> ${"•".repeat(this.input.getValue().length)}`)
+								: `${theme.fg("inputText", ">")} ${theme.fg("annotation", "type or paste; each character shows as •")}`,
+						]
+					: this.input.render(width).map((line) => theme.base("inputText", line))
+				: pending.options.searchable
+					? [theme.fg("searchQuery", `Filter: ${this.input.getValue()}`)]
+					: [];
+		const fixed = problem.length + field.length;
+		const fullNotes = notes.flatMap((line) => wrapNote(line, width).map((row) => theme.fg("body", row)));
+		const fullAsks = asks.flatMap((line, index) => wrapNote(line, width).map((row) => askTone(theme, row, index)));
+		const shortNotes = notes.map((line) => theme.fg("body", noteRow(line, width)));
+		const shortAsks = asks.map((line, index) => askTone(theme, noteRow(line, width), index));
 		if (pending.kind === "text") {
-			rows.push(
-				...(pending.options.mask
-					? [theme.fg("inputText", "•".repeat(this.input.getValue().length))]
-					: this.input.render(width).map((line) => theme.base("inputText", line))),
-			);
-		} else {
-			const choices = this.choices(pending);
-			if (pending.options.searchable) rows.push(theme.fg("searchQuery", `Filter: ${this.input.getValue()}`));
-			const height = Math.max(1, this.bodyRows - rows.length);
-			const [start, end] = centeredWindow(choices.length, choices.indexOf(pending.selected), height);
-			if (!choices.length) rows.push(theme.fg("emptyState", "No matching choices"));
-			for (const index of choices.slice(start, end)) {
-				const choice = pending.options.choices[index];
-				if (!choice) continue;
-				const selected = index === pending.selected;
-				rows.push(
-					`${selectionMark(selected)} ${selectionLabel(selected, stripTerminalSequences(choice.label))}${choice.hint ? theme.fg("annotation", ` · ${stripTerminalSequences(choice.hint)}`) : ""}`,
-				);
-			}
+			const head = [fullNotes, shortNotes].map((noteRows) => [...noteRows, ...fullAsks]);
+			const fit =
+				head.find((rows) => rows.length + fixed <= budget) ??
+				questionFirst(theme, shortNotes, shortAsks, budget - fixed, width);
+			return [...fit, ...problem, ...field];
 		}
-		return fitRows(rows, width, this.bodyRows);
+		const choices = this.choices(pending);
+		const hintWidth = Math.max(8, width - 4);
+		const hintOf = (index: number): string[] => {
+			const hint = pending.options.choices[index]?.hint;
+			return hint ? capRows(wrapNote(stripTerminalSequences(hint), hintWidth), 3, hintWidth) : [];
+		};
+		const hintRows = hintOf(pending.selected);
+		// Room for the longest description, so the notes keep one form as the selection moves.
+		const hintRoom = Math.max(hintRows.length, ...choices.map((index) => hintOf(index).length));
+		const allChoiceRows = Math.max(1, choices.length) + hintRoom;
+		const fewestChoiceRows =
+			choices.length === 0 ? 1 : Math.min(choices.length, 3) + hintRoom + (choices.length > 3 ? 1 : 0);
+		const tiers = [
+			[...fullNotes, ...fullAsks],
+			[...shortNotes, ...fullAsks],
+			[...shortNotes, ...shortAsks],
+		];
+		// Every choice on screen beats every note at full length; a windowed list is the last resort.
+		const head =
+			tiers.find((tier) => tier.length + fixed + allChoiceRows <= budget) ??
+			tiers.find((tier) => tier.length + fixed + fewestChoiceRows <= budget) ??
+			questionFirst(theme, shortNotes, shortAsks, budget - fixed - fewestChoiceRows, width);
+		const out = [...head, ...problem, ...field];
+		if (choices.length === 0) {
+			out.push(theme.fg("emptyState", "No matching choices"));
+			return out;
+		}
+		const height = Math.max(fewestChoiceRows, budget - out.length);
+		const windowed = choices.length + hintRows.length > height;
+		const slots = Math.max(1, height - hintRows.length - (windowed ? 1 : 0));
+		const [start, end] = centeredWindow(choices.length, Math.max(0, choices.indexOf(pending.selected)), slots);
+		for (const index of choices.slice(start, end)) {
+			const choice = pending.options.choices[index];
+			if (!choice) continue;
+			const selected = index === pending.selected;
+			const label = stripTerminalSequences(choice.label);
+			const hint = choice.hint ? stripTerminalSequences(choice.hint) : "";
+			// An unselected row carries its hint only whole, and only when the hint adds
+			// to the label: `LiteLLM gateway · LiteLLM gateway with…` said the name twice
+			// and cut the rest. The selected row's hint is wrapped beneath it in full.
+			const inline = `${selectionMark(false)} ${selectionLabel(false, label)}${theme.fg("annotation", ` · ${hint}`)}`;
+			const showHint =
+				hint.length > 0 && !hint.toLowerCase().startsWith(label.toLowerCase()) && visibleWidth(inline) <= width;
+			out.push(selected || !showHint ? `${selectionMark(selected)} ${selectionLabel(selected, label)}` : inline);
+			if (selected) for (const row of hintRows) out.push(`    ${theme.fg("annotation", row)}`);
+		}
+		if (windowed) {
+			out.push(theme.fg("annotation", noteRow(`${start + 1}–${end} of ${choices.length} choices · ↑↓ more`, width)));
+		}
+		return out;
 	}
 
 	invalidate(): void {}

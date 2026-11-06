@@ -11,6 +11,7 @@
 import { ToolNames } from "../../core/tool-names.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
@@ -22,6 +23,8 @@ import { type CompactionRailFacts, composerPhasePresentation } from "./widgets.j
 export interface LiveWorkFacts {
 	/** The name the composer rail gives the main agent. */
 	actor: string;
+	/** The target the main turn's requests go to, by its configured name, which the rail names too. */
+	target?: string;
 	status: AgentStatus;
 	/** The running compaction's stage and start, which the rail reads too; null or absent when none runs. */
 	compaction?: CompactionRailFacts | null;
@@ -41,7 +44,8 @@ function phaseElapsedMs(status: AgentStatus, now: number): number {
 }
 
 /** Keys the rail offers that reach nothing under a dock, which takes Esc and any typing for itself. */
-const RAIL_ONLY_FACTS = / · (?:Esc cancels|Esc|then \/model switches|then \/model|\/model moves it|\/model)(?= · |$)/gu;
+const RAIL_ONLY_FACTS =
+	/ · (?:Esc stops|Esc|then \/model to switch|then \/model|\/model to reroute|\/model to switch|\/model)(?= · |$)/gu;
 
 /** A label that already states its age (`has no output · 12s`) must not gain a second clock. */
 // `1m6s` is one clock too: its minutes and seconds are joined, so the pattern takes a compound form whole (B3).
@@ -79,10 +83,19 @@ const SECOND_WORKER_RAIL_SHARE = 0.6;
 const SECOND_WORKER_MIN_RAIL = 100;
 
 /** `verifier reading README.md · 12s`: which worker, what it is doing, for how long. */
+/** A council member goes by the label the operator watches it under, as its notice does, not the recipe all share. */
+function workerRailName(row: DispatchBoardRow): string {
+	const council = row.council;
+	if (council === undefined) return sanitizeCallTargetText(row.agentId);
+	return sanitizeCallTargetText(
+		council.label === COUNCIL_SYNTHESIS_LABEL ? "council synthesis" : `council member ${council.label}`,
+	);
+}
+
 function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string | null {
 	const first = foregroundWorker(facts);
 	if (first === undefined) return null;
-	const name = sanitizeCallTargetText(first.agentId);
+	const name = workerRailName(first);
 	const elapsed = workerElapsed(first);
 	// A queued run is held up and a running one is not, so `+1 more` must not stand for both.
 	const rest = facts.workers.filter((row) => row !== first);
@@ -100,7 +113,7 @@ function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string
 		const named = [
 			`${name} ${doing}`,
 			elapsed,
-			`${sanitizeCallTargetText(second.agentId)} ${sanitizeCallTargetText(facts.workerActivity(second, SECOND_WORKER_WORDS))}`,
+			`${workerRailName(second)} ${sanitizeCallTargetText(facts.workerActivity(second, SECOND_WORKER_WORDS))}`,
 			secondElapsed,
 			others > 1 ? `+${others - 1} more` : null,
 			queued > 0 ? `+${queued} queued` : null,
@@ -177,102 +190,95 @@ export function besideCardDetail(
 	return [both, workers, main].find((text) => text !== null && visibleWidth(text) <= room) ?? null;
 }
 
-/** What Esc does in this view, and that it does not reach the run. */
-function escapeNote(verb: string | null, subject: string): { long: string; short: string; tiny: string } {
-	const going = `${subject} keeps going`;
-	const action = verb?.startsWith("close")
-		? `Esc closes this view, ${going}`
-		: verb?.startsWith("back")
-			? `Esc goes back, ${going}`
-			: verb?.endsWith("filter")
-				? `Esc clears the filter, ${going}`
-				: `closing this view leaves ${subject} going`;
-	return { long: action, short: going, tiny: "continues" };
-}
+/**
+ * The one tail the strip gives what runs behind a view: whole or absent. Two tails, `the run keeps going` and
+ * `continues`, read as two different claims depending on the width (S2). The view's own rail carries its Esc.
+ */
+const BEHIND_VIEW = "continues behind this view";
+/**
+ * Esc inside a view closes the view, so the strip says how the run behind it stops: the view's rail could only offer
+ * `Esc close`, and nothing on screen said the run was one key further away (S3).
+ */
+const BEHIND_VIEW_STOP = "close this view, then Esc stops it";
 
 /**
- * The line, or null when nothing is active. Candidates run from fullest to
- * leanest and the first that fits wins, so at 40 columns the phase and its
- * elapsed are what remain: identity, then the worker, then the Esc note go
- * first, and the words are never cut mid-phrase while a shorter form exists.
+ * The line, or null when nothing is active. Candidates run from fullest to leanest and the first that fits wins. The
+ * subject is the rail's own name and stays down to the narrowest widths, because a phase with no subject cannot say
+ * whose it is (S1); the worker summary, then the tail, give way first, and words are never cut mid-phrase while a
+ * shorter form exists.
  */
 export function liveWorkStrip(
 	theme: ClioTheme,
 	facts: LiveWorkFacts,
 	width: number,
-	escVerb: string | null,
+	_escVerb: string | null,
 ): string | null {
 	const room = Math.max(1, width);
 	const mainActive = isMainActive(facts.status);
 	const workers = [workerSummary(facts, room), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
-	const dot = theme.fg("border", " · ");
-	const note = escapeNote(
-		escVerb,
-		mainActive
-			? facts.status.tool?.operatorShell === true
-				? "the command"
-				: "the run"
-			: facts.workers.length > 1
-				? "work"
-				: facts.workers.length === 1
-					? facts.workers[0]?.plan !== undefined
-						? "the plan"
-						: "the worker"
-					: "it",
-	);
+	const dot = theme.fg("separator", " · ");
 	const quiet = (text: string): string => theme.fg("annotation", text);
 	const render = (lead: string, parts: ReadonlyArray<string | null>): string =>
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);
 	let candidates: string[];
 	if (mainActive) {
 		const compaction = facts.compaction ?? null;
-		const phase = composerPhasePresentation(
-			facts.status,
-			room,
-			facts.now,
-			facts.actor,
-			undefined,
-			0,
-			undefined,
-			compaction,
-		);
-		const glyph = theme.fg(phase.token, phase.live ? GLYPH.running : phase.glyph);
+		const present = (labelRoom: number) =>
+			composerPhasePresentation(
+				facts.status,
+				room,
+				facts.now,
+				facts.actor,
+				Math.max(10, labelRoom),
+				0,
+				compaction,
+				facts.target,
+			);
+		const loose = present(room - 2);
+		const subject = loose.subject ?? facts.actor;
+		const glyph = theme.fg(loose.token, loose.live ? GLYPH.running : loose.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
-		const clockFor = (text: string): string | null => {
-			if (CARRIES_ELAPSED.test(stripTerminalSequences(text))) return null;
-			return formatWaitClock(phaseElapsedMs(facts.status, facts.now));
-		};
-		const label = railFree(phase.label);
-		// Without the actor the words get the whole line, so a countdown or a command is not cut for a name no longer drawn.
-		const looseLabel = railFree(
-			composerPhasePresentation(facts.status, room, facts.now, facts.actor, room - 2, 0, undefined, compaction).label,
-		);
+		// A turn waiting on a worker is timed by the worker's own clock beside it, as the rail shows it; two clocks read
+		// `waiting for a worker · 6s · coder waiting on the model · 6s`.
+		const awaitsWorker =
+			workers !== null && (facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch);
 		const clocked = (text: string): string => {
-			const elapsed = clockFor(text);
-			return `${glyph} ${theme.fg(phase.token, elapsed === null ? text : `${text} · ${elapsed}`)}`;
+			const elapsed =
+				awaitsWorker || CARRIES_ELAPSED.test(stripTerminalSequences(text))
+					? null
+					: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
+			return theme.fg(loose.token, elapsed === null ? text : `${text} · ${elapsed}`);
 		};
-		const owned = clocked(`${phase.subject ?? facts.actor} ${label}`);
-		const bare = clocked(looseLabel.replace(/^is /u, ""));
+		// The clock the strip may add takes up to eight cells, which the words leave for it.
+		// The words give up their lesser facts to a tail that has to stay whole, so the way to stop outranks them.
+		const ownedWith = (tail: number): string =>
+			`${glyph} ${theme.fg("activeModelIdentity", subject)} ${clocked(railFree(present(room - 2 - visibleWidth(subject) - 1 - 8 - tail).label))}`;
+		const owned = ownedWith(0);
+		const tailCells = (parts: ReadonlyArray<string | null>): number =>
+			parts.filter((part): part is string => part !== null).reduce((sum, part) => sum + 3 + visibleWidth(part), 0);
+		const bare = `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
+		// A stop already asked for owes nothing more; anything else a person may want to stop says how.
+		const stoppable = facts.status.phase !== "cancelling";
 		candidates = [
-			render(owned, [workers, note.long]),
-			...(workers === null ? [] : [render(owned, [workers, note.short]), render(bare, [workers, note.short])]),
-			// A worker asking outranks the Esc note: with an overlay over its card, this row is all that says time is running.
+			...(stoppable ? [render(ownedWith(tailCells([workers, BEHIND_VIEW_STOP])), [workers, BEHIND_VIEW_STOP])] : []),
+			render(owned, [workers, BEHIND_VIEW]),
+			...(workers === null ? [] : [render(owned, [workers])]),
+			// A worker asking outranks the tail: with an overlay over its card, this row is all that says time is running.
 			...(facts.workers.some((row) => row.progress?.awaitingApproval === true)
 				? [
 						render(bare, [workerSummary(facts, room - visibleWidth(bare) - 3)]),
 						`${glyph} ${quiet(workerSummary(facts, room - 2) ?? "")}`,
 					]
 				: []),
-			render(owned, [note.long]),
-			render(owned, [note.short]),
-			render(bare, [note.short]),
-			render(bare, [note.tiny]),
+			...(stoppable ? [render(ownedWith(tailCells([BEHIND_VIEW_STOP])), [BEHIND_VIEW_STOP])] : []),
+			render(owned, [BEHIND_VIEW]),
+			render(owned, []),
 			render(bare, []),
 		];
 	} else {
 		const lead = `${theme.fg("activity", GLYPH.running)} ${theme.fg("activity", workers ?? "")}`;
-		candidates = [render(lead, [note.long]), render(lead, [note.short]), render(lead, [note.tiny]), lead];
+		candidates = [render(lead, [BEHIND_VIEW]), lead];
 	}
 	const fitted = candidates.find((candidate) => visibleWidth(candidate) <= room);
 	return fitted ?? truncateToWidth(candidates.at(-1) ?? "", room, GLYPH.ellipsis, false);

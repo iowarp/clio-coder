@@ -14,6 +14,7 @@ const HINT_SEPARATOR = " · ";
 export type ComposerKeyContext =
 	| "surface"
 	| "idle"
+	| "recover"
 	| "send"
 	| "send-shell"
 	| "steer"
@@ -125,6 +126,9 @@ function immediateEntries(context: ComposerKeyContext): string[] {
 	switch (context) {
 		case "idle":
 			return catalogEntries([IDLE_PINNED]);
+		case "recover":
+			// After a failed turn the two ways forward are the receipt's and the rail's, so the row states them too (N1).
+			return ["↑ recalls your prompt", ...catalogEntries([IDLE_PINNED])];
 		case "send":
 			return [...enter("sends"), ...(newline ? [`${newline} newline`] : [])];
 		case "send-shell":
