@@ -28,6 +28,7 @@ import {
 	selectListTheme,
 	withThemeContext,
 } from "./theme/index.js";
+import { keyName } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
@@ -587,7 +588,7 @@ function canonicalizeKey(key: string): string {
 	if (lower === "tab") return "Tab";
 	if (lower === "r") return "r";
 	if (lower === "type") return "type";
-	return trimmed;
+	return keyName(trimmed);
 }
 
 export function buildHint(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb = "close"): string {

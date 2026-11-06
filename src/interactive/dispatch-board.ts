@@ -59,7 +59,7 @@ import {
 	tableRows,
 	toolFunction,
 } from "./theme/index.js";
-import { fitIdentityLabel } from "./theme/labels.js";
+import { fitIdentityLabel, keyName } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import {
 	USAGE_NOT_MEASURED,
@@ -2004,7 +2004,7 @@ function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number): strin
 	const rows: string[] = [];
 	let current = "";
 	for (const entry of dropped) {
-		const unit = `[${entry.key}] ${entry.short ?? entry.verb}`;
+		const unit = `[${keyName(entry.key)}] ${entry.short ?? entry.verb}`;
 		const joined = current.length === 0 ? unit : `${current} · ${unit}`;
 		if (current.length > 0 && visibleWidth(joined) > width) {
 			rows.push(current);

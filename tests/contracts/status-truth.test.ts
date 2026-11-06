@@ -667,7 +667,7 @@ test("a 40x15 card shows the effect and every choice without scrolling, and leav
 	match(card, /effect\s+Publishes to origin/u);
 	match(card, /\[Enter\] allow/u);
 	match(card, /\[Esc\] deny/u);
-	match(card, /\[alt\+x\] stop/u);
+	match(card, /\[Alt\+X\] stop/u);
 	match(card, /4:58 denies/u, "the timer stays on screen beside the position");
 	for (const row of rows) doesNotMatch(row, /^(?:rule|effect|advisory)$/u);
 });

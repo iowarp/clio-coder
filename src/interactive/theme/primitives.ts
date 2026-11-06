@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
-import { fitIdentityLabel } from "./labels.js";
+import { fitIdentityLabel, keyName } from "./labels.js";
 import { padAnsi, rule } from "./rules.js";
 import { dotSep } from "./segments.js";
 import type { ClioTheme, ClioToken, SemanticRole } from "./tokens.js";
@@ -131,7 +131,7 @@ export function statusChip(theme: ClioTheme, status: StatusKind, label?: string)
 
 /** `[Enter]`, in the key color, the spelling the rails and footers already use. */
 export function keyCap(theme: ClioTheme, key: string, role: SemanticRole = "decisionKey"): string {
-	return theme.fg(role, `[${key}]`);
+	return theme.fg(role, `[${keyName(key)}]`);
 }
 
 /** Chips on one row, joined by the quiet middot, clipped to `width`. */

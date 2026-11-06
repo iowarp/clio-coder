@@ -28,6 +28,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { CLIO_APP_KEYBINDING_IDS, CLIO_APP_KEYBINDINGS, CLIO_KEYBINDINGS } from "../domains/config/keybindings.js";
 import type { Keybinding, KeybindingConflict, KeybindingsConfig, KeyId } from "../engine/tui.js";
 import { getKeybindings, KeybindingsManager, setKeybindings } from "../engine/tui.js";
+import { keyName } from "./theme/labels.js";
 
 export interface InvalidKeybinding {
 	/** Action id the user tried to rebind. */
@@ -602,11 +603,9 @@ export function boundKeyLabel(actionId: ClioKeybinding): string | null {
 	return key ? formatKeyLabel(key) : null;
 }
 
-/** Title-case a KeyId for compact chrome hints, preserving each caller's fallback. */
+/** The canonical spelling of a KeyId for chrome hints, preserving each caller's fallback. */
 export function formatKeyLabel(keyId: string | undefined, fallback = "unbound"): string {
 	if (!keyId || keyId.length === 0) return fallback;
-	return keyId
-		.split("+")
-		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
-		.join("+");
+	// A bound letter is a key cap here (`Alt+G M`); a bare letter in an overlay's own hint keeps its case.
+	return keyId.length === 1 ? keyId.toUpperCase() : keyName(keyId);
 }
