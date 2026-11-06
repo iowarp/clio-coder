@@ -137,13 +137,15 @@ export async function primeDurableWorkerRuns(
 	primedRuns = null;
 	try {
 		const steps = durableWorkerRunRows(cwd, worktreeRoot);
-		for (let step = steps.next(); ; step = steps.next()) {
+		for (;;) {
+			// Checked before every read and so before publishing: a stopped boot reads no further and primes nothing.
+			if (signal?.aborted) return;
+			const step = steps.next();
 			if (step.done) {
 				primedRuns = { cwd, worktreeRoot, rows: step.value };
 				return;
 			}
 			await nextTurn();
-			if (signal?.aborted) return;
 		}
 	} catch {
 		// An unreadable ledger primes nothing; the board's own read handles it.
