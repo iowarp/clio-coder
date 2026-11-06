@@ -27,11 +27,13 @@ export const coreTests = [
 	"yolo-script-sandbox",
 	"search-completeness",
 	"tool-boundaries",
+	"engine-utilities",
 	"test-runner-vocabulary",
 	"bootstrap-schema-retry-identity",
 	"installed-package-ci",
 	"release-boundary",
 	"dispatch-session-ownership",
+	"monitor-steer-tools",
 	"gateway-authority",
 	"mutation-atomicity",
 	"physical-dotdot",
@@ -55,6 +57,7 @@ export const coreTests = [
 	"skill-frontmatter-cache",
 	"fleet-run-history-prime",
 	"approval-card-arguments",
+	"footer-snapshot",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
@@ -64,17 +67,20 @@ export const guiTests = [
 	"chat-turns",
 	"egress-policy",
 	"sessions-http",
+	"library-http",
 	"app-state",
 	"ssh-model",
 	"machine-proxy",
 	"openapi",
 	"boundaries",
+	"public-help",
 ].map((name) => `tests/${name}.test.ts`);
 
 export const packageTests = [
 	"tests/smoke/installed-package.test.ts",
 	"tests/smoke/native-call-timing.test.ts",
 	"tests/contracts/instant-shell-import-graph.test.ts",
+	"tests/extended/dogfood-doctor-readonly.test.ts",
 ];
 
 // Qualification runs the core, GUI and package tiers at once. Core at four
