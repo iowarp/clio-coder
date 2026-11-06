@@ -21,7 +21,7 @@
  */
 import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isMainThread } from "node:worker_threads";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
@@ -157,15 +157,36 @@ const clioRootEnvKeys = [
 	"CLIO_CODER_CACHE_DIR",
 ] as const;
 
-/** Whether `value` names the run root or a path inside it. */
-function insideRunRoot(value: string, runRoot: string): boolean {
-	const path = resolve(value);
-	const root = resolve(runRoot);
-	return path === root || path.startsWith(`${root}${sep}`);
+/**
+ * The physical path `value` writes through when it stays inside the run root,
+ * else null. Only an absolute path counts: a relative one moves with the cwd of
+ * whichever child or worker inherits it. Containment is judged on the realpath
+ * of the deepest entry that exists (lstat, so a dangling link is refused rather
+ * than skipped), because `<runRoot>/link/state` with `link` pointing at a real
+ * home is lexically inside and physically not. A `..` segment is refused since
+ * the kernel applies it after following a link and `resolve()` before.
+ */
+function confinedPath(value: string, realRunRoot: string): string | null {
+	if (!isAbsolute(value) || value.split(/[\\/]/u).includes("..")) return null;
+	let existing = resolve(value);
+	const suffix: string[] = [];
+	while (lstatSync(existing, { throwIfNoEntry: false }) === undefined) {
+		const parent = dirname(existing);
+		if (parent === existing) return null;
+		suffix.unshift(basename(existing));
+		existing = parent;
+	}
+	let physical: string;
+	try {
+		physical = join(realpathSync(existing), ...suffix);
+	} catch {
+		return null;
+	}
+	return physical === realRunRoot || physical.startsWith(`${realRunRoot}${sep}`) ? physical : null;
 }
 
 /**
- * Drop every Clio root variable that points outside the run root.
+ * Drop every Clio root variable that is not confined to the run root.
  *
  * The four per-role `CLIO_CODER_*_DIR` variables beat `CLIO_CODER_HOME`, so a
  * shell that exported only `CLIO_CODER_STATE_DIR` used to skip the home
@@ -174,30 +195,42 @@ function insideRunRoot(value: string, runRoot: string): boolean {
  * the package.json test scripts pass none), and operators routinely export a
  * test or live home in the same shell, so refusing would stop every such shell
  * from running tests. The values are overridden instead, with one notice.
- * Values inside the run root are a test's own scratch roots handed to a child
- * and are kept. Deleted rather than repointed, so a test that later sets only
+ * Confined values are a test's own scratch roots handed to a child; they are
+ * kept, rewritten to the physical path that was checked. Dropped values are
+ * deleted rather than repointed, so a test that later sets only
  * `CLIO_CODER_HOME` still resolves every role under it.
  */
 function confineClioRootEnv(env: NodeJS.ProcessEnv, runRoot: string): string[] {
+	const realRunRoot = realpathSync(runRoot);
 	const dropped: string[] = [];
 	for (const key of clioRootEnvKeys) {
 		const value = env[key]?.trim();
 		if (value === undefined) continue;
-		if (value.length > 0 && insideRunRoot(value, runRoot)) continue;
+		const confined = value.length > 0 ? confinedPath(value, realRunRoot) : null;
+		if (confined !== null) {
+			env[key] = confined;
+			continue;
+		}
 		Reflect.deleteProperty(env, key);
 		if (value.length > 0) dropped.push(key);
 	}
 	// Foreign agent roots (~/.claude, ~/.codex) are the operator's too. Off unless
 	// a test points them inside the run root, as tests/harness/scratch-env.ts does.
 	const interop = env.CLIO_CODER_INTEROP_HOME?.trim();
-	if (interop !== "none" && !(interop && insideRunRoot(interop, runRoot))) {
-		if (interop) dropped.push("CLIO_CODER_INTEROP_HOME");
-		env.CLIO_CODER_INTEROP_HOME = "none";
+	if (interop !== "none") {
+		const confined = interop ? confinedPath(interop, realRunRoot) : null;
+		if (confined === null && interop) dropped.push("CLIO_CODER_INTEROP_HOME");
+		env.CLIO_CODER_INTEROP_HOME = confined ?? "none";
 	}
-	// With nothing left choosing a root, the run root's home holds all five roles.
-	if (clioRootEnvKeys.every((key) => !env[key]?.trim())) {
-		env.CLIO_CODER_HOME = join(runRoot, "home");
-		env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+	// A role no surviving per-role variable names falls back to CLIO_CODER_HOME,
+	// and without one to the operator's platform default, so the home is always
+	// pinned. The prefix guard holds only when the home alone decides every role;
+	// a surviving per-role root outside it is legitimate here and would trip it.
+	if (!env.CLIO_CODER_HOME?.trim()) {
+		env.CLIO_CODER_HOME = join(realRunRoot, "home");
+		if (clioRootEnvKeys.every((key) => key === "CLIO_CODER_HOME" || !env[key]?.trim())) {
+			env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+		}
 	}
 	return dropped;
 }
