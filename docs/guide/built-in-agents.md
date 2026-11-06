@@ -294,7 +294,7 @@ messages, in the order a worker reads them, each present only when it applies:
   step's final assistant output, threaded as data inside a fixed
   `<<<PIPELINE-INPUT ... PIPELINE-INPUT>>>` delimiter and labeled as input,
   not instructions. It is ordered last, adjacent to the task,
-  and capped at 12000 characters; the receiving run's ledger row records
+  and capped at 12,000 UTF-8 bytes, keeping its head and tail; the receiving run's ledger row records
   `pipeline` provenance (source run, step position, input bytes, whether the
   cap truncated it). Step 1 and every non-pipeline run get none.
 
