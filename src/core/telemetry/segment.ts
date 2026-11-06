@@ -33,7 +33,10 @@ function frameTelemetryJson(text: string): Buffer {
  */
 const acceptedLines = new Set<string>();
 let acceptedChars = 0;
-const ACCEPTED_CHARS_MAX = 4 * 1024 * 1024;
+// About 1300 records at the ~760 characters a record measures, process-wide and held for the process's life: at
+// most 1 MB of one-byte strings, 2 MB if a record carries non-Latin-1 text. Readers re-read recent lines (the live
+// fold right after a batch, run usage at a turn's end), so older lines falling out only costs a full check.
+const ACCEPTED_CHARS_MAX = 1024 * 1024;
 
 /** Encode a record `readTelemetryRecord` has just accepted, and remember its text for this process's readers. */
 export function encodeAcceptedTelemetryLine(record: TelemetryRecord): Buffer {
