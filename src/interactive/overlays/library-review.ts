@@ -532,10 +532,13 @@ function formatLibraryImportReview(
 	const detail = options.detail === true;
 	const install = plan.action === "install";
 	const facts: Fact[] = [
-		{ label: "Source", value: `${plan.source.input} (${plan.source.transport})` },
+		{
+			label: "Source",
+			value: `${shortenHomePath(plan.source.input)}${plan.source.transport === "local" ? "" : ` (${plan.source.transport})`}`,
+		},
 		...(plan.format ? [{ label: "Format", value: plan.format }] : []),
 		...(plan.version ? [{ label: "Version", value: plan.version }] : []),
-		...(plan.destination ? [{ label: "Destination", value: plan.destination }] : []),
+		...(plan.destination ? [{ label: "Destination", value: shortenHomePath(plan.destination) }] : []),
 		{
 			label: "Adds",
 			value:
@@ -586,8 +589,8 @@ function formatLibraryImportReview(
 			],
 			width,
 		),
-		...choiceRows(theme, reviewChoices(install, "import", "imports exactly this projection", detail), width),
-		sectionRule(theme, width, "Projection"),
+		...choiceRows(theme, reviewChoices(install, "import", "writes exactly what is listed below", detail), width),
+		sectionRule(theme, width, "What import writes"),
 		...factRows(theme, facts, width, FACT_OPTIONS),
 	];
 }

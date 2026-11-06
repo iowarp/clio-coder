@@ -343,7 +343,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		if (operation === "install" && !plan.applicable && missing.length > 0 && !withRequirements) {
 			deps.lifecycle.release(plan);
 			pendingWithRequirements = ref;
-			deps.notice("error", `${ref} needs ${missing.join(", ")}; press i again to review them with it.`);
+			deps.notice(
+				"info",
+				`${ref} needs ${missing.join(", ")}, which ${missing.length === 1 ? "is" : "are"} not installed. Press i again to review installing ${missing.length === 1 ? "both" : "them all"}; nothing is written until you confirm.`,
+			);
 			return;
 		}
 		pendingWithRequirements = null;

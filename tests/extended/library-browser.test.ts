@@ -364,7 +364,7 @@ describe("library review and outcome wording", () => {
 		);
 		match(body, /reopen the Library\s+for\s+current\s+admission/);
 		// A package can be on disk while one resource is still unavailable.
-		match(body, /skill:ship unavailable \(untrusted project import\)/);
+		match(body, /not available: skill:ship \(untrusted project import\)/);
 		match(body, /This session already sees the change/);
 	});
 });
@@ -676,7 +676,7 @@ describe("library browser behavior", () => {
 		const state = harness({ initialTab: "plugin", refusal: "needs skill:ship" });
 		state.press("i");
 		equal(state.review, null, "a refused plan is reported before a review is opened");
-		match(state.notices.map(([, text]) => text).join(" "), /needs skill:ship; press i again/);
+		match(state.notices.map(([, text]) => text).join(" "), /needs skill:ship, which is not installed\. Press i again/);
 		equal(state.released, 1, "the refused plan is released rather than left staged");
 		state.press("i");
 		ok(state.review, "the second press reviews the requirements with it");
