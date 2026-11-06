@@ -245,14 +245,17 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		}),
 	);
 	// How a run ended can be longer than the activity column, and it is the row's whole point.
+	// One row each: the cause in the run's own words, without the worker's stderr dump, and where the rest is.
 	for (const row of listed) {
 		if (row.status !== "completed" && row.outcomeDetail) {
-			lines.push(
-				...wrapTextWithAnsi(
-					theme.fg("annotation", `${clean(row.agentId)}: ${clean(row.outcomeDetail)} · /view dispatch:${row.runId}`),
-					width,
-				),
-			);
+			const where = ` · /view dispatch:${row.runId}`;
+			const cause =
+				clean(row.outcomeDetail)
+					.split(/;\s*stderr:/u)[0]
+					?.trim() ?? "";
+			const lead = `${clean(row.agentId)}: ${cause === "operator abort" ? "cancelled at your request" : cause}`;
+			const room = Math.max(8, width - visibleWidth(where));
+			lines.push(theme.fg("annotation", `${truncateToWidth(lead, room, GLYPH.ellipsis, false)}${where}`));
 		}
 	}
 	if (listed.length < history.length) {
