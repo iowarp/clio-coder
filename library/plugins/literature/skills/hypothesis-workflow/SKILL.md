@@ -77,6 +77,10 @@ Several models propose hypotheses without seeing each other.
   hypotheses, each with a statement, a falsifiable prediction, the statement
   ids it rests on, the data it needs, and how many physical (bench, field or
   instrument) steps testing it takes.
+- A council asks for approval at `default` autonomy, which a headless run
+  cannot give, so headless `clio-coder run` at `default` refuses it. Say so
+  in the report and fall back as below; a headless council needs the run
+  started with `--autonomy yolo`.
 - No roster configured: say so, and run three independent `parallel`
   `researcher` tasks instead. Record `"independentModels": false` in the slate,
   because one model's three answers are not a council.
