@@ -176,6 +176,26 @@ function composerMode(chrome: EditorChrome, text: string): ComposerMode {
 }
 
 /**
+ * The status rail with its `Esc stops` clause made true for the next press.
+ * While a suggestion list is open, Esc closes the list and the run goes on; while
+ * the draft is a worker steer, Esc backs out of the steer, which the hint row
+ * names. The rail used to promise a stop the key would not make.
+ */
+type HarnessRailStatus = ReturnType<NonNullable<EditorChrome["getHarnessStatus"]>>;
+
+function escapeTakenBy(
+	status: HarnessRailStatus | undefined,
+	owner: "list" | "steer" | null,
+): HarnessRailStatus | undefined {
+	if (status == null || owner === null || !status.label.includes("Esc stops")) return status;
+	const label =
+		owner === "list"
+			? status.label.replace("Esc stops", "Esc closes list")
+			: status.label.replace(/ · Esc stops|Esc stops · |Esc stops/u, "");
+	return { ...status, label };
+}
+
+/**
  * The permission keys on the composer rail, fitted like the dialog footer so
  * both surfaces narrow in the same order and never drop allow or stop first.
  * The rule spends three columns around a right label, hence the subtraction.
@@ -593,7 +613,10 @@ export class ClioEditor extends Editor {
 		const yoloCols = rail.yolo ? 7 : 0;
 		const suffixCols = visibleWidth(suffix) + (suffix ? 3 : 0);
 		const reserved = yoloCols + suffixCols;
-		const status = this.chrome.getHarnessStatus?.(width, reserved);
+		const status = escapeTakenBy(
+			this.chrome.getHarnessStatus?.(width, reserved),
+			this.isShowingAutocomplete() ? "list" : mode !== "CONFIRM" && this.steerTarget(text) !== null ? "steer" : null,
+		);
 		const spinner = activityCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true);
 		let lead = "";
 		let activity = "";
