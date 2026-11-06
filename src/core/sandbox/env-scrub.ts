@@ -102,6 +102,17 @@ export function rememberResolvedSecret(value: string | undefined): void {
 const LOCATOR_VALUE = /^(?:~?[\\/]|[A-Za-z]:[\\/]|[a-z][a-z0-9+.-]*:\/\/)/iu;
 
 /**
+ * Pure: whether a credential-named variable holds the credential itself rather than where one lives. An unsandboxed
+ * command's environment drops these by the same name rule the sandbox scrub uses, so a bare `FOO_KEY`, `GH_PAT` or
+ * `PASSWD` never reaches it, while `KUBECONFIG=~/.kube/config` or a credential-free `VAULT_ADDR` still does.
+ */
+export function holdsNamedCredential(name: string, value: string | undefined): boolean {
+	if (!isSandboxSecretEnvName(name)) return false;
+	const trimmed = value?.trim() ?? "";
+	return !LOCATOR_VALUE.test(trimmed) || URL_CREDENTIALS.test(trimmed);
+}
+
+/**
  * The credential values a command's output must not show: every value the
  * scrub above would hide from a sandbox, judged by the same name and value
  * rules, and every credential Clio resolved. A path or credential-free URL
