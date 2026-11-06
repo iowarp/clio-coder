@@ -30,17 +30,6 @@ export function usageGap(quantity: UsageQuantity | null | undefined): number {
 	return isSum(fact) ? fact.unknownCount : fact.kind === "unknown" ? 1 : 0;
 }
 
-/** Calls that fed the quantity at all, measured, estimated or not. */
-function usageCalls(quantity: UsageQuantity | null | undefined): number {
-	if (!quantity) return 0;
-	const fact = quantity.fact;
-	return isSum(fact)
-		? fact.coverage.measured + fact.coverage.estimated + fact.unknownCount
-		: fact.kind === "absent"
-			? 0
-			: 1;
-}
-
 /** Whether nothing behind the quantity reported a figure, so no lower bound exists to show. */
 export function usageUnmeasured(quantity: UsageQuantity | null | undefined): boolean {
 	if (!quantity) return true;
@@ -126,17 +115,35 @@ function figureOf(
 	return figures.find((entry) => entry.label === label)?.quantity;
 }
 
+/** `cache read, cache write or reasoning`. */
+function listWords(words: ReadonlyArray<string>): string {
+	return words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+}
+
 /**
- * The sentence that replaces `46 contributions: 23 measured, 23 unknown`: what the gap is in calls, and what it does to
- * the totals beside it. Null when every call reported.
+ * What a line of token figures leaves out, said once: the kinds no call reported (`no cache read or reasoning data`),
+ * then the calls that reported nothing. The first two figures are the amounts every surface shows; the rest are said
+ * only when they have something to say. The exit card and /usage read their notes here, so a session's gaps read the
+ * same on both (U1, U5).
  */
-export function usageCoverageSentence(quantity: UsageQuantity | null | undefined): string | null {
-	const gap = usageGap(quantity);
-	if (gap <= 0) return null;
-	const calls = usageCalls(quantity);
-	const share =
-		calls > gap ? `${count(gap)} of ${count(calls)} calls` : gap === 1 ? "1 call" : `all ${count(gap)} calls`;
-	return calls > gap
-		? `${share} had no usage data, so totals marked ≥ leave them out`
-		: `${share} had no usage data, so no total is measured`;
+export function usageLineNotes(figures: ReadonlyArray<{ label: string; quantity: UsageQuantity | null | undefined }>): {
+	shown: ReadonlyArray<{ label: string; quantity: UsageQuantity | null | undefined }>;
+	notes: string[];
+} {
+	const [input, output, ...optional] = figures;
+	const unmeasured = optional.filter((entry) => usageUnmeasured(entry.quantity)).map((entry) => entry.label);
+	const shown = optional.filter((entry) => {
+		const figure = usageLineFigure(entry.quantity);
+		return figure !== "0" && !usageSaysNothing(figure);
+	});
+	const coverage = usageLineCoverage(
+		[input, output, ...shown].filter((entry): entry is NonNullable<typeof entry> => entry !== undefined),
+	);
+	return {
+		shown,
+		notes: [
+			...(unmeasured.length > 0 ? [`no ${listWords(unmeasured)} data`] : []),
+			...(coverage !== null ? [coverage] : []),
+		],
+	};
 }

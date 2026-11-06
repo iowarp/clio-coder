@@ -18,10 +18,8 @@ import {
 	usageEstimatedCalls,
 	usageEstimates,
 	usageGap,
-	usageLineCoverage,
 	usageLineFigure,
-	usageSaysNothing,
-	usageUnmeasured,
+	usageLineNotes,
 } from "./usage-words.js";
 
 export interface ExitSummarySnapshot {
@@ -160,41 +158,25 @@ function tokenFacts(view: TelemetryView, model?: string): { figures: string[]; t
 		{ label: "cache write", quantity: quantity("cacheWrite") },
 		{ label: "reasoning", quantity: quantity("reasoning") },
 	];
-	const [input, output, ...optional] = figures;
-	const unmeasured = optional.filter((entry) => usageUnmeasured(entry.quantity)).map((entry) => entry.label);
-	const shown = optional.filter((entry) => {
-		const figure = usageLineFigure(entry.quantity);
-		return figure !== "0" && !usageSaysNothing(figure);
-	});
-	const coverage = usageLineCoverage([input, output, ...shown].filter((entry) => entry !== undefined));
+	const [input, output] = figures;
+	const { shown, notes } = usageLineNotes(figures);
 	// Each figure keeps one mark at most; what Clio estimated is said once, by the calls behind the total (E1).
 	const estimates = usageEstimates(usageEstimatedCalls(quantity("total")));
 	return {
 		figures: [
-			`${usageLineFigure(input?.quantity)} in`,
-			`${usageLineFigure(output?.quantity)} out`,
-			...shown.map((entry) => `${usageLineFigure(entry.quantity)} ${entry.label}`),
+			// Label first, as the turn receipt and /usage write it: one notation for tokens on every surface (U5).
+			`in ${usageLineFigure(input?.quantity)}`,
+			`out ${usageLineFigure(output?.quantity)}`,
+			...shown.map((entry) => `${entry.label} ${usageLineFigure(entry.quantity)}`),
 		],
 		total: usageLineFigure(quantity("total")),
-		notes: [
-			...(unmeasured.length > 0 ? [`no ${listWords(unmeasured)} data`] : []),
-			...(coverage !== null ? [coverage] : []),
-			...(estimates !== null ? [estimates] : []),
-		],
+		notes: [...notes, ...(estimates !== null ? [estimates] : [])],
 	};
 }
 
 function tokenBreakdown(view: TelemetryView, model?: string): string {
 	const { figures, notes } = tokenFacts(view, model);
 	return [...figures, ...notes].join(" · ");
-}
-
-/**
- * `cache read, cache write or reasoning`. The old `cache read, reasoning not measured` read as a `cache read` figure
- * beside an unmeasured reasoning one, and `no … data` stays one fact a 40-column row holds whole (E1, E4).
- */
-function listWords(words: ReadonlyArray<string>): string {
-	return words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
 }
 
 /** Calls that reached the provider or may have; a never-sent attempt asked the model nothing. */

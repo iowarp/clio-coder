@@ -19,9 +19,9 @@ import { clioTheme, formatCompactMs, padAnsi, positionRow, rule } from "./theme/
 import {
 	USAGE_NOT_MEASURED,
 	usageCoverage,
-	usageCoverageSentence,
 	usageFigure,
 	usageGap,
+	usageLineNotes,
 	usageSaysNothing,
 	usageUnmeasured,
 } from "./usage-words.js";
@@ -134,6 +134,22 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
 }
 
 /**
+ * What the session's token figures leave out, in the exit card's words. `1 of 2 calls had no usage data` counted a
+ * missing cache-read figure as a call and a never-sent call as a second one, beside a receipt that measured the turn.
+ */
+function sessionUsageNotes(view: TelemetryView): string[] {
+	const quantity = (metric: FactMetric) => view.quantity(factRef({ scope: "session", owner: view.sessionId, metric }));
+	const { notes } = usageLineNotes([
+		{ label: "in", quantity: quantity("input") },
+		{ label: "out", quantity: quantity("output") },
+		{ label: "cache read", quantity: quantity("cacheRead") },
+		{ label: "cache write", quantity: quantity("cacheWrite") },
+		{ label: "reasoning", quantity: quantity("reasoning") },
+	]);
+	return notes;
+}
+
+/**
  * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
  * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
  */
@@ -156,8 +172,12 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 			),
 			["model calls", byRole.total.calls.display],
 			["harness overhead", session.overhead.share.display],
-			...(hasUnknown(tokenCoverage) ? [["usage data", usageCoverageSentence(tokenCoverage) ?? ""] as const] : []),
-			...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
+			...(hasUnknown(tokenCoverage) && sessionUsageNotes(view).length > 0
+				? [["usage data", sessionUsageNotes(view).join(" · ")] as const]
+				: []),
+			...(nonZero(neverSent)
+				? [["never sent", `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"}`] as const]
+				: []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 			...tokenRows(view),
 			...(cached
@@ -303,11 +323,12 @@ function renderActivity(
 		lines.push(...row("Session", sessionValue(view, elapsed)));
 		// A token total nothing measured already says why on the Session row, so its coverage is not said again here.
 		const tokens = view.session().totals.tokens;
-		const tokenCoverage = usageSaysNothing(usageFigure(tokens)) ? null : usageCoverageSentence(tokens);
+		const tokenCoverage = usageSaysNothing(usageFigure(tokens)) ? [] : sessionUsageNotes(view);
 		const neverSent = view.session().own.counts.dispositions.neverSent;
-		const usage = [tokenCoverage, nonZero(neverSent) ? `${neverSent.display} never sent` : null].filter(
-			(part) => part !== null,
-		);
+		const usage = [
+			...tokenCoverage,
+			nonZero(neverSent) ? `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"} never sent` : null,
+		].filter((part) => part !== null);
 		if (usage.length > 0) lines.push(...row("Usage", theme.fg("annotation", usage.join(" · "))));
 	}
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
