@@ -221,22 +221,23 @@ export function createSessionJournals(
 				const text = input.prompt?.systemPrompt;
 				if (text !== undefined && journal.admits("prompt.text_captured")) {
 					const digest = createHash("sha256").update(text).digest("hex");
-					if (!owned.promptTexts.has(digest) && journal.reserveResearchBytes(Buffer.byteLength(text))) {
+					const bytes = Buffer.byteLength(text);
+					if (!owned.promptTexts.has(digest) && journal.reserveResearchBytes(bytes)) {
+						let stored: ObjectRef;
 						try {
-							const stored = await journal.storeObject("prompt-text", { text });
-							owned.promptTexts.add(digest);
-							telemetryHub().emit(
-								"prompt.text_captured",
-								{
-									...(refs.promptStructure ? { structure: refs.promptStructure } : {}),
-									text: stored,
-									bytes: Buffer.byteLength(text),
-								},
-								context,
-							);
+							stored = await journal.storeObject("prompt-text", { text });
 						} catch {
+							// The record is dropped behind a writer-drop gap and its bytes go back to the cap (#434).
+							journal.dropUnstored(bytes);
 							report();
+							return refs;
 						}
+						owned.promptTexts.add(digest);
+						telemetryHub().emit(
+							"prompt.text_captured",
+							{ ...(refs.promptStructure ? { structure: refs.promptStructure } : {}), text: stored, bytes },
+							context,
+						);
 					}
 				}
 				return refs;

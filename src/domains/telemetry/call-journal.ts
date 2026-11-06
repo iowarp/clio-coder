@@ -86,6 +86,11 @@ export interface CallJournal extends TelemetrySink {
 	 */
 	reserveResearchBytes(bytes: number): boolean;
 	/**
+	 * A reserved preimage its caller could not store: the reservation is released, and the record that would have
+	 * cited it is counted as dropped, so the next batch records a writer-drop gap (#434).
+	 */
+	dropUnstored(bytes: number): void;
+	/**
 	 * Seal the scope: write what is queued, append the scope's `<kind>.sealed` record over the chain head and write
 	 * `bundle.json` (#434). False when the writer failed or closed; the scope then stays unsealed. Records written
 	 * after a seal remove `bundle.json` first, so the scope reads live until the next seal.
@@ -724,6 +729,11 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					}
 					researchBytes += bytes;
 					return true;
+				},
+				dropUnstored(bytes) {
+					if (Number.isSafeInteger(bytes) && bytes > 0) researchBytes = Math.max(0, researchBytes - bytes);
+					dropped += 1;
+					schedule();
 				},
 				enqueue(record) {
 					if (closed || failed || telemetryOwner(record.ctx) !== telemetryOwner(options.context) || count === capacity) {
