@@ -5800,7 +5800,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dashboardPlugins = activePluginIds();
 	});
 	termination.onTerminate(() => unsubscribeDashboardPlugins());
-	const { startInteractive } = await import("../interactive/index.js");
+	const { primeDurableWorkerRuns, startInteractive } = await import("../interactive/index.js");
+	if (options.terminalLease) {
+		// The board's history reads each earlier worker run's journal; read it in slices while Stage 0 takes keys.
+		const { nextTurn } = await import("./stage1-preload.js");
+		await primeDurableWorkerRuns(
+			process.cwd(),
+			getCurrentSettings().fleet.worktrees.root,
+			nextTurn,
+			options.terminalLease.abortSignal,
+		);
+	}
 	await startInteractive({
 		jobs: jobHost.operations,
 		getConnections: () => ({
