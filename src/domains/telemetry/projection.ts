@@ -365,6 +365,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 				summary.completion = {
 					...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
 					...(facts.refusedCalls !== undefined ? { refusedCalls: facts.refusedCalls } : {}),
+					...(facts.guardedCalls !== undefined ? { guardedCalls: facts.guardedCalls } : {}),
 					...(facts.contract !== undefined ? { contract: facts.contract } : {}),
 				};
 			}

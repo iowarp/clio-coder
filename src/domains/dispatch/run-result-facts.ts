@@ -20,6 +20,7 @@ import { integrityClause, trustStateWord, validationClause } from "../evidence/t
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readRunRecord } from "../telemetry/index.js";
+import { TOOL_GUARD_REASON_CODE } from "./failure-headline.js";
 import { readRunFeed } from "./run-feed.js";
 import { OBSERVED_COMMAND_PREFIX } from "./run-findings.js";
 
@@ -55,6 +56,8 @@ export interface RunResultSummary {
 	toolCalls?: number;
 	/** Calls policy, the operator or a repeat guard kept from running, which a clean exit says nothing about. */
 	refusedCalls?: number;
+	/** Of `refusedCalls`, those a tool guard stopped rather than policy or the operator, so a surface can say which. */
+	guardedCalls?: number;
 	/** Per-tool call counts the run settled, for the exit summary's tally. */
 	toolCounts?: ReadonlyArray<{ tool: string; count: number }>;
 	/** Paths the run changed, from its worktree or checkout facts, for the exit summary. */
@@ -150,6 +153,11 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 	const failureMessage = result?.failureMessage ?? settled.failureMessage;
 	const text = result?.output?.text;
 	const refusedCalls = settled.tools.reduce((sum, entry) => sum + entry.blocked, 0);
+	// The attempt list is capped at 64, so it can undercount guards but never claim more than the tools refused.
+	const guardedCalls = Math.min(
+		refusedCalls,
+		settled.blockedAttempts.filter((attempt) => attempt.reasonCode === TOOL_GUARD_REASON_CODE).length,
+	);
 	return {
 		trust: readRunTrust(record, gates).trust,
 		outcome: settled.outcome,
@@ -166,6 +174,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 		...(Number.isFinite(durationMs) ? { durationMs } : {}),
 		toolCalls: settled.toolCalls,
 		...(refusedCalls > 0 ? { refusedCalls } : {}),
+		...(guardedCalls > 0 ? { guardedCalls } : {}),
 		...(placement !== undefined ? { placement } : {}),
 		...(worktree !== null && !external
 			? {

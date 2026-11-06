@@ -1,7 +1,11 @@
 import { parseJsonObjectPayload, parseVerifierPayload } from "../core/json-payload.js";
 import { renderFactField } from "../core/telemetry/render.js";
 import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
-import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import {
+	completedRunCaveat,
+	TOOL_GUARD_REASON_CODE,
+	workerFailureHeadline,
+} from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { holdCutOffText, redactUrlCredentials } from "../domains/safety/redaction.js";
@@ -181,10 +185,15 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 function receiptCaveat(receipt: RunResult): CompletedRunCaveat | null {
 	// Older and synthetic receipts can lack the per-tool counts; a missing count says nothing either way.
 	const refusedCalls = (receipt.toolStats ?? []).reduce((sum, stat) => sum + (stat.blocked ?? 0), 0);
+	const guardedCalls = Math.min(
+		refusedCalls,
+		(receipt.safety?.blockedAttempts ?? []).filter((attempt) => attempt.reasonCode === TOOL_GUARD_REASON_CODE).length,
+	);
 	const contract = receipt.quality?.resultContract?.conformance;
 	return completedRunCaveat({
 		toolCalls: receipt.toolCalls,
 		...(refusedCalls > 0 ? { refusedCalls } : {}),
+		...(guardedCalls > 0 ? { guardedCalls } : {}),
 		...(contract !== undefined ? { contract } : {}),
 	});
 }
