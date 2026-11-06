@@ -42,7 +42,6 @@ import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
 import type { TurnPreparationStep } from "../session-control/turn-state.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
-import { isHelperRun } from "../session-control/worker-stream.js";
 import type { JobOperations } from "../tools/job-types.js";
 import { createBackgroundCallTracker } from "./background-calls.js";
 import type { ChatPanel } from "./chat-panel.js";
@@ -55,14 +54,19 @@ import { createCommandOutputRunIo } from "./command-output.js";
 import { createContextActivityStore, createContextProgressRail } from "./context-activity.js";
 import { admissionHint } from "./context-operation-view.js";
 import type { DispatchBoardView } from "./dispatch-board.js";
-import { createDispatchBoardStore, createDispatchBoardView, dispatchStatusPresentation } from "./dispatch-board.js";
+import {
+	createDispatchBoardStore,
+	createDispatchBoardView,
+	dispatchStatusPresentation,
+	summaryFleetRuns,
+} from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFleetDock } from "./fleet-dock.js";
 import { readDurableFleetPlans } from "./fleet-plan-history.js";
 import type { FleetPlanRunView } from "./fleet-plan-runs.js";
-import { readDurableWorkerRuns } from "./fleet-run-history.js";
+import { readDurableWorkerRuns, recordedRunUsage } from "./fleet-run-history.js";
 import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
@@ -104,7 +108,7 @@ import { clioTheme, GLYPH } from "./theme/index.js";
 import { formatWaitClock, modelNickname } from "./theme/labels.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
-import { workerActivityWords } from "./worker-activity.js";
+import { bindWorkerResponseLimit, workerActivityWords } from "./worker-activity.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
 
 /** How long one `/skill <name>` listing serves later keystrokes. */
@@ -371,6 +375,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	});
 	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
+	// Read per render, so a limit changed in /settings is the one a silent worker's words name.
+	bindWorkerResponseLimit(() => {
+		const seconds = (deps.getSettings?.() ?? settings).safety.limits.workerResponseSeconds;
+		return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+	});
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
@@ -491,6 +500,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		deps.telemetry,
 		() => readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
 		() => readDurableWorkerRuns(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+		recordedRunUsage,
 	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
@@ -764,7 +774,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-			workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter((row) => !isHelperRun(row)),
+			workers: summaryFleetRuns(dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()),
 			background: backgroundCalls.active(),
 			workerActivity: (row, room) =>
 				row.plan !== undefined
@@ -772,9 +782,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					: // A queued run's progress reads `starting`, which it is not until it has a slot.
 						row.status === "enqueued"
 						? "waiting for a slot"
-						: row.progress
-							? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
-							: dispatchStatusPresentation(row.status).label,
+						: // Its last phase reads `finishing`, which is work ending on its own; the board says `stopping`.
+							row.status === "cancelling"
+							? "stopping"
+							: row.progress
+								? workerActivityWords(row.progress, { room, history: row.routeFirstOutput ?? null })
+								: dispatchStatusPresentation(row.status).label,
 			now: Date.now(),
 		};
 	};
@@ -1128,6 +1141,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 				isFooterExpanded: () => footer.isExpanded(),
 				isFleetBoardOpen: () => deps.getOverlayState?.() === "dispatch-board",
+				getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
 			}),
 			editor,
 			contextProgress: createContextProgressRail(

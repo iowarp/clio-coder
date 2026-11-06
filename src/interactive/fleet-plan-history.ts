@@ -105,6 +105,7 @@ function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 		succeededStepCount,
 		costText: recordedCost(record, steps),
 		...(!ended ? { failure: "no end recorded" } : {}),
+		earlier: true,
 	};
 }
 

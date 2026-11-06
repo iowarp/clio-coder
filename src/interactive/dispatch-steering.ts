@@ -1,11 +1,22 @@
 import {
 	type DispatchBoardRow,
+	type DispatchBoardStatus,
 	dispatchStatusPresentation,
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
 
 // A refusal answers one keypress and describes no standing condition, so it is info and expires on its own.
+/** Where a run stands, as a clause after its name, for why a key does nothing: `verifier has failed`, not `verifier is failed`. */
+const STEER_REFUSAL_STATE: Partial<Record<DispatchBoardStatus, string>> = {
+	completed: "has finished",
+	failed: "has failed",
+	aborted: "was cancelled",
+	dead: "stopped responding",
+	cancelling: "is being cancelled",
+	retrying: "is waiting to retry",
+};
+
 export type DispatchSteeringNoticeLevel = "info" | "error";
 
 export interface DispatchSteeringDeps {
@@ -39,7 +50,9 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (row.runtimeKind === "acp-delegation" || row.runtimeKind === "subprocess") {
 			deps.notify(
 				"info",
-				`${row.agentId} runs on ${row.runtimeId} (${row.runtimeKind}) and cannot accept live steering`,
+				row.runtimeKind === "acp-delegation"
+					? `${row.agentId} is delegated to another agent, which cannot take a message while it works`
+					: `${row.agentId} runs as a command-line agent, which cannot take a message while it works`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;
@@ -49,7 +62,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 				"info",
 				row.status === "enqueued"
 					? `${row.agentId} is queued and can take a message once it starts`
-					: `${row.agentId} is ${dispatchStatusPresentation(row.status).label} and cannot take a message now`,
+					: `${row.agentId} ${STEER_REFUSAL_STATE[row.status] ?? `is ${dispatchStatusPresentation(row.status).label}`}, so it cannot take a message now`,
 				`dispatch-board:steer:${row.runId}`,
 			);
 			return;
@@ -85,7 +98,7 @@ export function createDispatchSteering(deps: DispatchSteeringDeps): DispatchStee
 		if (!isDispatchBoardRowCancellable(row)) {
 			deps.notify(
 				"info",
-				`${row.agentId} has already settled (${dispatchStatusPresentation(row.status).label}), so there is nothing to cancel`,
+				`${row.agentId} ${STEER_REFUSAL_STATE[row.status] ?? "has already ended"}, so there is nothing to cancel`,
 				`dispatch-board:cancel:${row.runId}`,
 			);
 			return;

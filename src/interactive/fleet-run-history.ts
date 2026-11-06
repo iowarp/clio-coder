@@ -1,4 +1,5 @@
 import { clioStateDir } from "../core/xdg.js";
+import { fleetNodeTaskBrief } from "../domains/dispatch/fleet-node-prompt.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunStatus } from "../domains/dispatch/types.js";
@@ -18,7 +19,7 @@ const SETTLED_STATUS: Partial<Record<RunStatus, DispatchBoardStatus>> = {
 };
 
 /** The run's usage as its own journal folds it, the same quantities a live row reads from the session view. */
-function recordedUsage(runId: string): DispatchRunUsage {
+export function recordedRunUsage(runId: string): DispatchRunUsage {
 	try {
 		const record = readRunRecord(clioStateDir(), runId);
 		if (record === null) return { kind: "unavailable" };
@@ -52,10 +53,11 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 		runtimeId: run.runtimeId,
 		targetId: run.targetId,
 		wireModelId: run.wireModelId,
-		taskSummary: run.task,
+		taskSummary: fleetNodeTaskBrief(run.task),
 		status,
 		elapsedMs: Number.isFinite(endedAt - startedAt) ? Math.max(0, endedAt - startedAt) : 0,
-		usage: recordedUsage(run.id),
+		...(Number.isFinite(endedAt) ? { settledAtMs: endedAt } : {}),
+		usage: recordedRunUsage(run.id),
 		ttft: null,
 		...(run.outcomeDetail ? { outcomeDetail: run.outcomeDetail } : {}),
 		...(run.node !== undefined ? { node: run.node.id } : {}),

@@ -3,9 +3,8 @@ import type { TaskBoardSnapshot } from "../domains/session/task-board.js";
 import { taskBoardCounts } from "../domains/session/task-board.js";
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { isHelperRun } from "../session-control/worker-stream.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
-import { formatTaskIslandLines } from "./dispatch-board.js";
+import { formatFleetDockRows, formatTaskIslandLines, summaryFleetRuns } from "./dispatch-board.js";
 import { taskBoardValue } from "./footer/widgets.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
@@ -19,7 +18,12 @@ export interface FleetDockDeps {
 	isFooterExpanded?: () => boolean;
 	/** Fleet Runs is open and already shows every run, so the worker card steps aside rather than repeat one. */
 	isFleetBoardOpen?: () => boolean;
+	/** Terminal height, so a short screen gets the dock's one-row form instead of a card the transcript already shows. */
+	getTerminalRows?: () => number;
 }
+
+/** Below this many terminal rows the dock keeps one row per run; the inline card above it carries the rest. */
+const FLEET_DOCK_CARD_MIN_ROWS = 32;
 
 /**
  * The task board's dock row: its title, progress, and the task that needs the
@@ -55,7 +59,7 @@ function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | nul
 export function createFleetDock(deps: FleetDockDeps): Component {
 	return {
 		render(width) {
-			const rows = deps.getRows().filter((row) => !isHelperRun(row));
+			const rows = summaryFleetRuns(deps.getRows());
 			if (rows.length > 0 && deps.isFleetBoardOpen?.() === true) return [];
 			if (rows.length === 0) {
 				if (deps.isFooterExpanded?.() === true) return [];
@@ -63,9 +67,12 @@ export function createFleetDock(deps: FleetDockDeps): Component {
 				const row = board ? taskBoardDockRow(board, width) : null;
 				return row === null ? [] : [row];
 			}
+			const quota = deps.getQuotaSnapshots?.() ?? [];
+			if ((deps.getTerminalRows?.() ?? FLEET_DOCK_CARD_MIN_ROWS) < FLEET_DOCK_CARD_MIN_ROWS)
+				return formatFleetDockRows(rows, width, quota);
 			// One card keeps the composer reachable; the summary names the remaining
 			// cards, all of which are inspectable in Fleet Runs.
-			return formatTaskIslandLines(rows, 1, deps.getQuotaSnapshots?.() ?? [], Math.max(1, width - 4));
+			return formatTaskIslandLines(rows, 1, quota, Math.max(1, width - 4));
 		},
 		invalidate() {},
 	};

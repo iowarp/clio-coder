@@ -126,6 +126,8 @@ export interface ToolExecutionStart {
 	stopping?: boolean | undefined;
 	/** A worker card sits under this dispatch call and states its task and outcome. */
 	cardAttached?: boolean | undefined;
+	/** Every worker card under this dispatch call settled cancelled, so the call was stopped, not failed. */
+	cardsCancelled?: boolean | undefined;
 	/**
 	 * The renderer unwrapped a gateway op=call to this capability. Callers pass
 	 * the wire call; the renderer sets this itself (see `presentedCall`).
@@ -183,6 +185,8 @@ export interface ToolExecutionFinished {
 	 * so the row does not repeat it.
 	 */
 	cardAttached?: boolean | undefined;
+	/** Every worker card under this dispatch call settled cancelled, so the call was stopped, not failed. */
+	cardsCancelled?: boolean | undefined;
 	/**
 	 * The renderer unwrapped a gateway op=call to this capability. Callers pass
 	 * the wire call; the renderer sets this itself (see `presentedCall`).
@@ -1818,7 +1822,7 @@ function settledStatus(finished: ToolExecutionFinished): HeaderStatus {
 	// A delegation whose worker was cancelled did not fail; its card under the row already says who stopped it.
 	if (finished.isError) {
 		const details = detailsOf(finished.result);
-		if (details?.outcome === "canceled") return "cancelled";
+		if (details?.outcome === "canceled" || finished.cardsCancelled === true) return "cancelled";
 		// A command the run ended under, by a stop or the host, did not fail on its own: it wears ⊘ like the turn's
 		// receipt beside it rather than ✗. Its own timeout is still a failure.
 		if (details?.aborted === true && details.timedOut !== true && resolveRow(finished).spec.class === "execute")
