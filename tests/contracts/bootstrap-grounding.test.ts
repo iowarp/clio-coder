@@ -116,6 +116,41 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 });
 
+it("cuts a model line's claim that CI runs a check, but keeps a carried invariant verbatim", async () => {
+	const carried = "Never commit a path `.gitignore` excludes: the tracked-ignored check in `scripts/check.js` fails CI.";
+	mkdirSync(join(cwd, "scripts"));
+	writeFileSync(join(cwd, ".gitignore"), "dist/\n");
+	writeFileSync(join(cwd, "scripts", "check.js"), 'fail("tracked-ignored", "a tracked path is gitignored");\n');
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		["# harbor", "", "A widget renderer.", "", "## Hard invariants", "", `1. ${carried}`, ""].join("\n"),
+	);
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: ["Export every widget from `src/index.ts`; `npm run check` is enforced in CI."],
+				conventions: [],
+				sections: [
+					{
+						title: "Change recipes",
+						body: "- Editing `src/widgets/render.ts`: rerun `npm run check`. It fails on CI on drift.",
+					},
+				],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(`1. ${carried}`), handbook);
+	ok(handbook.includes("2. Export every widget from `src/index.ts`; `npm run check` is enforced.\n"), handbook);
+	ok(handbook.includes("rerun `npm run check`. It fails on drift."), handbook);
+	strictEqual(/(?:fails|enforced)(?: on| in)? CI/.test(handbook.replace(carried, "")), false, handbook);
+});
+
 it("marks a module a rule calls preloaded when no package script preloads it", async () => {
 	mkdirSync(join(cwd, "tests", "harness"), { recursive: true });
 	mkdirSync(join(cwd, "scripts"));

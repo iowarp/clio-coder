@@ -1024,6 +1024,22 @@ function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGr
 	});
 }
 
+/** "fails CI", "fail on CI", "enforced in CI", "gated by the CI": a check's failure stated as CI's. */
+const CI_CLAIM_RE = /\b([Ff]ail(?:s|ed|ing)?|enforced|gated|checked|caught)\s+(?:(?:in|on|by)\s+)?(?:the\s+)?CI\b/g;
+
+/**
+ * Cut a model line's claim that CI runs a check. Clio does not decide what CI
+ * runs, so a rule names the check and what it refuses: a handbook said both
+ * pin `--check` modes "fail CI on drift" when CI reaches neither by name.
+ * Code spans are left as written.
+ */
+function withoutCiClaims(line: string): string {
+	return line
+		.split(/(`[^`\n]*`)/)
+		.map((part, index) => (index % 2 === 1 ? part : part.replace(CI_CLAIM_RE, "$1")))
+		.join("");
+}
+
 const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
 const PRELOAD_FLAG_RE = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader)(?:=|\s+)(["']?)([^\s"']+)\1/g;
 const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
@@ -1108,7 +1124,7 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		);
 		const line = inFence
 			? cited
-			: withUnsupportedPreloadsMarked(withUnsupportedReviewRequirementsMarked(cited, evidence), evidence);
+			: withUnsupportedPreloadsMarked(withUnsupportedReviewRequirementsMarked(withoutCiClaims(cited), evidence), evidence);
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);
