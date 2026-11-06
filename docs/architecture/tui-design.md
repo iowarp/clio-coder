@@ -243,7 +243,7 @@ The header operates in two distinct modes:
 
 The input surface (`ClioEditor`) frames the operator's prompt:
 - **Rails**: Framed by the static top and bottom rails of [1.3](#13-composer-rails). The empty composer reads `Ask Clio…  / for commands`, and its prompt changes while a parked call, a preparing turn or a compaction owns the composer (see [4.4](#44-composer-phases)).
-- **Steering Affordance**: Messages queued for a live run show in a `Steering Queue` island above the composer, with the send-now and restore keys.
+- **Steering Affordance**: Messages queued for a live run show in a `Steering Queue` island above the composer, with its action hints: the queue key to review them (`a` in the navigator restores all to the composer) and the send-now key ([follow-up-queue-panel.ts](../../src/interactive/follow-up-queue-panel.ts)).
 - **New lines**: `Shift+Enter`, `Ctrl+J` and `Alt+Enter` insert a newline. `Alt+Enter` is bound explicitly so it also works under the kitty keyboard protocol, which reports it as its own key ([keybindings.ts](../../src/domains/config/keybindings.ts)).
 - **Slow attachments**: While a submitted `@file` PDF is being read, the footer shows `reading <path> · Esc cancels and keeps your message`. `Esc` or `Ctrl+C` aborts the read, sends nothing, prints no error and returns the line to the editor; a chat line enters history only after its expansion finishes.
 

@@ -75,7 +75,7 @@ Every Clio Coder extension is namespaced under `agentCapabilities._meta`, so a s
 | `clio-coder/board` | `{version: 1, method, supersede?, proposeMemory?}` | the task board is wired; the two action methods need board actions |
 | `clio-coder/branches` | `{version: 1, tree, switchTurn, fork}` | session branching is wired |
 | `clio-coder/handoff` | `{version: 1, prepare, commit, cancel}` | the handoff service is wired |
-| `clio-coder/context` | `{version: 1, ledger, status, activity?, invoke?}` | the context ledger is wired; `activity: "context.activity"` when an event bus is wired, `invoke` when a command host is |
+| `clio-coder/context` | `{version: 1, ledger, status, activity?, invoke?}` | the context ledger is wired; `activity: "context.activity_changed"` when an event bus is wired, `invoke` when a command host is |
 | `clio-coder/jobs` | `{version: 1, list: "_clio-coder/jobs/list", event: "job.changed"}` | the session's job controller is wired |
 | `clio-coder/telemetry` | `{version: 1, methods: {session, calls, cost, cache, timeline, run, runs, quota, health, whyStopped, explain}, update: "_clio-coder/telemetry/update"}` | a telemetry read model is wired |
 | `clio-coder/workspace` | `{version: 1, update: "session_info_update"}` | workspace facts are wired |
