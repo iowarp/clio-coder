@@ -5,8 +5,8 @@
  * journal. This build skips and counts what it cannot read, folds what it can, and never renames, rewrites or deletes
  * what the other install wrote, whether it is writing, reading or rebuilding.
  */
-import { ok, strictEqual } from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -16,11 +16,15 @@ import type { FactSum } from "../../src/core/telemetry/fact.js";
 import { newRecordId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
-import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import {
+	loadSessionTelemetrySource,
+	loadSessionTelemetrySourceAsync,
+} from "../../src/domains/session/telemetry-source.js";
 import { callJournalHeader, openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import {
 	telemetryJournalFiles,
 	telemetryJournalPath,
+	telemetryProcessDirectory,
 	telemetrySessionDirectory,
 } from "../../src/domains/telemetry/paths.js";
 import { callsReport, sessionTelemetry } from "../../src/domains/telemetry/read-model.js";
@@ -30,10 +34,14 @@ const SESSION = "shared-session";
 const ctx = { sessionId: SESSION, agent: { role: "main" as const, id: SESSION } };
 
 /** This build's writer: open the session's journal, settle `records`, close it. */
-async function settle(directory: string, records: readonly TelemetryRecord[]): Promise<void> {
+async function settle(
+	directory: string,
+	records: readonly TelemetryRecord[],
+	context: TelemetryRecord["ctx"] = ctx,
+): Promise<void> {
 	const journal = await openCallJournal({
 		directory,
-		context: ctx,
+		context,
 		writer: { clioCoderVersion: "0.6.6", piVersion: "test" },
 	});
 	for (const record of records)
@@ -110,5 +118,59 @@ test("two installs append to and read one state dir; neither retires the other's
 		await holdsTheirs("after reading");
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("a session reads the account quota only from this host's process journals written in its window", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-quota-window-"));
+	const outside = await mkdtemp(join(tmpdir(), "telemetry-quota-outside-"));
+	try {
+		await settle(
+			telemetrySessionDirectory(stateDir, SESSION),
+			telemetryCall(SESSION, { at: "2026-10-30T10:00:00.000Z" }),
+		);
+		const quota = async (directory: string, processId: string, observedAt: string) => {
+			const context = { sessionId: null, processId, agent: { role: "main" as const, id: processId } };
+			const record = makeTelemetryRecord(
+				"quota.read",
+				{
+					provider: "codex",
+					displayName: "Codex",
+					status: "ok",
+					targetId: "fixture",
+					source: "stream-event",
+					observedAt,
+					windows: [{ key: "primary", usedPct: { kind: "measured", value: 42, source: "provider" } }],
+					limitReached: false,
+				},
+				context,
+				{ t: observedAt, mono: 1 },
+			);
+			await settle(directory, [record], context);
+		};
+		await quota(telemetryProcessDirectory(stateDir, "prc_0a"), "prc_0a", "2026-10-30T10:05:00.000Z");
+		const stale = telemetryProcessDirectory(stateDir, "prc_0b");
+		await quota(stale, "prc_0b", "2026-10-30T10:06:00.000Z");
+		// Last written before the session's first record, so its journal is not read.
+		await utimes(telemetryJournalPath(stale), new Date("2020-01-01"), new Date("2020-01-01"));
+		await quota(join(outside, "journal"), "prc_0c", "2026-10-30T10:07:00.000Z");
+		const linkedJournal = telemetryProcessDirectory(stateDir, "prc_0c");
+		await mkdir(linkedJournal, { recursive: true });
+		await symlink(telemetryJournalPath(join(outside, "journal")), telemetryJournalPath(linkedJournal));
+		await quota(join(outside, "scope"), "prc_0d", "2026-10-30T10:08:00.000Z");
+		await symlink(join(outside, "scope"), telemetryProcessDirectory(stateDir, "prc_0d"));
+
+		const read = [
+			loadSessionTelemetrySource(stateDir, SESSION),
+			await loadSessionTelemetrySourceAsync(stateDir, SESSION),
+		];
+		for (const source of read)
+			deepStrictEqual(
+				source?.accountQuota?.map((record) => (record.k === "quota.read" ? record.data.observedAt : record.k)),
+				["2026-10-30T10:05:00.000Z"],
+			);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+		await rm(outside, { recursive: true, force: true });
 	}
 });
