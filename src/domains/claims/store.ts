@@ -1,23 +1,19 @@
 import { createHash } from "node:crypto";
-import {
-	closeSync,
-	existsSync,
-	fstatSync,
-	fsyncSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	readSync,
-	realpathSync,
-	writeSync,
-} from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { clioProjectRoot } from "../../core/project-root.js";
 import { fsyncDirectory } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { claimRecordId } from "./capture.js";
-import { CLAIM_KINDS, CLAIM_RECORD_VERSION, type ClaimRecord } from "./types.js";
+import { claimLogRecordId, deriveClaimEdges } from "./edges.js";
+import {
+	CLAIM_KINDS,
+	CLAIM_RECORD_VERSION,
+	type ClaimEdgeRecord,
+	type ClaimRecord,
+	type ClaimRegressionRecord,
+} from "./types.js";
 
 /**
  * The claims log: `<stateDir>/claims/<sha256(project root)>.jsonl`, one record per line, append-only (#406).
@@ -30,6 +26,9 @@ import { CLAIM_KINDS, CLAIM_RECORD_VERSION, type ClaimRecord } from "./types.js"
  * A line is appended in place under the file's state lock and fsynced, the way the fleet event journal appends. A
  * whole-file `safeResourceWrite` per claim would make every capture cost the size of the log; an append cannot lose an
  * earlier line, and a line torn by a crash is skipped on read and closed off by the next append.
+ *
+ * Three line types share the log: `claim`, `edge` and `regression`. Edges are derived from the log as it stands under
+ * the same lock that appends the claim, so two sessions capturing at once derive against each other's claims.
  */
 
 export function claimsProjectRoot(cwd: string): string {
@@ -47,42 +46,68 @@ export function claimsLogPath(projectRoot: string): string {
 	return join(clioStateDir(), "claims", `${createHash("sha256").update(projectRoot, "utf8").digest("hex")}.jsonl`);
 }
 
-/** Whether the file's last byte is a newline, so an append after a torn line starts a line of its own. */
-function endsWithNewline(fd: number): boolean {
-	const size = fstatSync(fd).size;
-	if (size === 0) return true;
-	const last = Buffer.alloc(1);
-	readSync(fd, last, 0, 1, size - 1);
-	return last[0] === 0x0a;
+/** Write lines to the end of a log under its lock; `lines` sees the log as it stands once the lock is held. */
+async function appendLines(path: string, lines: (current: string) => string[]): Promise<void> {
+	const dir = dirname(path);
+	const created = !existsSync(dir);
+	mkdirSync(dir, { recursive: true });
+	await withStateFileLock(path, () => {
+		const fd = openSync(path, "a+", 0o600);
+		try {
+			const current = readFileSync(fd, "utf8");
+			const next = lines(current);
+			if (next.length === 0) return;
+			// A line torn by a crash is closed off, so the append starts a line of its own.
+			const prefix = current.length === 0 || current.endsWith("\n") ? "" : "\n";
+			writeSync(fd, `${prefix}${next.join("\n")}\n`);
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+	});
+	if (created) fsyncDirectory(dir);
 }
 
-/** Append records to their project's log. Records for several projects are grouped per log. */
-export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise<void> {
+/**
+ * Append claims to their project's log, each followed by the edges it adds against the log (#406). Records for several
+ * projects are grouped per log. Returns the edges written.
+ */
+export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise<ClaimEdgeRecord[]> {
 	const byProject = new Map<string, ClaimRecord[]>();
 	for (const record of records) byProject.set(record.project, [...(byProject.get(record.project) ?? []), record]);
+	const written: ClaimEdgeRecord[] = [];
 	for (const [project, group] of byProject) {
-		const path = claimsLogPath(project);
-		const dir = dirname(path);
-		const created = !existsSync(dir);
-		mkdirSync(dir, { recursive: true });
-		await withStateFileLock(path, () => {
-			const fd = openSync(path, "a+", 0o600);
-			try {
-				const prefix = endsWithNewline(fd) ? "" : "\n";
-				writeSync(fd, `${prefix}${group.map((record) => JSON.stringify(record)).join("\n")}\n`);
-				fsyncSync(fd);
-			} finally {
-				closeSync(fd);
+		await appendLines(claimsLogPath(project), (current) => {
+			const log = parseClaimsLog(current, project);
+			const lines: string[] = [];
+			const history = { claims: [...log.records], edges: [...log.edges] };
+			for (const claim of group) {
+				const edges = deriveClaimEdges(history, [claim]);
+				lines.push(JSON.stringify(claim), ...edges.map((edge) => JSON.stringify(edge)));
+				history.claims.push(claim);
+				history.edges.push(...edges);
+				written.push(...edges);
 			}
+			return lines;
 		});
-		if (created) fsyncDirectory(dir);
 	}
+	return written;
+}
+
+/** Append regression records, which name what a contradiction did to memory, to their project's log. */
+export async function appendClaimRegressions(records: ReadonlyArray<ClaimRegressionRecord>): Promise<void> {
+	const byProject = new Map<string, ClaimRegressionRecord[]>();
+	for (const record of records) byProject.set(record.project, [...(byProject.get(record.project) ?? []), record]);
+	for (const [project, group] of byProject)
+		await appendLines(claimsLogPath(project), () => group.map((record) => JSON.stringify(record)));
 }
 
 export interface ClaimsLogRead {
 	project: string;
 	path: string;
 	records: ClaimRecord[];
+	edges: ClaimEdgeRecord[];
+	regressions: ClaimRegressionRecord[];
 	/** Lines that are not a JSON object, such as a line torn by a crash. */
 	unreadable: number;
 	/** Records whose id does not match their content, or that name another project: edited after capture. */
@@ -109,24 +134,45 @@ function isClaimRecord(value: Record<string, unknown>): boolean {
 	);
 }
 
-/** Every claim in a project's log, oldest first. A missing log reads as empty. */
-export function readClaims(projectRoot: string): ClaimsLogRead {
-	const path = claimsLogPath(projectRoot);
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isEdgeRecord(value: Record<string, unknown>): boolean {
+	return (
+		value.type === "edge" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		(value.kind === "contradicts" || value.kind === "supersedes") &&
+		typeof value.from === "string" &&
+		typeof value.to === "string" &&
+		typeof value.check === "string"
+	);
+}
+
+function isRegressionRecord(value: Record<string, unknown>): boolean {
+	return (
+		value.type === "regression" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		typeof value.edge === "string" &&
+		typeof value.from === "string" &&
+		isStringArray(value.backing) &&
+		isStringArray(value.memory)
+	);
+}
+
+function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 	const read: ClaimsLogRead = {
 		project: projectRoot,
-		path,
+		path: claimsLogPath(projectRoot),
 		records: [],
+		edges: [],
+		regressions: [],
 		unreadable: 0,
 		mismatched: 0,
 		unknownVersion: 0,
 	};
-	let text: string;
-	try {
-		text = readFileSync(path, "utf8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return read;
-		throw error;
-	}
 	for (const line of text.split("\n")) {
 		if (line.trim().length === 0) continue;
 		let value: unknown;
@@ -145,16 +191,31 @@ export function readClaims(projectRoot: string): ClaimsLogRead {
 			read.unknownVersion += 1;
 			continue;
 		}
-		if (!isClaimRecord(record)) {
-			read.unreadable += 1;
+		if (isClaimRecord(record)) {
+			const claim = record as unknown as ClaimRecord;
+			if (claim.project !== projectRoot || claimRecordId(claim) !== claim.id) read.mismatched += 1;
+			else read.records.push(claim);
 			continue;
 		}
-		const claim = record as unknown as ClaimRecord;
-		if (claim.project !== projectRoot || claimRecordId(claim) !== claim.id) {
-			read.mismatched += 1;
+		if (isEdgeRecord(record) || isRegressionRecord(record)) {
+			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
+			else if (record.type === "edge") read.edges.push(record as unknown as ClaimEdgeRecord);
+			else read.regressions.push(record as unknown as ClaimRegressionRecord);
 			continue;
 		}
-		read.records.push(claim);
+		read.unreadable += 1;
 	}
 	return read;
+}
+
+/** Every claim, edge and regression in a project's log, oldest first. A missing log reads as empty. */
+export function readClaims(projectRoot: string): ClaimsLogRead {
+	let text: string;
+	try {
+		text = readFileSync(claimsLogPath(projectRoot), "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return parseClaimsLog("", projectRoot);
+		throw error;
+	}
+	return parseClaimsLog(text, projectRoot);
 }

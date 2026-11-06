@@ -3,20 +3,24 @@ import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { readDispatchScopeNotice } from "../../src/core/dispatch-scope-notice.js";
+import type { StartupHint } from "../../src/domains/context/contract.js";
 import type { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { createAcpInterviewChannel } from "../../src/engine/acp/host-members.js";
 import { createAcpHandshake, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { type AcpJsonRpcPeerTransport, createStdioServerTransport } from "../../src/engine/acp/transport.js";
 
-function server() {
+function server(options: { startupHints?: () => ReadonlyArray<StartupHint> } = {}) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const notifications = new Map<string, (params: unknown) => void>();
 	let close: () => void = () => {};
 	let submitted = "";
+	const sent: Array<{ method: string; params: unknown }> = [];
 	const transport: AcpJsonRpcPeerTransport = {
 		closed: false,
 		request: async () => ({}) as never,
-		notify: () => {},
+		notify: (method, params) => {
+			sent.push({ method, params });
+		},
 		onRequest: (method, handler) => {
 			requests.set(method, handler);
 			return () => requests.delete(method);
@@ -42,10 +46,12 @@ function server() {
 			isStreaming: () => false,
 			getSessionId: () => null,
 		},
+		...options,
 	});
 	return {
 		requests,
 		notifications,
+		sent,
 		get submitted() {
 			return submitted;
 		},
@@ -357,4 +363,32 @@ test("ACP interview timeout and detach cancel rounds without a caller abort sign
 	detach();
 	deepStrictEqual(await detached, { answers: [], cancelled: true });
 	deepStrictEqual(notifications, Array(3).fill("_clio-coder/interview/cancel"));
+});
+
+test("ACP sends startup notices once as session metadata, never as reply text", async () => {
+	const peer = server({ startupHints: () => [{ level: "info", text: "No CLIO-CODER.md detected." }] });
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const { sessionId } = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as {
+			sessionId: string;
+		};
+		await peer.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "one" }] });
+		await peer.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "two" }] });
+		const updates = peer.sent
+			.filter((frame) => frame.method === "session/update")
+			.map((frame) => (frame.params as { update: Record<string, unknown> }).update);
+		const chunks = updates.filter((update) => update.sessionUpdate === "agent_message_chunk");
+		strictEqual(JSON.stringify(chunks).includes("CLIO-CODER.md"), false);
+		const notices = updates.filter(
+			(update) =>
+				update.sessionUpdate === "session_info_update" &&
+				(update._meta as Record<string, unknown> | undefined)?.["clio-coder/notice"] !== undefined,
+		);
+		deepStrictEqual(
+			notices.map((update) => (update._meta as Record<string, unknown>)["clio-coder/notice"]),
+			[{ level: "info", text: "No CLIO-CODER.md detected." }],
+		);
+	} finally {
+		await peer.stop();
+	}
 });

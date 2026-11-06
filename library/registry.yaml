@@ -415,16 +415,16 @@ entries:
       online launch to build its environment before it runs offline."
     version: 0.2.0
     sourceUrl: plugins/hpc
-    sha256: 851c7f94bccadb2498a0d8c4e07a1819b215c2b9b9fd32c4a7608ab233f04937
+    sha256: 4f9555f7b20404a146471498e4302fd304dfb3ab2af67a313cded97dbba2e58c
     requires:
       - skill:slurm-jobs
     provides:
       - kind: skill
         name: hpc-chronolog
-        description: "Uses ChronoLog 4.0 as durable, time-ordered memory for HPC runs:
-          connects Clio to a ChronoLog instance through chronolog-mcp, records
-          run events under stable operation ids, and reads them back with an
-          explicit completeness verdict. Not for deploying Chrono"
+        description: "Uses ChronoLog as durable, time-ordered memory for HPC runs
+          through its MCP server: chrono-mcp from a released ChronoLog 3.x tree,
+          or chronolog-mcp from an unreleased ChronoLog 4.0 development build.
+          Records run events and reads them back, quoting what the"
       - kind: skill
         name: hpc-darshan
         description: "Characterizes an application's I/O from a Darshan log: runs
@@ -448,6 +448,35 @@ entries:
           and shows a dry run, submits on the operator's word, checks each run
           with its declared verify check, and tabulates every run, failed and
           unverified included. Not for a single job."
+  - kind: plugin
+    name: life-science
+    description: "Life-science pack: skills that query the RCSB Protein Data Bank,
+      UniProtKB and PubChem over their public, key-free REST APIs with
+      web_fetch, and stamp each answer with the source's entry revision or
+      release. Every lookup needs network; offline the skills say the source is
+      unreachable."
+    version: 0.1.0
+    sourceUrl: plugins/life-science
+    sha256: fb08f8923eacbd06b15fa7e916ce4c5beb8edcd77328641764a453c7d21d02e7
+    provides:
+      - kind: skill
+        name: pdb-structures
+        description: "Looks up macromolecular structures in the RCSB Protein Data Bank
+          over its public REST APIs with web_fetch: entry metadata, method and
+          resolution, entities and their UniProt mapping, ligands, full-text
+          search, and coordinate file URLs, each answer stamped w"
+      - kind: skill
+        name: pubchem-compounds
+        description: "Looks up small molecules in PubChem over PUG REST with web_fetch:
+          name or SMILES to CID, computed properties (formula, weight, SMILES,
+          InChIKey, IUPAC name), synonyms, with request pacing inside PubChem's
+          usage limits. Not for property prediction or synthe"
+      - kind: skill
+        name: uniprot-proteins
+        description: "Looks up proteins in UniProtKB over the UniProt REST API with
+          web_fetch: entries by accession, field-selected search, FASTA
+          sequences, and cross-references such as PDB IDs, each answer stamped
+          with the UniProt release and entry version. Not for sequence al"
   - kind: plugin
     name: literature
     description: "Literature pack: verifies citations and resolves DOIs and arXiv

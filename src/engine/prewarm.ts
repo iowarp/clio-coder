@@ -1,13 +1,8 @@
-import {
-	createInitialSystemMessage,
-	getCurrentTools,
-	getToolStateChanges,
-	toToolDeclaration,
-} from "@earendil-works/pi-ai";
 import { trackCallFetch } from "../core/call-failure.js";
 import type { CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import { normalizeContext } from "./context.js";
+import { withLiveToolDeclarations } from "./live-declarations.js";
 /**
  * One bounded-output warm through the eventual caller's engine request path.
  * Copies portable context, applies public Pi transforms and payload hooks,
@@ -206,21 +201,11 @@ async function runPrewarmAttempt(input: PrewarmRoundInput, scope: CallScope): Pr
 		input.signal?.throwIfAborted();
 		// Match Agent's initial baseline and pre-request tool reconciliation, using
 		// Pi's public declaration diff. Never clone executable AgentTool objects.
-		let messages: AgentMessage[] = structuredClone([...input.state.messages]);
-		if (messages[0]?.role !== "system") {
-			const initial = createInitialSystemMessage(input.state.systemPrompt, input.state.tools.map(toToolDeclaration));
-			if (initial) messages.unshift(initial);
-		}
-		const changes = getToolStateChanges(getCurrentTools(messages), input.state.tools.map(toToolDeclaration));
-		if (changes.toolsAdded.length || changes.toolsRemoved.length) {
-			messages.push({
-				role: "system",
-				content: "",
-				timestamp: Date.now(),
-				...(changes.toolsAdded.length ? { toolsAdded: changes.toolsAdded } : {}),
-				...(changes.toolsRemoved.length ? { toolsRemoved: changes.toolsRemoved } : {}),
-			});
-		}
+		let messages: AgentMessage[] = withLiveToolDeclarations(
+			structuredClone([...input.state.messages]),
+			input.state.systemPrompt,
+			input.state.tools,
+		);
 		messages.push({ role: "user", content: [{ type: "text", text: PREWARM_USER_TEXT }], timestamp: Date.now() });
 		if (input.agent?.transformContext) messages = await input.agent.transformContext(messages, input.signal);
 		const converted = input.agent

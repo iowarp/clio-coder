@@ -48,7 +48,7 @@ import type { MemoryInterventionRegistration } from "../domains/middleware/memor
 import { estimateAgentMessageTokens } from "../domains/session/context-accounting.js";
 import { createContinuityPersistencePorts } from "../domains/session/continuity/ports.js";
 import { continuityReplayText, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
-import { continueEngineWithoutInput, replaceEngineMessages } from "../engine/agent.js";
+import { continueEngineWithoutInput, engineLiveTurnRequest, replaceEngineMessages } from "../engine/agent.js";
 import { isLockedSynthesisFallbackOnly, lockedSynthesisRepromptMessages } from "../engine/loop-guard.js";
 import { ContinuityController } from "./continuity-controller.js";
 /**
@@ -139,7 +139,9 @@ import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import type { TurnTokens } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
+import { cacheKeepalivePromptTokens } from "../engine/cache-keepalive.js";
 import { countImageBlocks } from "../engine/image-context.js";
+import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentEvent, AgentMessage, AnthropicMessagesCompat, EngineModel, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
@@ -945,6 +947,7 @@ export interface CreateChatLoopDeps {
 		budget?: Pick<
 			CompactInput,
 			| "providerCompaction"
+			| "livePrefix"
 			| "providerFallbackReason"
 			| "providerReplayFallback"
 			| "keepRecentTokens"
@@ -1831,7 +1834,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		scheduling: deps.scheduling,
 		headless: deps.headless,
 		createAgent,
-		noteMainRequest: (runtime, request, stream) => keepalive.noteRequest(runtime, request, stream),
+		noteMainRequest: (runtime, request, stream) => {
+			keepalive.noteRequest(runtime, request, stream);
+			const record: MainRequestRecord = { request, sentAt: Date.now(), promptTokens: null };
+			state.lastMainRequest = { runtime, record };
+			// The prompt size the provider reports is what a compaction inside this prefix reads from cache (T4).
+			stream.result().then(
+				(message) => {
+					if (message.stopReason !== "error" && message.stopReason !== "aborted")
+						record.promptTokens = cacheKeepalivePromptTokens(message);
+				},
+				() => {
+					// A failed request leaves no cache entry to read; promptTokens stays null and the prefix is refused.
+				},
+			);
+		},
 		continuity,
 		hasQueuedSteering: () => queues.hasPendingSteer(),
 		queueHandOver: {
@@ -4057,6 +4074,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						messages,
 						question: text,
 						midTurn: prepared.inFlight,
+						// The turn's own prompt and tools, so the round reads the prefix the turn already cached (S12).
+						livePrefix: (history, tail, signal) => engineLiveTurnRequest(prepared.runtime.agent, history, tail, signal),
 						// The level the session's own next turn would use.
 						thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),

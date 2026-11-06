@@ -22,7 +22,7 @@ installing.
 | `hpc-modules` | Finds and loads Lmod modules and Spack installs, keeping each load in the shell that uses it | `module`, `$LMOD_CMD`, `spack` over `bash` |
 | `hpc-parallel-io` | Correctness rules and tuning for parallel HDF5 and MPI-IO, checked by readback and Darshan counters | `h5pcc`, `h5py`, `mpirun`, `lfs` |
 | `hpc-darshan` | Summarizes a Darshan log and names the counters behind each I/O finding | `darshan-parser` through `assets/scripts/darshan_summary.py` |
-| `hpc-chronolog` | Records run events in ChronoLog 4.0 and reads them back with a completeness verdict | `chronolog`, `chronolog-mcp` |
+| `hpc-chronolog` | Records run events in ChronoLog and reads them back: chrono-mcp on released 3.x, or chronolog-mcp with a completeness verdict on unreleased 4.0 builds | `chronolog-mcp`, and `chronolog` on 4.0 |
 
 ## Setup the operator owns
 
@@ -35,14 +35,16 @@ installing.
   `logs/slurm_output/` there. Without `cwd`, a user entry runs in Clio's config
   directory, and the job logs land in it. Submitting and cancelling ask at
   `default`, and a headless run at `default` denies them.
-- **ChronoLog.** Declare `chronolog-mcp` in the same user file, with its writer
-  identity in `env` and per-tool `toolActionClasses`; `hpc-chronolog` shows the
-  entry. ChronoLog 4.0 is built
-  from source; it is not on PyPI.
+- **ChronoLog.** Declare ChronoLog's MCP server in the same user file, with
+  its connection settings in `env` and per-tool `toolActionClasses`;
+  `hpc-chronolog` shows both entries. The released line is ChronoLog 3.x
+  (latest 3.4.0), whose server, chrono-mcp, ships in the ChronoLog source tree
+  at `plugins/chrono-mcp`. ChronoLog 4.0 is unreleased development: it exists
+  only as a source build, with its own `chronolog` launcher and `chronolog-mcp`.
 - **Environment.** Clio passes an MCP server only `PATH`, `HOME`, `USER`,
   `LOGNAME`, `LANG`, `LC_ALL`, the temp and `XDG_*` directories and a few
   platform variables, plus the `env` its declaration names. A variable a server
-  needs (`CHRONOLOG_MCP_IDENTITY`, `CHRONOLOG_HOME`, `CLIO_KIT_CACHE_DIR`) goes
+  needs (`CHRONO_HOST` for 3.x, `CHRONOLOG_MCP_IDENTITY` for 4.0, `CLIO_KIT_CACHE_DIR`) goes
   in that `env`, never as a credential value.
 
 ## Offline behavior
@@ -69,7 +71,8 @@ clio-kit also ships Darshan, Spack, Lmod and ChronoLog MCP servers. The pack
 does not declare them yet. The Darshan and Spack servers wait on a live check
 against a real `darshan-util` and Spack install. The Lmod server runs `module`
 as a program, but `module` is a shell function, so its loads cannot reach the
-caller. The ChronoLog server targets the pre-4.0 client. The skills drive the
+caller. clio-kit is retiring its ChronoLog server in favor of ChronoLog's own
+chrono-mcp (not yet in a clio-kit release). The skills drive the
 command-line tools directly instead.
 
 ## Checks

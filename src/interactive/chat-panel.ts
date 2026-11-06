@@ -53,6 +53,7 @@ import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
 import { holdInlineMath } from "./renderers/inline-math.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
+import { settledMarkdownHead } from "./renderers/markdown-blocks.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
@@ -266,6 +267,8 @@ type TextSegment = {
 	secrets?: RedactedStringProjection;
 	/** The segment's stock Markdown component and the source it last rendered. */
 	markdown?: { view: Markdown; source: string; epoch: number };
+	/** While the segment streams, its settled leading blocks and its open tail; null once it cannot split (#428). */
+	settled?: SettledBlocks | null;
 	/** Reuse wrapped rows while another entry streams or its clock advances (#428). */
 	rendered?: { source: string; finalized: boolean; epoch: number; layouts: Map<string, string[]> };
 	/** Fitted rows by Markdown row, so an unchanged row is not measured again on the next delta. Streaming only. */
@@ -286,6 +289,25 @@ type TextSegment = {
 	 * Markdown component; it is cached here rather than rebuilt per frame.
 	 */
 	suggestionSplit?: { suggestion: string; answer: TextSegment };
+};
+/**
+ * A streaming answer as a settled head of whole blocks and the open tail after it (#428). The head grows only at
+ * cuts `settledMarkdownHead` vouches for, so its rows at a width never change and render once; each delta lexes and
+ * renders only the tail. Rendering the head and the tail apart yields the same rows as the whole.
+ */
+type SettledBlocks = {
+	/** The settled head: a prefix of the segment's projected prose. */
+	source: string;
+	/** Where each cut fell in `source`, ascending; the last is `source.length`. */
+	cuts: number[];
+	/** The redaction projection's restart count the head was cut under; a restart may have changed the head. */
+	restarts: number;
+	/** How far the prose reached at the last search for a cut. A new cut needs a line completed after that. */
+	searched: number;
+	/** The head's rows at one layout and how much of `source` they cover. */
+	layout?: { width: number; bareFences: boolean; epoch: number; rows: string[]; through: number };
+	/** The open tail's Markdown component and the source it last rendered. */
+	tail?: { view: Markdown; source: string; epoch: number; bareFences: boolean };
 };
 type ToolSegment = {
 	kind: "tool";
@@ -1022,7 +1044,17 @@ function fitCodeLine(line: string, fenceIndent: string, width: number, bareFence
 	return wrapPaths(body, room).map((part, index) => theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`));
 }
 
-function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: RowMemo): string[] {
+/**
+ * The transcript rows of a Markdown component. `exit`, when given, learns whether the rows end with a fence still
+ * open, which a caller that renders a text in pieces needs: the fence state runs on into the next piece.
+ */
+function markdownRows(
+	md: Markdown,
+	width: number,
+	bareFences: boolean,
+	memo?: RowMemo,
+	exit?: { fenceOpen: boolean },
+): string[] {
 	const padded = md.render(width);
 	const rows: string[] = [];
 	let fenceIndent: string | null = null;
@@ -1078,6 +1110,7 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 		for (const part of parts) rows.push(part);
 	}
 	flushCode();
+	if (exit !== undefined) exit.fenceOpen = fenceIndent !== null;
 	// Each delta strands the old tail rows. Keep the live ones, so eviction never costs a re-measure.
 	if (memo !== undefined && memo.rows.size > padded.length * 2 + 256) {
 		const live = new Map<string, string[]>();
@@ -1097,12 +1130,13 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 }
 
 /**
- * A text segment renders through one stock Markdown component, streaming or
- * settled. Markdown renders each top-level block independently and caches by
- * (text, width), so the rows above the open block stay byte-stable while text
- * arrives, and a regular-screen terminal does not redraw the transcript when
- * the answer finalizes. setText always invalidates that cache, so it runs only
- * when the projected text changed.
+ * A settled text segment renders through one stock Markdown component.
+ * Markdown renders each top-level block independently and caches by
+ * (text, width), so a regular-screen terminal does not redraw the transcript
+ * when the answer finalizes. setText always invalidates that cache, so it runs
+ * only when the projected text changed. A streaming segment renders its
+ * settled head and open tail apart (`renderSettledSplit`), which yields the
+ * same rows.
  */
 function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boolean): string[] {
 	if (!seg.finalized && seg.diffusion) {
@@ -1119,18 +1153,24 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	seg.prose ??= new AssistantProseProjection();
 	seg.secrets ??= new RedactedStringProjection(redactUrlCredentials);
 	const prose = seg.secrets.project(seg.prose.project(seg.text, seg.finalized), seg.finalized);
-	if (seg.markdown === undefined || seg.markdown.epoch !== skinEpoch())
-		seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose, epoch: skinEpoch() };
-	else if (seg.markdown.source !== prose) {
-		seg.markdown.view.setText(prose);
-		seg.markdown.source = prose;
-	}
 	let memo = seg.rowMemo;
 	if (memo?.width !== width || memo.bareFences !== bareFences || memo.epoch !== epoch)
 		memo = seg.finalized ? undefined : { width, bareFences, epoch, rows: new Map(), plain: new Map() };
 	// A settled segment can last the whole session, so it keeps only its layouts.
 	seg.rowMemo = seg.finalized ? undefined : memo;
-	const lines = withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences, memo));
+	let rows =
+		seg.settled !== undefined || !seg.finalized ? renderSettledSplit(seg, prose, width, bareFences, memo) : null;
+	if (seg.finalized) delete seg.settled;
+	if (rows === null) {
+		if (seg.markdown === undefined || seg.markdown.epoch !== epoch)
+			seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose, epoch };
+		else if (seg.markdown.source !== prose) {
+			seg.markdown.view.setText(prose);
+			seg.markdown.source = prose;
+		}
+		rows = markdownRows(seg.markdown.view, width, bareFences, memo);
+	}
+	const lines = withoutLeadingBlanks(rows);
 	if (!seg.finalized) seg.liveRender = { durationMs: performance.now() - startedAt, codeUnits: seg.text.length };
 	seg.rendered.layouts.set(key, lines);
 	if (seg.rendered.layouts.size > 3) {
@@ -1138,6 +1178,83 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 		if (oldest !== undefined) seg.rendered.layouts.delete(oldest);
 	}
 	return lines;
+}
+
+/** Settled blocks render in runs of at least this many code units, so a resize does not build a component per block. */
+const SETTLED_RUN_CODE_UNITS = 8_192;
+
+/**
+ * The rows of a streaming segment as its settled head, rendered once per
+ * width, followed by its open tail (#428). Null when the segment cannot split,
+ * and the caller renders the whole text as one component. A finalized segment
+ * renders through the split it streamed with one last time, so finalizing
+ * re-renders only the tail.
+ */
+function renderSettledSplit(
+	seg: TextSegment,
+	prose: string,
+	width: number,
+	bareFences: boolean,
+	memo: RowMemo | undefined,
+): string[] | null {
+	if (seg.settled === null || seg.secrets === undefined) return null;
+	let settled = seg.settled;
+	// The head lies within the redaction's settled text, which only a restart rewrites: a cut-off hold, a
+	// diffusion frame or a replaced message. Comparing the head itself would cost a pass over the reply per frame.
+	const restarts = seg.secrets.restarts;
+	if (settled === undefined || settled.restarts !== restarts) settled = { source: "", cuts: [], restarts, searched: 0 };
+	seg.settled = settled;
+	// A cut needs a line completed since the last search. A reference definition, which always holds `]:`, is
+	// looked for on every frame it may be in the tail, since it changes how links in the head resolve.
+	const from = settled.source.length;
+	if (prose.indexOf("\n", settled.searched) >= 0 || prose.indexOf("]:", from) >= 0) {
+		settled.searched = prose.length;
+		const limit = seg.secrets.settledLength - from;
+		const cut = limit > 0 ? settledMarkdownHead(prose.slice(from), CODE_SPACE, limit) : 0;
+		if (cut === null) {
+			seg.settled = null;
+			return null;
+		}
+		if (cut > 0) {
+			settled.source = prose.slice(0, from + cut);
+			settled.cuts.push(from + cut);
+		}
+	}
+	const epoch = skinEpoch();
+	let layout = settled.layout;
+	if (layout?.width !== width || layout.bareFences !== bareFences || layout.epoch !== epoch) {
+		layout = { width, bareFences, epoch, rows: [], through: 0 };
+		settled.layout = layout;
+	}
+	const last = settled.cuts.at(-1) ?? 0;
+	for (const cut of settled.cuts) {
+		if (cut <= layout.through || (cut - layout.through < SETTLED_RUN_CODE_UNITS && cut !== last)) continue;
+		const exit = { fenceOpen: false };
+		const rows = markdownRows(
+			chatMarkdown(settled.source.slice(layout.through, cut), bareFences),
+			width,
+			bareFences,
+			undefined,
+			exit,
+		);
+		// The transcript's fence tracking misread a row as a fence and would carry it into the next run.
+		if (exit.fenceOpen) {
+			seg.settled = null;
+			return null;
+		}
+		for (const row of rows) layout.rows.push(row);
+		layout.through = cut;
+	}
+	const tailSource = prose.slice(settled.source.length);
+	let tail = settled.tail;
+	if (tail === undefined || tail.epoch !== epoch || tail.bareFences !== bareFences) {
+		tail = { view: chatMarkdown(tailSource, bareFences), source: tailSource, epoch, bareFences };
+		settled.tail = tail;
+	} else if (tail.source !== tailSource) {
+		tail.view.setText(tailSource);
+		tail.source = tailSource;
+	}
+	return layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
 }
 
 /**

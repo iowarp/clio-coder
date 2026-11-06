@@ -21,6 +21,7 @@ import type {
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { createEngineAgent } from "../engine/agent.js";
+import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
 import type { ModelRequestFacts } from "./status-types.js";
@@ -89,6 +90,8 @@ export type TurnStop =
 export interface ChatTurnState {
 	/** Live agent runtime; built or hot-swapped by turn-runtime. */
 	runtime: AgentRuntime | null;
+	/** The newest main-turn request and the runtime that sent it; compaction summarizes inside its cached prefix (T4). */
+	lastMainRequest?: { runtime: AgentRuntime; record: MainRequestRecord };
 	/** Ledger cursor: the id the next appended turn parents under. */
 	lastTurnId: string | null;
 	/** True while a submit is in flight. */

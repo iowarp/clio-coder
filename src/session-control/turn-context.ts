@@ -27,6 +27,7 @@ import {
 	setEngineSystemPrompt,
 } from "../engine/agent.js";
 import { providerCheckpointCompatibility } from "../engine/ai.js";
+import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
@@ -218,6 +219,7 @@ export interface TurnContextDeps {
 				budget?: Pick<
 					CompactInput,
 					| "providerCompaction"
+					| "livePrefix"
 					| "providerFallbackReason"
 					| "providerReplayFallback"
 					| "keepRecentTokens"
@@ -2040,6 +2042,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			| Pick<
 					CompactInput,
 					| "providerCompaction"
+					| "livePrefix"
 					| "providerFallbackReason"
 					| "keepRecentTokens"
 					| "preserveUserTurnId"
@@ -2116,6 +2119,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 									},
 								}
 							: {}),
+						// T4: the summary may ride the cached prefix of the last request this runtime sent.
+						livePrefix: async (prefixSignal?: AbortSignal) => {
+							const last = state.lastMainRequest;
+							const prepared = await prepareInPrefixSummary(
+								agentRuntime.agent,
+								last?.runtime === agentRuntime ? last.record : undefined,
+								prefixSignal,
+							);
+							return typeof prepared === "string" ? null : prepared;
+						},
 						...(summarySignal ? { signal: summarySignal } : {}),
 						...(automaticSummary && noGainSummaryDigest !== null ? { skipSummaryDigest: noGainSummaryDigest } : {}),
 						checkpointTokenFigures: (entry) => {

@@ -16,11 +16,16 @@ import type {
 import { clioStateDir } from "../../src/core/xdg.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import type { MemoryConsumptionReceipt } from "../../src/domains/memory/contract.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { canonicalEndpointKey, foregroundStreamUsage } from "../../src/domains/providers/index.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
-import { COMPACTION_SYSTEM_PROMPT } from "../../src/domains/session/compaction/compact.js";
+import {
+	COMPACTION_SYSTEM_PROMPT,
+	compact,
+	type LivePrefixSummary,
+} from "../../src/domains/session/compaction/compact.js";
 import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import { estimateAgentContextBreakdown, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
@@ -1591,5 +1596,115 @@ describe("production compaction controls", () => {
 		const entry = f.entries().find((entry) => entry.kind === "compactionSummary");
 		ok(entry?.kind === "compactionSummary");
 		strictEqual(entry.trigger, "force");
+	});
+
+	it("summarizes inside the live prefix only when cheaper, falls back on a tool call, and leaves memory offers portable (T4)", async () => {
+		const model = faux.getModel("summary");
+		ok(model);
+		const usage = {
+			input: 10,
+			output: 5,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 15,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		let portableCalls = 0;
+		faux.setResponses(
+			Array.from({ length: 6 }, () => () => {
+				portableCalls++;
+				return {
+					role: "assistant" as const,
+					content: [{ type: "text" as const, text: syntheticCompactionSummary("portable checkpoint") }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					stopReason: "stop" as const,
+					timestamp: Date.now(),
+					usage,
+				};
+			}),
+		);
+		const entries: SessionEntry[] = Array.from({ length: 7 }, (_, i) => ({
+			kind: "message",
+			turnId: `turn-${i}`,
+			parentTurnId: i === 0 ? null : `turn-${i - 1}`,
+			timestamp: "2026-11-06T00:00:00Z",
+			role: i % 2 === 0 ? "user" : "assistant",
+			payload: { text: `exchange ${i} `.repeat(400) },
+		}));
+		const port = (cost: number, reply: "text" | "tool") => {
+			const tails: string[] = [];
+			const live: LivePrefixSummary = {
+				model: { id: model.id, provider: model.provider },
+				inputCost: () => cost,
+				inputTokens: () => 1000,
+				stream: (tail) => {
+					tails.push(tail);
+					const events = createAssistantMessageEventStream();
+					const message = {
+						role: "assistant" as const,
+						content:
+							reply === "text"
+								? [{ type: "text" as const, text: syntheticCompactionSummary("live checkpoint") }]
+								: [{ type: "toolCall" as const, id: "call-1", name: "read", arguments: { path: "x" } }],
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						stopReason: reply === "text" ? ("stop" as const) : ("toolUse" as const),
+						timestamp: Date.now(),
+						usage: { ...usage, cacheRead: 900 },
+					};
+					queueMicrotask(() => {
+						events.push({ type: "done", reason: message.stopReason, message });
+						events.end(message);
+					});
+					return events;
+				},
+			};
+			return { tails, livePrefix: async () => live };
+		};
+		const run = (livePrefix: () => Promise<LivePrefixSummary>, extra: Partial<Parameters<typeof compact>[0]> = {}) =>
+			compact({ entries, model, keepRecentTokens: 100, livePrefix, instructions: "keep ZEPHYR", ...extra });
+
+		// Cheaper live prefix: one live call, the operator block in its tail, no portable request.
+		const cheap = port(1, "text");
+		const chosen = await run(cheap.livePrefix);
+		strictEqual(portableCalls, 0);
+		strictEqual(cheap.tails.length, 1);
+		match(cheap.tails[0] ?? "", /<operator-instructions>\nkeep ZEPHYR/);
+		match(chosen.summary, /live checkpoint/);
+
+		// A tool call instead of a checkpoint falls back to the portable request; both calls are observed.
+		const tool = port(1, "tool");
+		const observed: string[] = [];
+		const fallback = await run(tool.livePrefix, { onCall: (call) => observed.push(call.outcome) });
+		strictEqual(tool.tails.length, 1);
+		strictEqual(portableCalls, 1);
+		match(fallback.summary, /portable checkpoint/);
+		deepStrictEqual(observed, ["error", "success"]);
+
+		// Dearer than the portable request: the live prefix is never streamed.
+		const dear = port(Number.MAX_SAFE_INTEGER, "text");
+		await run(dear.livePrefix);
+		strictEqual(dear.tails.length, 0);
+		strictEqual(portableCalls, 2);
+
+		// An accepted memory offer stays on the portable route even when the live prefix is cheaper.
+		const offered = port(1, "text");
+		let used = 0;
+		await run(offered.livePrefix, {
+			offerMemory: () => ({
+				text: "memory observations",
+				receipt: {} as MemoryConsumptionReceipt,
+				isCurrent: () => true,
+				onUse: () => {
+					used++;
+				},
+			}),
+		});
+		strictEqual(offered.tails.length, 0);
+		strictEqual(used, 1);
+		strictEqual(portableCalls, 3);
 	});
 });
