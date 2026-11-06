@@ -26,6 +26,7 @@ import {
 	runtimeListsModelsLive,
 } from "../domains/providers/index.js";
 import { closestRuntimeId, getRuntimeRegistry } from "../domains/providers/registry.js";
+import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
@@ -350,7 +351,13 @@ async function runUse(args: ReadonlyArray<string>): Promise<number> {
 		const selectedTarget = candidate.targets.find((entry) => entry.id === route.target);
 		if (!selectedTarget) throw new Error("selected target disappeared");
 		const runtime = registry.get(selectedTarget.runtime);
-		if (!runtime || !(role === "fleet" ? isDispatchEligibleRuntime(runtime) : isOrchestratorEligibleRuntime(runtime))) {
+		if (!runtime) {
+			printError(
+				`cannot use target '${selectedTarget.id}' for ${labels[role]}: ${runtimeNotRegistered(selectedTarget.runtime)}`,
+			);
+			return 1;
+		}
+		if (!(role === "fleet" ? isDispatchEligibleRuntime(runtime) : isOrchestratorEligibleRuntime(runtime))) {
 			printError(
 				`cannot use target '${selectedTarget.id}' for ${labels[role]}: runtime '${selectedTarget.runtime}' is not eligible`,
 			);
@@ -496,7 +503,7 @@ function resolveDispatchProfileTarget(
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const runtime = registry.get(target.runtime);
 	if (!runtime) {
-		printError(`cannot use target '${target.id}' as ${role} because runtime '${target.runtime}' is not registered`);
+		printError(`cannot use target '${target.id}' as ${role} because ${runtimeNotRegistered(target.runtime)}`);
 		return { exitCode: 1 };
 	}
 	if (!isDispatchEligibleRuntime(runtime)) {
@@ -1222,6 +1229,7 @@ function formatToolProbe(probe: TargetStatus["toolProbe"]): string | null {
 }
 
 function degradedHealthDiagnostic(status: TargetStatus): string | null {
+	if (!status.runtime) return runtimeNotRegistered(status.target.runtime);
 	return status.health.status === "degraded" && status.health.lastError ? status.health.lastError : null;
 }
 

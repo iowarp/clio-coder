@@ -2,6 +2,7 @@ import { match, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { classifyDefaultTarget, describeVerdict } from "../../src/cli/default-target.js";
 import { readSettings } from "../../src/core/config.js";
 import { runDoctorModelChecks } from "../../src/domains/lifecycle/doctor.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -19,6 +20,18 @@ test("doctor reports a target using a retired runtime and names its replacement"
 	const target = findings.find((finding) => finding.name === "target blade");
 	strictEqual(target?.ok, false);
 	match(target?.detail ?? "", /runtime 'lmstudio-native'.*'lmstudio'/u);
+});
+
+test("startup names the replacement when the chat route sits on a retired runtime", async (t) => {
+	const home = await isolateClioEnv("clio-retired-chat-runtime-");
+	t.after(() => home.restore());
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(
+		join(home.dir, "config", "settings.yaml"),
+		"version: 2\ntargets:\n  - { id: box, runtime: ollama-native, defaultModel: llama3 }\nchat:\n  target: box\n  model: llama3\n",
+	);
+
+	match(describeVerdict(classifyDefaultTarget(readSettings())), /'ollama-native'.*removed in 0\.7\.0.*runtime: ollama/u);
 });
 
 test("doctor proposes the provider catalog model and changes it only after confirmation", async (t) => {

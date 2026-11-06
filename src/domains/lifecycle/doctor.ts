@@ -1147,12 +1147,7 @@ export async function runDoctorModelChecks(
 		settings.targets.map(async (target): Promise<DoctorFinding[]> => {
 			const runtime = registry.get(target.runtime);
 			if (!runtime) {
-				const replacement =
-					target.runtime === "lmstudio-native"
-						? "lmstudio"
-						: target.runtime === "ollama-native"
-							? "ollama"
-							: closestRuntimeId(registry, target.runtime);
+				const replacement = closestRuntimeId(registry, target.runtime);
 				return [
 					{
 						ok: false,

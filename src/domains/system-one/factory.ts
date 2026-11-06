@@ -20,6 +20,7 @@ import {
 	modelStreamUsage,
 } from "../providers/endpoint-capacity.js";
 import type { LlmRequestAdmission, OneShotPort } from "../providers/one-shot.js";
+import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { ENGINE_KINDS } from "./engine-kinds.js";
@@ -116,7 +117,7 @@ export function createSystemOne(deps: SystemOneDeps): SystemOneInstance {
 		const target = deps.providers.getTarget(cfg.target) ?? effective.targets.find((entry) => entry.id === cfg.target);
 		if (!target) return { problem: `target '${cfg.target}' is not configured`, cfg };
 		const runtime = deps.providers.getRuntime(target.runtime);
-		if (!runtime) return { problem: `runtime '${target.runtime}' is not registered`, cfg };
+		if (!runtime) return { problem: runtimeNotRegistered(target.runtime), cfg };
 		const problem = ENGINE_KINDS[cfg.kind].problem(
 			{ name, cfg, target, runtime, ...(deps.oneShot !== undefined ? { oneShot: deps.oneShot } : {}) },
 			missingKey,
