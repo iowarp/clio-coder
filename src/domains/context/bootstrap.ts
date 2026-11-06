@@ -1759,7 +1759,10 @@ async function runBootstrapWork(
 	};
 	if (shouldGenerate) {
 		const depth = input.depth ?? "standard";
-		const repositoryFiles = await enumerateWorkspaceFilesAsync(cwd);
+		// The handbook this run writes is its output, not repository evidence. A
+		// tracked draft let a rewrite ground slash-joined prose in its own
+		// previous text; only --apply hands the old handbook over, as existingClioMd.
+		const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter((path) => path !== "CLIO-CODER.md");
 		const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
 		const anchors = codewiki.files
 			.filter((file) => file.lang !== "config" && file.role !== "test")

@@ -231,7 +231,10 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 		projectType: input.projectType,
 		...(input.existingClioMdText
 			? { existingClioMd: truncate(input.existingClioMdText, FULL_PROJECT_CONTEXT_MAX_CHARS) }
-			: {}),
+			: {
+					handbookTarget:
+						"CLIO-CODER.md is the file this run writes. Do not read or cite it; Clio rejects a citation only it supports.",
+				}),
 		...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
 		...(input.enforcement ? { enforcement: boundedEnforcement(input.enforcement) } : {}),
 		...(input.evidence ? { evidence: { ...input.evidence, files: [...input.evidence.files] } } : {}),
