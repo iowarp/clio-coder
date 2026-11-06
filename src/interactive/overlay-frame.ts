@@ -579,7 +579,8 @@ export function fitHintEntryList(
 		if (!fits([...required, entry, ...extras])) break;
 		extras.unshift(entry);
 	}
-	const kept = [...required, ...extras];
+	// The way out closes the row wherever it is read, so a kept extra never lands after it.
+	const kept = [...required.filter((entry) => !isEsc(entry)), ...extras, ...required.filter(isEsc)];
 	// One entry always survives, so a footer never renders empty.
 	return { kept: kept.length > 0 ? kept : [entries.at(-1) as HintEntry], short: true };
 }
