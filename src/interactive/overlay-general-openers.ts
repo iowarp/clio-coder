@@ -44,7 +44,12 @@ import { type OutOfTurnRoute, outOfTurnRouteLabel } from "../session-control/sid
 import type { ContextClearCommandOptions, FleetRunStartOptions } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
-import { type createDispatchBoardView, dispatchBoardHintEntries, renderFleetPlanCard } from "./dispatch-board.js";
+import {
+	type createDispatchBoardView,
+	dispatchBoardEscapeEntry,
+	dispatchBoardHintEntries,
+	renderFleetPlanCard,
+} from "./dispatch-board.js";
 import type { FleetPlanRuns } from "./fleet-plan-runs.js";
 import { progressNoticeKeys } from "./footer/notifications.js";
 import { openHealthOverlay } from "./health-overlay.js";
@@ -575,7 +580,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	const dispatchBoardHint = (innerWidth: number): string =>
-		buildResponsiveHint(dispatchBoardHintEntries(deps.dispatchBoard))(innerWidth);
+		buildResponsiveHint(
+			dispatchBoardHintEntries(deps.dispatchBoard),
+			dispatchBoardEscapeEntry(deps.dispatchBoard),
+		)(innerWidth);
 
 	/**
 	 * `/btw <question>`: one model round beside the session, rendered in an

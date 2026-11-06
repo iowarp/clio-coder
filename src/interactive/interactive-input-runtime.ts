@@ -128,6 +128,7 @@ export interface InteractiveInputRuntimeDeps {
 		selectPrevious(): void;
 		selectNext(): void;
 		toggleDetail(): void;
+		detailExpanded?(): boolean;
 	};
 	/** Enter in the workers view; false falls through to the detail toggle. */
 	watchSelectedDispatch: () => boolean;
@@ -543,6 +544,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 						deps.dispatchBoard.toggleDetail();
 						deps.requestRender();
 					},
+					isSelectedDispatchDetailOpen: () => deps.dispatchBoard.detailExpanded?.() === true,
 					watchSelectedDispatch: () => {
 						const handled = deps.watchSelectedDispatch();
 						if (handled) deps.requestRender();

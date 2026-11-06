@@ -82,6 +82,8 @@ export interface DispatchBoardOverlayKeyDeps {
 	cancelSelectedDispatch: () => void;
 	/** Open or close the selected run's worker-progress detail. */
 	toggleSelectedDispatchDetail: () => void;
+	/** Whether the selected run's detail is open, so Esc folds it before it closes the board. */
+	isSelectedDispatchDetailOpen?: () => boolean;
 	/**
 	 * Open or retarget the watch pane for the selected run. True when the pane
 	 * layer took the key; false hands Enter back to the inline detail toggle,
@@ -233,7 +235,8 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 /** Pure overlay key router for the dispatch board. */
 function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
-		deps.closeOverlay();
+		if (deps.isSelectedDispatchDetailOpen?.() === true) deps.toggleSelectedDispatchDetail();
+		else deps.closeOverlay();
 		return true;
 	}
 	if (isKeyRelease(data)) return false;
