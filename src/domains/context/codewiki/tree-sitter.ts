@@ -6,6 +6,13 @@ import TreeSitter, {
 } from "@vscode/tree-sitter-wasm";
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import { resolvePackageRoot } from "../../../core/package-root.js";
+import { loadPinnedAsset } from "../../../core/pinned-asset.js";
+import {
+	fetchedGrammarAsset,
+	fetchedGrammarForFile,
+	GRAMMAR_FETCH_RETRY_MS,
+	GRAMMAR_FETCH_TIMEOUT_MS,
+} from "./fetched-grammars.js";
 import { TREE_SITTER_RUNTIME_WASM } from "./grammar-assets.js";
 import type {
 	CodewikiLanguage,
@@ -18,10 +25,10 @@ import type {
 const { Language, Parser } = TreeSitter;
 
 /**
- * Every wasm file lives in the package's own dist/assets/grammars/, vendored
- * there at build from the list in grammar-assets.ts. Nothing resolves through
- * node_modules: the grammar packages are devDependencies and are not installed
- * with the package.
+ * Every vendored wasm file lives in the package's own dist/assets/grammars/,
+ * copied there at build from the list in grammar-assets.ts. Nothing resolves
+ * through node_modules: the grammar packages are devDependencies and are not
+ * installed with the package.
  */
 function grammarAssetPath(file: string): string {
 	return join(resolvePackageRoot(), "dist", "assets", "grammars", file);
@@ -85,6 +92,26 @@ const FUNCTION_LIKE_NODE_TYPES = new Set([
 ]);
 
 const PY_SCOPE_NODE_TYPES = new Set(["function_definition", "class_definition"]);
+
+/**
+ * The grammar's wasm: vendored ones load from the package by path, fetched ones
+ * from the verified cache bytes. Null means the grammar is unavailable now and
+ * its files take the regex fallback; code_nav says so (fetched-grammars.ts).
+ */
+async function grammarSource(file: string): Promise<string | Uint8Array | null> {
+	const fetched = fetchedGrammarForFile(file);
+	if (!fetched) return grammarAssetPath(file);
+	try {
+		return await loadPinnedAsset(fetchedGrammarAsset(fetched), {
+			timeoutMs: GRAMMAR_FETCH_TIMEOUT_MS,
+			retryAfterMs: GRAMMAR_FETCH_RETRY_MS,
+		});
+	} catch {
+		// Offline or blocked: the regex extractor indexes these files instead, and
+		// code_nav reports the missing grammar with the recorded reason.
+		return null;
+	}
+}
 
 let parserInit: Promise<void> | null = null;
 
@@ -748,10 +775,11 @@ export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> 
 		if (parsers.has(grammar)) return Promise.resolve();
 		let pending = loading.get(grammar);
 		if (!pending) {
-			pending = Language.load(grammarAssetPath(WASM_BY_GRAMMAR[grammar]))
-				.then((language) => {
+			pending = grammarSource(WASM_BY_GRAMMAR[grammar])
+				.then(async (source) => {
+					if (source === null) return;
 					const parser = new Parser();
-					parser.setLanguage(language);
+					parser.setLanguage(await Language.load(source));
 					parsers.set(grammar, parser);
 				})
 				.finally(() => {
