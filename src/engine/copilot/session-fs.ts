@@ -1,37 +1,49 @@
 /**
- * Where the Copilot runtime keeps a session's own records (events, workspace, checkpoints).
+ * The session filesystem the Copilot runtime sees, under the SDK's `sessionFs` contract.
  *
  * The SDK's `mode: "empty"` requires an explicit persistence location: `baseDirectory` or `sessionFs`.
  * `baseDirectory` would set `COPILOT_HOME` for the runtime, which is also where the official
- * `copilot login` keeps its sign-in, so it would hide the very login Clio is meant to use. `sessionFs`
- * redirects only session-scoped files, so the login stays where `copilot login` put it while session
- * records land under Clio's own cache root: `<cache>/copilot-sdk/sessions/<session id>/`, per OS user,
- * removed when Clio closes the conversation.
+ * `copilot login` keeps its sign-in, so it would hide the very login Clio is meant to use.
  *
- * Every runtime path is treated as a virtual POSIX path inside that one directory: `..` cannot climb out,
- * and an absolute path such as the project directory maps to a mirror inside it, never the real file.
+ * With `sessionFs`, the runtime routes every session file operation through this provider: its own records
+ * under `sessionStatePath`, and the workspace namespace rooted at `initialCwd` (the runtime stats the
+ * session's working directory there while creating a session). Paths keep their real absolute form; the
+ * provider decides by where they point:
+ *
+ * - Session state: `sessionStatePath` is `<cache>/copilot-sdk/state`, which nothing on disk uses. A path
+ *   under it lands in this session's own directory, `<cache>/copilot-sdk/sessions/<session id>/`, per OS
+ *   user, removed when Clio closes the conversation; `..` cannot leave it.
+ * - Everything else is the user's real filesystem, served read-only. Copilot's built-in tools are disabled
+ *   and every change to the workspace goes through Clio's own tools and permission policy, so a write,
+ *   mkdir, rename or rm there is refused.
  */
 
 import { rmSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import type { SessionFsConfig, SessionFsProvider } from "@github/copilot-sdk";
 import { clioCacheDir } from "../../core/xdg.js";
 
-/** The virtual directory, inside each session's filesystem, that holds its records. */
-const SESSION_STATE_PATH = "/copilot-session";
-
-function copilotSessionsRoot(): string {
-	return join(clioCacheDir(), "copilot-sdk", "sessions");
+function copilotSdkCacheDir(): string {
+	return join(clioCacheDir(), "copilot-sdk");
 }
 
-export function copilotSessionFsConfig(): SessionFsConfig {
-	return { initialCwd: "/", sessionStatePath: SESSION_STATE_PATH, conventions: "posix" };
+/** Where each session's state appears in the runtime's namespace; mapped per session, never written as is. */
+function sessionStateBase(): string {
+	return join(copilotSdkCacheDir(), "state");
+}
+
+export function copilotSessionFsConfig(cwd = process.cwd()): SessionFsConfig {
+	return {
+		initialCwd: resolvePath(cwd),
+		sessionStatePath: sessionStateBase(),
+		conventions: process.platform === "win32" ? "windows" : "posix",
+	};
 }
 
 function sessionRoot(sessionId: string): string {
 	if (!/^[A-Za-z0-9_-]{1,128}$/u.test(sessionId)) throw new Error(`invalid Copilot session id: ${sessionId}`);
-	return join(copilotSessionsRoot(), sessionId);
+	return join(copilotSdkCacheDir(), "sessions", sessionId);
 }
 
 /** At process exit only synchronous work runs; this removes what a still-open conversation wrote. */
@@ -44,29 +56,45 @@ export async function removeCopilotSessionRecords(sessionId: string): Promise<vo
 	await rm(sessionRoot(sessionId), { recursive: true, force: true });
 }
 
+function refuseWorkspaceWrite(path: string): never {
+	throw new Error(
+		`Clio does not let the Copilot runtime change ${path}; workspace changes go through Clio's own tools.`,
+	);
+}
+
 export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 	const root = sessionRoot(sessionId);
-	const resolve = (path: string): string => {
-		// normalize("/" + p) cannot leave "/", so the joined path stays under root.
-		const relative = posix.normalize(`/${path.replaceAll("\\", "/")}`).slice(1);
-		return relative.length === 0 ? root : join(root, ...relative.split("/"));
+	const base = sessionStateBase();
+	/** The on-disk path for a runtime path, and whether it is this session's own state. */
+	const locate = (path: string): { real: string; state: boolean } => {
+		const absolute = resolvePath(path);
+		const inside = relative(base, absolute);
+		if (inside === "") return { real: root, state: true };
+		if (!inside.startsWith("..") && !isAbsolute(inside)) return { real: join(root, inside), state: true };
+		return { real: absolute, state: false };
 	};
-	const parentOf = async (path: string) => {
-		await mkdir(join(resolve(path), ".."), { recursive: true });
+	const writable = (path: string): string => {
+		const target = locate(path);
+		return target.state ? target.real : refuseWorkspaceWrite(path);
+	};
+	const parentOf = async (real: string) => {
+		await mkdir(dirname(real), { recursive: true });
 	};
 	return {
-		readFile: (path) => readFile(resolve(path), "utf8"),
+		readFile: (path) => readFile(locate(path).real, "utf8"),
 		async writeFile(path, content, mode) {
-			await parentOf(path);
-			await writeFile(resolve(path), content, mode !== undefined ? { mode } : {});
+			const real = writable(path);
+			await parentOf(real);
+			await writeFile(real, content, mode !== undefined ? { mode } : {});
 		},
 		async appendFile(path, content, mode) {
-			await parentOf(path);
-			await appendFile(resolve(path), content, mode !== undefined ? { mode } : {});
+			const real = writable(path);
+			await parentOf(real);
+			await appendFile(real, content, mode !== undefined ? { mode } : {});
 		},
 		async exists(path) {
 			try {
-				await stat(resolve(path));
+				await stat(locate(path).real);
 				return true;
 			} catch {
 				// Any stat failure reads as absent, which is what the runtime asks.
@@ -74,7 +102,7 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 			}
 		},
 		async stat(path) {
-			const info = await stat(resolve(path));
+			const info = await stat(locate(path).real);
 			return {
 				isFile: info.isFile(),
 				isDirectory: info.isDirectory(),
@@ -84,19 +112,21 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 			};
 		},
 		async mkdir(path, recursive, mode) {
-			await mkdir(resolve(path), { recursive, ...(mode !== undefined ? { mode } : {}) });
+			await mkdir(writable(path), { recursive, ...(mode !== undefined ? { mode } : {}) });
 		},
-		readdir: (path) => readdir(resolve(path)),
+		readdir: (path) => readdir(locate(path).real),
 		async readdirWithTypes(path) {
-			const entries = await readdir(resolve(path), { withFileTypes: true });
+			const entries = await readdir(locate(path).real, { withFileTypes: true });
 			return entries.map((entry) => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
 		},
 		async rm(path, recursive, force) {
-			await rm(resolve(path), { recursive, force });
+			await rm(writable(path), { recursive, force });
 		},
 		async rename(src, dest) {
-			await parentOf(dest);
-			await rename(resolve(src), resolve(dest));
+			const from = writable(src);
+			const to = writable(dest);
+			await parentOf(to);
+			await rename(from, to);
 		},
 	};
 }

@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -103,6 +103,16 @@ export class CopilotClient {
 		if (this.options.sessionFs) {
 			if (!config.createSessionFsProvider) throw new Error("createSessionFsProvider is required in session config when sessionFs is enabled in client options.");
 			session.fs = config.createSessionFsProvider(session);
+			// As the 1.0.26 runtime does during session.create: the working directory, an absolute path in the
+			// provider's namespace (rooted at initialCwd), is stat'ed through sessionFs and must be a directory.
+			const cwd = config.workingDirectory ?? this.options.sessionFs.initialCwd;
+			let info;
+			try {
+				info = await session.fs.stat(cwd);
+			} catch (error) {
+				throw new Error("Request session.create failed with message: session construction failed: " + error.message);
+			}
+			if (!info.isDirectory) throw new Error("session construction failed: " + cwd + " is not a directory");
 			await session.fs.mkdir(this.options.sessionFs.sessionStatePath, true);
 			await session.fs.appendFile(this.options.sessionFs.sessionStatePath + "/events.jsonl", "{}\n");
 			session.recordsId = config.sessionId;
@@ -361,12 +371,45 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 	ok(session);
 	// Session records live under Clio's cache root, never under COPILOT_HOME, and leave with the session.
 	const records = join(resolveClioDirs().cache, "copilot-sdk", "sessions", session.sessionId);
-	ok(existsSync(join(records, "copilot-session", "events.jsonl")));
+	ok(existsSync(join(records, "events.jsonl")));
 	disposeCopilotConversations("side-session");
 	await new Promise((resolve) => setTimeout(resolve, 20));
 	strictEqual(existsSync(records), false);
 	ok(fake().rejected.some((reason) => /Clio session ended/.test(reason)));
 	ok(fake().disconnected.includes(session.sessionId));
+});
+
+test("sessionFs keeps session state in Clio's cache and serves the workspace read-only at its real paths", async () => {
+	const config = fake().clients[0]?.sessionFs as { initialCwd: string; sessionStatePath: string };
+	strictEqual(config.initialCwd, process.cwd());
+	const session = fake().sessions.at(-1) as FakeSession & {
+		fs: {
+			stat(path: string): Promise<{ isFile: boolean }>;
+			readFile(path: string): Promise<string>;
+			writeFile(path: string, content: string): Promise<void>;
+			mkdir(path: string, recursive: boolean): Promise<void>;
+			rm(path: string, recursive: boolean, force: boolean): Promise<void>;
+		};
+	};
+	const workspaceFile = join(process.cwd(), "package.json");
+	ok((await session.fs.stat(workspaceFile)).isFile);
+	match(await session.fs.readFile(workspaceFile), /clio-coder/);
+	for (const write of [
+		() => session.fs.writeFile(join(process.cwd(), "copilot-wrote.txt"), "x"),
+		() => session.fs.mkdir(join(process.cwd(), "copilot-dir"), true),
+		() => session.fs.rm(workspaceFile, false, false),
+		// ".." out of the state path is a workspace path, so it is refused too.
+		() => session.fs.writeFile(join(config.sessionStatePath, "a", "..", "..", "escape.txt"), "x"),
+	]) {
+		await rejects(write(), /Clio does not let the Copilot runtime change/);
+	}
+	strictEqual(existsSync(join(process.cwd(), "copilot-wrote.txt")), false);
+	await session.fs.writeFile(join(config.sessionStatePath, "note.txt"), "state");
+	strictEqual(
+		readFileSync(join(resolveClioDirs().cache, "copilot-sdk", "sessions", session.sessionId, "note.txt"), "utf8"),
+		"state",
+	);
+	strictEqual(existsSync(config.sessionStatePath), false, "the state path itself is never written as is");
 });
 
 test("a copilot-sdk target admits one request at a time unless its capacity says more", () => {
