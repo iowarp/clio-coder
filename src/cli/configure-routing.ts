@@ -6,6 +6,7 @@ import {
 } from "../core/config.js";
 import { isOrchestratorEligibleRuntime } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import type { ConfigurePrompts } from "./configure-prompts.js";
 import { inventoryNote, resolveSupportedWireModels } from "./configure-target.js";
 
@@ -82,7 +83,9 @@ export async function assignTarget(io: RouteSelectionIo, role: "chat" | "fleet" 
 	}
 	const runtime = getRuntimeRegistry().get(target.runtime);
 	if (!runtime) {
-		io.warn(`Connection ${target.id} uses unknown runtime ${target.runtime}; repair it in Connections first.`);
+		io.warn(
+			`Connection ${target.id} cannot be routed: ${runtimeNotRegistered(target.runtime)}; repair it in Connections first.`,
+		);
 		return;
 	}
 	io.out.write(`  Checking ${target.id} for selectable models…\n`);

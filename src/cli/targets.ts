@@ -1209,7 +1209,7 @@ function formatNotes(status: TargetStatus): string {
 	if (status.runtime?.auth === "oauth") parts.push("oauth");
 	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
 	if (status.capabilities.contextWindow > 0) parts.push(formatContextWindow(status));
-	if (!status.available && status.reason) parts.push(status.reason);
+	if (!status.available && status.reason && status.reason !== diagnostic) parts.push(status.reason);
 	const residency = residentModelsSummary(status.discoveredModelStates);
 	if (residency) parts.push(residency);
 	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
@@ -1229,7 +1229,7 @@ function formatToolProbe(probe: TargetStatus["toolProbe"]): string | null {
 }
 
 function degradedHealthDiagnostic(status: TargetStatus): string | null {
-	if (!status.runtime) return runtimeNotRegistered(status.target.runtime);
+	if (!status.runtime) return status.reason;
 	return status.health.status === "degraded" && status.health.lastError ? status.health.lastError : null;
 }
 

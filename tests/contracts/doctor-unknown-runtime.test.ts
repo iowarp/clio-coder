@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { classifyDefaultTarget, describeVerdict } from "../../src/cli/default-target.js";
 import { readSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { runDoctorModelChecks } from "../../src/domains/lifecycle/doctor.js";
+import { createProvidersBundle } from "../../src/domains/providers/extension.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("doctor reports a target using a retired runtime and names its replacement", async (t) => {
@@ -32,6 +35,20 @@ test("startup names the replacement when the chat route sits on a retired runtim
 	);
 
 	match(describeVerdict(classifyDefaultTarget(readSettings())), /'ollama-native'.*removed in 0\.7\.0.*runtime: ollama/u);
+});
+
+// `targets --json` serializes this reason, so it carries the same advice as the table.
+test("a target on a retired runtime carries the replacement in its provider status reason", async (t) => {
+	const home = await isolateClioEnv("clio-retired-runtime-status-");
+	t.after(() => home.restore());
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "blade", runtime: "lmstudio-native", defaultModel: "local-model" }];
+	const bundle = createProvidersBundle(dispatchStubContext({ settings }));
+	await bundle.extension.start();
+	t.after(() => bundle.extension.stop?.());
+	const status = bundle.contract.list().find((entry) => entry.target.id === "blade");
+	strictEqual(status?.available, false);
+	match(status?.reason ?? "", /'lmstudio-native' was removed in 0\.7\.0.*runtime: lmstudio`/u);
 });
 
 test("doctor proposes the provider catalog model and changes it only after confirmation", async (t) => {
