@@ -902,15 +902,25 @@ function renderNoticeRow(
 	const actions = [more, dismiss].filter(Boolean).join(" · ");
 	const actionText = actions ? theme.fg("keyboardHint", ` ${actions}`) : "";
 	// A narrow row keeps the notice itself; the keys only ride along when the notice keeps enough room to read.
-	if (!actionText || width - visibleWidth(actionText) < 24) return fitNoticeLine(theme, message, width);
+	const fitted = (cells: number): string => theme.fg(notificationToken(notice.level), fitNoticeWords(body, cells));
+	if (!actionText || width - visibleWidth(actionText) < 24) return fitted(width);
 	const room = width - visibleWidth(actionText);
-	const shown = visibleWidth(body) <= room ? message : fitNoticeLine(theme, message, room);
+	const shown = visibleWidth(body) <= room ? message : fitted(room);
 	const gap = " ".repeat(Math.max(0, room - visibleWidth(shown)));
 	return `${shown}${gap}${actionText}`;
 }
 
-function fitNoticeLine(theme: ClioTheme, text: string, width: number): string {
-	return theme.base("counter", truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, true));
+/**
+ * A notice cut to its row at a word boundary: `the whole prompt is r…` left a fragment where the next word was. A
+ * cut that would lose more than a third of the row to reach a space keeps the plain cut.
+ */
+function fitNoticeWords(text: string, width: number): string {
+	const room = Math.max(1, width);
+	if (visibleWidth(text) <= room) return text;
+	const cut = truncateToWidth(text, room, "", false);
+	const space = cut.lastIndexOf(" ");
+	const whole = space >= Math.ceil(room * 0.66) ? cut.slice(0, space).replace(/[\s·:;,]+$/u, "") : null;
+	return whole === null ? truncateToWidth(text, room, GLYPH.ellipsis, false) : `${whole}${GLYPH.ellipsis}`;
 }
 
 const DASHBOARD_ROOMY_ROWS = 30;
