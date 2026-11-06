@@ -10979,9 +10979,11 @@ export function createDispatchBundle(
 				...(worktreeRoot !== undefined && isAbsolute(worktreeRoot) ? { worktreeRoot } : {}),
 			};
 		},
-		listRuns(status) {
-			const l = requireLedger();
-			return status ? l.list({ status }) : l.list();
+		listRuns(status, where) {
+			return requireLedger().list({
+				...(status ? { status } : {}),
+				...(where ? { where } : {}),
+			});
 		},
 		subscribeChanges(listener) {
 			const unsubscribes = [
