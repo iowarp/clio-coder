@@ -87,7 +87,11 @@ import { yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
-import { createClaimCaptureRegistration, createClaimsDeliveryRegistrations } from "../domains/claims/index.js";
+import {
+	createClaimCaptureRegistration,
+	createClaimsDeliveryRegistrations,
+	createHypothesisCaptureRegistration,
+} from "../domains/claims/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule, diffSettings } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
@@ -4448,6 +4452,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// checks reach the log through host verification instead. The verify tool judges against process.cwd(), so the claim
 	// is scoped to the project that cwd lies in.
 	middleware.registerHook(createClaimCaptureRegistration({ cwd: () => process.cwd() }));
+	// A hypothesis slate the main session writes enters the same log at proposed; the check its criterion names moves it.
+	middleware.registerHook(createHypothesisCaptureRegistration({ cwd: () => process.cwd() }));
 	// Contested and superseded claims reach the main agent in the message tail when the task touches their check (#406).
 	// Registered after capture, so the awaited verify delivery reads the claim and edges that call just appended.
 	for (const registration of createClaimsDeliveryRegistrations({ cwd: () => process.cwd() }))

@@ -266,6 +266,8 @@ export interface SealedHostCheck {
 	check: string;
 	argv: ReadonlyArray<string>;
 	memo: boolean;
+	/** The check's exit code; a judged check that failed its judgement after a clean exit reads 1. */
+	exitCode: number;
 	report?: { kind: string; passed: boolean };
 	evidenceRunId?: string;
 	tree?: { head: string; fingerprint: string };

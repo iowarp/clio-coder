@@ -25,13 +25,31 @@ export {
 	overturnedAgreements,
 	supersedeConditions,
 } from "./edges.js";
+export type { CheckRun, HypothesisDraft, HypothesisState } from "./hypotheses.js";
+export {
+	deriveHypothesisRecords,
+	deriveHypothesisTests,
+	hypothesesFromSlate,
+	hypothesisStatuses,
+	latestHypotheses,
+} from "./hypotheses.js";
 export {
 	CLAIM_CAPTURE_REGISTRATION_ID,
 	createClaimCaptureRegistration,
+	createHypothesisCaptureRegistration,
+	HYPOTHESIS_CAPTURE_REGISTRATION_ID,
 	recordHostVerificationClaims,
 } from "./record.js";
 export type { ClaimsLogRead } from "./store.js";
-export { appendClaimRegressions, appendClaims, claimsLogPath, claimsProjectRoot, readClaims } from "./store.js";
+export {
+	appendClaimRegressions,
+	appendClaims,
+	appendHypotheses,
+	appendHypothesisTests,
+	claimsLogPath,
+	claimsProjectRoot,
+	readClaims,
+} from "./store.js";
 export type {
 	ClaimConditions,
 	ClaimDigestRef,
@@ -47,7 +65,12 @@ export type {
 	ClaimSource,
 	ClaimStatus,
 	ClaimVerdict,
+	HypothesisRecord,
+	HypothesisRecordV1,
+	HypothesisStatus,
+	HypothesisTestRecord,
+	HypothesisTestRecordV1,
 	NumericClaimConditions,
 	ReproduceClaimConditions,
 } from "./types.js";
-export { CLAIM_KINDS, CLAIM_RECORD_VERSION, NUMERIC_CLAIM_KEY_LIMIT } from "./types.js";
+export { CLAIM_KINDS, CLAIM_RECORD_VERSION, HYPOTHESIS_SLATE_SCHEMA, NUMERIC_CLAIM_KEY_LIMIT } from "./types.js";

@@ -173,3 +173,68 @@ export type ClaimRegressionRecord = ClaimRegressionRecordV1;
  * `contested` while a claim with equal pinned conditions disagrees with it, else `standing`.
  */
 export type ClaimStatus = "standing" | "contested" | "superseded";
+
+/**
+ * The schema a hypothesis-workflow slate declares (`library/plugins/literature/skills/hypothesis-workflow`). The slate
+ * holds every hypothesis at `proposed`; this ledger is where a hypothesis moves to tested, supported or refuted.
+ */
+export const HYPOTHESIS_SLATE_SCHEMA = "clio-coder.hypothesis-slate.v1";
+
+/**
+ * Where a hypothesis stands: `proposed` until the check its success criterion names runs, `tested` once it ran without
+ * a judged claim (a command check, a crash, a timeout, a payload that could not be judged), then `supported` or
+ * `refuted` by the latest claim that check recorded for it. A judged claim is the only thing that supports or refutes.
+ */
+export type HypothesisStatus = "proposed" | "tested" | "supported" | "refuted";
+
+/**
+ * One hypothesis of a slate as the main session wrote it (#406). Unlike a claim this is model-authored text, so it is
+ * never `grounded`: it records what was proposed and the check that would judge it, nothing more. A later version of
+ * the same slate entry with changed content is a new record that `revises` the earlier one; neither is rewritten.
+ */
+export interface HypothesisRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "hypothesis";
+	/** SHA-256 of the record's canonical JSON without `id`. */
+	id: string;
+	at: string;
+	project: string;
+	/** Project-relative path of the slate, else absolute. */
+	slate: string;
+	/** The slate's hypothesis id, such as `H1`. */
+	hypothesis: string;
+	statement: string;
+	prediction: string;
+	/** The success criterion as the slate drafted it; `check` is its `verifyId`, the declared check that judges it. */
+	criterion: { kind: string; check?: string; statement?: string };
+	/** Digest of slate path, hypothesis id, statement, prediction and criterion: the same entry rewritten is one subject. */
+	subject: string;
+	/** The earlier record of the same slate entry this one replaces. */
+	revises?: string;
+	source: { channel: "slate"; sessionId: string | null; toolCallId: string | null; slateSha256: string };
+	evidence: "proposed";
+	flagged?: "instruction-markers";
+}
+
+/**
+ * A run of the check a hypothesis names (#406). `claim` is set exactly when the run was judged into a claim, and then
+ * `outcome` follows its verdict: `agrees` supports, `disagrees` refutes. A run with no claim is `tested`.
+ */
+export interface HypothesisTestRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "hypothesis-test";
+	id: string;
+	at: string;
+	project: string;
+	/** The hypothesis record tested: the latest revision of its slate entry when the check ran. */
+	hypothesis: string;
+	check: string;
+	outcome: Exclude<HypothesisStatus, "proposed">;
+	claim?: string;
+	/** How the run ended, as the channel recorded it (`succeeded`, `failed`, `timed-out`, ...). */
+	execution: string;
+	source: ClaimSource;
+}
+
+export type HypothesisRecord = HypothesisRecordV1;
+export type HypothesisTestRecord = HypothesisTestRecordV1;

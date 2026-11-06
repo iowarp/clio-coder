@@ -1,5 +1,5 @@
 import { strict as assert, match } from "node:assert";
-import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
+import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -9,8 +9,11 @@ import {
 	claimsLogPath,
 	claimsProjectRoot,
 	contradictionConditions,
+	createClaimCaptureRegistration,
 	createClaimsDeliveryRegistrations,
+	createHypothesisCaptureRegistration,
 	deriveClaimEdges,
+	hypothesisStatuses,
 	overturnedAgreements,
 	readClaims,
 } from "../../src/domains/claims/index.js";
@@ -151,6 +154,60 @@ describe("claims ledger (#406)", () => {
 			match(first[0]?.kind === "inject_reminder" ? first[0].message : "", /^\[Claims\] Check 'stats'.*Contested/u);
 			// The same state is not offered again in the session.
 			assert.equal(turn("rerun stats please").length, 0);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("moves a slate hypothesis from proposed only on its named check: tested, supported, refuted", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const slate = {
+				schema: "clio-coder.hypothesis-slate.v1",
+				question: { text: "q" },
+				hypotheses: [
+					{
+						id: "H1",
+						status: "proposed",
+						statement: "std is stable",
+						prediction: "std matches the reference",
+						experiment: { successCriterion: { kind: "numeric-compare", verifyId: "stats" } },
+					},
+				],
+			};
+			mkdirSync(join(repo, "research"), { recursive: true });
+			writeFileSync(join(repo, "research", "h.json"), JSON.stringify(slate));
+			const capture = createHypothesisCaptureRegistration({ cwd: () => repo });
+			const wrote = { hook: "after_tool", toolName: "write", toolArgs: { path: "research/h.json" } } as const;
+			await capture.evaluateAsync?.(wrote);
+			// The same slate written again records nothing new.
+			await capture.evaluateAsync?.(wrote);
+			const status = () => {
+				const read = readClaims(project);
+				assert.equal(read.hypotheses.length, 1);
+				const [hypothesis] = read.hypotheses;
+				return hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(hypothesis?.id ?? "")?.status;
+			};
+			assert.equal(status(), "proposed");
+			const verify = createClaimCaptureRegistration({ cwd: () => repo });
+			const ran = (details: Record<string, unknown>) =>
+				verify.evaluateAsync?.({ hook: "after_tool", toolName: "verify", sessionId: "s1", toolResultDetails: details });
+			await ran(numericDetails(false, "not-run", "timed-out"));
+			assert.equal(status(), "tested");
+			await ran({ ...numericDetails(true, "passed"), checkout: { commit: "c".repeat(40), trackedTreeClean: true } });
+			assert.equal(status(), "supported");
+			await ran({ ...numericDetails(false, "failed"), checkout: { commit: "c".repeat(40), trackedTreeClean: false } });
+			assert.equal(status(), "refuted");
+			// A test record that says supported without a claim behind it is not this ledger's and is not read.
+			const [test] = readClaims(project).hypothesisTests;
+			assert.ok(test);
+			const { claim: _claim, ...unbacked } = { ...test, outcome: "supported" as const };
+			appendFileSync(claimsLogPath(project), `${JSON.stringify(unbacked)}\n`);
+			assert.equal(readClaims(project).hypothesisTests.length, 3);
+			assert.equal(status(), "refuted");
 		} finally {
 			env.restore();
 		}

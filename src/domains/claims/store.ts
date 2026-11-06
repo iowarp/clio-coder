@@ -8,11 +8,20 @@ import { clioStateDir } from "../../core/xdg.js";
 import { claimRecordId } from "./capture.js";
 import { claimLogRecordId, deriveClaimEdges } from "./edges.js";
 import {
+	type CheckRun,
+	deriveHypothesisRecords,
+	deriveHypothesisTests,
+	type HypothesisDraft,
+	hypothesesNameCheck,
+} from "./hypotheses.js";
+import {
 	CLAIM_KINDS,
 	CLAIM_RECORD_VERSION,
 	type ClaimEdgeRecord,
 	type ClaimRecord,
 	type ClaimRegressionRecord,
+	type HypothesisRecord,
+	type HypothesisTestRecord,
 } from "./types.js";
 
 /**
@@ -27,8 +36,9 @@ import {
  * whole-file `safeResourceWrite` per claim would make every capture cost the size of the log; an append cannot lose an
  * earlier line, and a line torn by a crash is skipped on read and closed off by the next append.
  *
- * Three line types share the log: `claim`, `edge` and `regression`. Edges are derived from the log as it stands under
- * the same lock that appends the claim, so two sessions capturing at once derive against each other's claims.
+ * Five line types share the log: `claim`, `edge`, `regression`, `hypothesis` and `hypothesis-test`. Edges, hypothesis
+ * revisions and hypothesis tests are derived from the log as it stands under the same lock that appends them, so two
+ * sessions capturing at once derive against each other's records.
  */
 
 export function claimsProjectRoot(cwd: string): string {
@@ -102,12 +112,52 @@ export async function appendClaimRegressions(records: ReadonlyArray<ClaimRegress
 		await appendLines(claimsLogPath(project), () => group.map((record) => JSON.stringify(record)));
 }
 
+/**
+ * Append the hypotheses one slate write holds (#406): an unchanged entry adds nothing, a changed one adds a record
+ * revising the latest earlier one. Returns the records written.
+ */
+export async function appendHypotheses(
+	project: string,
+	drafts: ReadonlyArray<HypothesisDraft>,
+): Promise<HypothesisRecord[]> {
+	const written: HypothesisRecord[] = [];
+	if (drafts.length === 0) return written;
+	await appendLines(claimsLogPath(project), (current) => {
+		const added = deriveHypothesisRecords(parseClaimsLog(current, project).hypotheses, drafts);
+		written.push(...added);
+		return added.map((record) => JSON.stringify(record));
+	});
+	return written;
+}
+
+/**
+ * Append a test record for each current hypothesis whose criterion names a check that ran (#406). The log is read
+ * once without the lock first, so a check no hypothesis names never takes it. Returns the records written.
+ */
+export async function appendHypothesisTests(
+	project: string,
+	runs: ReadonlyArray<CheckRun>,
+): Promise<HypothesisTestRecord[]> {
+	const written: HypothesisTestRecord[] = [];
+	if (runs.length === 0) return written;
+	const checks = runs.map((run) => run.check);
+	if (!hypothesesNameCheck(readClaims(project).hypotheses, checks)) return written;
+	await appendLines(claimsLogPath(project), (current) => {
+		const added = deriveHypothesisTests(parseClaimsLog(current, project).hypotheses, runs);
+		written.push(...added);
+		return added.map((record) => JSON.stringify(record));
+	});
+	return written;
+}
+
 export interface ClaimsLogRead {
 	project: string;
 	path: string;
 	records: ClaimRecord[];
 	edges: ClaimEdgeRecord[];
 	regressions: ClaimRegressionRecord[];
+	hypotheses: HypothesisRecord[];
+	hypothesisTests: HypothesisTestRecord[];
 	/** Lines that are not a JSON object, such as a line torn by a crash. */
 	unreadable: number;
 	/** Records whose id does not match their content, or that name another project: edited after capture. */
@@ -162,6 +212,43 @@ function isRegressionRecord(value: Record<string, unknown>): boolean {
 	);
 }
 
+function isHypothesisRecord(value: Record<string, unknown>): boolean {
+	const criterion = value.criterion as Record<string, unknown> | null | undefined;
+	return (
+		value.type === "hypothesis" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		typeof value.slate === "string" &&
+		typeof value.hypothesis === "string" &&
+		typeof value.statement === "string" &&
+		typeof value.prediction === "string" &&
+		typeof value.subject === "string" &&
+		value.evidence === "proposed" &&
+		typeof criterion === "object" &&
+		criterion !== null &&
+		typeof criterion.kind === "string" &&
+		typeof value.source === "object" &&
+		value.source !== null
+	);
+}
+
+function isHypothesisTestRecord(value: Record<string, unknown>): boolean {
+	return (
+		value.type === "hypothesis-test" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		typeof value.hypothesis === "string" &&
+		typeof value.check === "string" &&
+		(value.outcome === "tested" || value.outcome === "supported" || value.outcome === "refuted") &&
+		// Only a judged claim supports or refutes; a record saying otherwise was not written by this ledger.
+		(value.outcome === "tested") === (value.claim === undefined) &&
+		(value.claim === undefined || typeof value.claim === "string") &&
+		typeof value.execution === "string" &&
+		typeof value.source === "object" &&
+		value.source !== null
+	);
+}
+
 function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 	const read: ClaimsLogRead = {
 		project: projectRoot,
@@ -169,6 +256,8 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		records: [],
 		edges: [],
 		regressions: [],
+		hypotheses: [],
+		hypothesisTests: [],
 		unreadable: 0,
 		mismatched: 0,
 		unknownVersion: 0,
@@ -201,6 +290,12 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
 			else if (record.type === "edge") read.edges.push(record as unknown as ClaimEdgeRecord);
 			else read.regressions.push(record as unknown as ClaimRegressionRecord);
+			continue;
+		}
+		if (isHypothesisRecord(record) || isHypothesisTestRecord(record)) {
+			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
+			else if (record.type === "hypothesis") read.hypotheses.push(record as unknown as HypothesisRecord);
+			else read.hypothesisTests.push(record as unknown as HypothesisTestRecord);
 			continue;
 		}
 		read.unreadable += 1;

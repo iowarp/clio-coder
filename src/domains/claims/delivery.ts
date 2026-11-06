@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
+import { hypothesisStatuses, latestHypotheses } from "./hypotheses.js";
 import { type ClaimsLogRead, claimsLogPath, claimsProjectRoot, readClaims } from "./store.js";
 import type { ClaimEdgeRecord, ClaimRecord, ClaimStatus } from "./types.js";
 
@@ -17,6 +18,8 @@ import type { ClaimEdgeRecord, ClaimRecord, ClaimStatus } from "./types.js";
  * whole token in the user's task text, a `verify` call naming the check, or a read, edit or write of a path the check's
  * keys or command name. Each check's state is offered at most once per session and again only when that state changes.
  * Workers get none: only the main session registers these hooks, and the dispatch contract carries no claims.
+ * A verify call that ran the check a recorded hypothesis names also gets where that hypothesis now stands, once per
+ * deciding test, so the agent reports the ledger's status instead of one it wrote itself.
  */
 
 export const CLAIMS_DELIVERY_REGISTRATION_ID = "observer.claims-delivery";
@@ -160,6 +163,34 @@ export function checksTouchingPath(
 
 const PATH_TOOLS: ReadonlyArray<string> = [ToolNames.Read, ToolNames.Edit, ToolNames.Write];
 
+/** Hypotheses one verify note names at most; a slate drafts a check for its top three. */
+const HYPOTHESIS_NOTE_MAX = 3;
+
+/**
+ * Where each current hypothesis naming a check now stands, one line each, with the key of the test that decided it.
+ * The slate keeps `proposed`, so the note says the ledger holds the status and the slate is not to be edited for it.
+ */
+function hypothesisNotes(check: string, read: ClaimsLogRead): Array<{ state: string; message: string }> {
+	const states = hypothesisStatuses(read.hypotheses, read.hypothesisTests);
+	const notes: Array<{ state: string; message: string }> = [];
+	for (const hypothesis of latestHypotheses(read.hypotheses).values()) {
+		if (hypothesis.criterion.check !== check) continue;
+		const state = states.get(hypothesis.id);
+		if (state?.decidedBy === undefined) continue;
+		const test = state.decidedBy;
+		const why =
+			test.claim === undefined
+				? `the check ran (${test.execution}) without a judged claim, so nothing supports or refutes it yet`
+				: `claim ${short(test.claim)} ${test.outcome === "supported" ? "agrees" : "disagrees"} within the declared tolerance`;
+		notes.push({
+			state: `hypothesis\0${hypothesis.id}\0${test.id}`,
+			message: `Hypothesis ${hypothesis.hypothesis} of ${hypothesis.slate} (record ${short(hypothesis.id)}) is ${state.status} in the claims ledger: ${why}. The slate keeps status proposed; report this status from the ledger (clio-coder claims) and leave the slate as written.`,
+		});
+		if (notes.length >= HYPOTHESIS_NOTE_MAX) break;
+	}
+	return notes;
+}
+
 /**
  * The two delivery registrations. The sync one reads the task at turn_start and path-taking tool calls; the awaited
  * one follows a `verify` call after claim capture has appended its claim and edges, so a contradiction this call
@@ -268,6 +299,19 @@ export function createClaimsDeliveryRegistrations(options: {
 		return messages;
 	};
 
+	// Runs after `deliver`, which has already settled the session key and loaded this session's earlier offers.
+	const deliverHypotheses = (check: string): string[] => {
+		const project = claimsProjectRoot(options.cwd());
+		const read = load(project);
+		if (read === null || read.hypotheses.length === 0) return [];
+		const fresh = hypothesisNotes(check, read).filter((note) => !offered.has(note.state));
+		for (const note of fresh) offered.add(note.state);
+		const states = fresh.map((note) => note.state);
+		if (sessionKey === undefined) unrecorded.push(...states);
+		else record(project, states);
+		return fresh.map((note) => note.message);
+	};
+
 	const asNotes = (messages: string[]): MiddlewareEffect[] =>
 		messages.map((message) => ({ kind: "annotate_tool_result", severity: "info", message }));
 
@@ -311,7 +355,10 @@ export function createClaimsDeliveryRegistrations(options: {
 			async evaluateAsync(input: MiddlewareHookInput) {
 				const check = stringArg(input, "check");
 				if (input.toolName !== ToolNames.Verify || check === null) return [];
-				return asNotes(deliver(input, (read) => (read.records.some((claim) => claim.keys.check === check) ? [check] : [])));
+				const messages = deliver(input, (read) =>
+					read.records.some((claim) => claim.keys.check === check) ? [check] : [],
+				);
+				return asNotes([...messages, ...deliverHypotheses(check)]);
 			},
 		},
 	];
