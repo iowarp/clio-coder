@@ -215,7 +215,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// The finish decision is already in the evidence ledger. Surface the
 			// warning to the operator without posing it as a new user instruction
 			// or carrying stale advice into the next model turn.
-			deps.emitFooterNotice("warning", "change not verified; inspect the turn receipt", "finish.unverified");
+			deps.emitFooterNotice("warning", "Clio changed files but ran no check on them afterwards", "finish.unverified");
 			return;
 		}
 		if (

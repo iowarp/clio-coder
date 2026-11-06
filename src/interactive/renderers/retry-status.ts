@@ -117,8 +117,16 @@ export function renderRetryStatus(
 		const reason = presentProviderError(errorMessage, { remedyStated: true }).replace(AVAILABLE_DIAGNOSTIC, "").trim();
 		// A narrow row spends itself on the reason; the composer rail states the provider's wait alongside.
 		const { retryAfterMs: _asked, ...lean } = heading;
-		const row = renderNoticeRow(`${formatRetryStatus(width < 90 ? lean : heading)} · ${reason}`, "retry", width)[0] ?? "";
-		return [truncateToWidth(row, width, GLYPH.ellipsis)];
+		// Two rows at most, broken between facts: one row cut the reason mid-word (`HTTP 503; mock:`) at 60 columns (N3).
+		const head = formatRetryStatus(width < 90 ? lean : heading);
+		const whole = renderNoticeRow(`${head} · ${reason}`, "retry", width);
+		if (whole.length <= 2) return whole;
+		// Past two rows the reason keeps its first sentence; the rest is evidence /view already holds.
+		const first = reason.split(/(?<=\.)\s+/u)[0] ?? reason;
+		const rows = renderNoticeRow(`${head} · ${first}`, "retry", width);
+		if (rows.length <= 2) return rows;
+		const rest = rows.slice(1).map((row) => row.replace(/^ {2}/u, ""));
+		return [rows[0] ?? "", `  ${truncateToWidth(rest.join(" "), Math.max(1, width - 2), GLYPH.ellipsis)}`];
 	}
 	// One heading row leaves room for the failure itself, not just a View hint.
 	// The diagnosis hangs in the content column beneath the mark.

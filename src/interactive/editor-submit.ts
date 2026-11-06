@@ -22,6 +22,7 @@ import {
 	resolveSteerTarget,
 	steerDraftToken,
 } from "./editor-steer.js";
+import type { ShellSettlement } from "./footer/widgets.js";
 import type { ChatDraft } from "./interactive-slash-runtime.js";
 import { type BashTranscriptExecution, renderBashTranscriptExecution } from "./renderers/tool-execution.js";
 
@@ -112,7 +113,7 @@ export interface EditorSubmitSessionTranscript {
 export interface EditorSubmitDeps {
 	askEgg?: import("../tools/ask-user.js").AskUserHandler;
 	onLocalEntry?: (entry: SessionEntry) => void;
-	onLocalBashRunning?: (running: boolean, command?: string) => void;
+	onLocalBashRunning?: (running: boolean, command?: string, settled?: ShellSettlement) => void;
 	onLocalBashCancelling?: () => void;
 	/** A steer was handed to a worker's queue; the transcript tracks it from here. */
 	onSteerSent?: (run: RunningDispatchRef, text: string) => void;
@@ -314,7 +315,13 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				execution.error = msg;
 				deps.io.stderr(`[bash] ${msg}\n`);
 			} finally {
-				deps.onLocalBashRunning?.(false);
+				deps.onLocalBashRunning?.(false, parsed.command, {
+					command: parsed.command,
+					exitCode: typeof execution.exitCode === "number" ? execution.exitCode : null,
+					cancelled: execution.cancelled === true,
+					killed: execution.cancelled === true && /^\[command terminated by SIGKILL\]$/mu.test(execution.output),
+					error: execution.error !== undefined,
+				});
 				if (activeEditorBash === abort) {
 					activeEditorBash = null;
 					markEditorBashStop = null;

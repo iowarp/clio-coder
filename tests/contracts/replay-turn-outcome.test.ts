@@ -462,7 +462,7 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 	clock += 5_000;
 	live.applyEvent({ type: "agent_end", messages: [final] } as unknown as ChatLoopEvent);
 	const liveRows = plainRows(live);
-	assert.equal(liveRows.at(-1), "✓ Done · 5.0s · in 7 · out 5 · cold: prompt recompiled");
+	assert.equal(liveRows.at(-1), "✓ Done · 5.0s · in 7 · out 5 · prompt read again after a prompt rebuild");
 	// The reasons belong to that run alone: the next one, a queued follow-up
 	// here, starts warm.
 	live.applyEvent({ type: "agent_start", turnId: "u2" } as ChatLoopEvent);

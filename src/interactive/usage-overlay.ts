@@ -15,8 +15,16 @@ import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
-import { clioTheme, formatCompactMs, padAnsi, rule } from "./theme/index.js";
-import { usageCoverageSentence, usageFigure } from "./usage-words.js";
+import { clioTheme, formatCompactMs, padAnsi, positionRow, rule } from "./theme/index.js";
+import {
+	USAGE_NOT_MEASURED,
+	usageCoverage,
+	usageFigure,
+	usageGap,
+	usageLineNotes,
+	usageSaysNothing,
+	usageUnmeasured,
+} from "./usage-words.js";
 
 const DEFAULT_CONTENT_WIDTH = 104;
 
@@ -126,6 +134,22 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
 }
 
 /**
+ * What the session's token figures leave out, in the exit card's words. `1 of 2 calls had no usage data` counted a
+ * missing cache-read figure as a call and a never-sent call as a second one, beside a receipt that measured the turn.
+ */
+function sessionUsageNotes(view: TelemetryView): string[] {
+	const quantity = (metric: FactMetric) => view.quantity(factRef({ scope: "session", owner: view.sessionId, metric }));
+	const { notes } = usageLineNotes([
+		{ label: "in", quantity: quantity("input") },
+		{ label: "out", quantity: quantity("output") },
+		{ label: "cache read", quantity: quantity("cacheRead") },
+		{ label: "cache write", quantity: quantity("cacheWrite") },
+		{ label: "reasoning", quantity: quantity("reasoning") },
+	]);
+	return notes;
+}
+
+/**
  * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
  * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
  */
@@ -148,8 +172,12 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, conte
 			),
 			["model calls", byRole.total.calls.display],
 			["harness overhead", session.overhead.share.display],
-			...(hasUnknown(tokenCoverage) ? [["usage data", usageCoverageSentence(tokenCoverage) ?? ""] as const] : []),
-			...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
+			...(hasUnknown(tokenCoverage) && sessionUsageNotes(view).length > 0
+				? [["usage data", sessionUsageNotes(view).join(" · ")] as const]
+				: []),
+			...(nonZero(neverSent)
+				? [["never sent", `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"}`] as const]
+				: []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 			...tokenRows(view),
 			...(cached
@@ -219,6 +247,35 @@ export interface OpenUsageOverlayOptions {
 }
 
 /**
+ * The glance tab's Session row: how long the session has run, what is known, then what is not, said once. It used to
+ * read `not measured · tokens: not measured (18s)`, which named the gap twice and left the elapsed time unexplained.
+ * A total nothing measured, or only a lower bound of zero, is not a figure, so it joins the unknown clause with the
+ * calls that had no usage data, in the words every usage surface uses.
+ */
+function sessionValue(view: TelemetryView, elapsed: string | null): string {
+	const theme = clioTheme();
+	const totals = view.session().totals;
+	const tokenFigure = usageFigure(totals.tokens);
+	const tokensKnown = !usageSaysNothing(tokenFigure);
+	const costShown = contributed(totals.usd);
+	const costKnown = costShown && !usageUnmeasured(totals.usd);
+	const known = [costKnown ? totals.usd.display : null, tokensKnown ? tokensText(tokenFigure) : null].filter(
+		(part) => part !== null,
+	);
+	const unknown = [tokensKnown ? null : "tokens", costShown && !costKnown ? "cost" : null].filter(
+		(part) => part !== null,
+	);
+	const why = tokensKnown ? null : usageCoverage(usageGap(totals.tokens));
+	const gap =
+		unknown.length > 0 ? `${unknown.join(" and ")} ${USAGE_NOT_MEASURED}${why === null ? "" : ` (${why})`}` : null;
+	return [
+		...(elapsed === null ? [] : [theme.fg("annotation", elapsed)]),
+		...known.map((part) => theme.fg("counter", part)),
+		...(gap === null ? [] : [theme.fg("annotation", gap)]),
+	].join(theme.fg("annotation", " · "));
+}
+
+/**
  * The glance tab: the activity graph, then the four facts an operator asks for
  * before any table. Every row is `label  value` on one column so the eye reads
  * down the labels, the way the Copilot usage card does.
@@ -235,6 +292,12 @@ function renderActivity(
 ): string[] {
 	const theme = clioTheme();
 	const label = (text: string): string => padAnsi(theme.fg("fieldName", text), 12);
+	// A value that wraps continues under its own column, not under the label, so a narrow Session row still reads
+	// as one row.
+	const row = (name: string, value: string): string[] =>
+		wrapTextWithAnsi(value, Math.max(1, contentWidth - 12)).map(
+			(line, index) => `${index === 0 ? label(name) : " ".repeat(12)}${line}`,
+		);
 	const lines = [
 		...renderActivityHeatmap(
 			days,
@@ -248,23 +311,25 @@ function renderActivity(
 		changes === null
 			? theme.fg("annotation", "not observed")
 			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("annotation", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
-	lines.push(`${label("Changes")}${changesValue}`);
+	lines.push(...row("Changes", changesValue));
 	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
-	const elapsed = Number.isFinite(started)
-		? ` ${theme.fg("annotation", `(${formatCompactMs(Math.max(0, now - started))})`)}`
-		: "";
+	const elapsed = Number.isFinite(started) ? `${formatCompactMs(Math.max(0, now - started))} so far` : null;
 	const view = data.view;
-	if (!view) lines.push(`${label("Session")}${theme.fg("annotation", data.missing)}${elapsed}`);
-	else {
-		const totals = view.session().totals;
-		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
-		lines.push(`${label("Session")}${cost}${theme.fg("counter", tokensText(usageFigure(totals.tokens)))}${elapsed}`);
-		const tokenCoverage = usageCoverageSentence(totals.tokens);
-		const neverSent = view.session().own.counts.dispositions.neverSent;
-		const usage = [tokenCoverage, nonZero(neverSent) ? `${neverSent.display} never sent` : null].filter(
-			(part) => part !== null,
+	if (!view)
+		lines.push(
+			...row("Session", theme.fg("annotation", [elapsed, data.missing].filter((part) => part !== null).join(" · "))),
 		);
-		if (usage.length > 0) lines.push(`${label("Usage")}${theme.fg("annotation", usage.join(" · "))}`);
+	else {
+		lines.push(...row("Session", sessionValue(view, elapsed)));
+		// A token total nothing measured already says why on the Session row, so its coverage is not said again here.
+		const tokens = view.session().totals.tokens;
+		const tokenCoverage = usageSaysNothing(usageFigure(tokens)) ? [] : sessionUsageNotes(view);
+		const neverSent = view.session().own.counts.dispositions.neverSent;
+		const usage = [
+			...tokenCoverage,
+			nonZero(neverSent) ? `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"} never sent` : null,
+		].filter((part) => part !== null);
+		if (usage.length > 0) lines.push(...row("Usage", theme.fg("annotation", usage.join(" · "))));
 	}
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
@@ -272,7 +337,7 @@ function renderActivity(
 		lines.push(
 			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${window.item.usedPct.display} used ${theme.fg("annotation", `· ${window.entry.provider} ${window.item.label}`)}`,
 		);
-	} else lines.push(`${label("Plan")}${theme.fg("annotation", "no subscription window reported")}`);
+	} else lines.push(...row("Plan", theme.fg("annotation", "no subscription window reported")));
 	return lines;
 }
 
@@ -409,9 +474,14 @@ class UsageOverlayBody implements Component {
 		const offset = Math.max(0, Math.min(this.offsets[this.tab] ?? 0, lines.length - this.pageHeight));
 		this.offsets[this.tab] = offset;
 		const visible = [...tabs, ...lines.slice(offset, offset + this.pageHeight)];
+		// The same position row every scrolling overlay draws; the keys that move it are on the rail, once.
 		if (lines.length > this.pageHeight)
 			visible.push(
-				theme.fg("annotation", `${offset + 1}–${Math.min(lines.length, offset + this.pageHeight)} / ${lines.length}`),
+				positionRow(
+					theme,
+					{ start: offset + 1, end: Math.min(lines.length, offset + this.pageHeight), total: lines.length },
+					contentWidth,
+				),
 			);
 		return visible;
 	}

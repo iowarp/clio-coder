@@ -13,15 +13,13 @@ import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
-import type { UsageQuantity } from "./usage-words.js";
 import {
-	USAGE_NOT_MEASURED,
 	usageCoverage,
-	usageFigure,
+	usageEstimatedCalls,
+	usageEstimates,
 	usageGap,
-	usageLineCoverage,
-	usageSaysNothing,
-	usageUnmeasured,
+	usageLineFigure,
+	usageLineNotes,
 } from "./usage-words.js";
 
 export interface ExitSummarySnapshot {
@@ -107,26 +105,41 @@ interface CollectorDeps {
 	now?: () => number;
 }
 
-/** Every string is the read model's own display, so the card never sums or rewords a number (#434 §11.3). */
+/**
+ * Every figure is the read model's own display, so the card never sums a number (#434 §11.3). Lines of several facts
+ * join them with ` · `, which the formatter wraps at.
+ */
 export type ExitSpend =
 	| { kind: "unavailable" }
 	| {
 			kind: "ready";
+			/** The session total, then the same notes as `breakdown`. */
 			tokens: string;
-			/** `in · out · cache read · cache write · reasoning`, each an honest display. */
+			/** `in · out · cache read · cache write · reasoning` where something was reported, then the notes. */
 			breakdown: string;
 			cost: string;
-			/** Attempts started since this visit began, counted by the read model. */
+			/**
+			 * Model calls this visit's own agents sent since it began, counted as the read model counts `calls`: a retry is
+			 * another attempt of the same call, and worker runs count as workers, not here (E2).
+			 */
 			visitCalls: number;
 			byRole: string;
-			/** Generation time, first token to settle, over every call the session paid for, workers included. */
-			modelTime: string;
+			/**
+			 * Those calls' time from each one starting to its settle, so a model silent before its first token is
+			 * counted; null when the visit sent none. Streaming alone (`modelTime`) read 404ms beside a 1m26s turn (B2).
+			 */
+			callTime: string | null;
 			/** `4 calls had no timing data`, said once after the time rather than inside it (F4). */
-			modelTimeCoverage: string | null;
+			callTimeCoverage: string | null;
 			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
 	  };
 
-function tokenBreakdown(view: TelemetryView, model?: string): string {
+/**
+ * The session's (or one model group's) token figures and the notes that qualify them, each note said once. The
+ * figures carry one mark at most; the notes say which figures nobody reported, how many calls reported nothing, and
+ * how many Clio estimated (E1).
+ */
+function tokenFacts(view: TelemetryView, model?: string): { figures: string[]; total: string; notes: string[] } {
 	const quantity = (metric: FactMetric) =>
 		view.quantity(
 			factRef({
@@ -145,39 +158,55 @@ function tokenBreakdown(view: TelemetryView, model?: string): string {
 		{ label: "cache write", quantity: quantity("cacheWrite") },
 		{ label: "reasoning", quantity: quantity("reasoning") },
 	];
-	const [input, output, ...optional] = figures;
-	const unmeasured = optional.filter((entry) => usageUnmeasured(entry.quantity)).map((entry) => entry.label);
-	const shown = optional.filter((entry) => {
-		const figure = usageFigure(entry.quantity);
-		return figure !== "0" && !usageSaysNothing(figure);
-	});
-	const coverage = usageLineCoverage([input, output, ...shown].filter((entry) => entry !== undefined));
-	return [
-		`${usageFigure(input?.quantity)} in`,
-		`${usageFigure(output?.quantity)} out`,
-		...shown.map((entry) => `${usageFigure(entry.quantity)} ${entry.label}`),
-		...(unmeasured.length > 0 ? [`${unmeasured.join(", ")} ${USAGE_NOT_MEASURED}`] : []),
-		...(coverage !== null ? [coverage] : []),
-	].join(" · ");
+	const [input, output] = figures;
+	const { shown, notes } = usageLineNotes(figures);
+	// Each figure keeps one mark at most; what Clio estimated is said once, by the calls behind the total (E1).
+	const estimates = usageEstimates(usageEstimatedCalls(quantity("total")));
+	return {
+		figures: [
+			// Label first, as the turn receipt and /usage write it: one notation for tokens on every surface (U5).
+			`in ${usageLineFigure(input?.quantity)}`,
+			`out ${usageLineFigure(output?.quantity)}`,
+			...shown.map((entry) => `${entry.label} ${usageLineFigure(entry.quantity)}`),
+		],
+		total: usageLineFigure(quantity("total")),
+		notes: [...notes, ...(estimates !== null ? [estimates] : [])],
+	};
 }
 
-function modelTimeParts(quantity: UsageQuantity | null): { modelTime: string; modelTimeCoverage: string | null } {
-	return { modelTime: usageFigure(quantity), modelTimeCoverage: usageCoverage(usageGap(quantity), "timing data") };
+function tokenBreakdown(view: TelemetryView, model?: string): string {
+	const { figures, notes } = tokenFacts(view, model);
+	return [...figures, ...notes].join(" · ");
 }
+
+/** Calls that reached the provider or may have; a never-sent attempt asked the model nothing. */
+const SENT = ["sent_unsettled", "settled_no_usage", "settled", "incomplete"] as const;
 
 export function exitSpend(view: TelemetryView | null | undefined, visitFrom: string): ExitSpend {
 	if (!view) return { kind: "unavailable" };
 	const session = view.session();
+	const sessionTokens = tokenFacts(view);
+	const visit = view.calls({ from: visitFrom, dispositions: [...SENT] });
+	// `settle` runs from each attempt's start, retries included, so it holds the silent wait for the first token that
+	// `modelTime` (first token to settle) leaves out. It also holds any admission hold Clio put on the request.
+	const callTime =
+		visit.matched > 0
+			? view.attempts(
+					visit.calls.map((call) => call.attemptId),
+					"settle",
+				)
+			: null;
 	return {
 		kind: "ready",
-		tokens: [usageFigure(session.totals.tokens), usageCoverage(usageGap(session.totals.tokens))]
-			.filter((part) => part !== null)
-			.join(" · "),
+		// The total's own gap counts a call that reported in and out but no cache read as a call with no usage data, so
+		// the brief line once named more such calls than the standard line beside the same session. Both share notes.
+		tokens: [sessionTokens.total, ...sessionTokens.notes].join(" · "),
 		breakdown: tokenBreakdown(view),
 		cost: session.totals.usd.display,
-		visitCalls: view.calls({ from: visitFrom, limit: 1 }).matched,
+		visitCalls: new Set(visit.calls.map((call) => call.callId)).size,
 		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
-		...modelTimeParts(view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "modelTime" }))),
+		callTime: callTime === null ? null : usageLineFigure(callTime),
+		callTimeCoverage: usageCoverage(usageGap(callTime), "timing data"),
 		models: view.cost("model").groups.map((group) => ({
 			key: group.key,
 			calls: group.calls.display,

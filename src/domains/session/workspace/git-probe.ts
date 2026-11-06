@@ -5,6 +5,11 @@ import { internalGitArgv } from "../../../core/internal-git.js";
 const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 1000;
+/**
+ * A gate question that ran out its first second is asked once more with this much room. Under load the one-second probe
+ * timed out and the launchpad said `No Git repository` for a real repository: a timeout is not an answer.
+ */
+const GATE_RETRY_TIMEOUT_MS = 5000;
 
 export interface GitProbeResult {
 	isGit: boolean;
@@ -14,6 +19,8 @@ export interface GitProbeResult {
 	behind: number | null;
 	recentCommits: ReadonlyArray<{ sha: string; subject: string }>;
 	remoteUrl: string | null;
+	/** Git did not answer whether this is a repository in time, so that is unknown rather than no. */
+	undetermined?: true;
 }
 
 /**
@@ -27,6 +34,8 @@ export interface GitStatusProbeResult {
 	branch: string | null;
 	dirty: boolean | null;
 	remoteUrl: string | null;
+	/** Git did not answer whether this is a repository in time, so that is unknown rather than no. */
+	undetermined?: true;
 }
 
 const EMPTY_PROBE: GitProbeResult = {
@@ -40,6 +49,40 @@ const EMPTY_PROBE: GitProbeResult = {
 };
 
 const EMPTY_STATUS_PROBE: GitStatusProbeResult = { isGit: false, branch: null, dirty: null, remoteUrl: null };
+const UNDETERMINED_PROBE: GitProbeResult = { ...EMPTY_PROBE, undetermined: true };
+const UNDETERMINED_STATUS_PROBE: GitStatusProbeResult = { ...EMPTY_STATUS_PROBE, undetermined: true };
+
+/** What a gate question got back: Git's answer, or nothing because it ran out of time. */
+type GateAnswer = { out: string | null; timedOut: boolean };
+
+function timedOut(err: unknown): boolean {
+	const error = err as { killed?: boolean; code?: unknown; signal?: unknown } | null;
+	return error?.killed === true || error?.code === "ETIMEDOUT" || error?.signal === "SIGTERM";
+}
+
+function gateSync(cwd: string, args: string[]): GateAnswer {
+	for (const timeout of [TIMEOUT_MS, GATE_RETRY_TIMEOUT_MS]) {
+		try {
+			const out = execFileSync("git", internalGitArgv(args, cwd), { cwd, timeout, stdio: ["ignore", "pipe", "ignore"] });
+			return { out: out.toString().trim(), timedOut: false };
+		} catch (err) {
+			if (!timedOut(err)) return { out: null, timedOut: false };
+		}
+	}
+	return { out: null, timedOut: true };
+}
+
+async function gateAsync(cwd: string, args: string[]): Promise<GateAnswer> {
+	for (const timeout of [TIMEOUT_MS, GATE_RETRY_TIMEOUT_MS]) {
+		try {
+			const { stdout } = await execFileAsync("git", internalGitArgv(args, cwd), { cwd, timeout, encoding: "utf8" });
+			return { out: stdout.trim(), timedOut: false };
+		} catch (err) {
+			if (!timedOut(err)) return { out: null, timedOut: false };
+		}
+	}
+	return { out: null, timedOut: true };
+}
 
 function gitOk(cwd: string, args: string[]): string | null {
 	try {
@@ -111,11 +154,15 @@ function remoteFrom(raw: string | null): string | null {
 }
 
 export function probeGit(cwd: string): GitProbeResult {
-	const inside = gitOk(cwd, ["rev-parse", "--is-inside-work-tree"]);
-	if (inside !== "true") return EMPTY_PROBE;
-	const ignored = gitOk(cwd, ["check-ignore", "--quiet", "--", "."]);
-	if (ignored !== null) return EMPTY_PROBE;
-	const branch = branchFrom(gitOk(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]));
+	const inside = gateSync(cwd, ["rev-parse", "--is-inside-work-tree"]);
+	if (inside.timedOut) return UNDETERMINED_PROBE;
+	if (inside.out !== "true") return EMPTY_PROBE;
+	const ignored = gateSync(cwd, ["check-ignore", "--quiet", "--", "."]);
+	if (ignored.timedOut) return UNDETERMINED_PROBE;
+	if (ignored.out !== null) return EMPTY_PROBE;
+	const asked = gateSync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+	if (asked.timedOut) return UNDETERMINED_PROBE;
+	const branch = branchFrom(asked.out);
 	const dirty = dirtyFrom(gitOk(cwd, ["status", "--porcelain", "--", "."]));
 	const { ahead, behind } = aheadBehindFrom(gitOk(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{u}"]));
 	const recentCommits = recentCommitsFrom(gitOk(cwd, ["log", "-5", "--format=%H%x09%s", "--", "."]));
@@ -129,21 +176,25 @@ export function probeGit(cwd: string): GitProbeResult {
  * subprocesses are independent and run concurrently.
  */
 export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
-	const inside = await gitOkAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
-	if (inside !== "true") return EMPTY_PROBE;
-	const ignored = await gitOkAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
-	if (ignored !== null) return EMPTY_PROBE;
-	const [branchRaw, status, aheadBehindRaw, log, remoteRaw] = await Promise.all([
-		gitOkAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+	const inside = await gateAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
+	if (inside.timedOut) return UNDETERMINED_PROBE;
+	if (inside.out !== "true") return EMPTY_PROBE;
+	const ignored = await gateAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
+	if (ignored.timedOut) return UNDETERMINED_PROBE;
+	if (ignored.out !== null) return EMPTY_PROBE;
+	const [branch, status, aheadBehindRaw, log, remoteRaw] = await Promise.all([
+		gateAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
 		gitOkAsync(cwd, ["status", "--porcelain", "--", "."]),
 		gitOkAsync(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{u}"]),
 		gitOkAsync(cwd, ["log", "-5", "--format=%H%x09%s", "--", "."]),
 		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
 	]);
+	// A branch question that ran out of time is unknown, not detached: the footer read `no Git branch` under load.
+	if (branch.timedOut) return UNDETERMINED_PROBE;
 	const { ahead, behind } = aheadBehindFrom(aheadBehindRaw);
 	return {
 		isGit: true,
-		branch: branchFrom(branchRaw),
+		branch: branchFrom(branch.out),
 		dirty: dirtyFrom(status),
 		ahead,
 		behind,
@@ -158,18 +209,21 @@ export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
  * the interactive footer polls and re-reads at the end of every turn.
  */
 export async function probeGitStatusAsync(cwd: string): Promise<GitStatusProbeResult> {
-	const inside = await gitOkAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
-	if (inside !== "true") return EMPTY_STATUS_PROBE;
-	const ignored = await gitOkAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
-	if (ignored !== null) return EMPTY_STATUS_PROBE;
-	const [branchRaw, status, remoteRaw] = await Promise.all([
-		gitOkAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+	const inside = await gateAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
+	if (inside.timedOut) return UNDETERMINED_STATUS_PROBE;
+	if (inside.out !== "true") return EMPTY_STATUS_PROBE;
+	const ignored = await gateAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
+	if (ignored.timedOut) return UNDETERMINED_STATUS_PROBE;
+	if (ignored.out !== null) return EMPTY_STATUS_PROBE;
+	const [branch, status, remoteRaw] = await Promise.all([
+		gateAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
 		gitOkAsync(cwd, ["status", "--porcelain", "--", "."]),
 		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
 	]);
+	if (branch.timedOut) return UNDETERMINED_STATUS_PROBE;
 	return {
 		isGit: true,
-		branch: branchFrom(branchRaw),
+		branch: branchFrom(branch.out),
 		dirty: dirtyFrom(status),
 		remoteUrl: remoteFrom(remoteRaw),
 	};
