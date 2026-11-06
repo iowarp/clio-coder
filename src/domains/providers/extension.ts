@@ -66,6 +66,15 @@ function loadKnowledgeBase(): KnowledgeBase {
 	}
 }
 
+/** Only some runtimes flag a refused credential; the rest report the bare status of the shared HTTP probe. */
+const REFUSED_CREDENTIAL = /\bHTTP (?:401|403)\b/u;
+
+function probeRefusedCredential(probe: ProbeResult): boolean {
+	return (
+		probe.authFailed === true || probe.failureKind === "authentication" || REFUSED_CREDENTIAL.test(probe.error ?? "")
+	);
+}
+
 function emptyHealth(): TargetHealth {
 	return { status: "unknown", lastCheckAt: null, lastError: null, latencyMs: null };
 }
@@ -482,6 +491,7 @@ export function createProvidersBundle(
 						lastCheckAt: new Date().toISOString(),
 						lastError: healthProbe.error ?? unservedDefault,
 						latencyMs: healthProbe.latencyMs ?? null,
+						...(!healthProbe.ok && probeRefusedCredential(healthProbe) ? { credentialRefused: true } : {}),
 					};
 		const available = availability.available && (probe === null || probe.ok || allowHttpInferenceAttempt);
 		const reason = probe !== null && !probe.ok ? (probe.error ?? "probe failed") : availability.reason;

@@ -476,7 +476,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
 		...(deps.app.getRouteBreakers ? { getRouteBreakers: deps.app.getRouteBreakers } : {}),
-		connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
+		connectTarget: (targetId, options) => overlayAuth.openConnectFlow(targetId, options),
 		...(deps.app.interop ? { getInteropProposals: interopProposalsFor(deps.app.interop) } : {}),
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
 		...(openModelScopeOverlayFactory ? { openModelScopeOverlay: openModelScopeOverlayFactory } : {}),

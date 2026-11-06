@@ -3,6 +3,7 @@ import {
 	getRuntimeRegistry,
 	type ProvidersContract,
 	resolveProviderReference,
+	type TargetStatus,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
@@ -12,9 +13,10 @@ import { maybeOpenExternalUrl } from "./open-external-url.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import { type AuthDialogHandle, openAuthDialog } from "./overlays/auth-dialog.js";
 
-type AuthProviders = Pick<ProvidersContract, "getRuntime" | "probeTarget"> & {
-	auth: Pick<ProvidersContract["auth"], "statusForTarget" | "setApiKey" | "login" | "damageReason">;
-};
+type AuthProviders = Pick<ProvidersContract, "getRuntime" | "probeTarget"> &
+	Partial<Pick<ProvidersContract, "list">> & {
+		auth: Pick<ProvidersContract["auth"], "statusForTarget" | "setApiKey" | "login" | "damageReason">;
+	};
 
 export interface OverlayAuthLifecycleDeps {
 	tui: TUI;
@@ -32,9 +34,14 @@ export interface OverlayAuthLifecycleDeps {
 	openAuthDialog?: (tui: TUI, title: string, onCancel: () => void) => AuthDialogHandle;
 }
 
+export interface ConnectFlowOptions {
+	/** Ask for a new API key even when a stored one has not been refused. */
+	replaceKey?: boolean;
+}
+
 export interface OverlayAuthLifecycle {
 	finish(dismiss: boolean): void;
-	openConnectFlow(reference: string): Promise<void>;
+	openConnectFlow(reference: string, options?: ConnectFlowOptions): Promise<void>;
 }
 
 /**
@@ -91,7 +98,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 		);
 	};
 
-	const openConnectFlow = async (reference: string): Promise<void> => {
+	const openConnectFlow = async (reference: string, options?: ConnectFlowOptions): Promise<void> => {
 		const fromState = deps.getOverlayState();
 		if (fromState !== "closed" && fromState !== "settings") return;
 		const returnTo = fromState === "settings" ? { state: fromState, handle: deps.getOverlayHandle() } : null;
@@ -116,13 +123,13 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 			deps.setOverlayState("auth");
 			deps.setOverlayHandle(dialog.handle);
 
-			const probeTarget = async (): Promise<void> => {
+			const probeTarget = async (): Promise<TargetStatus | null> => {
 				dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
 				const status = await deps.providers.probeTarget(targetId);
 				if (!status) {
 					dialog.controller.setLines([`Target: ${targetId}`, "Target check failed: target is not configured."]);
 					deps.notify("error", `connect: ${targetId} is not configured`, `connect:${targetId}`);
-					return;
+					return null;
 				}
 				const health = status.health.status;
 				const detail =
@@ -132,20 +139,59 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 				// Configured is not reachable: `connected offline-audit (down)` claimed a connection the probe had just
 				// failed to make, so a route that does not answer reads as not answering, with the reason.
 				const answers = status.available && health !== "down";
+				// A refused key is a credential to replace, not an address to fix, so the way on names Connect.
+				const refused = !answers && status.health.credentialRefused === true;
 				dialog.controller.setLines([
 					`Target: ${targetId}`,
 					`Runtime: ${runtimeId}`,
-					answers ? `Target ready (${health})` : `Target does not answer (${health})`,
+					answers
+						? `Target ready (${health})`
+						: refused
+							? "Target refused the API key"
+							: `Target does not answer (${health})`,
 					detail,
 				]);
 				deps.notify(
 					answers ? "info" : "warning",
 					answers
 						? `connected ${targetId} (${health})`
-						: `${targetId} does not answer (${health}): ${detail}. Its settings are unchanged; Edit URL fixes an address.`,
+						: refused
+							? `${targetId} refused the API key (${detail}); Connect asks for a new one.`
+							: `${targetId} does not answer (${health}): ${detail}. Its settings are unchanged; Edit URL fixes an address.`,
 					`connect:${targetId}`,
 				);
 				deps.refreshFooter();
+				deps.requestRender();
+				return status;
+			};
+
+			/** Ask for a key, store it, then probe with it. `intro` says why the key is being asked for. */
+			const enterApiKey = async (intro: string): Promise<void> => {
+				authDialogDismiss = dialog.controller.dismiss;
+				dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtime.id}`, intro]);
+				deps.requestRender();
+				const apiKey = (await dialog.controller.prompt("API key")).trim();
+				if (apiKey.length === 0) throw new Error("empty API key");
+				deps.providers.auth.setApiKey(authTarget.providerId, apiKey);
+				assertCredentialStored(deps.providers.auth, authTarget.providerId);
+				authDialogDismiss = null;
+				await probeTarget();
+			};
+
+			const runKeyFlow = (first: () => Promise<void>): void => {
+				void (async () => {
+					try {
+						await first();
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						if (message !== "dismissed" && message !== "cancelled") {
+							deps.notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
+						}
+					} finally {
+						authDialogDismiss = null;
+						finish(false);
+					}
+				})();
 				deps.requestRender();
 			};
 
@@ -181,6 +227,29 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 
 			const requiresManagedAuth = targetRequiresAuth(target, runtime);
 			const authStatus = deps.providers.auth.statusForTarget(target, runtime);
+			// Only a key Clio stored can be replaced from here; an environment or per-target key lives elsewhere.
+			const storedKey = requiresManagedAuth && runtime.auth === "api-key" && authStatus.source === "stored-api-key";
+			const refusedKeyIntro = (reason: string | null): string =>
+				`The stored API key was refused${reason ? ` (${reason})` : ""}. Enter a replacement key; Esc keeps the stored one.`;
+			if (storedKey) {
+				const lastHealth = deps.providers.list?.().find((entry) => entry.target.id === targetId)?.health;
+				if (options?.replaceKey || lastHealth?.credentialRefused === true) {
+					runKeyFlow(() =>
+						enterApiKey(
+							lastHealth?.credentialRefused === true
+								? refusedKeyIntro(lastHealth.lastError)
+								: "Enter a new API key to replace the stored one; Esc keeps the stored one.",
+						),
+					);
+					return;
+				}
+				// A stored key nobody has refused yet is tried first; a refusal turns the same dialog into key input.
+				runKeyFlow(async () => {
+					const status = await probeTarget();
+					if (status?.health.credentialRefused === true) await enterApiKey(refusedKeyIntro(status.health.lastError));
+				});
+				return;
+			}
 			if (!requiresManagedAuth || authStatus.available) {
 				void (async () => {
 					try {
@@ -199,31 +268,7 @@ export function createOverlayAuthLifecycle(deps: OverlayAuthLifecycleDeps): Over
 				return;
 			}
 			if (resolved.runtime.auth === "api-key") {
-				authDialogDismiss = dialog.controller.dismiss;
-				dialog.controller.setLines([
-					`Target: ${targetId}`,
-					`Runtime: ${runtime.id}`,
-					"API key required before Clio can connect to this target.",
-				]);
-				void (async () => {
-					try {
-						const apiKey = (await dialog.controller.prompt("API key")).trim();
-						if (apiKey.length === 0) throw new Error("empty API key");
-						deps.providers.auth.setApiKey(authTarget.providerId, apiKey);
-						assertCredentialStored(deps.providers.auth, authTarget.providerId);
-						authDialogDismiss = null;
-						await probeTarget();
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						if (message !== "dismissed" && message !== "cancelled") {
-							deps.notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
-						}
-					} finally {
-						authDialogDismiss = null;
-						finish(false);
-					}
-				})();
-				deps.requestRender();
+				runKeyFlow(() => enterApiKey("API key required before Clio can connect to this target."));
 				return;
 			}
 			authDialogDismiss = dialog.controller.dismiss;

@@ -59,6 +59,7 @@ import {
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
 	resolveModelRuntimeCapabilitiesForProviders,
+	targetRequiresAuth,
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
@@ -305,8 +306,8 @@ interface BuildSettingItemsOptions {
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	/** Live in-process dispatch breaker state per route; absent shows no breaker state. */
 	getRouteBreakers?: () => ReadonlyArray<RouteBreakerView>;
-	/** Run the API-key / OAuth connect flow for a target; absent hides the action. */
-	connectTarget?: (targetId: string) => Promise<void> | void;
+	/** Run the API-key / OAuth connect flow for a target; absent hides the action. `replaceKey` asks for a new key first. */
+	connectTarget?: (targetId: string, options?: { replaceKey?: boolean }) => Promise<void> | void;
 	editTarget?: (targetId: string) => void;
 	/** The connect/probe operation currently acting on a target, if any. */
 	getTargetOperation?: (targetId: string) => "connect" | "probe" | null;
@@ -951,6 +952,14 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 		const target = status?.target ?? options?.getSettings?.().targets.find((entry) => entry.id === targetId);
 		const runtime = status?.runtime ?? null;
 		const chatEligible = !providers || (runtime !== null && isOrchestratorEligibleRuntime(runtime));
+		// A key Clio stored can always be replaced from this menu. Once the target refused it, Connect itself asks for the new one.
+		const storedKey =
+			target !== undefined &&
+			runtime !== null &&
+			runtime.auth === "api-key" &&
+			targetRequiresAuth(target, runtime) &&
+			providers?.auth?.statusForTarget?.(target, runtime).source === "stored-api-key";
+		const keyRefused = storedKey && status?.health.credentialRefused === true;
 		const items = [
 			...(chatEligible
 				? [
@@ -965,9 +974,22 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 				? [
 						{
 							value: "connect",
-							label: "Connect (API key or OAuth), then probe",
+							label: keyRefused
+								? "Connect with a new API key (the stored key was refused), then probe"
+								: storedKey
+									? "Connect with the stored API key, then probe"
+									: "Connect (API key or OAuth), then probe",
 							presentationKind: "action" as const,
 						},
+						...(storedKey && !keyRefused
+							? [
+									{
+										value: "replace-key",
+										label: "Replace the stored API key, then probe",
+										presentationKind: "action" as const,
+									},
+								]
+							: []),
 					]
 				: []),
 			...(providers
@@ -1004,7 +1026,7 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 				options?.editTarget?.(targetId);
 				return;
 			}
-			if (value === "connect" && connectTarget) {
+			if ((value === "connect" || value === "replace-key") && connectTarget) {
 				done();
 				const operationToken = {};
 				options?.onTargetOperationChange?.(targetId, "connect", operationToken);
@@ -1014,7 +1036,9 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 					refresh();
 				};
 				try {
-					void Promise.resolve(connectTarget(targetId)).then(settle, settle);
+					const connecting =
+						value === "replace-key" ? connectTarget(targetId, { replaceKey: true }) : connectTarget(targetId);
+					void Promise.resolve(connecting).then(settle, settle);
 				} catch {
 					settle();
 				}
