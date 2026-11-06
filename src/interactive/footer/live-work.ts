@@ -229,10 +229,15 @@ export function liveWorkStrip(
 		const subject = loose.subject ?? facts.actor;
 		const glyph = theme.fg(loose.token, loose.live ? GLYPH.running : loose.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
+		// A turn waiting on a worker is timed by the worker's own clock beside it, as the rail shows it; two clocks read
+		// `waiting for a worker · 6s · coder waiting on the model · 6s`.
+		const awaitsWorker =
+			workers !== null && (facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch);
 		const clocked = (text: string): string => {
-			const elapsed = CARRIES_ELAPSED.test(stripTerminalSequences(text))
-				? null
-				: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
+			const elapsed =
+				awaitsWorker || CARRIES_ELAPSED.test(stripTerminalSequences(text))
+					? null
+					: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
 			return theme.fg(loose.token, elapsed === null ? text : `${text} · ${elapsed}`);
 		};
 		// The clock the strip may add takes up to eight cells, which the words leave for it.
