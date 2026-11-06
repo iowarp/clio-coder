@@ -272,12 +272,11 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 	return false;
 }
 
-/** Pure overlay key router for auth overlays. Esc closes; input handles Enter itself. */
-function routeAuthOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.closeOverlay();
-		return true;
-	}
+/**
+ * Auth overlays own their Esc: the dialog backs out of a typed field before it
+ * cancels the sign-in, so the key goes to the dialog like every other key.
+ */
+function routeAuthOverlayKey(_data: string, _deps: CloseOverlayKeyDeps): boolean {
 	return false;
 }
 
