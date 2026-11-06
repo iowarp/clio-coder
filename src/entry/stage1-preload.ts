@@ -30,7 +30,7 @@ const SLICES: ReadonlyArray<() => Promise<unknown>> = [
  * iteration's check phase, so the next slice would follow before any keystroke was read; the second one is queued
  * from the check phase and so waits for the next iteration's poll.
  */
-async function nextTurn(): Promise<void> {
+export async function nextTurn(): Promise<void> {
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	await new Promise<void>((resolve) => setImmediate(resolve));
 }
