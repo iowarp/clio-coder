@@ -62,7 +62,7 @@ function checkEdgeState(
  * The state a delivery is offered for: the check's open contradiction and latest supersede. A rerun that adds a
  * standing claim leaves it unchanged, so the check is not offered again; a new contradiction or supersede changes it.
  */
-export function claimsDeliveryState(
+function claimsDeliveryState(
 	check: string,
 	read: Pick<ClaimsLogRead, "edges">,
 	statuses: ReadonlyMap<string, ClaimStatus>,
