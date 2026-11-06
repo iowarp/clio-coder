@@ -398,11 +398,12 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		// Each toggle names its current setting in words, not a field:value code.
 		return buildHint([
 			{ key: "↑↓", verb: "move" },
-			{ key: "Enter", verb: "continue from here" },
 			{ key: "e", verb: "label" },
 			{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
 			{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
 			{ key: "Shift+T", verb: `times: ${this.showTimestamps ? "on" : "off"}` },
+			// A narrowing rail drops from the left, so the action the view exists for goes last.
+			{ key: "Enter", verb: "continue from here" },
 		]);
 	}
 

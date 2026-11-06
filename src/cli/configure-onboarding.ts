@@ -1334,7 +1334,7 @@ export async function runOnboardingWizard(
 	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
 	// hold no choice of theirs; the sentence is about the choices.
 	presenter.note(
-		`Escape goes back a step, and from the first step leaves without saving. Your choices are written to ${shortenPath(settingsPath())} only at the review, except a browser sign-in you complete.`,
+		"Escape goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only at the review, except a browser sign-in you complete.",
 	);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
