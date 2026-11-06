@@ -4,7 +4,7 @@
 
 `@earendil-works__pi-tui@1.5.0.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
-unpatched.** The patch has thirteen hunks in nine `dist/` files and applies to the
+unpatched.** The patch has fourteen hunks in nine `dist/` files and applies to the
 published, unmodified 1.5.0 package. It carries the semantic edit and search
 operations that stock 1.5.0 keeps private and the regular-screen render memo.
 Everything else earlier
@@ -20,6 +20,7 @@ hunk total.
 | 2: `alt-screen-search.d.ts`, `alt-screen-search.js` | `AltScreenSearchComponent.applyEdit("undo")` | Undo the whole search query and notify the query listener. | The overlay's `Input` is private, and so is the `undo` it would need, so a router cannot undo a query. |
 | 2: `tui-alt-screen.d.ts`, `tui-alt-screen.js` | `TuiAltScreen.isSearchFocused` and `undoSearchQuery`; `scrollToPrompt`, `toggleSearch`, `closeSearch` and `navigateSearch` made public | Clio's input router sends Escape, undo, prompt navigation and match navigation to the current owner, including the native search overlay. | Search focus and these methods are private. The public viewport scroll methods cannot query or manipulate search ownership or its undo history, and `getScreenLines()` exposes painted rows, not search state. |
 | 5: `tui-main-screen.js` | `TuiMainScreen` reset memo and Kitty image-row scans | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place and recording which rows are image rows, and the Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. `resetRenderState` drops the memo. | Stock 1.0.0 normalizes every transcript row and scans all rows for image headers on every regular-screen frame, so the cost grows with the transcript. Measured [below](#measured-cost-of-the-render-memo): a 22.9k-row transcript costs 5.90 ms per keystroke frame stock against 0.62 ms patched. The scans are private methods, so no subclass can replace them. |
+| 1: `tui-main-screen.js` | `TuiMainScreen.doRender` OSC 133 strip | Run the marker strip only on a row that starts with `\x1b]133;`, so a frame makes no regex call for any other row. The pattern is anchored at the row start, so the output is unchanged. | Stock 1.5.0 calls `replace` with the anchored pattern on every row of every frame, which cost 3.25 ms of a frame while a 500 KB reply streamed (#428). The call sits inside `doRender`, so no subclass can skip it. |
 
 The semantic operations call Pi's existing editing and search implementation;
 they do not replace it. Consumers are the terminal lease, input router, editor
@@ -33,7 +34,8 @@ auth boundary is Clio application code and adds no dependency patch.
 ## What was removed
 
 The patch carried 26 hunks before the Pi 1.0 adoption series and carries
-thirteen now. The thirteen removed hunks fall into five groups.
+fourteen now: thirteen kept from then and the OSC 133 prefix check added since.
+The thirteen removed hunks fall into five groups.
 
 | Removed | Replaced by | Cost and evidence |
 | --- | --- | --- |
