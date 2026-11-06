@@ -1,7 +1,9 @@
 /**
  * Whether work may refresh Clio's shared disposable state: the caches and
  * probe-learned priors every later process reads (parsed skill frontmatter,
- * per-target model snapshots, endpoint slot counts). Doctor, `run --read-only`
+ * per-target model snapshots, endpoint slot counts, first-use assets and their
+ * failure records, semantic indexes, MCP catalogs, Copilot session records;
+ * a codewiki build worker thread receives the mode at spawn). Doctor, `run --read-only`
  * and a read-only worker promise to change nothing, yet they load skills and
  * probe targets like any other run. In read-only mode they still read that
  * state, and a run still records its own session, but every cache and prior is

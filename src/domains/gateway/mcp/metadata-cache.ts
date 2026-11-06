@@ -17,8 +17,9 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { readOnlyMode } from "../../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import { clioCacheDir } from "../../../core/xdg.js";
+import { clioCacheDir, clioCachePath } from "../../../core/xdg.js";
 import { MCP_TOOL_LIST_CAP, type McpToolDescriptor } from "./client.js";
 import type { McpServerScope } from "./config.js";
 import { readBoundedFileText } from "./config.js";
@@ -112,9 +113,12 @@ function catalogKey(identity: McpCatalogIdentity): string {
 	return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
 }
 
-/** One file per declared server, so two sessions refreshing different servers never overwrite each other. */
+/**
+ * One file per declared server, so two sessions refreshing different servers never overwrite each other.
+ * Named, not created: a read leaves the home as it found it.
+ */
 export function mcpCatalogPath(identity: McpCatalogIdentity, cacheDir?: string): string {
-	return path.join(cacheDir ?? clioCacheDir(), CACHE_SUBDIRECTORY, `${catalogKey(identity)}.json`);
+	return path.join(cacheDir ?? clioCachePath(), CACHE_SUBDIRECTORY, `${catalogKey(identity)}.json`);
 }
 
 function decodeTool(value: unknown): McpCachedTool | null {
@@ -219,7 +223,7 @@ export function readMcpServerCatalog(
 /**
  * Replace one server's catalog atomically. Returns false rather than throwing:
  * a cache that cannot be written must never fail the live tool listing that
- * produced it.
+ * produced it. Read-only mode writes nothing and returns false the same way.
  */
 export function writeMcpServerCatalog(
 	identity: McpCatalogIdentity,
@@ -254,8 +258,13 @@ export function writeMcpServerCatalog(
 	};
 	const text = `${JSON.stringify(catalog, null, 2)}\n`;
 	if (Buffer.byteLength(text, "utf8") > MCP_METADATA_CACHE_CAPS.fileBytes) return false;
+	if (readOnlyMode()) return false;
 	try {
-		safeResourceWrite(mcpCatalogPath(identity, options.cacheDir), text, { encoding: "utf8", mode: 0o600 });
+		// The creating accessor checks the home's layout before the first catalog lands in it.
+		safeResourceWrite(mcpCatalogPath(identity, options.cacheDir ?? clioCacheDir()), text, {
+			encoding: "utf8",
+			mode: 0o600,
+		});
 		return true;
 	} catch {
 		return false;

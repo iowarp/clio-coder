@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
+import { readOnlyMode } from "../../../core/read-only-mode.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
 import {
 	codemapPath,
@@ -15,6 +16,7 @@ import {
 import type {
 	CodewikiArtifactRef,
 	CodewikiBuildProgress,
+	CodewikiBuildWorkerData,
 	CodewikiBuildWorkerMessage,
 	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
@@ -83,7 +85,8 @@ async function executeInWorker(
 	// `--import tsx` would be re-resolved from a hermetic fixture cwd before the
 	// source bootstrap can install its absolute loader.
 	signal?.throwIfAborted();
-	const worker = new Worker(buildWorkerUrl(), { workerData: request, execArgv: [] });
+	const workerData: CodewikiBuildWorkerData = { request, readOnly: readOnlyMode() };
+	const worker = new Worker(buildWorkerUrl(), { workerData, execArgv: [] });
 	let exited = false;
 	const exit = new Promise<void>((resolve) => {
 		worker.once("exit", () => {
