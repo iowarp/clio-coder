@@ -19,6 +19,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import { resolveGuardrail } from "../../core/guardrails.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
@@ -173,6 +174,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // anchor used for operator display and crash recovery. The monotonic heartbeat
 // stamp belongs to the live transport in this process; serializing it would
 // give a restarted process a number from an origin it cannot share.
+/**
+ * Checks for a row's spend shapes. `Value.Check` walks the schema at about 1 ms a row, and every process reads the
+ * ledger several times (dispatch start, each settlement, every persist), so a ledger near its 1000-row default cap cost
+ * seconds a launch. A compiled checker accepts and rejects exactly what `Value.Check` does at a few microseconds a row,
+ * after a one-time compile of about 17 ms, so it is built only once a ledger is long enough to repay it.
+ */
+type RowCheck = (value: unknown) => boolean;
+const COMPILE_ROW_CHECKS_AT = 16;
+let compiledRowChecks: { spend: RowCheck; sums: RowCheck } | null = null;
+function rowChecks(rows: number): { spend: RowCheck; sums: RowCheck } {
+	if (compiledRowChecks) return compiledRowChecks;
+	if (rows < COMPILE_ROW_CHECKS_AT)
+		return {
+			spend: (value) => Value.Check(RunUsageFactsSchema, value),
+			sums: (value) => Value.Check(RunSpendSumsSchema, value),
+		};
+	const spend = Compile(RunUsageFactsSchema);
+	const sums = Compile(RunSpendSumsSchema);
+	compiledRowChecks = { spend: (value) => spend.Check(value), sums: (value) => sums.Check(value) };
+	return compiledRowChecks;
+}
+
 function readRuns(): RunEnvelope[] {
 	const path = runsPath();
 	if (!existsSync(path)) return [];
@@ -183,13 +206,9 @@ function readRuns(): RunEnvelope[] {
 	// The ledger is live fleet state, not history: a file in any other shape is replaced on the next write, never
 	// read, so a row whose spend is not one fact and one sum per quantity drops the whole file (#434).
 	const envelopes: RunEnvelope[] = [];
+	const check = rowChecks(parsed.length);
 	for (const entry of parsed) {
-		if (
-			!isRecord(entry) ||
-			entry.version !== 1 ||
-			!Value.Check(RunUsageFactsSchema, entry.spend) ||
-			!Value.Check(RunSpendSumsSchema, entry.spendSums)
-		)
+		if (!isRecord(entry) || entry.version !== 1 || !check.spend(entry.spend) || !check.sums(entry.spendSums))
 			return [];
 		envelopes.push(entry as unknown as RunEnvelope);
 	}
