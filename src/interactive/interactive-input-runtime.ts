@@ -12,6 +12,7 @@ import type {
 	ApplicationSignalCoordinator,
 } from "./application-controller.js";
 import { createApplicationController } from "./application-controller.js";
+import { backOutOneLayer } from "./escape-layers.js";
 import { formatKeyLabel } from "./keybinding-manager.js";
 import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
 import { scrollTranscriptPage } from "./layout.js";
@@ -20,6 +21,7 @@ import { createLeaderKeyController } from "./leader-key.js";
 import { createLeaderMenu } from "./leader-menu.js";
 import type { OverlayState } from "./overlay-lifecycle.js";
 import { routeOverlayKey } from "./overlay-lifecycle.js";
+import { permissionEscapeLayers } from "./permission-hint.js";
 import { createQuickHelp } from "./quick-help.js";
 import type { RenderInputAction } from "./render-trace.js";
 
@@ -383,6 +385,11 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		explainProtectedExit: () => deps.explainProtectedExit?.(),
 		explainEscapeGuard: () => deps.explainEscapeGuard?.(),
 		...(deps.cancelSteerDraft ? { cancelSteerDraft: deps.cancelSteerDraft } : {}),
+		closeGlance: () => {
+			if (!quickHelp?.isOpen()) return false;
+			quickHelp.close();
+			return true;
+		},
 		...(deps.hasActiveEditorBash ? { hasActiveEditorBash: deps.hasActiveEditorBash } : {}),
 		forwardFocusedInput: (data) => {
 			const active = search();
@@ -401,8 +408,22 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		cancelFocusedOwner: () => {
 			const state = deps.overlay.getState();
-			if (state === "permission-confirm") deps.overlay.cancelPermission?.();
-			else if (["usage", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
+			// Ctrl+C on the card is the Esc it stands for elsewhere: it backs out of an
+			// open details or terms view first, so it never denies from a view opened to read.
+			if (state === "permission-confirm") {
+				backOutOneLayer(
+					permissionEscapeLayers(
+						deps.overlay.isInspectingMutation() ? "open" : "closed",
+						deps.overlay.isShowingPermissionTerms?.() === true ? "open" : "closed",
+						{
+							hideDetails: () => deps.overlay.toggleMutationInspection(),
+							hideTerms: () => deps.overlay.togglePermissionTerms(),
+							deny: () => deps.overlay.cancelPermission?.(),
+						},
+					),
+				);
+				deps.requestRender();
+			} else if (["usage", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
 				deps.overlay.closeOverlay();
 			else if (focused()?.handleInput) {
 				focused()?.handleInput?.(owner().ownsCtrlC === true ? "\x03" : "\x1b");
