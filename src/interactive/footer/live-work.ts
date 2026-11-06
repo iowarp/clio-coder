@@ -287,6 +287,7 @@ export function liveWorkStrip(
 		candidates = [
 			...(stoppable ? [render(ownedWith(tailCells([workers, BEHIND_VIEW_STOP])), [workers, BEHIND_VIEW_STOP])] : []),
 			...(stoppable ? behind(BEHIND_VIEW_STOP) : []),
+			...(stoppable && workers === null ? [render(owned, [BEHIND_VIEW_STOP_SHORT])] : []),
 			render(owned, [workers, BEHIND_VIEW]),
 			...behind(BEHIND_VIEW),
 			...(workers === null ? [] : [render(owned, [workers])]),
@@ -299,7 +300,6 @@ export function liveWorkStrip(
 					]
 				: []),
 			...(stoppable ? [render(ownedWith(tailCells([BEHIND_VIEW_STOP])), [BEHIND_VIEW_STOP])] : []),
-			...(stoppable ? [render(owned, [BEHIND_VIEW_STOP_SHORT])] : []),
 			render(owned, [BEHIND_VIEW]),
 			// The way out outranks the subject on a narrow strip, as it does on the rail.
 			...(stoppable ? [render(bare, [BEHIND_VIEW_STOP_SHORT])] : []),
