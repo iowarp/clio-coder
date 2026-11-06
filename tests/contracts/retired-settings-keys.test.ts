@@ -28,7 +28,10 @@ test("user settings load with retired v2 keys and list them as retired", async (
 				"version: 2\nintegrations:\n  externalAgents:\n    entries:\n      - { id: peer, command: peer, labels: { team: a } }\n",
 			path: "integrations.externalAgents.entries[0].labels",
 		},
-		{ yaml: "version: 2\ncontext:\n  compaction:\n    excludeLastTurns: 3\n", path: "context.compaction.excludeLastTurns" },
+		{
+			yaml: "version: 2\ncontext:\n  compaction:\n    excludeLastTurns: 3\n",
+			path: "context.compaction.excludeLastTurns",
+		},
 	];
 	for (const { yaml, path } of cases) {
 		writeFileSync(file, yaml);
