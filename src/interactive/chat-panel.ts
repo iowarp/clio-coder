@@ -141,7 +141,7 @@ const CHAT_MARKDOWN_OPTIONS = {
 	transform: (source: string, width: number) => {
 		const text = holdInlineMath(source, CODE_SPACE);
 		// Both transforms need a lex of the whole answer, so each runs only when the text can use it.
-		if (!mayNeedTableFit(text)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
+		if (!mayNeedTableFit(text, width)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
 		const tokens = tableParser.lexer(text);
 		const fitted = fitMarkdownTables(tokens, width);
 		if (!/mermaid/iu.test(fitted.text)) return fitted.text;
@@ -854,17 +854,59 @@ function tableGridReads(table: Tokens.Table, width: number): boolean {
 }
 
 /** Whether a lex could find a table to rewrite. A false positive costs one lex; a false negative would keep a table. */
-function mayNeedTableFit(text: string): boolean {
+function mayNeedTableFit(text: string, width: number): boolean {
 	if (!text.includes("|")) return false;
 	// A lex also removes a repeated link definition, which closes up the blank rows around it, so keep it for those.
 	const definition = text.indexOf("]:");
 	if (definition >= 0 && text.includes("]:", definition + 2)) return true;
 	for (const match of text.matchAll(TABLE_DELIMITER_ROW)) {
 		const row = match[1] ?? "";
-		// Any table may need records once its cells are measured, so the width alone no longer rules one out.
-		if (/[:|]/u.test(row)) return true;
+		if (!/[:|]/u.test(row)) continue;
+		if (!tableMayRead(text, match.index, row, width)) return true;
 	}
 	return false;
+}
+
+/**
+ * Whether the table at this delimiter row surely reads as a grid, judged from its source lines without a lex.
+ * Each column's widest raw cell is at least what the lexed cell measures, and the rows are taken up to the next
+ * blank line, which is never fewer than Marked takes, so a table this passes also passes tableGridReads.
+ * An escaped pipe would shift the split, so a table holding one goes to the lex.
+ */
+function tableMayRead(text: string, delimiterAt: number, delimiter: string, width: number): boolean {
+	const columns = tableCells(delimiter).length;
+	if (!tableFitsWidth(columns, width)) return false;
+	const headerEnd = delimiterAt - 1;
+	if (headerEnd < 0) return false;
+	const header = text.slice(text.lastIndexOf("\n", headerEnd - 1) + 1, headerEnd);
+	const widest = new Array<number>(columns).fill(0);
+	const measure = (line: string): boolean => {
+		if (line.includes("\\|")) return false;
+		const cells = tableCells(line);
+		for (let index = 0; index < columns; index += 1)
+			widest[index] = Math.max(widest[index] ?? 0, visibleWidth(cells[index] ?? ""));
+		return true;
+	};
+	if (!measure(header)) return false;
+	let start = text.indexOf("\n", delimiterAt);
+	while (start >= 0) {
+		const end = text.indexOf("\n", start + 1);
+		const line = text.slice(start + 1, end < 0 ? undefined : end);
+		if (line.trim() === "") break;
+		if (!measure(line)) return false;
+		start = end;
+	}
+	const room = width - (columns * 3 + 1);
+	return widest.reduce((sum, cell) => sum + cell, 0) <= room * 1.75;
+}
+
+/** A table row's cells as Marked splits them: outer pipes dropped, each field trimmed. */
+function tableCells(line: string): string[] {
+	return line
+		.trim()
+		.replace(/^\||\|$/gu, "")
+		.split("|")
+		.map((cell) => cell.trim());
 }
 
 function fitMarkdownTables(tokens: readonly Tokens.Generic[], width: number): { text: string; rewritten: boolean } {
