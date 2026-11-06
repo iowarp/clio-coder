@@ -368,16 +368,17 @@
 		},
 		{
 			"name": "arxiv-literature",
-			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
+			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
 			"triggers": [
 				"search arXiv",
 				"summarize an arXiv paper",
 				"compare these papers",
 				"find recent research papers",
-				"build a literature survey"
+				"build a literature survey",
+				"bibtex for this arxiv paper"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/arxiv-literature",
-			"version": "0.5.3",
+			"version": "0.6.0",
 			"audit": "pass",
 			"category": "research"
 		},

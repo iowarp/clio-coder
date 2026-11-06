@@ -29,8 +29,10 @@ entries:
   - kind: skill
     name: arxiv-literature
     description: Searches arXiv, summarizes or compares papers, and builds a compact
-      literature survey as citation-ready, source-linked paper cards. Prefer the
-      Researcher shadow agent for noisy multi-paper retrieval.
+      literature survey as citation-ready, source-linked paper cards, with
+      BibTeX export and ID verification through the CiteNexus server when the
+      literature pack is installed. Prefer the Researcher shadow agent for noisy
+      multi-paper retrieval.
     category: research
     audit: pass
     triggers:
@@ -39,15 +41,17 @@ entries:
       - compare these papers
       - find recent research papers
       - build a literature survey
-    version: 0.5.3
+      - bibtex for this arxiv paper
+    version: 0.6.0
     sourceUrl: skills/research/arxiv-literature
-    sha256: 95bea62f98c2dd69700d420cc3becfe3d838f82717784abc4a197617e33f0d54
+    sha256: d9f4a59c1b348f5dfb5340f787ea52be0ec1d36927f70f85735ec9ffdd882843
     provides:
       - kind: skill
         name: arxiv-literature
         description: Searches arXiv, summarizes or compares papers, and builds a compact
-          literature survey as citation-ready, source-linked paper cards. Prefer
-          the Researcher shadow agent for noisy multi-paper retrieval.
+          literature survey as citation-ready, source-linked paper cards, with
+          BibTeX export and ID verification through the CiteNexus server when
+          the literature pack is installed. Prefer the Resear
   - kind: skill
     name: ast-grep
     description: "Structural code search with ast-grep rules: finds code by shape
@@ -438,6 +442,26 @@ entries:
           one file correctly and collectively, and checks the result with
           Darshan counters. Not for serial file reading; not for choosing the
           science stored in the file.
+  - kind: plugin
+    name: literature
+    description: "Literature pack: verifies citations and resolves DOIs and arXiv
+      IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free
+      Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for
+      BibTeX and Markdown and a web_fetch fallback. Extends arxiv-literature.
+      Needs network for every lookup; the server needs one online launch to
+      install."
+    version: 0.1.0
+    sourceUrl: plugins/literature
+    sha256: 15ae1029900eb3e8d24a5731a1e91561a43de30259b8b4c40774d575be115c1c
+    requires:
+      - skill:arxiv-literature
+    provides:
+      - kind: skill
+        name: citation-check
+        description: "Checks every citation in a bibliography or draft against scholarly
+          records: extracts BibTeX entries, DOIs and arXiv IDs offline, verifies
+          each through the CiteNexus server (Crossref, DataCite, Europe PMC,
+          arXiv), and reports VERIFIED, MISMATCH, NOT_FOUND, "
   - kind: extension
     name: local-status
     description: A small local status command and ambient status example.
@@ -730,11 +754,11 @@ entries:
     description: "Science data pack: a skill that reads HDF5, NetCDF, Parquet and
       CSV with Clio's data tool first, and declares the clio-kit parquet and
       pandas MCP servers with per-tool action classes for analysis beyond it.
-      Reads run and file-writing tools ask first; each server needs one online
-      launch to build its environment before it runs offline."
+      Read tools run without asking; file-writing tools ask first; each server
+      needs one online launch to build its environment before it runs offline."
     version: 0.1.0
     sourceUrl: plugins/science-data
-    sha256: f2b1142e320c9263f2d4378350340f64008220ee6c141e22608ea4b67bb8d7f3
+    sha256: befdbe0a5193f61b3e9b97f19c39db5dd71337720933bbe5331111a348f97f5f
     provides:
       - kind: skill
         name: science-data

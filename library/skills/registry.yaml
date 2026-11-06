@@ -111,8 +111,8 @@ skills:
   # ── research ──
   - name: arxiv-literature
     path: research/arxiv-literature
-    version: 0.5.3
-    sha256: c142a00b2f03e1717186bef17bbcb4a4bc15416ed23c8c51e839f92a10a31b3b
+    version: 0.6.0
+    sha256: 3d433499d7dd8abf5270b40e204922551f11820f169b93f731dffdae395b3fc6
   - name: experiment-protocol
     path: research/experiment-protocol
     version: 0.3.2
