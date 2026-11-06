@@ -4,7 +4,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
 import { type ClaimsLogRead, claimsLogPath, claimsProjectRoot, readClaims } from "./store.js";
-import type { ClaimRecord, ClaimStatus } from "./types.js";
+import type { ClaimEdgeRecord, ClaimRecord, ClaimStatus } from "./types.js";
 
 /**
  * Delivery of contested and superseded claims to the main agent when the task touches their check (#406).
@@ -42,6 +42,35 @@ function claimLine(claim: ClaimRecord): string {
 	return `claim ${short(claim.id)} ${claim.verdict}: ${text}`;
 }
 
+/** The latest open contradiction and the latest supersede of one check: what its delivery is about. */
+function checkEdgeState(
+	check: string,
+	read: Pick<ClaimsLogRead, "edges">,
+	statuses: ReadonlyMap<string, ClaimStatus>,
+): { openContradiction: ClaimEdgeRecord | undefined; lastSupersede: ClaimEdgeRecord | undefined } {
+	const ofCheck = read.edges.filter((edge) => edge.check === check);
+	return {
+		openContradiction: ofCheck
+			.filter((edge) => edge.kind === "contradicts")
+			.filter((edge) => statuses.get(edge.from) === "contested" && statuses.get(edge.to) === "contested")
+			.at(-1),
+		lastSupersede: ofCheck.filter((edge) => edge.kind === "supersedes").at(-1),
+	};
+}
+
+/**
+ * The state a delivery is offered for: the check's open contradiction and latest supersede. A rerun that adds a
+ * standing claim leaves it unchanged, so the check is not offered again; a new contradiction or supersede changes it.
+ */
+export function claimsDeliveryState(
+	check: string,
+	read: Pick<ClaimsLogRead, "edges">,
+	statuses: ReadonlyMap<string, ClaimStatus>,
+): string {
+	const { openContradiction, lastSupersede } = checkEdgeState(check, read, statuses);
+	return `${check}\0${openContradiction?.id ?? ""}\0${lastSupersede?.id ?? ""}`;
+}
+
 /**
  * One check's delivery, or null when none of its claims is contested or superseded. Names the latest claim's status,
  * the open contradiction (both sides, never a merged verdict), and how many earlier verdicts were superseded and why.
@@ -56,10 +85,7 @@ export function claimsDeliveryMessage(
 	if (latest === undefined) return null;
 	const byId = new Map(claims.map((claim) => [claim.id, claim]));
 	const superseded = claims.filter((claim) => statuses.get(claim.id) === "superseded");
-	const openContradiction = read.edges
-		.filter((edge) => edge.kind === "contradicts" && edge.check === check)
-		.filter((edge) => statuses.get(edge.from) === "contested" && statuses.get(edge.to) === "contested")
-		.at(-1);
+	const { openContradiction, lastSupersede } = checkEdgeState(check, read, statuses);
 	if (openContradiction === undefined && superseded.length === 0) return null;
 	const parts: string[] = [`[Claims] Check '${check}' has recorded claims this task touches.`];
 	const later = openContradiction === undefined ? undefined : byId.get(openContradiction.from);
@@ -71,7 +97,6 @@ export function claimsDeliveryMessage(
 	} else {
 		parts.push(`Latest: ${claimLine(latest)}`);
 	}
-	const lastSupersede = read.edges.filter((edge) => edge.kind === "supersedes" && edge.check === check).at(-1);
 	const replacing = lastSupersede === undefined ? undefined : byId.get(lastSupersede.from);
 	const replaced = lastSupersede === undefined ? undefined : byId.get(lastSupersede.to);
 	if (superseded.length > 0 && replacing !== undefined && replaced !== undefined)
@@ -172,8 +197,9 @@ export function createClaimsDeliveryRegistrations(options: { cwd: () => string }
 		for (const check of pick(read)) {
 			if (messages.length >= CLAIMS_DELIVERY_MAX_CHECKS) break;
 			const message = claimsDeliveryMessage(check, read, statuses);
-			if (message === null || offered.has(message)) continue;
-			offered.add(message);
+			const state = claimsDeliveryState(check, read, statuses);
+			if (message === null || offered.has(state)) continue;
+			offered.add(state);
 			messages.push(message);
 		}
 		return messages;
