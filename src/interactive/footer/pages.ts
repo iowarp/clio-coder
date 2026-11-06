@@ -186,7 +186,9 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								: sessionTokens(theme, spend.tokens === null ? "0" : spend.measuredTokens, width),
 							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
 							// A bare `not measured` beside the token count read as the tokens' own qualifier.
-							spend.cost === null ? null : theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
+							spend.cost === null
+								? null
+								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
 			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
 		],

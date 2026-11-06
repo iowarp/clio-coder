@@ -608,9 +608,9 @@ export interface CompactionRailFacts {
 }
 
 const COMPACTION_STAGE_WORDS: Partial<Record<ContextActivityPhase, readonly [string, string]>> = {
-	compact: ["is preparing to compact", "preparing"],
-	summarize: ["is summarizing history", "summarizing"],
-	state: ["is saving the summary", "saving"],
+	compact: ["is preparing to compact", "is preparing"],
+	summarize: ["is summarizing history", "is summarizing"],
+	state: ["is saving the summary", "is saving"],
 };
 
 /**
@@ -624,7 +624,8 @@ export function compactionRailLabel(
 	subject?: RailSubject,
 ): string {
 	const words = facts ? COMPACTION_STAGE_WORDS[facts.phase] : undefined;
-	const [head, tight] = words ?? ["is compacting context", "compacting"];
+	// The tight form keeps its verb, so a named subject still reads as a sentence (`Judge-model summarizing`).
+	const [head, tight] = words ?? ["is compacting context", "is compacting"];
 	const elapsedMs = facts ? Math.max(0, now - facts.startedAtMs) : 0;
 	const elapsed = Math.floor(elapsedMs / 1000);
 	return fitRailFacts(

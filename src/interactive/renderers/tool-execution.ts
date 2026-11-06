@@ -2059,6 +2059,9 @@ function bashStopRow(execution: BashTranscriptExecution, width: number, killed =
 	return settledRow([`stopped ${took} after you asked`, `stopped after ${took}`, took]);
 }
 
+/** The note the shell runner appends after a non-zero exit, which the card's `exit N` fact already states. */
+const EXIT_NOTE = /^\[command exited with code -?\d+\]$/mu;
+
 /** The notes the shell runner appends to a stopped command's output, which the card states in its own words instead. */
 const STOP_NOTES = /^\[command (?:aborted|terminated by (?<signal>[A-Z0-9]+))\]$/gmu;
 
@@ -2089,8 +2092,11 @@ export function renderBashTranscriptExecution(
 ): string[] {
 	const stopped = execution.cancelled === true ? withoutStopNotes(execution.output) : null;
 	if (stopped !== null) execution = { ...execution, output: stopped.output };
+	// The header already says `exit 1`; the runner's `[command exited with code 1]` repeated it as the body and its size.
+	const exitNote = !execution.running && EXIT_NOTE.test(execution.output);
+	if (exitNote) execution = { ...execution, output: execution.output.replace(EXIT_NOTE, "").replace(/\s+$/u, "") };
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
-	const totalBytes = stopped !== null ? shownBytes : (execution.totalBytes ?? shownBytes);
+	const totalBytes = stopped !== null || exitNote ? shownBytes : (execution.totalBytes ?? shownBytes);
 	const args: Record<string, unknown> = { command: execution.command };
 	const details = {
 		resultSize: {
