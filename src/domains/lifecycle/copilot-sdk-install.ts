@@ -9,8 +9,8 @@ import { inspectInstallation } from "./install-method.js";
 
 /**
  * The official GitHub Copilot SDK. Its per-platform optional dependency carries the Copilot runtime
- * (about 160 MB), so like the Claude SDK it is a separate per-user component installed on first use,
- * never a runtime dependency of Clio's own package.
+ * (about 180 MB installed on Linux x64, measured with this file's npm flags), so like the Claude SDK it is
+ * a separate per-user component installed on first use, never a runtime dependency of Clio's own package.
  */
 export const COPILOT_SDK_PACKAGE = "@github/copilot-sdk";
 export const COPILOT_SDK_VERSION = "1.0.26";
@@ -139,7 +139,7 @@ export async function ensureCopilotSdk(options: CopilotSdkInstallOptions = {}): 
 		attempt = (async () => {
 			if (
 				!(await confirm(
-					`The copilot-sdk runtime needs the official GitHub Copilot SDK (${COPILOT_SDK_PACKAGE}@${COPILOT_SDK_VERSION}, about 170 MB with its runtime) as a separate component. Install it now?`,
+					`The copilot-sdk runtime needs the official GitHub Copilot SDK (${COPILOT_SDK_PACKAGE}@${COPILOT_SDK_VERSION}, about 180 MB with its runtime) as a separate component. Install it now?`,
 				))
 			)
 				throw new CopilotSdkUnavailableError();
