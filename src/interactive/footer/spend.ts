@@ -88,11 +88,12 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 }
 
 /**
- * The session's tokens as the read model displays them, without the `+?` gap marker the row has no room to explain:
+ * The session's tokens as the read model displays them, without the `≥ … +?` bound the row has no room to explain:
  * the measured part alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252`.
  */
 function knownSessionCount(quantity: Quantity): string | null {
-	const figure = renderCompactCount(quantity.fact).replace(/ \+\?$/u, "");
+	// Clio's estimates count, marked `~`; calls that reported nothing leave the bound to /usage, as the receipt does.
+	const figure = renderCompactCount(quantity.fact).replace(/^≥/u, "").replace(/ \+\?$/u, "");
 	return figure === "?" || figure === "n/a" ? null : figure;
 }
 
