@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Value } from "typebox/value";
 import {
+	INTERVIEW_META_KEY,
 	InterviewRequest,
 	type InterviewResult,
 	type InterviewRound,
@@ -8,6 +9,12 @@ import {
 	InterviewWithdrawal,
 } from "../../contracts/interviews.js";
 import { AppProblem } from "../services/problem.js";
+
+/** Whether the runtime's interview metadata marks the round operator_only; anything malformed reads as not. */
+function operatorOnly(meta: Record<string, unknown> | undefined): boolean {
+	const entry = meta?.[INTERVIEW_META_KEY];
+	return typeof entry === "object" && entry !== null && (entry as { operatorOnly?: unknown }).operatorOnly === true;
+}
 
 /** A parked runtime callback, with no browser-owned decisions or automatic selection. */
 export class Interviews {
@@ -28,6 +35,7 @@ export class Interviews {
 			requestedAt: new Date().toISOString(),
 			questions: structuredClone(value.questions),
 			...(value.interviewId ? { interviewId: value.interviewId } : {}),
+			...(operatorOnly(value._meta) ? { operatorOnly: true as const } : {}),
 		};
 		return new Promise((resolve) => {
 			this.pending = { round, resolve };

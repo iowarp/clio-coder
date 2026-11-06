@@ -44,6 +44,7 @@ export const coreTests = [
 export const guiTests = [
 	"chat-composer",
 	"chat-approval",
+	"chat-interview",
 	"chat-turns",
 	"egress-policy",
 	"sessions-http",

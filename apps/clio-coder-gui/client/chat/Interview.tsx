@@ -43,6 +43,27 @@ function savedAnswers(round: InterviewRound): InterviewDraft[] {
 	return blankInterview(round.questions);
 }
 
+/**
+ * The dialog's title block. An operator_only round says so, since the runtime
+ * waits for this person's own choice and nothing answers it in their place.
+ */
+export function InterviewHeading({ round, titleId }: { round: InterviewRound; titleId: string }) {
+	return (
+		<div>
+			<p className="eyebrow">Clio Coder needs your input</p>
+			<h2 id={titleId}>
+				Shape the next step<span className="period">.</span>
+			</h2>
+			{round.operatorOnly ? (
+				<p className="interview-dialog__operator-only">
+					<Icon name="warn" />
+					Operator only: only you can answer this. No agent or policy decides it for you.
+				</p>
+			) : null}
+		</div>
+	);
+}
+
 function InterviewDialog({ client, sessionId, round }: { client: Client; sessionId: string; round: InterviewRound }) {
 	const queries = useQueryClient();
 	const [answers, setAnswers] = useState(() => savedAnswers(round));
@@ -132,12 +153,7 @@ function InterviewDialog({ client, sessionId, round }: { client: Client; session
 			}}
 		>
 			<header className="interview-dialog__header">
-				<div>
-					<p className="eyebrow">Clio Coder needs your input</p>
-					<h2 id={title}>
-						Shape the next step<span className="period">.</span>
-					</h2>
-				</div>
+				<InterviewHeading round={round} titleId={title} />
 				<button
 					type="button"
 					disabled={send.isPending}
