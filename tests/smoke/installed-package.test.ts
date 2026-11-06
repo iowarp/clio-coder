@@ -872,6 +872,21 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			) as { kind: string; output?: string; message?: string };
 			strictEqual(packedRead.kind, "ok", packedRead.message);
 			match(packedRead.output ?? "", /from "\.\.\/core\/assistant-model\.js"/);
+			// A directory that exists only in the pack answers like a loose one, not "File not found".
+			const packedDirectory = dirname(packedSource);
+			strictEqual(existsSync(packedDirectory), false, "src/interactive must ship packed, not as a loose directory");
+			const packedDirectoryRead = JSON.parse(
+				execFileSync(process.execPath, ["--input-type=module", "--eval", readChild, readChunk, packedDirectory], {
+					cwd: foreign,
+					env: isolatedEnv(home),
+					encoding: "utf8",
+				}),
+			) as { kind: string; message?: string };
+			strictEqual(packedDirectoryRead.kind, "error");
+			strictEqual(
+				packedDirectoryRead.message,
+				`read: ${packedDirectory} is a directory, not a file. List its entries with ls.`,
+			);
 
 			const libraryHome = join(work, "isolated library home with spaces");
 			const libraryProject = join(work, "isolated library project with spaces");

@@ -38,6 +38,7 @@ export const coreTests = [
 	"url-userinfo-hold",
 	"url-credential-surfaces",
 	"in-prefix-summary",
+	"packed-source-directory",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
