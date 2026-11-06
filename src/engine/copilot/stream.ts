@@ -173,8 +173,10 @@ class Conversation {
 	/** Readings are numbered; only the newest may move a boundary. */
 	metricsSeq = 0;
 	private readonly retiredCalls = new Set<string>();
-	/** Settled steps still owed one usage report Copilot sent without a call id. */
-	private unclaimedUsage = 0;
+	/** Settled steps that ended without any usage report and may still be sent one. */
+	private owedUsage = 0;
+	/** The call ids those steps were seen under; a late report carrying one of them pays its debt by name. */
+	private readonly owedIds = new Set<string>();
 	private readonly parked = new Map<string, Parked>();
 	private readonly delivered = new Map<string, ToolResultObject>();
 	private unsubscribe: (() => void) | null = null;
@@ -199,22 +201,33 @@ class Conversation {
 	}
 
 	/**
-	 * Usage belongs to the call that made it. A report for a call whose step already settled stays with that
-	 * step (which settled it unreported) and never reaches the open step. A report without a call id while a
-	 * settled step still owes one cannot be placed, so it counts for neither and the open step's usage becomes
-	 * uncertain instead of absorbing it.
+	 * Usage belongs to the call that made it, and Copilot's ids do not prove which call that is: message and
+	 * usage ids come from different namespaces (Copilot's call id, the provider's message id) and either may be
+	 * absent. So the rule is conservative. A report naming a settled call stays with that call. While any
+	 * settled step still owes a report, a report whose id is not already bound to the open step is
+	 * unattributable: it is credited to no step, it pays one debt, and the open step's counts become unknown,
+	 * whether the report carried an id or not.
 	 */
 	private route(event: SessionEvent): void {
 		if (event.type === "assistant.usage" && !(event as { agentId?: string }).agentId && !event.data.parentToolCallId) {
 			const id = event.data.apiCallId;
-			if (id !== undefined && this.retiredCalls.has(id)) return;
-			if (id === undefined && this.unclaimedUsage > 0) {
-				this.unclaimedUsage -= 1;
+			if (id !== undefined && this.retiredCalls.has(id)) {
+				if (this.owedIds.delete(id)) this.payDebt();
+				return;
+			}
+			const bound = id !== undefined && this.activeStep?.callIds.has(id) === true;
+			if (this.owedUsage > 0 && !bound) {
+				this.payDebt();
 				this.activeStep?.markUsageUncertain();
 				return;
 			}
 		}
 		this.activeStep?.handle(event);
+	}
+
+	private payDebt(): void {
+		this.owedUsage = Math.max(0, this.owedUsage - 1);
+		if (this.owedUsage === 0) this.owedIds.clear();
 	}
 
 	/** A settled step's calls keep their late usage; one that ended without its own usage moves no boundary. */
@@ -226,7 +239,10 @@ class Conversation {
 				if (oldest !== undefined) this.retiredCalls.delete(oldest);
 			}
 		}
-		if (step.owesAnonymousUsage) this.unclaimedUsage += 1;
+		if (step.owesUsage) {
+			this.owedUsage += 1;
+			for (const id of step.callIds) this.owedIds.add(id);
+		}
 		if (!step.usageComplete) {
 			// Its usage may still be accounted later, so the runtime's next totals cannot split it from a successor.
 			this.boundaries.premiumRequests.valid = false;
@@ -476,8 +492,6 @@ class Step {
 	private error: string | null = null;
 	private billing: CopilotStepBilling = { premiumRequests: null, nanoAiu: null, modelCalls: 0 };
 	private toolUse: string[] | null = null;
-	/** The tool-requesting call's id, when Copilot gave one; a settled step without it may still owe an id-less report. */
-	private toolUseCall: string | null = null;
 	private usageEvents = 0;
 	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	private nanoReports = 0;
@@ -492,6 +506,8 @@ class Step {
 	private usageUncertain = false;
 	/** Whether the tool-requesting call's own usage arrived before the step settled. */
 	private toolUseUsageSeen = false;
+	/** Whether Copilot answered this step at all (any root message or delta), so a usage report is due. */
+	private answered = false;
 	/** Runs when the step stops taking events, before any settling; later usage then waits for the next step. */
 	onDetach: ((step: Step) => void) | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -577,9 +593,9 @@ class Step {
 		return this.toolUse === null || this.toolUseUsageSeen;
 	}
 
-	/** A tool-requesting call with no id that settled without its usage: its report may still arrive anonymously. */
-	get owesAnonymousUsage(): boolean {
-		return this.toolUse !== null && !this.toolUseUsageSeen && this.toolUseCall === null;
+	/** The step answered (it made a model call) but settled before any usage report for it arrived. */
+	get owesUsage(): boolean {
+		return this.answered && this.usageEvents === 0;
 	}
 
 	private usage(data: Extract<SessionEvent, { type: "assistant.usage" }>["data"]): void {
@@ -630,7 +646,10 @@ class Step {
 		if ((event as { agentId?: string }).agentId) return;
 		switch (event.type) {
 			case "assistant.message_delta":
-				if (!event.data.parentToolCallId) this.text(event.data.deltaContent);
+				if (!event.data.parentToolCallId) {
+					this.answered = true;
+					this.text(event.data.deltaContent);
+				}
 				return;
 			case "assistant.reasoning_delta":
 				this.thinking(event.data.deltaContent);
@@ -640,6 +659,7 @@ class Step {
 				return;
 			case "assistant.message": {
 				if (event.data.parentToolCallId) return;
+				this.answered = true;
 				if (typeof event.data.apiCallId === "string") this.callIds.add(event.data.apiCallId);
 				const streamed = this.textIndex === null ? "" : (this.message.content[this.textIndex] as TextContent).text;
 				if (streamed.length === 0 && event.data.content) this.text(event.data.content);
@@ -666,7 +686,6 @@ class Step {
 				// The step ends with this call's usage, so its tokens and seat units settle on this call. Without
 				// usage by the deadline it settles them as unreported; a later report is not moved to another call.
 				this.toolUse = ids;
-				this.toolUseCall = event.data.apiCallId ?? null;
 				// The live runtime can report the call's usage before this message: the step is then already complete.
 				if (this.usageEvents > 0) {
 					this.toolUseUsageSeen = true;
@@ -766,9 +785,61 @@ function declareTools(conversationRef: () => Conversation | null, tools: Readonl
 	}));
 }
 
-function openConversation(input: Parameters<typeof openConversationHeld>[0]): Promise<Conversation> {
+class CopilotOpenCancelled extends Error {
+	constructor() {
+		super("Opening the Copilot session was cancelled");
+		this.name = "CopilotOpenCancelled";
+	}
+}
+
+/**
+ * Open a conversation under a runtime hold. Cancellation does not wait for the SDK: on abort the hold is released
+ * at once and the caller sees CopilotOpenCancelled, even when createSession never answers. A session that
+ * arrives after the cancel is disposed (dispose is idempotent) and never used; a creation that later fails
+ * needs nothing.
+ */
+function openConversation(
+	input: Parameters<typeof openConversationHeld>[0],
+	signal: AbortSignal | undefined,
+): Promise<Conversation> {
 	const release = holdCopilotClient();
-	return openConversationHeld(input).finally(release);
+	const opening = openConversationHeld(input);
+	return new Promise<Conversation>((resolve, reject) => {
+		let settled = false;
+		const onAbort = () => {
+			if (settled) return;
+			settled = true;
+			release();
+			reject(new CopilotOpenCancelled());
+			void opening.then(
+				(late) => late.dispose("The Copilot step was cancelled before its session was used."),
+				() => {
+					// A creation that fails after the cancel left nothing to clean up.
+				},
+			);
+		};
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
+		opening.then(
+			(conversation) => {
+				if (settled) return;
+				settled = true;
+				signal?.removeEventListener("abort", onAbort);
+				release();
+				resolve(conversation);
+			},
+			(error: unknown) => {
+				if (settled) return;
+				settled = true;
+				signal?.removeEventListener("abort", onAbort);
+				release();
+				reject(error);
+			},
+		);
+	});
 }
 
 async function openConversationHeld(input: {
@@ -935,9 +1006,9 @@ async function runStep(
 	try {
 		if (!conversation) {
 			evictFor(key);
-			const opened = await openConversation({ key, model, systemPrompt, tools, reasoningEffort });
+			const opened = await openConversation({ key, model, systemPrompt, tools, reasoningEffort }, signal);
 			if (step.isFinished) {
-				// Cancelled while the session was being created: it never carries a message.
+				// Ended another way while the session was being created: it never carries a message.
 				void opened.dispose("The Copilot step was cancelled before its session was used.");
 				return;
 			}
@@ -1056,6 +1127,8 @@ async function runStep(
 			});
 		}
 	} catch (error) {
+		// The abort already settled the step; the cancelled opening has nothing more to report.
+		if (error instanceof CopilotOpenCancelled) return;
 		const message = error instanceof Error ? error.message : String(error);
 		if (conversation && !bound) remove(conversation);
 		step.finish("error", [], message);

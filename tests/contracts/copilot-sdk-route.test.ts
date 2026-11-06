@@ -12,7 +12,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
@@ -45,7 +45,7 @@ const FAKE_SDK = String.raw`
 import { EventEmitter } from "node:events";
 const state = (globalThis.__clioCopilotFake ??= {
 	clients: [], instances: [], sessions: [], deleted: [], disconnected: [], toolResults: [], rejected: [],
-	omitInternals: false, createGate: null, creating: 0, order: [], failBaselineOnce: false,
+	omitInternals: false, createGate: null, creating: 0, order: [], failBaselineOnce: false, referenced: false,
 	auth: { isAuthenticated: true, login: "octo", host: "https://github.com" },
 	models: [
 		{ id: "fake-model", name: "Fake Model", capabilities: { supports: { vision: false, reasoningEffort: false }, limits: { max_context_window_tokens: 64000 } }, policy: { state: "enabled", terms: "" } },
@@ -100,13 +100,17 @@ class FakeSession {
 	}
 	/** As SDK 1.0.26 _markDisconnected(): handlers cleared, no terminal event. */
 	markDisconnected() { this.markedDisconnected = true; this.handlers.clear(); }
-	/** A tool request whose usage arrives only after Clio's tool result, as a late report. */
-	async lateUsageTool(toolCallId, callId) {
+	/**
+	 * A tool request whose usage arrives only after Clio's tool result, as a late report. messageId is the id on
+	 * the tool request, lateId the id on its late usage, nextId the id on the successor call's usage; any may be
+	 * absent, and lateId may differ from messageId as Copilot's and the provider's namespaces do.
+	 */
+	async lateUsageTool(toolCallId, messageId, lateId, nextId) {
 		const name = [...this.tools.keys()][0];
-		this.emit("assistant.message", { messageId: "l1", ...(callId ? { apiCallId: callId } : {}), content: "", toolRequests: [{ toolCallId, name, arguments: {} }] });
+		this.emit("assistant.message", { messageId: "l1", ...(messageId ? { apiCallId: messageId } : {}), content: "", toolRequests: [{ toolCallId, name, arguments: {} }] });
 		const result = await this.tools.get(name).handler({}, { toolCallId, sessionId: this.sessionId, toolName: name, arguments: {}, signal: new AbortController().signal });
-		this.usage({ model: "fake-model", ...(callId ? { apiCallId: callId } : {}), inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
-		this.usage({ model: "fake-model", ...(callId ? { apiCallId: callId + "-next" } : {}), inputTokens: 30, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
+		this.usage({ model: "fake-model", ...(lateId ? { apiCallId: lateId } : {}), inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+		this.usage({ model: "fake-model", ...(nextId ? { apiCallId: nextId } : {}), inputTokens: 30, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
 		this.emit("assistant.message", { messageId: "l2", content: "after " + result.textResultForLlm });
 		this.emit("session.idle", {});
 	}
@@ -137,8 +141,10 @@ class FakeSession {
 			this.emit("assistant.message", { messageId: "u1", apiCallId: "copilot-call-1", content: "", toolRequests: [{ toolCallId: "call_first", name, arguments: {} }] });
 			return;
 		}
-		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a"); return; }
-		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null); return; }
+		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a", "late-a", "late-a-next"); return; }
+		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null, null, null); return; }
+		if (prompt.includes("op:late-namespace")) { await this.lateUsageTool("call_ns", "copilot-A", "msg_A", "msg_B"); return; }
+		if (prompt.includes("op:late-idless-tagged")) { await this.lateUsageTool("call_tag", null, "msg_A", "msg_B"); return; }
 		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
 		if (prompt.includes("op:usage-wait")) {
 			this.usage({ model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 });
@@ -188,7 +194,8 @@ export class CopilotClient {
 		this.sessionsOpen = [];
 		// The private 1.0.26 layout Clio's client watches: the stdio child, its start timer and the state field.
 		if (!state.omitInternals) {
-			const handle = () => Object.assign(new EventEmitter(), { ref() {}, unref() {} });
+			// ref/unref record whether Clio currently keeps the runtime alive (it holds it while work is pending).
+			const handle = () => Object.assign(new EventEmitter(), { ref() { state.referenced = true; }, unref() { state.referenced = false; } });
 			this.cliProcess = Object.assign(handle(), { stdin: handle(), stdout: handle(), stderr: handle() });
 			this.cliStartTimeout = null;
 		}
@@ -254,6 +261,7 @@ interface FakeState {
 	creating: number;
 	order: string[];
 	failBaselineOnce: boolean;
+	referenced: boolean;
 }
 const fake = (): FakeState => (globalThis as { __clioCopilotFake?: FakeState }).__clioCopilotFake as FakeState;
 
@@ -311,17 +319,17 @@ async function step(context: Context, sessionId = "route-session", signal?: Abor
 	return engineStreamSimple(model, normalizeContext(context), { sessionId, ...(signal ? { signal } : {}) }).result();
 }
 
-/** Settles with the promise's value, or "pending" when it has not settled within `ms`. */
-async function within<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const pending = new Promise<"pending">((resolve) => {
-		timer = setTimeout(() => resolve("pending"), ms);
+/**
+ * The promise's value if it settles within a bounded number of event-loop turns, else "pending". Turns, not
+ * milliseconds: the work under test is event-driven, so no wall-clock threshold decides the outcome.
+ */
+async function settledWithinTurns<T>(promise: Promise<T>, turns = 200): Promise<T | "pending"> {
+	let outcome: { value: T } | null = null;
+	void promise.then((value) => {
+		outcome = { value };
 	});
-	try {
-		return await Promise.race([promise, pending]);
-	} finally {
-		clearTimeout(timer);
-	}
+	for (let turn = 0; turn < turns && outcome === null; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+	return outcome === null ? "pending" : (outcome as { value: T }).value;
 }
 
 const toolResult = (toolCallId: string, text: string) => ({
@@ -590,6 +598,8 @@ test("late usage stays with the call that made it and never lands on its success
 	for (const [prompt, key] of [
 		["op:late-usage", "late-session"],
 		["op:late-anon", "anon-session"],
+		["op:late-namespace", "namespace-session"],
+		["op:late-idless-tagged", "tagged-session"],
 	] as const) {
 		const context: Context = { tools: [readTool], messages: [user(prompt)] };
 		const first = await step(context, key);
@@ -608,25 +618,35 @@ test("late usage stays with the call that made it and never lands on its success
 			deepStrictEqual(facts.usage?.output, { kind: "measured", value: 5, source: "provider" });
 			deepStrictEqual(facts.billing?.modelCalls, { kind: "measured", value: 1, source: "local-count" });
 		} else {
-			// Without call ids the first report cannot be placed: the successor's counts are uncertain, never 90.
+			// No verified common id: no call id at all, message and usage ids from different namespaces, or an
+			// id-less tool request followed by a tagged report. The late report is placed nowhere and the
+			// successor's counts are unknown, never 90 and 15 over two calls.
 			strictEqual(facts.usage?.input.kind, "unknown");
 			strictEqual(facts.usage?.output.kind, "unknown");
+			strictEqual(facts.billing?.premiumRequests.kind, "unknown");
 		}
 		disposeCopilotConversations(key);
 	}
 });
 
 test("a lost runtime or a closed conversation settles the open step, and the client restarts", async () => {
+	const hangSends = fake().order.filter((entry) => entry.startsWith("send ")).length;
 	const pending = step({ messages: [user("op:hang")] }, "hang-session");
-	await new Promise((resolve) => setTimeout(resolve, 20));
+	while (fake().order.filter((entry) => entry.startsWith("send ")).length === hangSends)
+		await new Promise((resolve) => setImmediate(resolve));
 	disposeCopilotConversations("hang-session");
-	const closed = await within(pending, 500);
+	const closed = await settledWithinTurns(pending);
 	ok(closed !== "pending", "disposal settles the open step");
 	strictEqual(closed.stopReason, "error");
 	match(closed.errorMessage ?? "", /Clio session ended/);
 
 	const clientsBefore = fake().instances.length;
-	const dropped = await within(step({ messages: [user("op:drop")] }, "drop-session"), 500);
+	const sendsBefore = fake().order.filter((entry) => entry.startsWith("send ")).length;
+	const dropping = step({ messages: [user("op:drop")] }, "drop-session");
+	// Wait for the event that matters, the prompt reaching the runtime, then for the drop that follows it.
+	while (fake().order.filter((entry) => entry.startsWith("send ")).length === sendsBefore)
+		await new Promise((resolve) => setImmediate(resolve));
+	const dropped = await settledWithinTurns(dropping);
 	ok(dropped !== "pending", "a runtime exit settles the open step");
 	strictEqual(dropped.stopReason, "error");
 	match(dropped.errorMessage ?? "", /runtime exited/);
@@ -650,6 +670,9 @@ test("a lost runtime or a closed conversation settles the open step, and the cli
 		fake().omitInternals = false;
 		disposeCopilotConversations("drop-session");
 		disposeCopilotConversations("drop-session-2");
+		// Retire the client built without the private layout, so later tests run on a normal one again.
+		const layoutless = fake().instances.at(-1) as { state: string };
+		layoutless.state = "disconnected";
 	}
 });
 
@@ -663,7 +686,7 @@ test("cancelling while Copilot creates the session sends nothing and disposes th
 	const pending = step({ messages: [user("hello")] }, "cancel-session", controller.signal);
 	while (fake().creating === creatingBefore) await new Promise((resolve) => setTimeout(resolve, 5));
 	controller.abort();
-	const settled = await within(pending, 500);
+	const settled = await settledWithinTurns(pending);
 	ok(settled !== "pending", "the abort settles the step while creation is still pending");
 	strictEqual(settled.stopReason, "aborted");
 	fake().createGate = null;
@@ -673,6 +696,27 @@ test("cancelling while Copilot creates the session sends nothing and disposes th
 	ok(created);
 	deepStrictEqual(created.prompts, [], "nothing is sent after the cancel");
 	ok(fake().disconnected.includes(created.sessionId), "the session created after the cancel is disposed");
+});
+
+test("a createSession that never answers releases the runtime hold as soon as the step is cancelled", async () => {
+	fake().createGate = new Promise<void>(() => {
+		// Never resolves: the runtime never answers session.create.
+	});
+	try {
+		const creatingBefore = fake().creating;
+		const controller = new AbortController();
+		const pending = step({ messages: [user("hello")] }, "never-session", controller.signal);
+		while (fake().creating === creatingBefore) await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(fake().referenced, true, "the runtime is held while the session is being created");
+		controller.abort();
+		const settled = await settledWithinTurns(pending);
+		ok(settled !== "pending");
+		strictEqual(settled.stopReason, "aborted");
+		await settledWithinTurns(new Promise<void>(() => {}), 5);
+		strictEqual(fake().referenced, false, "no hold outlives the cancelled step");
+	} finally {
+		fake().createGate = null;
+	}
 });
 
 test("billing boundaries are per quantity, and a gap is attributed to no call", async () => {
@@ -751,6 +795,27 @@ test("session state containment is physical: no symlink leads a write or a clean
 		await removeCopilotSessionRecords("alias-session");
 		strictEqual(existsSync(join(sessions, "alias-session")), false);
 		strictEqual(readFileSync(join(victim, "kept-session", "precious.txt"), "utf8"), "precious");
+
+		// Identity anchoring: a session directory swapped for another real directory after first use, or reached
+		// through a replaced ancestor, is no longer the one first resolved; mutation and cleanup both refuse it.
+		const swapFs = createCopilotSessionFs("swap-session");
+		await swapFs.appendFile(join(stateBase, "events.jsonl"), "{}");
+		renameSync(join(sessions, "swap-session"), join(env.dir, "swap-original"));
+		mkdirSync(join(sessions, "swap-session"));
+		writeFileSync(join(sessions, "swap-session", "planted.txt"), "planted");
+		await rejects(swapFs.appendFile(join(stateBase, "events.jsonl"), "{}"), /no longer the one first resolved/);
+		await rejects(swapFs.rm(join(stateBase, "planted.txt"), false, false), /no longer the one first resolved/);
+		await rejects(removeCopilotSessionRecords("swap-session"), /no longer the one first resolved/);
+		removeCopilotSessionRecordsSync("swap-session");
+		strictEqual(readFileSync(join(sessions, "swap-session", "planted.txt"), "utf8"), "planted");
+
+		const ancestorFs = createCopilotSessionFs("ancestor-session");
+		await ancestorFs.appendFile(join(stateBase, "events.jsonl"), "{}");
+		renameSync(sessions, join(env.dir, "sessions-original"));
+		mkdirSync(join(sessions, "ancestor-session"), { recursive: true });
+		await rejects(ancestorFs.writeFile(join(stateBase, "events.jsonl"), "{}"), /no longer the one first resolved/);
+		await rejects(ancestorFs.mkdir(join(stateBase, "checkpoints"), true), /no longer the one first resolved/);
+		strictEqual(readdirSync(join(sessions, "ancestor-session")).length, 0);
 	} finally {
 		rmSync(sessions, { recursive: true, force: true });
 		renameSync(parked, sessions);
@@ -758,11 +823,22 @@ test("session state containment is physical: no symlink leads a write or a clean
 });
 
 test("the first step of a fresh conversation is measured from a boundary read before the first send", async () => {
-	const started = performance.now();
-	const first = await step({ tools: [readTool], messages: [user("op:usage-first")] }, "fresh-session");
-	const elapsed = performance.now() - started;
+	// The 2 s tool-use deadline runs on a mocked clock that is never advanced to it, so the step can only
+	// complete because its usage and its tool request both arrived (usage first, as on the live runtime).
+	mock.timers.enable({ apis: ["setTimeout"] });
+	let first: AssistantMessage | "pending";
+	try {
+		const pending = step({ tools: [readTool], messages: [user("op:usage-first")] }, "fresh-session");
+		first = "pending";
+		for (let virtualMs = 0; virtualMs < 100 && first === "pending"; virtualMs += 1) {
+			mock.timers.tick(1);
+			first = await settledWithinTurns(pending, 5);
+		}
+	} finally {
+		mock.timers.reset();
+	}
+	ok(first !== "pending", "the step completed without the deadline timer reaching its 2 s");
 	strictEqual(first.stopReason, "toolUse");
-	ok(elapsed < 1_000, `usage before the tool request completes the step at once, not at the deadline (${elapsed} ms)`);
 	const facts = callSettlementFromMessage(first, "none");
 	deepStrictEqual(facts.billing?.premiumRequests, { kind: "measured", value: 1, source: "provider" });
 	deepStrictEqual(facts.usage?.input, { kind: "measured", value: 50, source: "provider" });
