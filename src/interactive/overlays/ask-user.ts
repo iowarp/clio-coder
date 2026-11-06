@@ -1004,7 +1004,15 @@ class AskUserOverlayView implements Component {
 		} else {
 			const full = [...(position === null ? [] : [position]), ...move, ...(ledger === null ? [] : [ledger])];
 			if (escKeeps > 0) full.push(keepsWhole);
-			parts = escKeeps > 0 && !fits(full) ? [...shortPosition, ...move, keepsNamed] : full;
+			// Narrowest, the count stands for the answers: `1 kept on cancel` still says what Esc keeps.
+			const keepsCounted = `${escKeeps} kept on cancel${pointer}`;
+			const narrow = [...shortPosition, ...move];
+			parts =
+				escKeeps > 0 && !fits(full)
+					? fits([...narrow, keepsNamed])
+						? [...narrow, keepsNamed]
+						: [...narrow, keepsCounted]
+					: full;
 			// What the question under the row already explains fits whole or gives way.
 			const optional = [
 				...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
