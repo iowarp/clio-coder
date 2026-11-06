@@ -47,6 +47,8 @@ export const ObjectRefSchema = Type.Object(
 			"prompt-text",
 			"memory-trace",
 			"observation-trace",
+			// The prompt cache key a request was sent under, as a commitment that never stores the key (#434).
+			"prompt-cache-key",
 			"run-result",
 			"evidence-findings",
 		]),

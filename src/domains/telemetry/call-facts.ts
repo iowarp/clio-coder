@@ -6,6 +6,7 @@ import { pricedUsd } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
 import type { EffectivePricing } from "../providers/catalog.js";
+import { telemetryCommitment } from "./objects.js";
 
 const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
 const unobserved = { kind: "unknown", reason: "not-observed" } as const;
@@ -44,6 +45,7 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 	const outcome = outcomes.find((value) => value === recovery.outcome);
 	const continuation = codex.request === "delta" || codex.request === "full" ? codex.request : undefined;
 	const bytes = sent && continuation !== "delta" ? amount(raw.clioCoderRequestBytes) : null;
+	const cacheKey = sent && typeof raw.clioCoderPromptCacheKey === "string" ? raw.clioCoderPromptCacheKey : undefined;
 	return {
 		kind: codex.mode === "websocket" || codex.mode === "sse" ? codex.mode : "unknown",
 		continuation: continuation ? counted(continuation) : unobserved,
@@ -59,6 +61,8 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 		...(fallbacks !== null ? { sseFallbacks: counted(fallbacks) } : {}),
 		...(codex.fallbackActive === true && pinReason ? { pinReason } : {}),
 		...(action && outcome ? { recovery: { action, outcome } } : {}),
+		// The key is a session identifier, so the journal keeps a commitment: equal keys compare, none is stored (#434).
+		...(cacheKey ? { promptCacheKey: telemetryCommitment("prompt-cache-key", cacheKey) } : {}),
 	};
 }
 

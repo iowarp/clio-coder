@@ -4,7 +4,8 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 /**
  * Under transport option B Pi serializes and sends the request, so the payload it hands its provider is the request
  * Clio can see. Its size is taken once the call settles, off the send path, and rides the terminal message the way
- * the Codex transport observation does, so stream wrappers that copy the message keep it (#434).
+ * the Codex transport observation does, so stream wrappers that copy the message keep it (#434). So does the prompt
+ * cache key the body was sent under (Codex and Responses `prompt_cache_key`), which only the payload states.
  */
 export function observePayloadBytes<T extends StreamOptions>(
 	model: Model<Api>,
@@ -26,6 +27,12 @@ export function observePayloadBytes<T extends StreamOptions>(
 	let handedOver = false;
 	const remember = (message: AssistantMessage): void => {
 		let serialized: string | undefined;
+		const cacheKey =
+			payload !== null && typeof payload === "object"
+				? (payload as { prompt_cache_key?: unknown }).prompt_cache_key
+				: undefined;
+		if (typeof cacheKey === "string" && cacheKey.length > 0)
+			(message as AssistantMessage & { clioCoderPromptCacheKey?: string }).clioCoderPromptCacheKey = cacheKey;
 		if (payload !== undefined) {
 			try {
 				serialized = JSON.stringify(payload);
