@@ -47,6 +47,7 @@ export const guiTests = [
 	"app-state",
 	"ssh-model",
 	"machine-proxy",
+	"openapi",
 ].map((name) => `tests/${name}.test.ts`);
 
 export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
