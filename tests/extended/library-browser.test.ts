@@ -333,7 +333,7 @@ describe("library review and outcome wording", () => {
 		match(body, /session refresh failed: reload threw; press R to retry/);
 		// Disk and resource evidence predate the refresh; a failed refresh must not
 		// read as "this session now has it".
-		match(body, /resource evidence from before refresh; current session admission is unverified/);
+		match(body, /read before the reload, which failed, so what loads now is\s+unverified/);
 		match(body, /Unattempted steps were never started/);
 		match(body, /never repeats a write/);
 	});
@@ -362,10 +362,10 @@ describe("library review and outcome wording", () => {
 				90,
 			).join("\n"),
 		);
-		match(body, /reopen the Library\s+for\s+current\s+admission/);
+		match(body, /reopen the Library\s+to\s+see\s+what\s+loads\s+now/);
 		// A package can be on disk while one resource is still unavailable.
-		match(body, /skill:ship unavailable \(untrusted project import\)/);
-		match(body, /generation 4/);
+		match(body, /not available: skill:ship \(untrusted project import\)/);
+		match(body, /This session already sees the change/);
 	});
 });
 
@@ -669,14 +669,14 @@ describe("library browser behavior", () => {
 		state.review?.accept();
 		equal(state.applied, 1);
 		deepStrictEqual(state.planned, [{ operation: "remove", ref: "plugin:materio", scope: "user" }]);
-		match(state.notices.map(([, text]) => text).join(" "), /session refresh refreshed/);
+		match(state.notices.map(([, text]) => text).join(" "), /plugin:materio: nothing changed\./);
 	});
 
 	it("refuses an install with missing requirements once, then reviews them together", () => {
 		const state = harness({ initialTab: "plugin", refusal: "needs skill:ship" });
 		state.press("i");
 		equal(state.review, null, "a refused plan is reported before a review is opened");
-		match(state.notices.map(([, text]) => text).join(" "), /needs skill:ship; press i again/);
+		match(state.notices.map(([, text]) => text).join(" "), /needs skill:ship, which is not installed\. Press i again/);
 		equal(state.released, 1, "the refused plan is released rather than left staged");
 		state.press("i");
 		ok(state.review, "the second press reviews the requirements with it");
@@ -844,7 +844,7 @@ describe("library browser behavior", () => {
 		equal(state.imports, 0, "nothing is imported before the review is accepted");
 		state.review?.accept();
 		equal(state.imports, 1);
-		match(state.notices.map(([, text]) => text).join(" "), /import \/vendor\/pack: 1 committed/);
+		match(state.notices.map(([, text]) => text).join(" "), /Imported plugin:vendor-pack in user scope\./);
 	});
 
 	it("releases the staged vendor tree when an import review is cancelled", () => {
@@ -963,11 +963,11 @@ describe("library browser behavior", () => {
 		const state = harness({ initialTab: "skill", inventory: inventory({ packages: [], copies: [], resources: [] }) });
 		const view = state.mount();
 		view.setViewportRows(18);
-		match(plain(view.render(100).join("\n")), /No packages of this kind/);
+		match(plain(view.render(100).join("\n")), /No installable packages of this kind/);
 		state.options.globalActions?.b?.();
 		const installed = state.mount();
 		installed.setViewportRows(18);
-		match(plain(installed.render(100).join("\n")), /No entries of this kind/);
+		match(plain(installed.render(100).join("\n")), /Nothing of this kind is installed or loaded/);
 	});
 
 	it("keeps `o` as the separate local-agent discovery route", () => {

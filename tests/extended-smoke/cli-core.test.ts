@@ -380,7 +380,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 				input: "q\n",
 			});
 			strictEqual(firstRunCancel.code, 130, firstRunCancel.stdout + firstRunCancel.stderr);
-			match(firstRunCancel.stdout, /Starting `clio-coder configure`/u);
+			match(firstRunCancel.stdout, /Clio needs a model before it can do anything else/u);
 			match(firstRunCancel.stderr, /configuration cancelled/u);
 		} finally {
 			firstRun.cleanup();

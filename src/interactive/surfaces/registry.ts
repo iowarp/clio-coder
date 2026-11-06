@@ -1,3 +1,4 @@
+import { extensionOwnerLabel } from "../../domains/extensions/owner-label.js";
 import type { ExtensionStatus } from "../../domains/extensions/public-api.js";
 import type { ExtensionSkin } from "../../domains/extensions/public-api-v2.js";
 import type { ActiveExtensionWorkspace, ExtensionSurfaceModel } from "../../domains/extensions/surface-model.js";
@@ -28,6 +29,20 @@ const STATUS_ROLES = {
 	error: "error",
 } as const satisfies Record<NonNullable<ExtensionStatus["tone"]>, SemanticRole>;
 
+/**
+ * An extension status as `Owner: words`. A status that already opens with its
+ * owner's name ("Local status ready") gives the name to the label instead of
+ * saying it twice, so the footer reads "Local status: ready".
+ */
+function ownedStatus(owner: string, text: string): { owner: string; text: string } {
+	const trimmed = text.trim();
+	if (trimmed.toLowerCase().startsWith(owner.toLowerCase())) {
+		const rest = trimmed.slice(owner.length).replace(/^[\s:·-]+/u, "");
+		if (rest.length > 0) return { owner: trimmed.slice(0, owner.length), text: rest };
+	}
+	return { owner, text: trimmed };
+}
+
 export interface WorkspaceSurfaceDeps {
 	model: ExtensionSurfaceModel;
 	tui: Pick<TUI, "requestRender">;
@@ -36,11 +51,18 @@ export interface WorkspaceSurfaceDeps {
 	leaveHint(): string;
 	/** The terminal's height, which bounds how many dock rows the island tiles take. */
 	terminalRows?(): number;
-	/** A workspace key was pressed through the leader menu. */
-	press(extensionId: string, action: string): void;
+	/** A workspace key or a band action was pressed through the leader menu. */
+	press(extensionId: string, action: string, source?: "leader" | "band"): void;
+	/** The leader key as the footer prints it, or null when none is bound. */
+	leaderLabel?(): string | null;
 	/** Open the board in the pressable panel; absent where no such panel exists. */
 	focusBoard?(extensionId: string, title: string, view: () => View | undefined): void;
 	leave(): void;
+	/**
+	 * Statuses from runtimes outside the surface model (api 1), so the footer is
+	 * the one place every running extension's status is read.
+	 */
+	otherStatuses?(): ReadonlyArray<{ id: string; status: ExtensionStatus }>;
 }
 
 /** The leader suffix that leaves an active workspace; built-in suffixes never use it. */
@@ -73,6 +95,28 @@ export interface WorkspaceSurfaces {
 	/** The active workspace's leader entries: its declared keys, then how to leave. */
 	leaderTargets(): Array<{ key: string; label: string; run: () => void }>;
 	dispose(): void;
+}
+
+/** The action rows inside a band, in drawing order. */
+function bandActionItems(view: View): Array<{ id: string; label: string }> {
+	if (view.t === "actions") return view.items;
+	if (view.t === "box") return view.children.flatMap(bandActionItems);
+	return [];
+}
+
+/** A copy of a band whose action rows show the key that presses them. */
+function withBandKeys(view: View, keys: ReadonlyMap<string, string>): View {
+	if (view.t === "actions")
+		return {
+			...view,
+			// A band's own hotkey is never live, since a band never holds the keys; only the leader chord is shown.
+			items: view.items.map(({ hotkey: _unused, ...item }) => {
+				const key = keys.get(item.id);
+				return key === undefined ? item : { ...item, hotkey: key };
+			}),
+		};
+	if (view.t === "box") return { ...view, children: view.children.map((child) => withBandKeys(child, keys)) };
+	return view;
 }
 
 /** Whether a view names an action a row, card or node press would send. */
@@ -177,22 +221,60 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 		deps.tui.requestRender();
 	});
 
+	/** Every band action with the leader suffix that presses it: digits, in band order, up to nine. */
+	const bandPresses = (): Array<{ extensionId: string; action: string; label: string; key: string }> => {
+		const presses: Array<{ extensionId: string; action: string; label: string; key: string }> = [];
+		for (const id of deps.model.ids().sort()) {
+			const band = deps.model.entry(id)?.band;
+			if (!band) continue;
+			for (const item of bandActionItems(band)) {
+				if (presses.length >= 9) return presses;
+				presses.push({ extensionId: id, action: item.id, label: item.label, key: String(presses.length + 1) });
+			}
+		}
+		return presses;
+	};
+
 	const board: Component = {
 		render(width) {
 			const budget = islandBudget();
-			return memo("board", `${width}:${budget}`, () => {
+			return memo("board", `${width}:${budget}:${deps.terminalRows?.() ?? 40}`, () => {
 				const active = takes("board");
 				const view = active?.board === "band" ? regionView(active, "board") : undefined;
 				const lines = view ? draw(view, width, BOARD_ROWS) : [];
 				const workspace = deps.model.activeWorkspace;
 				if (workspace) lines.push(...islandRows(workspace, width, budget));
+				const leader = deps.leaderLabel?.() ?? null;
+				const pressKeys = bandPresses();
 				for (const id of deps.model.ids().sort()) {
 					const band = deps.model.entry(id)?.band;
 					if (!band) continue;
-					const owner = clioTheme().fg("sectionHeading", `${id} · `);
-					const rows = draw(band, Math.max(1, width - visibleWidth(owner)), 3);
+					// The band is labelled with the name the operator installed, not the package id.
+					const owner = clioTheme().fg("sectionHeading", `${extensionOwnerLabel(id)} · `);
+					const indent = " ".repeat(visibleWidth(owner));
+					// A band never holds the keyboard, so its actions are pressed through the leader
+					// menu, and each row names that chord instead of a cursor nothing can move.
+					const keys = new Map(
+						leader === null
+							? []
+							: pressKeys.filter((press) => press.extensionId === id).map((press) => [press.action, `${leader} ${press.key}`]),
+					);
+					// A short terminal keeps one row per band, so the bands never crowd out the
+					// list or panel the operator opened; the leader menu still lists every action.
+					const bandRows = (deps.terminalRows?.() ?? 40) >= 30 ? 3 : 1;
+					const room = Math.max(1, width - visibleWidth(owner));
+					// One row is the band's first line unwrapped and cut with an ellipsis, so a short
+					// terminal shows "Next: /materio:identify-re…" rather than a lone "Next:".
+					const rows =
+						bandRows === 1
+							? renderView(withBandKeys(band, keys), 1000)
+									.lines.slice(0, 1)
+									.map((row) => truncateToWidth(row.trimEnd(), room, GLYPH.ellipsis, false))
+							: draw(withBandKeys(band, keys), room, bandRows);
 					lines.push(
-						...rows.map((row, index) => truncateToWidth(`${index === 0 ? owner : "  "}${row}`, width, GLYPH.ellipsis, false)),
+						...rows.map((row, index) =>
+							truncateToWidth(`${index === 0 ? owner : indent}${row}`, width, GLYPH.ellipsis, false),
+						),
 					);
 				}
 				return lines;
@@ -250,21 +332,42 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			);
 		},
 		statusFacts(width) {
-			return memo("status", String(width), () => {
+			const modelIds = new Set(deps.model.ids());
+			const others = (deps.otherStatuses?.() ?? []).filter((entry) => !modelIds.has(entry.id));
+			const othersKey = others
+				.map((entry) => `${entry.id}\u0000${entry.status.tone ?? ""}\u0000${entry.status.text}`)
+				.join("\u0001");
+			return memo("status", `${width}:${othersKey}`, () => {
 				const theme = clioTheme();
-				const room = Math.max(8, Math.floor(width / 4));
-				return deps.model.ids().flatMap((id) => {
-					const status = deps.model.entry(id)?.status;
-					if (!status) return [];
-					const text = truncateToWidth(`${id} ${status.text}`, room, GLYPH.ellipsis, false);
-					return [theme.fg(STATUS_ROLES[status.tone ?? "neutral"], text)];
+				// The footer gives its facts up to half the row when wide; one status may use all of it.
+				const room = Math.max(12, Math.floor(width * (width >= 100 ? 0.5 : 0.4)));
+				const statuses = [
+					// An extension with a band already says its piece above the composer on every frame;
+					// repeating it here only crowds out the extensions that have no band.
+					...deps.model.ids().flatMap((id) => {
+						const entry = deps.model.entry(id);
+						return entry?.status && !entry.band ? [{ id, status: entry.status }] : [];
+					}),
+					...others,
+				];
+				return statuses.flatMap(({ id, status }) => {
+					const { owner, text } = ownedStatus(extensionOwnerLabel(id), status.text);
+					const label = `${owner}: `;
+					const body = truncateToWidth(text, Math.max(4, room - visibleWidth(label)), GLYPH.ellipsis, false);
+					return [`${theme.fg("annotation", label)}${theme.fg(STATUS_ROLES[status.tone ?? "neutral"], body)}`];
 				});
 			});
 		},
 		leaderTargets() {
+			const bands = bandPresses().map((press) => ({
+				key: press.key,
+				label: `${extensionOwnerLabel(press.extensionId)}: ${press.label}`,
+				run: () => deps.press(press.extensionId, press.action, "band"),
+			}));
 			const active = deps.model.activeWorkspace;
-			if (!active) return [];
+			if (!active) return bands;
 			return [
+				...bands,
 				...active.keys
 					.filter((binding) => binding.key !== WORKSPACE_LEAVE_KEY && binding.key !== WORKSPACE_FOCUS_KEY)
 					.map((binding) => ({

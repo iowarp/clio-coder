@@ -1,3 +1,4 @@
+import { extensionOwnerLabel } from "../../domains/extensions/owner-label.js";
 import type { ExtensionPanelV2 } from "../../domains/extensions/public-api-v2.js";
 import {
 	type Component,
@@ -115,7 +116,7 @@ export function openExtensionViewPanel(tui: TUI, owner: string, deps: Omit<Panel
 		anchor: "center",
 		width: 88,
 		markerId: "extension-panel",
-		title: () => `Extension: ${owner} · ${deps.panel()?.title ?? "expired"}`,
+		title: () => `${extensionOwnerLabel(owner)} · ${deps.panel()?.title ?? "expired"}`,
 		footerHint: buildHint([
 			{ key: "Up/Down/Tab", verb: "select" },
 			{ key: "Enter", verb: "press" },
