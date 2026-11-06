@@ -73,8 +73,9 @@ export const guiTests = [
 	"machine-proxy",
 	"openapi",
 	"boundaries",
-	"public-help",
-].map((name) => `tests/${name}.test.ts`);
+]
+	.map((name) => `tests/${name}.test.ts`)
+	.concat("tests/public-help.test.tsx");
 
 export const packageTests = [
 	"tests/smoke/installed-package.test.ts",
