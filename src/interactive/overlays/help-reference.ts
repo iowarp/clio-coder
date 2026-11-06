@@ -7,7 +7,7 @@ import { displaySafe } from "../display-safe.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
 import { MUTATION_PREVIEW_KEY, PERMISSION_STOP_KEY, PERMISSION_TERMS_KEY } from "../permission-hint.js";
 import { compactArgumentHint } from "../slash-autocomplete.js";
-import { clioTheme, dotSep, type Fact, factRows, statusChip, titleRow } from "../theme/index.js";
+import { clioTheme, dotSep, type Fact, factRows, keyName, statusChip, titleRow } from "../theme/index.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
 import { detailWithHead, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
@@ -15,19 +15,7 @@ import { detailWithHead, type ListOverlayItem, openListOverlay } from "./list-ov
 const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
 
 function formatKey(raw: string): string {
-	if (raw === "(unbound)") return raw;
-	return raw
-		.split(" / ")
-		.map((single) =>
-			single
-				.split("+")
-				.map((segment) => {
-					const head = segment.charAt(0);
-					return head.length === 0 ? segment : head.toUpperCase() + segment.slice(1);
-				})
-				.join("+"),
-		)
-		.join(" / ");
+	return raw === "(unbound)" ? raw : keyName(raw);
 }
 
 export function openHelpOverlay(
@@ -253,8 +241,8 @@ export function openHelpOverlay(
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
 					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs deny what the safety judge does not allow.",
 				"**Inspecting a mutation**: a parked `write` or `edit` card carries the target, the byte count, and a `sha256` digest of the exact call arguments. " +
-					`Press ${MUTATION_PREVIEW_KEY} to read the complete proposed content, or the complete effective diff against the file on disk, and ${MUTATION_PREVIEW_KEY} again to put it away; ↑/↓ and PageUp/PageDown scroll it. ${PERMISSION_TERMS_KEY} opens the standing terms of the decision the same way. ` +
-					`Enter still allows and ${PERMISSION_STOP_KEY} still stops while either view is open; Esc closes the view and the card is as it was, and only Esc on the card itself denies. The mutation text is shown locally and never enters the transcript, a notice, a desktop notification, or the render trace. ` +
+					`Press ${keyName(MUTATION_PREVIEW_KEY)} to read the complete proposed content, or the complete effective diff against the file on disk, and ${keyName(MUTATION_PREVIEW_KEY)} again to put it away; ↑/↓ and PgUp/PgDn scroll it. ${keyName(PERMISSION_TERMS_KEY)} opens the standing terms of the decision the same way. ` +
+					`Enter still allows and ${keyName(PERMISSION_STOP_KEY)} still stops while either view is open; Esc closes the view and the card is as it was, and only Esc on the card itself denies. The mutation text is shown locally and never enters the transcript, a notice, a desktop notification, or the render trace. ` +
 					"A worker escalation has no preview because the call's arguments never leave the worker, and its card says so.",
 			],
 		},

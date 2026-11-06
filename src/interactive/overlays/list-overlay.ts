@@ -31,6 +31,7 @@ import {
 	fitUnits,
 	fitUnitsKept,
 	GLYPH,
+	innerDivider,
 	keyCap,
 	listGroupHeader,
 	markdownTheme,
@@ -38,6 +39,7 @@ import {
 	positionRow,
 	rule,
 	selectionRow,
+	wrapPaths,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
@@ -50,6 +52,10 @@ export const NARROW_ROW_WIDTH = 76;
 
 /** The share of a row the lead column of a two-column list may take. */
 const LEAD_COLUMN_SHARE = 0.4;
+/** The focused row in full: a rule, then two rows of lead and text. */
+const FOCUS_LINE_ROWS = 3;
+/** A list shorter than this keeps every row for the cursor. */
+const FOCUS_LINE_MIN_LIST_ROWS = 8;
 
 /** Fewest list rows a stacked detail pane may leave, and fewest rows it needs to be drawn at all. */
 const STACKED_LIST_MIN_ROWS = 3;
@@ -754,6 +760,44 @@ export class ListOverlayView implements Component {
 		return `${theme.fg("menuOption", fitted)}  ${theme.fg("menuDescription", cells.text)}`;
 	}
 
+	/** Whether the width cuts the lead or the text of enough two-column rows to give the focused one its own line. */
+	private anyRowCut(width: number, items: ReadonlyArray<ListOverlayItem>, leadWidth: number): boolean {
+		const room = width - 2;
+		let rows = 0;
+		let cut = 0;
+		for (const item of items) {
+			const cells = item.cells;
+			if (!cells) continue;
+			rows += 1;
+			const lead = cells.narrowLead !== undefined && visibleWidth(cells.lead) > leadWidth ? cells.narrowLead : cells.lead;
+			if (visibleWidth(lead) > leadWidth || leadWidth + 2 + visibleWidth(cells.text) > room) cut += 1;
+		}
+		// A width that cuts one row in a hundred keeps its rows for the list; the detail key reads that one.
+		return cut > 0 && cut * 5 >= rows;
+	}
+
+	/**
+	 * The focused two-column row in full: its lead, then its whole text, wrapped under a quiet rule and held to
+	 * FOCUS_LINE_ROWS rows. A row the width did not cut is stated too, so the reserved rows never read as empty.
+	 */
+	private focusLineRows(width: number, focused: ListOverlayItem | undefined): string[] {
+		const theme = clioTheme();
+		const cells = focused?.cells;
+		const rows: string[] = [this.padLine(`  ${innerDivider(theme, Math.max(1, width - 4))}`, width)];
+		// The short lead is whole where it exists; the text is what the row cut, so it gets the rows.
+		const lead = cells?.narrowLead ?? cells?.lead ?? "";
+		const body = cells ? `${theme.fg("menuOption", lead)}  ${theme.fg("menuDescription", cells.text)}` : "";
+		const wrapped = body.length === 0 ? [] : wrapTextWithAnsi(body, Math.max(1, width - 4));
+		for (let index = 0; index < FOCUS_LINE_ROWS - 1; index += 1) {
+			const row = wrapped[index] ?? "";
+			const cut = index === FOCUS_LINE_ROWS - 2 && wrapped.length > FOCUS_LINE_ROWS - 1;
+			rows.push(
+				this.padLine(`  ${cut ? truncateToWidth(row, Math.max(1, width - 5), "", false) + GLYPH.ellipsis : row}`, width),
+			);
+		}
+		return rows;
+	}
+
 	/** The list's rows in draw order: each group header, then its items. */
 	private renderedRowsFor(filteredItems: ReadonlyArray<ListOverlayItem>): RenderedRow[] {
 		const uniqueGroups: string[] = [];
@@ -801,6 +845,7 @@ export class ListOverlayView implements Component {
 		listMaxLines: number,
 		filteredItems: ReadonlyArray<ListOverlayItem>,
 		renderedRows: ReadonlyArray<RenderedRow>,
+		focusLine = false,
 	): string[] {
 		const lines: string[] = [];
 		const allItems = this.items;
@@ -832,8 +877,15 @@ export class ListOverlayView implements Component {
 				lines.push(this.padLine(`  ${wrapped}${cut ? ` ${GLYPH.ellipsis}` : ""}`, width));
 			}
 		} else {
-			const scrollRows = renderedRows.length > listMaxLines && listMaxLines > 1 ? 1 : 0;
-			const itemRows = Math.max(1, listMaxLines - scrollRows);
+			const leadWidth = this.leadWidth(width - 2, filteredItems);
+			// With no detail pane, a two-column row the width cuts is stated whole under the list for the focused
+			// row. The rows are reserved whenever any row is cut, so moving the cursor never resizes the window.
+			const focus =
+				focusLine && listMaxLines >= FOCUS_LINE_MIN_LIST_ROWS && this.anyRowCut(width - 2, filteredItems, leadWidth)
+					? this.focusLineRows(width, filteredItems[this.selectedIndex])
+					: [];
+			const scrollRows = renderedRows.length > listMaxLines - focus.length && listMaxLines > 1 ? 1 : 0;
+			const itemRows = Math.max(1, listMaxLines - scrollRows - focus.length);
 			const selectedRowIndex = renderedRows.findIndex(
 				(row) => row.type === "item" && row.itemIndex === this.selectedIndex,
 			);
@@ -850,7 +902,6 @@ export class ListOverlayView implements Component {
 			this.listPage = Math.max(1, itemRows);
 
 			const visibleRows = renderedRows.slice(this.listScrollOffset, this.listScrollOffset + itemRows);
-			const leadWidth = this.leadWidth(width - 2, filteredItems);
 
 			for (const row of visibleRows) {
 				if (row.type === "group") {
@@ -879,6 +930,7 @@ export class ListOverlayView implements Component {
 				}
 			}
 
+			lines.push(...focus);
 			if (scrollRows > 0) {
 				// The position names rows of the list, headers included, because that is
 				// what the window slides over; the unit says what the rows are.
@@ -920,9 +972,7 @@ export class ListOverlayView implements Component {
 		if (selectedItem.detailFormat === "rows") {
 			// Rows laid out from the primitives already fit; only prose that was
 			// handed over unwrapped folds here, at the pane's real width.
-			lines = detailLines.flatMap((line) =>
-				visibleWidth(line) <= width ? [line] : wrapTextWithAnsi(line, Math.max(1, width)),
-			);
+			lines = detailLines.flatMap((line) => (visibleWidth(line) <= width ? [line] : wrapPaths(line, Math.max(1, width))));
 		} else {
 			const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
 			lines = md.render(width);
@@ -1185,7 +1235,7 @@ export class ListOverlayView implements Component {
 					}
 				}
 				this.detailHeadText = "";
-				lines.push(...this.renderList(width, avail, filteredItems, renderedRows));
+				lines.push(...this.renderList(width, avail, filteredItems, renderedRows, true));
 				lines.push(...keyLines);
 				return { lines, headText: "", drawn: false, takeover: false, paneRows: 0 };
 			};
@@ -1193,8 +1243,8 @@ export class ListOverlayView implements Component {
 			// The key rows depend on what the pinned pane head shows, and the pane's
 			// height on how many key rows there are; one pass with every dropped key
 			// finds the head, the second lays out with the keys the head leaves. Keys
-			// leave the cursor its row, or a wanted pane its two, and with eight rows
-			// or more take at most half; past that, the rows they do get are whole
+			// leave the cursor its row, or a wanted pane its two, and take at most half
+			// of eight rows or more and a third of fewer; past that, the rows they do get are whole
 			// and the last one is fitted, with the dim marker for what it still holds.
 			// The overflow counts keys, not rows: shedding a chrome row that moved
 			// one key into the rows and bought a row for three others read as no
@@ -1204,7 +1254,12 @@ export class ListOverlayView implements Component {
 				// A pane that may take the body over keeps its two rows from the keys; a
 				// pane that only stacks is already behind the list's three.
 				const reserve = paneWanted && !isSplit && this.takeoverAllowed ? STACKED_DETAIL_MIN_ROWS : 1;
-				const most = availableRows >= 8 ? Math.floor(availableRows / 2) : Math.max(0, availableRows - reserve);
+				// Under eight rows the keys take a third: four rows of legend over a single item at 40x15 left a
+				// list nobody could scan, and the keys past the marker still work and are listed in /help.
+				const most =
+					availableRows >= 8
+						? Math.floor(availableRows / 2)
+						: Math.max(0, Math.min(Math.max(1, Math.floor(availableRows / 3)), availableRows - reserve));
 				if (rows.length <= most) return rows;
 				overflow = dropped.length;
 				// No row to spare: the keys the rail dropped are off screen.

@@ -125,7 +125,7 @@ test("a long unbroken reasoning paragraph is bounded after wrapping and freezes 
 	panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: reasoning, partialThinking: reasoning });
 	const streaming = panel.render(32);
 	strictEqual(streaming.length, 3);
-	match(plain(streaming), /final reasoning tail/u);
+	match(plain(streaming), /final\s+(?:│ )?reasoning\s+(?:│ )?tail/u);
 	ok(streaming.every((row) => visibleWidth(row) <= 32));
 	panel.applyEvent({
 		type: "message_end",

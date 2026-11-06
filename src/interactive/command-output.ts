@@ -5,7 +5,7 @@ import type { NoticeLevel, NoticeSource } from "../session-control/notice-source
 import type { PromptReferenceCard, RunIo } from "../session-control/slash-commands.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { renderReferenceCard } from "./renderers/reference-card.js";
-import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
+import { type ClioToken, clioTheme, GLYPH, wrapPaths } from "./theme/index.js";
 
 export type { NoticeLevel } from "../session-control/notice-source.js";
 
@@ -158,7 +158,7 @@ export interface CommandOutputSink {
 
 export type CommandOutputWrap = (line: string, width: number) => string[];
 
-function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: CommandOutputWrap = wrapTextWithAnsi): void {
+function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: CommandOutputWrap = wrapPaths): void {
 	const normalized = text.replace(/\r/g, "").replace(/\n$/u, "");
 	if (normalized.length === 0) return;
 	sink.appendReplayBlock((width) => {
@@ -184,7 +184,7 @@ function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: Comman
 	sink.requestRender();
 }
 
-export function createCommandOutputRunIo(sink: CommandOutputSink, wrap: CommandOutputWrap = wrapTextWithAnsi): RunIo {
+export function createCommandOutputRunIo(sink: CommandOutputSink, wrap: CommandOutputWrap = wrapPaths): RunIo {
 	const write = (text: string): void => appendCommandOutput(text, sink, wrap);
 	return {
 		stdout: write,
