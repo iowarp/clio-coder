@@ -2,7 +2,7 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.6.9 - 2026-11-06
 
 Clio Coder 0.6.9 makes the terminal tell the truth about what is happening and who it is waiting on. The status rail names the model, worker, server or person a turn waits on, with a clock and the key that stops it, and states a silence with its evidence instead of a spinner. Provider waits read as waits and are sat out in full, a model pick can move a request still waiting on its first output, and a worker's approval card can be held while you read it. Esc and Ctrl+C back out one layer at a time and never throw away typed text, and a stop holds queued messages instead of joining them (#447). Receipts, `/usage`, the exit summary and Fleet Runs count calls and tokens one way and say "not measured" instead of guessing. The line also moves to the Pi SDK 1.5.0, clears every open dependency advisory and closes two installer gaps.
 
