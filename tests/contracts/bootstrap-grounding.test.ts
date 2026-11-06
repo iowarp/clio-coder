@@ -75,6 +75,35 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 	strictEqual(handbook.includes("npm run deploy"), false, handbook);
 });
 
+it("drops a reviewer requirement placed in a file that names no reviewer, keeping the rest of the rule", async () => {
+	writeFileSync(join(cwd, ".github", "workflows", "release.yml"), "jobs:\n  publish:\n    environment: release\n");
+	await runBootstrap({
+		cwd,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: [],
+				sections: [
+					{
+						title: "Git and release",
+						body: [
+							"- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer. Keep the `ci (22)` job name in `.github/workflows/ci.yml`.",
+							"- Follow `CONTRIBUTING.md` before review.",
+						].join("\n"),
+					},
+				],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	strictEqual(handbook.includes("requires the owner as reviewer"), false, handbook);
+	ok(handbook.includes("- Keep the `ci (22)` job name in `.github/workflows/ci.yml`."), handbook);
+	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
+});
+
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
 	const draft = {
 		projectName: "harbor",

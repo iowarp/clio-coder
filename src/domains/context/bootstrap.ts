@@ -675,6 +675,8 @@ interface ModelGroundingCorpus {
 	repositoryPaths: ReadonlySet<string>;
 	/** Lowercased text of the visible repository files, read once on first need. */
 	repositoryText: () => string;
+	/** Lowercased text of one visible repository file, or null when it cannot be read. */
+	fileText: (path: string) => string | null;
 	/** Opening text of each long package script body, whitespace-collapsed. */
 	scriptRecitals: ReadonlyArray<string>;
 	/** Script-specific bodies prevent test:full's smoke glob from being attributed to test. */
@@ -757,6 +759,7 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 		// An unreadable tree leaves the indexed evidence as the only grounding.
 	}
 	let text: string | null = null;
+	const fileTexts = new Map<string, string | null>();
 	return {
 		lower: evidence.toLowerCase(),
 		indexedPaths,
@@ -772,6 +775,11 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 		repositoryText: () => {
 			text ??= repositoryGroundingText(input.cwd, repositoryPaths);
 			return text;
+		},
+		fileText: (path) => {
+			if (!fileTexts.has(path))
+				fileTexts.set(path, repositoryPaths.includes(path) ? repositoryGroundingText(input.cwd, [path]) || null : null);
+			return fileTexts.get(path) ?? null;
 		},
 	};
 }
@@ -926,6 +934,45 @@ function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus)
 	);
 }
 
+const REVIEW_REQUIREMENT_RE = /\breviewers?\b|\brequired reviews?\b/i;
+
+/**
+ * Drop each sentence that places a reviewer requirement in a file that states
+ * none. Every generated handbook said the `release` environment "in
+ * `.github/workflows/release.yml`" requires the owner as reviewer: the path is
+ * real, so the citation grounded, but reviewers are a GitHub environment setting
+ * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer.
+ */
+function withoutMisplacedReviewRequirements(line: string, evidence: ModelGroundingCorpus): string {
+	if (!REVIEW_REQUIREMENT_RE.test(line)) return line;
+	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
+	const body = line.slice(prefix.length);
+	// Split prose sentences without breaking inside a code span.
+	const masked = body.replace(/`[^`\n]*`/g, (span) => "x".repeat(span.length));
+	const sentences: string[] = [];
+	let from = 0;
+	for (const match of masked.matchAll(/[.!?](?=\s+[A-Z`*])/g)) {
+		const at = (match.index ?? 0) + 1;
+		sentences.push(body.slice(from, at));
+		from = at;
+	}
+	sentences.push(body.slice(from));
+	const kept = sentences.filter((sentence) => {
+		if (!REVIEW_REQUIREMENT_RE.test(sentence)) return true;
+		const cited = [...sentence.matchAll(CODE_TOKEN_RE)]
+			.map((match) => (match[1] ?? "").trim().replace(/^\.\//, ""))
+			.map((token) => CITED_LOCATION_RE.exec(token)?.[1] ?? token)
+			.filter((token) => CONCRETE_FILE_RE.test(token));
+		if (cited.length === 0) return true;
+		return cited.some((path) => {
+			const text = evidence.fileText(path);
+			return text === null || REVIEW_REQUIREMENT_RE.test(text);
+		});
+	});
+	const text = kept.join("").trim();
+	return text.length > 0 ? `${prefix}${text}` : "";
+}
+
 /**
  * Keep a Scout line only when it cites the repository and every citation is real.
  *
@@ -960,10 +1007,11 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		// Keep a nested bullet's indentation; flattening it turned a recipe's
 		// sub-steps into unrelated top-level rules.
 		const indent = inFence ? "" : (/^(\s*)[-*+]\s/.exec(rawLine)?.[1] ?? "").replace(/\t/g, "  ");
-		const line = correctSymbolAttributions(
+		const cited = correctSymbolAttributions(
 			wrapBareCitations(inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`, evidence),
 			evidence,
 		);
+		const line = inFence ? cited : withoutMisplacedReviewRequirements(cited, evidence);
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);
