@@ -661,8 +661,8 @@ class AskUserOverlayView implements Component {
 		if (countdown.state() === "held") {
 			// The keys are the rail's; this row only says the clock stopped, which nothing else on screen says.
 			const line = headers
-				? `${GLYPH.phaseBlocked} timer held · nothing is chosen until you answer`
-				: `${GLYPH.phaseBlocked} timer held`;
+				? `${GLYPH.phaseBlocked} no time limit now · nothing is chosen until you answer`
+				: `${GLYPH.phaseBlocked} no time limit now`;
 			return headers
 				? wrapTextWithAnsi(theme.fg("annotation", line), width)
 				: [fitRow(theme.fg("annotation", line), width)];

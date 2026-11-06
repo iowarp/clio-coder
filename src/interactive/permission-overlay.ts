@@ -336,7 +336,7 @@ function permissionChoices(
 	mainTurn?: boolean,
 ): Parameters<typeof choiceRows>[1] {
 	const stopWords = "ends the turn";
-	const draftNote = hasDraft ? ` · inert until Backspace clears your draft` : "";
+	const draftNote = hasDraft ? ` · clear your draft with Backspace first` : "";
 	if (presentation.tier === "worker") {
 		// An approval is never remembered, only a denial (`deniedEscalations` in the
 		// worker runtime, F8). The stop key does not reach the worker's process
@@ -408,7 +408,7 @@ function compactChoiceRows(
 		),
 		...readingParts(theme, reading),
 	];
-	return wrapTextWithAnsi(parts.join(theme.fg("divider", " · ")), width).map(releaseSpaces);
+	return joinChoiceUnits(theme, parts, width);
 }
 
 /** A key that reads the call rather than answering it. */
@@ -459,7 +459,58 @@ function bareChoiceRows(
 		),
 		...readingParts(theme, reading),
 	];
-	return wrapTextWithAnsi(parts.join(theme.fg("divider", " · ")), width).map(releaseSpaces);
+	return joinChoiceUnits(theme, parts, width);
+}
+
+/**
+ * What the call acts on, in its gutter: the command or path, or for a plan
+ * what the plan does. Every view of the card shows it, so no answer key is
+ * ever on screen without the thing it answers.
+ */
+function cardTargetRows(theme: ClioTheme, view: ApprovalRequestView, width: number): string[] {
+	const risk = permissionRiskTone(view.actionClass, view.exposure);
+	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
+	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
+	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
+	if (targetText === undefined || targetText.length === 0) return [];
+	return plan !== null
+		? commandBlock(theme, targetText, width, { tone: risk, prose: true })
+		: targetBlock(theme, targetText, risk, width);
+}
+
+/**
+ * Key entries joined with a divider and broken between entries, never inside
+ * a key's name and never on a dangling divider: at 40 columns the wrapped
+ * paragraph ended rows on `deny ·` and `terms ·`.
+ */
+function joinChoiceUnits(theme: ClioTheme, units: ReadonlyArray<string>, width: number): string[] {
+	const divider = theme.fg("divider", " · ");
+	const rows: string[] = [];
+	let current = "";
+	for (const unit of units) {
+		const joined = current.length === 0 ? unit : `${current}${divider}${unit}`;
+		if (visibleWidth(joined) <= width) {
+			current = joined;
+			continue;
+		}
+		if (current.length > 0) rows.push(current);
+		if (visibleWidth(unit) <= width) {
+			current = unit;
+			continue;
+		}
+		const wrapped = wrapTextWithAnsi(unit, width);
+		rows.push(...wrapped.slice(0, -1));
+		current = wrapped.at(-1) ?? "";
+	}
+	if (current.length > 0) rows.push(current);
+	return rows.map(releaseSpaces);
+}
+
+/** A sentence led by a status glyph, its later rows indented under the text rather than under the glyph. */
+function hangingWrap(text: string, width: number): string[] {
+	const rows = wrapTextWithAnsi(text, width);
+	if (rows.length <= 1 || width < 12) return rows;
+	return wrapTextWithAnsi(text, width - 2).map((row, index) => (index === 0 ? row : `  ${row}`));
 }
 
 /** A target row whose next row is out of view, marked so it cannot be read as the end of the command. */
@@ -475,13 +526,13 @@ function compactCountdownClause(
 	countdown: CardCountdown,
 ): { outcome: string; holds: string; tone: ClioToken } | null {
 	if (countdown === null) return null;
-	if (countdown === "held") return { outcome: `${GLYPH.phaseBlocked} timer held`, holds: "", tone: "annotation" };
+	if (countdown === "held") return { outcome: `${GLYPH.phaseBlocked} no time limit now`, holds: "", tone: "annotation" };
 	if (isWorkerWindow(countdown)) {
 		const left = formatUnattendedRemaining(countdown.remainingMs);
 		const ending = view.workerFallback === "fail" ? "fails the run" : "denies";
 		if (!countdown.held) return { outcome: `${GLYPH.warn} ${left} ${ending}`, holds: "key holds", tone: "warning" };
 		return {
-			outcome: `${GLYPH.phaseBlocked} held · no answer in ${left} ${ending}`,
+			outcome: `${GLYPH.phaseBlocked} extended · no answer in ${left} ${ending}`,
 			holds: "",
 			tone: countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation",
 		};
@@ -588,17 +639,8 @@ function permissionFacts(
 	countdown: CardCountdown,
 	hasDraft: boolean,
 ): PermissionFactRows {
-	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const identity = identityRow(theme, view, presentation, width);
-	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
-	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
-	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
-	const target =
-		targetText === undefined || targetText.length === 0
-			? []
-			: plan !== null
-				? commandBlock(theme, targetText, width, { tone: risk, prose: true })
-				: targetBlock(theme, targetText, risk, width);
+	const target = cardTargetRows(theme, view, width);
 	// Why before the rule's name: on a short card the reason (it writes outside this workspace) is what decides it.
 	const facts: Fact[] = [];
 	if (view.netReason !== undefined && view.netReason.length > 0) facts.push({ label: "why", value: view.netReason });
@@ -656,19 +698,19 @@ function permissionFacts(
 			: "denies this call; the worker carries on without it";
 	if (countdown === "held") {
 		timer.push(
-			...wrapTextWithAnsi(theme.fg("annotation", `${GLYPH.phaseBlocked} timer held · ${answer}, ${escWords}`), width),
+			...hangingWrap(theme.fg("annotation", `${GLYPH.phaseBlocked} No time limit now. ${answer}, ${escWords}.`), width),
 		);
 	} else if (isWorkerWindow(countdown)) {
 		const left = formatUnattendedRemaining(countdown.remainingMs);
 		const sentence = countdown.held
-			? `${GLYPH.phaseBlocked} Timer held. No answer in ${left} ${after}. ${answer}, ${escWords}.`
+			? `${GLYPH.phaseBlocked} Extended for you. No answer in ${left} ${after}. ${answer}, ${escWords}.`
 			: `${GLYPH.warn} No answer in ${left} ${after}. Any key holds the card.`;
 		const tone = !countdown.held || countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation";
-		timer.push(...wrapTextWithAnsi(theme.fg(tone, sentence), width));
+		timer.push(...hangingWrap(theme.fg(tone, sentence), width));
 	} else if (countdown !== null && view.origin.kind === "worker") {
 		// The window runs inside the worker's process, so no key here can hold it.
 		timer.push(
-			...wrapTextWithAnsi(
+			...hangingWrap(
 				theme.fg(
 					"warning",
 					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} ${after}. No key pauses this.`,
@@ -678,7 +720,7 @@ function permissionFacts(
 		);
 	} else if (countdown !== null) {
 		timer.push(
-			...wrapTextWithAnsi(
+			...hangingWrap(
 				theme.fg(
 					"warning",
 					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} denies this call and Clio continues without it. Any key holds the card.`,
@@ -779,9 +821,7 @@ function permissionCardSections(
 	const bareChoices = bareChoiceRows(theme, choices, content, hasDraft, reading);
 	const full = [
 		...choiceRows(theme, choices, content),
-		...(reading.length === 0
-			? []
-			: wrapTextWithAnsi(readingParts(theme, reading).join(theme.fg("divider", " · ")), content).map(releaseSpaces)),
+		...(reading.length === 0 ? [] : joinChoiceUnits(theme, readingParts(theme, reading), content)),
 	];
 	// A short dock (a draft under the card, a 24-row terminal) may not hold the
 	// facts and three choice rows together, and the choices are what the keys
@@ -1248,8 +1288,17 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const theme = clioTheme();
 		const content = Math.max(8, Math.floor(width));
 		const identity = identityRow(theme, this.view, permissionDecisionPresentation(this.view), content);
+		// The call stays named beside the answer keys while the terms are read: two rows of it at most,
+		// marked when cut, so the terms keep the rest of the rows.
+		const target = cardTargetRows(theme, this.view, content);
+		const targetRows = target.slice(0, 2);
+		const lastTarget = targetRows.at(-1);
+		if (lastTarget !== undefined && target.length > targetRows.length) {
+			targetRows[targetRows.length - 1] = markContinued(lastTarget, content);
+		}
 		const head = [
 			...identity.rows,
+			...targetRows,
 			sectionRule(theme, content, "Terms", { meta: `Esc or ${keyName(PERMISSION_TERMS_KEY)} hides` }),
 		];
 		const rows = permissionTermsRows(theme, this.view, content);

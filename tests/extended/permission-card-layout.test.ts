@@ -311,7 +311,10 @@ test("a card nobody answers denies its call after the window, and the turn conti
 		const card = plain(
 			createPermissionOverlayBody(WRITE_VIEW, undefined, undefined, undefined, f.countdowns[0]).render(76),
 		);
-		match(card.join(" "), /No answer in 5 s denies this call and Clio continues without it\. Any key holds the card\./u);
+		match(
+			card.join(" "),
+			/No answer in 5 s denies this call and Clio continues without it\.\s+Any key\s+holds the card\./u,
+		);
 		f.clock.advance(5_000);
 		const settled = await verdict;
 		strictEqual(settled.kind, "blocked");

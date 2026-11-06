@@ -1208,7 +1208,7 @@ test("a worker card with a parent-owned window offers the hold, then says it is 
 			.join("\n");
 	match(card({ remainingMs: 119_000, held: false }), /No answer in 1:59 denies this call.*Any key holds the card\./u);
 	const held = card({ remainingMs: 822_000, held: true });
-	match(held, /Timer held\. No answer in 13:42 denies this call/u);
+	match(held, /Extended for you\. No answer in 13:42 denies this call/u);
 	doesNotMatch(held, /Any key holds/u);
 	match(card(null), /No key pauses this\./u, "a window inside the worker makes no promise a key can keep");
 	const owned = card(null, { ...view, origin: { kind: "worker", agentId: "coder", runId: "run", endsWithTurn: true } });
