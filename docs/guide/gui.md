@@ -42,13 +42,14 @@ A bare `clio-coder gui` picks between two kinds of server:
 | `--path </app/path>` | Opens a particular page of the application. The value must be an absolute app path without `?`, `#`, backslashes, control characters, `.` or `..` segments. Default `/`. Under WSL, when `gui` reuses the background app and its window is already open, the window is brought forward and shown the page, see [One app window](#one-app-window). |
 | `--open` / `--no-open` | `--open` always opens a browser. `--no-open` never does and wins when both are given. With neither, a browser opens by itself only from an interactive terminal on a desktop: macOS, Linux with `DISPLAY` or `WAYLAND_DISPLAY`, or WSL. Windows prints the link instead. |
 | `--foreground` | Always start a private server, even when a background app is installed. |
-| `--reuse-background` | Fail instead of starting a private server when an installed background app cannot be verified, belongs to another installation or will not start. With no background app installed, a private server starts. Cannot be combined with `--foreground`, `--port`, `--token`, `--idle-exit` or `--log-file`. |
+| `--reuse-background` | Fail instead of starting a private server when an installed background app cannot be verified, belongs to another installation or will not start. With no background app installed, a private server starts. Cannot be combined with `--foreground`, `--port`, `--token`, `--token-stdin`, `--idle-exit` or `--log-file`. |
 | `--port <0-65535>` | Listen on this port. `0`, the default, picks a free port. A private server never falls back to another port. Implies `--foreground`. |
 | `--idle-exit <ms>` | Stop the private server after it has been idle this many milliseconds (1 to 2147483647). Idle means no open HTTP response (the event stream included), no running operation, CLI child or setup, no pending worker call and no busy session. Implies `--foreground`. |
 | `--token <token>` | Use this launch token instead of a random one: 32 to 256 URL-safe characters. Implies `--foreground`. |
+| `--token-stdin` | Read the launch token from the first line of stdin instead of argv, and stop the server when stdin ends. A parent that starts the server over SSH uses it, so the token never appears in a process list. Cannot be combined with `--token`. Implies `--foreground`. |
 | `--log-file <file>` | Append lifecycle lines (listening, stopped) to a private file. The file must be a regular, single-link file owned by the current user and is chmod 0600. Request bodies and launch URLs are never written. Implies `--foreground`. |
 
-Two further flags exist for the application's own use. `--persistent <server.json>` is how the background service starts the server from its credential file; it conflicts with `--port`, `--token`, `--idle-exit`, `--fixture` and `--open`. `--fixture` starts fabricated tool fixtures in an isolated scratch home and works in source mode only.
+Two further flags exist for the application's own use. `--persistent <server.json>` is how the background service starts the server from its credential file; it conflicts with `--port`, `--token`, `--token-stdin`, `--idle-exit`, `--fixture` and `--open`. `--fixture` starts fabricated tool fixtures in an isolated scratch home and works in source mode only.
 
 Launch output is the link `[clio-coder:gui] http://127.0.0.1:<port><path>#token=<token>` on stdout. Guidance lines go to stderr and only when stderr is a terminal, so a pipe or script receives the link alone.
 
@@ -180,7 +181,7 @@ A completed install ends with `Run: clio-coder` and `Desktop app: clio-coder gui
 The server binds `127.0.0.1` only; there is no host option.
 
 - **Launch token.** A private server draws 32 random bytes (43 URL-safe characters) per launch. The background app reads its fixed token from `server.json`. The token travels in the launch link's URL fragment, which the browser never sends to a server. The client moves it into `sessionStorage` and removes it from the address bar. The background app's browser may keep it in `localStorage` so the installed app reconnects.
-- **Authentication.** Every `/api/*` request needs `Authorization: Bearer <token>`, compared in constant time. The SSE stream also accepts `?token=` because `EventSource` cannot set headers. Static assets need no token. A refused token is dropped from browser storage and the page shows a reconnect prompt.
+- **Authentication.** Every `/api/*` request, and every `/m/<id>/api/*` request for another machine (see [Switching machines](#switching-machines)), needs `Authorization: Bearer <token>`, compared in constant time. The SSE stream also accepts `?token=` because `EventSource` cannot set headers. Static assets need no token. A refused token is dropped from browser storage and the page shows a reconnect prompt.
 - **Host and Origin.** A request whose `Host` is not the listener's own address is refused with 421. A request with an `Origin` header that differs from the listener's origin is refused.
 - **Response headers.** Every response carries a strict Content-Security-Policy (`default-src 'self'`, same-origin scripts, no framing, no `object-src`), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` denying camera, microphone, geolocation, payment and USB, and `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` of same-origin.
 - **Body limits.** API bodies are limited to 64 KiB, except a turn request, which may carry images and files up to 1 MiB.
@@ -196,8 +197,8 @@ The server binds `127.0.0.1` only; there is no host option.
 ### What the server does not expose
 
 - It never listens on a non-loopback address and has no flag to.
-- It runs no generic command. The CLI children it starts come from a closed table in `apps/clio-coder-gui/server/cli-commands.ts`: `agents --json`, `verifiers inspect --json`, `usage report --repo <workspace> --days 30 --json`, `fleet verify <id> --json`, `targets` list, probe, use and remove, `auth logout <target>`, `models --json --offline`, and `targets profile list|bindings --json`. Arguments are validated identifiers, never free text, and children are spawned without a shell.
-- It makes no outbound network request of its own. Each server isolate replaces `fetch` with a function that throws. Only the pinned toolchain downloader keeps network access.
+- It runs no generic command. The CLI children it starts come from a closed table in `apps/clio-coder-gui/server/cli-commands.ts`: `fleet nodes` list, add, remove and test, `agents --json`, `verifiers inspect --json`, `usage report --repo <workspace> --days 30 --json`, `fleet verify <id> --json`, `targets` list, probe, use and remove, `auth logout <target>`, `models --json --offline`, and `targets profile list|bindings --json`. Arguments are validated identifiers, never free text, and children are spawned without a shell.
+- It makes no outbound network request of its own. Each server isolate replaces `fetch` with a function that throws. Only the pinned toolchain downloader keeps network access, and the `ssh` channels to a fleet node that a person opened from the machine switcher (see [Switching machines](#switching-machines)) are the only other outbound connections.
 - It serves no file outside the built client directory, resolved through `realpath`.
 - It does not serve documentation. The Help dialog links to the public site and names the installed `docs/` directory, and Clio Coder retrieves those pages with `clio_docs`.
 - It never answers an approval for the person. See [Permissions and approvals](#permissions-and-approvals).
@@ -259,10 +260,23 @@ A `Back to work` link at the top returns to the last page outside Settings mode,
 | Group | Pages |
 | --- | --- |
 | Settings | General, Models, Safety, Context and memory, All settings |
-| Capabilities | Library, Toolchain, System |
-| Activity | Usage, Traces, Fleet, Evidence |
+| Capabilities | Library, Toolchain, System, Machines |
+| Activity | Usage, Traces, Fleet, Evidence, Sessions |
 
 `Help and shortcuts` at the end of the panel opens the keyboard and vocabulary reference.
+
+### Switching machines
+
+Below the rail's header, the machine switcher names the machine whose application this window shows: `This machine`, or a registered fleet node's id followed by the node's own host name. Its menu lists this machine first, then every node in the fleet registry (`clio-coder fleet nodes add`, or Add on the Machines page) by id, each with its host and a state: `Here`, `Not connected`, `Connecting…`, `Connected`, `Failed` or `Version mismatch` ([machine-switcher-model.ts](../../apps/clio-coder-gui/client/shell/machine-switcher-model.ts)). The Machines page's Open action does the same as choosing a node in the menu. Both always talk to the application on this machine, so a window that shows a node can always switch back or move on.
+
+Opening a node that is not connected starts its own GUI over SSH and waits for it to become ready ([machine-attach.ts](../../apps/clio-coder-gui/server/services/machine-attach.ts), [ssh-model.ts](../../apps/clio-coder-gui/server/ssh-model.ts)):
+
+- **Command channel.** `ssh -T` with `BatchMode=yes` runs `clio-coder gui --foreground --port 0 --no-open --idle-exit 600000 --token-stdin` on the node, using the CLI in front of the registry's worker entry for that node, or `clio-coder` on the node's `PATH` when none is recorded. A fresh token goes in as stdin's first line, and the node's launch line names its port. The node's GUI stops itself after 10 minutes without a request or open stream, and the node then shows `Not connected` until the next Open.
+- **Forward.** A second `ssh -N` forwards a free loopback port on this machine to the node's GUI port, with `ExitOnForwardFailure=yes` and without sharing a multiplexed master connection.
+- **Version gate.** The node must run the same Clio Coder version and, when both sides report one, the same build, because the browser client comes from this machine. Otherwise the node shows `Version mismatch` and names `clio-coder fleet nodes install <id> --yes`.
+- **Reconnects.** A failed or broken connection is retried up to five times, after 1, 2, 4, 8 and 16 seconds. When the last retry fails too, the node stays `Failed` until it is opened again.
+
+Once the node is ready, the window navigates to `/m/<id>/`. Under that prefix the API client, the event stream and new windows go to `/m/<id>/api`, which this machine's server checks against its own token and origin and then proxies through the forward with the node's own token. The browser never holds the node's token. A refusal from the node reads as the node being unavailable, so the browser keeps its own token. Switching is a full page navigation, so nothing cached for one machine carries into another. Stopping this application stops every SSH channel it opened.
 
 ### Right sidebar before a task
 
@@ -375,6 +389,7 @@ A draft whose first character is `/` and that has one line opens the slash palet
 | Skills (`/skills`) | The skills available in the current project, with a search box and a link to the Library for installing or removing packages. The rail has no link to it; the command palette lists it as `Skills`. The Library page has its own Skills tab. |
 | Toolchain | Pinned external tools, how each resolves (PATH or the vendored copy), and install and remove operations with progress. |
 | System | Installation findings, Clio Coder folders, and detected coding agents under Interop with accept and decline decisions. |
+| Machines | The fleet's registered SSH machines, how to add one and each one's readiness, with an Open action that switches this window to the machine's own GUI (see [Switching machines](#switching-machines)). |
 | Usage | The 30-day `usage report` for the workspace, read from the telemetry read model: spend, token composition, origins, models, skills and suggestions. |
 | Traces, Fleet, Evidence | Run history from the telemetry run journals, newest write first, with each run's numbers and timeline from the read model (`/api/telemetry/runs`); saved fleet executions and dispatches; and each run's evidence with its findings and provenance, read from its sealed run scope. |
 
@@ -389,7 +404,7 @@ An approval is the child's `session/request_permission` request, shown as a card
 - **Clock.** The card escalates after 45 seconds (`APPROVAL WAITING, ESCALATED`, with an assertive announcement) and the request expires after 600 seconds. On expiry the server cancels the turn and resolves the parked request as cancelled. Clio Coder is not told no. The child's own `--permission-timeout` is 605000 ms, so the application's budget always fires first.
 - **Keyboard and signals.** `Alt+A` allows once and `Alt+R` rejects, from anywhere while an approval waits and no dialog is open. A pending approval sets a marker in the tab title and the task's rail row, and a turn that ends or is cancelled withdraws the card.
 - **Working freedom.** The control beside the composer sets the task's autonomy through `session/set_mode`. `Ask first` is `default`: reads, edits and shell commands contained in the OS sandbox run, destructive workspace operations run after a workspace snapshot, and the safety judge reviews what escapes containment, so only what it cannot decide, plan-scale dispatch and other operator-only decisions wait for this card. `Run without asking` is `yolo`: nothing asks, and only the yolo floor, rules in an approved `.clio-coder/safety.yaml` and the run's ceilings stop a call ([Yolo](../architecture/safety-model.md#yolo)). Choosing it counts as the operator's yolo acceptance, and Clio refuses it as root outside a container. Choosing it needs a second, confirming press, lasts until the task closes or is parked, and is disabled while a turn runs. A task that resumes from parking starts at the `safety.autonomy` setting.
-- **Interviews.** When Clio calls `ask_user`, the application shows the questions as a card and returns the reviewed answers with `Ctrl/Cmd+Enter`. A turn abort, a session switch or a close cancels a round that is still waiting.
+- **Interviews.** When Clio calls `ask_user`, the application shows the questions as a card and returns the reviewed answers with `Ctrl/Cmd+Enter`. A round the runtime marks `operator_only` carries an `Operator only` line under the card's heading, because no agent or policy answers it in your place. A turn abort, a session switch or a close cancels a round that is still waiting.
 
 See [Safety Model](../architecture/safety-model.md) for how the child classifies a call and [Information Flow](information-flow.md) for the source labels it attaches.
 
