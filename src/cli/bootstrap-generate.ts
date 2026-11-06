@@ -413,6 +413,7 @@ async function generateBootstrapWithModel(
 	input: BootstrapGenerateInput,
 	route: BootstrapRoute | undefined,
 	runs: BootstrapRunTelemetry[],
+	generationStartedAt: number,
 ): Promise<BootstrapStructuredOutput> {
 	let prompt = buildBootstrapPrompt(input);
 	// The draft's own dispatch; repair and section requests below never replace
@@ -564,7 +565,7 @@ async function generateBootstrapWithModel(
 		input.reportGeneration?.({
 			...attemptTelemetry,
 			runs: [...runs],
-			durationMs: Math.round(performance.now() - startedAtClock),
+			durationMs: Math.round(performance.now() - generationStartedAt),
 		});
 	return output;
 }
@@ -630,16 +631,18 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 	return async (input) => {
 		let stop: (() => Promise<void>) | null = null;
 		const runs: BootstrapRunTelemetry[] = [];
+		// One monotonic span for the whole generation, reported by success and fallback alike.
+		const startedAtClock = performance.now();
 		try {
 			if (options.dispatch) {
 				const route = options.route ?? options.resolveRoute?.();
-				return await generateBootstrapWithModel(options.dispatch, input, route, runs);
+				return await generateBootstrapWithModel(options.dispatch, input, route, runs, startedAtClock);
 			}
 			{
 				const lazy = await loadBootstrapDispatch();
 				stop = lazy.stop;
 				const route = options.route ?? resolveBootstrapRoute(lazy.config.get());
-				return await generateBootstrapWithModel(lazy.dispatch, input, route, runs);
+				return await generateBootstrapWithModel(lazy.dispatch, input, route, runs, startedAtClock);
 			}
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
@@ -650,6 +653,7 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 				fallbackReason: error.message,
 				...(err instanceof BootstrapAttemptError ? { run: err.telemetry } : {}),
 				...(runs.length > 0 ? { runs } : {}),
+				durationMs: Math.round(performance.now() - startedAtClock),
 			};
 			input.progress?.({
 				phase: "generate",

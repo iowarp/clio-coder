@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, it } from "node:test";
+import { afterEach, beforeEach, it, mock } from "node:test";
 import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
 import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { HANDBOOK_TARGETS, serializeClioMd } from "../../src/domains/context/clio-md.js";
@@ -536,6 +536,41 @@ it("records the spend of every bootstrap dispatch, not only the draft that survi
 	strictEqual(generation?.tokenCount, 6000, JSON.stringify(generation));
 	strictEqual(generation?.toolCalls, 9, JSON.stringify(generation));
 	strictEqual(generation?.repairRan, true, JSON.stringify(generation));
+});
+
+it("records the whole generation span when every dispatch failed, not the last receipt's", async () => {
+	let clock = 0;
+	const now = mock.method(performance, "now", () => clock);
+	let dispatches = 0;
+	const dispatch = {
+		dispatch: async () => {
+			dispatches += 1;
+			clock += 5_500;
+			const runId = `bootstrap-failed-${dispatches}`;
+			return {
+				runId,
+				events: (async function* () {})(),
+				finalPromise: Promise.resolve({
+					runId,
+					exitCode: 1,
+					// The first refuses the schema, so the parser attempt dispatches again.
+					failureMessage: dispatches === 1 ? "400 bad request: json_schema grammar failed to compile" : "the model stopped",
+					startedAt: "2026-01-01T00:00:00.000Z",
+					endedAt: "2026-01-01T00:00:02.000Z",
+					toolCalls: 0,
+					toolStats: [],
+				}),
+			};
+		},
+		abort: () => {},
+	} as unknown as DispatchContract;
+	try {
+		await runBootstrap({ cwd, generate: modelBootstrapGenerate({ dispatch, onFallback: () => {} }) });
+	} finally {
+		now.mock.restore();
+	}
+	strictEqual(dispatches, 2);
+	strictEqual(readClioState(cwd)?.lastBootstrap?.durationMs, 11_000, JSON.stringify(readClioState(cwd)?.lastBootstrap));
 });
 
 it("records no tool call total when a started dispatch left no receipt", async () => {

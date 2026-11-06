@@ -2023,7 +2023,8 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 		// The project state keeps a plain count, so a total is recorded only when every dispatch measured its own (#434).
 		["tokenCount", measuredTotal(runs)],
 		["toolCalls", across((entry) => entry.toolCalls)],
-		["durationMs", telemetry.durationMs ?? run.durationMs],
+		// The generation's own span; one dispatch's receipt is not the span of several.
+		["durationMs", telemetry.durationMs],
 		["promptBytes", across((entry) => entry.promptBytes)],
 		["outputBytes", across((entry) => entry.outputBytes)],
 	] as const) {
