@@ -9,6 +9,7 @@ import {
 	appendClaims,
 	bindHostVerificationHypotheses,
 	claimFromVerifyResult,
+	claimRecordId,
 	claimStatuses,
 	claimsLogPath,
 	claimsProjectRoot,
@@ -386,6 +387,67 @@ describe("claims ledger (#406)", () => {
 				hypotheses: bound,
 			});
 			assert.equal(statusOfH2(), "refuted");
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("decides a hypothesis only on a grounded claim from a valid source of the test's own channel", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			writeFileSync(join(repo, "h.json"), slateText([{ id: "H1", check: "stats" }]));
+			await createHypothesisCaptureRegistration({ cwd: () => repo }).evaluateAsync?.({
+				hook: "after_tool",
+				toolName: "write",
+				toolArgs: { path: "h.json" },
+			});
+			const [hypothesis] = readClaims(project).hypotheses;
+			assert.ok(hypothesis);
+			const genuine = claimFromVerifyResult({
+				details: { ...numericDetails(true, "passed"), checkout: { commit: "c".repeat(40), trackedTreeClean: true } },
+				project,
+				at: "2099-01-01T00:00:00.000Z",
+				source,
+			});
+			assert.ok(genuine);
+			// Each forgery rehashes correctly and follows the hypothesis, cites its own check and agrees, so only the
+			// claim's evidence or source can refuse it: a proposed claim, a claim from an invented channel cited by a verify
+			// test with the same identity fields, and a genuine verify claim cited by a test that says a host run made it.
+			const forge = (claim: Record<string, unknown>, testSource: Record<string, unknown>, at: string) => {
+				const { id: _claimId, ...claimRest }: Record<string, unknown> = { ...claim, at };
+				const forgedClaim = { ...claimRest, id: claimRecordId(claimRest as never) };
+				const testRest = {
+					v: 1,
+					type: "hypothesis-test",
+					at,
+					project,
+					hypothesis: hypothesis.id,
+					check: "stats",
+					outcome: "supported",
+					claim: forgedClaim.id,
+					execution: "succeeded",
+					source: testSource,
+				};
+				return `${JSON.stringify(forgedClaim)}\n${JSON.stringify({ ...testRest, id: claimLogRecordId(testRest) })}\n`;
+			};
+			const invented = { channel: "notebook", sessionId: "s1", toolCallId: "t1", requestedBy: "model" };
+			const host = { channel: "host-verification", runId: "s1", receiptDigest: "t1", sessionId: "s1", toolCallId: "t1" };
+			appendFileSync(
+				claimsLogPath(project),
+				forge({ ...genuine, evidence: "proposed" }, source, "2099-01-01T00:00:01.000Z") +
+					forge({ ...genuine, source: invented }, source, "2099-01-01T00:00:02.000Z") +
+					forge(genuine as unknown as Record<string, unknown>, host, "2099-01-01T00:00:03.000Z"),
+			);
+			const read = readClaims(project);
+			// Only the last forgery's claim, the genuine one, is read as a claim; no test is admitted.
+			assert.equal(read.records.length, 1);
+			assert.equal(read.mismatched, 2);
+			assert.equal(read.unlinked, 3);
+			assert.equal(read.hypothesisTests.length, 0);
+			assert.equal(hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(hypothesis.id)?.status, "proposed");
 		} finally {
 			env.restore();
 		}

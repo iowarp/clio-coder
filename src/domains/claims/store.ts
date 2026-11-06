@@ -173,7 +173,10 @@ export interface ClaimsLogRead {
 	hypothesisTests: HypothesisTestRecord[];
 	/** Lines that are not a JSON object, such as a line torn by a crash. */
 	unreadable: number;
-	/** Records whose id does not match their content, or that name another project: edited after capture. */
+	/**
+	 * Records whose id does not match their content, that name another project, or a claim that is not grounded in a
+	 * valid execution source: edited or written after capture by something other than this ledger.
+	 */
 	mismatched: number;
 	/** Records of a version this build does not read. */
 	unknownVersion: number;
@@ -309,15 +312,14 @@ interface LinkState {
 	tested: Set<string>;
 }
 
+/** Two check sources name the same run only when both are valid sources of one channel and agree on its identity. */
 function sameSource(a: ClaimSource, b: ClaimSource): boolean {
-	if (a.channel === "host-verification" || b.channel === "host-verification")
-		return (
-			a.channel === "host-verification" &&
-			b.channel === "host-verification" &&
-			a.runId === b.runId &&
-			a.receiptDigest === b.receiptDigest
-		);
-	return a.sessionId === b.sessionId && a.toolCallId === b.toolCallId && a.requestedBy === b.requestedBy;
+	if (!isCheckSource(a) || !isCheckSource(b) || a.channel !== b.channel) return false;
+	if (a.channel === "host-verification" && b.channel === "host-verification")
+		return a.runId === b.runId && a.receiptDigest === b.receiptDigest;
+	if (a.channel === "verify" && b.channel === "verify")
+		return a.sessionId === b.sessionId && a.toolCallId === b.toolCallId && a.requestedBy === b.requestedBy;
+	return false;
 }
 
 function admitHypothesis(state: LinkState, record: HypothesisRecord, line: number): boolean {
@@ -347,6 +349,8 @@ function admitHypothesisTest(state: LinkState, test: HypothesisTestRecord): bool
 		if (
 			backing === undefined ||
 			state.tested.has(pair) ||
+			// Only Clio's own judgement decides a hypothesis.
+			backing.claim.evidence !== "grounded" ||
 			// Bound when the check started, so the hypothesis was in the log before the claim that check produced.
 			backing.line < hypothesis.line ||
 			backing.claim.keys.check !== test.check ||
@@ -403,7 +407,14 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		}
 		if (isClaimRecord(record)) {
 			const claim = record as unknown as ClaimRecord;
-			if (claim.project !== projectRoot || claimRecordId(claim) !== claim.id) read.mismatched += 1;
+			// The ledger writes only grounded claims from a verify call or a sealed host check; anything else was not its.
+			if (
+				claim.project !== projectRoot ||
+				claim.evidence !== "grounded" ||
+				!isCheckSource(claim.source) ||
+				claimRecordId(claim) !== claim.id
+			)
+				read.mismatched += 1;
 			else {
 				read.records.push(claim);
 				if (!links.claims.has(claim.id)) links.claims.set(claim.id, { claim, line: index });
