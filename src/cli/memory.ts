@@ -46,8 +46,8 @@ always requires an explicit scope and creates unapproved records for review.
 
 --from-claim proposes an unapproved repo record resting on one claim of the
 project at the current directory (see clio-coder claims). If a later claim
-under the same conditions disagrees, the record gets a regression and leaves
-the prompt until approved again.
+with the same pinned conditions disagrees, the record gets a regression and
+leaves the prompt until approved again.
 `;
 
 type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune";

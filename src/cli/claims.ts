@@ -4,7 +4,9 @@ import {
 	type ClaimsLogRead,
 	claimStatuses,
 	claimsProjectRoot,
+	contradictionConditions,
 	readClaims,
+	supersedeConditions,
 } from "../domains/claims/index.js";
 import { printError } from "./argv.js";
 
@@ -24,10 +26,13 @@ directory, keyed by the repository root, so every subdirectory of a repository
 reads the same claims.
 
 Edges are derived when a claim is recorded, from the check id and recorded
-conditions only. A claim that reaches the opposite verdict under the same
-conditions (check declaration, reference, inputs, commit) contradicts the
-latest earlier one, and both read as contested. A claim under changed
-conditions (a new commit, new input digests) supersedes the earlier ones.
+conditions only. A claim that reaches the opposite verdict with the same
+pinned conditions (commit, command, reference, inputs, tolerance, and for
+reproduce the seed, environment and platform) contradicts the latest earlier
+one, and both read as contested. A numeric-compare check's working tree is
+not pinned: an uncommitted edit at the same commit still contradicts, and the
+edge says how the trees differed. A claim whose pinned conditions changed (a
+new commit, new input digests) supersedes the earlier ones.
 When a disagreement overturns an agreement, every memory record citing the
 agreeing claim gets a regression and leaves the prompt until approved again;
 the claim lists which records changed, or that none did.`;
@@ -55,15 +60,26 @@ function short(id: string): string {
 /** Each edge and memory outcome touching a claim, from that claim's side. */
 function relationLines(claim: ClaimRecord, view: LogView): string[] {
 	const lines: string[] = [];
+	const byId = new Map(view.read.records.map((record) => [record.id, record]));
 	for (const edge of view.read.edges) {
-		if (edge.kind === "contradicts" && edge.from === claim.id)
-			lines.push(`contradicts ${short(edge.to)} (opposite verdict under the same conditions)`);
-		if (edge.kind === "contradicts" && edge.to === claim.id)
-			lines.push(`contradicted by ${short(edge.from)} (opposite verdict under the same conditions)`);
-		if (edge.kind === "supersedes" && edge.from === claim.id)
-			lines.push(`supersedes ${short(edge.to)} (changed conditions)`);
-		if (edge.kind === "supersedes" && edge.to === claim.id)
-			lines.push(`superseded by ${short(edge.from)} (changed conditions)`);
+		if (edge.from !== claim.id && edge.to !== claim.id) continue;
+		const later = byId.get(edge.from);
+		const earlier = byId.get(edge.to);
+		const why =
+			later === undefined || earlier === undefined
+				? "the other claim is not in this log"
+				: edge.kind === "contradicts"
+					? `opposite verdict ${contradictionConditions(later, earlier)}`
+					: supersedeConditions(later, earlier);
+		const verb =
+			edge.kind === "contradicts"
+				? edge.from === claim.id
+					? `contradicts ${short(edge.to)}`
+					: `contradicted by ${short(edge.from)}`
+				: edge.from === claim.id
+					? `supersedes ${short(edge.to)}`
+					: `superseded by ${short(edge.from)}`;
+		lines.push(`${verb}: ${why}`);
 	}
 	for (const regression of view.read.regressions) {
 		if (regression.from !== claim.id) continue;

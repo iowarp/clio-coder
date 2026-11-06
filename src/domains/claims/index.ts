@@ -10,8 +10,10 @@ export {
 	claimBackingRefs,
 	claimConditionsKey,
 	claimStatuses,
+	contradictionConditions,
 	deriveClaimEdges,
 	overturnedAgreements,
+	supersedeConditions,
 } from "./edges.js";
 export {
 	CLAIM_CAPTURE_REGISTRATION_ID,

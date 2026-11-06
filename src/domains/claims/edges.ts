@@ -18,48 +18,104 @@ function sha256(text: string): string {
 }
 
 /**
- * The digest of the conditions a verdict was pinned under, or null when nothing pins it. Two claims with the same key
- * judged the same check, declaration, reference, inputs and commit, so opposite verdicts contradict each other.
+ * The conditions a verdict was pinned under, by the name an operator reads, or null when nothing pins it.
  *
- * The judged output (`actual`, run payloads) is not a condition: it is what changed when a verdict flips. A
- * numeric-compare check runs in the working tree, so an uncommitted edit at the same HEAD keeps the key, and a check
- * that agreed and now disagrees there is a regression. A reproduce check runs the committed tree, so its key adds the
- * pinned inputs, seed, environment and the platform facts that decide the computation; the kernel release and Clio's
- * version are left out because they change without changing what ran. A claim with no recorded commit has no pinned
- * conditions, so it can be replaced but never contradicted.
+ * The rule for edges follows from what is pinned. Claims of one check with equal pins and opposite verdicts contradict
+ * each other; claims whose pins differ in any field (commit, command, reference, inputs, tolerance, and for reproduce
+ * the seed, environment and platform) are a supersede. Two things are deliberately not pinned:
+ * - The judged output (`actual`, run payloads): it is what changed when a verdict flips.
+ * - A numeric-compare check's working-tree state. It runs in the working tree, so an uncommitted edit at the same
+ *   commit is what a regression looks like: a check that agreed on a clean tree and disagrees with uncommitted changes
+ *   is a contradiction, and every sentence about it names that difference (`contradictionConditions`).
+ * A reproduce check runs the committed tree or a copy of its pinned inputs, so the working tree never reaches it. The
+ * kernel release and Clio's version are left out of its platform because they change without changing what ran. A
+ * claim with no recorded commit has no pinned conditions, so it can be replaced but never contradicted.
  */
-export function claimConditionsKey(claim: ClaimRecord): string | null {
+function pinnedConditions(claim: ClaimRecord): Record<string, unknown> | null {
 	const conditions = claim.conditions;
 	if (conditions.commit === null) return null;
-	const pins =
-		conditions.kind === "numeric-compare"
-			? {
-					argv: conditions.argv,
-					tolerance: conditions.tolerance,
-					combine: conditions.combine,
-					nonFinite: conditions.nonFinite,
-					reference: conditions.reference?.sha256 ?? null,
-					commit: conditions.commit,
-				}
-			: {
-					argv: conditions.argv,
-					cwd: conditions.cwd,
-					environment: conditions.environment,
-					compare: conditions.compare,
-					tolerance: conditions.tolerance,
-					reference: conditions.reference?.sha256 ?? null,
-					inputs: conditions.inputs.map((input) => `${input.path}\0${input.sha256}`).sort(),
-					seed: conditions.seed,
-					commit: conditions.commit,
-					platform: {
-						os: conditions.platform.os,
-						arch: conditions.platform.arch,
-						nodeVersion: conditions.platform.nodeVersion,
-						interpreter: conditions.platform.interpreter ?? null,
-						pythonVersion: conditions.platform.pythonVersion ?? null,
-					},
-				};
-	return sha256(canonicalClaimJson({ kind: claim.kind, check: claim.keys.check, pins }));
+	if (conditions.kind === "numeric-compare")
+		return {
+			commit: conditions.commit,
+			command: conditions.argv,
+			reference: conditions.reference?.sha256 ?? null,
+			tolerance: { bounds: conditions.tolerance, combine: conditions.combine, nonFinite: conditions.nonFinite },
+		};
+	return {
+		commit: conditions.commit,
+		command: { argv: conditions.argv, cwd: conditions.cwd },
+		reference: conditions.reference?.sha256 ?? null,
+		inputs: conditions.inputs.map((input) => `${input.path}\0${input.sha256}`).sort(),
+		tolerance: conditions.tolerance,
+		comparison: conditions.compare,
+		seed: conditions.seed,
+		environment: conditions.environment,
+		platform: {
+			os: conditions.platform.os,
+			arch: conditions.platform.arch,
+			nodeVersion: conditions.platform.nodeVersion,
+			interpreter: conditions.platform.interpreter ?? null,
+			pythonVersion: conditions.platform.pythonVersion ?? null,
+		},
+	};
+}
+
+/** The digest of a claim's pinned conditions; equal keys mean opposite verdicts contradict. Null when unpinned. */
+export function claimConditionsKey(claim: ClaimRecord): string | null {
+	const pins = pinnedConditions(claim);
+	return pins === null ? null : sha256(canonicalClaimJson({ kind: claim.kind, check: claim.keys.check, pins }));
+}
+
+function short(value: string): string {
+	return value.slice(0, 12);
+}
+
+/** A numeric-compare claim's working-tree state as its channel recorded it. */
+function treeState(claim: ClaimRecord): string | null {
+	const conditions = claim.conditions;
+	if (conditions.kind !== "numeric-compare") return null;
+	if (conditions.treeFingerprint !== undefined) return `working tree ${short(conditions.treeFingerprint)}`;
+	if (conditions.trackedTreeClean === true) return "a clean tree";
+	if (conditions.trackedTreeClean === false) return "uncommitted changes to tracked files";
+	return "an unrecorded working-tree state";
+}
+
+/**
+ * What two claims under the same pinned conditions shared, and the one difference the pins leave open: the working
+ * tree of a numeric-compare check. Never says "the same conditions" when the trees differed.
+ */
+export function contradictionConditions(later: ClaimRecord, earlier: ClaimRecord): string {
+	const pins = pinnedConditions(later);
+	const commit = later.conditions.commit === null ? "no recorded commit" : `commit ${short(later.conditions.commit)}`;
+	const shared = Object.keys(pins ?? {}).filter((name) => name !== "commit");
+	const head = `at the same ${commit} with the same ${shared.join(", ").replace(/, ([^,]*)$/u, " and $1")}`;
+	const laterTree = treeState(later);
+	const earlierTree = treeState(earlier);
+	if (laterTree === null || earlierTree === null) return head;
+	if (laterTree === earlierTree) {
+		if (laterTree === "uncommitted changes to tracked files")
+			return `${head}; both ran with uncommitted changes to tracked files, which may differ`;
+		if (laterTree === "an unrecorded working-tree state") return `${head}; neither recorded its working-tree state`;
+		return `${head}, both on ${laterTree}`;
+	}
+	const preposition = (state: string) => (state.startsWith("uncommitted") ? "with" : "on");
+	return `${head}; claim ${short(later.id)} ran ${preposition(laterTree)} ${laterTree} where claim ${short(earlier.id)} ran ${preposition(earlierTree)} ${earlierTree}`;
+}
+
+/** Which pinned conditions changed between two claims of one check, from their typed fields. */
+export function supersedeConditions(later: ClaimRecord, earlier: ClaimRecord): string {
+	const laterPins = pinnedConditions(later);
+	const earlierPins = pinnedConditions(earlier);
+	if (earlierPins === null) return `claim ${short(earlier.id)} recorded no commit, so it pinned no conditions`;
+	if (laterPins === null) return `claim ${short(later.id)} recorded no commit, so it pinned no conditions`;
+	const changed = Object.keys(laterPins)
+		.filter((name) => canonicalClaimJson(laterPins[name]) !== canonicalClaimJson(earlierPins[name]))
+		.map((name) => {
+			const from = earlierPins[name];
+			const to = laterPins[name];
+			return typeof from === "string" && typeof to === "string" ? `${name} ${short(from)} -> ${short(to)}` : name;
+		});
+	return `changed ${changed.join(", ")}`;
 }
 
 export function claimLogRecordId(record: object): string {
@@ -85,9 +141,9 @@ function edge(kind: ClaimEdgeRecordV1["kind"], from: ClaimRecord, to: ClaimRecor
  * The edges each incoming claim adds against the log, in order; an incoming claim also counts as history for the
  * ones after it.
  *
- * - `contradicts` the latest earlier claim under the same conditions when its verdict differs. Only a flip adds one,
+ * - `contradicts` the latest earlier claim with equal pinned conditions (`pinnedConditions`) when its verdict differs. Only a flip adds one,
  *   so a run of agreeing claims followed by a disagreeing one adds one edge, not one per agreement.
- * - `supersedes` every earlier claim of the same check and kind under other conditions that nothing superseded yet.
+ * - `supersedes` every earlier claim of the same check and kind whose pinned conditions differ, unless already superseded.
  *   Each claim is superseded at most once, so these edges never outnumber claims.
  */
 export function deriveClaimEdges(
@@ -133,7 +189,7 @@ export function claimStatuses(
 
 /**
  * The agreeing claims a `contradicts` edge overturns, when the later claim disagrees: every earlier agreeing claim
- * under the same conditions that nothing superseded. Empty when the later claim agrees, since a disagreement turning
+ * with equal pinned conditions that nothing superseded. Empty when the later claim agrees, since a disagreement turning
  * into agreement withdraws nothing a memory relied on.
  */
 export function overturnedAgreements(
@@ -169,11 +225,9 @@ export function claimBackingRefs(claim: ClaimRecord): string[] {
 	return [`claim:${claim.id}`, ...(claim.source.channel === "host-verification" ? [claim.source.runId] : [])];
 }
 
-/** The regression text a backed memory record carries; it cites both claims in full. */
+/** The regression text a backed memory record carries; it cites both claims in full and says what matched. */
 export function claimRegressionNote(later: ClaimRecord, backing: ClaimRecord): string {
-	const commit =
-		later.conditions.commit === null ? "no recorded commit" : `commit ${later.conditions.commit.slice(0, 12)}`;
-	return `claim ${later.id} disagrees, under the same conditions (${commit}), with claim ${backing.id} of check '${later.keys.check}' that agreed within the declared tolerance (${later.at})`;
+	return `check '${later.keys.check}': claim ${later.id} disagrees with claim ${backing.id}, which agreed within the declared tolerance, ${contradictionConditions(later, backing)} (${later.at})`;
 }
 
 export function regressionRecord(input: {

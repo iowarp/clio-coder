@@ -1,4 +1,4 @@
-import { strict as assert } from "node:assert";
+import { strict as assert, match } from "node:assert";
 import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,6 +8,7 @@ import {
 	claimStatuses,
 	claimsLogPath,
 	claimsProjectRoot,
+	contradictionConditions,
 	deriveClaimEdges,
 	overturnedAgreements,
 	readClaims,
@@ -50,7 +51,7 @@ describe("claims ledger (#406)", () => {
 		assert.equal(claimFromVerifyResult({ details: numericDetails(false, "passed"), project: "/p", at, source }), null);
 	});
 
-	it("derives contradicts under the same conditions and supersedes under a new commit", () => {
+	it("derives contradicts under equal pinned conditions and supersedes under a new commit", () => {
 		const claim = (passed: boolean, commit: string, clean: boolean, at: string) => {
 			const details = {
 				...numericDetails(passed, passed ? "passed" : "failed"),
@@ -68,6 +69,11 @@ describe("claims ledger (#406)", () => {
 		assert.deepEqual(
 			first.map((edge) => [edge.kind, edge.from, edge.to]),
 			[["contradicts", disagreed.id, agreed.id]],
+		);
+		// The edge names the tree difference rather than calling the conditions the same.
+		match(
+			contradictionConditions(disagreed, agreed),
+			/with uncommitted changes to tracked files where claim \w+ ran on a clean tree$/u,
 		);
 		const [contradiction] = first;
 		assert.ok(contradiction);

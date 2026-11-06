@@ -122,7 +122,8 @@ export type ClaimRecord = ClaimRecordV1;
  * A typed relation between two claims of one check, derived when the later claim is appended (#406). Edges are their
  * own lines in the log, so a claim is never rewritten.
  *
- * - `contradicts`: the later claim reached the opposite verdict under the same pinned conditions (`claimConditionsKey`).
+ * - `contradicts`: the later claim reached the opposite verdict under equal pinned conditions (`claimConditionsKey`);
+ *   a numeric-compare check's working-tree state is not pinned, so an uncommitted edit at the same commit still counts.
  * - `supersedes`: the later claim judged the same check under changed conditions, such as a new commit or new input
  *   digests, and replaces the earlier verdict.
  *
@@ -159,7 +160,7 @@ export interface ClaimRegressionRecordV1 {
 	edge: string;
 	/** The disagreeing claim. */
 	from: string;
-	/** The agreeing claims under the same conditions that it overturned. */
+	/** The agreeing claims with equal pinned conditions that it overturned. */
 	backing: string[];
 	memory: string[];
 }
@@ -169,6 +170,6 @@ export type ClaimRegressionRecord = ClaimRegressionRecordV1;
 
 /**
  * Where a claim stands after its edges: `superseded` once a later claim replaced it under changed conditions,
- * `contested` while a claim under the same conditions disagrees with it, else `standing`.
+ * `contested` while a claim with equal pinned conditions disagrees with it, else `standing`.
  */
 export type ClaimStatus = "standing" | "contested" | "superseded";
