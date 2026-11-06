@@ -176,7 +176,7 @@ export const askUserParameters = Type.Object({
 				operator_only: Type.Optional(
 					Type.Boolean({
 						description:
-							"A choice only the operator makes (research question, hypothesis, hazard confirmation): asked alone, never answered for them.",
+							"Operator's own choice (research question, hypothesis, hazard check): asked alone, never answered for them.",
 					}),
 				),
 			}),
