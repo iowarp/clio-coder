@@ -941,15 +941,29 @@ function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus)
 }
 
 const REVIEW_REQUIREMENT_RE = /\breviewers?\b|\brequired reviews?\b/i;
+/**
+ * Review policy stated as configuration: branch protection and rulesets
+ * (`required_pull_request_reviews`, `required_approving_review_count`,
+ * `require_code_owner_reviews`), deployment environments (`reviewers:`,
+ * `required_reviewers`), or a CODEOWNERS file.
+ */
+const REVIEW_POLICY_KEY_RE =
+	/["']?\b(?:required_pull_request_reviews|required_approving_review_count|require_code_owner_reviews?|required_reviewers|dismiss_stale_reviews|require_last_push_approval|reviewers)["']?\s*:/i;
+
+function statesReviewPolicy(path: string, text: string): boolean {
+	return /(?:^|\/)CODEOWNERS$/.test(path) || REVIEW_POLICY_KEY_RE.test(text) || REVIEW_REQUIREMENT_RE.test(text);
+}
 
 /**
- * Drop each sentence that places a reviewer requirement in a file that states
- * none. Every generated handbook said the `release` environment "in
+ * Mark each sentence that places a reviewer requirement in files that state no
+ * review policy. Every generated handbook said the `release` environment "in
  * `.github/workflows/release.yml`" requires the owner as reviewer: the path is
  * real, so the citation grounded, but reviewers are a GitHub environment setting
  * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer.
+ * The requirement itself may still hold, so the sentence stays, marked as not
+ * found in what it cites, rather than vanishing as a safety rule.
  */
-function withoutMisplacedReviewRequirements(line: string, evidence: ModelGroundingCorpus): string {
+function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGroundingCorpus): string {
 	if (!REVIEW_REQUIREMENT_RE.test(line)) return line;
 	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
 	const body = line.slice(prefix.length);
@@ -963,20 +977,27 @@ function withoutMisplacedReviewRequirements(line: string, evidence: ModelGroundi
 		from = at;
 	}
 	sentences.push(body.slice(from));
-	const kept = sentences.filter((sentence) => {
-		if (!REVIEW_REQUIREMENT_RE.test(sentence)) return true;
-		const cited = [...sentence.matchAll(CODE_TOKEN_RE)]
-			.map((match) => (match[1] ?? "").trim().replace(/^\.\//, ""))
-			.map((token) => CITED_LOCATION_RE.exec(token)?.[1] ?? token)
-			.filter((token) => CONCRETE_FILE_RE.test(token));
-		if (cited.length === 0) return true;
-		return cited.some((path) => {
+	const marked = sentences.map((sentence) => {
+		if (!REVIEW_REQUIREMENT_RE.test(sentence)) return sentence;
+		const cited = [
+			...new Set(
+				[...sentence.matchAll(CODE_TOKEN_RE)]
+					.map((match) => (match[1] ?? "").trim().replace(/^\.\//, ""))
+					.map((token) => CITED_LOCATION_RE.exec(token)?.[1] ?? token)
+					.filter((token) => CONCRETE_FILE_RE.test(token)),
+			),
+		];
+		if (cited.length === 0) return sentence;
+		const supported = cited.some((path) => {
 			const text = evidence.fileText(path);
-			return text === null || REVIEW_REQUIREMENT_RE.test(text);
+			return text === null || statesReviewPolicy(path, text);
 		});
+		if (supported) return sentence;
+		const note = ` (unverified: ${cited.map((path) => `\`${path}\``).join(", ")} states no review policy)`;
+		const end = /([.!?])(\s*)$/.exec(sentence);
+		return end ? `${sentence.slice(0, end.index)}${note}${end[1]}${end[2]}` : `${sentence.trimEnd()}${note}`;
 	});
-	const text = kept.join("").trim();
-	return text.length > 0 ? `${prefix}${text}` : "";
+	return `${prefix}${marked.join("").trim()}`;
 }
 
 /**
@@ -1017,7 +1038,7 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 			wrapBareCitations(inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`, evidence),
 			evidence,
 		);
-		const line = inFence ? cited : withoutMisplacedReviewRequirements(cited, evidence);
+		const line = inFence ? cited : withUnsupportedReviewRequirementsMarked(cited, evidence);
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);

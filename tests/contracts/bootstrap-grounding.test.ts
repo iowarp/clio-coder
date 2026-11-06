@@ -75,8 +75,12 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 	strictEqual(handbook.includes("npm run deploy"), false, handbook);
 });
 
-it("drops a reviewer requirement placed in a file that names no reviewer, keeping the rest of the rule", async () => {
+it("keeps a reviewer requirement its cited policy states, and marks one its cited file does not state", async () => {
 	writeFileSync(join(cwd, ".github", "workflows", "release.yml"), "jobs:\n  publish:\n    environment: release\n");
+	writeFileSync(
+		join(cwd, ".github", "branch-protection.json"),
+		JSON.stringify({ required_pull_request_reviews: { required_approving_review_count: 1 } }),
+	);
 	await runBootstrap({
 		cwd,
 		generate: async (input) => {
@@ -91,6 +95,7 @@ it("drops a reviewer requirement placed in a file that names no reviewer, keepin
 						title: "Git and release",
 						body: [
 							"- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer. Keep the `ci (22)` job name in `.github/workflows/ci.yml`.",
+							"- `.github/branch-protection.json` requires a reviewer before merging.",
 							"- Follow `CONTRIBUTING.md` before review.",
 						].join("\n"),
 					},
@@ -99,8 +104,13 @@ it("drops a reviewer requirement placed in a file that names no reviewer, keepin
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	strictEqual(handbook.includes("requires the owner as reviewer"), false, handbook);
-	ok(handbook.includes("- Keep the `ci (22)` job name in `.github/workflows/ci.yml`."), handbook);
+	ok(
+		handbook.includes(
+			"- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer (unverified: `.github/workflows/release.yml` states no review policy). Keep the `ci (22)` job name in `.github/workflows/ci.yml`.",
+		),
+		handbook,
+	);
+	ok(handbook.includes("- `.github/branch-protection.json` requires a reviewer before merging.\n"), handbook);
 	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 });
 
