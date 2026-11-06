@@ -239,22 +239,37 @@ test("a usage error comes back as an error level with the registry's own usage l
 
 test("a dispatch command reports that it started, because its result is an event stream", async () => {
 	let requested = 0;
-	const pending = host({
-		// The run never settles inside this call; that is the point of the flag.
-		dispatch: {
-			ownsProgressBus: () => true,
-			dispatch: () => {
-				requested += 1;
-				return new Promise(() => {});
-			},
-		} as unknown as AcpCommandHost["dispatch"],
-		// The run watches its own queue events to say when it waits for a slot (ac0e5b530).
-		bus: { subscribe: () => () => {} } as unknown as AcpCommandHost["bus"],
-	});
+	const runs = (admission: () => Promise<unknown>) =>
+		host({
+			dispatch: {
+				ownsProgressBus: () => true,
+				dispatch: () => {
+					requested += 1;
+					return admission();
+				},
+			} as unknown as AcpCommandHost["dispatch"],
+			// The run watches its own queue events to say when it waits for a slot (ac0e5b530).
+			bus: { subscribe: () => () => {} } as unknown as AcpCommandHost["bus"],
+		});
+	// Admitted, and the run never settles inside this call; that is the point of the flag.
+	const pending = runs(async () => ({
+		runId: "run-1",
+		events: (async function* () {
+			await new Promise(() => {});
+		})(),
+		finalPromise: new Promise(() => {}),
+	}));
 	const result = await invokeAcpCommand({ command: "delegate", argv: ["codex", "summarize the diff"] }, pending);
 	assert.equal(requested, 1);
 	assert.equal(result.level, "info");
 	assert.deepEqual(result.lines, ["delegate started; progress arrives as _clio-coder/event dispatch kinds"]);
+	// A run refused at admission never started, so the reply is the refusal and never "started".
+	const refused = await invokeAcpCommand(
+		{ command: "run", argv: ["ghost", "summarize the diff"] },
+		runs(() => Promise.reject(new Error("dispatch: unknown agent ghost"))),
+	);
+	assert.equal(refused.level, "error");
+	assert.deepEqual(refused.lines, ["run refused: unknown agent ghost"]);
 });
 
 test("a command that is wired reports its own outcome instead of a started line", async () => {
