@@ -7,6 +7,7 @@
  * or spoof the UI that approves it.
  */
 
+import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { isSecretArgKey, redactSecretString } from "./redaction.js";
 
 const ESC_CHAR = String.fromCharCode(27);
@@ -415,15 +416,58 @@ function dispatchTaskNames(value: ReadonlyArray<unknown>): string[] {
 	return names;
 }
 
+/** Longest string argument of an uncurated tool that the card shows whole. */
+const UNLISTED_STRING_MAX_CHARS = 96;
+
+/** Argument names that carry a payload rather than a choice; their size is what the card says. */
+const PAYLOAD_ARG_KEYS: ReadonlySet<string> = new Set([
+	"body",
+	"code",
+	"content",
+	"contents",
+	"data",
+	"diff",
+	"file_text",
+	"input",
+	"new_string",
+	"old_string",
+	"patch",
+	"payload",
+	"stdin",
+	"text",
+]);
+
+/**
+ * A short one-line string of a tool with no curated field list (MCP and other
+ * dynamic tools) is usually the decision itself: `slurm_submit` showed
+ * `script=<string 66 bytes>` where the operator needed the script path. It
+ * renders whole with secrets redacted. Secret-named fields, payload fields,
+ * multi-line values and anything over the cap stay summarized.
+ */
+function shortUnlistedString(tool: string, field: string, value: string): string | null {
+	if (CALL_TARGET_FIELDS[tool] !== undefined) return null;
+	if (isSecretArgKey(field) || PAYLOAD_ARG_KEYS.has(field.toLowerCase())) return null;
+	if (value.length > UNLISTED_STRING_MAX_CHARS || /[\r\n]/.test(value)) return null;
+	// Display redaction keys on names (`token=`, `--key`); a bare `sk-…` or `ghp_…` value needs the shape rules too.
+	const masked = redactSecretsText(redactSecretString(value), createRedactionTally());
+	const rendered = sanitizeCallTargetText(masked);
+	return rendered.length > 0 ? rendered : null;
+}
+
 /**
  * A boolean or finite number cannot carry pasted content, so it renders as
  * itself: `worktree=true` decides more than `<boolean 1 value>` did. A value
- * under a secret-looking key stays summarized, and strings and objects stay
- * summarized by type and size.
+ * under a secret-looking key stays summarized, a short one-line string of an
+ * uncurated tool renders redacted (shortUnlistedString), and other strings and
+ * objects stay summarized by type and size.
  */
 function summarizeUnlistedField(tool: string, field: string, value: unknown): string {
 	if (typeof value === "boolean") return String(value);
 	if (typeof value === "number" && Number.isFinite(value) && !isSecretArgKey(field)) return String(value);
+	if (typeof value === "string") {
+		const shown = shortUnlistedString(tool, field, value);
+		if (shown !== null) return shown;
+	}
 	if (tool === "dispatch" && field === "tasks" && Array.isArray(value)) {
 		const names = dispatchTaskNames(value);
 		if (names.length > 0) {
@@ -443,7 +487,8 @@ function targetFieldName(value: string): string {
 
 /**
  * Derive the operator-facing object of a call for the approval overlay. Only
- * values in the named tool's allowlist may render. Every other argument is
+ * values in the named tool's allowlist may render, plus short one-line strings
+ * of a tool that has no allowlist, redacted. Every other argument is
  * summarized by its field name, type, and size, so an unexpected credential
  * or pasted document still informs the decision without disclosing content.
  * Returns an empty string when the call carries no arguments.
