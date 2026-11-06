@@ -1631,11 +1631,34 @@ function stabilizeGeneratedOutput(
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
-	// A title the draft dropped returns with its enforced blocks, and a later section gives way to it.
+	// A previous section returns under its title when the draft dropped the title. Under a kept title, a block
+	// returns when the handbook no longer names its check. A carried section is not cut for a later one.
 	const carriedSections = new Set<ClioMdSection>();
+	const stated = new Set(
+		namedEnforcement(
+			[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
+			names,
+		),
+	);
 	for (const section of carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : []) {
-		const retained = addSection(section) ? ordinarySections.at(-1) : undefined;
-		if (retained) carriedSections.add(retained);
+		const key = section.title.replace(/\s+/g, " ").trim().toLowerCase();
+		const index = ordinarySections.findIndex((kept) => kept.title.replace(/\s+/g, " ").trim().toLowerCase() === key);
+		const current = ordinarySections[index];
+		if (!current) {
+			const retained = addSection(section) ? ordinarySections.at(-1) : undefined;
+			if (retained) carriedSections.add(retained);
+			continue;
+		}
+		const missing = handbookBlocks(section.body).filter(
+			(block) =>
+				namedEnforcement(block, names).some((name) => !stated.has(name)) &&
+				!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens),
+		);
+		if (missing.length === 0) continue;
+		const merged = { ...current, body: [current.body, ...missing].join("\n") };
+		ordinarySections[index] = merged;
+		if (modelSections.delete(current)) modelSections.add(merged);
+		carriedSections.add(merged);
 	}
 	const checkerSection = uncoveredCheckerSection(
 		checkerRules.filter((rule) => !rule.architectural),

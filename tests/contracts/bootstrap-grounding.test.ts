@@ -354,6 +354,51 @@ it("carries a section title the rewrite dropped with the blocks a running check 
 	]);
 });
 
+it("returns a previous block under a kept title only when the handbook no longer names its check", async () => {
+	const carried = writeCarryFixture();
+	mkdirSync(join(cwd, "docs"), { recursive: true });
+	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
+	const previousCorpus =
+		"- Every page under `docs/` is reachable from `docs/guide.md`; the corpus check in `scripts/check.js` fails otherwise.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			...carried.map((rule, i) => `${i + 1}. ${rule}`),
+			"",
+			"## Docs and prose",
+			"",
+			"- Pages are Markdown under `docs/`, never HTML; the retired-html check in `scripts/check.js` refuses an HTML tree.",
+			previousCorpus,
+			"",
+		].join("\n"),
+	);
+	const modelDocs =
+		"- Link each new page from `docs/guide.md`; the retired-html check in `scripts/check.js` refuses HTML.";
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: [],
+				sections: [{ title: "Docs and prose", body: modelDocs }],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	strictEqual(docs, [modelDocs, previousCorpus].join("\n"), handbook);
+});
+
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
 	const draft = {
 		projectName: "harbor",
