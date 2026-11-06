@@ -48,13 +48,15 @@ import { createCopilotSessionFs, removeCopilotSessionRecords, removeCopilotSessi
 type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
 
 export const COPILOT_SDK_API = "copilot-sdk";
-export const COPILOT_SDK_PROVIDER = "copilot-sdk";
 
 /** What one Copilot model step billed, as the runtime reported it; carried beside the message usage. */
 export interface CopilotStepBilling {
-	/** Premium requests: the model multiplier for a user-initiated call, zero for an agent continuation. */
+	/**
+	 * Premium requests this step added to the runtime's own session total (`usage.getMetrics()`
+	 * `totalPremiumRequestCost`); null when the runtime gave no answer. Clio never derives it.
+	 */
 	premiumRequests: number | null;
-	/** AI credits in nano-AIU, when the API reported them. */
+	/** AI credits in nano-AIU: the session total's growth, else the sum the calls reported. */
 	nanoAiu: number | null;
 	/** Model calls Copilot made for this step, root agent only. */
 	modelCalls: number;
@@ -70,6 +72,8 @@ interface Parked {
 const MAX_CONVERSATIONS_PER_KEY = 4;
 /** Upper bound on waiting for a tool-requesting call's usage before handing the calls to Clio. */
 const TOOL_USE_SETTLE_MS = 2_000;
+/** Upper bound on the runtime's accounting answer at the end of a step. */
+const SETTLE_METRICS_MS = 1_000;
 const MAX_CONVERSATIONS = 16;
 
 function hash(text: string): string {
@@ -142,7 +146,8 @@ class Conversation {
 	disposed = false;
 	lastUsed = Date.now();
 	sink: StepSink | null = null;
-	orphanUsage: SessionEvent[] = [];
+	/** The runtime's session accounting totals at the end of the previous step. */
+	metricsBaseline = { premiumRequests: 0, nanoAiu: 0 };
 	private readonly parked = new Map<string, Parked>();
 	private readonly delivered = new Map<string, ToolResultObject>();
 	private unsubscribe: (() => void) | null = null;
@@ -161,11 +166,9 @@ class Conversation {
 		this.toolsHash = input.toolsHash;
 		this.model = input.model;
 		this.reasoningEffort = input.reasoningEffort;
-		this.unsubscribe = this.session.on((event) => {
-			if (this.sink) this.sink.handle(event);
-			// Usage that lands between steps is the previous call's; the next step reports it, so no tokens drop.
-			else if (event.type === "assistant.usage") this.orphanUsage.push(event);
-		});
+		// Events reach only the step that is open. Usage a finished step never received stays with that step,
+		// which settled it as unreported; it is never handed to the next call.
+		this.unsubscribe = this.session.on((event) => this.sink?.handle(event));
 	}
 
 	/** The SDK handler for one of Clio's tools: wait for Clio's own result for this call. */
@@ -301,6 +304,12 @@ function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | un
 	}
 }
 
+function framedUserText(text: string): string {
+	const trimmed = text.trim();
+	if (trimmed.length === 0 || trimmed.startsWith("<system-reminder>")) return trimmed;
+	return `<user-message>\n${trimmed}\n</user-message>`;
+}
+
 function toolResultObject(message: Extract<CoreMessage, { role: "toolResult" }>, extraText = ""): ToolResultObject {
 	const text = [textOf(message.content), extraText].filter((part) => part.length > 0).join("\n\n");
 	const images = imagesOf(message.content);
@@ -398,6 +407,18 @@ class Step implements StepSink {
 	private error: string | null = null;
 	private readonly billing: CopilotStepBilling = { premiumRequests: null, nanoAiu: null, modelCalls: 0 };
 	private toolUse: string[] | null = null;
+	/** The tool-requesting call's id, when Copilot gave one, so only its own usage closes the step. */
+	private toolUseCall: string | null = null;
+	private usageEvents = 0;
+	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	private nanoReports = 0;
+	private nanoSum = 0;
+	/** The model the runtime reported serving this step's calls (`assistant.usage.model`). */
+	private servedModel: string | null = null;
+	/** Reads this step's premium requests and AI credits from the runtime's own session accounting. */
+	settle: (() => Promise<{ premiumRequests: number | null; nanoAiu: number | null }>) | null = null;
+	/** Runs when the step stops taking events, before any settling; later usage then waits for the next step. */
+	onDetach: (() => void) | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
 	onFinish: ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[] }) => void) | null = null;
 
@@ -469,22 +490,38 @@ class Step implements StepSink {
 
 	private usage(data: Extract<SessionEvent, { type: "assistant.usage" }>["data"]): void {
 		const usage = this.message.usage;
-		const cacheRead = data.cacheReadTokens ?? 0;
+		const count = (value: unknown): number | undefined =>
+			typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+		const inputTokens = count(data.inputTokens);
+		const outputTokens = count(data.outputTokens);
+		const cacheRead = count(data.cacheReadTokens);
+		const cacheWrite = count(data.cacheWriteTokens);
 		// Copilot's inputTokens counts the whole prompt, cached part included, as OpenAI's prompt_tokens does.
-		usage.input += Math.max(0, (data.inputTokens ?? 0) - cacheRead);
-		usage.output += data.outputTokens ?? 0;
-		usage.cacheRead += cacheRead;
-		usage.cacheWrite += data.cacheWriteTokens ?? 0;
+		if (inputTokens !== undefined) usage.input += Math.max(0, inputTokens - (cacheRead ?? 0));
+		usage.output += outputTokens ?? 0;
+		usage.cacheRead += cacheRead ?? 0;
+		usage.cacheWrite += cacheWrite ?? 0;
 		usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+		// A field counts as reported only when every call of the step sent it; an omitted field is never zero.
+		// The uncached input needs the cached part too, so it is reported only beside a cache-read count.
+		this.usageEvents += 1;
+		if (inputTokens !== undefined && cacheRead !== undefined) this.fieldReports.input += 1;
+		if (outputTokens !== undefined) this.fieldReports.output += 1;
+		if (cacheRead !== undefined) this.fieldReports.cacheRead += 1;
+		if (cacheWrite !== undefined) this.fieldReports.cacheWrite += 1;
 		this.billing.modelCalls += 1;
-		if (typeof data.cost === "number") {
-			// A call with an initiator (sub-agent, background) is not user-initiated and bills no premium request.
-			const premium = data.initiator === undefined ? data.cost : 0;
-			this.billing.premiumRequests = (this.billing.premiumRequests ?? 0) + premium;
+		const nano = count(data.copilotUsage?.totalNanoAiu);
+		if (nano !== undefined) {
+			this.nanoReports += 1;
+			this.nanoSum += nano;
 		}
-		const nano = data.copilotUsage?.totalNanoAiu;
-		if (typeof nano === "number") this.billing.nanoAiu = (this.billing.nanoAiu ?? 0) + nano;
-		if (typeof data.model === "string" && data.model.length > 0) this.message.responseModel = data.model;
+		// The tool-requesting call's own usage closes its step (see the tool-request case).
+		if (this.toolUse && (this.toolUseCall === null || data.apiCallId === this.toolUseCall))
+			this.finish("toolUse", this.toolUse);
+		if (typeof data.model === "string" && data.model.trim().length > 0) {
+			this.message.responseModel = data.model;
+			this.servedModel = data.model.trim();
+		}
 		if (typeof data.apiCallId === "string") this.message.responseId = data.apiCallId;
 	}
 
@@ -526,16 +563,13 @@ class Step implements StepSink {
 					this.stream.push({ type: "toolcall_end", contentIndex: index, toolCall, partial: this.message });
 					ids.push(request.toolCallId);
 				}
-				// The call's usage may follow its message; the step ends when Copilot moves on to the tools.
+				// The step ends with this call's usage, so its tokens and seat units settle on this call. Without
+				// usage by the deadline it settles them as unreported; a later report is not moved to another call.
 				this.toolUse = ids;
+				this.toolUseCall = event.data.apiCallId ?? null;
 				this.toolUseTimer = setTimeout(() => this.finish("toolUse", ids), TOOL_USE_SETTLE_MS);
 				return;
 			}
-			case "external_tool.requested":
-			case "tool.execution_start":
-			case "assistant.turn_end":
-				if (this.toolUse) this.finish("toolUse", this.toolUse);
-				return;
 			case "session.error":
 				this.error = refusalMessage(event.data);
 				return;
@@ -553,10 +587,49 @@ class Step implements StepSink {
 		if (this.finished) return;
 		this.finished = true;
 		if (this.toolUseTimer) clearTimeout(this.toolUseTimer);
+		this.onDetach?.();
+		const settle = this.settle;
+		if ((stop === "stop" || stop === "toolUse") && settle && this.billing.modelCalls > 0) {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const late = new Promise<null>((resolve) => {
+				timer = setTimeout(() => resolve(null), SETTLE_METRICS_MS);
+			});
+			void Promise.race([settle(), late])
+				.then((settled) => {
+					if (settled) {
+						this.billing.premiumRequests = settled.premiumRequests;
+						if (settled.nanoAiu !== null) this.billing.nanoAiu = settled.nanoAiu;
+					}
+				})
+				.catch(() => {
+					// No accounting answer leaves premium requests unknown; the step itself succeeded.
+				})
+				.finally(() => {
+					clearTimeout(timer);
+					this.complete(stop, toolCallIds, errorText);
+				});
+			return;
+		}
+		this.complete(stop, toolCallIds, errorText);
+	}
+
+	private complete(stop: "stop" | "toolUse" | "aborted" | "error", toolCallIds: string[], errorText?: string): void {
 		this.start();
 		this.closeOpenBlocks();
 		// A step that reached no model call billed nothing and records no seat units.
-		if (this.billing.modelCalls > 0) this.message.copilotBilling = { ...this.billing };
+		if (this.billing.modelCalls > 0) {
+			// AI credits are a complete total only when every call reported them; the runtime's session total wins.
+			if (this.billing.nanoAiu === null && this.nanoReports === this.usageEvents) this.billing.nanoAiu = this.nanoSum;
+			this.message.copilotBilling = { ...this.billing };
+		}
+		(this.message.usage as { reportedFields?: string[] }).reportedFields = Object.entries(this.fieldReports)
+			.filter(([, reports]) => this.usageEvents > 0 && reports === this.usageEvents)
+			.map(([field]) => field);
+		if (this.billing.modelCalls > 0) {
+			(this.message as { responseModelIdObservation?: unknown }).responseModelIdObservation = this.servedModel
+				? { state: "reported", reportedModelId: this.servedModel }
+				: { state: "not-reported" };
+		}
 		if (stop === "stop" || stop === "toolUse") {
 			this.message.stopReason = stop;
 			this.stream.push({ type: "done", reason: stop, message: this.message });
@@ -650,7 +723,6 @@ async function openConversationHeld(input: {
 
 interface Plan {
 	conversation: Conversation | null;
-	newMessages: CoreMessage[];
 }
 
 function plan(key: string, systemHash: string, core: ReadonlyArray<CoreMessage>, prints: ReadonlyArray<string>): Plan {
@@ -662,14 +734,14 @@ function plan(key: string, systemHash: string, core: ReadonlyArray<CoreMessage>,
 		if (!conversation.synced.every((print, index) => prints[index] === print)) continue;
 		if (!best || conversation.synced.length > best.synced.length) best = conversation;
 	}
-	if (!best) return { conversation: null, newMessages: [...core] };
+	if (!best) return { conversation: null };
 	const fresh = core.slice(best.synced.length);
 	const first = fresh[0];
 	const valid =
 		best.state === "awaiting-tools"
 			? first?.role === "toolResult" && fresh.every((message) => message.role !== "assistant")
 			: fresh.every((message) => message.role === "user");
-	return valid ? { conversation: best, newMessages: fresh } : { conversation: null, newMessages: [...core] };
+	return { conversation: valid ? best : null };
 }
 
 async function runStep(
@@ -694,11 +766,15 @@ async function runStep(
 	const kept = core.filter((message) => fingerprint(message) !== null);
 	const prints = kept.map((message) => fingerprint(message) as string);
 
-	let { conversation, newMessages } = plan(key, systemHash, kept, prints);
+	let { conversation } = plan(key, systemHash, kept, prints);
 	const reused = conversation !== null;
-	// Framing that rides on the request tail (reminders) is sent with the new messages.
+	// Everything after what the session has seen, in order, host framing (reminder-only messages) included:
+	// framing carries no transcript identity, but each request's own framing still reaches the model.
+	const lastSeen = conversation ? kept[conversation.synced.length - 1] : undefined;
+	const fresh = lastSeen ? core.slice(core.indexOf(lastSeen) + 1) : core;
+	const lastKept = kept[kept.length - 1];
 	const tailFraming = core
-		.slice(core.length > 0 ? core.lastIndexOf(kept[kept.length - 1] as CoreMessage) + 1 : 0)
+		.slice(lastKept ? core.indexOf(lastKept) + 1 : 0)
 		.filter((message) => fingerprint(message) === null);
 
 	let abortListener: (() => void) | null = null;
@@ -726,7 +802,22 @@ async function runStep(
 			active.toolsHash = toolsHash;
 		}
 		active.sink = step;
-		for (const event of active.orphanUsage.splice(0)) step.handle(event);
+		step.onDetach = () => {
+			active.sink = null;
+		};
+		step.settle = async () => {
+			const metrics = await active.session.rpc.usage.getMetrics();
+			const premium = metrics.totalPremiumRequestCost - active.metricsBaseline.premiumRequests;
+			const nano = typeof metrics.totalNanoAiu === "number" ? metrics.totalNanoAiu - active.metricsBaseline.nanoAiu : null;
+			active.metricsBaseline = {
+				premiumRequests: metrics.totalPremiumRequestCost,
+				nanoAiu: metrics.totalNanoAiu ?? active.metricsBaseline.nanoAiu,
+			};
+			return {
+				premiumRequests: Number.isFinite(premium) && premium >= 0 ? premium : null,
+				nanoAiu: nano !== null && Number.isFinite(nano) && nano >= 0 ? nano : null,
+			};
+		};
 		step.onFinish = ({ stop, toolCallIds }) => {
 			active.sink = null;
 			active.busy = false;
@@ -745,16 +836,17 @@ async function runStep(
 		};
 		signal?.addEventListener("abort", abortListener, { once: true });
 
-		const framingText = tailFraming
-			.map((message) => textOf(message.content))
-			.filter((text) => text.length > 0)
-			.join("\n\n");
 		if (reused && active.state === "awaiting-tools") {
-			const results = newMessages.filter(
+			const results = fresh.filter(
 				(message): message is Extract<CoreMessage, { role: "toolResult" }> => message.role === "toolResult",
 			);
-			const after = newMessages.filter((message) => message.role === "user");
-			const extra = [...after.map((message) => textOf(message.content)), framingText]
+			const after = fresh.filter((message) => message.role === "user");
+			// Copilot takes no user message while its run waits on tools, so text that followed the results rides on
+			// the last one. The tool's own output and the registry's `[middleware:*]` notes stay byte-for-byte what
+			// Clio produced, as on the Pi route; a reminder keeps its `<system-reminder>` frame, and a person's
+			// message gets one, so none of it reads as tool output.
+			const extra = after
+				.map((message) => framedUserText(textOf(message.content)))
 				.filter((text) => text.length > 0)
 				.join("\n\n");
 			const answered = new Set(results.map((message) => message.toolCallId));
@@ -767,12 +859,17 @@ async function runStep(
 					active.deliver(id, { textResultForLlm: "The host returned no result for this call.", resultType: "failure" });
 			}
 		} else {
+			const framingText = tailFraming
+				.map((message) => textOf(message.content))
+				.filter((text) => text.length > 0)
+				.join("\n\n");
 			const seed = reused
 				? {
-						prompt: [...newMessages.map((message) => textOf(message.content)), framingText]
+						prompt: fresh
+							.map((message) => textOf(message.content))
 							.filter((text) => text.length > 0)
 							.join("\n\n"),
-						images: newMessages.flatMap((message) => imagesOf(message.content)),
+						images: fresh.flatMap((message) => imagesOf(message.content)),
 					}
 				: (() => {
 						const seeded = seedPrompt(core.filter((message) => fingerprint(message) !== null));

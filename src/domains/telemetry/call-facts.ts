@@ -137,8 +137,18 @@ export function callSettlementFromMessage(
 	);
 	const breakdownIncomplete = providerTotal !== null && providerTotal > breakdown;
 	const totalOnly = breakdownIncomplete && breakdown === 0;
+	// An adapter that knows which counts the provider sent lists them (copilot-sdk): a listed count is the
+	// provider's measurement, zero included, and an unlisted one is unknown whatever placeholder it holds.
+	const reportedFields = Array.isArray(usage.reportedFields)
+		? new Set(usage.reportedFields.filter((field): field is string => typeof field === "string"))
+		: null;
 	const read = (key: keyof CallUsage | "totalTokens"): Fact<number> => {
 		const value = amount(usage[key]);
+		if (reportedFields !== null && key !== "totalTokens") {
+			return terminal && reportedFields.has(key) && value !== null && Number.isInteger(value)
+				? { kind: "measured", value, source: "provider" }
+				: unknown;
+		}
 		if (value === 0 && (!terminal || totalOnly)) return unknown;
 		if (
 			usage.estimated === true ||

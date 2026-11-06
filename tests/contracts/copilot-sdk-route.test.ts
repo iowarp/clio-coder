@@ -10,7 +10,7 @@ import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { hasCopilotConsent, recordCopilotConsent } from "../../src/domains/providers/copilot-consent.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
-import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
@@ -40,6 +40,18 @@ class FakeSession {
 		this.handlers = new Set();
 		this.tools = new Map((config.tools ?? []).map((tool) => [tool.name, tool]));
 		this.prompts = [];
+		// The runtime's own session accounting, which usage.getMetrics() reads back.
+		this.metrics = { totalPremiumRequestCost: 0, totalNanoAiu: 0 };
+		this.metricsFail = false;
+		this.rpc = { usage: { getMetrics: async () => {
+			if (this.metricsFail) throw new Error("metrics unavailable");
+			return { ...this.metrics, totalUserRequests: 0, totalApiDurationMs: 0, sessionStartTime: "", lastCallInputTokens: 0, lastCallOutputTokens: 0, modelMetrics: {}, codeChanges: {} };
+		} } };
+	}
+	usage(data) {
+		if (!data.initiator && typeof data.cost === "number") this.metrics.totalPremiumRequestCost += data.cost;
+		this.metrics.totalNanoAiu += data.copilotUsage?.totalNanoAiu ?? 0;
+		this.emit("assistant.usage", data);
 	}
 	on(handler) { this.handlers.add(handler); return () => this.handlers.delete(handler); }
 	emit(type, data) { for (const handler of [...this.handlers]) handler({ type, data, id: "e", parentId: null, timestamp: "" }); }
@@ -50,9 +62,10 @@ class FakeSession {
 	async send(options) { this.prompts.push(options.prompt); setTimeout(() => void this.run(options.prompt), 0); return "m"; }
 	async callTool(toolCallId) {
 		const name = [...this.tools.keys()][0];
-		this.emit("assistant.message", { messageId: "a1", content: "", toolRequests: [{ toolCallId, name, arguments: { path: "notes.txt" } }] });
-		this.emit("assistant.usage", { model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 40, cost: 1, copilotUsage: { totalNanoAiu: 5000 } });
+		this.emit("assistant.message", { messageId: "a1", apiCallId: "call-a", content: "", toolRequests: [{ toolCallId, name, arguments: { path: "notes.txt" } }] });
+		// The live runtime may start the tool before reporting the call's usage; it still belongs to call-a.
 		this.emit("external_tool.requested", { requestId: "r", sessionId: this.sessionId, toolCallId, toolName: name });
+		this.usage({ model: "fake-model", apiCallId: "call-a", inputTokens: 100, outputTokens: 10, cacheReadTokens: 40, cacheWriteTokens: 0, cost: 1, copilotUsage: { totalNanoAiu: 5000 } });
 		try {
 			return await this.tools.get(name).handler({ path: "notes.txt" }, { toolCallId, sessionId: this.sessionId, toolName: name, arguments: {}, signal: new AbortController().signal });
 		} catch (error) {
@@ -71,13 +84,22 @@ class FakeSession {
 			const result = await this.callTool("call_1");
 			if (!result) return;
 			state.toolResults.push(result);
-			this.emit("assistant.usage", { model: "fake-model", inputTokens: 130, outputTokens: 5, initiator: "agent", cost: 1 });
+			this.usage({ model: "fake-model", apiCallId: "call-b", inputTokens: 130, outputTokens: 5, cacheReadTokens: 100, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
 			this.emit("assistant.message_delta", { messageId: "a2", deltaContent: "tool said " + result.textResultForLlm });
 			this.emit("assistant.message", { messageId: "a2", content: "tool said " + result.textResultForLlm });
 			this.emit("session.idle", {});
 			return;
 		}
-		this.emit("assistant.usage", { model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1 });
+		if (prompt.includes("zero usage")) {
+			this.usage({ model: "fake-model", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+		} else if (prompt.includes("partial credits")) {
+			this.metricsFail = true;
+			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, copilotUsage: { totalNanoAiu: 700 } });
+			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0 });
+		} else {
+			// Omits the cache counts: the uncached input and both cache counts are unknown, not zero.
+			this.usage({ model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1 });
+		}
 		this.emit("assistant.message_delta", { messageId: "a1", deltaContent: "hello" });
 		this.emit("assistant.message", { messageId: "a1", content: "hello" });
 		this.emit("session.idle", {});
@@ -140,6 +162,7 @@ interface FakeState {
 const fake = (): FakeState => (globalThis as { __clioCopilotFake?: FakeState }).__clioCopilotFake as FakeState;
 
 const SECRET = "ghp_clioCopilotRouteNeverStored0000";
+const HOST_NOTE = "\n\n[middleware:info] prefer the structured observe tools over shell file inspection";
 let env: IsolatedClioEnv;
 
 before(async () => {
@@ -301,27 +324,60 @@ test("Clio's loop runs the tool; Copilot continues the same session and reports 
 				role: "toolResult",
 				toolCallId: "call_1",
 				toolName: "read",
-				content: [{ type: "text", text: "file body" }],
+				content: [{ type: "text", text: `file body${HOST_NOTE}` }],
 				isError: false,
 				timestamp: 2,
 			},
 			user("<system-reminder>host note</system-reminder>"),
+			user("operator steer"),
 		],
 	});
 	strictEqual(second.stopReason, "stop");
 	match((second.content[0] as { text: string }).text, /tool said file body/);
 	strictEqual(fake().sessions.length, before + 1, "the tool round trip reuses one Copilot session");
-	match(fake().toolResults.at(-1)?.textResultForLlm ?? "", /host note/);
+	// The registry's framed note reaches Copilot exactly as Clio wrote it; later user text keeps a frame of its own.
+	strictEqual(
+		fake().toolResults.at(-1)?.textResultForLlm,
+		`file body${HOST_NOTE}\n\n<system-reminder>host note</system-reminder>\n\n<user-message>\noperator steer\n</user-message>`,
+	);
 	const firstSettled = callSettlementFromMessage(first, "none");
+	// Usage reported after the tool started still settles on the call that requested the tool.
+	deepStrictEqual(firstSettled.usage?.input, { kind: "measured", value: 60, source: "provider" });
+	deepStrictEqual(callSettlementFromMessage(second, "none").usage?.input, {
+		kind: "measured",
+		value: 30,
+		source: "provider",
+	});
+	deepStrictEqual(reportedModelFromMessage(first), { kind: "measured", value: "fake-model", source: "provider" });
 	deepStrictEqual(firstSettled.billing?.premiumRequests, { kind: "measured", value: 1, source: "provider" });
 	deepStrictEqual(firstSettled.billing?.nanoAiu, { kind: "measured", value: 5000, source: "provider" });
 	deepStrictEqual(firstSettled.usage?.cacheRead, { kind: "measured", value: 40, source: "provider" });
+	// Premium requests are the runtime's own session total's growth: the agent continuation added none.
 	deepStrictEqual(callSettlementFromMessage(second, "none").billing?.premiumRequests, {
 		kind: "measured",
 		value: 0,
 		source: "provider",
 	});
 	strictEqual(firstSettled.pricing.usd.kind, "unknown", "a seat call never renders a dollar price");
+});
+
+test("usage facts keep per-field presence and billing coverage", async () => {
+	const omitted = callSettlementFromMessage(await step({ messages: [user("hello")] }, "facts-session"), "none");
+	deepStrictEqual(omitted.usage?.output, { kind: "measured", value: 2, source: "provider" });
+	for (const field of ["input", "cacheRead", "cacheWrite"] as const)
+		strictEqual(omitted.usage?.[field].kind, "unknown", `${field} was omitted, so it is not a measured zero`);
+	const zeros = callSettlementFromMessage(await step({ messages: [user("zero usage")] }, "facts-session"), "none");
+	for (const field of ["input", "output", "cacheRead", "cacheWrite"] as const)
+		deepStrictEqual(zeros.usage?.[field], { kind: "measured", value: 0, source: "provider" });
+	const partial = callSettlementFromMessage(
+		await step({ messages: [user("partial credits")] }, "facts-session"),
+		"none",
+	);
+	strictEqual(partial.billing?.nanoAiu.kind, "unknown", "one of two calls reported credits");
+	strictEqual(partial.billing?.premiumRequests.kind, "unknown", "no accounting answer is not zero");
+	strictEqual(partial.usage?.cacheWrite.kind, "unknown", "one of two calls omitted cache writes");
+	deepStrictEqual(partial.usage?.output, { kind: "measured", value: 2, source: "provider" });
+	disposeCopilotConversations("facts-session");
 });
 
 test("a rewritten history seeds a fresh session; a side call never disturbs the main one", async () => {
