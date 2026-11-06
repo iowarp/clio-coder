@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { assistantModelLabel } from "../core/assistant-model.js";
+import { assistantMessageNeverSent, assistantModelLabel } from "../core/assistant-model.js";
 import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
@@ -461,6 +461,8 @@ type TranscriptEntry =
 			 * the text the same message produced, rather than at the tail.
 			 */
 			messageStartSegmentIndex?: number | undefined;
+			/** The model the open message's start added to `models`, held back if the message turns out never sent. */
+			messageStartModel?: string | undefined;
 			pending: boolean;
 			isError: boolean;
 			turnUsage?: ChatPanelTurnUsage;
@@ -2556,8 +2558,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		transcript.push(entry);
 	};
 
-	const attachModel = (assistant: Extract<TranscriptEntry, { role: "assistant" }>, model: string | null): void => {
-		if (model === null || assistant.models?.includes(model)) return;
+	const attachModel = (assistant: Extract<TranscriptEntry, { role: "assistant" }>, model: string | null): boolean => {
+		if (model === null || assistant.models?.includes(model)) return false;
 		if (assistant.models === undefined) {
 			const at = transcript.lastIndexOf(assistant);
 			let before: string | undefined;
@@ -2569,6 +2571,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 		assistant.models ??= [];
 		assistant.models.push(model);
+		return true;
+	};
+	/**
+	 * `Reply from` names routes that answered. A call Clio never sent, such as one whose admission could not load its
+	 * model, got no reply, so the model its start named comes back off the row (a residency refusal printed
+	 * `Reply from mock-router · cold-b` above `cannot load 'cold-b'`).
+	 */
+	const detachUnsentModel = (assistant: Extract<TranscriptEntry, { role: "assistant" }>): void => {
+		const model = assistant.messageStartModel;
+		if (model === undefined || assistant.models?.at(-1) !== model) return;
+		assistant.models.pop();
+		if (assistant.models.length === 0) {
+			delete assistant.models;
+			delete assistant.sameModelAsBefore;
+		}
 	};
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
@@ -3408,7 +3425,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (typeof respondedModel === "string" && respondedModel.length > 0)
 					requestingModel = modelNickname(respondedModel);
 				const model = assistantModelLabel(event.message, messageTarget());
-				attachModel(assistant, model);
+				assistant.messageStartModel = attachModel(assistant, model) && model !== null ? model : undefined;
 				assistant.messageStartSegmentIndex = assistant.segments.length;
 				markDirty();
 				return;
@@ -3580,6 +3597,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 					if (completedStreamedArgs) invalidateEntryCache(current);
 				}
+				// The model this message's start named leaves `Reply from` when the call never went out, retried or not.
+				const unsent = assistantMessageNeverSent(event.message);
+				if (current?.role === "assistant") {
+					if (unsent && current.messageStartModel !== undefined) {
+						detachUnsentModel(current);
+						invalidateEntryCache(current);
+					}
+					current.messageStartModel = undefined;
+				}
 				const text = extractAssistantText(event.message);
 				const thinking = extractAssistantThinking(event.message);
 				// A failure recovery will retry is stated once, on the retry row; only the turn's real outcome reads as one.
@@ -3600,8 +3626,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				// message_end rewrites exactly one entry: the assistant it lands on.
 				invalidateEntryCache(assistant);
-				const model = assistantModelLabel(event.message, messageTarget());
-				attachModel(assistant, model);
+				attachModel(assistant, assistantModelLabel(event.message, messageTarget()));
 				// Until its run ends, an entry's receipt reads the turn so far.
 				if (reports) {
 					assistant.turnUsage = runTurnId === undefined ? {} : { turnId: runTurnId };

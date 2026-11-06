@@ -2208,3 +2208,34 @@ test("a worker run's calls that reached the provider count as sent beside the se
 	strictEqual(sentCallCount(view, { roles: ["main"] }), 1);
 	strictEqual(sentCallCount(view), 3, "the model calls row reconciles with the Models tab");
 });
+
+test("Reply from names only a route that replied; an admission that never sent prints no provenance", async () => {
+	const { assistantModelLabel } = await import("../../src/core/assistant-model.js");
+	const panel = createChatPanel({ getRunTarget: () => "mock-router" });
+	panel.appendUser("two");
+	panel.applyEvent({ type: "agent_start" } as never);
+	const refused = {
+		role: "assistant",
+		provider: "openai-completions",
+		model: "cold-b",
+		content: [],
+		stopReason: "error",
+		errorMessage: "cannot load 'cold-b' on 'mock-router': the server holds 1 model at a time",
+		usage: { input: 0, output: 0, totalTokens: 0 },
+	};
+	panel.applyEvent({ type: "message_start", message: { ...refused } } as never);
+	const settled = {
+		...refused,
+		callInvoked: false,
+		failure: { invoked: false, stage: "admission", httpStatus: null, errorClass: "admission_refused" },
+	};
+	panel.applyEvent({ type: "message_end", message: settled } as never);
+	panel.applyEvent({ type: "agent_end", messages: [settled] } as never);
+	const output = screen(panel);
+	doesNotMatch(output, /Reply from/u, output);
+	match(output, /cannot load 'cold-b'/u);
+	const exported = assistantModelLabel(settled);
+	strictEqual(exported, null, "the transcript export names no model for a call never sent");
+	const answered = { ...refused, content: [{ type: "text", text: "Done." }], stopReason: "stop" };
+	strictEqual(assistantModelLabel(answered, "mock-router"), "mock-router · cold-b");
+});
