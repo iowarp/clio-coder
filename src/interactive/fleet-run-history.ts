@@ -1,4 +1,5 @@
 import { clioStateDir } from "../core/xdg.js";
+import { fleetNodeTaskBrief } from "../domains/dispatch/fleet-node-prompt.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunStatus } from "../domains/dispatch/types.js";
@@ -52,7 +53,7 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 		runtimeId: run.runtimeId,
 		targetId: run.targetId,
 		wireModelId: run.wireModelId,
-		taskSummary: run.task,
+		taskSummary: fleetNodeTaskBrief(run.task),
 		status,
 		elapsedMs: Number.isFinite(endedAt - startedAt) ? Math.max(0, endedAt - startedAt) : 0,
 		...(Number.isFinite(endedAt) ? { settledAtMs: endedAt } : {}),

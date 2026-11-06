@@ -26,6 +26,7 @@ import {
 	STALLED_RUN_HEADLINE,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
+import { fleetNodeTaskBrief } from "../../domains/dispatch/fleet-node-prompt.js";
 import type { TrustSummaryProjection } from "../../domains/evidence/trust-projection.js";
 import { trustStateWord, trustVerdict, validationClause } from "../../domains/evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../../domains/evidence/trust-status.js";
@@ -681,7 +682,7 @@ function alignedHeader(
 		entry.council !== undefined ? councilLabelText(theme, shown, entry.council.color) : theme.fg("workerIdentity", shown);
 	const header = `${prefix}${identity}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shown)))} ${status} ${timer}`;
 	const taskWidth = width - visibleWidth(header) - 2;
-	const task = displayText(entry, "task", entry.task ?? "");
+	const task = displayText(entry, "task", fleetNodeTaskBrief(entry.task ?? ""));
 	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
 	if (visibleWidth(header) <= width) return header;
 	// Below the header's minimum width, even its identity yields to elapsed.

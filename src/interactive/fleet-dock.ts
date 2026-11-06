@@ -4,7 +4,7 @@ import { taskBoardCounts } from "../domains/session/task-board.js";
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
-import { formatFleetDockRows, formatTaskIslandLines, isOperatorFleetRun } from "./dispatch-board.js";
+import { formatFleetDockRows, formatTaskIslandLines, summaryFleetRuns } from "./dispatch-board.js";
 import { taskBoardValue } from "./footer/widgets.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
@@ -59,7 +59,7 @@ function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | nul
 export function createFleetDock(deps: FleetDockDeps): Component {
 	return {
 		render(width) {
-			const rows = deps.getRows().filter(isOperatorFleetRun);
+			const rows = summaryFleetRuns(deps.getRows());
 			if (rows.length > 0 && deps.isFleetBoardOpen?.() === true) return [];
 			if (rows.length === 0) {
 				if (deps.isFooterExpanded?.() === true) return [];

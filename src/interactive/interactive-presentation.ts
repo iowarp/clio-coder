@@ -58,7 +58,7 @@ import {
 	createDispatchBoardStore,
 	createDispatchBoardView,
 	dispatchStatusPresentation,
-	isOperatorFleetRun,
+	summaryFleetRuns,
 } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
@@ -760,7 +760,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-			workers: (dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).filter(isOperatorFleetRun),
+			workers: summaryFleetRuns(dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()),
 			background: backgroundCalls.active(),
 			workerActivity: (row, room) =>
 				row.plan !== undefined

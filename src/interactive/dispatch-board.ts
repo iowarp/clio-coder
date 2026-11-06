@@ -5,6 +5,7 @@ import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.
 import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
 import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
 import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import { fleetNodeTaskBrief } from "../domains/dispatch/fleet-node-prompt.js";
 import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
@@ -701,7 +702,12 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 }
 
 /** `2/2 steps`, then the first step that failed. Unsettled steps are not counted as anything yet. */
-function planProgressText(plan: FleetPlanRunView, statusShown = false): string {
+/** Why a plan ended without its steps settling, without the runner's own prefix. */
+function planFailureWords(plan: FleetPlanRunView): string | null {
+	return plan.failure === undefined ? null : sanitizeCallTargetText(plan.failure.replace(/^dispatch:\s*/u, ""));
+}
+
+function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailure = true): string {
 	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
 	const failed = plan.steps.find((step) => step.state === "failed" && !planStepStopped(plan, step.stepId));
 	const live = plan.state === "running" || plan.state === "cancelling";
@@ -712,7 +718,7 @@ function planProgressText(plan: FleetPlanRunView, statusShown = false): string {
 	}
 	// Where a status cell already reads cancelled, repeating it on the count only doubles the word.
 	if (plan.state === "cancelled") return statusShown ? count : `${count} · cancelled`;
-	if (plan.failure !== undefined) return `${count} · ${plan.failure}`;
+	if (plan.failure !== undefined) return withFailure ? `${count} · ${planFailureWords(plan)}` : count;
 	return failed === undefined ? count : `${count} · ${failed.stepId} failed`;
 }
 
@@ -768,15 +774,18 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 	const presentation = dispatchStatusPresentation(row.status);
 	const units = [
 		`${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`,
-		theme.fg("body", planProgressText(plan, true)),
+		theme.fg("body", planProgressText(plan, true, false)),
 		...(plan.finishedAtMs === null
 			? []
 			: [`${theme.fg("annotation", "cost")} ${theme.fg("body", plan.costText ?? "no model calls")}`]),
 	];
 	const gutter = " ".repeat(CARD_KV_KEY_WIDTH + 1);
 	const steps = planStepLines(theme, plan, Math.max(1, contentWidth - gutter.length));
+	// The reason gets its own wrapped row: as one more status unit it was wider than the row and dropped whole.
+	const why = planFailureWords(plan);
 	return [
 		cardUnitsLine(theme, "status", units, contentWidth),
+		...(why === null ? [] : cardWrappedValueLines(theme, "why", theme.fg("error", why), contentWidth)),
 		...steps.map((line, index) => `${index === 0 ? cardKvKey(theme, "steps") : gutter}${line}`),
 		...cardWrappedValueLines(
 			theme,
@@ -814,10 +823,14 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): stri
 	const rail = theme.fg("gutter", "  │ ");
 	const tone = passed ? "success" : cancelled ? "toolMetadata" : "error";
 	const glyph = passed ? GLYPH.ok : cancelled ? GLYPH.cancelled : GLYPH.error;
-	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(tone, `${glyph} ${planProgressText(plan)}`)}`;
+	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(tone, `${glyph} ${planProgressText(plan, false, false)}`)}`;
 	const room = Math.max(1, width - 4);
+	const why = planFailureWords(plan);
 	return [
 		truncateToWidth(head, width, GLYPH.ellipsis, false),
+		...(why === null
+			? []
+			: wrapTextWithAnsi(theme.fg("error", `${GLYPH.error} ${why}`), room).map((line) => `${rail}${line}`)),
 		...planStepLines(theme, plan, room).map((line) => `${rail}${line}`),
 		`${rail}${theme.fg("annotation", truncateToWidth(`/fleet for detail · cost ${plan.costText ?? "none, no model calls"}`, room, GLYPH.ellipsis, false))}`,
 	];
@@ -2144,6 +2157,22 @@ export function isOperatorFleetRun(row: Pick<DispatchBoardRow, "agentAudience" |
 	return row.council !== undefined || !isHelperRun(row);
 }
 
+/**
+ * The live runs a summary surface counts: a running plan already names the steps it is running, so the workers those
+ * steps started are its own and not more work beside it. Counted apart they read `+ 2 running` under the plan that
+ * listed them.
+ */
+export function summaryFleetRuns(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
+	const operator = rows.filter(isOperatorFleetRun);
+	const planLive = operator.some((row) => row.plan !== undefined && !isTerminalStatus(row.status));
+	// A step's worker waiting on the operator stays: that wait is the part that blocks the plan.
+	return planLive
+		? operator.filter(
+				(row) => row.plan !== undefined || row.phase === undefined || row.progress?.awaitingApproval === true,
+			)
+		: operator;
+}
+
 export function formatTaskIslandLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	maxRows = 4,
@@ -2152,7 +2181,7 @@ export function formatTaskIslandLines(
 ): string[] {
 	// Councils are folded before the row cap, so a five-member council costs the
 	// island one card and never crowds out the runs beside it.
-	const items = dispatchBoardItems(rows.filter(isOperatorFleetRun));
+	const items = dispatchBoardItems(summaryFleetRuns(rows));
 	const visibleItems = items.slice(0, Math.max(1, maxRows));
 	const body: string[] = [];
 
@@ -2198,7 +2227,7 @@ export function formatFleetDockRows(
 	maxRuns = 2,
 ): string[] {
 	const theme = clioTheme();
-	const items = dispatchBoardItems(rows.filter(isOperatorFleetRun));
+	const items = dispatchBoardItems(summaryFleetRuns(rows));
 	if (items.length === 0) return [];
 	const room = Math.max(1, width - 2);
 	const shown = items.slice(0, Math.max(1, maxRuns));
@@ -2281,7 +2310,7 @@ function toRow(
 		targetId: entry.targetId ?? "-",
 		wireModelId: entry.modelId ?? "-",
 		...(entry.endpoint !== undefined ? { endpoint: { ...entry.endpoint } } : {}),
-		...(entry.taskSummary !== undefined ? { taskSummary: entry.taskSummary } : {}),
+		...(entry.taskSummary !== undefined ? { taskSummary: fleetNodeTaskBrief(entry.taskSummary) } : {}),
 		...(entry.budget !== undefined ? { budget: entry.budget } : {}),
 		status: entry.status,
 		elapsedMs: entry.durationMs ?? Math.max(0, (entry.finishedAtMs ?? now) - entry.startedAtMs),
@@ -2400,7 +2429,13 @@ export function boardOrder(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoard
 	const live = (row: DispatchBoardRow): boolean => !isTerminalStatus(row.status);
 	return [...rows].sort((a, b) => {
 		if (live(a) !== live(b)) return live(a) ? -1 : 1;
-		if (live(a)) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (b.settledAtMs ?? 0) - (a.settledAtMs ?? 0);
+		// A running plan leads the workers its steps started, so the board reads plan, then its steps' runs.
+		if (live(a))
+			return (
+				STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+				Number(b.plan !== undefined) - Number(a.plan !== undefined) ||
+				(b.settledAtMs ?? 0) - (a.settledAtMs ?? 0)
+			);
 		return (b.settledAtMs ?? 0) - (a.settledAtMs ?? 0);
 	});
 }
