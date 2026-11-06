@@ -11,7 +11,7 @@
  */
 
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
-import type { JournalEventName } from "../../core/telemetry/events.js";
+import type { EVENTS, JournalEventName } from "../../core/telemetry/events.js";
 import type { ToolFileKind } from "../../core/telemetry/schemas.js";
 import { TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../session/task-board.js";
 
@@ -34,17 +34,25 @@ export type AutonomyLevelScore = (typeof AUTONOMY_LEVELS)[number];
 export const INSIGHTS_HEURISTIC_NOTE =
 	"Heuristic: categories and autonomy come from fixed rules over tool names, file kinds by extension, check kinds, skill names, worker runs, approvals and timing. No message content is read, so a session can land in the wrong category.";
 
-/** The only journal record kinds the classifier reads. Each is registered content-free or structural. */
+/** Journal kinds registered content-free or structural below the research tier; a content kind fails typecheck. */
+type ContentFreeKind = {
+	[N in JournalEventName]: (typeof EVENTS)[N]["cc"] extends "content-bearing"
+		? never
+		: (typeof EVENTS)[N]["tier"] extends "research"
+			? never
+			: N;
+}[JournalEventName];
+
+/** The only journal record kinds the classifier reads. */
 export const INSIGHT_RECORD_KINDS = [
 	"tool.settled",
 	"approval.resolved",
 	"approval.requested",
 	"message.stepped",
-	"run.linked",
 	"run.settled",
 	"config.snapshotted",
 	"config.changed",
-] as const satisfies ReadonlyArray<JournalEventName>;
+] as const satisfies ReadonlyArray<ContentFreeKind>;
 type InsightKind = (typeof INSIGHT_RECORD_KINDS)[number];
 const INSIGHT_KIND_SET: ReadonlySet<string> = new Set(INSIGHT_RECORD_KINDS);
 
@@ -81,6 +89,9 @@ const SKILL_CATEGORIES: Readonly<Record<string, InsightCategory>> = {
 	"materio-research-explorer": "ideation and hypothesis generation",
 	"materio-task-executor": "data analysis",
 	"materio-task-verifier": "data analysis",
+	"science-data": "data analysis",
+	"hpc-darshan": "data analysis",
+	"hpc-parallel-io": "design and development",
 };
 /** Name rules for skills outside the table, first match wins. */
 const SKILL_NAME_RULES: ReadonlyArray<readonly [RegExp, InsightCategory]> = [
@@ -93,9 +104,29 @@ const SKILL_NAME_RULES: ReadonlyArray<readonly [RegExp, InsightCategory]> = [
 	[/protocol|experiment|simulation|sweep/u, "design and development"],
 ];
 /** Research skill families: loading one marks a session as research even when no category rule matches it. */
-const RESEARCH_SKILL = /^(materio-|arxiv-|experiment-|scientific-|slurm-)/u;
+const RESEARCH_SKILL = /^(materio-|arxiv-|experiment-|scientific-|science-|slurm-|hpc-)/u;
 
-export function skillCategory(name: string): InsightCategory | null {
+/**
+ * MCP servers by the science they serve, matched on the server part of an `mcp_<server>__<tool>` capability name. The
+ * names follow the CLIO science servers (data, HPC, catalogs, literature). An HPC server marks research work without
+ * naming a task, so it scores as design and development, the category nearest to running and building workflows.
+ */
+const MCP_SERVER_RULES: ReadonlyArray<readonly [RegExp, InsightCategory]> = [
+	[/pandas|parquet|hdf|adios|plot|paraview|compression|darshan/u, "data analysis"],
+	[/arxiv|cite|citation|scholar|paper/u, "reading and knowledge acquisition"],
+	[/catalog|ndp|geo|seismic|terrain|sac/u, "data gathering"],
+	[/slurm|lmod|spack|jarvis|chronolog|node-hardware|parallel-sort/u, "design and development"],
+];
+const MCP_TOOL = /^mcp_(.+?)__/u;
+
+function mcpServerCategory(tool: string): InsightCategory | null {
+	const server = MCP_TOOL.exec(tool)?.[1]?.toLowerCase();
+	if (server === undefined) return null;
+	for (const [pattern, category] of MCP_SERVER_RULES) if (pattern.test(server)) return category;
+	return null;
+}
+
+function skillCategory(name: string): InsightCategory | null {
 	const known = SKILL_CATEGORIES[name];
 	if (known !== undefined) return known;
 	for (const [pattern, category] of SKILL_NAME_RULES) if (pattern.test(name)) return category;
@@ -171,7 +202,6 @@ export function sessionSignals(
 	};
 	const skills = new Set<string>();
 	const modes = new Set<string>();
-	const linked = new Set<string>();
 	const agents: string[] = [];
 	const turns = new Map<string, { from: number; to: number }>();
 	const tool = (record: TelemetryRecord<"tool.settled">): void => {
@@ -217,9 +247,6 @@ export function sessionSignals(
 			case "message.stepped":
 				if (record.data.step === "submitted" && record.data.by === "operator") signals.operatorMessages += 1;
 				break;
-			case "run.linked":
-				linked.add(record.data.runId);
-				break;
 			case "config.snapshotted": {
 				const mode = autonomyOf(record.data.settings);
 				if (mode !== null) modes.add(mode);
@@ -241,7 +268,8 @@ export function sessionSignals(
 			else if (record.k === "approval.resolved" && record.data.decidedBy !== undefined)
 				if (OPERATOR_DECIDERS.has(record.data.decidedBy)) signals.operatorDecided += 1;
 		}
-	signals.workerRuns = linked.size;
+	// The caller passes every run journal the session references, readable or not, so each is one delegation.
+	signals.workerRuns = runs.length;
 	signals.workerAgents = [...new Set(agents)].sort();
 	signals.skills = [...skills].sort();
 	signals.autonomyModes = [...modes].sort();
@@ -278,7 +306,13 @@ export function classifySession(signals: InsightSignals): InsightCategory {
 		if (category !== null) skillScores.set(category, (skillScores.get(category) ?? 0) + 4);
 		if (category !== null || RESEARCH_SKILL.test(skill)) researchSkill = true;
 	}
+	const mcpScores = new Map<InsightCategory, number>();
+	for (const [tool, calls] of Object.entries(tools)) {
+		const category = mcpServerCategory(tool);
+		if (category !== null) mcpScores.set(category, (mcpScores.get(category) ?? 0) + calls);
+	}
 	const research =
+		mcpScores.size > 0 ||
 		(tools.data ?? 0) > 0 ||
 		(tools.run_script ?? 0) > 0 ||
 		scienceChecks > 0 ||
@@ -310,6 +344,7 @@ export function classifySession(signals: InsightSignals): InsightCategory {
 		"software (non-research)": 0,
 	};
 	for (const [category, score] of skillScores) scores[category] += score;
+	for (const [category, score] of mcpScores) scores[category] += score;
 	let best: InsightCategory = "other";
 	for (const category of INSIGHT_CATEGORIES) if (scores[category] > scores[best]) best = category;
 	return best;
@@ -497,7 +532,7 @@ export function outcomeLedgerProjection(entry: unknown): unknown {
 	if (entry.kind === "taskLedger") {
 		return {
 			...base,
-			...pickTyped(entry, ["boardId"]),
+			...pickTyped(entry, ["boardId", "activeRunIds"]),
 			goals: Array.isArray(entry.goals) ? entry.goals.map(projectGoal) : [],
 			subgoals: Array.isArray(entry.subgoals) ? entry.subgoals.map(projectGoal) : [],
 			requiredValidationEvidence: Array.isArray(entry.requiredValidationEvidence)

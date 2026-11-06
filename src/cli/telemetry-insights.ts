@@ -110,7 +110,7 @@ function projectCwd(stateDir: string, bucketDir: string, sessionIds: readonly st
 	return null;
 }
 
-export function readProjectInsights(stateDir: string, bucket: string): ProjectInsights {
+function readProjectInsights(stateDir: string, bucket: string): ProjectInsights {
 	const bucketDir = join(stateDir, "sessions", bucket);
 	const { sessions } = loadRepoTelemetrySources(stateDir, {
 		cwdHash: bucket,
