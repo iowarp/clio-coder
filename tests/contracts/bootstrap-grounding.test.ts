@@ -351,6 +351,69 @@ it("removes a model rule only when it restates a carried invariant, not when it 
 	ok(handbook.includes(recipe), handbook);
 });
 
+it("keeps rules that share a carried rule's citations but state another obligation", async () => {
+	mkdirSync(join(cwd, "scripts"));
+	mkdirSync(join(cwd, "docs"));
+	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
+	writeFileSync(
+		join(cwd, "scripts", "check.js"),
+		['fail("export-names", "an export is named after another file");', 'fail("corpus", "a page is unlinked");', ""].join(
+			"\n",
+		),
+	);
+	// Each model rule shares two citations with this one, and no more than one with another model rule.
+	const carried =
+		"Never export a widget from `src/index.ts` under a name other than its file's in `src/widgets/render.ts`: `scripts/check.js` refuses it.";
+	const previousDocs =
+		"- Every page is reachable from `docs/guide.md`; the corpus check in `scripts/check.js` fails otherwise.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			`1. ${carried}`,
+			"",
+			"## Docs and prose",
+			"",
+			previousDocs,
+			"",
+		].join("\n"),
+	);
+	const approval =
+		"Get maintainer approval before removing any public export of `src/index.ts`; `scripts/check.js` lists released names.";
+	const convention =
+		"Keep one widget per file such as `src/widgets/render.ts`, as `scripts/check.js` reads one name per file.";
+	const recipe = "- Adding a widget: copy `src/widgets/render.ts`, then append its export to `src/index.ts`.";
+	const modelDocs = "- Write page titles in sentence case in `docs/guide.md`; `scripts/check.js` reads every title.";
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [approval],
+				conventions: [convention],
+				sections: [
+					{ title: "Change recipes", body: recipe },
+					{ title: "Docs and prose", body: modelDocs },
+				],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(`1. ${carried}\n2. ${approval}\n`), handbook);
+	ok(handbook.includes(`- ${convention}`), handbook);
+	ok(handbook.includes(recipe), handbook);
+	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	strictEqual(docs, [modelDocs, previousDocs].join("\n"), handbook);
+});
+
 it("keeps every carried invariant when the model repeats one at the end of a full list", async () => {
 	const carried = writeCarryFixture();
 	const widgetRules = Array.from(

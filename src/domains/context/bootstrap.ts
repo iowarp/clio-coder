@@ -1267,13 +1267,24 @@ const CITED_FILE_RE = /^`[^`\s/]+\/[^`\s]/;
 function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
 	const citations = [...tokens].filter((token) => token.startsWith("`"));
 	return kept.some((other) => {
-		const shorter = tokens.size <= other.size ? tokens : other;
-		const longer = tokens.size <= other.size ? other : tokens;
-		if (shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7) return true;
+		if (restatesLexically(tokens, [other])) return true;
 		const otherCitations = [...other].filter((token) => token.startsWith("`"));
 		const shared = citations.filter((token) => other.has(token));
 		const fewest = Math.min(citations.length, otherCitations.length);
 		return shared.length >= 2 && shared.some((token) => CITED_FILE_RE.test(token)) && shared.length / fewest >= 2 / 3;
+	});
+}
+
+/**
+ * Two rules are one when most of their words match. A carried rule is compared
+ * only this way: shared citations show a shared subject, not the same action,
+ * and an approval rule citing the files a prohibition cites is its own rule.
+ */
+function restatesLexically(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
+	return kept.some((other) => {
+		const shorter = tokens.size <= other.size ? tokens : other;
+		const longer = tokens.size <= other.size ? other : tokens;
+		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
 	});
 }
 
@@ -1634,9 +1645,10 @@ function stabilizeGeneratedOutput(
 		? groundedPreviousInvariants(input, carryCorpus).filter((rule) => !restatesArchitecture(rule))
 		: [];
 	const carriedTokens = carried.map(handbookRuleTokens);
-	// Only a model invariant that restates a carried one in its words gives way. Sharing a check, a script or a
-	// cited file does not show it states no other obligation: approval before disabling a check is its own rule.
-	const duplicatesCarried = (rule: string): boolean => restatesHandbookRule(handbookRuleTokens(rule), carriedTokens);
+	// Only a rule that restates a carried one in its words gives way, and a carried rule gives way only to one
+	// that restates it so. Sharing a check, a script or a cited file does not show it states no other
+	// obligation: approval before disabling a check is its own rule.
+	const duplicatesCarried = (rule: string): boolean => restatesLexically(handbookRuleTokens(rule), carriedTokens);
 	// Checker import rules, carried rules and authored rules lead and are never cut: a model rule gives way to
 	// them, and the cap applies to model rules alone. When they exceed the target on their own they all stay,
 	// and the handbook parser warns that hard invariants exceed it.
@@ -1654,6 +1666,7 @@ function stabilizeGeneratedOutput(
 		...protectedInvariants,
 		...modelInvariants.slice(0, Math.max(0, HANDBOOK_TARGETS.invariants - protectedInvariants.length)),
 	];
+	const uncarriedInvariantTokens = retainedInvariants.filter((rule) => !carried.includes(rule)).map(handbookRuleTokens);
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
 	const typescriptConvention = tsconfigConvention(
 		input.cwd,
@@ -1663,10 +1676,16 @@ function stabilizeGeneratedOutput(
 	const retainedConventions = [
 		...(typescriptConvention ? [typescriptConvention] : []),
 		...conventions
-			.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
+			.filter(
+				(rule) =>
+					!restatesHandbookRule(handbookRuleTokens(rule), uncarriedInvariantTokens) &&
+					!duplicatesCarried(rule) &&
+					!restatesArchitecture(rule),
+			)
 			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
 	];
 	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
+	const uncarriedRuleTokens = [...uncarriedInvariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
 	const verification = verificationSection(input.cwd, tomlFiles);
 	const inferredSections = inferHeuristicSections(input);
@@ -1674,13 +1693,17 @@ function stabilizeGeneratedOutput(
 	const ordinarySections: ClioMdSection[] = [];
 	const modelSections = new Set<ClioMdSection>();
 	const seenSectionTitles = new Set<string>();
-	const addSection = (section: ClioMdSection, modelSection = false): boolean => {
+	const addSection = (section: ClioMdSection, modelSection = false, carriedSection = false): boolean => {
 		if (VERIFICATION_SECTION_RE.test(section.title)) return false;
+		const restatesKept = (tokens: ReadonlySet<string>): boolean =>
+			carriedSection
+				? restatesLexically(tokens, keptRuleTokens)
+				: restatesHandbookRule(tokens, uncarriedRuleTokens) || restatesLexically(tokens, carriedTokens);
 		const body = handbookBlocks(section.body)
 			.filter(
 				(block) =>
 					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
-					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) && !restatesArchitecture(block)),
+					(!restatesKept(handbookRuleTokens(block)) && !restatesArchitecture(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
@@ -1711,13 +1734,13 @@ function stabilizeGeneratedOutput(
 		const index = ordinarySections.findIndex((kept) => kept.title.replace(/\s+/g, " ").trim().toLowerCase() === key);
 		const current = ordinarySections[index];
 		if (!current) {
-			const retained = addSection(section) ? ordinarySections.at(-1) : undefined;
+			const retained = addSection(section, false, true) ? ordinarySections.at(-1) : undefined;
 			if (retained) carriedSections.add(retained);
 			continue;
 		}
 		const sectionTokens = [...keptRuleTokens, ...handbookBlocks(current.body).map(handbookRuleTokens)];
 		const missing = handbookBlocks(section.body).filter(
-			(block) => !restatesHandbookRule(handbookRuleTokens(block), sectionTokens),
+			(block) => !restatesLexically(handbookRuleTokens(block), sectionTokens),
 		);
 		if (missing.length === 0) continue;
 		const merged = { ...current, body: [current.body, ...missing].join("\n") };
