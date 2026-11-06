@@ -1410,10 +1410,21 @@ function renderTurnUsageLine(
 	const moved = usage.movedTo ? `moved to ${modelNickname(usage.movedTo)}` : null;
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
+		// Calls Clio never sent are part of the count, so they are said inside it: `2 calls · 1 call never sent` read as
+		// three calls.
+		const unsent = spend?.neverSent ?? 0;
 		const calls =
 			spend?.calls != null && (spend.calls > 1 || retries !== null || moved !== null)
-				? renderCalls(String(spend.calls), "call")
+				? `${renderCalls(String(spend.calls), "call")}${unsent > 0 && spend.calls > unsent ? `, ${unsent} never sent` : ""}`
 				: null;
+		const coverageNote =
+			unsent > 0 &&
+			calls !== null &&
+			spend?.calls != null &&
+			spend.calls > unsent &&
+			spend.coverageNote?.endsWith("never sent") === true
+				? null
+				: (spend?.coverageNote ?? null);
 		// A call moved away from has no amounts of its own. The row states the answering call beside the move, and
 		// Detailed keeps the sum.
 		const stated = moved !== null ? spend?.answer : spend;
@@ -1425,7 +1436,7 @@ function renderTurnUsageLine(
 		];
 		for (const fact of [
 			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
-			spend?.coverageNote ?? null,
+			coverageNote,
 			stated?.tokens ?? null,
 			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
 			stated?.cached != null ? `cached ${stated.cached}` : null,
@@ -2060,6 +2071,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * transcript with nothing running keeps the old mutation-only invalidation.
 	 */
 	let renderedRunningTool = false;
+	/** The `isLive` of each replay block still reporting live, so the frame after one settles is never a cache hit. */
+	const liveReplayBlocks = new Set<() => boolean>();
 	/**
 	 * Each stable entry keeps its render for the last few layout keys (width,
 	 * height budget, style). Alt+O cycles three styles, and holding one render
@@ -2793,6 +2806,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// pinned to 0 whenever nothing is counting so a settled transcript
 		// re-renders no more often than it did before.
 		const tick = renderedRunningTool ? Math.floor(nowMs / 100) : 0;
+		// A live block that settled since the last frame changed what it renders, which no mutation marked: a `!false`
+		// that exited inside one 100 ms tick kept reading `you are running` beside a rail reading `exited 1`.
+		for (const live of liveReplayBlocks) {
+			if (live()) continue;
+			liveReplayBlocks.delete(live);
+			dirty = true;
+		}
 		if (
 			!dirty &&
 			cachedWidth === width &&
@@ -3001,6 +3021,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			markDirty();
 		},
 		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
+			if (isLive !== undefined) liveReplayBlocks.add(isLive);
 			appendRow({ role: "replayBlock", renderBlock, at: stamp(), isLive });
 			markDirty();
 		},
@@ -3191,6 +3212,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.length = 0;
 			lastSettledReceipt = null;
 			liveReceipts.clear();
+			liveReplayBlocks.clear();
 			receiptView = null;
 			runTurnId = undefined;
 			runStartedAt = undefined;

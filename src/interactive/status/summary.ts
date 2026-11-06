@@ -57,12 +57,15 @@ export function emptyRunTally(): RunTally {
  */
 /** A message's failure class when it ended the call in an error; a later call in the run replaces it. */
 export function turnFailureFacts(message: unknown): TurnFailureFacts | undefined {
-	const record = message as { stopReason?: unknown; failureRoute?: unknown };
+	const record = message as { stopReason?: unknown; failureRoute?: unknown; errorMessage?: unknown };
 	if (record.stopReason !== "error") return undefined;
 	const route = readProviderFailureRoute(record.failureRoute);
 	if (route === null) return undefined;
 	const { url: _endpoint, ...facts } = route;
-	return facts;
+	// A call Clio never sent failed on Clio's own refusal, whose text is Clio's words rather than a provider's.
+	return route.stage === "admission" && typeof record.errorMessage === "string" && record.errorMessage.length > 0
+		? { ...facts, reason: record.errorMessage }
+		: facts;
 }
 
 export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage): RunTally {

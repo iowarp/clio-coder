@@ -234,9 +234,28 @@ export function providerFailureHeadline(route: ProviderFailureRoute): string | n
 }
 
 /** The same failure in rail cells. Null keeps the rail to the failure and the route switch. */
-export function providerFailureRailFacts(route: ProviderFailureRoute): ProviderFailureRailFacts | null {
+/**
+ * What kept a call Clio never sent from going out, in rail cells. The residency refusal is the one with a cause worth a
+ * name: the server's model slots are full and Clio may not free one. The second pane of a two-Clio residency run read
+ * `Cold-b failed its last request` with the reason only in the transcript.
+ */
+function admissionRailCause(reason: string | undefined, errorClass: string): ProviderFailureRailFact {
+	const text = reason ?? "";
+	const held = /holds (\d+) models? at a time/u.exec(text)?.[1];
+	if (held !== undefined || (/pinned/u.test(text) && /cannot load/u.test(text))) {
+		const slots = held === undefined ? "its models" : `${held} ${held === "1" ? "model" : "models"}`;
+		return { text: `server holds ${slots} and none can be unloaded`, short: "no free model slot" };
+	}
+	if (errorClass === "timeout") return { text: "timed out before it was sent", short: "timed out" };
+	return { text: "Clio did not send it", short: "not sent" };
+}
+
+export function providerFailureRailFacts(
+	route: ProviderFailureRoute & { reason?: string },
+): ProviderFailureRailFacts | null {
 	const errorClass = route.errorClass ?? "";
 	const status = httpStatusOf(errorClass);
+	if (route.stage === "admission") return { cause: admissionRailCause(route.reason, errorClass) };
 	if (route.stage === "auth") {
 		const way = { text: `clio-coder configure --id ${route.targetId}` };
 		if (status !== null) return { cause: { text: "credential refused", short: "key refused" }, way };

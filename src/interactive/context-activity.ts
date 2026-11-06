@@ -7,7 +7,7 @@ import type {
 	ContextActivityStatus,
 } from "../core/telemetry/live-events.js";
 import type { Component } from "../engine/tui.js";
-import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	CONTEXT_KIND_TITLES,
 	outcomeTone,
@@ -162,16 +162,25 @@ export function formatContextActivityRailLines(
 	// is busy, so a narrow rail gives it the row before the progress detail.
 	const hint = !settled && options.admission ? plain(options.admission) : "";
 	const hintRoom = hint ? visibleWidth(hint) + 3 : 0;
+	// A cut detail ends on a whole word: `36.6K tokens of sess…` left a fragment where `session history` was.
+	const fitted = (room: number): string => padAnsi(theme.fg("annotation", wholeWords(text, room)), room);
 	if (hint && width - hintRoom >= 16) {
-		rows.push(
-			`${padAnsi(message, width - hintRoom, GLYPH.ellipsis)}${theme.fg("separator", " · ")}${theme.fg("harnessAction", hint)}`,
-		);
+		rows.push(`${fitted(width - hintRoom)}${theme.fg("separator", " · ")}${theme.fg("harnessAction", hint)}`);
 	} else if (hint) {
 		rows.push(padAnsi(theme.fg("harnessAction", hint), width, GLYPH.ellipsis));
 	} else {
-		rows.push(padAnsi(message, width, GLYPH.ellipsis));
+		rows.push(fitted(width));
 	}
 	return rows;
+}
+
+/** `text` within `room` cells, cut after a whole word when one ends in the last third of the room. */
+function wholeWords(text: string, room: number): string {
+	if (visibleWidth(text) <= room) return text;
+	const cut = truncateToWidth(text, Math.max(1, room), "", false);
+	const space = cut.lastIndexOf(" ");
+	if (space < Math.ceil(room * 0.66)) return truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, false);
+	return `${cut.slice(0, space).replace(/[\s·:;,]+$/u, "")}${GLYPH.ellipsis}`;
 }
 
 export function createContextProgressRail(

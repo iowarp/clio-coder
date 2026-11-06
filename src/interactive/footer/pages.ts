@@ -205,11 +205,14 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	const rows = workerRowsOf(state.dispatchRows);
 	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const done = rows.filter((row) => row.status === "completed");
-	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status));
+	// A run someone stopped did not fail: `12 failed` sat over rows that each read `⊘ cancelled`.
+	const cancelled = rows.filter((row) => row.status === "aborted");
+	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status) && row.status !== "aborted");
 	const meta = [
 		active.length > 0 ? `${active.length} active` : null,
 		done.length > 0 ? `${done.length} done` : null,
 		failed.length > 0 ? `${failed.length} failed` : null,
+		cancelled.length > 0 ? `${cancelled.length} cancelled` : null,
 	]
 		.filter((part): part is string => part !== null)
 		.join(" · ");
@@ -816,7 +819,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: // Memory yields the model to the turn on purpose and nothing waits on it, so its wait says nothing: `memory waits`
 				// beside a retry read as a second fault (N9), and in the hint row as a cryptic third party.
 				guardian === "unavailable"
-				? theme.fg("unknownValue", "memory unavailable")
+				? theme.fg("unknownValue", "memory review paused")
 				: "";
 	const facts = [
 		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
@@ -872,7 +875,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	// A narrow footer spends no row on hints it cannot fit, so there the notice keeps the shared row it always had;
 	// only a quit or leader prompt outranks it.
 	if (narrow)
-		return [firstRow, row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, undefined))];
+		return [
+			firstRow,
+			row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, state.dismissKeyLabel)),
+		];
 	const noticeRow = renderNoticeRow(theme, notice, otherNotices, w, key, state.dismissKeyLabel);
 	const hintRow = row(controls);
 	// With nothing else to say on the hint row, the notice keeps the one row it always had.
@@ -902,15 +908,25 @@ function renderNoticeRow(
 	const actions = [more, dismiss].filter(Boolean).join(" · ");
 	const actionText = actions ? theme.fg("keyboardHint", ` ${actions}`) : "";
 	// A narrow row keeps the notice itself; the keys only ride along when the notice keeps enough room to read.
-	if (!actionText || width - visibleWidth(actionText) < 24) return fitNoticeLine(theme, message, width);
+	const fitted = (cells: number): string => theme.fg(notificationToken(notice.level), fitNoticeWords(body, cells));
+	if (!actionText || width - visibleWidth(actionText) < 24) return fitted(width);
 	const room = width - visibleWidth(actionText);
-	const shown = visibleWidth(body) <= room ? message : fitNoticeLine(theme, message, room);
+	const shown = visibleWidth(body) <= room ? message : fitted(room);
 	const gap = " ".repeat(Math.max(0, room - visibleWidth(shown)));
 	return `${shown}${gap}${actionText}`;
 }
 
-function fitNoticeLine(theme: ClioTheme, text: string, width: number): string {
-	return theme.base("counter", truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, true));
+/**
+ * A notice cut to its row at a word boundary: `the whole prompt is r…` left a fragment where the next word was. A
+ * cut that would lose more than a third of the row to reach a space keeps the plain cut.
+ */
+function fitNoticeWords(text: string, width: number): string {
+	const room = Math.max(1, width);
+	if (visibleWidth(text) <= room) return text;
+	const cut = truncateToWidth(text, room, "", false);
+	const space = cut.lastIndexOf(" ");
+	const whole = space >= Math.ceil(room * 0.66) ? cut.slice(0, space).replace(/[\s·:;,]+$/u, "") : null;
+	return whole === null ? truncateToWidth(text, room, GLYPH.ellipsis, false) : `${whole}${GLYPH.ellipsis}`;
 }
 
 const DASHBOARD_ROOMY_ROWS = 30;
