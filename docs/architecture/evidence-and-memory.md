@@ -344,6 +344,7 @@ Nothing enforces a manifest at edit time. The self-edit gate that would require 
 ```bash
 clio-coder memory list
 clio-coder memory propose --from-evidence <runId> [scope options]
+clio-coder memory propose --from-claim <claim-id-prefix>
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
@@ -360,8 +361,8 @@ The store is a JSON object `{ "version": 1, "records": [...] }` (`MEMORY_VERSION
 
 | Command | Behavior |
 | --- | --- |
-| `list` | Prints the record count, then per record: ID, status (`proposed`, `approved`, `rejected`), scope, confidence, evidence refs, key and lesson. |
-| `propose` | Builds one unapproved record from a run's evidence and prints it with a `review:` hint. A repeated proposal for the same run and scope returns the existing record. |
+| `list` | Prints the record count, then per record: ID, status (`proposed`, `approved`, `rejected`), scope, confidence, evidence refs, key, lesson and each regression. |
+| `propose` | Builds one unapproved record from a run's evidence and prints it with a `review:` hint. A repeated proposal for the same run and scope returns the existing record. `--from-claim` instead builds an unapproved `repo` record citing `claim:<id>` for one claim of the project at the current directory; it takes no scope options and is refused, like an evidence proposal, when the claim's run or session carries an information-flow restriction. |
 | `promote` | Builds unapproved records from a version 2 handoff snapshot. |
 | `approve <id>` | Sets `approved`, stamps `lastVerifiedAt` with the current time and clears `rejectedAt`. It stamps `approval.by: operator` and clears regressions. Approving an approved record refreshes `lastVerifiedAt`. |
 | `reject <id>` | Clears `approved` and stamps `rejectedAt`. |
@@ -437,6 +438,8 @@ Explicit overlay and handoff promotion leave proposals unapproved. Automatic tas
 ### Host-evidence approval for repository knowledge
 
 Clio Coder's durable-memory gate in [guardian-gate.ts](../../src/domains/memory/guardian-gate.ts) can approve repository-scoped `task-bank-entry` knowledge after one session records `held`, provided there is no contradiction or regression and no other approved, unrejected record of the same repository already carries one of its `command:` evidence refs; such a record waits for the operator, and nothing merges by command. Procedural proposals and global, runtime and agent scopes still require operator approval. Operator approvals and rejections, including legacy unstamped approvals, are never reversed by the gate. A later contradiction demotes a guardian-approved record, removes its approval stamp and records a regression.
+
+The claims log is the other regression producer ([record.ts](../../src/domains/claims/record.ts)). When a judged check that agreed disagrees under the same pinned conditions, every memory record whose evidence refs cite one of the overturned agreeing claims (`claim:<id>`, or the run id whose host verification produced it) gets a regression naming both claims, appended inside the store's locked mutation. Approval is left as it was, the suppression filter keeps the record out of the prompt and recall, and `approve` clears the regression.
 
 A new durable lesson earns a host-held observation only through [lesson-evidence.ts](../../src/domains/memory/lesson-evidence.ts): its text must quote the exact complete command that succeeded as one simple invocation that is not a help or version call, or contain a source quote both visible in that path's successful read excerpt and still present in the current file. The entry must declare `durable: true`; model confidence or a path alone supplies no evidence. Source reads for that check are capped at 2 MiB. A successful pure `&&` chain run from the workspace root counts for each of its segments, while `;`, `||`, pipes, background launches, substitutions, a state-changing word in the chain, and a shell call given a `cwd` other than the root count for nothing ([command-evidence.ts](../../src/domains/memory/command-evidence.ts)). Delivery observations track whether a previously delivered lesson held or was contradicted: it holds only when a later receipt satisfies its own command or source evidence, and two recurrences of the failure it was about after submission contradict it. The gate input is bounded evidence of that observation, not proof of general correctness.
 

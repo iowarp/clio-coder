@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
+import { claimsProjectRoot, readClaims } from "../domains/claims/index.js";
 import { inspectRunFlowProvenance } from "../domains/evidence/index.js";
 import {
 	approveMemoryRecord,
@@ -11,6 +12,7 @@ import {
 	memoryRuntimeIdentity,
 	memoryStatus,
 	parseTaskMemoryHandoffSnapshot,
+	proposeMemoryFromClaim,
 	proposeMemoryFromEvidence,
 	proposeMemoryPromotion,
 	pruneStaleMemory,
@@ -25,6 +27,7 @@ import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder memory list
 clio-coder memory propose --from-evidence <runId> [scope options]
+clio-coder memory propose --from-claim <claim-id-prefix>
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
@@ -40,6 +43,11 @@ Scope options:
 
 Omit scope options from propose to preserve evidence-inferred scope. Promotion
 always requires an explicit scope and creates unapproved records for review.
+
+--from-claim proposes an unapproved repo record resting on one claim of the
+project at the current directory (see clio-coder claims). If a later claim
+under the same conditions disagrees, the record gets a regression and leaves
+the prompt until approved again.
 `;
 
 type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune";
@@ -47,6 +55,7 @@ type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "pr
 interface ParsedMemoryArgs {
 	command?: MemoryCommand;
 	evidenceId?: string;
+	claimId?: string;
 	handoffPath?: string;
 	entryIds: string[];
 	memoryId?: string;
@@ -88,6 +97,12 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 				const value = args[index + 1];
 				if (value === undefined || value.startsWith("-")) throw new Error("--from-evidence requires a run id");
 				parsed.evidenceId = value;
+				index += 1;
+				continue;
+			}
+			if (arg === "--from-claim") {
+				if (parsed.command !== "propose") throw new Error("--from-claim is valid only for memory propose");
+				parsed.claimId = requireOptionValue(args, index, "--from-claim", "a claim id prefix");
 				index += 1;
 				continue;
 			}
@@ -152,8 +167,11 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 	}
 	if (parsed.help) return parsed;
 	if (parsed.command === undefined) throw new Error("memory requires list, propose, promote, approve, reject, or prune");
-	if (parsed.command === "propose" && parsed.evidenceId === undefined) {
-		throw new Error("propose requires --from-evidence <runId>");
+	if (parsed.command === "propose" && (parsed.evidenceId === undefined) === (parsed.claimId === undefined)) {
+		throw new Error("propose requires one of --from-evidence <runId> or --from-claim <claim-id-prefix>");
+	}
+	if (parsed.claimId !== undefined && parsed.scope !== undefined) {
+		throw new Error("--from-claim takes no scope options; the record is scoped to the claim's repository");
 	}
 	if (parsed.command === "promote" && parsed.handoffPath === undefined) {
 		throw new Error("promote requires --from-handoff <path>");
@@ -246,6 +264,8 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 			renderMemoryList(await loadMemoryRecords(dataDir));
 			return 0;
 		}
+		if (parsed.command === "propose" && parsed.claimId !== undefined)
+			return await proposeFromClaim(dataDir, parsed.claimId);
 		if (parsed.command === "propose") {
 			const evidenceId = parsed.evidenceId;
 			if (evidenceId === undefined) {
@@ -392,6 +412,48 @@ function promotionFlowRefusal(sessionId: string, cwd: string): string | null {
  * A lesson from evidence words the run's task and findings, and a record has no flow label. The run's settled record holds
  * what the run carried, and its dispatching session answers as a promotion's source does.
  */
+/**
+ * Propose a record resting on one claim (#406). The claim's own source decides the flow check, as for any proposal:
+ * a host-verified claim is checked through its run, a verify claim through its session.
+ */
+async function proposeFromClaim(dataDir: string, prefix: string): Promise<number> {
+	if (!/^[0-9a-f]{4,64}$/u.test(prefix)) {
+		printError("--from-claim needs an id prefix of at least 4 hex characters");
+		return 2;
+	}
+	const project = claimsProjectRoot(process.cwd());
+	const matches = readClaims(project).records.filter((claim) => claim.id.startsWith(prefix));
+	const [claim] = matches;
+	if (claim === undefined || matches.length > 1) {
+		printError(
+			claim === undefined
+				? `no claim in ${project} has an id starting '${prefix}'`
+				: `'${prefix}' matches ${matches.length} claims; give more of the id`,
+		);
+		return 1;
+	}
+	const source = claim.source;
+	const flowRefusal =
+		source.channel === "host-verification"
+			? await evidenceFlowRefusal(source.runId, project)
+			: source.sessionId === null
+				? null
+				: promotionFlowRefusal(source.sessionId, project);
+	if (flowRefusal !== null) {
+		printError(`${flowRefusal}; nothing was proposed`);
+		return 1;
+	}
+	const result = await proposeMemoryFromClaim(dataDir, {
+		claimId: claim.id,
+		text: claim.text,
+		check: claim.keys.check,
+		project,
+		at: claim.at,
+	});
+	renderProposal(result.record, result.created);
+	return 0;
+}
+
 async function evidenceFlowRefusal(runId: string, cwd: string): Promise<string | null> {
 	const flow = await inspectRunFlowProvenance(clioStateDir(), runId);
 	if (flow.restricted) return `run ${runId} carries an information-flow restriction`;
@@ -502,5 +564,7 @@ function renderMemoryList(records: ReadonlyArray<MemoryRecord>): void {
 		process.stdout.write("\n");
 		process.stdout.write(`  key: ${record.key}\n`);
 		process.stdout.write(`  lesson: ${record.lesson}\n`);
+		// A record with a regression is out of the prompt and recall; say why, since approve clears it.
+		for (const regression of record.regressions ?? []) process.stdout.write(`  regression: ${regression}\n`);
 	}
 }
