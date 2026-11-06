@@ -145,7 +145,7 @@ it("separates eight diagnostic notices from package counts across Plugins, Agent
 		const text = plain(state.view.render(88).join("\n"));
 		match(text, /1 package/);
 		match(text, /\[n\] 8 notices/);
-		match(text, /Scope User/);
+		match(text, /\bUser\b/);
 		ok(!text.includes("skill diagnostic"));
 		state.view.handleInput("n");
 		match(plain(state.view.render(88).join("\n")), /8 notices/);

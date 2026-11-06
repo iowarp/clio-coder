@@ -210,7 +210,7 @@ export function libraryStatusLine(
 	const unit = view.member ? "member" : view.mode === "browse" ? "package" : "entry";
 	const plural = unit === "entry" ? "entries" : `${unit}s`;
 	const total = `${counts.rows} ${counts.rows === 1 ? unit : plural}`;
-	const wide = width >= 72;
+	const wide = width >= 96;
 	const keyed = width >= 48;
 	const notices =
 		counts.notices > 0
@@ -448,13 +448,23 @@ function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] 
 	const entry = (key: string, verb: string): string => `${keyCap(theme, key)} ${theme.fg("menuDescription", verb)}`;
 	// Enter opens a package's members and does nothing else, so it is named
 	// only where it opens something; Tab is the detail key.
+	const reviews: Array<[string, string]> = [
+		...(actions.install ? [["i", "install"] as [string, string]] : []),
+		...(actions.enable ? [["e", "enable/disable"] as [string, string]] : []),
+		...(actions.update ? [["u", "update"] as [string, string]] : []),
+		...(actions.remove ? [["r", "remove"] as [string, string]] : []),
+	];
+	// "review" is said once ahead of the keys it covers, so three reviews fit on one row.
+	const reviewChips =
+		reviews.length === 1
+			? reviews.map(([key, verb]) => entry(key, `review ${verb}`))
+			: reviews.map(([key, verb], index) =>
+					index === 0 ? `${theme.fg("annotation", "review:")} ${entry(key, verb)}` : entry(key, verb),
+				);
 	return [
 		...(actions.use ? [entry("v", "use")] : []),
 		...(actions.open ? [entry("Enter", "members")] : []),
-		...(actions.install ? [entry("i", "review install")] : []),
-		...(actions.enable ? [entry("e", "review enable/disable")] : []),
-		...(actions.update ? [entry("u", "review update")] : []),
-		...(actions.remove ? [entry("r", "review remove")] : []),
+		...reviewChips,
 	];
 }
 
