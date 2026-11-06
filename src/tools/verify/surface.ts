@@ -21,7 +21,7 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 	return next;
 }
 
-export const verifyToolSurface = {
+export const verifyToolSurface: ToolSurface = {
 	name: ToolNames.Verify,
 	description:
 		'Run a declared verification check: check=<id> runs one, and an undeclared id names the declared ones; check="frontend" with path validates an HTML/CSS/JS artifact; no arguments lists declared and build/CI-derived checks.',
@@ -45,4 +45,4 @@ export const verifyToolSurface = {
 	baseActionClass: "execute",
 	executionMode: "sequential",
 	prepareArguments: prepareVerifyArguments,
-} satisfies ToolSurface;
+};

@@ -23,6 +23,7 @@
 import { isUtf8 } from "node:buffer";
 import { glob, lstat, open, readFile, realpath, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
+import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { createRedactionTally, redactSecretsText } from "../domains/evidence/redact.js";
@@ -120,7 +121,7 @@ type ConsultKind = (typeof KINDS)[number];
 
 const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
 
-export const consultParameters = Type.Object({
+export const consultParameters: TSchema = Type.Object({
 	filter: Type.Optional(
 		Type.Object({
 			criterion: Type.String({

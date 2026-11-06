@@ -125,7 +125,7 @@ export function prepareDataAdmissionArguments(
 	return prepared;
 }
 
-export const dataToolSurface = {
+export const dataToolSurface: ToolSurface = {
 	name: DATA_TOOL_NAME,
 	description: DESCRIPTION,
 	parameters: Type.Object({
@@ -207,4 +207,4 @@ export const dataToolSurface = {
 	executionMode: "parallel",
 	prepareArguments: prepareDataArguments,
 	prepareAdmissionArguments: prepareDataAdmissionArguments,
-} satisfies ToolSurface;
+};
