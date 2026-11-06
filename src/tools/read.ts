@@ -224,7 +224,7 @@ async function readExact(handle: FileHandle, position: number, length: number): 
  * like the loose file it replaced. Its identity is the pack's mtime.
  */
 function packedSourceHandle(bytes: Buffer, mtimeMs: number): FileHandle {
-	const stats = { size: bytes.length, mtimeMs, isFile: () => true };
+	const stats = { size: bytes.length, mtimeMs, isFile: () => true, isDirectory: () => false };
 	const handle = {
 		async read(buffer: Buffer, offset: number, length: number, position: number) {
 			const bytesRead = position >= bytes.length ? 0 : bytes.copy(buffer, offset, position, position + length);
@@ -245,9 +245,10 @@ function packedSourceHandle(bytes: Buffer, mtimeMs: number): FileHandle {
 }
 
 /** The stat of `filePath`, or of its packed member when the file is absent from an installed package's `src/`. */
-async function statReadTarget(
-	filePath: string,
-): Promise<{ entry: { size: number; mtimeMs: number; isFile(): boolean }; packed: FileHandle | null }> {
+async function statReadTarget(filePath: string): Promise<{
+	entry: { size: number; mtimeMs: number; isFile(): boolean; isDirectory(): boolean };
+	packed: FileHandle | null;
+}> {
 	try {
 		return { entry: await stat(filePath), packed: null };
 	} catch (err) {
