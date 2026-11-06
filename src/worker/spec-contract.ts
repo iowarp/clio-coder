@@ -352,6 +352,7 @@ const RUNTIME_API_FAMILIES = [
 	"rerank-http",
 	"embeddings-http",
 	"claude-agent-sdk",
+	"copilot-sdk",
 	"claude-code-subprocess",
 	"external-agent-subprocess",
 ] as const satisfies ReadonlyArray<RuntimeApiFamily>;

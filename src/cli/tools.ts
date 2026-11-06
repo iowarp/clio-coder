@@ -1,4 +1,5 @@
 import { installClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
+import { installCopilotSdk } from "../domains/lifecycle/copilot-sdk-install.js";
 import { describeYaziProfile, inspectCurrentYaziProfile, resetYaziProfile } from "../domains/mux/index.js";
 import {
 	describeFloorRejection,
@@ -26,6 +27,7 @@ Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves
   clio-coder tools status <id> [--json] [--reset-profile]  one tool in detail
   clio-coder tools install claude-sdk      provision the separate Claude SDK component
+  clio-coder tools install copilot-sdk     provision the separate GitHub Copilot SDK component
   clio-coder tools install <id> [--force] [--json]  download, verify, and vendor a tool
   clio-coder tools remove <id>|--all [--json]  delete every vendored version of a tool
 
@@ -88,6 +90,23 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 					const path = await installClaudeAgentSdk();
 					if (parsed.json) process.stdout.write(`${JSON.stringify({ id: "claude-sdk", path })}\n`);
 					else printOk(`Claude SDK component available at ${path}`);
+					return 0;
+				} catch (error) {
+					printError(error instanceof Error ? error.message : String(error));
+					return 1;
+				}
+			}
+			if (parsed.positional[0] === "copilot-sdk") {
+				if (parsed.force || parsed.positional.length !== 1) {
+					printError(
+						"copilot-sdk installation accepts no extra arguments or --force; pinned versions have separate locations.",
+					);
+					return 2;
+				}
+				try {
+					const path = await installCopilotSdk();
+					if (parsed.json) process.stdout.write(`${JSON.stringify({ id: "copilot-sdk", path })}\n`);
+					else printOk(`Copilot SDK component available at ${path}`);
 					return 0;
 				} catch (error) {
 					printError(error instanceof Error ? error.message : String(error));

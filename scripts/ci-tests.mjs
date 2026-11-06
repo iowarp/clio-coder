@@ -36,6 +36,7 @@ export const coreTests = [
 	"mcp-config-trust",
 	"url-userinfo-hold",
 	"url-credential-surfaces",
+	"copilot-sdk-route",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

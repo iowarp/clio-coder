@@ -135,6 +135,7 @@
 	},
 	"devDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.292",
+		"@github/copilot-sdk": "1.0.26",
 		"@biomejs/biome": "2.5.1",
 		"@types/node": "24.12.2",
 		"@typescript/native": "npm:typescript@7.0.2",

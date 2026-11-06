@@ -48,6 +48,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	bedrock: "Amazon Bedrock",
 	"claude-code": "Claude Code subscription via installed claude CLI",
 	"claude-sdk": "Claude Code subscription via Claude Agent SDK",
+	"copilot-sdk": "GitHub Copilot seat via the official Copilot SDK",
 	"codex-cli": "Managed headless delegation through the installed Codex CLI",
 	"opencode-cli": "Managed headless delegation through the installed OpenCode CLI",
 	"pi-cli": "Managed headless delegation through the installed Pi CLI",

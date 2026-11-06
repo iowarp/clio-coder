@@ -216,7 +216,30 @@ export function callSettlementFromMessage(
 			verdict: "unknown",
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
+		...copilotBilling(raw.copilotBilling),
 		...(interruptedEstimate ? { interruptedEstimate } : {}),
+	};
+}
+
+/** The seat units a copilot-sdk step reported (`CopilotStepBilling`, src/engine/copilot/stream.ts). */
+function copilotBilling(raw: unknown): Pick<CallSettled, "billing"> {
+	const billing = record(raw);
+	if (Object.keys(billing).length === 0) return {};
+	const fact = (value: unknown): Fact<number> =>
+		typeof value === "number" && Number.isFinite(value) && value >= 0
+			? { kind: "measured", value, source: "provider" }
+			: unknown;
+	const calls = billing.modelCalls;
+	return {
+		billing: {
+			provider: "github-copilot",
+			premiumRequests: fact(billing.premiumRequests),
+			nanoAiu: fact(billing.nanoAiu),
+			modelCalls:
+				typeof calls === "number" && Number.isSafeInteger(calls) && calls >= 0
+					? { kind: "measured", value: calls, source: "local-count" }
+					: unknown,
+		},
 	};
 }
 

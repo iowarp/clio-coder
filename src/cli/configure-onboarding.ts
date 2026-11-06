@@ -38,6 +38,7 @@ import { initializeClioHome } from "../core/init.js";
 import { resolveOnPath } from "../domains/interop/detect.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import type { ProviderSupportEntry } from "../domains/providers/index.js";
 import {
 	buildProviderSupportEntry,
@@ -310,6 +311,11 @@ const CATEGORY_STEP: Step = {
 			answers.inventoryKey = undefined;
 			wizard.answer("Source", route.source);
 			wizard.answer("Provider", route.runtime.id);
+			// A detected Copilot login still needs this account's consent before it becomes a route.
+			if (route.runtime.id === "copilot-sdk") {
+				const consent = await COPILOT_STEP.run(wizard, answers);
+				if (consent !== "next") return consent;
+			}
 			return "detected";
 		}
 		if (answers.detectedChatRoute) answers.runtime = undefined;
@@ -410,6 +416,34 @@ const SDK_STEP: Step = {
 			wizard.presenter.fail(error instanceof Error ? error.message : String(error));
 			return "cancel";
 		}
+	},
+};
+
+/** Copilot: the SDK component, the `copilot login` check and the account's one-time consent. */
+const COPILOT_STEP: Step = {
+	id: "copilot-sdk",
+	applies: (answers) => answers.runtime?.id === "copilot-sdk",
+	run: async (wizard) => {
+		const ask = async (question: string) => {
+			const result = await wizard.select<boolean>({
+				heading: ["", question],
+				choices: [
+					{ value: true, label: "Yes" },
+					{ value: false, label: "No" },
+				],
+				initialIndex: 1,
+				railPrefix: wizard.rail,
+				backLabel: "back",
+				clearOnExit: true,
+				input: wizard.input,
+				output: wizard.output,
+			});
+			return result.kind === "selected" && result.value;
+		};
+		const ready = await prepareCopilotSdk({ confirm: ask, print: (text) => wizard.output.write(`${text}\n`) });
+		if (ready.ok) return "next";
+		wizard.presenter.fail(ready.message);
+		return "cancel";
 	},
 };
 
@@ -1243,6 +1277,7 @@ const STEPS: ReadonlyArray<Step> = [
 	CATEGORY_STEP,
 	RUNTIME_STEP,
 	SDK_STEP,
+	COPILOT_STEP,
 	CREDENTIAL_STEP,
 	CREDENTIAL_VALUE_STEP,
 	URL_STEP,

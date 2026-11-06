@@ -591,6 +591,8 @@ Clio supplies a thinking choice for model calls outside the main conversation in
 | `protocol` | `openai-compat`, `anthropic-compat`, `litellm` | Generic endpoints that carry no local-server assumptions, over `openai-completions` or `anthropic-messages`. `litellm` is a gateway runtime with per-route capability discovery. They never price as free. |
 | `subscription` | `claude-code`, `claude-sdk`, `codex-cli`, `opencode-cli`, `pi-cli`, `antigravity-code` | Worker-only. `claude-code` runs the installed `claude` CLI and `claude-sdk` the Claude Agent SDK, both on the CLI's own login. `codex-cli`, `opencode-cli`, `pi-cli` and `antigravity-code` run the installed command headlessly under its own login. `claude-code` and those four run their own tool loop, so write-capable dispatch work on them needs the target's `trustedUnmediated`. |
 
+`copilot-sdk` is the one `subscription` runtime that is not worker-only. It is an `http`-kind runtime with the `copilot-sdk` API family, so it serves chat, main and worker routes like any target; [GitHub Copilot](#github-copilot) describes it.
+
 Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-completion`, `llamacpp-embed` and `llamacpp-rerank` are the other surfaces of one llama.cpp server, `lemonade-anthropic` is Lemonade's Anthropic surface, `systemone` is the System One decision server, and `typesafe-jev` is its hosted engine. `alcf` is documented in the [ALCF provider contract](../architecture/alcf-provider.md). A custom runtime joins the registry as the [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes. The Claude Agent SDK is an optional dependency that the installer skips; see the [installation guide](installation-and-lifecycle.md) for how `claude-sdk` obtains it on first use.
 
 `inception` declares no reasoning support. The older Mercury models get `reasoning_effort: "instant"` pinned on every chat request, because their reasoning is not observable over the API and any higher effort returns an empty completion. `mercury-3` takes no pin. Thinking controls supplied by callers are still removed for it.
@@ -619,6 +621,23 @@ OAuth credential storage and refresh stay Clio Coder's own. [`src/engine/oauth.t
 ## Subscription-based Targets and Runtimes
 
 OAuth providers, supported worker runtimes, and external-agent delegation have different runtime roles. `openai-codex` and `anthropic-max` are HTTP chat runtimes behind a subscription login. `claude-code`, `claude-sdk` and the `*-cli` runtimes are worker-only and use the installed tool's own login. `auth status` shows which credential source answers for each. Use [Interop](interop.md) for detected coding-agent peers. Runtime descriptors in [`src/domains/providers/runtimes/`](../../src/domains/providers/runtimes/builtins.ts) define their auth method and whether they serve chat or dispatch.
+
+## GitHub Copilot
+
+A `copilot-sdk` target sends model calls through the official GitHub Copilot SDK (`@github/copilot-sdk`), as the GitHub account signed in with the official `copilot login`. It is an ordinary target: `clio-coder configure` offers it, detected-route onboarding offers it when a Copilot login exists, and it can be the chat, main or worker route, chosen with `/model`, `/config`, dispatch `target`/`model` pins or `run --target`/`--model`. Its models are the ones the account's Copilot policy has enabled, listed by the SDK at runtime; a model the organization has not enabled is not listed, and Clio never enables one.
+
+```yaml
+targets:
+  - id: copilot
+    runtime: copilot-sdk
+    defaultModel: <a model id from `clio-coder targets`>
+```
+
+- **Login.** Clio has no Copilot sign-in and stores no Copilot token. Run `copilot login` (the official GitHub Copilot CLI) first; a missing login fails with a message naming it. GitHub token variables such as `GH_TOKEN` are not passed to the Copilot runtime, so only that login is used. `COPILOT_HOME` is honored.
+- **Component.** The SDK and its platform runtime (about 170 MB) install once as a separate component, offered the first time a Copilot target is configured, or with `clio-coder tools install copilot-sdk`.
+- **Consent.** Before the first call, Clio asks once per GitHub account. The prompt names the account, says that requests bill the account's Copilot seat or organization pool in premium requests and AI credits, and that the enterprise's Copilot policy and retention apply. `clio-coder auth login copilot-sdk` gives it from a terminal. Without it every surface refuses the call, headless `run` included, with a message naming that command.
+- **Tools and prompt.** Clio's own agent loop runs every tool under its usual permission policy; Copilot's built-in tools are all disabled, and Clio's compiled prompt replaces Copilot's default system prompt.
+- **Cost and limits.** A Copilot target has no dollar price (`pricedBy: none`). Token usage and, per model call, premium requests and AI credits are recorded as reported by the SDK. A target admits one request at a time unless `maxConcurrentRequests` says otherwise. A refusal from Copilot (policy, quota, rate limit) is shown as is and is never retried on another account or moved to another target.
 
 ## Troubleshooting checklist
 
