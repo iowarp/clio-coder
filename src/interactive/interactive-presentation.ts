@@ -192,6 +192,8 @@ export interface InteractivePresentationDeps {
 	getOverlayState?: () => string;
 	/** Whether that prompt has a mutation to inspect, and whether it is open (issue #254). */
 	getPermissionInspection?: () => import("./permission-hint.js").PermissionInspectionHint;
+	/** Whether that prompt's terms are open, so the rail's Esc says it hides them rather than denying. */
+	getPermissionTerms?: () => import("./permission-hint.js").PermissionTermsHint;
 	getCwd?: () => string;
 	/**
 	 * True when this process resumed an existing session at boot (`--continue`,
@@ -956,6 +958,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
+		...(deps.getPermissionTerms ? { getPermissionTerms: deps.getPermissionTerms } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
 		getCompactionLabel: (room) => compactionRailLabel(runningCompaction(), room, Date.now()),
 		getPreparationDetail: () => {
