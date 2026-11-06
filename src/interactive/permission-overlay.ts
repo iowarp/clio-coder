@@ -1146,8 +1146,10 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		// rail, so the identity holds and every row stays reachable.
 		const callRows = identityRows + Math.min(parts.target.length, 1) + parts.effect.length;
 		if (budget < answerRows + 2 && budget < callRows + bareChoices.length + 1) {
-			const all = [...parts.target, ...parts.effect, ...parts.others, ...parts.windowTimer, ...rest];
 			const positioned = budget >= identityRows + 2;
+			// The position row carries the timer as a clause; the sentence in the window would say it twice.
+			const timerSentence = positioned && timerClause !== null ? [] : parts.windowTimer;
+			const all = [...parts.target, ...parts.effect, ...parts.others, ...timerSentence, ...rest];
 			const window = Math.max(0, budget - identityRows - (positioned ? 1 : 0));
 			this.cardMaxScroll = window > 0 ? Math.max(0, all.length - window) : 0;
 			this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
@@ -1190,7 +1192,8 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			...parts.effect,
 			...(targetPinned === 0 ? [] : parts.target.slice(targetPinned)),
 			...parts.others,
-			...parts.windowTimer,
+			// The position row below carries the timer as a clause when there is one.
+			...(timerClause === null ? parts.windowTimer : []),
 		];
 		const scrolled = [
 			...allFacts,
