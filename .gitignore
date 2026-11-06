@@ -6,6 +6,8 @@
 # Dependencies and build output.
 node_modules/
 dist/
+# Written by scripts/build-source-pack.ts beside dist/assets/source.pack.
+/src/.npmignore
 coverage/
 .tsbuildinfo
 __pycache__/

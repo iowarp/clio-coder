@@ -866,6 +866,8 @@ const ROOT_ONLY_RESOLVERS = new Set([
 	"src/cli/components.ts",
 	// Installation identity uses the root's layout to preserve its package-manager prefix.
 	"src/domains/lifecycle/install-method.ts",
+	// Serves files under the root's src/ from dist/assets/source.pack, so it maps paths against the root itself.
+	"src/core/source-pack.ts",
 ]);
 const PATH_JOINERS = new Set(["join", "resolve"]);
 

@@ -111,6 +111,7 @@ const entries = {
 	"gui/ops-worker": "apps/clio-coder-gui/server/worker/ops-main.ts",
 	"worker/entry": "src/worker/entry.ts",
 	"codewiki/build-worker": "src/domains/context/codewiki/build-worker.ts",
+	"data/scientific-worker": "src/tools/data/scientific-worker.ts",
 };
 
 export default defineConfig({
