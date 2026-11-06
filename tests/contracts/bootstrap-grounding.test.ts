@@ -78,7 +78,13 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 });
 
 it("keeps a reviewer requirement its cited policy states, and marks one its cited file does not state", async () => {
-	writeFileSync(join(cwd, ".github", "workflows", "release.yml"), "jobs:\n  publish:\n    environment: release\n");
+	writeFileSync(
+		join(cwd, ".github", "workflows", "release.yml"),
+		"jobs:\n  publish:\n    environment: release\n    steps:\n      - name: Present the approval receipt\n",
+	);
+	writeFileSync(join(cwd, "CONTRIBUTING.md"), "The `release` environment needs the owner as required reviewer.\n");
+	const approval =
+		"- The publish job needs the protected `release` environment with owner approval (`CONTRIBUTING.md`, `.github/workflows/release.yml`).";
 	writeFileSync(
 		join(cwd, ".github", "branch-protection.json"),
 		JSON.stringify({ required_pull_request_reviews: { required_approving_review_count: 1 } }),
@@ -99,6 +105,8 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 							"- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer. Keep the `ci (22)` job name in `.github/workflows/ci.yml`.",
 							"- `.github/branch-protection.json` requires a reviewer before merging.",
 							"- Follow `CONTRIBUTING.md` before review.",
+							approval,
+							"- Owner approval of the `release` environment gates the publish job in `.github/workflows/release.yml`.",
 						].join("\n"),
 					},
 				],
@@ -114,6 +122,18 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 	);
 	ok(handbook.includes("- `.github/branch-protection.json` requires a reviewer before merging.\n"), handbook);
 	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
+	ok(
+		handbook.includes(
+			"- The publish job needs the protected `release` environment with owner approval (`CONTRIBUTING.md`).\n",
+		),
+		handbook,
+	);
+	ok(
+		handbook.includes(
+			"- Owner approval of the `release` environment gates the publish job in `.github/workflows/release.yml` (unverified: `.github/workflows/release.yml` states no review policy).",
+		),
+		handbook,
+	);
 });
 
 it("cuts a model line's claim that CI runs a check, but keeps a carried invariant verbatim", async () => {

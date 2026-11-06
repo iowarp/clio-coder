@@ -952,6 +952,8 @@ function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus)
 }
 
 const REVIEW_REQUIREMENT_RE = /\breviewers?\b|\brequired reviews?\b/i;
+/** An approval gate: approval in a sentence about a deployment environment, not "approval before disabling a check". */
+const APPROVAL_GATE_RE = /^(?=.*\bapprov(?:al|als|e|es|ed|ing)\b)(?=.*\benvironments?\b)/is;
 /**
  * Review policy stated as configuration: branch protection and rulesets
  * (`required_pull_request_reviews`, `required_approving_review_count`,
@@ -965,6 +967,29 @@ function statesReviewPolicy(path: string, text: string): boolean {
 	return /(?:^|\/)CODEOWNERS$/.test(path) || REVIEW_POLICY_KEY_RE.test(text) || REVIEW_REQUIREMENT_RE.test(text);
 }
 
+/** A cited path as the repository names it: `./src/cart.ts:26` is `src/cart.ts`. */
+function citedPath(token: string): string {
+	const path = token.trim().replace(/^\.\//, "");
+	return CITED_LOCATION_RE.exec(path)?.[1] ?? path;
+}
+
+/** Cut `drop` from each parenthesized citation list, `(`a`, `b`)`, and the list when none remain. */
+function withoutCitations(sentence: string, drop: ReadonlySet<string>): string {
+	return sentence.replace(/\s*\((`[^`\n]+`(?:\s*(?:,|;|\band\b)\s*`[^`\n]+`)*)\)/g, (list, inner: string) => {
+		const spans = [...inner.matchAll(CODE_TOKEN_RE)];
+		const kept = spans.filter((span) => !drop.has(citedPath(span[1] ?? ""))).map((span) => span[0]);
+		if (kept.length === spans.length) return list;
+		return kept.length > 0 ? ` (${kept.join(", ")})` : "";
+	});
+}
+
+interface ClaimCitations {
+	/** Which code spans are cited files; concrete paths below the root by default. */
+	cites?: (path: string) => boolean;
+	/** Cited files that do not support the claim, cut from citation lists when another cited file does. */
+	unsupporting?: (cited: string[]) => string[];
+}
+
 /**
  * Append `(unverified: …)` to each sentence of a line that makes a `claim` the
  * files it cites do not support; `unsupported` names what is missing, or null.
@@ -975,8 +1000,10 @@ function withUnsupportedClaimsMarked(
 	line: string,
 	claim: RegExp,
 	unsupported: (cited: string[]) => string | null,
+	citations: ClaimCitations = {},
 ): string {
 	if (!claim.test(line)) return line;
+	const cites = citations.cites ?? ((path: string) => CONCRETE_FILE_RE.test(path));
 	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
 	const body = line.slice(prefix.length);
 	// Split prose sentences without breaking inside a code span.
@@ -992,15 +1019,10 @@ function withUnsupportedClaimsMarked(
 	const marked = sentences.map((sentence) => {
 		if (!claim.test(sentence)) return sentence;
 		const cited = [
-			...new Set(
-				[...sentence.matchAll(CODE_TOKEN_RE)]
-					.map((match) => (match[1] ?? "").trim().replace(/^\.\//, ""))
-					.map((token) => CITED_LOCATION_RE.exec(token)?.[1] ?? token)
-					.filter((token) => CONCRETE_FILE_RE.test(token)),
-			),
+			...new Set([...sentence.matchAll(CODE_TOKEN_RE)].map((match) => citedPath(match[1] ?? "")).filter(cites)),
 		];
 		const missing = cited.length > 0 ? unsupported(cited) : null;
-		if (missing === null) return sentence;
+		if (missing === null) return withoutCitations(sentence, new Set(citations.unsupporting?.(cited) ?? []));
 		const note = ` (unverified: ${missing})`;
 		const end = /([.!?])(\s*)$/.exec(sentence);
 		return end ? `${sentence.slice(0, end.index)}${note}${end[1]}${end[2]}` : `${sentence.trimEnd()}${note}`;
@@ -1012,16 +1034,26 @@ function withUnsupportedClaimsMarked(
  * Every generated handbook said the `release` environment "in
  * `.github/workflows/release.yml`" requires the owner as reviewer: the path is
  * real, so the citation grounded, but reviewers are a GitHub environment setting
- * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer.
+ * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer. A
+ * later one cited both for the environment's owner approval; the workflow is cut
+ * from that citation list, since the guide states the policy.
  */
 function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGroundingCorpus): string {
-	return withUnsupportedClaimsMarked(line, REVIEW_REQUIREMENT_RE, (cited) => {
-		const supported = cited.some((path) => {
-			const text = evidence.fileText(path);
-			return text === null || statesReviewPolicy(path, text);
-		});
-		return supported ? null : `${cited.map((path) => `\`${path}\``).join(", ")} states no review policy`;
-	});
+	const statesPolicy = (path: string): boolean => {
+		const text = evidence.fileText(path);
+		return text === null || statesReviewPolicy(path, text);
+	};
+	return withUnsupportedClaimsMarked(
+		line,
+		new RegExp(`${REVIEW_REQUIREMENT_RE.source}|${APPROVAL_GATE_RE.source}`, "is"),
+		(cited) =>
+			cited.some(statesPolicy) ? null : `${cited.map((path) => `\`${path}\``).join(", ")} states no review policy`,
+		{
+			// A root guide such as `CONTRIBUTING.md` states review policy, so it counts as cited.
+			cites: (path) => CONCRETE_FILE_RE.test(path) || evidence.repositoryPaths.has(path),
+			unsupporting: (cited) => cited.filter((path) => !statesPolicy(path)),
+		},
+	);
 }
 
 /** "fails CI", "fail on CI", "enforced in CI", "gated by the CI": a check's failure stated as CI's. */
