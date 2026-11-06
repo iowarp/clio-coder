@@ -250,6 +250,10 @@ test("ACP interview channel maps the client's reply, its cancel and a turn abort
 		header: "Merge task branch?",
 		options: [{ label: "Merge" }, { label: "Keep branch", description: "Leave it." }],
 	});
+	deepStrictEqual(requests[0]?.params._meta, { "clio-coder/interview": { version: 1, operatorOnly: false } });
+	await channel.ask([{ ...question, operator_only: true }]);
+	deepStrictEqual(requests[1]?.params._meta, { "clio-coder/interview": { version: 1, operatorOnly: true } });
+	strictEqual("operator_only" in ((requests[1]?.params.questions as unknown[])[0] as object), false);
 
 	reply = { answers: [], cancelled: true };
 	deepStrictEqual(await channel.ask([question]), { answers: [], cancelled: true });

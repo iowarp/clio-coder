@@ -38,6 +38,8 @@ export const InterviewRequest = Type.Object(
 		sessionId: Id,
 		interviewId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 		questions: Type.Array(InterviewQuestion, { minItems: 1, maxItems: 4 }),
+		// ACP extension data, e.g. `clio-coder/interview` naming an operator_only round.
+		_meta: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 	},
 	closed,
 );
