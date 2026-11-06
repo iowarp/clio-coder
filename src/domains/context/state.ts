@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureProjectIgnore } from "../../core/project-root.js";
+import { assertProjectIndexWritable, ensureProjectIgnore } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionProvider, AdoptionScope, AdoptionSourceKind, AdoptionSourceSnapshot } from "./adoption.js";
@@ -247,6 +247,7 @@ export function readClioState(cwd: string): ClioProjectState | null {
 }
 
 export function writeClioState(cwd: string, state: ClioProjectState, codewiki?: Codewiki): void {
+	assertProjectIndexWritable();
 	const orientation = codewiki
 		? buildProjectOrientation(cwd, codewiki, state.fingerprint)
 		: (state.orientation ?? readClioState(cwd)?.orientation);

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ensureProjectIgnore } from "../../../core/project-root.js";
+import { assertProjectIndexWritable, ensureProjectIgnore } from "../../../core/project-root.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { ProjectType } from "../../session/workspace/project-type.js";
 import {
@@ -139,6 +139,7 @@ export function serializeCodewiki(codewiki: Codewiki): string {
 	return `${JSON.stringify(normalizeCodewiki(codewiki))}\n`;
 }
 export function writeCodewiki(cwd: string, codewiki: Codewiki): string {
+	assertProjectIndexWritable();
 	const serialized = serializeCodewiki(codewiki);
 	ensureProjectIgnore(cwd);
 	safeResourceWrite(codemapPath(cwd), serialized, { encoding: "utf8" });
