@@ -73,6 +73,34 @@ it("lists the commands CI runs, the scripts they call, and custom check files wi
 	ok(!("src/main.ts" in byPath));
 });
 
+it("marks which scripts CI reaches, including those a CI-run program spawns, apart from available checks", () => {
+	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: node scripts/qualify.mjs\n");
+	write(
+		"scripts/qualify.mjs",
+		[
+			'for (const step of ["typecheck", "lint"]) spawn("pnpm", ["run", step]);',
+			'if (!["release", "dev"].includes(mode)) throw new Error("bad mode");',
+			"",
+		].join("\n"),
+	);
+	write(
+		"package.json",
+		JSON.stringify({
+			scripts: {
+				typecheck: "tsc",
+				lint: "biome check . && pnpm run docs:check",
+				"docs:check": "node scripts/check-drift.mjs",
+				"library:check": "node scripts/pin.mjs --check",
+				release: "node scripts/release.mjs",
+				dev: "tsx watch src/main.ts",
+			},
+		}),
+	);
+	const inventory = collectEnforcementInventory(root);
+	deepStrictEqual(inventory.ciScripts, ["typecheck", "lint", "docs:check"]);
+	ok("library:check" in inventory.scripts);
+});
+
 it("hands the inventory to the bootstrap model", () => {
 	const prompt = buildBootstrapPrompt({
 		cwd: root,
