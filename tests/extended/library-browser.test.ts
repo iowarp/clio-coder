@@ -215,7 +215,7 @@ describe("library browser projection", () => {
 			{ ...BROWSE, scope: "project" },
 		);
 		equal(actions.remove, true);
-		match(actions.reasons.join(" "), /identify the whole owner plugin:materio in project scope/);
+		match(actions.reasons.join(" "), /identify the whole owner, the materio plugin, in project scope/);
 	});
 
 	it("refuses to read an absent package as proof when results were capped", () => {
@@ -284,8 +284,8 @@ describe("library review and outcome wording", () => {
 			refusal: "plugin:lab (project) would lose plugin:materio; repair or remove the dependent first.",
 		});
 		const body = plain(formatLibraryPlanReview(plan, 90).join("\n"));
-		match(body, /remove plugin:materio in project scope/);
-		match(body, /would break plugin:lab \(project\): needs plugin:materio/);
+		match(body, /remove the materio plugin in project scope/);
+		match(body, /would break the lab plugin \(project\): needs materio plugin/);
 		match(body, /No copy in the other scope/);
 		match(body, /Changed files are kept beside the package/);
 		match(body, /cannot be applied as reviewed/);
@@ -669,14 +669,14 @@ describe("library browser behavior", () => {
 		state.review?.accept();
 		equal(state.applied, 1);
 		deepStrictEqual(state.planned, [{ operation: "remove", ref: "plugin:materio", scope: "user" }]);
-		match(state.notices.map(([, text]) => text).join(" "), /plugin:materio: nothing changed\./);
+		match(state.notices.map(([, text]) => text).join(" "), /materio plugin: nothing changed\./);
 	});
 
 	it("refuses an install with missing requirements once, then reviews them together", () => {
 		const state = harness({ initialTab: "plugin", refusal: "needs skill:ship" });
 		state.press("i");
 		equal(state.review, null, "a refused plan is reported before a review is opened");
-		match(state.notices.map(([, text]) => text).join(" "), /needs skill:ship, which is not installed\. Press i again/);
+		match(state.notices.map(([, text]) => text).join(" "), /needs ship skill, which is not installed\. Press i again/);
 		equal(state.released, 1, "the refused plan is released rather than left staged");
 		state.press("i");
 		ok(state.review, "the second press reviews the requirements with it");
@@ -844,7 +844,7 @@ describe("library browser behavior", () => {
 		equal(state.imports, 0, "nothing is imported before the review is accepted");
 		state.review?.accept();
 		equal(state.imports, 1);
-		match(state.notices.map(([, text]) => text).join(" "), /Imported plugin:vendor-pack in user scope\./);
+		match(state.notices.map(([, text]) => text).join(" "), /Imported the vendor-pack plugin in user scope\./);
 	});
 
 	it("releases the staged vendor tree when an import review is cancelled", () => {

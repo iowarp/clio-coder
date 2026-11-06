@@ -478,6 +478,8 @@ export interface DecisionLedgerEntry extends BaseSessionEntry {
 	endedAt: string;
 	roundCount: number;
 	summary?: string;
+	/** The questions the interview asked, in order, so an entry that recorded no answer still says what it was about. */
+	questions?: string[];
 	transcriptPath?: string;
 	exposure?: AutonomyExposure;
 	decisions: DecisionRecord[];
@@ -950,6 +952,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				Number.isInteger(v.roundCount) &&
 				v.roundCount >= 0 &&
 				isOptionalString(v.summary) &&
+				(v.questions === undefined || isStringArray(v.questions)) &&
 				isOptionalString(v.transcriptPath) &&
 				(v.exposure === undefined || isOneOf(v.exposure, AUTONOMY_EXPOSURES)) &&
 				Array.isArray(v.decisions) &&

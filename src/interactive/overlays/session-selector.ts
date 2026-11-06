@@ -14,9 +14,10 @@ import {
 	type TUI,
 	truncateToWidth,
 } from "../../engine/tui.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "../escape-layers.js";
 import { relative } from "../format-time.js";
 import {
-	buildHint,
+	buildResponsiveHint,
 	centeredWindow,
 	DEFAULT_SELECT_THEME,
 	FILTER_HINT,
@@ -184,8 +185,8 @@ function createSessionOverlayBox(
 	sessions: ReadonlyArray<SessionMeta>,
 	onSelect: (sessionId: string) => void,
 	onClose: () => void,
-	options: { escapeGraceMs?: number; initialQuery?: string } = {},
-): FocusBox & { dispose(): void } {
+	options: { escapeGraceMs?: number; initialQuery?: string; requestRender?: () => void } = {},
+): FocusBox & { dispose(): void; escapeLayers(): EscapeLayers } {
 	const input = new Input();
 	const noMatchView = new Text("");
 	const allSessions = [...sessions];
@@ -202,6 +203,25 @@ function createSessionOverlayBox(
 	const box = new FocusBox(input, { onInput: handleInput }) as FocusBox & {
 		dispose(): void;
 		setBodyRows(rows: number): void;
+		escapeLayers(): EscapeLayers;
+	};
+	// A typed filter is a layer of its own: Esc clears it and keeps the picker, and a second Esc closes.
+	box.escapeLayers = (): EscapeLayers => [
+		input.getValue().length > 0 && {
+			verb: "clear filter",
+			short: "clear",
+			back: () => {
+				input.setValue("");
+				lastQuery = "";
+				applyFilter();
+				options.requestRender?.();
+			},
+		},
+		{ verb: "close", back: closeOverlay },
+	];
+	const escapeOnce = (): void => {
+		clearPendingEscape();
+		backOutOneLayer(box.escapeLayers());
 	};
 	box.setBodyRows = (rows: number): void => {
 		const next = rows > 0 ? Math.max(1, Math.min(VISIBLE_ROWS, Math.floor((rows - 2) / 2))) : VISIBLE_ROWS;
@@ -237,7 +257,7 @@ function createSessionOverlayBox(
 			closeOverlay();
 		};
 		list.onCancel = (): void => {
-			closeOverlay();
+			escapeOnce();
 		};
 		return list;
 	}
@@ -301,7 +321,7 @@ function createSessionOverlayBox(
 		pendingEscapeTimer = setTimeout(() => {
 			pendingEscapeTimer = null;
 			pendingEscape = "";
-			onClose();
+			escapeOnce();
 		}, options.escapeGraceMs ?? SESSION_ESCAPE_GRACE_MS);
 	}
 
@@ -343,7 +363,10 @@ function createSessionOverlayBox(
 				armPendingEscape(combined);
 				return;
 			}
-			closeOverlay();
+			// A lone Esc followed by an ordinary key: the Esc backs out one layer, and the key still counts if the picker stays.
+			const closing = box.escapeLayers().filter(Boolean).length === 1;
+			escapeOnce();
+			if (!closing) dispatchResolvedInput(data);
 			return;
 		}
 		if (isBareEscape(data)) {
@@ -351,7 +374,7 @@ function createSessionOverlayBox(
 			return;
 		}
 		if (matchesKey(data, "esc")) {
-			closeOverlay();
+			escapeOnce();
 			return;
 		}
 		dispatchResolvedInput(data);
@@ -364,14 +387,21 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 		sessions,
 		(sessionId) => deps.onResume(sessionId),
 		() => deps.onClose(),
-		deps.initialQuery !== undefined ? { initialQuery: deps.initialQuery } : {},
+		{
+			...(deps.initialQuery !== undefined ? { initialQuery: deps.initialQuery } : {}),
+			requestRender: () => tui.requestRender(),
+		},
 	);
 	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SESSION_OVERLAY_WIDTH,
 		markerId: "resume",
 		title: "Sessions",
-		footerHint: buildHint([FILTER_HINT, { key: "Enter", verb: "resume" }]),
+		footerHint: (innerWidth) =>
+			buildResponsiveHint(
+				[FILTER_HINT, { key: "Enter", verb: "resume" }],
+				escapeHintEntry(box.escapeLayers()),
+			)(innerWidth),
 	});
 	return {
 		...handle,

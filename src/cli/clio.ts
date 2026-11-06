@@ -6,6 +6,12 @@ import { formatSettingsLayerWarning } from "../core/settings-layer-diagnostics.j
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
 import type { BootOptions } from "../entry/boot-options.js";
 import { classifyDefaultTarget, describeKeptChatRoute, describeVerdict, homeIsReturning } from "./default-target.js";
+import { terminalColumns, wrapPlain } from "./text-layout.js";
+
+/** A startup notice wrapped to the terminal, so a 60-column first run does not break it mid-word at the edge. */
+function wrapToTerminal(text: string): string {
+	return `${wrapPlain(text, terminalColumns(process.stdout) - 1).join("\n")}\n`;
+}
 
 /** Headless and ACP keep their established non-TUI transports even when an
  * embedding process leaves the interactive marker in the environment. */
@@ -71,20 +77,22 @@ export async function runClioCommand(
 				);
 				return 2;
 			}
-			process.stdout.write(`${describeKeptChatRoute(startupSettings, verdict)}\n`);
+			process.stdout.write(wrapToTerminal(describeKeptChatRoute(startupSettings, verdict)));
 		} else if (existingHome && verdict.kind !== "usable") {
 			const { adoptDetectedChatRoute, describeAdoptedRoute } = await import("./detect-chat-routes.js");
 			const adopted = await adoptDetectedChatRoute(startupSettings);
 			if (adopted) {
 				startupSettings = adopted.settings;
 				detected = true;
-				process.stdout.write(`${describeAdoptedRoute(adopted)} Change it with /config.\n`);
+				process.stdout.write(wrapToTerminal(`${describeAdoptedRoute(adopted)} Change it with /config.`));
 			}
 		}
 		if (!detected && !keptRoute && verdict.kind !== "usable") {
 			// The one next action, and that nothing else can run until it is done (HI02).
 			process.stdout.write(
-				`${describeVerdict(verdict)} Clio needs a model before it can do anything else, so setup starts now.\n`,
+				wrapToTerminal(
+					`${describeVerdict(verdict)} Clio needs a model before it can do anything else, so setup starts now.`,
+				),
 			);
 			const { runConfigureCommand } = await import("./configure.js");
 			const configured = await runConfigureCommand([], process.stdin, process.stdout, true);

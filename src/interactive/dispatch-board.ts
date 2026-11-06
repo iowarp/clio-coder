@@ -2125,9 +2125,17 @@ export function dispatchBoardHintEntries(
 	return entries;
 }
 
+/**
+ * Esc by the shared rule: an open run detail is a layer, so Esc folds it and
+ * the board stays; from the table Esc closes the board.
+ */
+export function dispatchBoardEscapeEntry(board: { detailExpanded(): boolean }): HintEntry {
+	return board.detailExpanded() ? { key: "Esc", verb: "hide detail", short: "hide" } : { key: "Esc", verb: "close" };
+}
+
 /** The keys the frame's rail drops at this width, as rows under the table; the arrows are on the position row. */
-function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number): string[] {
-	const all: HintEntry[] = [...entries, { key: "Esc", verb: "close" }];
+function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number, esc: HintEntry): string[] {
+	const all: HintEntry[] = [...entries, esc];
 	// The frame fits its rail into the body's width less one cell.
 	const { kept } = fitHintEntryList(all, width - 1);
 	// Splitting off a watch pane from a terminal this narrow leaves two unreadable halves, so the key goes unadvertised
@@ -2216,7 +2224,7 @@ export function createDispatchBoardView(
 					.filter((run) => run.evidence)
 					.map((run) => run.runId)
 					.join(",") ?? "";
-			const keyRows = droppedKeyRows(dispatchBoardHintEntries(view), safeWidth);
+			const keyRows = droppedKeyRows(dispatchBoardHintEntries(view), safeWidth, dispatchBoardEscapeEntry(view));
 			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${keyRows.join("/")}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
 			const body = formatDispatchBoardBody(

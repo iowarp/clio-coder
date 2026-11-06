@@ -3917,7 +3917,9 @@ export class SettingsCenter implements Component {
 				(count, section) => count + section.items.filter((item) => this.isSelectableRow(item)).length,
 				0,
 			);
-			const text = `filter “${this.filterQuery}” · ${matches} ${matches === 1 ? "match" : "matches"} · Esc clears · / starts over`;
+			// `Esc clears` only while the filter is the next thing Esc backs out of; under an open edit or scope card Esc means that layer.
+			const escClears = innermostEscapeLayer(this.escapeLayers())?.verb === "clear filter";
+			const text = `filter “${this.filterQuery}” · ${matches} ${matches === 1 ? "match" : "matches"}${escClears ? " · Esc clears" : ""} · / starts over`;
 			return [truncateToWidth(clioTheme().fg("searchQuery", text), width, GLYPH.ellipsis, false)];
 		}
 		// The editor draws its own caret, so the row stops faking one with `_`.
