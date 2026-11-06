@@ -11,13 +11,15 @@ import { withRunFailureReporting, writeRunDiagnostic } from "../../src/cli/run-f
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
-import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
+import { appendRunFeed, holdBack, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	endsInOpenCredential,
+	headGuardAfter,
 	holdUnresolvedUserinfo,
 	redactFinalUrlCredentials,
 	redactSecretString,
+	redactStreamingUrlCredentials,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../src/domains/safety/redaction.js";
@@ -144,6 +146,31 @@ test("a run feed bound never leaves a secret query value without its name", asyn
 		ok(!value.join("\n").match(SECRET_LETTERS), JSON.stringify(value.map((row) => row.slice(0, 60))));
 	} finally {
 		env.restore();
+	}
+});
+
+test("a feed's hold back checks each word of repeated secret names a bounded number of times", () => {
+	for (const unit of ["password: ", "token "]) {
+		const text = unit.repeat(3000);
+		let checks = 0;
+		const counted = (removed: string) => {
+			checks += 1;
+			return headGuardAfter(removed);
+		};
+		let carry = "";
+		let guarded = 0;
+		let deltas = 0;
+		for (let at = 0; at < text.length; at += 8) {
+			const held = holdBack(carry + text.slice(at, at + 8), guarded, counted);
+			// Every word names a secret, so none of the run can leave without the value that would follow it.
+			strictEqual(held.head, "");
+			carry = held.tail;
+			guarded = held.guardedThrough;
+			deltas += 1;
+		}
+		strictEqual(carry, text);
+		// Rescanning the carry per delta made these checks grow with the square of the run: 3.5 ms per delta at 138 KB (#448).
+		ok(checks <= 4 * deltas, `${unit}: ${checks} checks for ${deltas} deltas`);
 	}
 });
 
@@ -1243,6 +1270,83 @@ test("a long run of parameter delimiters stays linear", () => {
 		const started = performance.now();
 		redactUrlCredentials(unit.repeat(Math.ceil(320_000 / unit.length)));
 		ok(performance.now() - started < 1_000, unit);
+	}
+});
+
+// The shapes #446 left showing: a fragment, a JSON-escaped URL, a percent-encoded one, a scheme-relative one and two JDBC forms.
+const ESCAPED_SHAPES: ReadonlyArray<readonly [string, string]> = [
+	["https://h/cb#access_token=ZQXJ", "https://h/cb#access_token=[redacted]"],
+	["https:\\/\\/alice:ZQXJ@h\\/r", "https:\\/\\/alice:[redacted]@h\\/r"],
+	["https%3A%2F%2Falice%3AZQ%40XJ%40h", "https%3A%2F%2Falice%3A[redacted]%40h"],
+	["//alice:ZQXJ@h/x", "//alice:[redacted]@h/x"],
+	["jdbc:oracle:thin:scott/ZQXJ@//db:1521/svc", "jdbc:oracle:thin:scott/[redacted]@//db:1521/svc"],
+	["jdbc:sqlserver://db:1433;password=ZQ@XJ;", "jdbc:sqlserver://db:1433;password=[redacted];"],
+];
+
+test("the URL rule hides a fragment token, an escaped or scheme-relative URL and a JDBC password", () => {
+	for (const [shape, redacted] of ESCAPED_SHAPES) {
+		for (const [text, expected] of [
+			[shape, redacted],
+			[`see ${shape} now`, `see ${redacted} now`],
+			[`{"u":"${shape}","v":1}`, `{"u":"${redacted}","v":1}`],
+		] as const) {
+			strictEqual(redactUrlCredentials(text), expected);
+			strictEqual(redactStreamingUrlCredentials(text, true), expected);
+			ok(!SECRET_LETTERS.test(redactSecretsText(text, createRedactionTally())), text);
+		}
+	}
+});
+
+test("no split of an escaped or JDBC shape shows its password on a streaming surface", async () => {
+	const env = await isolateClioEnv("url-surfaces-escaped-");
+	try {
+		for (const [index, [shape, redacted]] of ESCAPED_SHAPES.entries()) {
+			const text = `see ${shape} next words`;
+			for (let cut = 0; cut <= text.length; cut += 1) {
+				const head = text.slice(0, cut);
+				ok(!SECRET_LETTERS.test(redactStreamingUrlCredentials(head)), `frame ${head}`);
+				ok(!SECRET_LETTERS.test(redactFinalUrlCredentials(head, false)), `cut off ${head}`);
+				const filter = new UrlCredentialStreamFilter();
+				const sent = filter.push(head) + filter.push(text.slice(cut)) + filter.end(true);
+				strictEqual(sent, `see ${redacted} next words`, `append-only split at ${cut}`);
+				const segments = redactSecretSegments([head, text.slice(cut)], createRedactionTally());
+				ok(!SECRET_LETTERS.test(segments.join("")), `segments split at ${cut}`);
+			}
+			const filter = new UrlCredentialStreamFilter();
+			let sent = "";
+			for (const char of text) sent += filter.push(char);
+			strictEqual(sent + filter.end(true), `see ${redacted} next words`);
+			// A feed bound can land anywhere in the shape, which a quote sets apart from the run ahead of it.
+			const bounded = `"${shape}" next words`;
+			for (let cut = 0; cut <= bounded.length; cut += 1) {
+				const lead = "x".repeat(4090) + bounded.slice(0, cut);
+				const rows = feedText(`escaped-${index}-${cut}`, lead, bounded.slice(cut), MESSAGE_STOP).join("");
+				ok(!SECRET_LETTERS.test(rows), `${shape} bound split at ${cut}: ${rows.slice(-60)}`);
+			}
+		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("ordinary URLs and prose near the escaped shapes stay whole on every surface", () => {
+	for (const text of [
+		"see //cdn.example.com/x.js now",
+		"a // comment: here and a//b:c@d",
+		'{"a":"http:\\/\\/h:8080\\/x","b":"me@corp.com"}',
+		"url https%3A%2F%2Fexample.com%3A443%2Fp ok",
+		"jdbc:oracle:thin:@db:1521:orcl",
+		"jdbc:postgresql://host:5432/db?user=app",
+		"https://h/#/route?x=1 and issue #448",
+		"100% done, path/to//file, ratio 3/4@home",
+		"BASE_TOKENS=100 and --token to pass",
+	]) {
+		strictEqual(redactUrlCredentials(text), text);
+		strictEqual(holdUnresolvedUserinfo(text), text);
+		const filter = new UrlCredentialStreamFilter();
+		let sent = "";
+		for (const char of text) sent += filter.push(char);
+		strictEqual(sent + filter.end(true), text);
 	}
 });
 
