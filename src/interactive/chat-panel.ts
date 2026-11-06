@@ -245,7 +245,14 @@ export interface ChatPanelRegions {
 
 const NO_ROWS: readonly string[] = Object.freeze([]);
 
-type RowMemo = { width: number; bareFences: boolean; epoch: number; rows: Map<string, string[]> };
+type RowMemo = {
+	width: number;
+	bareFences: boolean;
+	epoch: number;
+	rows: Map<string, string[]>;
+	/** Each prose row's text without terminal sequences, which the operator lift reads on every frame. */
+	plain: Map<string, string>;
+};
 
 type TextSegment = {
 	kind: "text";
@@ -991,14 +998,22 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
  * typesetting breaks after a binary operator. A row above that is itself a list item at the same indent
  * is a list, not a wrapped paragraph, and is left alone.
  */
-function liftLeadingOperator(above: string, row: string, width: number): [string, string] | null {
-	const lead = /^( *)([-+]) (?=\S)/u.exec(stripTerminalSequences(row));
+function liftLeadingOperator(
+	above: string,
+	row: string,
+	width: number,
+	plain: (row: string) => string,
+): [string, string] | null {
+	// Most rows hold no operator at all, and this runs on every row of every frame, so they skip the strip.
+	if (!row.includes("- ") && !row.includes("+ ")) return null;
+	const lead = /^( *)([-+]) (?=\S)/u.exec(plain(row));
 	if (lead === null) return null;
 	const indent = lead[1] ?? "";
 	// Styling may open before the marker, so the marker is found past any escape sequences.
 	const at = row.indexOf(`${lead[2]} `, indent.length);
 	if (at < 0 || stripTerminalSequences(row.slice(0, at)) !== indent) return null;
-	const plainAbove = stripTerminalSequences(above).replace(/ +$/u, "");
+	const plainAbove = plain(above).replace(/ +$/u, "");
+	if (plainAbove.trim() === "") return null;
 	if (!plainAbove.startsWith(indent) || plainAbove.charAt(indent.length) === " ") return null;
 	if (/^ *(?:[-+*]|\d+[.)]) /u.test(plainAbove)) return null;
 	const raised = `${above.replace(/ +$/u, "")} ${lead[2]}`;
@@ -1041,6 +1056,14 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 	// The prose row last drawn and where its parts sit, so a wrap that left an operator leading the next row can move it back.
 	let prose: { raw: string; at: number; count: number } | null = null;
 	const codeKeys: string[] = [];
+	const plainRow = (row: string): string => {
+		let text = memo?.plain.get(row);
+		if (text === undefined) {
+			text = stripTerminalSequences(row);
+			memo?.plain.set(row, text);
+		}
+		return text;
+	};
 	const flushCode = (): void => {
 		if (code === null) return;
 		const key = `\0code\0${code}`;
@@ -1076,7 +1099,7 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 			continue;
 		}
 		let current = row;
-		const lifted = prose === null ? null : liftLeadingOperator(prose.raw, row, width);
+		const lifted = prose === null ? null : liftLeadingOperator(prose.raw, row, width, plainRow);
 		if (prose !== null && lifted !== null) {
 			rows.splice(prose.at, prose.count, ...fitMarkdownRow(lifted[0], width, bareFences));
 			current = lifted[1];
@@ -1086,7 +1109,8 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 			parts = fitMarkdownRow(current, width, bareFences);
 			memo?.rows.set(current, parts);
 		}
-		prose = stripTerminalSequences(current).trim() === "" ? null : { raw: current, at: rows.length, count: parts.length };
+		// A blank row above is ruled out inside the lift, so only rows that could lift pay for the strip.
+		prose = { raw: current, at: rows.length, count: parts.length };
 		for (const part of parts) rows.push(part);
 	}
 	flushCode();
@@ -1098,6 +1122,12 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 			if (parts !== undefined) live.set(key, parts);
 		}
 		memo.rows = live;
+		const plain = new Map<string, string>();
+		for (const key of padded) {
+			const text = memo.plain.get(key);
+			if (text !== undefined) plain.set(key, text);
+		}
+		memo.plain = plain;
 	}
 	return rows;
 }
@@ -1133,7 +1163,7 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	}
 	let memo = seg.rowMemo;
 	if (memo?.width !== width || memo.bareFences !== bareFences || memo.epoch !== epoch)
-		memo = seg.finalized ? undefined : { width, bareFences, epoch, rows: new Map() };
+		memo = seg.finalized ? undefined : { width, bareFences, epoch, rows: new Map(), plain: new Map() };
 	// A settled segment can last the whole session, so it keeps only its layouts.
 	seg.rowMemo = seg.finalized ? undefined : memo;
 	const lines = withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences, memo));
