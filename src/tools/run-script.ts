@@ -1,6 +1,7 @@
 import { closeSync, openSync, realpathSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
+import { bashSecretValues } from "../core/bash-exec.js";
 import {
 	assertRunRecordIntact,
 	captureFileRef,
@@ -24,8 +25,10 @@ import {
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
+import { knownSecretValues } from "../core/sandbox/env-scrub.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import type { DynamicToolName } from "../core/tool-names.js";
+import { redactKnownSecrets } from "../domains/evidence/redact.js";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
 import { StringEnum } from "../engine/ai.js";
@@ -433,6 +436,8 @@ export interface RunScriptProgressInput {
 	scheduler?: RunScriptScheduler;
 	throttleMs?: number;
 	tailBytes?: number;
+	/** Masks known credential values in each tail before it is shown. */
+	mask?: (text: string) => string;
 }
 
 /**
@@ -453,17 +458,20 @@ export function createRunScriptProgressController(input: RunScriptProgressInput)
 	let dirty = false;
 	let timer: unknown = null;
 
+	const mask = input.mask ?? ((text: string) => text);
 	const snapshot = (): ToolResult => {
 		const elapsedMs = Math.max(0, scheduler.now() - startedAt);
 		const out = stdoutTail.render();
 		const err = stderrTail.render();
+		const outText = mask(out.text);
+		const errText = mask(err.text);
 		const lines = [
 			`run_script: running ${input.label} (${formatElapsed(elapsedMs)} elapsed)`,
 			`stdout: ${out.totalBytes} bytes | stderr: ${err.totalBytes} bytes`,
 			"--- stdout tail ---",
-			out.text.length > 0 ? out.text : "(no output yet)",
+			outText.length > 0 ? outText : "(no output yet)",
 			"--- stderr tail ---",
-			err.text.length > 0 ? err.text : "(no output yet)",
+			errText.length > 0 ? errText : "(no output yet)",
 		];
 		return {
 			kind: "ok",
@@ -795,12 +803,20 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			}
 
 			const label = [request.interpreter, ...request.interpreterArgs, request.scriptRelative, ...request.args].join(" ");
+			// The same known-value masking bash output gets: credential values from the environment bash would see, the
+			// credentials Clio resolved, and any credential-named value the call itself declared for the script.
+			const secrets = [
+				...(await bashSecretValues(options?.shellSandbox?.env.secretNames)),
+				...knownSecretValues(request.env),
+			];
+			const mask = (text: string): string => redactKnownSecrets(text, secrets);
 			const progress =
 				options?.onUpdate === undefined
 					? null
 					: createRunScriptProgressController({
 							onUpdate: options.onUpdate,
 							label,
+							mask,
 							...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
 						});
 			const vector = [...request.interpreterArgs, request.scriptRealPath, ...request.args];
@@ -853,6 +869,8 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 				closeQuietly(logs.stderr.fd);
 			}
 
+			// Only the tails shaped for the result are masked; the logs on disk keep the bytes the script wrote.
+			result = { ...result, stdout: mask(result.stdout), stderr: mask(result.stderr) };
 			const finishedAt = now();
 			const outcome = classifyOutcome(result);
 			const outputRefs: RunOutputRef[] = [];

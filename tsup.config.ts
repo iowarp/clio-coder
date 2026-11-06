@@ -6,7 +6,12 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineConfig } from "tsup";
 import { artifactBytes, buildVerbose, reportBuildStage } from "./scripts/build-output.js";
-import { GRAMMAR_ASSETS, type GrammarAssetSource } from "./src/domains/context/codewiki/grammar-assets.js";
+import {
+	FETCHED_GRAMMAR_PACKAGE,
+	FETCHED_GRAMMARS,
+	GRAMMAR_ASSETS,
+	type GrammarAssetSource,
+} from "./src/domains/context/codewiki/grammar-assets.js";
 
 const require = createRequire(import.meta.url);
 const buildStartedAt = performance.now();
@@ -63,11 +68,27 @@ function vendorTuiNotices(): void {
 }
 
 /**
- * Vendor the twelve wasm files the codewiki indexer loads into
+ * Vendor the ten wasm files the codewiki indexer loads from the package into
  * dist/assets/grammars/ so the package needs neither grammar collection at
- * install time (~72MB between them; ~19MB actually used).
+ * install time. The fetched grammars stay out; their pins are checked here
+ * against the installed devDependency so a version bump cannot leave Clio
+ * fetching a grammar built for another runtime.
  */
 function vendorGrammars(): void {
+	const vscodeDir = GRAMMAR_SOURCE_DIRS["@vscode/tree-sitter-wasm"];
+	const installed = (JSON.parse(readFileSync(join(dirname(vscodeDir), "package.json"), "utf8")) as { version: string })
+		.version;
+	if (installed !== FETCHED_GRAMMAR_PACKAGE.version) {
+		throw new Error(
+			`FETCHED_GRAMMAR_PACKAGE pins ${FETCHED_GRAMMAR_PACKAGE.name}@${FETCHED_GRAMMAR_PACKAGE.version} but ${installed} is installed; re-pin grammar-assets.ts`,
+		);
+	}
+	for (const grammar of FETCHED_GRAMMARS) {
+		const actual = createHash("sha256")
+			.update(readFileSync(join(vscodeDir, grammar.file)))
+			.digest("hex");
+		if (actual !== grammar.sha256) throw new Error(`${grammar.file} sha256 ${actual} does not match its pin`);
+	}
 	const target = join("dist", "assets", "grammars");
 	rmSync(target, { recursive: true, force: true });
 	mkdirSync(target, { recursive: true });
@@ -112,10 +133,14 @@ export default defineConfig({
 	// The web-tree-sitter runtime (bundled from @vscode/tree-sitter-wasm) is a
 	// UMD that probes `__filename` at module scope; the ESM shim supplies it.
 	shims: true,
-	// No minification, by decision (#64, #65): dist/ is Clio-facing. It reads
-	// its own installed code, and stack traces from the field must name real
-	// symbols. The ~2MB it would save is not worth an opaque package.
-	minify: false,
+	// Whitespace and syntax minification only. Identifiers are never mangled
+	// and keepNames pins every function and class `.name`, so field stack
+	// traces still name real symbols (#64, #65). Clio reads its own installed
+	// code from src/, which ships unminified, never from dist/.
+	minifyWhitespace: true,
+	minifySyntax: true,
+	minifyIdentifiers: false,
+	keepNames: true,
 	// Node 22.19 ships `node:sqlite`; retaining the protocol prevents tsup from
 	// turning that newer builtin into a lookup for the nonexistent `sqlite` package.
 	removeNodeProtocol: false,

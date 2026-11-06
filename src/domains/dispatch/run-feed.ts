@@ -40,6 +40,8 @@ import {
 	cutHeadGuard,
 	dropCutHead,
 	endsInOpenCredential,
+	firstAuthorityOpener,
+	formingCredentialStart,
 	headGuardAfter,
 	holdCutOffText,
 	holdUnresolvedUserinfo,
@@ -141,6 +143,8 @@ interface WriterState {
 	headGuard: CutHeadGuard | null;
 	/** The carry is a name a bound kept back that names a secret, and the next text decides whether its value is attached. */
 	boundSecretName: boolean;
+	/** How far into the carry {@link holdBack} has proved every word start leads into a secret; 0 once the carry is replaced. */
+	carryGuardedThrough: number;
 }
 
 const writers = new Map<string, WriterState>();
@@ -167,6 +171,7 @@ function loadWriterState(path: string): WriterState {
 		carryAt: "",
 		headGuard: null,
 		boundSecretName: false,
+		carryGuardedThrough: 0,
 	};
 	const tail = readTail(path, 64 * 1024);
 	if (tail === null) return state;
@@ -224,22 +229,44 @@ function writeBounded(path: string, state: WriterState, body: RunEventJournalBod
 	if (body.kind === "terminal") state.closed = true;
 }
 
+/** Where the last word ending at or before `end` starts, or -1 when only whitespace is left. */
+function wordStartBefore(text: string, end: number): number {
+	let at = end;
+	while (at > 0 && /\s/u.test(text.charAt(at - 1))) at -= 1;
+	if (at === 0) return -1;
+	while (at > 0 && !/\s/u.test(text.charAt(at - 1))) at -= 1;
+	return at;
+}
+
 /**
  * Split prose at the start of its last two words, the most a credential pattern spans across whitespace, and further back
  * while the head would end in a key whose value is left in the tail, since neither row could then match it (#446).
+ *
+ * `guardedThrough` is where the previous call's walk began in the carry that leads `text`. Every word start from there back to
+ * the carry's start already failed the check against this same prefix, so a walk reaching it ends at the start. Text that
+ * repeats `password: ` fails at every word, and rescanning the whole carry per delta cost 3.5 ms each (#448). `guardAfter`
+ * is the check itself, which a caller can count to see the walk stay bounded.
  */
-function holdBack(text: string): { head: string; tail: string } {
-	const words = /\S+\s*$/u;
-	const last = text.search(words);
-	if (last <= 0) return { head: "", tail: text };
-	const previous = text.slice(0, last).search(words);
-	let cut = previous < 0 ? last : previous;
-	while (cut > 0 && headGuardAfter(text.slice(0, cut)) !== null) {
-		const word = text.slice(0, cut).search(words);
+export function holdBack(
+	text: string,
+	guardedThrough: number,
+	guardAfter: (removed: string) => CutHeadGuard | null = headGuardAfter,
+): { head: string; tail: string; guardedThrough: number } {
+	const last = wordStartBefore(text, text.length);
+	if (last <= 0) return { head: "", tail: text, guardedThrough };
+	const previous = wordStartBefore(text, last);
+	const start = previous < 0 ? last : previous;
+	let cut = start;
+	while (cut > 0 && guardAfter(text.slice(0, cut)) !== null) {
+		if (cut <= guardedThrough) {
+			cut = 0;
+			break;
+		}
+		const word = wordStartBefore(text, cut);
 		if (word < 0) break;
 		cut = word;
 	}
-	return { head: text.slice(0, cut), tail: text.slice(cut) };
+	return { head: text.slice(0, cut), tail: text.slice(cut), guardedThrough: start - cut };
 }
 
 /**
@@ -250,20 +277,30 @@ function holdBack(text: string): { head: string; tail: string } {
 function carryBoundCut(carry: string): number {
 	const split = carryTailCut(carry);
 	const bounded = carry.slice(0, split);
-	if (holdUnresolvedUserinfo(bounded) === bounded && !endsInOpenCredential(bounded)) return split;
+	if (
+		holdUnresolvedUserinfo(bounded) === bounded &&
+		!endsInOpenCredential(bounded) &&
+		formingCredentialStart(bounded) === null
+	)
+		return split;
 	// A row ending inside a URL would make the discard take the text after it, though `http://localhost:8` holds no secret. The
 	// kept URLs go to the next row whole instead, with the one scheme character the pattern reads, starting from the first since
 	// `http://a,http://b` leaves the first open. Only a URL that outgrows the keep is left to the discard, as nothing tells a
-	// password that long from a host (#446).
-	const url = carry.indexOf("://", carry.length - OPEN_TAIL_KEEP_CHARS);
+	// password that long from a host (#446). Escaped, percent-encoded and scheme-relative URLs move the same way (#448).
+	const url = firstAuthorityOpener(carry, carry.length - OPEN_TAIL_KEEP_CHARS);
 	return url > 0 && url < split ? url - 1 : split;
 }
 
 function carryTailCut(carry: string): number {
-	const param = Math.max(carry.lastIndexOf("&"), carry.lastIndexOf("?"));
+	const param = Math.max(carry.lastIndexOf("&"), carry.lastIndexOf("?"), carry.lastIndexOf("#"));
 	if (param > 0 && carry.length - param <= OPEN_TAIL_KEEP_CHARS && !/\s/u.test(carry.slice(param))) return param;
-	// One character is all the pattern reads ahead of a `://`, and any word can turn out to be a scheme.
-	return openNameStart(carry) ?? (SCHEME_CHAR_RE.test(carry.charAt(carry.length - 1)) ? carry.length - 1 : carry.length);
+	// One character is all the pattern reads ahead of a `://`, and any word can turn out to be a scheme. A piece of an escaped
+	// opener or an Oracle JDBC prefix goes to the next row whole. `jdbc:oracle:` also ends in a name, so the earlier start
+	// wins (#448).
+	const name = openNameStart(carry);
+	const forming = formingCredentialStart(carry);
+	if (name !== null || forming !== null) return Math.min(name ?? carry.length, forming ?? carry.length);
+	return SCHEME_CHAR_RE.test(carry.charAt(carry.length - 1)) ? carry.length - 1 : carry.length;
 }
 
 /**
@@ -301,16 +338,18 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 					writeBounded(path, state, { kind: "event", type: "text", detail: state.carry }, state.carryAt);
 					state.headGuard = headGuardAfter(state.carry);
 					state.carry = "";
+					state.carryGuardedThrough = 0;
 				}
 			}
 			if (state.headGuard !== null) {
 				detail = dropCutHead(detail, state.headGuard);
 				if (state.headGuard.tokens === 0) state.headGuard = null;
 			}
-			const { head, tail } = holdBack(state.carry + detail);
+			const { head, tail, guardedThrough } = holdBack(state.carry + detail, state.carryGuardedThrough);
 			if (state.carry.length === 0) state.carryAt = at;
 			if (head.length > 0) writeBounded(path, state, { ...body, detail: head }, state.carryAt);
 			state.carry = tail;
+			state.carryGuardedThrough = guardedThrough;
 			state.carryAt = head.length > 0 ? at : state.carryAt;
 			if (state.carry.length > TEXT_CARRY_MAX_CHARS) {
 				// One run outgrew the carry. A piece of a URL on each side of this row would match nothing (#446).
@@ -321,6 +360,7 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 				if (open) state.headGuard = cutHeadGuard();
 				writeBounded(path, state, { kind: "event", type: "text", detail: shown }, state.carryAt);
 				state.carry = open ? "" : state.carry.slice(split);
+				state.carryGuardedThrough = 0;
 				state.carryAt = at;
 				state.boundSecretName = openNameStart(state.carry) === 0 && namesSecret(state.carry);
 			}
@@ -331,6 +371,7 @@ export function appendRunFeed(runId: string, body: RunEventJournalBody, at: stri
 			const detail = carry === "hold" ? holdCutOffText(state.carry) : state.carry;
 			if (detail.length > 0) writeBounded(path, state, { kind: "event", type: "text", detail }, state.carryAt);
 			state.carry = "";
+			state.carryGuardedThrough = 0;
 			// The next text starts a new block, so nothing of it continues what the guard covers.
 			state.headGuard = null;
 			state.boundSecretName = false;

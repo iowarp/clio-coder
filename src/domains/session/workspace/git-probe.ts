@@ -16,6 +16,8 @@ export interface GitProbeResult {
 	behind: number | null;
 	recentCommits: ReadonlyArray<{ sha: string; subject: string }>;
 	remoteUrl: string | null;
+	/** HEAD names no branch (a tag checkout, a rebase in progress): the commit it sits on, abbreviated. */
+	detachedAt?: string;
 	/** Git did not answer whether this is a repository in time, so that is unknown rather than no. */
 	undetermined?: true;
 }
@@ -31,6 +33,8 @@ export interface GitStatusProbeResult {
 	branch: string | null;
 	dirty: boolean | null;
 	remoteUrl: string | null;
+	/** HEAD names no branch (a tag checkout, a rebase in progress): the commit it sits on, abbreviated. */
+	detachedAt?: string;
 	/** Git did not answer whether this is a repository in time, so that is unknown rather than no. */
 	undetermined?: true;
 }
@@ -151,6 +155,17 @@ function branchFrom(raw: string | null): string | null {
 	return raw && raw !== "HEAD" ? raw : null;
 }
 
+/**
+ * `rev-parse --abbrev-ref HEAD` answers `HEAD` when no branch is checked out. The footer said `no Git branch` then, so
+ * a tag checked out during release qualification read as a checkout without Git while the session's context still
+ * named the branch it had bound on.
+ */
+const DETACHED_SHA_ARGS = ["rev-parse", "--short", "HEAD"];
+
+function detachedFrom(raw: string | null): { detachedAt: string } | Record<string, never> {
+	return raw ? { detachedAt: raw } : {};
+}
+
 function dirtyFrom(status: string | null): boolean | null {
 	return status === null ? null : status.length > 0;
 }
@@ -189,11 +204,12 @@ export function probeGit(cwd: string): GitProbeResult {
 	const asked = gateSync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
 	if (asked.timedOut) return UNDETERMINED_PROBE;
 	const branch = branchFrom(asked.out);
+	const detached = asked.out === "HEAD" ? detachedFrom(gitOk(cwd, DETACHED_SHA_ARGS)) : {};
 	const dirty = dirtyFrom(gitOk(cwd, ["status", "--porcelain", "--", "."]));
 	const { ahead, behind } = aheadBehindFrom(gitOk(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{u}"]));
 	const recentCommits = recentCommitsFrom(gitOk(cwd, ["log", "-5", "--format=%H%x09%s", "--", "."]));
 	const remoteUrl = remoteFrom(gitOk(cwd, ["remote", "get-url", "origin"]));
-	return { isGit: true, branch, dirty, ahead, behind, recentCommits, remoteUrl };
+	return { isGit: true, branch, dirty, ahead, behind, recentCommits, remoteUrl, ...detached };
 }
 
 /**
@@ -217,6 +233,7 @@ export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
 	]);
 	// A branch question that ran out of time is unknown, not detached: the footer read `no Git branch` under load.
 	if (branch.timedOut) return UNDETERMINED_PROBE;
+	const detached = branch.out === "HEAD" ? detachedFrom(await gitOkAsync(cwd, DETACHED_SHA_ARGS)) : {};
 	const { ahead, behind } = aheadBehindFrom(aheadBehindRaw);
 	return {
 		isGit: true,
@@ -226,6 +243,7 @@ export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
 		behind,
 		recentCommits: recentCommitsFrom(log),
 		remoteUrl: remoteFrom(remoteRaw),
+		...detached,
 	};
 }
 
@@ -247,11 +265,13 @@ export async function probeGitStatusAsync(cwd: string): Promise<GitStatusProbeRe
 		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
 	]);
 	if (branch.timedOut) return UNDETERMINED_STATUS_PROBE;
+	const detached = branch.out === "HEAD" ? detachedFrom(await gitOkAsync(cwd, DETACHED_SHA_ARGS)) : {};
 	return {
 		isGit: true,
 		branch: branchFrom(branch.out),
 		dirty: dirtyFrom(status),
 		remoteUrl: remoteFrom(remoteRaw),
+		...detached,
 	};
 }
 

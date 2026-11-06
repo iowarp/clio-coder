@@ -149,6 +149,31 @@ describe("contracts/route readiness reads", () => {
 		strictEqual(window(createRouteObserver({ stateDir })).observations.length, 1, "a restart folds the same history");
 	});
 
+	it("a route decision over a wide catalog still settles: candidate hashes stay under decisionHash", async () => {
+		// A shadow decision over 64 candidates listed 685 hashes, past run.settled's 512, and no worker run settled.
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-wide-"));
+		const envelope = fixtureEnvelope("run-wide");
+		const draft = fixtureReceiptDraft(envelope);
+		const decision = fixedRouteDecision(ROUTE, "test-fixed-route");
+		const evaluation = decision.candidateEvaluations[0];
+		if (evaluation === undefined) throw new Error("fixed route decision has no candidate evaluation");
+		decision.candidateEvaluations = Array.from({ length: 128 }, () => structuredClone(evaluation));
+		draft.routeDecision = decision;
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
+		await ledger(stateDir, [{ envelope, receipt }]);
+		deepStrictEqual(
+			createRouteHistoryFold({ stateDir })
+				.read()
+				.entries.map((entry) => entry.settled),
+			["success"],
+		);
+	});
+
 	it("every settled route carries its run's outcome label", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-settled-"));
 		const ok = sealed("run-ok", true);

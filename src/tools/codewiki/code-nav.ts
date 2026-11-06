@@ -4,6 +4,7 @@ import { gunzipSync } from "node:zlib";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { parseCodewikiRaw } from "../../domains/context/codewiki/artifact.js";
+import { missingGrammarNote } from "../../domains/context/codewiki/fetched-grammars.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/schema.js";
 import { readWikiPage } from "../../domains/context/wiki/frontmatter.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
@@ -833,10 +834,12 @@ export const codeNavTool: ToolSpec = {
 				hint: "Use a lower limit or continue in a follow-up turn.",
 			});
 		}
+		let grammarNote: string | undefined;
 		const close = (nav: NavPayload | ToolResult): ToolResult => {
 			if ("kind" in nav) return nav;
 			const next = source === "clio" && nav.next !== undefined ? `source=clio ${nav.next}` : nav.next;
-			const payload = next === nav.next ? nav.payload : { ...nav.payload, next };
+			const paged = next === nav.next ? nav.payload : { ...nav.payload, next };
+			const payload = grammarNote !== undefined ? { ...paged, grammarNote } : paged;
 			return finalizeObservation({
 				tool: ToolNames.CodeNav,
 				unit: "results",
@@ -873,6 +876,16 @@ export const codeNavTool: ToolSpec = {
 		}
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = navIndexFor(loaded.loaded.codewiki);
+		// Symbol and outline answers depend on how files were parsed; a symbol
+		// search spans every language in the index, an outline only its file's.
+		if (source === "workspace" && (mode === "symbol" || mode === "outline")) {
+			const outlined = mode === "outline" ? resolveFile(index, query) : null;
+			const langs =
+				outlined === null
+					? new Set<string>(loaded.loaded.codewiki.files.map((file) => file.lang))
+					: new Set<string>("error" in outlined ? [] : [outlined.lang]);
+			grammarNote = missingGrammarNote(langs);
+		}
 		const sourcePrefix = source === "clio" ? "source=clio " : "";
 		if (mode === "symbol") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };

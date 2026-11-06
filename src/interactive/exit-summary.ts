@@ -330,7 +330,7 @@ export function renderExitSummary(
 				`Workers (${count(snapshot.workers.length)}; ${outcomes(snapshot).join(", ")})`,
 				snapshot.workers.map((worker) => [
 					worker.agent,
-					workerOutcome(worker),
+					plainOutcomeLabel(workerOutcome(worker)),
 					`run record ${worker.record}`,
 					routeLabel(worker.target, worker.model),
 					worker.runId,

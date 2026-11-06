@@ -9,7 +9,7 @@
 
 import {
 	secretUrlParamValues,
-	URL_USERINFO_RE,
+	URL_USERINFO_PATTERNS,
 	URL_USERNAME_TOKEN_RE,
 	urlUserinfoHoldsSecret,
 } from "../safety/redaction.js";
@@ -35,9 +35,9 @@ interface SecretPattern {
  * escaped into free text, command output, or tool arguments.
  */
 const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
-	// Shares its pattern with display redaction so the two hide the same text (#446). It runs first because the
+	// Shares its patterns with display redaction so the two hide the same text (#446, #448). They run first because the
 	// assignment value below would swallow the `@` and host of `https://u:token=abcdefgh@h`.
-	{ kind: "url-userinfo", re: URL_USERINFO_RE },
+	...URL_USERINFO_PATTERNS.map((re) => ({ kind: "url-userinfo", re })),
 	{ kind: "url-username", re: URL_USERNAME_TOKEN_RE },
 	{
 		kind: "pem",
@@ -149,7 +149,7 @@ export function redactSecretsText(
 			if (pattern.kind === "url-userinfo") {
 				if (!urlUserinfoHoldsSecret(String(match[2]))) return String(match[0]);
 				tally.count += 1;
-				return `${String(match[1])}[redacted:url-userinfo]@`;
+				return `${String(match[1])}[redacted:url-userinfo]`;
 			}
 			if (pattern.kind === "assignment" && options?.keepAssignmentValue) {
 				const key = String(match[1]);
@@ -231,7 +231,7 @@ export function redactSecretSegments(segments: string[], tally: RedactionTally):
 			if (userinfo && !urlUserinfoHoldsSecret(match[2] ?? "")) continue;
 			const keepsHead = userinfo || pattern.kind === "assignment" || pattern.kind === "jwt";
 			const start = match.index + (keepsHead ? (match[1]?.length ?? 0) : 0);
-			ranges.push({ start, end: match.index + match[0].length - (userinfo ? 1 : 0), kind: pattern.kind });
+			ranges.push({ start, end: match.index + match[0].length, kind: pattern.kind });
 			tally.count += 1;
 		}
 	}

@@ -70,6 +70,7 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 					completion: {
 						...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
 						...(facts.refusedCalls !== undefined ? { refusedCalls: facts.refusedCalls } : {}),
+						...(facts.guardedCalls !== undefined ? { guardedCalls: facts.guardedCalls } : {}),
 						...(facts.contract !== undefined ? { contract: facts.contract } : {}),
 					},
 				}

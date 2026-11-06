@@ -151,7 +151,7 @@ export interface DispatchBoardRow {
 	/** Which validator failed and on what evidence, beside a validation-failed verdict. */
 	validationFailure?: string;
 	/** How the settled run finished beside its outcome, for the caveat the worker card shows too. */
-	completion?: { toolCalls?: number; refusedCalls?: number; contract?: string };
+	completion?: { toolCalls?: number; refusedCalls?: number; guardedCalls?: number; contract?: string };
 	/** Read back from the run ledger because it settled before this Clio process started (J2-F16). */
 	earlier?: true;
 	/** When the run settled, or started while it has not; what the board orders settled runs by, newest first. */
@@ -1675,7 +1675,7 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 			width >= NARROW_STATUS_WIDTH
 				? failure.words
 				: failure.kind === "refused"
-					? `${row.completion?.refusedCalls ?? 1} refused`
+					? `${row.completion?.refusedCalls ?? 1} ${row.completion?.guardedCalls === row.completion?.refusedCalls ? "guarded" : "refused"}`
 					: COMPACT_CAVEAT_WORD[failure.kind];
 		return theme.fg(mark.token, `${mark.glyph} ${words}`);
 	}

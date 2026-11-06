@@ -24,16 +24,34 @@ const CONTINUING_QUOTE = String.raw`"(?=[^,:;}\])>\\\s])`;
 // The bound on quotes is what keeps the regex stack shallow: an open `*` threw a RangeError on 8 million of them.
 const stringRun = (chars: string): string => `${chars}*(?:${CONTINUING_QUOTE}${chars}*){0,64}`;
 const PASSWORD_RUN = stringRun(String.raw`[^\s/"]`);
+// What opens an authority: `://`, its JSON-escaped form `:\/\/`, or a scheme-relative `//` that starts a word. A `//` inside a
+// word, as in `a//b` or `@//db`, is a path (#448).
+const AUTHORITY_OPENER = String.raw`(?:(?<=[a-z0-9+.-]):|(?<![^\s"'(<=,{>]))(?:\/\/|\\\/\\\/)`;
 // Any scheme can carry a password, as `postgres://`, `redis://`, `mongodb+srv://` and `ssh://` do, and matching from `://`
 // back one character needs no scan of a long word. The name stops at its first colon and the password runs to the
 // authority's last `@`, so `https://:pw@h`, `u:pa:ss@h`, `u:p@ss@h` and `me@corp.com:pw@h` hide the whole password. A `[` opens
 // an IPv6 host or an earlier pass's marker, never a name. An authority with no `@` can still hold one past a `/` when what
 // follows its colon cannot be a port, as in `u:p/ss@h`. Only that reach needs a bound, which keeps the scan linear. A name
-// holding an `@` has no such reach, since `ssh://git@host:org/repo@v1` is a path (#446).
+// holding an `@` has no such reach, since `ssh://git@host:org/repo@v1` is a path (#446). A port followed by `;` opens
+// parameters, as in `jdbc:sqlserver://db:1433;password=hun@ter;`, where the `@` belongs to the parameter's value (#448).
+// The match ends at the password, so a caller replaces group 2 and every terminator stays.
 const SECRET_STRING_RE = new RegExp(
-	String.raw`(?<=[a-z0-9+.-])(:\/\/${stringRun(String.raw`[^\s/:["]`)}:)(${PASSWORD_RUN}|(?!\d*\/)(?<!@[^/:]*:)${PASSWORD_RUN}\/(?:[^\s"]|${CONTINUING_QUOTE}){0,256})@`,
+	String.raw`(${AUTHORITY_OPENER}${stringRun(String.raw`[^\s/:["]`)}:)(?!\d+;)(${PASSWORD_RUN}|(?!\d*\\?\/)(?<!@[^/:]*:)${PASSWORD_RUN}\/(?:[^\s"]|${CONTINUING_QUOTE}){0,256})(?=@)`,
 	"giu",
 );
+// A URL percent-encoded into a query value, as `redirect=https%3A%2F%2Falice%3Apw%40h` carries one. Its delimiters are escapes,
+// so the name stops at the first `%3A` and the password runs to the authority's last `%40`. Neither crosses a `%2F` or a
+// literal `&`, which ends the value holding the URL, so each opener's scan stops at the next one's `%2F` (#448).
+const PERCENT_NAME_RUN = String.raw`(?:[^\s%&"]|%(?!3a|2f)[0-9a-f]{2})*`;
+const PERCENT_PASSWORD_RUN = String.raw`(?:[^\s%&"]|%(?!2f)[0-9a-f]{2})*`;
+const PERCENT_USERINFO_RE = new RegExp(
+	`(?<=[a-z0-9+.-])(%3a%2f%2f${PERCENT_NAME_RUN}%3a)(${PERCENT_PASSWORD_RUN})(?=%40)`,
+	"giu",
+);
+// Oracle's JDBC form puts `user/password` ahead of the `@` with no `//`, as in `jdbc:oracle:thin:scott/tiger@//db:1521/svc`.
+// A password holding `@` or `/` has to be quoted there, so an unquoted one ends at the first `@` (#448).
+const JDBC_ORACLE_PREFIX = String.raw`jdbc:oracle:[a-z0-9]+:[^\s/@:"]*\/`;
+const JDBC_ORACLE_USERINFO_RE = new RegExp(String.raw`(${JDBC_ORACLE_PREFIX})("[^"\s]*"|[^\s"/@]*)(?=@)`, "giu");
 // A token can be the whole username, as in `https://<token>@github.com`. `alice` and `first.last` are ordinary names, while
 // a long opaque run holding a digit is not one worth keeping. A known git host token also counts ahead of a colon, where a
 // long opaque name would more often be a host and its port (#446).
@@ -50,10 +68,12 @@ const SECRET_URL_PARAM_NAME_RE =
 	/(?:^|_)(?:authorization|credential|pass(?:word|wd|phrase)?|pwd|secret|token|(?:access|api|auth|private|secret)_?key|(?:access|auth|oauth|refresh|id|session)token|clientsecret|(?:db|ssl)pass(?:word)?)(?:_|$)|^o?auth$/u;
 const URL_PARAM_WORD_BREAK_RE = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/gu;
 const URL_PARAM_WORD_SEPARATOR_RE = /[-_.[\]\d]+/u;
-// A delimiter opens a name, `://` opens a URL, and whitespace or a `"` closes one. `;` divides parameters only inside a URL, as
-// in `jdbc:sqlserver://db:1433;user=sa;password=x;`, since code such as `a=1;token=next()` is full of them. Names stop at every
-// delimiter, so runs are disjoint and each name is read once: `&token` repeated took 8 s at 320 KB when each walked to the `=`.
-const URL_PARAM_SCAN_RE = /\s+|:\/\/|"|[?&;]([^?&;=\s:"]*)/gu;
+// A delimiter opens a name, `//` or its JSON-escaped form opens a URL, and whitespace or a `"` closes one. `;` divides
+// parameters only inside a URL, as in `jdbc:sqlserver://db:1433;user=sa;password=x;`, since code such as `a=1;token=next()` is
+// full of them. `#` opens a fragment, which an OAuth implicit grant fills with `#access_token=`, and like `?` it counts
+// anywhere, so a row that a bound starts at the `#` still reads it (#448). Names stop at every delimiter, so runs are disjoint
+// and each name is read once: `&token` repeated took 8 s at 320 KB when each walked to the `=`.
+const URL_PARAM_SCAN_RE = /\s+|\/\/|\\\/\\\/|"|[?&;#]([^?&;#=\s:"]*)/gu;
 const SECRET_URL_PARAM_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^&#\s"]`)}`, "uy");
 const SECRET_URL_SEMICOLON_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^;\s"]`)}`, "uy");
 // A name's run must reach the `=`, so only the run's start can match and the secret word need only be found once. Two
@@ -71,14 +91,21 @@ export function isEnvReference(value: string): boolean {
 	return ENV_REFERENCE_RE.test(value);
 }
 
-/** Groups 1 and 2 of {@link URL_USERINFO_RE} hold the part one-shot redaction shows and the part it hides. */
-export const URL_USERINFO_RE = SECRET_STRING_RE;
+/**
+ * Every shape of URL userinfo. Group 1 of each match is the part one-shot redaction shows and group 2, which ends the match,
+ * is the part it hides.
+ */
+export const URL_USERINFO_PATTERNS: readonly RegExp[] = [
+	SECRET_STRING_RE,
+	PERCENT_USERINFO_RE,
+	JDBC_ORACLE_USERINFO_RE,
+];
 
 // Text passes both redactors, and again on a re-export, where promotion and handoff mask earlier markers as private-use
 // tokens. Only a password that is entirely one marker is exempt, so `https://u:REAL[redacted:abc]@h` is still rewritten.
 const REDACTED_USERINFO_RE = /^(?:\[redacted(?::[a-z-]+)?\]|\uE000[\uE100-\uF8FF])$/u;
 
-/** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
+/** Whether a {@link URL_USERINFO_PATTERNS} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
 export function urlUserinfoHoldsSecret(secret: string): boolean {
 	return !ENV_REFERENCE_RE.test(secret) && !REDACTED_USERINFO_RE.test(secret);
 }
@@ -150,7 +177,7 @@ export function secretUrlParamValues(value: string): Array<{ start: number; end:
 	for (let match = scan.exec(value); match !== null; match = scan.exec(value)) {
 		const name = match[1];
 		if (name === undefined) {
-			inUrl = match[0] === "://";
+			inUrl = match[0] !== '"' && !/^\s/u.test(match[0]);
 			continue;
 		}
 		const semicolon = match[0].startsWith(";");
@@ -247,13 +274,13 @@ export function redactSecretString(value: string): string {
  * script consumes, where `BASE_TOKENS=100` or "pass --token to it" are ordinary text the wider rule would blank (#446).
  */
 export function redactUrlCredentials(value: string): string {
-	return redactSecretUrlParams(
-		value
-			.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
-				urlUserinfoHoldsSecret(secret) ? `${prefix}[redacted]@` : match,
-			)
-			.replace(URL_USERNAME_TOKEN_RE, "[redacted]"),
-	);
+	let out = value;
+	for (const pattern of URL_USERINFO_PATTERNS) {
+		out = out.replace(pattern, (match, prefix: string, secret: string) =>
+			urlUserinfoHoldsSecret(secret) ? `${prefix}[redacted]` : match,
+		);
+	}
+	return redactSecretUrlParams(out.replace(URL_USERNAME_TOKEN_RE, "[redacted]"));
 }
 
 function redactPlainSecretString(value: string): string {
@@ -277,7 +304,8 @@ const USERINFO_HOLD_MARKER = "[held]";
  */
 function shownUserinfoEnd(value: string, start: number, lastAt: number): number | null {
 	const slash = value.indexOf("/", start);
-	const end = slash < 0 ? value.length : slash;
+	// A JSON-escaped `\/` ends the authority as `/` does (#448).
+	const end = slash < 0 ? value.length : slash > start && value.charAt(slash - 1) === "\\" ? slash - 1 : slash;
 	const authority = value.slice(start, end);
 	const firstAt = authority.indexOf("@");
 	if (slash < 0 && GIT_TOKEN_NAME_RE.test(authority)) return firstAt >= 0 ? lastAt + 1 : start;
@@ -287,6 +315,13 @@ function shownUserinfoEnd(value: string, start: number, lastAt: number): number 
 	if (slash >= 0 && (firstAt >= 0 || /^\d*$/u.test(authority.slice(colon + 1)))) return null;
 	return lastAt > end ? lastAt + 1 : start + colon + 1;
 }
+
+const AUTHORITY_OPENER_RE = new RegExp(AUTHORITY_OPENER, "giu");
+// A percent-encoded or Oracle password that text still to come may continue, matched up to where it starts (#448).
+const OPEN_USERINFO_RES: readonly RegExp[] = [
+	new RegExp(`(?<=[a-z0-9+.-])%3a%2f%2f${PERCENT_NAME_RUN}%3a(?=${PERCENT_PASSWORD_RUN}(?:%[0-9a-f]?)?$)`, "giu"),
+	new RegExp(String.raw`${JDBC_ORACLE_PREFIX}(?=(?:"[^"\s]*"?|[^\s"/@]*)$)`, "giu"),
+];
 
 /** The last `"` in the token that closed a string. No URL ahead of it can still grow, whatever follows (#446). */
 function lastClosingQuote(value: string, tokenStart: number): number {
@@ -313,14 +348,25 @@ export function holdUnresolvedUserinfo(value: string): string {
 	// One scan for every URL in the token: a token of 80,000 of them took 9.5 s per frame when each looked for itself.
 	const lastAt = value.lastIndexOf("@");
 	const from = Math.max(tokenStart, lastClosingQuote(value, tokenStart)) + 1;
-	for (let at = value.indexOf("://", from); at >= 0; at = value.indexOf("://", at + 3)) {
-		if (!SCHEME_CHAR_RE.test(value.charAt(at - 1))) continue;
-		const keep = shownUserinfoEnd(value, at + 3, lastAt);
-		if (keep === null) continue;
-		if (keep === value.length) return value;
-		return `${value.slice(0, keep)}${value.length - keep > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
+	// `from` is one past the token's start or a closing quote, and a `//` or `jdbc:` can open the token itself.
+	const scanFrom = Math.max(0, from - 1);
+	let keep = value.length;
+	const opener = new RegExp(AUTHORITY_OPENER_RE);
+	opener.lastIndex = scanFrom;
+	for (let match = opener.exec(value); match !== null; match = opener.exec(value)) {
+		const shown = shownUserinfoEnd(value, match.index + match[0].length, lastAt);
+		if (shown === null) continue;
+		keep = shown;
+		break;
 	}
-	return value;
+	// A percent-encoded or Oracle password has no literal `@` to show through, so all of it stays back until it resolves (#448).
+	for (const open of OPEN_USERINFO_RES) {
+		open.lastIndex = scanFrom;
+		const match = open.exec(value);
+		if (match !== null) keep = Math.min(keep, match.index + match[0].length);
+	}
+	if (keep === value.length) return value;
+	return `${value.slice(0, keep)}${value.length - keep > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
 }
 
 /**
@@ -336,12 +382,16 @@ export interface CutHeadGuard {
 	token: string;
 }
 
-// `https://u`, which goes on to hold a secret.
-const OPEN_URL_END_RE = new RegExp(String.raw`:\/\/${stringRun(String.raw`[^\s/"]`)}"?$`, "iu");
+// `https://u`, which goes on to hold a secret, in any of its shapes (#448).
+const OPEN_URL_END_RES: readonly RegExp[] = [
+	new RegExp(`${AUTHORITY_OPENER}${stringRun(String.raw`[^\s/"]`)}"?$`, "iu"),
+	new RegExp(`(?<=[a-z0-9+.-])%3a%2f%2f${PERCENT_PASSWORD_RUN}(?:%[0-9a-f]?)?$`, "iu"),
+	/jdbc:oracle:[^\s"@]*(?:"[^"\s]*)?$/iu,
+];
 
 /** Whether a cut at the end of this text would leave a piece of a credential on each side, neither of which matches (#446). */
 export function endsInOpenCredential(text: string): boolean {
-	if (OPEN_URL_END_RE.test(text)) return true;
+	if (OPEN_URL_END_RES.some((open) => open.test(text))) return true;
 	// One more character shows whether a value is open here, even an empty one or a variable's name so far.
 	return secretUrlParamValues(`${text}x`).at(-1)?.end === text.length + 1;
 }
@@ -357,6 +407,62 @@ export function openNameStart(text: string): number | null {
 	const from = Math.max(0, text.length - OPEN_NAME_CHARS - 3);
 	const match = OPEN_NAME_END_RE.exec(text.slice(from));
 	return match === null ? null : from + match.index;
+}
+
+// Every opener a pattern reads, lowercased. A token ending in one or a piece of one, such as `https:\` or `%3A%2`, may be
+// about to open a URL (#448).
+const AUTHORITY_OPENER_MARKERS = ["://", ":\\/\\/", "//", "\\/\\/", "%3a%2f%2f"];
+const LONGEST_OPENER = 9;
+
+/**
+ * Where the end of this text starts an authority opener or a piece of one, or -1. The earliest start wins, so the `\/` that
+ * ends `:\/\/` reads as part of that opener and not as the start of another.
+ */
+function openerPieceStart(text: string): number {
+	for (let at = Math.max(0, text.length - LONGEST_OPENER); at < text.length; at += 1) {
+		const piece = text.slice(at).toLowerCase();
+		if (AUTHORITY_OPENER_MARKERS.some((marker) => marker.startsWith(piece))) return at;
+	}
+	return -1;
+}
+
+const PERCENT_OPENER_RE = /(?<=[a-z0-9+.-])%3a%2f%2f/giu;
+
+/** Where the first authority opener at or after `from` starts, in any shape, or -1 (#448). */
+export function firstAuthorityOpener(text: string, from: number): number {
+	let first = -1;
+	for (const pattern of [AUTHORITY_OPENER_RE, PERCENT_OPENER_RE]) {
+		const opener = new RegExp(pattern);
+		opener.lastIndex = Math.max(0, from);
+		const match = opener.exec(text);
+		if (match !== null && (first < 0 || match.index < first)) first = match.index;
+	}
+	return first;
+}
+
+// The Oracle JDBC prefix still forming, `jdbc:ora` through `jdbc:oracle:thin:scott`. A cut inside it leaves neither row
+// matching the pattern (#448).
+const JDBC_ORACLE_LEAD = "jdbc:oracle:";
+const FORMED_JDBC_ORACLE_RE = /jdbc:oracle:[a-z0-9]*(?::[^\s/@:"]*)?$/iu;
+
+/**
+ * Where a cut should land so that an opener or an Oracle JDBC prefix still forming at the end of this text reaches the next
+ * row whole, with the one character ahead of it that the pattern reads, or null (#448).
+ */
+export function formingCredentialStart(text: string): number | null {
+	const starts: number[] = [];
+	const piece = openerPieceStart(text);
+	if (piece >= 0) starts.push(Math.max(0, piece - 1));
+	const from = Math.max(0, text.length - OPEN_NAME_CHARS - 24);
+	const formed = FORMED_JDBC_ORACLE_RE.exec(text.slice(from));
+	if (formed !== null) starts.push(from + formed.index);
+	for (let at = Math.max(0, text.length - JDBC_ORACLE_LEAD.length + 1); at < text.length; at += 1) {
+		if (JDBC_ORACLE_LEAD.startsWith(text.slice(at).toLowerCase())) {
+			starts.push(at);
+			break;
+		}
+	}
+	return starts.length === 0 ? null : Math.min(...starts);
 }
 
 const CUT_TOKENS = 2;
@@ -478,12 +584,23 @@ export function redactFinalUrlCredentials(value: string, completed: boolean): st
 	return redactUrlCredentials(completed ? value : holdCutOffText(value));
 }
 
-/** Where text that a reader cannot retract becomes unsafe to send: from anything in its last token a later character could make a credential. */
-function appendOnlySafeEnd(text: string): number {
+// What makes the rest of a token wait for its whitespace: an authority opener in any shape, a query or fragment, or an Oracle
+// JDBC prefix, whose userinfo has no `//` ahead of it (#448).
+const APPEND_ONLY_WAIT_RE = /:?\/\/|:?\\\/\\\/|%3a%2f%2f|jdbc:|[?&#]/iu;
+/** How much of its token a stream filter keeps as context: enough for the `jdbc` ahead of `:oracle:` (#448). */
+const APPEND_ONLY_CONTEXT_CHARS = 16;
+
+/**
+ * Where text that a reader cannot retract becomes unsafe to send: from anything in its last token a later character could
+ * make a credential. `waiting` says the rest of the token waits for whitespace, not just for its next character.
+ */
+function appendOnlySafeEnd(text: string): { end: number; waiting: boolean } {
 	let tokenStart = text.length;
 	while (tokenStart > 0 && !/\s/u.test(text.charAt(tokenStart - 1))) tokenStart -= 1;
-	const unsafe = text.slice(tokenStart).search(/:\/\/|[?&]|:\/?$/u);
-	return unsafe < 0 ? text.length : tokenStart + unsafe;
+	const unsafe = text.slice(tokenStart).search(APPEND_ONLY_WAIT_RE);
+	if (unsafe >= 0) return { end: tokenStart + unsafe, waiting: true };
+	const piece = openerPieceStart(text);
+	return { end: piece < tokenStart ? text.length : piece, waiting: false };
 }
 
 /**
@@ -494,27 +611,35 @@ function appendOnlySafeEnd(text: string): number {
  */
 export class UrlCredentialStreamFilter {
 	private pending = "";
-	/** The last character sent, which is all the pattern reads ahead of a `://`. */
+	/**
+	 * The end of the token already sent, which the patterns read ahead of what waits: one character ahead of a `://`, and the
+	 * `jdbc` ahead of `:oracle:`. It never holds a credential, since anything that opens one waits.
+	 */
 	private context = "";
 	/**
-	 * What waits opens with a `://` or a query, so only whitespace ends the wait and only new text can hold it. Scanning the
-	 * whole token per delta took 25.7 s on a 200 KB token in 8-character deltas, blocking the loop (#446).
+	 * What waits opens with an authority opener, a query or a fragment, so only whitespace ends the wait and only new text can
+	 * hold it. Scanning the whole token per delta took 25.7 s on a 200 KB token in 8-character deltas, blocking the loop (#446).
 	 */
 	private waiting = false;
 
 	private send(text: string, redact: (value: string) => string): string {
-		const safe = redact(this.context + text).slice(this.context.length);
-		if (text.length > 0) this.context = text.slice(-1);
+		const joined = this.context + text;
+		const safe = redact(joined).slice(this.context.length);
+		let start = joined.length;
+		while (start > 0 && joined.length - start < APPEND_ONLY_CONTEXT_CHARS && !/\s/u.test(joined.charAt(start - 1)))
+			start -= 1;
+		this.context = joined.slice(start);
 		return safe;
 	}
 
 	push(delta: string): string {
 		this.pending += delta;
 		if (this.waiting && !/\s/u.test(delta)) return "";
-		const end = appendOnlySafeEnd(this.pending);
-		const safe = end === 0 ? "" : this.send(this.pending.slice(0, end), redactUrlCredentials);
-		this.pending = this.pending.slice(end);
-		this.waiting = /^(?::\/\/|[?&])/u.test(this.pending);
+		const { end, waiting } = appendOnlySafeEnd(this.context + this.pending);
+		const cut = Math.max(0, end - this.context.length);
+		const safe = cut === 0 ? "" : this.send(this.pending.slice(0, cut), redactUrlCredentials);
+		this.pending = this.pending.slice(cut);
+		this.waiting = waiting;
 		return safe;
 	}
 

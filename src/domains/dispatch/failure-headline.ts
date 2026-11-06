@@ -163,6 +163,11 @@ export interface CompletedRunFacts {
 	contract?: string;
 	toolCalls?: number;
 	refusedCalls?: number;
+	/**
+	 * Of `refusedCalls`, the ones a tool guard stopped (the loop guard holding back a repeated call, the tool-call
+	 * budget) rather than a safety rule or the operator. A scout that repeated a grep read as a safety refusal.
+	 */
+	guardedCalls?: number;
 }
 
 /**
@@ -176,8 +181,19 @@ export type CompletedRunCaveat =
 	| { kind: "no-tools"; words: string }
 	| { kind: "refused"; words: string };
 
-export function refusedCallsWords(count: number): string {
-	return count === 1 ? "1 call refused" : `${count} calls refused`;
+/** The reason code the tool registry stamps on a call a before_tool guard blocked (`src/tools/registry.ts`). */
+export const TOOL_GUARD_REASON_CODE = "guard_block";
+
+/**
+ * Kept-from-running calls in words that say who stopped them. A tool guard holding back a repeated call is not a
+ * safety refusal, and calling it one sent the operator looking for a rule that never fired.
+ */
+export function refusedCallsWords(count: number, guarded = 0): string {
+	const calls = (n: number): string => (n === 1 ? "1 call" : `${n} calls`);
+	const held = Math.min(Math.max(0, guarded), count);
+	if (held === 0) return `${calls(count)} refused`;
+	if (held === count) return `${calls(count)} stopped by a tool guard`;
+	return `${calls(count - held)} refused, ${held} stopped by a tool guard`;
 }
 
 export function completedRunCaveat(facts: CompletedRunFacts): CompletedRunCaveat | null {
@@ -187,7 +203,7 @@ export function completedRunCaveat(facts: CompletedRunFacts): CompletedRunCaveat
 	if (against !== null) return { kind: "against", words: against };
 	// A refused call is the stronger fact: a worker whose only call was refused also ran no tools.
 	const refused = facts.refusedCalls ?? 0;
-	if (refused > 0) return { kind: "refused", words: refusedCallsWords(refused) };
+	if (refused > 0) return { kind: "refused", words: refusedCallsWords(refused, facts.guardedCalls ?? 0) };
 	return facts.toolCalls === 0 ? { kind: "no-tools", words: "ran no tools" } : null;
 }
 
@@ -212,7 +228,7 @@ function trustVerdictOf(trust: CanonicalTrustStatus): Pick<TrustSummaryProjectio
  * succeeded on one of them.
  */
 export function settledRunCaveat(
-	result: Pick<RunResultSummary, "outcome" | "trust" | "contract" | "toolCalls" | "refusedCalls">,
+	result: Pick<RunResultSummary, "outcome" | "trust" | "contract" | "toolCalls" | "refusedCalls" | "guardedCalls">,
 	synthesizes = false,
 ): CompletedRunCaveat | null {
 	if (result.outcome !== "succeeded") return null;
@@ -222,5 +238,6 @@ export function settledRunCaveat(
 		// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
 		...(result.toolCalls !== undefined && !synthesizes ? { toolCalls: result.toolCalls } : {}),
 		...(result.refusedCalls !== undefined ? { refusedCalls: result.refusedCalls } : {}),
+		...(result.guardedCalls !== undefined ? { guardedCalls: result.guardedCalls } : {}),
 	});
 }

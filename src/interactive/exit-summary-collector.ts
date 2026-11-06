@@ -4,7 +4,7 @@ import type { FactMetric } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { settledRunCaveat } from "../domains/dispatch/failure-headline.js";
+import { plainOutcomeLabel, settledRunCaveat, TOOL_GUARD_REASON_CODE } from "../domains/dispatch/failure-headline.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
@@ -228,12 +228,36 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
  * is claimed only once the record has been read, in the words the Workers row uses.
  */
 function settledWords(worker: ExitSummarySnapshot["workers"][number]): string {
-	if (worker.outcome !== "succeeded") return worker.outcome;
+	if (worker.outcome !== "succeeded") return plainOutcomeLabel(worker.outcome);
 	if (worker.record === "not available") return "finished, run record not read";
 	return worker.against ?? worker.outcome;
 }
 
 /** This visit's account. All ledger folds and record reads happen while events arrive. */
+const BLOCK_REASON_MAX_CHARS = 120;
+
+/**
+ * Who stopped a worker's call, in the timeline's words. Every blocked finish used to read `Worker safety refusal:
+ * grep`, so a scout whose repeated grep the loop guard held back sent the operator looking for a safety rule that
+ * never fired. A guard block says so and quotes its reason; a policy block names its rule.
+ */
+function workerBlockWords(
+	tool: string,
+	payload: { reason?: string; ruleId?: string; reasonCode?: string; redundantRepeat?: boolean },
+): { guard: boolean; words: string } {
+	// The first sentence says what stopped the call; the rest is recovery advice addressed to the model.
+	const reason = (payload.reason ?? "").split(/\n|(?<=\.)\s/u)[0]?.trim() ?? "";
+	const clipped = reason.length > BLOCK_REASON_MAX_CHARS ? `${reason.slice(0, BLOCK_REASON_MAX_CHARS)}…` : reason;
+	if (payload.redundantRepeat === true || payload.reasonCode === TOOL_GUARD_REASON_CODE) {
+		return { guard: true, words: `Worker tool guard stopped ${tool}${clipped ? `: ${clipped}` : ""}` };
+	}
+	const rule = payload.ruleId ?? payload.reasonCode;
+	return {
+		guard: false,
+		words: `Worker safety refusal: ${tool}${rule ? ` by rule ${rule}` : ""}${clipped ? `: ${clipped}` : ""}`,
+	};
+}
+
 export function createExitSummaryCollector(deps: CollectorDeps) {
 	const now = deps.now ?? (() => performance.now());
 	let startedAt = now();
@@ -371,7 +395,16 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				toolName?: string;
 				toolCallId?: string;
 				args?: unknown;
-				payload?: { tool?: string; toolCallId?: string; outcome?: string; decision?: string };
+				payload?: {
+					tool?: string;
+					toolCallId?: string;
+					outcome?: string;
+					decision?: string;
+					reason?: string;
+					ruleId?: string;
+					reasonCode?: string;
+					redundantRepeat?: boolean;
+				};
 			};
 			if (
 				frame.type === "tool_execution_start" &&
@@ -392,8 +425,10 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				);
 				if (frame.payload.outcome === "error") noteFailure(tool);
 				if (frame.payload.outcome === "blocked" || frame.payload.decision === "blocked") {
-					permissions.blocked += 1;
-					highlight(`Worker safety refusal: ${tool}`);
+					const blocked = workerBlockWords(tool, frame.payload);
+					// A guard holding back a repeated call is no approval or refusal, so it stays out of that tally.
+					if (!blocked.guard) permissions.blocked += 1;
+					highlight(blocked.words);
 				}
 			}
 		}),

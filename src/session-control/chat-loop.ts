@@ -3734,7 +3734,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						);
 						if (batches.length === 0) return;
 						emitNotice(
-							`Main turn canceled. Detached batches continue independently: ${batches.map((batch) => batch.id).join(", ")}. ` +
+							`Main turn cancelled. Detached batches continue independently: ${batches.map((batch) => batch.id).join(", ")}. ` +
 								'Collect with monitor(mode="collect", batch_id="<batch-id>"); abort a worker with steer(action="cancel", run_id="<run-id>"). ' +
 								"Collect existing results or explicitly re-run failed assignments before replacing their work.",
 							"info",
@@ -4535,7 +4535,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				settled ??
 				refused(
 					request.signal.aborted
-						? "Scheduled delivery canceled before execution."
+						? "Scheduled delivery cancelled before execution."
 						: "The fresh turn was refused during ordinary admission.",
 				)
 			);
