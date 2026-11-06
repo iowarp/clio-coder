@@ -596,15 +596,31 @@ checks:
     cwd: .
     timeoutMs: 600000
     tags: [scientific, performance]
+  - id: temperature-analysis
+    description: Reproduce the temperature analysis from pinned raw data
+    kind: reproduce
+    command: [python, analysis.py]
+    inputs:
+      - {path: data/raw.csv, sha256: c2baa1a4b19d6061c8cb910723d7e1dbd45e6ca4a1103a0e995a0a1f45826ed3}
+    environment: worktree
+    seed: {env: ANALYSIS_SEED, value: "1234"}
+    compare: twice
+    tolerance: {relative: 1.0e-12}
+    units: {mean_temp: K}
+    shapes: {histogram: [5], moments: [2, 3]}
+    cwd: .
+    timeoutMs: 60000
+    tags: [scientific]
 ```
 
-Version 1 remains readable and means `kind: command`; version 2 adds `numeric-compare` and `perf-budget`. Required core fields are `id`, `description`, `command`, `cwd`, `timeoutMs`, and `tags`. Unknown fields and duplicate IDs fail closed; YAML aliases are disabled.
+Version 1 remains readable and means `kind: command`; version 2 adds `numeric-compare`, `perf-budget` and `reproduce`. Required core fields are `id`, `description`, `command`, `cwd`, `timeoutMs`, and `tags`. Unknown fields and duplicate IDs fail closed; YAML aliases are disabled.
 
 | Kind | Contract |
 | --- | --- |
 | `command` | Passes on exit code zero. |
 | `numeric-compare` | Compare stdout JSON object `string -> number or number[]` with a repository-relative `reference` JSON file of the same shape. `tolerance` requires finite, non-negative `relative`, `absolute`, or `ulp`; `combine: all` (default) requires every named bound, `any` requires at least one. Missing keys and unequal array lengths fail. `nonFinite: fail` (default) rejects non-finite pairs; `match` accepts NaN/NaN and same-signed infinities. `ulp` is an integer up to 9007199254740991. Relative error against zero passes only on equality. |
 | `perf-budget` | Compare measured wall time with exactly one of `budget: {wallTimeMs, tolerance?: {relative}}` or a repository-relative `baseline`. Relative tolerance is non-negative fractional headroom. `verifiers baseline <id>` records a successful run. |
+| `reproduce` | Rerun an analysis from pinned inputs in a clean environment and judge its metrics. Required: `inputs` (repository-relative files, each with a lowercase hex `sha256`), `compare` (`twice` or `{reference: <path>}`), and `tolerance` (the `numeric-compare` tolerance object). Optional: `environment`, `seed: {env, value}`, `units` (metric to units string) and `shapes` (metric to shape array, `[]` for a scalar). Details follow the table. |
 
 | Field | Constraint |
 | --- | --- |
@@ -617,6 +633,10 @@ Version 1 remains readable and means `kind: command`; version 2 adds `numeric-co
 | File | At most 262144 bytes and 128 checks. |
 
 Catalog and package IDs share one namespace; a collision or invalid catalog prevents listing and execution. Checks run declared argv without model-supplied args, cwd, timeout, or environment overrides, through safe-exec's environment allowlist and 600000-byte output cap. Judged output and reference/baseline files are capped at 32 MiB. Nonzero exit, timeout, abort, or output cap prevents judgement. Results include exact argv/cwd/exit/duration and `aborted`/`timedOut`/`outputCapped` flags; judged checks also report numeric deviations or measured time, budget, and ratio. `judgement.execution` is `succeeded`, `failed`, `unavailable`, `timed-out`, `aborted`, or `output-capped`; validation is `passed`, `failed`, `exit-code`, or `not-run`. `scientificValidity` is always `not established by this check`.
+
+A `reproduce` check hashes every input in the checkout first. Any mismatch refuses the check before anything runs, and the refusal names each path with its expected and actual sha256. Each run then gets a fresh clean environment under the state directory's `scratch/reproduce/`, never inside the checkout: `worktree` (the default) is a detached worktree of HEAD added with hooks off, and `copy` is a directory holding only the declared inputs, so a `copy` check declares its script as an input too. Inputs are copied in at their relative paths and hashed again, so gitignored raw data reaches the run with the pinned bytes. The environment is removed when the run ends, on failure and abort included. A `python` or `python3` command runs through the project `.venv` interpreter by absolute path, `VIRTUAL_ENV`, or `python`/`python3` on PATH; a uv project without `.venv` is refused as needing provisioning. The seed variable is added to the safe-exec environment of every run. The command prints a JSON object whose metrics are numbers, rectangular nested number arrays, or `{"value": ..., "units": "..."}` objects; a ragged array fails judgement. `compare: twice` runs the command in two separate clean environments and judges run 1 against run 2; `compare: {reference}` judges one run against a reference file in the same format. Every metric on either side must be present on both, have the same shape and agree within the tolerance. Each declared `units` entry must be reported exactly by every run, and by the reference when it reports units. Each declared shape must match. The verdict states agreement within the declared tolerance, never correctness. A pass is evidence only; it changes no permission, budget or job clock.
+
+The `reproduce` report records its conditions: `inputs` (`path`, `sha256`, `sizeBytes`, and `tracked` at the commit), `environment`, `commit`, `trackedTreeClean` (whether the checkout's tracked files matched HEAD; a worktree run judges the committed tree), `seed`, `platform` (`os`, `arch`, `release`, `nodeVersion`, `clioVersion`, and for Python `interpreter` and `pythonVersion`), the resolved `argv` and `cwd`, the tolerance and its rule, each run's exit, duration and payload sha256, the reference identity, and a per-metric verdict with its agreement, units and shape results. Dispatch host verification runs a sealed `reproduce` check through the same runner and never reuses a memoized pass.
 
 Numeric reports identify the reference and extracted payload by SHA-256 and byte count. Non-finite report values serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Version 2 performance baselines record wall time, check, timestamp, and host (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`); version 1 still loads. Host differences are reported but do not change the verdict.
 
@@ -635,12 +655,13 @@ clio-coder verifiers validate
 clio-coder verifiers dry-run rust-workspace
 clio-coder verifiers baseline solver-time
 clio-coder verifiers add --id validate-grid --description "Validate the grid" --command '["python","tools/check_grid.py"]' --kind numeric-compare --reference tests/grid.json --tolerance '{"relative":1e-6}' --yes
+clio-coder verifiers add --id temperature-analysis --description "Reproduce the temperature analysis" --command '["python","analysis.py"]' --kind reproduce --input data/raw.csv --compare twice --seed ANALYSIS_SEED=1234 --tolerance '{"relative":1e-12}' --units '{"mean_temp":"K"}' --shapes '{"histogram":[5]}' --yes
 clio-coder verifiers edit validate-grid --timeout-ms 300000
 clio-coder verifiers rename validate-grid validate-regional-grid --yes
 clio-coder verifiers remove validate-regional-grid --yes
 ```
 
-CLI fields: `add` requires `--id`, `--description`, and `--command` as a JSON argv array; `edit` accepts these plus `--cwd`, `--timeout-ms`, `--tags`, and kind options. Numeric checks take `--reference` and JSON `--tolerance`; performance checks take `--budget-ms` with optional `--budget-relative`, or `--baseline` with optional relative `--tolerance`. Mutations need `--yes`. `validate` runs the production parser and declared-check discovery; an ID collision with a package script fails validation. `dry-run <id>` executes one admitted check, and `baseline <id>` runs one performance check and writes only on success.
+CLI fields: `add` requires `--id`, `--description`, and `--command` as a JSON argv array; `edit` accepts these plus `--cwd`, `--timeout-ms`, `--tags`, and kind options. Numeric checks take `--reference` and JSON `--tolerance`; performance checks take `--budget-ms` with optional `--budget-relative`, or `--baseline` with optional relative `--tolerance`. Reproduce checks take repeatable `--input <path>[=<sha256>]` (without a digest the file's current sha256 is pinned and shown in the preview), exactly one of `--compare twice` or `--reference <path>`, JSON `--tolerance`, and optional `--environment worktree|copy`, `--seed NAME=value`, JSON `--units` and JSON `--shapes`; `edit --kind reproduce` restates every reproduce field. Mutations need `--yes`. `validate` runs the production parser and declared-check discovery; an ID collision with a package script fails validation. `dry-run <id>` executes one admitted check, and `baseline <id>` runs one performance check and writes only on success.
 
 `verify(check="frontend", path=...)` checks an in-workspace `.html`, `.htm`, `.css`, `.js`, `.mjs`, or `.cjs` file without shell access: HTML tag balance, classic/module script syntax, CSS balance, and local script/stylesheet existence. External and root-relative references are skipped. Optional browser load: `auto` warns if Chromium/Chrome/Edge is unavailable, `required` fails, `off` skips. Checks report pass/warn/fail/skip; any fail errors the tool. Details include `{action, check, path, browserMode, status, checks}`.
 

@@ -900,7 +900,7 @@ the rest. A read root that is only the workspace is the default and is left out.
 Verification values are declared check ids, never shell commands. Admission
 resolves each id from a package script or `.clio-coder/verifiers.yaml`
 ([quality-policy.md](quality-policy.md) covers declared checks, including the judged
-`numeric-compare` and `perf-budget` kinds), clamps
+`numeric-compare`, `perf-budget` and `reproduce` kinds), clamps
 the requested timeout to the declaration, and freezes the exact argv, cwd,
 timeout, and normalized intent into the execution snapshot and plan hash. A
 later catalog edit cannot change the approved command. Undeclared ids fail
