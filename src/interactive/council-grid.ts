@@ -51,8 +51,13 @@ export interface CouncilGroupView {
 	group: string;
 	/** Final-round member runs, in roster order. */
 	members: ReadonlyArray<CouncilMemberView>;
-	/** The council's own answer, or null while the members are still running. */
+	/** The council's own answer, or null while the members are still running or when none was asked for. */
 	synthesis: CouncilMemberView | null;
+	/**
+	 * Set when the council only collected its members' answers: there is no answer of its own to show, so the body
+	 * says that in a line instead of drawing the collector as a member that answered.
+	 */
+	collectedNote?: string;
 	/** Aggregate status of the group, used by the compact card. */
 	status: { glyph: string; label: string; token: ClioToken; glyphToken?: ClioToken };
 	/** The question every member was asked, as the board's rows word a task. */
@@ -106,14 +111,26 @@ function answerRows(theme: ClioTheme, member: CouncilMemberView, width: number, 
 	for (const line of member.tailText.split("\n")) {
 		for (const row of wrapTextWithAnsi(line, railWidth)) wrapped.push(row);
 	}
-	const shown = wrapped.slice(Math.max(0, wrapped.length - maxRows));
-	const hidden = wrapped.length - shown.length + member.droppedLines;
 	const rail = theme.fg("gutter", `${GLYPH.rail} `);
-	const rows = shown.map((row) => `${rail}${theme.fg("assistantProse", row)}`);
-	if (hidden > 0) {
-		rows.push(`${rail}${theme.fg("annotation", truncateToWidth(`${hidden} more`, railWidth, "…", false))}`);
+	const note = (text: string): string =>
+		`${rail}${theme.fg("annotation", truncateToWidth(text, railWidth, "…", false))}`;
+	// A settled answer reads from its start, so its first claim is never the part cut; a live one shows its newest
+	// rows, the ones still moving, under a note that says how much came before them.
+	if (member.settled === true) {
+		const shown = wrapped.slice(0, maxRows);
+		const hidden = wrapped.length - shown.length;
+		return [
+			...(member.droppedLines > 0 ? [note(`${GLYPH.ellipsis} ${member.droppedLines} earlier`)] : []),
+			...shown.map((row) => `${rail}${theme.fg("assistantProse", row)}`),
+			...(hidden > 0 ? [note(`${GLYPH.ellipsis} ${hidden} more in /view dispatch:${member.runId}`)] : []),
+		];
 	}
-	return rows;
+	const shown = wrapped.slice(Math.max(0, wrapped.length - maxRows));
+	const earlier = wrapped.length - shown.length + member.droppedLines;
+	return [
+		...(earlier > 0 ? [note(`${GLYPH.ellipsis} ${earlier} earlier`)] : []),
+		...shown.map((row) => `${rail}${theme.fg("assistantProse", row)}`),
+	];
 }
 
 /**
@@ -185,6 +202,10 @@ export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, cont
 				}),
 			);
 		}
+	}
+	if (group.collectedNote !== undefined) {
+		body.push(innerDivider(theme, contentWidth));
+		body.push(truncateToWidth(theme.fg("annotation", group.collectedNote), contentWidth, GLYPH.ellipsis, false));
 	}
 	if (group.synthesis !== null) {
 		body.push(innerDivider(theme, contentWidth));

@@ -95,7 +95,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 		accept();
 		strictEqual(notices.at(-1)?.[0], "fleet-run:started");
 		// The started notice names the plan by the steps its waves run; the plan hash stays with the approval card.
-		ok(notices.at(-1)?.[1].includes("1 step running in the background"));
+		ok(notices.at(-1)?.[1].includes("plan survey: 1 step started"));
 		ok(!notices.at(-1)?.[1].includes(expectedPlanHash));
 		deepStrictEqual(runLimits, [{ delegatedTools: ["read"] }]);
 		openers.startFleetRun("survey", {});

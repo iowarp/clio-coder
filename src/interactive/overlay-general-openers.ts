@@ -44,8 +44,13 @@ import { type OutOfTurnRoute, outOfTurnRouteLabel } from "../session-control/sid
 import type { ContextClearCommandOptions, FleetRunStartOptions } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
-import { type createDispatchBoardView, dispatchBoardHintEntries, renderFleetPlanCard } from "./dispatch-board.js";
-import type { FleetPlanRuns } from "./fleet-plan-runs.js";
+import {
+	type createDispatchBoardView,
+	dispatchBoardHintEntries,
+	planWithWorkerRows,
+	renderFleetPlanCard,
+} from "./dispatch-board.js";
+import type { FleetPlanRuns, FleetPlanRunView } from "./fleet-plan-runs.js";
 import { progressNoticeKeys } from "./footer/notifications.js";
 import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
@@ -82,6 +87,8 @@ export interface OverlayGeneralOpenersDeps {
 	bus: TelemetryHub;
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void> | void;
 	stderr: (text: string) => void;
+	/** A transcript block drawn at the width of each paint, so a card never keeps the width it was made at. */
+	appendBlock?: (render: (width: number) => string[]) => void;
 	refreshFooter: () => void;
 	toggleFooter: () => void;
 	renderTaskIsland: () => void;
@@ -699,7 +706,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (fleetInFlight !== null) {
 			deps.notify(
 				"info",
-				`fleet ${fleetInFlight.name} is still running; start another once it settles · /fleet`,
+				`plan ${fleetInFlight.name} is still running; start another once it settles · /fleet`,
 				"fleet-run:in-flight",
 			);
 			return;
@@ -740,7 +747,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			},
 			onCancel: () => {
 				deps.closeOverlay();
-				deps.notify("info", `fleet ${name}: cancelled; nothing was dispatched`, "fleet-run:cancelled");
+				deps.notify("info", `plan ${name}: cancelled; nothing was started`, "fleet-run:cancelled");
 			},
 		});
 		deps.requestRender();
@@ -780,15 +787,23 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onStarted: () => {
 				deps.fleetPlans?.start(fleetRootId, preview);
 				deps.fleetPlans?.bindStop(fleetRootId, () => stop.abort());
-				// Counted from the waves, as the approval card counts them, so a resumed run names only what it runs.
+				// Counted from the waves, as the approval card counts them, so a resumed run names only what it runs. Only the
+				// first wave starts now; the rest wait on it, so the notice says how many run at once rather than all of them.
 				const steps = preview.waves.reduce((total, wave) => total + wave.steps.length, 0);
-				deps.notify(
-					"info",
-					`fleet ${preview.name}: ${steps} ${steps === 1 ? "step" : "steps"} running in the background · /fleet shows detail`,
-					"fleet-run:started",
-				);
+				const first = preview.waves[0]?.steps.length ?? 0;
+				const shape =
+					first >= steps
+						? `${steps} ${steps === 1 ? "step" : "steps"} started`
+						: `${steps} steps, ${first} started and ${steps - first} waiting their turn`;
+				deps.notify("info", `plan ${preview.name}: ${shape} · /fleet follows it`, "fleet-run:started");
 			},
-			onNotice: (text) => deps.stderr(`fleet ${preview.name}: ${text}\n`),
+			onNotice: (text) => deps.stderr(`plan ${preview.name}: ${text}\n`),
+		};
+		// The settled card reads each step beside its worker's own row, and draws at the width of each paint.
+		const appendPlanCard = (settled: FleetPlanRunView): void => {
+			const view = planWithWorkerRows(settled, deps.getDispatchRows?.() ?? []);
+			if (deps.appendBlock !== undefined) deps.appendBlock((width) => renderFleetPlanCard(view, width));
+			else deps.stderr(`${renderFleetPlanCard(view, deps.terminal.columns).join("\n")}\n`);
 		};
 		fleetInFlight = { name: preview.name };
 		void run(args)
@@ -798,11 +813,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				// A stop asked for from the board, and a refusal that said this plan runs, are over once it settles.
 				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
-				if (plan) deps.stderr(`${renderFleetPlanCard(plan, deps.terminal.columns).join("\n")}\n`);
+				if (plan) appendPlanCard(plan);
 				if (plan?.state === "cancelled") {
 					deps.notify(
 						"info",
-						`fleet ${preview.name}: cancelled · ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded before the stop`,
+						`plan ${preview.name}: cancelled · ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded before the stop`,
 						"fleet-run:settled",
 					);
 					return;
@@ -810,7 +825,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				deps.notify(
 					outcome.cleanRun ? "success" : "warning",
 					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on.
-					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
+					`plan ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
 					"fleet-run:settled",
 				);
 			})
@@ -821,17 +836,17 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const failed = deps.fleetPlans?.fail(fleetRootId, error instanceof Error ? error.message : String(error));
 				if (failed?.state === "cancelled") {
-					deps.stderr(`${renderFleetPlanCard(failed, deps.terminal.columns).join("\n")}\n`);
-					deps.notify("info", `fleet ${preview.name}: cancelled before every step settled`, "fleet-run:settled");
+					appendPlanCard(failed);
+					deps.notify("info", `plan ${preview.name}: cancelled before every step settled`, "fleet-run:settled");
 					return;
 				}
 				if (error instanceof FleetWorkspaceBusyError) {
-					deps.notify("warning", `fleet ${preview.name}: ${error.message}`, "fleet-run:refused");
+					deps.notify("warning", `plan ${preview.name}: ${error.message}`, "fleet-run:refused");
 					return;
 				}
 				deps.notify(
 					"error",
-					`fleet ${preview.name}: ${error instanceof Error ? error.message : String(error)}`,
+					`plan ${preview.name}: ${error instanceof Error ? error.message : String(error)}`,
 					"fleet-run:failed",
 				);
 			});
