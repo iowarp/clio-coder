@@ -12,6 +12,8 @@ export interface AnthropicMessagesSynthesisInput {
 	defaultCapabilities: CapabilityFlags;
 	provider: string;
 	defaultBaseUrl: string;
+	/** Cache retention for the session's own turn requests; workers and side calls keep the provider default (#422). */
+	mainThreadCacheRetention?: "long";
 }
 
 export function synthesizeAnthropicMessagesModel(input: AnthropicMessagesSynthesisInput): Model<Api> {
@@ -24,5 +26,6 @@ export function synthesizeAnthropicMessagesModel(input: AnthropicMessagesSynthes
 		api: "anthropic-messages",
 		provider: input.provider,
 		defaultBaseUrl: input.defaultBaseUrl,
+		...(input.mainThreadCacheRetention !== undefined ? { mainThreadCacheRetention: input.mainThreadCacheRetention } : {}),
 	});
 }
