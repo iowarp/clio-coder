@@ -157,16 +157,65 @@ const clioRootEnvKeys = [
 	"CLIO_CODER_CACHE_DIR",
 ] as const;
 
-// A test that has not chosen its own Clio roots must never inherit the
-// operator's platform defaults. The preload runs before every test module, so
-// this catches settingsPath() and every XDG role resolver without requiring
-// each call site to remember an override. Tests of default XDG resolution set
-// an explicit environment in their own child process.
-if (clioRootEnvKeys.every((key) => !process.env[key]?.trim())) {
+/** Whether `value` names the run root or a path inside it. */
+function insideRunRoot(value: string, runRoot: string): boolean {
+	const path = resolve(value);
+	const root = resolve(runRoot);
+	return path === root || path.startsWith(`${root}${sep}`);
+}
+
+/**
+ * Drop every Clio root variable that points outside the run root.
+ *
+ * The four per-role `CLIO_CODER_*_DIR` variables beat `CLIO_CODER_HOME`, so a
+ * shell that exported only `CLIO_CODER_STATE_DIR` used to skip the home
+ * override below and send every state write through that variable into a real
+ * home. A runner is never handed a home on purpose (scripts/ci-tests.mjs and
+ * the package.json test scripts pass none), and operators routinely export a
+ * test or live home in the same shell, so refusing would stop every such shell
+ * from running tests. The values are overridden instead, with one notice.
+ * Values inside the run root are a test's own scratch roots handed to a child
+ * and are kept. Deleted rather than repointed, so a test that later sets only
+ * `CLIO_CODER_HOME` still resolves every role under it.
+ */
+function confineClioRootEnv(env: NodeJS.ProcessEnv, runRoot: string): string[] {
+	const dropped: string[] = [];
+	for (const key of clioRootEnvKeys) {
+		const value = env[key]?.trim();
+		if (value === undefined) continue;
+		if (value.length > 0 && insideRunRoot(value, runRoot)) continue;
+		Reflect.deleteProperty(env, key);
+		if (value.length > 0) dropped.push(key);
+	}
+	// Foreign agent roots (~/.claude, ~/.codex) are the operator's too. Off unless
+	// a test points them inside the run root, as tests/harness/scratch-env.ts does.
+	const interop = env.CLIO_CODER_INTEROP_HOME?.trim();
+	if (interop !== "none" && !(interop && insideRunRoot(interop, runRoot))) {
+		if (interop) dropped.push("CLIO_CODER_INTEROP_HOME");
+		env.CLIO_CODER_INTEROP_HOME = "none";
+	}
+	// With nothing left choosing a root, the run root's home holds all five roles.
+	if (clioRootEnvKeys.every((key) => !env[key]?.trim())) {
+		env.CLIO_CODER_HOME = join(runRoot, "home");
+		env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+	}
+	return dropped;
+}
+
+// A test must never inherit the operator's Clio roots or platform defaults. The
+// preload runs before every test module, so this catches settingsPath() and
+// every XDG role resolver without requiring each call site to remember an
+// override. Tests of default XDG resolution set an explicit environment in
+// their own child process.
+{
 	const runRoot = process.env[ROOT_ENV];
 	if (runRoot !== undefined) {
-		process.env.CLIO_CODER_HOME = join(runRoot, "home");
-		process.env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+		const dropped = confineClioRootEnv(process.env, runRoot);
+		if (dropped.length > 0) {
+			process.stderr.write(
+				`tests/harness/tmp-root.ts: ignoring inherited ${dropped.join(", ")}; tests use the run root ${runRoot}\n`,
+			);
+		}
 	}
 }
 
