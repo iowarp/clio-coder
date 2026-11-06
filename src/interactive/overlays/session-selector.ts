@@ -98,11 +98,12 @@ export function formatRelativeTime(iso: string | null | undefined, now: number =
 	return iso ? relative(iso, now) : "—";
 }
 
+/** The session's connection and model the way the composer names them: `mock · mock/judge-model`. */
 function shortTarget(meta: SessionMeta): string {
 	const target = sanitizeCallTargetText(meta.target ?? "");
 	const model = sanitizeCallTargetText(meta.model ?? "");
 	if (!target && !model) return "no target";
-	if (target && model) return `${target}/${model}`;
+	if (target && model) return `${target} · ${model}`;
 	return target || model || "no target";
 }
 
