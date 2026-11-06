@@ -57,4 +57,23 @@ describe("skill frontmatter cache", () => {
 		const persisted = JSON.parse(readFileSync(cacheFile(), "utf8")) as { entries: Record<string, unknown> };
 		deepEqual(Object.keys(persisted.entries), [], "a deleted skill's entry is dropped");
 	});
+
+	it("reads a damaged cache file or entry as a miss and parses the source", () => {
+		mkdirSync(join(clioConfigDir(), "skills", "probe"), { recursive: true });
+		writeFileSync(skillFile, skillText("Original one."));
+		for (const body of ["null", "[]", `{"format":1,"clioVersion":${JSON.stringify(readClioVersion())},"entries":null}`]) {
+			writeFileSync(cacheFile(), body);
+			equal(description(), "Original one.", `cache body ${body}`);
+		}
+
+		const stat = statSync(skillFile);
+		const text = "name: probe\ndescription: Original one.";
+		const entries = { [skillFile]: { mtimeMs: stat.mtimeMs, size: stat.size, text, json: "{not json" } };
+		writeFileSync(cacheFile(), JSON.stringify({ format: 1, clioVersion: readClioVersion(), entries }));
+		equal(description(), "Original one.", "an entry whose JSON does not parse falls back to the source");
+		const persisted = JSON.parse(readFileSync(cacheFile(), "utf8")) as { entries: Record<string, { json: string }> };
+		deepEqual(JSON.parse(persisted.entries[skillFile]?.json ?? "null"), { name: "probe", description: "Original one." });
+		equal(description(), "Original one.", "the replaced entry answers the next load");
+	});
+
 });
