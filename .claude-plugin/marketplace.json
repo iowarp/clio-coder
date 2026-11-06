@@ -210,6 +210,16 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "science-data",
+			"source": "./library/plugins/science-data",
+			"description": "Science data pack: declares the clio-kit parquet and pandas MCP servers with per-tool action classes, so reads run and every file-writing tool asks first, plus a skill for exploring HDF5, Parquet and CSV data, with an operator entry for the hdf5 server.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
 			"name": "scientific-debugging",
 			"source": "./library/skills/research/scientific-debugging",
 			"description": "Diagnoses stalled or cross-system failures and wrong, NaN, nondeterministic, or unexpectedly slow scientific results through falsifiable hypotheses across distinct fault classes, with evidence-cited verdicts before any fix. Not for designing benchmarks or pre-registered experiments; use experiment-protocol.",

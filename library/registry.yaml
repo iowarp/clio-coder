@@ -724,6 +724,22 @@ entries:
           reconstructing both sides' intent, validating with the project's own
           checks, and completing the operation. Not for integrating many
           branches; use worktree-merge.
+  - kind: plugin
+    name: science-data
+    description: "Science data pack: declares the clio-kit parquet and pandas MCP
+      servers with per-tool action classes, so reads run and every file-writing
+      tool asks first, plus a skill for exploring HDF5, Parquet and CSV data,
+      with an operator entry for the hdf5 server."
+    version: 0.1.0
+    sourceUrl: plugins/science-data
+    sha256: b19a969ce10388a7c1bd4fd873d6a3022d85d19be4d983722557de030fe814db
+    provides:
+      - kind: skill
+        name: science-data
+        description: "Explores HDF5, Parquet and CSV data through the clio-kit hdf5,
+          parquet and pandas MCP servers: structure, slices, statistics and
+          tests, read-only by default. Not for writing or converting data files;
+          those calls ask first."
   - kind: skill
     name: scientific-debugging
     description: Diagnoses stalled or cross-system failures and wrong, NaN,

@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "science-data",
+	"version": "0.1.0",
+	"description": "Science data pack: declares the clio-kit parquet and pandas MCP servers with per-tool action classes, so reads run and every file-writing tool asks first, plus a skill for exploring HDF5, Parquet and CSV data, with an operator entry for the hdf5 server.",
+	"license": "Apache-2.0",
+	"author": {
+		"name": "IOWarp"
+	},
+	"repository": "https://github.com/iowarp/clio-coder",
+	"keywords": ["hdf5", "parquet", "pandas", "scientific-data", "mcp"],
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"compatibility": {
+				"clio": ">=0.7.0-0"
+			},
+			"resources": {
+				"skills": "skills"
+			}
+		}
+	}
+}
