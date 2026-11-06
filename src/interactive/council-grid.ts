@@ -199,7 +199,48 @@ function zipColumns(columns: ReadonlyArray<ReadonlyArray<string>>, columnWidth: 
  * The council group's body: the member grid or stack, then the synthesis run
  * full width under it. The caller frames the result.
  */
-export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, contentWidth: number): string[] {
+export function councilGroupBody(
+	theme: ClioTheme,
+	group: CouncilGroupView,
+	contentWidth: number,
+	maxRows?: number,
+): string[] {
+	const full = councilFullBody(theme, group, contentWidth);
+	// A short board cut the stack after its first member, hiding the rest and the cursor with them. When the whole body
+	// cannot fit, each member keeps one row instead, so every member and the selection stay in view.
+	if (maxRows === undefined || full.length <= maxRows || group.members.length < 2) return full;
+	return councilCompactBody(theme, group, contentWidth);
+}
+
+/** One row per member: cursor, label, outcome, then the first line of what it said or why it said nothing. */
+function councilCompactBody(theme: ClioTheme, group: CouncilGroupView, contentWidth: number): string[] {
+	const dot = dotSep(theme);
+	const row = (member: CouncilMemberView): string => {
+		const cursor = member.runId === group.selectedRunId ? `${theme.fg("selectedOption", GLYPH.cursor)} ` : "  ";
+		const status = `${theme.fg(member.status.glyphToken ?? member.status.token, member.status.glyph)} ${theme.fg(member.status.token, member.status.label)}`;
+		const said =
+			member.tailText
+				.split("\n")
+				.map((line) => line.replace(/^[-*\s]+/u, "").trim())
+				.find((line) => line.length > 0) ?? (member.why !== undefined ? `no answer: ${member.why}` : "");
+		const tail = said.length > 0 ? `${dot}${theme.fg("assistantProse", said)}` : "";
+		return truncateToWidth(
+			`${cursor}${councilLabelText(theme, member.label, member.color)}${dot}${status}${tail}`,
+			contentWidth,
+			GLYPH.ellipsis,
+			false,
+		);
+	};
+	return [
+		...group.members.map(row),
+		...(group.collectedNote !== undefined
+			? [truncateToWidth(theme.fg("annotation", `  ${group.collectedNote}`), contentWidth, GLYPH.ellipsis, false)]
+			: []),
+		...(group.synthesis !== null ? [row(group.synthesis)] : []),
+	];
+}
+
+function councilFullBody(theme: ClioTheme, group: CouncilGroupView, contentWidth: number): string[] {
 	const layout = councilGridLayout(group.members.length, contentWidth);
 	const body: string[] = [];
 	if (layout.mode === "grid") {

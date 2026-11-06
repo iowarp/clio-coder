@@ -2031,7 +2031,8 @@ function formatDispatchBoardBody(
 						title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` · ${item.group.task}`}`,
 						meta: item.group.round > 1 ? `round ${item.group.round} · ${item.group.elapsed}` : item.group.elapsed,
 						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
-						body: councilGroupBody(theme, item.group, width),
+						// The table keeps its selected row and position row, and the detail its rule, whatever the council's size.
+						body: councilGroupBody(theme, item.group, width, Math.max(3, budget - notes.length - dividerRows - 3)),
 					}
 				: {
 						title: runRuleTitle(item.row),
