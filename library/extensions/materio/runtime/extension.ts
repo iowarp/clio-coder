@@ -307,8 +307,57 @@ interface UsageLedger {
 function ledgerKey(workspace: string): string {
 	return `usage:${createHash("sha256").update(workspace).digest("hex")}`;
 }
+/**
+ * The host reports usage as fact sums: what was measured or estimated, and how many parts nobody reported. Adding one
+ * to a number as if it were a count stored `0[object Object]` in the ledger and printed it in the footer band.
+ */
+function knownCount(value: unknown): number | null {
+	if (typeof value === "number") return Number.isFinite(value) ? value : null;
+	if (value === null || typeof value !== "object") return null;
+	const { measured, estimated } = value as { measured?: unknown; estimated?: unknown };
+	if (typeof measured !== "number" && typeof estimated !== "number") return null;
+	const sum = (typeof measured === "number" ? measured : 0) + (typeof estimated === "number" ? estimated : 0);
+	return Number.isFinite(sum) ? sum : null;
+}
+/** A cost is priced only when every part of it was; a sum with an unreported part leaves the call unpriced. */
+function pricedCost(value: unknown): number | null {
+	if (value !== null && typeof value === "object" && Number((value as { unknownCount?: unknown }).unknownCount) > 0)
+		return null;
+	return knownCount(value);
+}
+/**
+ * A stored row as numbers. A row an earlier build wrote with object text in it cannot be recounted, so its unreadable
+ * figures add nothing and it counts as unpriced rather than printing that text.
+ */
+function cleanRow(raw: unknown): StepUsage {
+	const row = (raw !== null && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+	const read = (key: keyof StepUsage): number | null => {
+		const value = row[key];
+		return typeof value === "number" && Number.isFinite(value) ? value : null;
+	};
+	const fields = ["input", "output", "cacheRead", "cacheWrite", "cost", "unpriced", "calls"] as const;
+	const damaged = fields.some((key) => read(key) === null);
+	const value = (key: keyof StepUsage): number => read(key) ?? 0;
+	const calls = damaged ? Math.max(1, value("calls")) : value("calls");
+	return {
+		input: value("input"),
+		output: value("output"),
+		cacheRead: value("cacheRead"),
+		cacheWrite: value("cacheWrite"),
+		cost: value("cost"),
+		unpriced: damaged ? calls : value("unpriced"),
+		calls,
+	};
+}
+function cleanLedger(raw: UsageLedger | null | undefined): UsageLedger {
+	const steps = raw?.steps !== null && typeof raw?.steps === "object" ? raw.steps : {};
+	return {
+		steps: Object.fromEntries(Object.entries(steps).map(([step, row]) => [step, cleanRow(row)])),
+		seen: Array.isArray(raw?.seen) ? raw.seen.filter((id): id is string => typeof id === "string") : [],
+	};
+}
 async function ledger(ctx: ExtensionContextV2): Promise<UsageLedger> {
-	return (await ctx.store.get<UsageLedger>(ledgerKey(ctx.snapshot.workspace))).value ?? { steps: {}, seen: [] };
+	return cleanLedger((await ctx.store.get<UsageLedger>(ledgerKey(ctx.snapshot.workspace))).value);
 }
 /** One store per project; compare-and-set retries also protect usage from other sessions. */
 async function addUsage(
@@ -321,16 +370,17 @@ async function addUsage(
 	const key = ledgerKey(ctx.snapshot.workspace);
 	for (let attempt = 0; attempt < 8; attempt++) {
 		const current = await ctx.store.get<UsageLedger>(key);
-		const value = current.value ?? { steps: {}, seen: [] };
+		const value = cleanLedger(current.value);
 		if (value.seen.includes(eventId)) return;
 		const row = value.steps[step] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0, calls: 0 };
+		const cost = pricedCost(usage.costUsd);
 		value.steps[step] = {
-			input: row.input + usage.inputTokens,
-			output: row.output + usage.outputTokens,
-			cacheRead: row.cacheRead + usage.cacheReadTokens,
-			cacheWrite: row.cacheWrite + usage.cacheWriteTokens,
-			cost: row.cost + (usage.costUsd ?? 0),
-			unpriced: row.unpriced + Number(usage.costUsd === null),
+			input: row.input + (knownCount(usage.inputTokens) ?? 0),
+			output: row.output + (knownCount(usage.outputTokens) ?? 0),
+			cacheRead: row.cacheRead + (knownCount(usage.cacheReadTokens) ?? 0),
+			cacheWrite: row.cacheWrite + (knownCount(usage.cacheWriteTokens) ?? 0),
+			cost: row.cost + (cost ?? 0),
+			unpriced: row.unpriced + Number(cost === null),
 			calls: row.calls + 1,
 		};
 		value.seen = [...value.seen, eventId].slice(-512);
@@ -338,11 +388,18 @@ async function addUsage(
 	}
 	throw new Error("Usage store changed repeatedly; this event was not recorded.");
 }
+/** A figure for the band and cards; anything but a finite number reads `unknown`, never its object text. */
+function figure(value: unknown): string {
+	return typeof value === "number" && Number.isFinite(value) ? String(value) : "unknown";
+}
+function dollars(value: unknown, digits: number): string {
+	return typeof value === "number" && Number.isFinite(value) ? `$${value.toFixed(digits)}` : "cost unknown";
+}
 function usageText(row: StepUsage): string {
-	const tokens = `${row.input + row.output} tokens (in ${row.input}, out ${row.output}, cache ${row.cacheRead}/${row.cacheWrite})`;
+	const tokens = `${figure(row.input + row.output)} tokens (in ${figure(row.input)}, out ${figure(row.output)}, cache ${figure(row.cacheRead)}/${figure(row.cacheWrite)})`;
 	return row.unpriced
-		? `${tokens} · cost unavailable${row.cost ? `; priced calls $${row.cost.toFixed(4)}` : ""}`
-		: `$${row.cost.toFixed(4)} · ${tokens}`;
+		? `${tokens} · cost unavailable${row.cost ? `; priced calls ${dollars(row.cost, 4)}` : ""}`
+		: `${dollars(row.cost, 4)} · ${tokens}`;
 }
 function totalUsage(value: UsageLedger): StepUsage {
 	return Object.values(value.steps).reduce(
@@ -1393,7 +1450,7 @@ async function bench(ctx: ExtensionContextV2, message?: string): Promise<Extensi
 	};
 	const costSteps = Object.entries(usage.steps)
 		.slice(0, 6)
-		.map(([step, row]) => `${step}: ${row.unpriced ? `${row.input + row.output} tok` : `$${row.cost.toFixed(3)}`}`)
+		.map(([step, row]) => `${step}: ${row.unpriced ? `${figure(row.input + row.output)} tok` : dollars(row.cost, 3)}`)
 		.join(" · ");
 	const total = totalUsage(usage);
 	return {
@@ -1447,7 +1504,7 @@ async function bench(ctx: ExtensionContextV2, message?: string): Promise<Extensi
 			rail: { t: "text", text: `MATERIO ◆ ${project.phase.toUpperCase()}`, tone: "brand", bold: true },
 			footer: {
 				t: "text",
-				text: `Σ ${total.calls ? (total.unpriced ? `${total.input + total.output} tokens · cost unavailable` : `$${total.cost.toFixed(4)}`) : "no usage"} · ${project.indexed} files indexed · checkpoint ${project.checkpoint.slice(0, 68)} · ${costSteps || "Step usage: no calls recorded"}${project.tasks.length > 60 ? ` · ${project.tasks.length - 60} tasks beyond board limit` : ""}`,
+				text: `Σ ${total.calls ? (total.unpriced ? `${figure(total.input + total.output)} tokens · cost unavailable` : dollars(total.cost, 4)) : "no usage"} · ${project.indexed} files indexed · checkpoint ${project.checkpoint.slice(0, 68)} · ${costSteps || "Step usage: no calls recorded"}${project.tasks.length > 60 ? ` · ${project.tasks.length - 60} tasks beyond board limit` : ""}`,
 				wrap: "truncate",
 			},
 		},

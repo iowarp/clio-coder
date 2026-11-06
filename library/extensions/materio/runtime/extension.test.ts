@@ -53,11 +53,19 @@ function project(): string {
 	writeFileSync(path.join(workspace, ".research/tasks/task-03/analysis.py"), "def analyze(:\n    pass\n");
 	return workspace;
 }
+/** The host reports usage as fact sums, so the fixture does too. */
+const sum = (measured: number, unknownCount = 0) => ({
+	measured,
+	estimated: 0,
+	unknownCount,
+	absentCount: 0,
+	coverage: { measured: unknownCount === 0 ? 1 : 0, estimated: 0, unknown: unknownCount === 0 ? 0 : 1 },
+});
 const USAGE = {
-	inputTokens: 100,
-	outputTokens: 40,
-	cacheReadTokens: 20,
-	cacheWriteTokens: 5,
+	inputTokens: sum(100),
+	outputTokens: sum(40),
+	cacheReadTokens: sum(20),
+	cacheWriteTokens: sum(5),
 	costUsd: null,
 	model: "no-price",
 	target: "dead",
@@ -185,7 +193,7 @@ test("turn and dispatch usage is deduplicated, attributed, CAS-stored and never 
 			runId: "d1",
 			agentId: "materio-workflow-planner",
 			durationMs: 10,
-			usage: { ...USAGE, costUsd: 0.25 },
+			usage: { ...USAGE, costUsd: sum(0.25) },
 		});
 		const key = (await host.store.keys()).find((key) => key.startsWith("usage:"));
 		assert.ok(key);
@@ -196,6 +204,17 @@ test("turn and dispatch usage is deduplicated, attributed, CAS-stored and never 
 		assert.match(cost.text, /140 tokens.*cost unavailable/);
 		assert.match(cost.text, /\$0\.2500/);
 		assert.doesNotMatch(cost.text, /literature-review: \$/);
+		assert.doesNotMatch(cost.text, /object Object/);
+		// A ledger an earlier build stored with object text in it reads as unpriced, never as that text.
+		const stored = (await host.store.get<Record<string, unknown>>(key)).value ?? {};
+		await host.store.set(key, {
+			...stored,
+			steps: { "define-research-tasks": { input: "00[object Object]", output: 0, cost: 0, unpriced: 0, calls: 1 } },
+		});
+		const bench = await host.command("lab");
+		const footer = JSON.stringify(bench.regions?.footer ?? {});
+		assert.doesNotMatch(footer, /object Object/);
+		assert.match(footer, /tokens · cost unavailable/);
 	} finally {
 		await host.dispose();
 		rmSync(workspace, { recursive: true, force: true });
