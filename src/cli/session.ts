@@ -52,6 +52,10 @@ const SIGNAL_SETTLE_WAIT_MS = 5_000;
 
 export async function runSessionCommand(args: ReadonlyArray<string>): Promise<number> {
 	const [sub, ...rest] = args;
+	if ((sub === "list" || sub === "terminate") && (rest.includes("--help") || rest.includes("-h"))) {
+		process.stdout.write(USAGE);
+		return 0;
+	}
 	if (sub === "list") return runList(rest);
 	if (sub === "terminate") return runTerminate(rest);
 	if (sub === undefined || sub === "--help" || sub === "-h") {

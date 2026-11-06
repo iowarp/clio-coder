@@ -15,6 +15,7 @@ import {
 	resolveModelRuntimeCapabilities,
 	resolveTargetRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
+import { runtimeNotRegistered } from "./retired-runtimes.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import { VALID_THINKING_LEVELS } from "./types/capability-flags.js";
 import type { ContextWindowSlots } from "./types/context-window-slots.js";
@@ -433,7 +434,7 @@ export function resolveRuntimeTarget(
 	if (!runtime) {
 		return {
 			ok: false,
-			diagnostics: [diagnostic("error", "runtime-not-registered", `runtime '${target.runtime}' not registered`)],
+			diagnostics: [diagnostic("error", "runtime-not-registered", runtimeNotRegistered(target.runtime))],
 		};
 	}
 

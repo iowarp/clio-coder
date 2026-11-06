@@ -31,6 +31,7 @@ import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
+import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
@@ -717,11 +718,20 @@ async function runDispatch(
 			: undefined;
 		const targetId =
 			parsed.target ?? profileTargetId ?? runtimeTargetId ?? settings.fleet?.default?.target ?? settings.chat?.target;
-		const target = targetId ? providers.getTarget(targetId) : null;
-		const runtime = target ? providers.getRuntime(target.runtime) : null;
-		if (!target || !runtime) {
+		if (!targetId) {
 			writeRunDiagnostic("clio-coder run: --api-key supplied but no target resolved; pass --target <id>\n");
 			return await stopDomains(2);
+		}
+		const target = providers.getTarget(targetId);
+		if (!target) {
+			writeRunDiagnostic(`clio-coder run: --api-key supplied but target '${targetId}' not found\n`);
+			return await stopDomains(2);
+		}
+		// Dispatch refuses this target the same way, with exit 1, when no key is supplied.
+		const runtime = providers.getRuntime(target.runtime);
+		if (!runtime) {
+			writeRunDiagnostic(`clio-coder run: cannot use target '${target.id}': ${runtimeNotRegistered(target.runtime)}\n`);
+			return await stopDomains(1);
 		}
 		providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
 	}

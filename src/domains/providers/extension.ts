@@ -27,6 +27,7 @@ import { loadPluginRuntimes } from "./plugins.js";
 import { probeToolCall } from "./probe/tool-call.js";
 import { createProfileKnowledgeBase } from "./profile-knowledge.js";
 import { getRuntimeRegistry } from "./registry.js";
+import { runtimeNotRegistered } from "./retired-runtimes.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
@@ -443,7 +444,7 @@ export function createProvidersBundle(
 				target,
 				runtime: null,
 				available: false,
-				reason: "unknown runtime",
+				reason: runtimeNotRegistered(target.runtime),
 				health: previous?.health ?? emptyHealth(),
 				capabilities: previous?.capabilities ?? EMPTY_CAPABILITIES,
 				probeCapabilities: previous?.probeCapabilities ?? null,

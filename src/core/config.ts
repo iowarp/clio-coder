@@ -1004,18 +1004,21 @@ export const SETTINGS_V1_PATH_MOVES = Object.freeze([
 const EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED =
 	"a delegated agent's permission ask is decided at once and never waits for the operator; integrations.externalAgents.defaults.permissionTimeoutMs still bounds Clio's own ACP server";
 const EXTERNAL_AGENT_LABELS_RETIRED = "nothing read or displayed external agent labels";
+const EXCLUDE_LAST_TURNS_RETIRED =
+	"only the temporary legacy mask used it; context.workingSet.protectLastTurns remains";
 
 export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	identity: "it was accepted and ignored; no behavior is lost",
 	"background.thinkingLevel": "proactive memory always resolves thinking off",
 	theme: "the only registered theme was not read by runtime rendering",
-	"compaction.excludeLastTurns": "only the temporary legacy mask used it; context.workingSet.protectLastTurns remains",
+	"compaction.excludeLastTurns": EXCLUDE_LAST_TURNS_RETIRED,
 	"delegation.agents[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
 	"delegation.agents[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
 	// Version-2 keys retired without a replacement. They share this table so a
 	// file naming one gets the same targeted removal message.
 	"integrations.externalAgents.entries[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,
 	"integrations.externalAgents.entries[].labels": EXTERNAL_AGENT_LABELS_RETIRED,
+	"context.compaction.excludeLastTurns": EXCLUDE_LAST_TURNS_RETIRED,
 	// Written as an empty map by `init` from 0.5.3 through 0.5.7, so most upgraded files carry it.
 	"fleet.decisionProfiles": "System One replaced decision profiles; name an engine with systemOne.use",
 	"systemOne.sites":
@@ -2105,6 +2108,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					issues.add("context.compaction", `expected a map, got ${describe(context.compaction)}`);
 				else {
 					const compaction = context.compaction;
+					// `excludeLastTurns` stays known only so its retirement entry, not "unknown key", names it.
 					issues.unknownKeys("context.compaction", compaction, [
 						"provider",
 						"maxTokens",
@@ -2114,11 +2118,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"systemPrompt",
 						"excludeLastTurns",
 					]);
-					if ("excludeLastTurns" in compaction)
-						issues.add(
-							"context.compaction.excludeLastTurns",
-							"retired without replacement; use context.workingSet.protectLastTurns",
-						);
 					if ("auto" in compaction) {
 						const parsed = expectBoolean(issues, "context.compaction.auto", compaction.auto);
 						if (parsed !== undefined) settings.context.compaction.auto = parsed;

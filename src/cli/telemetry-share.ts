@@ -110,6 +110,8 @@ interface ShareArgs {
 	dryRun: boolean;
 }
 
+const SINGLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["--repo", "--since", "--until", "--profile", "--out"]);
+
 function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 	const sessions: string[] = [];
 	const runs: string[] = [];
@@ -123,13 +125,13 @@ function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 		}
 		const value = argv[index + 1];
 		if (!arg.startsWith("--")) return `unexpected argument ${arg}`;
+		if (arg !== "--session" && arg !== "--run" && !SINGLE_VALUE_FLAGS.has(arg)) return `unknown flag ${arg}`;
 		if (value === undefined || value.startsWith("--")) return `${arg} needs a value`;
 		index += 1;
 		if (arg === "--session") sessions.push(value);
 		else if (arg === "--run") runs.push(value);
-		else if (["--repo", "--since", "--until", "--profile", "--out"].includes(arg) && !single.has(arg))
-			single.set(arg, value);
-		else return `unknown or repeated flag ${arg}`;
+		else if (!single.has(arg)) single.set(arg, value);
+		else return `repeated flag ${arg}`;
 	}
 	const profile = single.get("--profile") ?? null;
 	if (profile !== null && !isShareProfile(profile)) return `--profile takes ${SHARE_PROFILE_NAMES.join(", ")}`;

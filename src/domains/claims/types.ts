@@ -173,3 +173,102 @@ export type ClaimRegressionRecord = ClaimRegressionRecordV1;
  * `contested` while a claim with equal pinned conditions disagrees with it, else `standing`.
  */
 export type ClaimStatus = "standing" | "contested" | "superseded";
+
+/**
+ * The schema a hypothesis-workflow slate declares (`library/plugins/literature/skills/hypothesis-workflow`). The slate
+ * holds every hypothesis at `proposed`; this ledger is where a hypothesis moves to tested, supported or refuted.
+ */
+export const HYPOTHESIS_SLATE_SCHEMA = "clio-coder.hypothesis-slate.v1";
+
+/**
+ * Where a hypothesis stands: `proposed` until the check its success criterion names runs, `tested` once it ran without
+ * a judged claim (a command check, a crash, a timeout, a payload that could not be judged), then `supported` or
+ * `refuted` by the latest claim that check recorded for it. A judged claim is the only thing that supports or refutes.
+ */
+export type HypothesisStatus = "proposed" | "tested" | "supported" | "refuted";
+
+/**
+ * One hypothesis of a slate the main session wrote, or a worker wrote and the host accepted into the project (#406).
+ * Unlike a claim this is model-authored text, so it is
+ * never `grounded`: it records what was proposed and the check that would judge it, nothing more. A later version of
+ * the same slate entry with changed content is a new record that `revises` the earlier one; neither is rewritten.
+ */
+/**
+ * How a slate reached the log: written by a main-session tool call, or landed in the project by a worker run the host
+ * accepted (a merged task worktree, or a run in the checkout that settled succeeded). Either way the host read the
+ * file from the project; nothing a worker reported about it is recorded.
+ */
+export type HypothesisSource =
+	| { channel: "slate"; sessionId: string | null; toolCallId: string | null; slateSha256: string }
+	| { channel: "worker-slate"; runId: string; receiptDigest: string; slateSha256: string };
+
+export interface HypothesisRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "hypothesis";
+	/** SHA-256 of the record's canonical JSON without `id`. */
+	id: string;
+	at: string;
+	project: string;
+	/** Project-relative path of the slate, else absolute. */
+	slate: string;
+	/** The slate's hypothesis id, such as `H1`. */
+	hypothesis: string;
+	statement: string;
+	prediction: string;
+	/** The success criterion as the slate drafted it; `check` is its `verifyId`, the declared check that judges it. */
+	criterion: { kind: string; check?: string; statement?: string };
+	/** Digest of slate path, hypothesis id, statement, prediction and criterion: the same entry rewritten is one subject. */
+	subject: string;
+	/** The record of the same slate entry this one replaces, which was current when this one was appended. */
+	revises?: string;
+	source: HypothesisSource;
+	evidence: "proposed";
+	flagged?: "instruction-markers";
+}
+
+/**
+ * A run of the check a hypothesis names (#406). `claim` is set exactly when the run was judged into a claim, and then
+ * `outcome` follows its verdict: `agrees` supports, `disagrees` refutes. A run with no claim is `tested`.
+ */
+export interface HypothesisTestRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "hypothesis-test";
+	id: string;
+	at: string;
+	project: string;
+	/** The hypothesis record tested: a revision that was current when the check started, bound then. */
+	hypothesis: string;
+	check: string;
+	outcome: Exclude<HypothesisStatus, "proposed">;
+	claim?: string;
+	/** How the run ended, as the channel recorded it (`succeeded`, `failed`, `timed-out`, ...). */
+	execution: string;
+	source: ClaimSource;
+}
+
+export type HypothesisRecord = HypothesisRecordV1;
+export type HypothesisTestRecord = HypothesisTestRecordV1;
+
+/** The run a check-start record binds: a main-thread verify call, or a worker run's host verification. */
+export type CheckRunIdentity =
+	| { channel: "verify"; sessionId: string | null; toolCallId: string }
+	| { channel: "host-verification"; runId: string };
+
+/**
+ * The hypothesis revisions one run of a check was bound to as it started (#406), appended under the log's lock before
+ * the check executes. Replay admits a test only for a revision its run's first start record lists, and a judged test
+ * only on a claim that follows that record, so a revision appended while the check ran is never credited with it.
+ */
+export interface CheckStartRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "check-start";
+	id: string;
+	at: string;
+	project: string;
+	check: string;
+	run: CheckRunIdentity;
+	/** The current revisions whose criterion named the check when it started; empty when none did. */
+	hypotheses: string[];
+}
+
+export type CheckStartRecord = CheckStartRecordV1;

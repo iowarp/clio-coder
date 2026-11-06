@@ -28,6 +28,7 @@ import {
 import { probeCapabilitiesForModel } from "../domains/providers/model-capabilities.js";
 import { loadedContextWindowForModel } from "../domains/providers/model-discovery.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import type {
 	ProbeContext,
 	ProbeModelStatus,
@@ -327,7 +328,7 @@ export function setOrchestratorPointer(
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
-			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
+			`cannot use target '${descriptor.id}' as orchestrator target because ${runtimeNotRegistered(descriptor.runtime)}`,
 		);
 	}
 	if (!isOrchestratorEligibleRuntime(runtime)) {
@@ -369,7 +370,7 @@ export function assertOrchestratorReplacementEligible(settings: ClioSettings, de
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
-			`cannot update ${role} target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
+			`cannot update ${role} target '${descriptor.id}' because ${runtimeNotRegistered(descriptor.runtime)}`,
 		);
 	}
 	if (!isOrchestratorEligibleRuntime(runtime)) {

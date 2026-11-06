@@ -39,6 +39,13 @@ delete process.env.NO_COLOR;
 // shell cannot move the suite off the unknown-background palette.
 delete process.env.COLORFGBG;
 delete process.env.CLIO_CODER_THEME;
+// Git configuration injected through the environment, as agent shells do with
+// GIT_CONFIG_COUNT/KEY_n/VALUE_n (core.fsmonitor=false, safe.bareRepository),
+// overrides every repository fixture's own config and turned fsmonitor and
+// module git-dir contracts red. Fixtures that need a key set it themselves.
+for (const name of Object.keys(process.env)) {
+	if (/^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/.test(name)) delete process.env[name];
+}
 /** Names every root this harness makes, and the only names it will remove. */
 export const TEST_TMP_ROOT_PREFIX = "clio-coder-tests-";
 

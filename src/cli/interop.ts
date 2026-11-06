@@ -34,6 +34,10 @@ export async function runInteropCommand(args: ReadonlyArray<string>): Promise<nu
 		process.stdout.write(HELP);
 		return sub === undefined ? 2 : 0;
 	}
+	if ((sub === "adopt" || sub === "inspect") && (args.includes("--help") || args.includes("-h"))) {
+		process.stdout.write(HELP);
+		return 0;
+	}
 	if (sub === "adopt") return await runAdopt(args.slice(1));
 	if (sub === "inspect") return await runInteropInspect(args.slice(1));
 	printError(`unknown interop command: ${sub}`);

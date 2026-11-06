@@ -2,6 +2,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { retiredRuntimeReplacement } from "./retired-runtimes.js";
 
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
@@ -134,8 +135,11 @@ function editDistance(a: string, b: string): number {
  * null when nothing is near enough to be a plausible typo. Ids compare
  * lowercased with separators dropped, so `lm-studio` and `llama.cpp` find their
  * runtime, and a near miss of an alias suggests the canonical id it names.
+ * A retired id names the runtime that replaced it.
  */
 export function closestRuntimeId(registry: RuntimeRegistry, input: string): string | null {
+	const replacement = retiredRuntimeReplacement(input);
+	if (replacement !== null && registry.get(replacement)) return replacement;
 	const wanted = normalizeRuntimeId(input);
 	if (wanted.length === 0) return null;
 	const limit = Math.max(1, Math.floor(wanted.length / 3));

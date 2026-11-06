@@ -4,6 +4,7 @@ import type { ClioSettings } from "../core/config.js";
 import { readSettings } from "../core/config.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { bootAuthStatus } from "../domains/providers/auth/boot-status.js";
+import { retiredRuntimeReplacement } from "../domains/providers/retired-runtimes.js";
 import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/boot-manifest.js";
 
 /**
@@ -57,8 +58,12 @@ export function describeVerdict(verdict: DefaultTargetVerdict): string {
 	switch (verdict.kind) {
 		case "no-target":
 			return "No model target is configured.";
-		case "ineligible-runtime":
+		case "ineligible-runtime": {
+			const replacement = retiredRuntimeReplacement(verdict.runtime);
+			if (replacement !== null)
+				return `Target '${verdict.targetId}' runs on '${verdict.runtime}', which was removed in 0.7.0; set \`runtime: ${replacement}\` on it in settings.yaml.`;
 			return `Target '${verdict.targetId}' runs on '${verdict.runtime}', which cannot drive the main agent.`;
+		}
 		case "no-model":
 			return `Target '${verdict.targetId}' has no chat model configured.`;
 		default:

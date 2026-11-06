@@ -117,12 +117,15 @@ function components(value: unknown, root: string): PluginComponent[] {
 function clioConfiguration(value: unknown, root: string): ClioPluginConfiguration {
 	if (value !== undefined && !record(value)) throw new Error(`${PLUGIN_EXTENSION_KEY} must be an object`);
 	const raw: Record<string, unknown> = value ?? {};
-	// `evals` is retired: an installed manifest that still declares package
-	// suites keeps loading and the value is ignored. The key leaves this set in
-	// the v0.7.0 compatibility window.
+	// Package evals were retired with the eval engine; 0.7.0 closed the window
+	// in which a manifest could still declare them.
+	if (Object.hasOwn(raw, "evals"))
+		throw new Error(
+			`${PLUGIN_EXTENSION_KEY} key 'evals' was removed in 0.7.0; delete it from the package manifest and reinstall`,
+		);
 	requireKeys(
 		raw,
-		new Set(["manifestVersion", "kind", "requires", "evals", "compatibility", "resources", "components"]),
+		new Set(["manifestVersion", "kind", "requires", "compatibility", "resources", "components"]),
 		PLUGIN_EXTENSION_KEY,
 	);
 	if (value !== undefined && raw.manifestVersion !== 1) throw new Error("Clio plugin manifestVersion must be 1");
