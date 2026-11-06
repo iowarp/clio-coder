@@ -108,6 +108,12 @@ export interface ApplicationControllerDeps {
 	explainEscapeGuard?: () => void;
 	/** Esc while the draft addresses a worker backs out of the steer and keeps the text. */
 	cancelSteerDraft?: () => boolean;
+	/**
+	 * Close a glance card (the `?` quick help) if one is up. Its rail says any key
+	 * closes it, so the key does only that: an Esc used to reach the run under it
+	 * first and cancel the run, leaving the card on screen.
+	 */
+	closeGlance?: () => boolean;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
 	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
@@ -403,8 +409,10 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		if (!isEscapeKey(data) || isKeyRelease(data)) return routeInput(data);
 		const before = deps.getOverlayState();
 		const closesSuggestions = before === "closed" && (deps.isAutocompleteVisible?.() ?? false);
+		// The leader menu is a surface too: a second Esc right after the one that closed it must not reach the run.
+		const closesLeader = deps.leaderKeys.isPending();
 		const result = routeInput(data);
-		if (closesSuggestions || (before !== "closed" && deps.getOverlayState() === "closed")) {
+		if (closesSuggestions || closesLeader || (before !== "closed" && deps.getOverlayState() === "closed")) {
 			lastOwnerEscapeAt = deps.clock.now();
 		}
 		return result;
@@ -447,6 +455,11 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			return undefined;
 		}
 		if (isEscapeKey(data) && deps.isAutocompleteVisible?.()) return undefined;
+		if (deps.getOverlayState() === "closed" && deps.closeGlance?.()) {
+			if (isEscapeKey(data)) lastOwnerEscapeAt = deps.clock.now();
+			deps.requestRender();
+			return { consume: true };
+		}
 		if (isEscapeKey(data) && deps.cancelSteerDraft?.()) {
 			lastOwnerEscapeAt = deps.clock.now();
 			return { consume: true };

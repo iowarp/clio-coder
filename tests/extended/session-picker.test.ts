@@ -249,6 +249,10 @@ it("keeps fragmented arrows distinct from Escape and preserves the editor draft"
 	assert.equal(f.editor.getText(), "unsent editor draft");
 	const cancelled = picker(t, [session("first")]);
 	cancelled.input("search text");
+	// A typed filter is a layer: the first Esc clears it and the picker stays; the second closes.
+	cancelled.input("\x1b");
+	await delay(SESSION_ESCAPE_GRACE_MS + 30);
+	assert.equal(cancelled.closed(), 0);
 	cancelled.input("\x1b");
 	await delay(SESSION_ESCAPE_GRACE_MS + 30);
 	assert.equal(cancelled.closed(), 1);

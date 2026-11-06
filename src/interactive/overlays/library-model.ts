@@ -47,6 +47,7 @@ import {
 	titleRow,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
+import { refWords } from "./library-words.js";
 import { type ListOverlayItem, markdownRows } from "./list-overlay.js";
 
 /** Browse lists install targets; Installed lists the copies and components that exist here. */
@@ -340,7 +341,9 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 	}
 	if (subject.kind === "member") {
 		const selected = subject.owner.scope === view.scope;
-		const reasons = [`Actions here identify the whole owner ${subject.owner.ref} in ${view.scope} scope.`];
+		const reasons = [
+			`Actions here identify the whole owner, the ${refWords(subject.owner.ref)}, in ${view.scope} scope.`,
+		];
 		if (!selected) reasons.push(`The inspected copy is ${subject.owner.scope}; press s to select it.`);
 		if (!subject.member.valid) reasons.push("This member did not validate, so it has no use action.");
 		return {
@@ -362,7 +365,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 			use: false,
 			open: false,
 			reasons: [
-				`A catalog hint from ${subject.record.ref}. It describes what that package says it contains; nothing is loaded until it is installed and verified.`,
+				`A catalog hint from the ${refWords(subject.record.ref)}. It describes what that package says it contains; nothing is loaded until it is installed and verified.`,
 			],
 		};
 	}
@@ -378,7 +381,8 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 				: "This file was found directly in a resource root, not installed as a package, so package lifecycle does not apply.",
 		);
 	const selected = owner?.scope === view.scope;
-	if (owner && !selected) reasons.push(`Owned by ${owner.ref} in ${owner.scope} scope; press s to select it.`);
+	if (owner && !selected)
+		reasons.push(`Owned by the ${refWords(owner.ref)} in ${owner.scope} scope; press s to select it.`);
 	return {
 		install: false,
 		remove: !!owner && selected,
@@ -500,7 +504,7 @@ function packageDetail(
 		here?.update ? statusChip(theme, "warning", libraryUpdateLabel(here.update)) : null,
 		record.refusal ? statusChip(theme, "error", "cannot be installed") : null,
 		// A requirement changes what install will write, so it is said before i is pressed.
-		record.requires?.length ? chip(theme, `needs ${record.requires.join(", ")}`, "warning") : null,
+		record.requires?.length ? chip(theme, `needs ${record.requires.map(refWords).join(", ")}`, "warning") : null,
 		record.copies.length > 0 && !here
 			? chip(theme, `${record.copies.map((copy) => copyPhrase(copy.scope, copy.state)).join(", ")}`, "muted")
 			: null,
