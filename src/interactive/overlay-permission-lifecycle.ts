@@ -1,32 +1,26 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { PermissionRequestedPayload } from "../core/telemetry/live-events.js";
-import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
-import { describeMainCallConsequences, mainCallExposure } from "../domains/safety/call-consequence.js";
 import { sanitizeCallTargetText, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/safety/command-consequence.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
 import { UNATTENDED_DECIDED_BY, unattendedPermissionReason } from "../domains/safety/unattended.js";
+import { axisViewFromId, mainApprovalRequestView } from "../session-control/approval-request-facts.js";
 import type { ToolApprovalStateEvent } from "../session-control/chat-loop.js";
 import { resolvePermission } from "../session-control/index.js";
 import type { NoticeSource } from "../session-control/notice-source.js";
-import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
-import { resolveVerifyCall, verifyResolutionArgv } from "../tools/verify/resolve.js";
-import { prepareVerifyArguments } from "../tools/verify/surface.js";
 import { approvalParkedNotice } from "./bus-notices.js";
 import type { NoticeLevel } from "./command-output.js";
-import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
+import { createMutationInspector, type MutationInspector } from "./mutation-preview.js";
 import type { OverlayState } from "./overlay-key-routing.js";
-import {
-	type ApprovalRequestView,
-	askAxis,
-	describeCallTarget,
-	type PermissionAdvisoryReader,
-	type PermissionCountdownReader,
-	type WorkerWindowReader,
+import type {
+	ApprovalRequestView,
+	PermissionAdvisoryReader,
+	PermissionCountdownReader,
+	WorkerWindowReader,
 } from "./permission-overlay.js";
 import { formatCompactMs } from "./theme/index.js";
 import { startUnattendedCountdown, type UnattendedCountdown, type UnattendedTimers } from "./unattended-countdown.js";
@@ -184,65 +178,6 @@ function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayload): boo
 	return typeof runId === "string" && runId.length > 0;
 }
 
-function axisViewFromId(axisId: string | undefined, fallbackLevel: string): ApprovalRequestView["axis"] | null {
-	if (axisId?.startsWith("net:")) {
-		const ruleId = axisId.slice("net:".length);
-		return { kind: "net", ruleId: ruleId.length > 0 ? ruleId : "unknown" };
-	}
-	if (axisId?.startsWith("autonomy:")) {
-		const level = axisId.slice("autonomy:".length);
-		return { kind: "autonomy", level: level.length > 0 ? level : fallbackLevel };
-	}
-	return null;
-}
-
-/**
- * The rule's reason for a net-axis ask in words: the policy verdict's first reason that is a sentence, else the
- * damage-control match's. A policy can lead with its audit code (`damage-control:truncate-size-zero`), which the
- * card printed as its `why` beside an effect that already said it in words (B05); the code stays on the rule row
- * and in inspection.
- */
-function netReasonOf(decision: SafetyDecision): string | undefined {
-	if (decision.kind !== "ask") return undefined;
-	const reasons = [
-		...(decision.policy?.kind === "ask" ? decision.policy.reasons : []),
-		...(decision.match?.reason !== undefined ? [decision.match.reason] : []),
-	];
-	for (const reason of reasons) {
-		const words = reasonSentence(reason);
-		if (words !== null) return sanitizeCallTargetText(netReasonWords(words));
-	}
-	return undefined;
-}
-
-/** A damage-control match's reason names its rule first (`matched truncate-size-zero: …`); the card keeps the words. */
-const MATCHED_RULE_PREFIX = /^matched [\w.:-]+: (?=\S)/u;
-
-/** A reason as words, or null for an audit code: one token with no space in it is never a sentence. */
-function reasonSentence(reason: string): string | null {
-	const trimmed = reason.trim();
-	if (trimmed.length === 0 || !/\s/u.test(trimmed)) return null;
-	return trimmed.replace(MATCHED_RULE_PREFIX, "");
-}
-
-/**
- * The classifier's write-path codes as the card's `why` row says them. The code
- * itself (`write-path-outside-cwd: /home/…`) is the classifier's audit word, and
- * the card is read by someone deciding, not auditing.
- */
-const WRITE_PATH_REASONS: ReadonlyArray<readonly [string, string]> = [
-	["write-path-outside-cwd: ", "it writes outside this workspace, to "],
-	["write-path-home-escape: ", "it writes through a home-directory path the workspace cannot bound: "],
-	["write-path-system-root: ", "it writes under the system directory "],
-];
-
-function netReasonWords(reason: string): string {
-	for (const [code, words] of WRITE_PATH_REASONS) {
-		if (reason.startsWith(code)) return `${words}${reason.slice(code.length)}`;
-	}
-	return reason;
-}
-
 /**
  * The sentences a worker wrote from its own full arguments. They cross the
  * stdout seam as data, so each is sanitized again, and anything that is not a
@@ -258,63 +193,6 @@ function workerConsequenceLines(value: unknown): string[] {
 		if (line.length > 0) lines.push(line);
 	}
 	return lines;
-}
-
-/**
- * The command a verify call will run, resolved the way the tool and the safety
- * scan resolve it, so the card names it beside the check id as the bash card
- * names its command. Absent when the call resolves to nothing runnable.
- */
-function resolvedVerifyCommand(call: ClassifierCall): { command: string } | undefined {
-	if (call.tool !== ToolNames.Verify || call.args === undefined) return undefined;
-	try {
-		const args = prepareVerifyArguments(call.args);
-		const argv = verifyResolutionArgv(resolveVerifyCall(process.cwd(), args), args);
-		return argv === null ? undefined : { command: argv.join(" ") };
-	} catch {
-		// Resolution reads project files; the card falls back to the check id alone.
-		return undefined;
-	}
-}
-
-function mainApprovalRequestView(
-	call: ClassifierCall,
-	decision: SafetyDecision,
-	meta: PermissionRequiredMeta | undefined,
-	autonomy: string,
-	queueDepth: number | undefined,
-): ApprovalRequestView {
-	const axisFromMeta = axisViewFromId(meta?.axis, autonomy);
-	const axisFromDecision = askAxis(decision);
-	const axis =
-		axisFromMeta ??
-		(axisFromDecision.kind === "net"
-			? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
-			: { kind: "autonomy" as const, level: autonomy });
-	const target = describeCallTarget(call.tool, call.args, resolvedVerifyCommand(call));
-	const netReason = axis.kind === "net" ? netReasonOf(decision) : undefined;
-	// Facts only. The mutation text stays in the inspector the overlay opener
-	// gets; this object reaches the transcript row and the approval-state event.
-	const mutation = mutationFacts(call.tool, call.args);
-	const consequence = describeMainCallConsequences(call);
-	return {
-		requestId: meta?.requestId ?? "permission-pending",
-		tool: call.tool,
-		actionClass: decision.classification.actionClass,
-		axis,
-		origin: { kind: "main" },
-		reason:
-			decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
-		...(netReason !== undefined ? { netReason } : {}),
-		...(consequence.length > 0 ? { consequence } : {}),
-		...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
-			? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
-			: {}),
-		exposure: call.tool === ToolNames.AskUser ? askUserExposure(call.args) : mainCallExposure(call, decision),
-		...(target.length > 0 ? { target } : {}),
-		...(mutation !== null ? { mutation } : {}),
-		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
-	};
 }
 
 /**

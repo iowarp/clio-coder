@@ -11,6 +11,13 @@ import { MAIN_GRANTS_UNAVAILABLE_REASON } from "../../domains/safety/worker-perm
 import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
 import { toolCallFacts } from "../../tools/agent-tools.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
+import type { WorkerRefusal } from "../worker-refusals.js";
+import {
+	describeWorkerRefusal,
+	formatWorkerRefusal,
+	WORKER_REFUSAL_LIMIT,
+	workerRefusalLimitReason,
+} from "../worker-refusals.js";
 
 export interface MappedClaudeToolCall {
 	claudeToolName: string;
@@ -43,6 +50,8 @@ export type ClaudeToolPermissionDecision =
 			permissionRequired: boolean;
 			/** Who could answer the ask behind a permission-required denial. */
 			approvalAuthority?: ApprovalAuthority;
+			/** This refusal was the WORKER_REFUSAL_LIMIT-th execute refusal of the run, so the run ends here. */
+			refusalLimitReached?: boolean;
 	  };
 
 export interface EvaluateClaudeToolPermissionInput {
@@ -74,6 +83,13 @@ export interface EmitClaudeToolPermissionInput extends EvaluateClaudeToolPermiss
 	mainGrantsUnavailable?: boolean;
 	/** SDK tool-use id shared by the start and finish telemetry events. */
 	toolCallId?: string;
+	/**
+	 * The run's execute refusals so far, appended to here. A deny-posture execute
+	 * refusal returns to the model, and the WORKER_REFUSAL_LIMIT-th ends the run
+	 * naming every refused command, as the native worker does. Absent means no
+	 * count is kept.
+	 */
+	executeRefusals?: WorkerRefusal[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -410,18 +426,32 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	}
 	if (decision.permissionRequired) {
 		const mode = input.onPermission ?? "deny";
+		const actionClass = decision.decision.classification.actionClass;
+		const refusal =
+			mode !== "fail" && actionClass === "execute" && input.executeRefusals !== undefined
+				? describeWorkerRefusal({ tool: decision.mapped.clioToolName, args: decision.mapped.args }, decision.decision)
+				: null;
+		if (refusal !== null) input.executeRefusals?.push(refusal);
+		const refusals = input.executeRefusals ?? [];
+		if (refusal !== null && refusals.length >= WORKER_REFUSAL_LIMIT) decision.refusalLimitReached = true;
+		const head =
+			refusal === null
+				? "permission denied by policy: "
+				: `permission denied by policy: ${formatWorkerRefusal(refusal)}; `;
 		input.emit({
 			type: "clio_coder_permission_resolved",
 			payload: {
 				tool: decision.mapped.clioToolName,
-				actionClass: decision.decision.classification.actionClass,
+				actionClass,
 				mode,
 				reason:
 					mode === "fail"
 						? `permission required for ${decision.mapped.clioToolName}; fleet.permissions.mode=fail ends this run`
-						: input.mainGrantsUnavailable === true
-							? `permission denied by policy: ${MAIN_GRANTS_UNAVAILABLE_REASON}; ${decision.reason}`
-							: `permission denied by policy: Claude SDK workers run non-interactively; ${decision.reason}`,
+						: decision.refusalLimitReached === true
+							? workerRefusalLimitReason(refusals)
+							: input.mainGrantsUnavailable === true
+								? `${head}${MAIN_GRANTS_UNAVAILABLE_REASON}; ${decision.reason}`
+								: `${head}Claude SDK workers run non-interactively; ${decision.reason}`,
 			},
 		});
 	}

@@ -11,9 +11,11 @@ import {
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { mutationFacts } from "../../src/session-control/approval-request-facts.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import { createRegistry, type PermissionRequiredMeta, type ToolSpec } from "../../src/tools/registry.js";
+import { writeTool } from "../../src/tools/write.js";
 
 const PLAN = {
 	tasks: [
@@ -38,12 +40,12 @@ const dispatchStub = (runs: string[]): ToolSpec => ({
 async function askOnce(
 	args: Record<string, unknown>,
 	answer: "allow-once" | "reject-once",
-	toolName: "dispatch" | "bash" = "dispatch",
+	toolName: "dispatch" | "bash" | "write" = "dispatch",
 ) {
 	const safety = createWorkerSafety({ cwd: process.cwd() });
 	const registry = createRegistry({ safety, autonomy: () => "default" });
 	const runs: string[] = [];
-	registry.register(toolName === "bash" ? bashTool : dispatchStub(runs));
+	registry.register(toolName === "bash" ? bashTool : toolName === "write" ? writeTool : dispatchStub(runs));
 	const parked: PermissionRequiredMeta[] = [];
 	registry.onPermissionRequired((_call, _decision, meta) => parked.push(meta));
 	const asks: Array<Record<string, unknown>> = [];
@@ -132,6 +134,15 @@ test("a bash ask carries the sentences the host wrote from the whole command", a
 	const dispatch = await askOnce(PLAN, "reject-once");
 	const dispatchMeta = (dispatch.ask?._meta as Record<string, Record<string, unknown>>)["clio-coder/decision"] ?? {};
 	strictEqual("consequenceLines" in dispatchMeta, false);
+});
+
+test("a write ask carries the size and digest facts the terminal card shows", async () => {
+	const args = { path: "../clio-coder-acp-mutation-probe.txt", content: "hello\n" };
+	const turn = await askOnce(args, "reject-once", "write");
+	ok(turn.parked, "the write parked for approval");
+	const meta = (turn.ask?._meta as Record<string, Record<string, unknown>>)["clio-coder/decision"] ?? {};
+	deepStrictEqual(meta.mutation, mutationFacts(ToolNames.Write, args));
+	deepStrictEqual(Object.keys(meta.mutation as object).sort(), ["bytes", "digest", "kind", "replacements"]);
 });
 
 test("an approved plan runs exactly once through the same ask", async () => {
