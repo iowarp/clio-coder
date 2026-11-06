@@ -346,7 +346,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			pendingWithRequirements = ref;
 			deps.notice(
 				"info",
-				`The ${refWords(ref)} needs ${missing.map(refWords).join(", ")}, which ${missing.length === 1 ? "is" : "are"} not installed. Press i again to review installing ${missing.length === 1 ? "both" : "them all"}; nothing is written until you confirm.`,
+				`The ${refWords(ref)} needs the ${missing.map(refWords).join(", the ")}, which ${missing.length === 1 ? "is" : "are"} not installed. Press i again to review installing ${missing.length === 1 ? "both" : "them all"}; nothing is written until you confirm.`,
 			);
 			return;
 		}

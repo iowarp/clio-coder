@@ -676,7 +676,7 @@ describe("library browser behavior", () => {
 		const state = harness({ initialTab: "plugin", refusal: "needs skill:ship" });
 		state.press("i");
 		equal(state.review, null, "a refused plan is reported before a review is opened");
-		match(state.notices.map(([, text]) => text).join(" "), /needs ship skill, which is not installed\. Press i again/);
+		match(state.notices.map(([, text]) => text).join(" "), /needs the ship skill, which is not installed\. Press i again/);
 		equal(state.released, 1, "the refused plan is released rather than left staged");
 		state.press("i");
 		ok(state.review, "the second press reviews the requirements with it");

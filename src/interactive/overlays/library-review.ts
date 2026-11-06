@@ -167,6 +167,7 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 			label: "Adds",
 			value: resourceSummary(
 				step.content.resources.map((item) => ({ kind: item.kind, name: `${item.name}${item.valid ? "" : " (invalid)"}` })),
+				detail,
 			),
 		});
 	if (step.dependencies.missing.length)
@@ -230,7 +231,7 @@ function reviewChoices(applicable: boolean, verb: string, consequence: string, d
 		...(applicable ? [{ key: "Enter", verb, consequence, tone: "action" as const }] : []),
 		// The rows say what Esc does now: with the paths open it hides them, the way the rail says.
 		detail
-			? { key: "Esc", verb: "hide paths", consequence: "back to the review; nothing changes" }
+			? { key: "Esc", verb: "back to review", consequence: "closes the paths; nothing changes" }
 			: { key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
 		{
 			key: "d",
@@ -382,11 +383,20 @@ function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: Librar
 }
 
 /** Resources grouped by kind with a count each: "6 skills: a, b; 20 prompts: c, d" reads faster than 26 kind:name refs. */
-function resourceSummary(items: ReadonlyArray<{ kind: string; name: string }>): string {
+/** How many names a kind lists before it counts the rest; the full list is behind the paths key. */
+const SUMMARY_NAMES = 3;
+
+function resourceSummary(items: ReadonlyArray<{ kind: string; name: string }>, detail = false): string {
 	const groups = new Map<string, string[]>();
-	for (const item of items) groups.set(item.kind, [...(groups.get(item.kind) ?? []), item.name]);
+	// A name carries its package as `pkg:name`; the review already names the package, so the row keeps the name.
+	for (const item of items)
+		groups.set(item.kind, [...(groups.get(item.kind) ?? []), item.name.replace(/^[^:\s]+:/u, "")]);
 	return [...groups]
-		.map(([kind, names]) => `${names.length} ${names.length === 1 ? kind : `${kind}s`}: ${names.join(", ")}`)
+		.map(([kind, names]) => {
+			const shown = detail || names.length <= SUMMARY_NAMES + 1 ? names : names.slice(0, SUMMARY_NAMES);
+			const more = names.length - shown.length;
+			return `${names.length} ${names.length === 1 ? kind : `${kind}s`}: ${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+		})
 		.join("; ");
 }
 
@@ -599,7 +609,7 @@ function formatLibraryImportReview(
 		{
 			label: "Provenance",
 			value:
-				"Imported content stays foreign: it keeps its original provenance and needs the project-import trust gate before the model may use it. The vendor's own directory is never modified.",
+				"Imported content keeps its original source, and the model uses it only once this project trusts imported resources. The folder it came from is never modified.",
 			tone: "muted",
 		},
 		...(detail
@@ -757,9 +767,10 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 
 	// Esc backs out one layer: the path list first, then the review, which cancels without writing anything.
 	const reviewLayers = (): EscapeLayers => [
+		// `d` already says `hide paths`; Esc names where it lands, so two keys never share one label.
 		body.detail && {
-			verb: "hide paths",
-			short: "hide",
+			verb: "back to review",
+			short: "back",
 			back: () => {
 				body.detail = false;
 				tui.requestRender();
