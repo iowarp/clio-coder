@@ -15,6 +15,7 @@ import {
 	type MutationInspector,
 	type MutationPreview,
 	mutationFactsLine,
+	targetWithoutPayloadSize,
 } from "./mutation-preview.js";
 import { fitHintEntries, fitRow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import {
@@ -560,17 +561,6 @@ interface PermissionFactRows {
 }
 
 /**
- * The target as the card shows it. A file change's size placeholder
- * (`content=<string 18 bytes>`) is serialization, and the mutation row under
- * it already names the size and digest, so the card keeps only the path.
- */
-function cardTarget(view: ApprovalRequestView): string | undefined {
-	if (view.target === undefined || view.mutation === undefined) return view.target;
-	const kept = view.target.split(" · ").filter((part) => !/^[\w.-]+=<\w+ \d+ bytes>$/u.test(part.trim()));
-	return kept.length > 0 ? kept.join(" · ") : view.target;
-}
-
-/**
  * The facts that identify the call, in reading order: the identity row, the
  * exact target in a gutter, then the labelled table. The target is the one
  * thing never clipped, because a deep path's file name is what says what the
@@ -589,7 +579,7 @@ function permissionFacts(
 	const identity = identityRow(theme, view, presentation, width);
 	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
 	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
-	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
+	const targetText = plan !== null ? planHeadline(plan) : targetWithoutPayloadSize(view.target, view.mutation);
 	const target = targetText !== undefined && targetText.length > 0 ? targetBlock(theme, targetText, risk, width) : [];
 	// Why before the rule's name: on a short card the reason (it writes outside this workspace) is what decides it.
 	const facts: Fact[] = [];

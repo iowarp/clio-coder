@@ -51,7 +51,7 @@ import {
 } from "../../tools/presentation.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
-import { mutationFactsLine } from "../mutation-preview.js";
+import { mutationFactsLine, targetWithoutPayloadSize } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import {
 	clioTheme,
@@ -824,8 +824,10 @@ export function renderToolAwaitingApproval(
 	);
 	const lines = [singleActionLine(parts.lead, AWAITING_APPROVAL_TAIL(), width)];
 	if (view === undefined) return lines;
-	// The lead row already names a target it can show whole, so `target` only adds what that row cut.
-	const leadShowsTarget = view.target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(view.target);
+	// The lead row already names a target it can show whole, so `target` only adds what that row cut. A file
+	// change's size placeholder is serialization; the mutation row names the size and digest.
+	const target = targetWithoutPayloadSize(view.target, view.mutation);
+	const leadShowsTarget = target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(target);
 	// The axis is a level or a rule, not a requester, so the row says why the call stopped as a sentence.
 	const actionWords = `${view.actionClass.replaceAll("_", " ")} action`;
 	const why =
@@ -834,7 +836,7 @@ export function renderToolAwaitingApproval(
 			: `${approvalAxisText(view)} held this ${actionWords} for you`;
 	lines.push(...indentAndWrap(toolMeta(why), width, false));
 	const facts = [
-		...(view.target !== undefined && view.target.length > 0 && !leadShowsTarget ? [["target", view.target]] : []),
+		...(target !== undefined && target.length > 0 && !leadShowsTarget ? [["target", target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
