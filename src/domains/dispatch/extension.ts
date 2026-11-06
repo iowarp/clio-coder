@@ -205,6 +205,7 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
+import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -3305,7 +3306,7 @@ function pickCapabilityMatchedWorker(
 
 function targetUsabilityProblem(status: TargetStatus | null | undefined): string | null {
 	if (!status) return null;
-	if (!status.runtime) return `runtime '${status.target.runtime}' not registered`;
+	if (!status.runtime) return runtimeNotRegistered(status.target.runtime);
 	if (!isDispatchEligibleRuntime(status.runtime)) return `runtime '${status.runtime.id}' is not a fleet-dispatch target`;
 	if (!status.available) return status.reason.trim() || "unavailable";
 	if (status.health.status === "down") {
@@ -3395,8 +3396,8 @@ function resolveSelectedDispatchTarget(
 	if (!runtime) {
 		return {
 			ok: false,
-			reason: `runtime '${target.runtime}' not registered`,
-			message: `dispatch: runtime '${target.runtime}' not registered`,
+			reason: runtimeNotRegistered(target.runtime),
+			message: `dispatch: ${runtimeNotRegistered(target.runtime)}`,
 		};
 	}
 	if (!isDispatchEligibleRuntime(runtime)) {
