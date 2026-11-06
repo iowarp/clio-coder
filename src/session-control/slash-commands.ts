@@ -657,7 +657,11 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 function councilFailureWords(message: string): string {
 	const lines = message.split("\n");
 	const body = (/^\[(?:operator )?approval\]/u.test(lines[0] ?? "") ? lines.slice(1) : lines).join(" ").trim();
-	return workerFailureHeadline(body) ?? (body.length > 0 ? body : "the council stopped before any member answered");
+	const headline = workerFailureHeadline(body);
+	// Admission takes a council whole, so one unreachable member target keeps every member from starting.
+	const unreachable = /^its target (\S+) is not reachable/u.exec(headline ?? "");
+	if (unreachable !== null) return `a member's target ${unreachable[1]} is not reachable, so no member ran`;
+	return headline ?? (body.length > 0 ? body : "the council stopped before any member answered");
 }
 
 async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: SlashCommandContext): Promise<void> {

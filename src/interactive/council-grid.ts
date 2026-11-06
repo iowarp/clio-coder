@@ -45,6 +45,8 @@ export interface CouncilMemberView {
 	droppedLines: number;
 	/** The run has ended, so a missing tail means its answer is only in its record. */
 	settled?: boolean;
+	/** Why a member that failed gave no answer, in the words its run row uses. */
+	why?: string;
 }
 
 export interface CouncilGroupView {
@@ -163,6 +165,13 @@ function councilMemberLines(
 	if (member.settled === true && member.tailText.trim().length === 0) {
 		// A member that failed has no answer anywhere; its record says why, which is what the pointer offers instead.
 		const failed = member.status.token === "error";
+		// A known cause is the answer to "why"; the record is still one key away on the run's own row.
+		if (failed && member.why !== undefined && member.why.length > 0) {
+			for (const row of wrapTextWithAnsi(`no answer: ${member.why}`, width).slice(0, 3)) {
+				lines.push(theme.fg("annotation", row));
+			}
+			return lines.map((line) => padAnsi(line, width));
+		}
 		lines.push(
 			truncateToWidth(
 				theme.fg("annotation", `${failed ? "no answer · why in" : "answer in"} /view dispatch:${member.runId}`),

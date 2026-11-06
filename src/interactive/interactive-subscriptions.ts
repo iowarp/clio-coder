@@ -5,7 +5,7 @@ import type {
 	DispatchRunIdentity,
 	DispatchStartedPayload,
 } from "../core/telemetry/live-events.js";
-import { plainOutcomeLabel, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import { NEVER_STARTED_WORDS, plainOutcomeLabel, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import {
@@ -159,6 +159,8 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	const runFailureNotice = (payload: DispatchFailedPayload, entry: WorkerEntryState): void => {
 		if (workerAskedByModel(entry) || entry.helper === true || payload.outcome === "canceled") return;
 		const why = workerFailureHeadline(payload.outcomeDetail);
+		// A member released because its council stopped first adds nothing: the council's own notice names the cause.
+		if (entry.council !== undefined && why === NEVER_STARTED_WORDS) return;
 		// A council member goes by the label the operator watched it under, not the recipe every member shares.
 		const who = entry.council === undefined ? payload.agentId : `council member ${entry.council.label}`;
 		const label = plainOutcomeLabel(payload.outcome);
