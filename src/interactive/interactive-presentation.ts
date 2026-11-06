@@ -12,20 +12,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForProviders, thinkingEffectNote } from "../domains/providers/index.js";
-
-/**
- * Why the rail's thinking word differs from the level asked for, in the operator's terms (TY05). `medium runs as on`
- * made the reader decode a mapping; a toggle model has no levels at all, which is the fact that explains the word.
- */
-function railThinkingNote(thinking: Parameters<typeof thinkingEffectNote>[0]): string | null {
-	const note = thinkingEffectNote(thinking);
-	if (note === null) return null;
-	if (thinking.mechanism === "on-off") return "this model has no levels";
-	if (thinking.mechanism === "always-on") return "this model always thinks";
-	if (thinking.mechanism === "none") return note;
-	return `${thinking.configuredLevel} not offered`;
-}
+import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -106,6 +93,7 @@ import { createDropAlerts } from "./telemetry-drops.js";
 import { ACTIVITY_STEP_MS } from "./theme/glyphs.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { formatWaitClock, modelNickname } from "./theme/labels.js";
+import { thinkingNoteWords } from "./thinking-note.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { bindWorkerResponseLimit, workerActivityWords } from "./worker-activity.js";
@@ -931,7 +919,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
-			const note = thinking ? railThinkingNote(thinking) : null;
+			const note = thinking ? thinkingNoteWords(thinking) : null;
 			return {
 				label:
 					note !== null && thinking
