@@ -17,7 +17,10 @@ executeCodewikiBuildOutcome(workerData as CodewikiBuildWorkerRequest, {
 	},
 }).then(
 	(result) => {
-		port.postMessage({ ok: true, result } satisfies CodewikiBuildWorkerMessage);
+		// Unchanged means the artifact is the one the caller handed in; posting it
+		// back would clone the whole index again and hand the caller a copy.
+		const posted = result.changed ? result : { ...result, codewiki: null };
+		port.postMessage({ ok: true, result: posted } satisfies CodewikiBuildWorkerMessage);
 		port.close();
 	},
 	(error: unknown) => {

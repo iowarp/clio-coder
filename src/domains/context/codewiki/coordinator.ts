@@ -63,6 +63,17 @@ function byReference(request: CodewikiBuildWorkerRequest, held: Codewiki | null)
 	return { ...request, current: artifactRef(held) };
 }
 
+/** An unchanged outcome omits the artifact; restore the very object the caller handed in. */
+function withHandedArtifact(
+	outcome: CodewikiBuildWorkerOutcome,
+	request: CodewikiBuildWorkerRequest,
+): CodewikiBuildWorkerOutcome {
+	if (outcome.codewiki || request.kind === "build" || request.current === null || "source" in request.current) {
+		return outcome;
+	}
+	return { ...outcome, codewiki: request.current };
+}
+
 async function executeInWorker(
 	request: CodewikiBuildWorkerRequest,
 	onProgress?: (progress: CodewikiBuildProgress) => void,
@@ -114,7 +125,7 @@ async function executeInWorker(
 					return;
 				}
 				finish(() => {
-					if (message.ok) resolve(message.result);
+					if (message.ok) resolve(withHandedArtifact(message.result, request));
 					else {
 						const error = new Error(message.error);
 						if (message.stack) error.stack = message.stack;

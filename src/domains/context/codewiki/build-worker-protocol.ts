@@ -43,9 +43,10 @@ export interface CodewikiBuildWorkerResult {
 }
 
 /**
- * What the worker posts back. An unchanged reconciliation of an artifact it
- * was handed by reference leaves `codewiki` null: the caller still holds the
- * object, and returning it would clone the whole artifact a second time.
+ * What the worker posts back. An unchanged reconciliation leaves `codewiki`
+ * null, whether the artifact was handed by reference or as an object: the
+ * caller still holds it, and returning it would clone the whole artifact a
+ * second time and break the caller's identity-keyed caches.
  */
 export interface CodewikiBuildWorkerOutcome {
 	codewiki: Codewiki | null;
