@@ -449,6 +449,17 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		};
 		const stopWait = this.stopWait;
 		return [
+			// A typed filter is the innermost layer of a searchable step: Esc clears it and keeps the step.
+			pending?.kind === "select" &&
+				pending.options.searchable === true &&
+				this.input.getValue().length > 0 && {
+					verb: "clear filter",
+					short: "clear",
+					back: () => {
+						this.input.setValue("");
+						this.requestRender();
+					},
+				},
 			pending === null &&
 				stopWait !== null && {
 					verb: "stop waiting, back a step",

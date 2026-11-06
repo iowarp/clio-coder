@@ -325,7 +325,9 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 		// On the top screen escape and q do the same thing, and listing both as
 		// "quit" reads as two different exits.
 		const legend = ["↑/↓ move", "enter select"];
-		if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`esc ${options.backLabel}`);
+		// With a filter typed, Esc clears it before it leaves, and the legend names the press it is about to make.
+		if (options.searchable && query.length > 0) legend.push("esc clear filter");
+		else if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`esc ${options.backLabel}`);
 		if (options.searchable) legend.push("type to filter", "ctrl-u clear", "ctrl-c quit");
 		else legend.push(options.backLabel === "quit" ? "esc or q quit" : "q quit");
 		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
@@ -355,6 +357,12 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 				}
 				if (!key.ctrl && !key.meta && str?.length === 1 && str >= " " && str !== "\x7f") {
 					query += str;
+					filter();
+					return;
+				}
+				// A typed filter is a layer: Esc clears it first, and the next Esc leaves the step.
+				if (key.name === "escape" && query.length > 0) {
+					query = "";
 					filter();
 					return;
 				}
