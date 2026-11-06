@@ -31,6 +31,7 @@ export const coreTests = [
 	"worker-permit",
 	"worker-refusal-limit",
 	"job-tool",
+	"judge-screen-park-surfaces",
 	"acp-v1-basics",
 	"configure-routing",
 	"mcp-config-trust",
