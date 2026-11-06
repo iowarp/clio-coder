@@ -48,8 +48,8 @@ export function scaffoldExtension(
 					noEmit: true,
 					skipLibCheck: true,
 					paths: {
-						"@iowarp/clio-coder/extensions": [join(install, "src/domains/extensions/public-api.ts")],
-						"@iowarp/clio-coder/extensions/testing": [join(install, "src/domains/extensions/authoring/test-api.ts")],
+						"@iowarp/clio-coder/extensions": [join(install, "dist/extensions/public-api.d.ts")],
+						"@iowarp/clio-coder/extensions/testing": [join(install, "dist/extensions/testing.d.ts")],
 					},
 				},
 				include: ["runtime/**/*.ts"],
