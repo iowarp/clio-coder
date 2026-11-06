@@ -1409,7 +1409,8 @@ function settledExcerptLimit(rows: ReadonlyArray<string>, text: string, limit: n
 	return limit;
 }
 
-const THINKING_LEAD = "thinking · ";
+// Capitalized like the folded marker it replaces and the footer's phase label, so a turn never shows both forms.
+const THINKING_LEAD = "Thinking · ";
 
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(
