@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { classifyDefaultTarget, describeVerdict } from "../../src/cli/default-target.js";
+import { runClioRun } from "../../src/cli/run.js";
 import { readSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { runDoctorModelChecks } from "../../src/domains/lifecycle/doctor.js";
@@ -49,6 +50,39 @@ test("a target on a retired runtime carries the replacement in its provider stat
 	const status = bundle.contract.list().find((entry) => entry.target.id === "blade");
 	strictEqual(status?.available, false);
 	match(status?.reason ?? "", /'lmstudio-native' was removed in 0\.7\.0.*runtime: lmstudio`/u);
+});
+
+test("run --agent with an API key names the replacement for a target on a retired runtime", async (t) => {
+	const home = await isolateClioEnv("clio-retired-runtime-run-");
+	const original = process.cwd();
+	const cwd = join(home.dir, "workspace");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	mkdirSync(cwd);
+	writeFileSync(
+		join(home.dir, "config", "settings.yaml"),
+		"version: 2\ntargets:\n  - { id: box, runtime: ollama-native, defaultModel: llama3 }\n",
+	);
+	let stderr = "";
+	t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+		stderr += String(chunk);
+		return true;
+	});
+	process.chdir(cwd);
+	try {
+		const run = (target: string) =>
+			runClioRun(["--agent", "coder", "--read-only", "--target", target, "audit"], {
+				apiKey: "fixture-key",
+				noContextFiles: true,
+			});
+		strictEqual(await run("box"), 1);
+		match(stderr, /cannot use target 'box': runtime 'ollama-native' was removed in 0\.7\.0.*runtime: ollama`/u);
+		stderr = "";
+		strictEqual(await run("nosuch"), 2);
+		match(stderr, /target 'nosuch' not found/u);
+	} finally {
+		process.chdir(original);
+		home.restore();
+	}
 });
 
 test("doctor proposes the provider catalog model and changes it only after confirmation", async (t) => {
