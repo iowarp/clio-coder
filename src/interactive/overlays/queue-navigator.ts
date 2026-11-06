@@ -50,10 +50,8 @@ export interface QueueNavigatorDeps {
 	toEditor(entry: QueuedChatMessage): void;
 	/** Take the entry out of the queue and deliver it as a fresh prompt, or at the next slot if the run refuses; the rest stay queued. */
 	sendNow(entry: QueuedChatMessage): void;
-	/** Everything back to the editor, the Alt+Q behaviour. */
+	/** Everything back to the editor: `a`, or a key the operator bound to the restore action. */
 	restoreAll(): void;
-	/** The restore-all key as the live binding manager spells it. */
-	restoreAllLabel(): string;
 	matchesRestoreAll(data: string): boolean;
 	onClose(): void;
 	requestRender(): void;
@@ -266,7 +264,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		return [
 			...(send ? [send] : []),
 			{ key: "↑↓", verb: "select" },
-			{ key: this.deps.restoreAllLabel().split(" · ")[0] ?? "", verb: "all to editor" },
+			{ key: "a", verb: "all to editor" },
 			{ key: "Shift+↑↓", verb: "move" },
 			{ key: "t", verb: "steer/later" },
 			{ key: "x", verb: "remove" },
@@ -302,7 +300,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			this.deps.requestRender();
 			return;
 		}
-		if (this.deps.matchesRestoreAll(data)) {
+		if (matchesKey(data, "a") || this.deps.matchesRestoreAll(data)) {
 			this.deps.restoreAll();
 			this.deps.onClose();
 			return;

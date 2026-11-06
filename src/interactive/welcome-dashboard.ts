@@ -400,9 +400,10 @@ const WELCOME_HINTS: ReadonlyArray<{
 			["/help", "Explore commands and shortcuts"],
 		],
 		keys: [
-			["tui.input.newLine", "New line"],
+			["clio-coder.leader", "Every action by letter"],
 			["clio-coder.model.select", "Model picker"],
-			["clio-coder.editor.external", "Open your external editor"],
+			["clio-coder.thinking.cycle", "Cycle thinking effort"],
+			["clio-coder.editor.external", "Write in your own editor"],
 		],
 	},
 	{
@@ -413,10 +414,10 @@ const WELCOME_HINTS: ReadonlyArray<{
 			["/help", "Find a command by name"],
 		],
 		keys: [
-			["clio-coder.files.toggle", "Show or hide files"],
-			["clio-coder.music.toggle", "Show or hide music"],
 			["clio-coder.status.toggle", "Cycle dashboard pages"],
-			["clio-coder.session.tree", "Explore the session tree"],
+			["clio-coder.dispatchBoard.toggle", "Show the workers"],
+			["clio-coder.files.toggle", "Show or hide files"],
+			["clio-coder.library.toggle", "Open the library"],
 		],
 	},
 	{
@@ -427,9 +428,10 @@ const WELCOME_HINTS: ReadonlyArray<{
 			["/help", "Look up a shortcut"],
 		],
 		keys: [
-			["clio-coder.dispatchBoard.toggle", "Show the workers dashboard"],
-			["clio-coder.tasks.open", "Open tasks"],
-			["clio-coder.thinking.cycle", "Cycle thinking effort"],
+			["tui.input.newLine", "New line"],
+			["clio-coder.message.interrupt", "Send now, mid-run"],
+			["clio-coder.queue.open", "Review queued messages"],
+			["clio-coder.output.cycle", "Cycle output detail"],
 		],
 	},
 ];

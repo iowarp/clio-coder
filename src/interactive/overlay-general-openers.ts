@@ -150,7 +150,6 @@ export interface OverlayGeneralOpenersDeps {
 		toEditor(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
 		sendNow(entry: import("../session-control/chat-loop.js").QueuedChatMessage): void;
 		restoreAll(): void;
-		restoreAllLabel(): string;
 		matchesRestoreAll(data: string): boolean;
 	};
 	/** Recipe registry `/fleet run` resolves every step's agent against. */
@@ -887,7 +886,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			toEditor: (entry) => queue.toEditor(entry),
 			sendNow: (entry) => queue.sendNow(entry),
 			restoreAll: () => queue.restoreAll(),
-			restoreAllLabel: () => queue.restoreAllLabel(),
 			matchesRestoreAll: (data) => queue.matchesRestoreAll(data),
 			onClose: deps.closeOverlay,
 			requestRender: deps.requestRender,
