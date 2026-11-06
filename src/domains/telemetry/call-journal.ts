@@ -29,6 +29,7 @@ import type { SegmentScan, TelemetryChain } from "../../core/telemetry/segment.j
 import {
 	chainTelemetryBytes,
 	EMPTY_TELEMETRY_CHAIN,
+	encodeAcceptedTelemetryLine,
 	encodeTelemetryLine,
 	scanTelemetrySegment,
 	telemetryChainHead,
@@ -495,11 +496,12 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 								},
 								createRedactionTally(),
 							);
-							if (readTelemetryRecord(record).kind !== "record") {
+							const accepted = readTelemetryRecord(record);
+							if (accepted.kind !== "record") {
 								invalidBatch += 1;
 								continue;
 							}
-							const line = encodeTelemetryLine(record);
+							const line = encodeAcceptedTelemetryLine(accepted.record);
 							if (record.tier === "research") {
 								// The preimage was reserved before it was stored; only the record itself is new here.
 								const cost = line.length;

@@ -16,8 +16,43 @@ export function crc32(bytes: Uint8Array): string {
 }
 
 export function encodeTelemetryLine(value: TelemetryRecord | SegmentHeader): Buffer {
-	const json = Buffer.from(JSON.stringify(value), "utf8");
+	return frameTelemetryJson(JSON.stringify(value));
+}
+
+function frameTelemetryJson(text: string): Buffer {
+	const json = Buffer.from(text, "utf8");
 	return Buffer.concat([json, Buffer.from(`\t#${crc32(json)}\n`)]);
+}
+
+/**
+ * The exact JSON text of records this process's writer already accepted through `readTelemetryRecord`. Schema
+ * validation costs one to five milliseconds a record, and every journal this process writes is read back by the
+ * same process (the live fold, run usage, seal checks), so a line whose text is byte-identical to one accepted here
+ * reads without validating again. Any other text, including an edit of an accepted line, takes the full check.
+ * The JSON round trip keeps an accepted record accepted: the schemas hold only JSON types and finite numbers.
+ */
+const acceptedLines = new Set<string>();
+let acceptedChars = 0;
+const ACCEPTED_CHARS_MAX = 4 * 1024 * 1024;
+
+/** Encode a record `readTelemetryRecord` has just accepted, and remember its text for this process's readers. */
+export function encodeAcceptedTelemetryLine(record: TelemetryRecord): Buffer {
+	const text = JSON.stringify(record);
+	if (!acceptedLines.has(text) && text.length <= ACCEPTED_CHARS_MAX) {
+		acceptedLines.add(text);
+		acceptedChars += text.length;
+		for (const oldest of acceptedLines) {
+			if (acceptedChars <= ACCEPTED_CHARS_MAX) break;
+			acceptedLines.delete(oldest);
+			acceptedChars -= oldest.length;
+		}
+	}
+	return frameTelemetryJson(text);
+}
+
+function readTelemetryLine(text: string): RecordRead {
+	if (acceptedLines.has(text)) return { kind: "record", record: JSON.parse(text) as TelemetryRecord };
+	return readTelemetryRecord(JSON.parse(text));
 }
 
 export interface SegmentScan {
@@ -48,7 +83,7 @@ export function scanTelemetrySegment(bytes: Buffer): SegmentScan {
 			break;
 		}
 		try {
-			result.rows.push(readTelemetryRecord(JSON.parse(json.toString("utf8"))));
+			result.rows.push(readTelemetryLine(json.toString("utf8")));
 		} catch {
 			// A complete checksummed but invalid JSON record is skipped and counted, never truncated (#434).
 			result.rows.push({ kind: "skipped", reason: "invalid-record" });
