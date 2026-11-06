@@ -29,26 +29,27 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 			const count = Math.max(1, Math.min(10, dockBodyRows(tui) - 2));
 			const [start, end] = centeredWindow(targets.length, selected, count);
 			const theme = clioTheme();
-			// Two columns: the action, then its direct shortcut aligned beside the
-			// longest action. A narrow menu drops the shortcut column, because the
-			// letter already runs the action from here.
+			// The action, then its direct shortcut at the row's right edge. A row with no shortcut gives the
+			// action the whole row, and a row too narrow for both drops the shortcut before it cuts the
+			// action, because the letter already runs the action from here.
 			const bindings = targets.map((entry) => (entry.id === undefined ? "" : keyLabel(entry.id)));
 			const bindingWidth = Math.max(0, ...bindings.map((binding) => visibleWidth(binding)));
-			const showBindings = bindingWidth > 0 && width >= 56;
 			const reasonOf = (entry: LeaderTarget): string =>
 				entry.disabledReason ? ` (${entry.disabledReason.charAt(0).toLowerCase()}${entry.disabledReason.slice(1)})` : "";
 			const labelOf = (entry: LeaderTarget): string => `${entry.label ?? entry.id ?? ""}${reasonOf(entry)}`;
-			const labelRoom = Math.max(1, width - 5 - (showBindings ? bindingWidth + 2 : 0));
-			const labelWidth = Math.min(labelRoom, Math.max(1, ...targets.map((entry) => visibleWidth(labelOf(entry)))));
+			// Shortcuts sit in one column beside the longest action when the menu is wide enough for that.
+			const widest = Math.max(1, ...targets.map((entry) => visibleWidth(labelOf(entry))));
+			const aligned = width - 5 >= widest + 2 + bindingWidth ? widest : null;
 			const header =
 				width >= 66
 					? `${scope()} · press a letter to run its action · /help lists commands`
 					: width >= 44
 						? `${scope()} · press a letter to run its action`
 						: "Press a letter to run its action";
+			const shown = targets.slice(start, end);
 			return [
 				theme.fg("annotation", header),
-				...targets.slice(start, end).map((entry, index) => {
+				...shown.map((entry, index) => {
 					const focused = start + index === selected;
 					const label = entry.label ?? entry.id ?? "";
 					const reason = entry.disabledReason ? theme.fg("annotation", reasonOf(entry)) : "";
@@ -56,14 +57,16 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.
 					const mark = selectionMark(focused);
-					const name = padAnsi(
-						truncateToWidth(`${selectionLabel(focused, label)}${reason}`, labelWidth, GLYPH.ellipsis),
-						labelWidth,
-					);
-					const binding = showBindings ? `  ${theme.fg("annotation", bindings[start + index] ?? "")}` : "";
-					return `${mark} ${entry.key || " "}  ${name}${binding}`.replace(/ +$/u, "");
+					const room = Math.max(1, width - 5);
+					const binding = bindings[start + index] ?? "";
+					const fullName = `${selectionLabel(focused, label)}${reason}`;
+					const fits = binding.length > 0 && visibleWidth(labelOf(entry)) + 2 + visibleWidth(binding) <= room;
+					if (!fits)
+						return `${mark} ${entry.key || " "}  ${truncateToWidth(fullName, room, GLYPH.ellipsis)}`.replace(/ +$/u, "");
+					const nameWidth = aligned ?? room - visibleWidth(binding) - 2;
+					return `${mark} ${entry.key || " "}  ${padAnsi(fullName, nameWidth)}  ${theme.fg("annotation", binding)}`;
 				}),
-				`${targets.length ? `${selected + 1}/${targets.length}` : "No actions in this scope"}${state.notice ? ` · ${state.notice}` : ""}`,
+				`${targets.length === 0 ? "No actions in this scope" : shown.length < targets.length ? `${start + 1}–${end} of ${targets.length} actions` : `${targets.length} ${targets.length === 1 ? "action" : "actions"}`}${state.notice ? ` · ${state.notice}` : ""}`,
 			].map((line) => truncateToWidth(line, width, GLYPH.ellipsis));
 		},
 		invalidate() {},
@@ -83,9 +86,9 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 				nonCapturing: true,
 				footerHint: buildResponsiveHint(
 					[
-						{ key: "↑↓", verb: "select" },
+						{ key: "↑↓", verb: "select", critical: true },
 						{ key: "Enter", verb: "run" },
-						{ key: "Ctrl+C", verb: "cancel" },
+						// Ctrl+C closes it too, as it does every menu; one way out keeps the rail short and unambiguous.
 						{ key: `${keyLabel("clio-coder.leader")}/Esc`, verb: "close", critical: true },
 					],
 					null,

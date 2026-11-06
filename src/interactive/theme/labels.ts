@@ -267,3 +267,60 @@ function accountHome(): string | null {
 export function statusRailLabelRoom(width: number): number {
 	return Math.max(1, width - 5);
 }
+
+const KEY_WORDS: Readonly<Record<string, string>> = {
+	ctrl: "Ctrl",
+	control: "Ctrl",
+	alt: "Alt",
+	option: "Alt",
+	shift: "Shift",
+	super: "Super",
+	meta: "Meta",
+	esc: "Esc",
+	escape: "Esc",
+	enter: "Enter",
+	return: "Enter",
+	tab: "Tab",
+	space: "Space",
+	backspace: "Backspace",
+	delete: "Delete",
+	insert: "Insert",
+	home: "Home",
+	end: "End",
+	pageup: "PgUp",
+	pagedown: "PgDn",
+	up: "Up",
+	down: "Down",
+	left: "Left",
+	right: "Right",
+};
+const MODIFIER_ORDER = ["Ctrl", "Alt", "Shift", "Super", "Meta"];
+
+function keyWord(segment: string, chorded: boolean): string {
+	const word = KEY_WORDS[segment.toLowerCase()];
+	if (word !== undefined) return word;
+	if (/^f\d{1,2}$/iu.test(segment)) return segment.toUpperCase();
+	// A bare letter is an overlay's own key and keeps its case (`[r] retry`, `[R] reload`); in a chord it is a cap.
+	return chorded && segment.length === 1 ? segment.toUpperCase() : segment;
+}
+
+/**
+ * The one spelling of a key everywhere Clio names one: `Ctrl+C`, `Alt+T`, `Shift+Tab`, `Esc`, `PgUp`. Accepts a KeyId
+ * (`alt+t`, `shift+ctrl+p`) or several joined by ` / `, and puts modifiers in the order Ctrl, Alt, Shift.
+ */
+export function keyName(id: string): string {
+	const trimmed = id.trim();
+	if (trimmed.includes(" / ")) return trimmed.split(" / ").map(keyName).join(" / ");
+	// The last `+` of `ctrl++` is the key itself, not a separator.
+	const parts = trimmed.length <= 1 ? [trimmed] : trimmed.split(/\+(?!$)/u);
+	if (parts.length === 1) return keyWord(trimmed, false);
+	const key = keyWord(parts.pop() ?? "", true);
+	const modifiers = parts
+		.map((part) => keyWord(part, true))
+		.sort((a, b) => {
+			const left = MODIFIER_ORDER.indexOf(a);
+			const right = MODIFIER_ORDER.indexOf(b);
+			return (left < 0 ? MODIFIER_ORDER.length : left) - (right < 0 ? MODIFIER_ORDER.length : right);
+		});
+	return [...modifiers, key].join("+");
+}

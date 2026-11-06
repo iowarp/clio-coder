@@ -319,9 +319,9 @@ describe("Clio rendering invariants", () => {
 		doesNotMatch(rendered, /read the module|the test is next|run it/u);
 		// Stretches of reasoning that nothing visible separates are one run and one marker.
 		strictEqual(markerRows(rendered).length, 2, rendered);
-		match(rendered, /│ summarize the cause\n\n✦ The jitter was real randomness\./u);
+		match(rendered, /│ thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
 		const detailed = thinkingTurn("detailed", [["read the module", "read"]]);
-		match(detailed, /│ read the module\n\n▸ read src\/retry\.js/u);
+		match(detailed, /│ thinking · read the module\n\n▸ read src\/retry\.js/u);
 	});
 
 	it("replaces cumulative partials and re-expands at the latest state", () => {
@@ -1740,10 +1740,11 @@ describe("transcript block grammar", () => {
 		for (const width of [40, 65]) {
 			const rows = renderToolPreview(edit, width, transcriptDetail("standard")).map(stripTerminalSequences).slice(1);
 			const removed = rows.findIndex((row) => row.startsWith("  │ -24 "));
-			ok(removed >= 0 && rows[removed + 1]?.startsWith("  │     "), rows.join("\n"));
+			// A continuation keeps its sign and marks the number column, so it never reads as a context line.
+			ok(removed >= 0 && rows[removed + 1]?.startsWith("  │ - ↪ "), rows.join("\n"));
 			for (const row of rows) ok(visibleWidth(row) <= width, row);
-			for (const row of rows.filter((line) => !/^ {2}│ ([-+]24 |… \d+ rows)/u.test(line)))
-				ok(/^ {2}│ {5}\S/u.test(row), `a continuation left the content column: ${row}`);
+			for (const row of rows.filter((line) => !/^ {2}│ ([-+]24 |… \d+ more lines?)/u.test(line)))
+				ok(/^ {2}│ [-+] ↪ \S/u.test(row), `a continuation left the content column: ${row}`);
 		}
 	});
 
@@ -1924,9 +1925,9 @@ describe("transcript block grammar", () => {
 		const viaGateway = stripTerminalSequences(
 			renderToolPreview(gatewayLoad, 110, transcriptDetail("standard")).join("\n"),
 		);
-		match(viaGateway, /loaded skill test-hygiene · by model · via gateway · drifted/u);
+		match(viaGateway, /loaded skill test-hygiene · by model · drifted/u);
 		match(viaGateway, /narrows tools to read/u);
-		match(viaGateway, /via gateway/u);
+		doesNotMatch(viaGateway, /via gateway/u);
 		doesNotMatch(render("compact"), /narrows|Keep tests deterministic|1 section/u);
 		// Standard nests the surface the skill declares, then what it is for.
 		for (const style of ["standard", "detailed"] as const) {
@@ -2393,7 +2394,7 @@ describe("tool classes", () => {
 			);
 			strictEqual(
 				mcp[0],
-				`${GLYPH.classExternal} called github › search_issues · query "flaky retry test" · state open · via gateway ✓ · 42ms`,
+				`${GLYPH.classExternal} called github › search_issues · query "flaky retry test" · state open ✓ · 42ms`,
 			);
 			doesNotMatch(mcp.join("\n"), /op ›|capability ›|args ›/u);
 			const builtin = rows(
@@ -2404,7 +2405,7 @@ describe("tool classes", () => {
 				),
 				style,
 			);
-			match(builtin[0] ?? "", new RegExp(`^${GLYPH.classNetwork} fetched github\\.com/.* · 200 · via gateway ✓`, "u"));
+			match(builtin[0] ?? "", new RegExp(`^${GLYPH.classNetwork} fetched github\\.com/.* · 200 ✓`, "u"));
 			const find = rows(
 				settled("gateway", { op: "find", query: "github issues" }, text("…", { op: "find", count: 3, total: 7 })),
 				style,

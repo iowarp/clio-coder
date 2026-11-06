@@ -91,6 +91,7 @@ export {
 	ProcessTerminal,
 	parseKey,
 	renderFakeCursor,
+	renderLatex,
 	ScrollView,
 	SelectList,
 	setKeybindings,

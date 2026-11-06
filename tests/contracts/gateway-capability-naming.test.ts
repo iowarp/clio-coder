@@ -230,7 +230,7 @@ test("json stream: a chain's end frame is followed by a start/end pair per settl
 	]);
 });
 
-test("tui: a gateway op=call row reads as the direct capability row plus via gateway", () => {
+test("tui: a gateway op=call row reads exactly as the direct capability row", () => {
 	const direct: ToolExecutionFinished = {
 		toolCallId: "d",
 		toolName: "bash",
@@ -249,9 +249,9 @@ test("tui: a gateway op=call row reads as the direct capability row plus via gat
 	const directRows = plain(renderToolPreview(direct, 100, detail));
 	const gatewayRows = plain(renderToolPreview(gateway, 100, detail));
 	assert.equal(directRows[0], "$ ran `npm test` · exit 0 · 2 lines ✓ · 1.2s");
-	assert.equal(gatewayRows[0], "$ ran `npm test` · exit 0 · 2 lines · via gateway ✓ · 1.2s");
+	assert.equal(gatewayRows[0], "$ ran `npm test` · exit 0 · 2 lines ✓ · 1.2s");
 	assert.deepEqual(gatewayRows.slice(1), directRows.slice(1));
-	assert.equal(toolRowTitle(gateway), "$ ran `npm test` · exit 0 · 2 lines · via gateway");
+	assert.equal(toolRowTitle(gateway), "$ ran `npm test` · exit 0 · 2 lines");
 	// The expanded body echoes the command and states the default exit status, as a direct bash call does.
 	// With no structured exit code a settled bash call states the default `exit 0`.
 	const expanded = plain(
@@ -268,7 +268,8 @@ test("tui: a gateway op=call row reads as the direct capability row plus via gat
 			partialResult: { content: [{ type: "text", text: "partial line" }] },
 		}),
 	);
-	assert.match(running[0] ?? "", /^\$ running `npm test` · via gateway/u);
+	assert.match(running[0] ?? "", /^\$ running `npm test`/u);
+	assert.ok(!running[0]?.includes("via gateway"));
 	assert.ok(running.some((row) => row.includes("partial line")));
 });
 

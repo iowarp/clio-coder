@@ -672,7 +672,7 @@ test("a 40x15 card shows the effect and every choice without scrolling, and leav
 	match(card, /effect\s+Publishes to origin/u);
 	match(card, /\[Enter\] allow/u);
 	match(card, /\[Esc\] deny/u);
-	match(card, /\[alt\+x\] stop/u);
+	match(card, /\[Alt\+X\] stop/u);
 	match(card, /4:58 denies/u, "the timer stays on screen beside the position");
 	for (const row of rows) doesNotMatch(row, /^(?:rule|effect|advisory)$/u);
 });
@@ -2087,4 +2087,18 @@ test("a worker that stopped answering takes no steer, and takes one again once i
 	const row = { runtimeKind: "http", status: "stale" } as unknown as DispatchBoardRow;
 	strictEqual(isDispatchBoardRowSteerable(row), false);
 	strictEqual(isDispatchBoardRowSteerable({ ...row, status: "running" }), true);
+});
+
+test("every surface spells a key one way: modifiers title-cased in Ctrl, Alt, Shift order, Esc and PgUp short", async () => {
+	const { keyName } = await import("../../src/interactive/theme/labels.js");
+	const { fitHintEntries } = await import("../../src/interactive/overlay-frame.js");
+	strictEqual(keyName("alt+t"), "Alt+T");
+	strictEqual(keyName("shift+ctrl+p"), "Ctrl+Shift+P");
+	strictEqual(keyName("escape"), "Esc");
+	strictEqual(keyName("pageUp"), "PgUp");
+	strictEqual(keyName("alt+right / ctrl+right"), "Alt+Right / Ctrl+Right");
+	// An overlay's own letter keeps its case; only a chord's letter is a cap.
+	strictEqual(keyName("r"), "r");
+	strictEqual(keyName("R"), "R");
+	strictEqual(fitHintEntries([{ key: "alt+x", verb: "stop" }], 80), "[Alt+X] stop");
 });

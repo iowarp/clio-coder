@@ -58,6 +58,8 @@ function transcriptDocument(
 	let anchored: { from: readonly string[]; rows: number; lines: string[] } | null = null;
 	let header: string[] = [];
 	let lines: string[] = [];
+	// True while the document is the banner alone: the launchpad before the first turn.
+	let bannerOnly = true;
 	let renderedSkinEpoch = skinEpoch();
 	const pool: DocumentSlot[] = Array.from({ length: 3 }, () => ({ rows: [], prefix: null, prefixAt: -1 }));
 	let turn = 0;
@@ -69,7 +71,8 @@ function transcriptDocument(
 		};
 		write(header);
 		const tail = regions?.tail ?? [];
-		if (whole.length + tail.length === 0) {
+		bannerOnly = whole.length + tail.length === 0;
+		if (bannerOnly) {
 			slot.prefix = null;
 		} else {
 			out[row++] = "";
@@ -91,14 +94,23 @@ function transcriptDocument(
 	 * A document shorter than the viewport sits on the composer rather than
 	 * under the top edge: the launchpad and the first turns stay next to the
 	 * place the operator types, as they do on the regular screen, and the
-	 * spare rows go above them. The padded copy is reused while neither the
-	 * document nor the viewport changes, so an idle frame stays the same array.
+	 * spare rows go above them. The launchpad alone is a splash, not a turn:
+	 * it stands in the middle of the free rows, because sixteen blank rows over
+	 * a box read as a layout that had not finished drawing. The padded copy is
+	 * reused while neither the document nor the viewport changes, so an idle
+	 * frame stays the same array.
 	 */
 	const bottomAnchored = (from: string[]): string[] => {
 		const rows = viewportRows();
 		if (from.length >= rows) return from;
 		if (anchored?.from === from && anchored.rows === rows) return anchored.lines;
-		const lines = [...Array.from({ length: rows - from.length }, () => ""), ...from];
+		const spare = rows - from.length;
+		const above = bannerOnly ? Math.floor(spare / 2) : spare;
+		const lines = [
+			...Array.from({ length: above }, () => ""),
+			...from,
+			...Array.from({ length: spare - above }, () => ""),
+		];
 		anchored = { from, rows, lines };
 		return lines;
 	};
