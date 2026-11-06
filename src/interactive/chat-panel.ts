@@ -250,7 +250,7 @@ type RowMemo = {
 	bareFences: boolean;
 	epoch: number;
 	rows: Map<string, string[]>;
-	/** Each prose row's text without terminal sequences, which the operator lift reads on every frame. */
+	/** Each row's text without terminal sequences, which the fence, code and operator checks read on every frame. */
 	plain: Map<string, string>;
 };
 
@@ -1024,9 +1024,9 @@ function liftLeadingOperator(
 /** A fence row as Pi draws it, export-tagged or not; a list or a quote nests it behind its own indent. */
 const FENCE_ROW = /^( *)\uFDD0?```/u;
 
-/** The opening fence as the block's language, or `code` when it names none, at the fence's own indent. */
-function fenceLabelRow(row: string, fenceEnd: number, indent: string): string {
-	const lang = stripTerminalSequences(row).slice(fenceEnd).trim().split(/\s+/u, 1)[0];
+/** The opening fence, given as plain text, as the block's language, or `code` when it names none, at the fence's own indent. */
+function fenceLabelRow(plain: string, fenceEnd: number, indent: string): string {
+	const lang = plain.slice(fenceEnd).trim().split(/\s+/u, 1)[0];
 	return `${indent}${clioTheme().fg("annotation", lang || "code")}`;
 }
 
@@ -1077,7 +1077,7 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 		code = null;
 	};
 	for (const row of padded) {
-		const fence = row.includes("```") ? FENCE_ROW.exec(stripTerminalSequences(row)) : null;
+		const fence = row.includes("```") ? FENCE_ROW.exec(plainRow(row)) : null;
 		if (fence !== null) {
 			prose = null;
 			flushCode();
@@ -1085,12 +1085,12 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 			if (!bareFences) {
 				// The reader needs where code starts and what language it is, not the Markdown that said so: the
 				// opening fence becomes the language as a quiet label and the closing fence draws nothing.
-				if (fenceIndent !== null) rows.push(fenceLabelRow(row, fence[0].length, fenceIndent));
+				if (fenceIndent !== null) rows.push(fenceLabelRow(plainRow(row), fence[0].length, fenceIndent));
 				continue;
 			}
 		} else if (fenceIndent !== null) {
 			const trimmed = row.replace(/ +$/u, "");
-			if (stripTerminalSequences(trimmed).startsWith(`${fenceIndent}${CODE_LINE}`) || code === null) {
+			if (plainRow(row).startsWith(`${fenceIndent}${CODE_LINE}`) || code === null) {
 				flushCode();
 				code = trimmed;
 			} else {
