@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -99,6 +99,67 @@ it("marks which scripts CI reaches, including those a CI-run program spawns, apa
 	const inventory = collectEnforcementInventory(root);
 	deepStrictEqual(inventory.ciScripts, ["typecheck", "lint", "docs:check"]);
 	ok("library:check" in inventory.scripts);
+	strictEqual(inventory.ciUnresolved, undefined);
+});
+
+it("reaches a script only through an invocation that names it, however many programs deep", () => {
+	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: node scripts/ci.mjs\n");
+	// A script name near an unrelated invocation is not run by it.
+	write(
+		"scripts/ci.mjs",
+		[
+			'const available = ["library:check"];',
+			'spawn("pnpm", ["run", "typecheck"]);',
+			'execFileSync(process.execPath, ["scripts/checks.mjs"]);',
+			"",
+		].join("\n"),
+	);
+	// The second program runs the first again; the walk visits each program once.
+	write("scripts/checks.mjs", 'spawnSync("pnpm", ["run", "lint"]);\nspawnSync("node", ["scripts/ci.mjs"]);\n');
+	write(
+		"package.json",
+		JSON.stringify({
+			scripts: { typecheck: "tsc", lint: "biome check .", "library:check": "node scripts/pin.mjs --check" },
+		}),
+	);
+	const inventory = collectEnforcementInventory(root);
+	deepStrictEqual(inventory.ciScripts, ["typecheck", "lint"]);
+	strictEqual(inventory.ciUnresolved, undefined);
+});
+
+it("reports an invocation whose script it cannot read as unresolved, not as unreached", () => {
+	write(
+		".github/workflows/ci.yml",
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression is the input under test.
+		"jobs:\n  check:\n    steps:\n      - run: pnpm run ${{ matrix.task }}\n      - run: node scripts/ci.mjs\n",
+	);
+	write("scripts/ci.mjs", 'spawn("pnpm", ["run", process.env.TASK]);\n');
+	write("package.json", JSON.stringify({ scripts: { lint: "biome check .", "library:check": "node scripts/pin.mjs" } }));
+	const inventory = collectEnforcementInventory(root);
+	strictEqual(inventory.ciScripts, undefined);
+	deepStrictEqual(inventory.ciUnresolved, [
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression is the input under test.
+		"CI: pnpm run ${{ matrix.task }}",
+		'scripts/ci.mjs: spawn("pnpm", ["run", process.env.TASK])',
+	]);
+	const prompt = buildBootstrapPrompt({
+		cwd: root,
+		projectType: "javascript",
+		siblingFiles: [],
+		adoption: {
+			cwd: root,
+			homeDir: root,
+			includeGlobal: false,
+			sources: [],
+			rejected: [],
+			importedRules: [],
+			conflicts: [],
+			sourceHash: "fixture",
+			sourceSnapshots: [],
+		},
+		enforcement: inventory,
+	});
+	ok(prompt.includes("process.env.TASK"), prompt);
 });
 
 it("hands the inventory to the bootstrap model", () => {

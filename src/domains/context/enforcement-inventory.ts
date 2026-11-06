@@ -12,6 +12,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CI_FILE_RE, ciRunCommands } from "../../core/ci-commands.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { ciReach } from "./ci-reach.js";
 
 export interface EnforcementCheckFile {
 	path: string;
@@ -41,10 +42,17 @@ export interface EnforcementInventory {
 	scripts: Record<string, string>;
 	/**
 	 * The package scripts a CI command reaches, directly, through another
-	 * reached script, or through a repository file CI runs by path. Every other
-	 * entry in `scripts` is an available check that CI is not shown to run.
+	 * reached script, or through a program CI runs by path, however many
+	 * programs deep. Every other entry in `scripts` is an available check that
+	 * CI is not shown to run.
 	 */
 	ciScripts?: string[];
+	/**
+	 * Invocations on CI's path whose script or program could not be read
+	 * statically (`pnpm run ${{ matrix.task }}`, `spawn(pm, ["run", name])`).
+	 * When present, a script outside `ciScripts` may still run in CI.
+	 */
+	ciUnresolved?: string[];
 	checkFiles: EnforcementCheckFile[];
 }
 
@@ -110,79 +118,6 @@ function packageScripts(root: string): Record<string, string> {
 	} catch {
 		return {};
 	}
-}
-
-function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Repository files a command runs by path: `node scripts/release-candidate.mjs test`. */
-function invokedFiles(command: string, visible: ReadonlySet<string>): string[] {
-	return command
-		.split(/\s+/)
-		.map((word) => word.replace(/^["']|["']$/g, "").replace(/^\.\//, ""))
-		.filter((word) => visible.has(word));
-}
-
-const QUOTED_RUN_RE = /["']run["']/;
-const SPAWN_WINDOW_CHARS = 300;
-
-/**
- * Whether a program spawns a package script by name: as the argument after a
- * quoted `"run"`, or as a member of a string array that a quoted `"run"` follows
- * closely (`["typecheck", "lint"].map((step) => spawn("pnpm", ["run", step]))`).
- * A bare literal is not enough: `["release", "dev"]` there names release modes.
- */
-function spawnsScript(text: string, name: string): boolean {
-	const quoted = escapeRegExp(name);
-	if (new RegExp(`["']run["']\\s*,\\s*["']${quoted}["']`).test(text)) return true;
-	const item = `["'][^"'\\n]+["']`;
-	const array = new RegExp(`\\[\\s*(?:${item}\\s*,\\s*)*["']${quoted}["']\\s*(?:,\\s*${item}\\s*)*,?\\s*\\]`, "g");
-	for (const match of text.matchAll(array)) {
-		const after = (match.index ?? 0) + match[0].length;
-		if (QUOTED_RUN_RE.test(text.slice(after, after + SPAWN_WINDOW_CHARS))) return true;
-	}
-	return false;
-}
-
-/**
- * Which package scripts CI reaches. A script is reached when a reached command
- * names it (`pnpm run lint`), or when a repository file a reached command runs
- * by path spawns it: Clio's CI runs
- * `node scripts/release-candidate.mjs`, which spawns `pnpm run` over
- * `["typecheck", "lint", "check:gui"]`. Listing every check script as reached
- * let the bootstrap model write that `skills:check` and `library:check` fail
- * CI, though no CI command runs either.
- */
-function ciReachedScripts(
-	root: string,
-	ciCommands: ReadonlyArray<string>,
-	scripts: Readonly<Record<string, string>>,
-	visible: ReadonlySet<string>,
-): string[] {
-	const reached = new Set<string>();
-	const readFiles = new Set<string>();
-	const pending = [...ciCommands];
-	while (pending.length > 0) {
-		const command = pending.shift() ?? "";
-		const texts = [command];
-		for (const path of invokedFiles(command, visible)) {
-			if (readFiles.has(path)) continue;
-			readFiles.add(path);
-			const text = readText(root, path);
-			if (text !== null && !text.includes("\u0000")) texts.push(text);
-		}
-		for (const [name, body] of Object.entries(scripts)) {
-			if (reached.has(name)) continue;
-			const named = texts.some((text, index) =>
-				index === 0 ? new RegExp(`\\brun\\s+${escapeRegExp(name)}(?:\\s|$)`).test(text) : spawnsScript(text, name),
-			);
-			if (!named) continue;
-			reached.add(name);
-			pending.push(body);
-		}
-	}
-	return Object.keys(scripts).filter((name) => reached.has(name));
 }
 
 function isCheckFile(path: string): boolean {
@@ -387,7 +322,8 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 	}
 	const allScripts = packageScripts(root);
 	const ciText = ciCommands.join("\n");
-	const ciScripts = ciReachedScripts(root, ciCommands, allScripts, new Set(visible));
+	const reach = ciReach(root, ciCommands, allScripts, new Set(visible));
+	const ciScripts = reach.reached;
 	const scripts: Record<string, string> = {};
 	for (const [name, command] of Object.entries(allScripts)) {
 		if (ciScripts.includes(name) || SCRIPT_NAME_RE.test(name)) scripts[name] = command.slice(0, MAX_COMMAND_CHARS);
@@ -408,6 +344,7 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 		ciCommands: ciCommands.slice(0, MAX_CI_COMMANDS),
 		scripts,
 		...(ciScripts.length > 0 ? { ciScripts } : {}),
+		...(reach.unresolved.length > 0 ? { ciUnresolved: reach.unresolved } : {}),
 		checkFiles,
 	};
 }

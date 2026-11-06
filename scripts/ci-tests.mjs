@@ -40,6 +40,7 @@ export const coreTests = [
 	"doctor-unknown-runtime",
 	"plugin-engine",
 	"bootstrap-grounding",
+	"enforcement-inventory",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
