@@ -66,6 +66,8 @@ const DEFAULT_ASK_USER_PRESENTATION = classifyDecisionPresentation(decisionFacts
 /** An interview owns the viewport for every round, including one-question rounds. */
 const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_INNER_ROWS = 6;
+/** The key that moves between a round's questions, spelled once for the rail, the legend and the position row. */
+const MOVE_KEY = "Tab/Shift+Tab";
 /** The question region keeps at least this many rows before the options window shrinks. */
 const MIN_QUESTION_ROWS = 3;
 /** At or under this many body rows an option's explanation may give way so every choice stays listed. */
@@ -884,8 +886,7 @@ class AskUserOverlayView implements Component {
 		// A key neither the rail nor the legend could keep is named where it acts.
 		const named = this.keysOnScreen(legend);
 		const moveKey = this.moveKey();
-		// The legend writes `[Tab/Shift+Tab]`, so the text field's key is matched by its start.
-		const pointToMove = moveKey !== null && !named.includes(moveKey.replace(/\]$/u, ""));
+		const pointToMove = moveKey !== null && !named.includes(moveKey);
 		const otherPointer = named.includes("[t]")
 			? null
 			: !named.includes("[n]") && !named.includes("[?]") && width >= OTHER_ROW_ALL_KEYS_MIN_WIDTH
@@ -1033,7 +1034,9 @@ class AskUserOverlayView implements Component {
 	/** The key that moves between this round's questions, as the rail would name it; null with one question. */
 	private moveKey(): string | null {
 		if (this.questions.length <= 1) return null;
-		return this.currentState()?.mode === "text" ? "[Tab]" : "[←/→]";
+		// One spelling on every row and at every width: the rail, the legend and this pointer all say Tab/Shift+Tab,
+		// which moves in a text field and in a list alike. The arrows still move in a list, unnamed.
+		return `[${MOVE_KEY}]`;
 	}
 
 	/** The rail and the legend as plain text, to tell which keys they already name. */
@@ -1049,7 +1052,7 @@ class AskUserOverlayView implements Component {
 		const kept = this.railKept(entries, this.railRoom);
 		// The fit keeps entries from the end, so the keys with another home give way first:
 		// the question's position row can point at the move key, and the count stands in for `a`.
-		const givesWayFirst = (entry: HintEntry): boolean => entry.key === "Tab/Shift+Tab" || entry.key === "a";
+		const givesWayFirst = (entry: HintEntry): boolean => entry.key === MOVE_KEY || entry.key === "a";
 		const dropped = entries
 			.filter((entry) => !kept.includes(entry))
 			.sort((left, right) => Number(givesWayFirst(right)) - Number(givesWayFirst(left)));
@@ -1181,7 +1184,7 @@ class AskUserOverlayView implements Component {
 					critical: false,
 				});
 			entries.push(...scroll);
-			if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question", critical: false });
+			if (this.questions.length > 1) entries.push({ key: MOVE_KEY, verb: "question", critical: false });
 			entries.push(record);
 			return { entries, esc };
 		}
@@ -1196,7 +1199,7 @@ class AskUserOverlayView implements Component {
 		}
 		entries.push(...scroll);
 		// Tab moves between questions in the list and in the text field alike, so both rails name the same key.
-		if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question" });
+		if (this.questions.length > 1) entries.push({ key: MOVE_KEY, verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
 		entries.push(record);
 		return { entries, esc };
@@ -1493,7 +1496,15 @@ class AskUserOverlayView implements Component {
 		// A body that has given up its header rows keeps the answers themselves rather than a heading over none.
 		const head =
 			fit.headers || rowBudget >= rows.length + 2
-				? ["", sectionRule(theme, width, "Answers", { meta: canGoBack ? `${count} · [←/→] change one` : count })]
+				? [
+						"",
+						sectionRule(theme, width, "Answers", {
+							meta:
+								canGoBack && visibleWidth(`Answers ${count} · [${MOVE_KEY}] change one`) + 8 <= width
+									? `${count} · [${MOVE_KEY}] change one`
+									: count,
+						}),
+					]
 				: [];
 		const budget = Math.max(1, rowBudget - head.length);
 		if (rows.length <= budget) return [...head, ...rows];
