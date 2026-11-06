@@ -548,6 +548,8 @@ The command spellings and arguments are the [slash-command registry](../../src/s
 
 To change the model, open `/model`, choose a target and model, then choose whether the route is for this session or a saved default. Cancel leaves the active route unchanged. `/thinking` changes the thinking level.
 
+A pick made during a turn applies from the next turn, with one exception. When the request is still waiting on its first output, or sits in a retry countdown, and the new route fits it, Clio moves that request to the new route instead of cancelling it, and a request in a retry countdown goes out at once. The move records no cancelled receipt, and the journal records `route_moved`. When the new route's context window is too small, it cannot read the turn's images, output has started or a tool is running, the pick applies from the next turn and the dialog says why ([overlay-model-selectors.ts](../../src/interactive/overlay-model-selectors.ts)). A session with history also hears that the new model starts with a cold prompt cache.
+
 #### Use a bare model ID without a target
 
 You can type just a model ID with `/model <model-id>` instead of opening the picker. Clio resolves the model against configured targets, trying an exact match before a substring match. Use `/model <target>/<model-id>` to name the connection explicitly. If several models match, the resolver warns and selects the first match. The [model resolver](../../src/domains/providers/resolver.ts) defines the matching order.

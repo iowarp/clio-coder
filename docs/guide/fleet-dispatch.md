@@ -1805,6 +1805,7 @@ hard block.
 - `clio-coder fleet status [--json]` shows the durable ledger view cross-process;
   [Inspect fleet runs from the CLI](#inspect-fleet-runs-from-the-cli) lists every inspection command.
 - A worker permission ask opens a `Worker needs approval` card (tier `Worker escalation`) that names the worker agent and run. The worker is parked while the card is open. Approval covers that call and identical calls under the same permission conditions for that run only. It leaves the autonomy level unchanged, and each call still passes the safety net.
+- The process that dispatched the worker owns that ask's window and answers it with the worker's own timeout decision, so fallback `deny` and `fail` behave as before ([worker-approval-window.ts](../../src/domains/dispatch/worker-approval-window.ts)). The window starts when the ask reaches your card, and asks queued behind the card start theirs again while you read it. Any key on the card holds the window until its ceiling: 15 minutes from when the ask opened, or `fleet.permissions.escalation.timeoutMs` when that is longer. A held card reads `extended · no answer in <time>`, and when the ceiling passes the fallback applies. The worker keeps its own timer one minute past the ceiling, and a parent that is gone closes the worker's input, which ends the ask at once.
 
 ### Workers dock and dashboard
 
