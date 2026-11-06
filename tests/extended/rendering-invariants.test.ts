@@ -140,6 +140,30 @@ describe("Clio rendering invariants", () => {
 		ok(firstReasoning < before && before < tool && tool < secondReasoning && secondReasoning < after, rendered);
 	});
 
+	it("keeps every bullet of a list that follows a paragraph with no blank line", () => {
+		// The wrapped-operator lift read the first item as a paragraph continuation and raised its bullet a row.
+		const text =
+			"Gateway capabilities (reached through gateway on demand)\n- Inspect: read files\n- Search: grep the tree";
+		const panel = createChatPanel({ now: () => 1_000 });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: text, partialText: text });
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text }] },
+		} as never);
+		panel.applyEvent({ type: "agent_end", messages: [] } as never);
+		const rows = plainRender(panel, 80).split("\n");
+		ok(!rows.some((row) => /\S -\s*$/u.test(row)), rows.join("\n"));
+		ok(
+			rows.some((row) => /^\s*- Inspect: read files/u.test(row)),
+			rows.join("\n"),
+		);
+		ok(
+			rows.some((row) => /^\s*- Search: grep the tree/u.test(row)),
+			rows.join("\n"),
+		);
+	});
+
 	it("states a skill suggestion the model wrote after its narration as a § row ahead of the answer", () => {
 		const panel = createChatPanel({ now: () => 1_000 });
 		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
@@ -319,9 +343,9 @@ describe("Clio rendering invariants", () => {
 		doesNotMatch(rendered, /read the module|the test is next|run it/u);
 		// Stretches of reasoning that nothing visible separates are one run and one marker.
 		strictEqual(markerRows(rendered).length, 2, rendered);
-		match(rendered, /│ thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
+		match(rendered, /│ Thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
 		const detailed = thinkingTurn("detailed", [["read the module", "read"]]);
-		match(detailed, /│ thinking · read the module\n\n▸ read src\/retry\.js/u);
+		match(detailed, /│ Thinking · read the module\n\n▸ read src\/retry\.js/u);
 	});
 
 	it("replaces cumulative partials and re-expands at the latest state", () => {

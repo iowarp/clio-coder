@@ -4,7 +4,7 @@ import type { FactMetric } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { settledRunCaveat, TOOL_GUARD_REASON_CODE } from "../domains/dispatch/failure-headline.js";
+import { plainOutcomeLabel, settledRunCaveat, TOOL_GUARD_REASON_CODE } from "../domains/dispatch/failure-headline.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
@@ -228,7 +228,7 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
  * is claimed only once the record has been read, in the words the Workers row uses.
  */
 function settledWords(worker: ExitSummarySnapshot["workers"][number]): string {
-	if (worker.outcome !== "succeeded") return worker.outcome;
+	if (worker.outcome !== "succeeded") return plainOutcomeLabel(worker.outcome);
 	if (worker.record === "not available") return "finished, run record not read";
 	return worker.against ?? worker.outcome;
 }
