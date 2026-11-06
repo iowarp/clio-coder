@@ -108,7 +108,8 @@ the admitted estimate (or revision estimate) and the smaller of the recipe's
 `maximum.toolCalls` and `fleet.limits.toolCallsPerRun` (default 150). A recipe without
 `maximum` uses its default `toolCalls` as the maximum, and raising `budget.toolCalls`
 raises the floor of the ceiling. Native workers stop at the ceiling. The Claude SDK
-runtime mediates each call but applies no ceiling in this mode. In enforced mode, which
+runtime mediates each call and, once the ceiling is reached, denies every further tool
+call ([sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts)). In enforced mode, which
 covers native read-only `scout`, `provenance` and `context-bootstrap` runs whose recipe has
 `synthesis: true`, the tool phase ends after 36 observed calls, or
 `fleet.limits.toolCallsPerRun` when lower, and a text-only synthesis round follows;
@@ -270,6 +271,19 @@ installs show the remote changes before confirmation. The screen manages nodes
 saved in the global settings only. Removal affects saved configuration and leaves
 remote files in place. `clio-coder fleet nodes remove node-a` does the same;
 profile pins or a standing preference must be cleared first.
+
+The desktop app ([gui.md](gui.md)) lists the same SSH nodes on its **Machines** page
+and in a sidebar machine switcher. Opening a node starts that node's own GUI over
+SSH (`clio-coder gui --foreground --port 0 --no-open --idle-exit <ms> --token-stdin`,
+with a fresh token on stdin), forwards a loopback port to it, and serves it under
+`/m/<id>/` in the same window, so the app on this machine stays the one the browser
+talks to. The node must run the same Clio Coder version and build as the app; a
+mismatch names `clio-coder fleet nodes install <id> --yes`. The node's GUI exits
+after 10 idle minutes. A broken channel reconnects with backoff, and after five
+consecutive failed connections the attachment stays failed until the node is opened
+again. Stopping the app stops every channel
+([machine-attach.ts](../../apps/clio-coder-gui/server/services/machine-attach.ts),
+[ssh-model.ts](../../apps/clio-coder-gui/server/ssh-model.ts)).
 
 ### Exact client installation
 
@@ -529,8 +543,11 @@ the worker's permit and sandbox, and anything else denies it. Elsewhere `judge` 
 `deny` mode, and for a denied execute ask under `judge` or `main`, a refused execute call returns to the worker model as a tool result and
 the third one ends the run with exit 3, outcome `permission_required`, and a
 reason that names every refused command. Refusals of other action classes never
-count, `fail` ends at the first refusal, and the Claude SDK worker runtime ends at
-its first execute refusal. Each denial reads as the tool, the command clipped to
+count, and `fail` ends at the first refusal. The Claude SDK worker runtime counts its
+`deny` mode execute refusals against the same limit and ends at the first refusal under
+`fail` ([tool-safety.ts](../../src/engine/claude/tool-safety.ts)). In this release the Claude
+SDK worker paths were exercised against a fake SDK only, not a live Claude Agent SDK
+session. Each denial reads as the tool, the command clipped to
 200 characters with secrets redacted, and the rule that refused it
 ([worker-refusals.ts](../../src/engine/worker-refusals.ts)). The protocol is specified in
 [worker-dispatch-mechanics.md](../architecture/worker-dispatch-mechanics.md).
@@ -913,7 +930,13 @@ workspace fingerprint, resolved argv, cwd, and allowed environment values. A
 memo hit names the run that produced the original evidence. A changed tree is a
 miss. An unsuccessful worker records `hostVerification.status="skipped"` with
 `reason="worker_not_successful"`; a failed host check records `rejected` with
-its exit code, bounded output tail, and artifact path. Worker-reported command
+its exit code, bounded output tail, and artifact path. A check whose process never
+started also records `notRun`: `refused` when a reproduce check's precondition refused
+it before launch, `unconfigured` when a sealed check carries no parameters, or
+`spawn-failed` when no process could be created. The sealed run-result object keeps that fact, so a check
+that never ran does not read as a plain failing exit
+([host-verification.ts](../../src/domains/dispatch/host-verification.ts),
+[types.ts](../../src/domains/dispatch/types.ts)). Worker-reported command
 success never populates this status. In a parallel batch each distinct check runs
 once per wave, on the settled tree after every live member has finished
 (`strategy: "batch-settled"`), and a failure is charged to the members whose write
@@ -1562,7 +1585,7 @@ step's success.
 
 ### Inspect worker runs
 
-Inspect a worker run with `clio-coder fleet view <runId> --json`, or open the dispatch runs in `/view` ([/view](../architecture/observability.md)). A run's record states the worker's outcome, route, usage, cost and evidence; `/view verify <runId>` and `clio-coder fleet verify <runId> --json` check its seal. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger row and available transcript.
+Inspect a worker run with `clio-coder fleet view <runId> --json`, or open the dispatch runs in `/view` ([/view](../architecture/observability.md)). A run's record states the worker's outcome, route, usage, cost and evidence; `/view verify <runId>` and `clio-coder fleet verify <runId> --json` check its seal. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger row and available transcript. Headless `clio-coder run --agent` prints a `Not verified:` block from the sealed result's own typed fields, such as declared checks that did not run and failed checks, and prints the sealed result itself when the worker wrote no prose; [exit-codes-and-output.md](exit-codes-and-output.md) describes that output ([run-output.ts](../../src/cli/run-output.ts)).
 
 ### Run record integrity and fields
 
@@ -1688,6 +1711,14 @@ hard block.
   rows use `↳`). A running `◇` on the board is therefore the operator's own work.
   The footer shows the live worker count (`N workers`) and the Activity page's
   Workers rule a summary such as `2 active · 1 done`; neither splits by origin.
+- A `/run` or `/delegate` reports its admission once. A run that never started, such as
+  one naming an unknown agent or an unusable target, reads as `<command> refused: <reason>`
+  with no run to inspect, and a failure after the run began reads as that run's failure
+  with its `/view dispatch:<runId>` link. A run still waiting for a worker slot after a
+  short delay gets a queued notice. Over ACP the command's reply waits for admission, so
+  it says started or queued only for an admitted run and otherwise carries the refusal and
+  its reason at error level ([slash-commands.ts](../../src/session-control/slash-commands.ts),
+  [commands.ts](../../src/engine/acp/commands.ts)).
 - User-origin and agent-origin runs stream into the chat transcript as an
   attributed worker block. The typed command is echoed dim above the block.
   Header units display `<agentId>` (a council member shows its roster label)
@@ -1725,7 +1756,11 @@ hard block.
   renders `local`), gate badges (`gate reviewer c2`), reroute badges, live
   tool activity (the current or last call as a redacted verb and object; raw
   arguments never cross the worker stdout seam), and the worker's context figure.
-  It also lists finished runs. `Up` and `Down` (or `k` and `j`) move the cursor, `s`
+  It also lists finished runs. After a restart, the board also shows up to 12 of this
+  project's newest settled worker runs from the run ledger, leaving out internal helper
+  runs; startup reads them one run at a time before the board's first read, so keys typed
+  at the boot prompt are not held behind those reads
+  ([fleet-run-history.ts](../../src/interactive/fleet-run-history.ts)). `Up` and `Down` (or `k` and `j`) move the cursor, `s`
   steers the selected run, and `x` cancels it.
 - `w` on a live run takes the [workers dock](#workers-dock-and-dashboard)
   over for that run when a pane host is present, and the board names the key as `watch in a pane`
@@ -1991,7 +2026,7 @@ For an independent helper task, use `detach:true` and continue useful work; coll
 
 The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. Grounding counts the spans a read returned and the lines a grep result showed, whether the call was direct or a settled step of a gateway chain; a pending, failed or refused step grounds nothing, and a chain step cut to its share of the aggregate grounds only the lines that survived the cut. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.
 
-Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, and, for native workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Claude SDK runs in advisory mode have no tool-call ceiling, and subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
+Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, and, for native and Claude SDK workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own run record and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 
