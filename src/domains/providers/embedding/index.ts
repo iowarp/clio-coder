@@ -1,5 +1,6 @@
 export { embeddingCanaryFingerprint, embeddingGemma2Q8Profile, embeddingProfileIdentity } from "./profile.js";
 export { qualifyEmbeddingProfile } from "./qualification.js";
+export type { EmbeddingRoute } from "./service.js";
 export { createEmbeddingService } from "./service.js";
 export type {
 	EmbeddingErrorCode,
@@ -8,7 +9,6 @@ export type {
 	EmbeddingProfile,
 	EmbeddingRequest,
 	EmbeddingResponse,
-	EmbeddingRoute,
 	EmbeddingService,
 	EmbeddingTask,
 } from "./types.js";

@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -314,13 +314,11 @@ for (const prefix of REQUIRED_PREFIXES) {
 }
 
 checkSourcePack();
+checkExtensionDeclarations();
 
 /**
  * The tarball must agree with the source-pack plan computed from this
- * checkout: every packed file is in source.pack and absent as a loose file,
- * and every file the public extension types reach (package.json `exports`
- * types and the scaffold's tsconfig paths) ships loose, so a new import in
- * that closure cannot silently break installed extension type-checking.
+ * checkout: every packed file is in source.pack and absent as a loose file.
  */
 function checkSourcePack() {
 	let plan;
@@ -332,9 +330,6 @@ function checkSourcePack() {
 		errors.push(`unable to check the source pack: ${error instanceof Error ? error.message : String(error)}`);
 		return;
 	}
-	const missingLoose = plan.closure.filter((file) => !fileSet.has(file));
-	if (missingLoose.length > 0)
-		errors.push(`extension type closure files not shipped loose: ${missingLoose.slice(0, 10).join(", ")}`);
 	const doubled = [...members].filter((file) => fileSet.has(file));
 	if (doubled.length > 0) errors.push(`packed source also shipped loose: ${doubled.slice(0, 10).join(", ")}`);
 	const unpacked = plan.packed.filter((file) => !members.has(file) && !fileSet.has(file));
@@ -342,6 +337,40 @@ function checkSourcePack() {
 		errors.push(`source missing from the package and the pack: ${unpacked.slice(0, 10).join(", ")}`);
 	const strays = [...members].filter((file) => !plan.packed.includes(file));
 	if (strays.length > 0) errors.push(`source pack carries files outside the plan: ${strays.slice(0, 10).join(", ")}`);
+}
+
+/**
+ * Installed extensions type-check against the `exports` `types` files alone,
+ * so each must ship and may import only other shipped files by relative path.
+ * A bare specifier would name a package an extension author does not have
+ * (most of Clio's own imports are bundled devDependencies), which is how the
+ * loose src/ types failed before they were bundled.
+ */
+function checkExtensionDeclarations() {
+	const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+	const pending = Object.values(pkg.exports ?? {})
+		.map((target) => (target && typeof target === "object" ? target.types : undefined))
+		.filter((types) => typeof types === "string")
+		.map((types) => posix.normalize(types));
+	const seen = new Set();
+	while (pending.length > 0) {
+		const file = pending.pop();
+		if (seen.has(file)) continue;
+		seen.add(file);
+		if (!fileSet.has(file)) {
+			errors.push(`extension declaration not shipped: ${file}`);
+			continue;
+		}
+		const text = readFileSync(join(packageRoot, file), "utf8");
+		for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']/g)) {
+			const specifier = match[1];
+			if (!specifier.startsWith(".")) {
+				errors.push(`extension declaration ${file} imports a package: ${specifier}`);
+				continue;
+			}
+			pending.push(posix.join(posix.dirname(file), specifier).replace(/\.js$/, ".d.ts"));
+		}
+	}
 }
 
 const requiredRecipeKeys = new Set([

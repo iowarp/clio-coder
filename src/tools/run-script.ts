@@ -654,7 +654,7 @@ const DESCRIPTION =
 	"At autonomy default the script runs in an OS sandbox when the host has one: the workspace, the scratch roots and package caches are writable, the network is on and credentials are hidden. " +
 	`Default timeout ${RUN_SCRIPT_CAPS.defaultTimeoutMs}ms; a nonzero exit, timeout, or cancellation returns an error that still names the logs and any partial outputs.`;
 
-export const runScriptToolSurface = {
+export const runScriptToolSurface: ToolSurface = {
 	name: RUN_SCRIPT_TOOL_NAME,
 	description: DESCRIPTION,
 	parameters: Type.Object({
@@ -715,7 +715,7 @@ export const runScriptToolSurface = {
 			},
 		};
 	},
-} satisfies ToolSurface;
+};
 
 interface OpenLog {
 	fd: number;

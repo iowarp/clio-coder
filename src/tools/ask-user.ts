@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { isPlanCloseQuestion } from "../core/plan-request.js";
 import { safeResourceWriteAsync } from "../core/safe-resource-write.js";
@@ -146,7 +147,7 @@ export interface AskUserToolDeps {
 	getAutonomy?: () => AutonomyLevel;
 }
 
-export const askUserParameters = Type.Object({
+export const askUserParameters: TSchema = Type.Object({
 	action: Type.Optional(
 		StringEnum(["ask", "complete"], {
 			description: "ask presents a round of questions; complete records the decisions, once, before final prose.",

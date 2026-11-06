@@ -1,4 +1,6 @@
-import type { TargetDescriptor } from "../types/target-descriptor.js";
+// Embedding value shapes. The extension public API (public-api-v2.ts) names
+// them, so this module imports nothing: an import here would pull its whole
+// graph into the bundled declaration build of that API.
 
 export type EmbeddingTask = "query" | "document";
 export type EmbeddingPart =
@@ -40,13 +42,6 @@ export interface EmbeddingResponse {
 	sources: Array<{ index: number; kind: EmbeddingInput["kind"]; bytes: number }>;
 	usage: { inputItems: number; inputBytes: number; tokens?: number };
 	warnings: string[];
-}
-export interface EmbeddingRoute {
-	target: TargetDescriptor;
-	model: string;
-	/** Explicit qualified modalities; text is required. Video is intentionally unsupported. */
-	modalities: readonly ("text" | "image" | "audio" | "mixed")[];
-	authToken?: string;
 }
 export interface EmbeddingService {
 	embed(request: EmbeddingRequest): Promise<EmbeddingResponse>;

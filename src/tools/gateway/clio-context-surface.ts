@@ -21,7 +21,7 @@ export const clioDocsToolSurface = {
 	executionMode: "parallel",
 } satisfies ToolSurface;
 
-export const clioLibraryToolSurface = {
+export const clioLibraryToolSurface: ToolSurface = {
 	name: ToolNames.ClioLibrary,
 	description:
 		"Read the recipe catalog: discovered and installed skills, agents, prompts, and playbooks with their owner and invocation, plus installable packages. Body-free rows, bounded pages; activates and installs nothing. Unavailable inside a worker.",
@@ -38,4 +38,4 @@ export const clioLibraryToolSurface = {
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
-} satisfies ToolSurface;
+};
