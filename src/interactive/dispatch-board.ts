@@ -410,7 +410,8 @@ export function dispatchStatusPresentation(
 				token: "dispatchAction",
 			};
 		case "cancelling":
-			return { glyph: GLYPH.cancelled, label: "cancelling", token: "warning" };
+			// The card and the strip say stopping while the process exits, so the board's status cell does too.
+			return { glyph: GLYPH.cancelled, label: "stopping", token: "warning" };
 		case "retrying":
 			return { glyph: GLYPH.phaseRetry, label: "retrying", token: "warning" };
 		case "completed":
@@ -828,10 +829,12 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 		cardUnitsLine(theme, "status", units, contentWidth),
 		...(why === null ? [] : cardWrappedValueLines(theme, "why", theme.fg("error", why), contentWidth)),
 		...steps.map((line, index) => `${index === 0 ? cardKvKey(theme, "steps") : gutter}${line}`),
+		// The plan's step-by-step record lives in its event log, which a shell command prints; the row says so, so the
+		// id reads as that command's argument rather than as a name.
 		...cardWrappedValueLines(
 			theme,
-			"inspect",
-			theme.fg("annotation", `clio-coder fleet events ${plan.rootId}`),
+			"log",
+			theme.fg("annotation", `clio-coder fleet events ${plan.rootId} prints its event log`),
 			contentWidth,
 		),
 	];
@@ -1675,7 +1678,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 		case "stale":
 		case "cancelling": {
 			// The worker is being stopped; its last phase would read as work finishing normally.
-			if (row.status === "cancelling") return { text: "stopping", tone: "warning" };
+			if (row.status === "cancelling") return { text: "waiting for it to exit", tone: "warning" };
 			const progress = row.progress;
 			if (progress) {
 				if (progress.awaitingApproval === true) return { text: approvalWaitWords(progress), tone: "warning" };

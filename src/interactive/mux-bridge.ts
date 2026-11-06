@@ -21,7 +21,7 @@
 
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { AgentStatusChangedPayload, DispatchRunIdentity } from "../core/telemetry/live-events.js";
-import { plainOutcomeLabel, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import { NEVER_STARTED_WORDS, plainOutcomeLabel, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
 import type { MuxContract, MuxLog } from "../domains/mux/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 
@@ -150,6 +150,8 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		const origin = originOfRun.get(identity.lineage?.rootRunId ?? identity.runId) ?? identity.requestOrigin;
 		if (deps.notice === undefined || origin === "user" || retrying.delete(identity.runId)) return;
 		const why = workerFailureHeadline(rawDetail);
+		// A member released because its council stopped first adds nothing: the council's own notice names the cause.
+		if (identity.council !== undefined && why === NEVER_STARTED_WORDS) return;
 		// A council member goes by the roster label the operator watched it under, as its card and row do.
 		const who = identity.council === undefined ? identity.agentId : `council member ${identity.council.label}`;
 		const text = `${who} ${plainOutcomeLabel(outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${identity.runId}`;
