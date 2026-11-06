@@ -191,9 +191,9 @@ const TREE_ROLE_WORDS: Readonly<Record<string, string>> = {
 };
 const TREE_ROLE_WIDTH = 11;
 
-/** Width budget for the inline preview cell. Sized so the surrounding indent,
- * role marker, and short turn id still fit on an 88-column overlay. */
-const ROW_PREVIEW_BUDGET = 55;
+/** Width budget for the inline preview cell. With no turn id in the row, a wide overlay shows most of a turn;
+ * the row still clips to the overlay width below this. */
+const ROW_PREVIEW_BUDGET = 96;
 
 /**
  * One node as the label of a selection row, and its timestamp as the row's
