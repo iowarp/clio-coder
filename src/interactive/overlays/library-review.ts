@@ -148,6 +148,12 @@ function afterwardsText(after: NonNullable<LibraryPlanStep["effectiveAfter"]>): 
 function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined, detail: boolean): Fact[] {
 	const theme = clioTheme();
 	const facts: Fact[] = [{ label: "Package", value: step.identity.ref }];
+	const versions = step.versions;
+	if (versions?.from && versions.to && versions.from !== versions.to)
+		facts.push({ label: "Version", value: `${versions.from} installed → ${versions.to}` });
+	else if (versions?.to && !versions.from) facts.push({ label: "Version", value: versions.to });
+	else if (versions?.from && step.operation === "update")
+		facts.push({ label: "Version", value: `${versions.from}, same version with changed content` });
 	if (step.refusal) facts.push({ label: "Refused", value: statusChip(theme, "error", step.refusal) });
 	if (step.content && !step.content.valid)
 		facts.push({

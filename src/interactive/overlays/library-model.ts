@@ -554,7 +554,10 @@ function packageDetail(
 	];
 	return {
 		head: [
-			titleRow(theme, safe(record.name), width, { meta: record.version ? `v${safe(record.version)}` : kindText }),
+			// With an update pending the version shown is the catalog's, and it says so.
+			titleRow(theme, safe(record.name), width, {
+				meta: record.version ? `v${safe(record.version)}${here?.update ? " in the catalog" : ""}` : kindText,
+			}),
 			...chipRows(theme, status, width),
 			...chipRows(theme, actionKeyChips(theme, actions), width),
 			...noteRows(theme, actions.reasons, width),

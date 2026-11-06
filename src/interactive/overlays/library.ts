@@ -447,7 +447,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				const next = result.committed > 0 ? libraryRefreshSummary(result.refresh) : "";
 				deps.notice(
 					result.failed > 0 ? "error" : "success",
-					`${result.committed > 0 ? `Imported ${source}` : `Could not import ${source}`}.${next ? ` ${next}` : ""}`,
+					`${result.outcomes.length > 0 ? libraryOutcomeHeadline(result) : `Could not import ${source}`}.${next ? ` ${next}` : ""}`,
 				);
 				if (result.committed > 0) redraw();
 				review.hide();

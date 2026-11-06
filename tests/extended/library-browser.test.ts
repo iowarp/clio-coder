@@ -844,7 +844,7 @@ describe("library browser behavior", () => {
 		equal(state.imports, 0, "nothing is imported before the review is accepted");
 		state.review?.accept();
 		equal(state.imports, 1);
-		match(state.notices.map(([, text]) => text).join(" "), /Imported \/vendor\/pack\./);
+		match(state.notices.map(([, text]) => text).join(" "), /Imported plugin:vendor-pack in user scope\./);
 	});
 
 	it("releases the staged vendor tree when an import review is cancelled", () => {

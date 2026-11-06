@@ -89,6 +89,8 @@ export interface LibraryPlanStep {
 	operation: LibraryOperation;
 	identity: LibraryPackageIdentity;
 	destination: string;
+	/** The installed version and the one this step writes, where either is known. */
+	versions?: { from?: string; to?: string };
 	source?: { sourceUrl: string; sha256: string; staged: boolean };
 	content?: {
 		valid: boolean;
@@ -355,6 +357,14 @@ function installStep(
 		operation,
 		identity,
 		destination: staged.path,
+		...(existing?.version || staged.entry.version
+			? {
+					versions: {
+						...(existing?.version ? { from: existing.version } : {}),
+						...(staged.entry.version ? { to: staged.entry.version } : {}),
+					},
+				}
+			: {}),
 		source: { sourceUrl: staged.entry.sourceUrl, sha256: staged.sha256, staged: staged.sourceRoot !== undefined },
 		content: contentOf(staged.sourceRoot as string),
 		expected,
