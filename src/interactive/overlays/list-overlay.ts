@@ -1054,7 +1054,8 @@ export class ListOverlayView implements Component {
 		const bodyRows = Math.max(1, this.viewportRows - 2);
 		const chromeRows = (): number => tabRows.length + statusRows.length + filterRows.length;
 		const filterSheddable = (): boolean => filterRows.length > 0 && this.filterText.length === 0 && !this.isFilterFocused;
-		if (bodyRows - chromeRows() < 1 && filterSheddable()) filterRows = [];
+		// A short dock spends no row on an empty, unfocused search line; "/" still opens it.
+		if ((bodyRows < 10 || bodyRows - chromeRows() < 1) && filterSheddable()) filterRows = [];
 		if (bodyRows - chromeRows() < 1) tabRows = [];
 		if (bodyRows - chromeRows() < 1) statusRows = [];
 
