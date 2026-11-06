@@ -1,7 +1,8 @@
-import { ok } from "node:assert/strict";
+import { deepEqual, ok } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
+import { ciRunCommands } from "../../src/core/ci-commands.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { BOOTSTRAP_PROMPT, parseBootstrapModelOutput } from "../../src/domains/context/bootstrap-prompt.js";
 import { HANDBOOK_TARGETS } from "../../src/domains/context/clio-md.js";
@@ -104,4 +105,21 @@ it("preserves the exact default test selection without claiming optional suites 
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	ok(handbook.includes(`Exact package.json#scripts.test: \`${ordinary}\``));
 	ok(!handbook.includes("node --test tests/**/*.test.ts"));
+});
+
+// Clio's own workflow listed `fi` and `shell: bash` as CI gates.
+it("reads a multi-line run script as commands and a run mapping as none", () => {
+	const yaml = [
+		"defaults:",
+		"  run:",
+		"    shell: bash",
+		"steps:",
+		"  - run: |",
+		"      if pnpm run lint; then",
+		"        pnpm run build \\",
+		"          --prod",
+		"      fi",
+		"",
+	].join("\n");
+	deepEqual(ciRunCommands(yaml), ["pnpm run lint", "pnpm run build --prod"]);
 });
