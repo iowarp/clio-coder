@@ -162,3 +162,38 @@ test("an unavailable inventory without a configured default cannot invent a rout
 	assert.match(warning, /No selectable models/u);
 	assert.equal(readFileSync(file, "utf8"), before);
 });
+
+test("fleet routing to a connection on a retired runtime names the replacement and saves nothing", async (t) => {
+	const home = await isolateClioEnv("clio-configure-retired-runtime-");
+	t.after(() => home.restore());
+	registerBuiltinRuntimes(getRuntimeRegistry());
+	const file = join(home.dir, "config/settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(
+		file,
+		stringify({ version: 2, targets: [{ id: "box", runtime: "ollama-native", url: "http://127.0.0.1:1" }] }),
+	);
+	const before = readFileSync(file, "utf8");
+	let warning = "";
+	await assignTarget(
+		{
+			rl: {
+				async choose(_label, choices) {
+					const first = choices[0];
+					assert.ok(first);
+					return first;
+				},
+			},
+			out: new PassThrough(),
+			ok() {
+				assert.fail("a retired runtime must not save");
+			},
+			warn(message) {
+				warning = message;
+			},
+		},
+		"fleet",
+	);
+	assert.match(warning, /'ollama-native' was removed in 0\.7\.0.*runtime: ollama`/u);
+	assert.equal(readFileSync(file, "utf8"), before);
+});
