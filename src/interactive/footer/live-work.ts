@@ -266,10 +266,29 @@ export function liveWorkStrip(
 		const bare = `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
 		// A stop already asked for owes nothing more; anything else a person may want to stop says how.
 		const stoppable = facts.status.phase !== "cancelling";
+		// What runs behind the turn is fitted to the cells the lead and tail leave, so a worker's wait cause shortens
+		// before it is dropped: at 80 columns a worker silent for 20s outgrew the row and the strip lost it (F2).
+		const background = backgroundSummary(facts, room);
+		const workersIn = (lead: string, tail: string | null): string | null => {
+			if (workers === null) return null;
+			const cells = room - visibleWidth(lead) - 3 - (tail === null ? 0 : tailCells([tail]));
+			if (cells < 12) return null;
+			const named = workerSummary(facts, cells, cells);
+			const both = [named, background].filter(Boolean).join(" · ");
+			if (both.length > 0 && visibleWidth(both) <= cells) return both;
+			return named !== null && visibleWidth(named) <= cells ? named : null;
+		};
+		const behind = (tail: string | null): string[] => {
+			const fitted = workersIn(owned, tail);
+			return fitted === null ? [] : [render(owned, tail === null ? [fitted] : [fitted, tail])];
+		};
 		candidates = [
 			...(stoppable ? [render(ownedWith(tailCells([workers, BEHIND_VIEW_STOP])), [workers, BEHIND_VIEW_STOP])] : []),
+			...(stoppable ? behind(BEHIND_VIEW_STOP) : []),
 			render(owned, [workers, BEHIND_VIEW]),
+			...behind(BEHIND_VIEW),
 			...(workers === null ? [] : [render(owned, [workers])]),
+			...behind(null),
 			// A worker asking outranks the tail: with an overlay over its card, this row is all that says time is running.
 			...(facts.workers.some((row) => row.progress?.awaitingApproval === true)
 				? [
