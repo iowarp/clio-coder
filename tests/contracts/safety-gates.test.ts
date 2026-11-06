@@ -1343,6 +1343,11 @@ describe("safety gate boundary", () => {
 			'sed -n 1p "a b/../.env"',
 			"printf -v PATH bin && cat a.txt",
 			"printf -nv PATH bin && cat a.txt",
+			"date -s 2026-01-01",
+			"date --se=2026-01-01",
+			"date -us now",
+			"date 110610002026",
+			"date -f dates.txt",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition !== "recognized", true, command);
@@ -1375,6 +1380,10 @@ describe("safety gate boundary", () => {
 			"git -C pkg -C .. status",
 			"git -C src diff -- a.js",
 			"cd pkg && git -C .. log --oneline -3",
+			"date",
+			"date -u -Iseconds && date +%Y-%m-%d",
+			"date -d yesterday +%s",
+			"date -r package.json",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			strictEqual(decision.execRecognition, "recognized", command);
