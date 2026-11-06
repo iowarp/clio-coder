@@ -593,7 +593,12 @@ function permissionFacts(
 	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
 	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
 	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
-	const target = targetText !== undefined && targetText.length > 0 ? targetBlock(theme, targetText, risk, width) : [];
+	const target =
+		targetText === undefined || targetText.length === 0
+			? []
+			: plan !== null
+				? commandBlock(theme, targetText, width, { tone: risk, prose: true })
+				: targetBlock(theme, targetText, risk, width);
 	// Why before the rule's name: on a short card the reason (it writes outside this workspace) is what decides it.
 	const facts: Fact[] = [];
 	if (view.netReason !== undefined && view.netReason.length > 0) facts.push({ label: "why", value: view.netReason });
