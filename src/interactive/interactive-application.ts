@@ -2408,10 +2408,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					const live = liveSessionsElsewhere(process.cwd()).filter((session) => session.id !== currentId);
 					const first = live[0];
 					if (!first) return;
-					const more = live.length > 1 ? ` and ${live.length - 1} more` : "";
 					appendNotice(
 						"info",
-						`another Clio session is live in this folder (pid ${first.owner.pid}, session ${first.id.slice(0, 13)})${more}; this terminal has its own session`,
+						`${live.length === 1 ? "Another Clio session is" : `${live.length} other Clio sessions are`} open in this folder. This terminal keeps its own conversation, and both edit the same files.`,
 						busNoticeSink,
 					);
 				})
