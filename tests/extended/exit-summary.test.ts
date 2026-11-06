@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { countVerifiedOutcomes } from "../../src/domains/evidence/verified-outcomes.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import { renderExitSummary } from "../../src/interactive/exit-summary.js";
@@ -140,4 +141,37 @@ test("the exit card divides the session's spend over its distinct verified outco
 		[tasks.count, tasks.parts],
 		["2", ["1 reproduce or numeric-compare pass", "1 task done with a passing check"]],
 	);
+	// A host-verified worker whose check judged a payload already counted folds into that pass; a new payload counts.
+	const dispatched = (runId: string, sha256: string, second: number) => ({
+		kind: "message",
+		role: "tool_result",
+		timestamp: `2026-11-06T00:02:0${second}.000Z`,
+		payload: {
+			toolName: "dispatch",
+			isError: false,
+			result: {
+				details: {
+					runs: [
+						{
+							runId,
+							hostVerification: {
+								status: "verified",
+								checks: [{ check: "fit", report: { kind: "numeric-compare", passed: true, actual: { sha256 } } }],
+							},
+						},
+					],
+				},
+			},
+		},
+	});
+	const ledgerWithRuns = [...entries, dispatched("run-a", "b", 1), dispatched("run-b", "z", 2)];
+	deepStrictEqual(countVerifiedOutcomes(ledgerWithRuns, new Set(["run-a", "run-b"])), {
+		total: 3,
+		checks: 2,
+		workers: 1,
+		tasks: 0,
+	});
+	// A run whose checks the ledger does not show counts only when there is no counted pass it could repeat.
+	deepStrictEqual(countVerifiedOutcomes(entries, new Set(["run-hidden"])).workers, 0);
+	deepStrictEqual(countVerifiedOutcomes([], new Set(["run-hidden"])).workers, 1);
 });

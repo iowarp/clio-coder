@@ -6,7 +6,10 @@
  *  - a worker run whose record verifies against its seal and whose host verification passed;
  *  - a board task marked done whose required checks all have an observed pass.
  * One verification is one outcome. A check passing again on the same judged payload is the same result, so it is keyed
- * by check id and payload digests, and a run by its id. A done task is checked by the passes observed while it was
+ * by check id and payload digests. A worker run's host checks are keyed the same way from the dispatch result the
+ * ledger holds (its sealed run record keeps no report), and a run whose every host check judged a payload a main-thread
+ * pass already counts folds into that pass. A run whose checks the ledger does not show counts only when no
+ * main-thread pass exists for it to duplicate. A done task is checked by the passes observed while it was
  * active, and those are often the very check passes or worker runs already counted; a task counts only for a pass of
  * its own. Its observed rows carry the timestamp of the ledger entry that recorded the pass (`standingChecks`), so a
  * row whose time is a counted outcome's entry time is that outcome. Two results written in the same millisecond share a
@@ -28,7 +31,7 @@ export interface VerifiedOutcomeCount {
 	total: number;
 	/** Distinct `reproduce` and `numeric-compare` passes. */
 	checks: number;
-	/** Sealed worker runs whose host verification passed. */
+	/** Sealed worker runs whose host verification passed on a payload no counted main-thread pass judged. */
 	workers: number;
 	/** Board tasks done with every required check observed passing, and a pass no other outcome here counts. */
 	tasks: number;
@@ -47,12 +50,16 @@ function str(value: unknown): string {
  * digests name the result, so rerunning a check on unchanged output is the same outcome and changed output is another.
  */
 function passedCheckKey(details: Record<string, unknown>): string | null {
-	const report = details.report;
 	const judgement = details.judgement;
-	if (!isRecord(report) || !isRecord(judgement)) return null;
+	if (!isRecord(judgement) || judgement.validation !== "passed" || judgement.execution !== "succeeded") return null;
+	return judgedKey(str(details.check), details.report);
+}
+
+/** Kind, check id and judged digests of a passing reproduce or numeric-compare report; null for any other report. */
+function judgedKey(check: string, report: unknown): string | null {
+	if (!isRecord(report)) return null;
 	const kind = report.kind;
-	if (!VERIFIED_CHECK_KINDS.some((verified) => verified === kind)) return null;
-	if (report.passed !== true || judgement.validation !== "passed" || judgement.execution !== "succeeded") return null;
+	if (!VERIFIED_CHECK_KINDS.some((verified) => verified === kind) || report.passed !== true) return null;
 	const digests: string[] = [];
 	const digest = (value: unknown): void => {
 		if (isRecord(value) && typeof value.sha256 === "string") digests.push(value.sha256);
@@ -62,7 +69,26 @@ function passedCheckKey(details: Record<string, unknown>): string | null {
 	if (Array.isArray(report.runs)) for (const run of report.runs) digest(isRecord(run) ? run.payload : undefined);
 	const conditions = report.conditions;
 	if (isRecord(conditions) && Array.isArray(conditions.inputs)) for (const input of conditions.inputs) digest(input);
-	return `${String(kind)}\0${str(details.check)}\0${digests.join(",")}`;
+	return `${String(kind)}\0${check}\0${digests.join(",")}`;
+}
+
+/**
+ * The judged keys of each run's host checks as the dispatch result reports them, by run id. A check with no report
+ * (a `command` check) judged no payload any main-thread pass can count, so it is keyed by nothing and keeps its run.
+ */
+function hostCheckKeys(details: Record<string, unknown>): Map<string, Array<string | null>> {
+	const keys = new Map<string, Array<string | null>>();
+	const runs = Array.isArray(details.runs) ? details.runs : [details];
+	for (const run of runs) {
+		if (!isRecord(run) || typeof run.runId !== "string" || !isRecord(run.hostVerification)) continue;
+		const host = run.hostVerification;
+		if (!Array.isArray(host.checks)) continue;
+		keys.set(
+			run.runId,
+			host.checks.map((check) => (isRecord(check) ? judgedKey(str(check.check), check.report) : null)),
+		);
+	}
+	return keys;
 }
 
 /** A settled tool result entry's tool, details and ledger time, or null for any other entry. */
@@ -81,7 +107,7 @@ function dispatchRunIds(details: Record<string, unknown>): string[] {
 }
 
 /** Whether a run's sealed record says Clio's own host verification passed on it. */
-function runHostVerified(record: RunTelemetryV1 | null): boolean {
+export function runHostVerified(record: RunTelemetryV1 | null): boolean {
 	if (record === null || record.settled === null) return false;
 	const { integrity, trust } = readRunTrust(record);
 	const grounding = trust.validationGrounding;
@@ -95,25 +121,33 @@ function runHostVerified(record: RunTelemetryV1 | null): boolean {
 
 /**
  * Count a session's verified outcomes. `entries` is the session's whole ledger, every branch included, as its token
- * and cost totals cover every branch; gateway chain children must already be expanded. `runs` are the worker runs the
- * session's telemetry references.
+ * and cost totals cover every branch; gateway chain children must already be expanded. `verified` names the worker
+ * runs the session's telemetry references whose sealed record passes `runHostVerified`.
  */
 export function countVerifiedOutcomes(
 	entries: ReadonlyArray<unknown>,
-	runs: ReadonlyArray<RunTelemetryV1 | null>,
+	verified: ReadonlySet<string>,
 ): VerifiedOutcomeCount {
-	const workers = new Set<string>();
-	for (const run of runs) if (run !== null && runHostVerified(run)) workers.add(run.row.runId);
 	const checks = new Set<string>();
-	/** Ledger times of the entries that recorded an outcome counted above. */
+	const hostKeys = new Map<string, Array<string | null>>();
+	/** Ledger times of the entries that recorded a counted pass or a host-verified run, counted or folded. */
 	const counted = new Set<string>();
 	for (const entry of entries) {
 		const result = toolResult(entry);
 		if (result === null) continue;
 		const key = passedCheckKey(result.details);
 		if (key !== null) checks.add(key);
-		const countedRun = result.tool === "dispatch" && dispatchRunIds(result.details).some((id) => workers.has(id));
-		if ((key !== null || countedRun) && result.at !== "") counted.add(result.at);
+		const dispatched = result.tool === "dispatch";
+		if (dispatched) for (const [runId, keys] of hostCheckKeys(result.details)) hostKeys.set(runId, keys);
+		const verifiedRun = dispatched && dispatchRunIds(result.details).some((id) => verified.has(id));
+		if ((key !== null || verifiedRun) && result.at !== "") counted.add(result.at);
+	}
+	const workers = new Set<string>();
+	for (const runId of verified) {
+		const keys = hostKeys.get(runId);
+		// Without its checks in view a run could repeat a counted pass, so it counts only when there is none to repeat.
+		const own = keys === undefined ? checks.size === 0 : keys.some((key) => key === null || !checks.has(key));
+		if (own) workers.add(runId);
 	}
 	let tasks = 0;
 	for (const board of foldSessionTaskHistory(entries))

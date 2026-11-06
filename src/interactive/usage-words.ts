@@ -14,6 +14,7 @@ import { renderCountSum, renderUsdSum } from "../core/telemetry/render.js";
 import {
 	countVerifiedOutcomes,
 	perVerifiedOutcome,
+	runHostVerified,
 	type VerifiedOutcomeCount,
 } from "../domains/evidence/verified-outcomes.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
@@ -234,13 +235,13 @@ export type VerifiedOutcomeWords =
  * is read and its seal checked here, so a caller reads this once per render, not per row.
  */
 export function sessionVerifiedOutcomes(view: TelemetryView, entries: ReadonlyArray<unknown>): VerifiedOutcomeCount {
-	let runs: ReturnType<TelemetryView["run"]>[] = [];
+	const verified = new Set<string>();
 	try {
-		runs = view.runs().map((row) => view.run(row.runId));
+		for (const row of view.runs()) if (runHostVerified(view.run(row.runId))) verified.add(row.runId);
 	} catch {
 		// A read model that cannot list runs leaves the runs out; the ledger's own outcomes still count.
 	}
-	return countVerifiedOutcomes(expandChainMessages(entries), runs);
+	return countVerifiedOutcomes(expandChainMessages(entries), verified);
 }
 
 export const NO_VERIFIED_OUTCOME = "none this session, so no per-outcome figure";
