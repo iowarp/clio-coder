@@ -189,13 +189,14 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 			],
 			width,
 		),
+		// The card leads with what approving does; the seal that makes it exact is a footnote under the budget.
 		...factRows(
 			theme,
 			[
 				{
-					label: "seals",
-					value: `recipes, routes, commands, budget and replay under plan ${preview.plan.hash.slice(0, 12)}, approval ${preview.planHash.slice(0, 12)}`,
-					tone: "muted",
+					label: "approving",
+					value: `dispatches the ${steps === 1 ? "step" : `${steps} steps`} below in ${preview.waves.length} ${preview.waves.length === 1 ? "wave" : "waves"}, exactly as listed; nothing runs until you press Enter`,
+					tone: "info",
 				},
 			],
 			width,
@@ -249,6 +250,19 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 		}
 	}
 	rows.push(...budgetRows(preview, width));
+	rows.push(
+		...factRows(
+			theme,
+			[
+				{
+					label: "sealed",
+					value: `plan ${preview.plan.hash.slice(0, 12)}, approval ${preview.planHash.slice(0, 12)}: recipes, routes, commands, budget and replay cannot change after you approve`,
+					tone: "muted",
+				},
+			],
+			width,
+		),
+	);
 	return rows;
 }
 

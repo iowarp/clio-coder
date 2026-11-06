@@ -806,6 +806,10 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					...(verdict.kind === "ok" && verdict.result.kind === "ok" && verdict.result.terminate === true
 						? { terminate: true }
 						: {}),
+					// A verify step naming no declared check ran nothing; receipts must not fold it as a failed check.
+					...(verdict.kind === "ok" && verdict.result.kind === "error" && verdict.result.details?.unresolved === true
+						? { unresolved: true }
+						: {}),
 				}
 			: undefined;
 		if (verdict.kind === "blocked") {

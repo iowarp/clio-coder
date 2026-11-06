@@ -219,6 +219,8 @@ export interface GatewayChainReceipt {
 		ruleId?: string;
 		reasonCode?: string;
 		blockReason?: string;
+		/** The step named a check that does not exist, so nothing ran. */
+		unresolved?: true;
 	};
 }
 
@@ -275,6 +277,7 @@ export function gatewayChainReceipts(toolName: string, result: unknown): Gateway
 					...(typeof admission.ruleId === "string" ? { ruleId: admission.ruleId } : {}),
 					...(typeof admission.reasonCode === "string" ? { reasonCode: admission.reasonCode } : {}),
 					...(typeof admission.blockReason === "string" ? { blockReason: admission.blockReason } : {}),
+					...(admission.outcome === "error" && admission.unresolved === true ? { unresolved: true as const } : {}),
 				},
 			},
 		];
