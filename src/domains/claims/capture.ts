@@ -3,6 +3,7 @@ import { isAbsolute, relative } from "node:path";
 import { containsInstructionMarkers } from "../../core/untrusted-content.js";
 import type { NumericCompareReport } from "../../tools/verify/numeric.js";
 import type { ReproduceReport } from "../../tools/verify/reproduce.js";
+import { judgedPayloadKey } from "../evidence/index.js";
 import {
 	CLAIM_RECORD_VERSION,
 	type ClaimConditions,
@@ -156,16 +157,12 @@ export function claimText(check: string, conditions: ClaimConditions, passed: bo
 	return `${head}, ${commit}.`;
 }
 
-/** Kind, check id and every judged digest, in the order the report lists them. */
-function subjectOf(check: string, conditions: ClaimConditions): string {
-	const digests: string[] = [];
-	if (conditions.reference !== undefined) digests.push(conditions.reference.sha256);
-	if (conditions.kind === "numeric-compare") {
-		if (conditions.actual !== undefined) digests.push(conditions.actual.sha256);
-	} else {
-		digests.push(...conditions.payloads, ...conditions.inputs.map((input) => input.sha256));
-	}
-	return sha256(canonicalClaimJson([conditions.kind, check, digests]));
+/**
+ * The digest of the judged-payload key the verified-outcome count uses, so a claim and an outcome name one judgement
+ * alike. Kind, check id and every judged digest: rerunning on the same bytes is the same subject.
+ */
+function subjectOf(check: string, report: ReproduceReport | NumericCompareReport): string {
+	return sha256(judgedPayloadKey(check, report) ?? `${report.kind}\0${check}\0`);
 }
 
 function keysOf(check: string, conditions: ClaimConditions, declaredCommand: ReadonlyArray<string>): ClaimKeys {
@@ -184,19 +181,20 @@ function buildClaim(input: {
 	check: string;
 	declaredCommand: ReadonlyArray<string>;
 	conditions: ClaimConditions;
-	passed: boolean;
+	report: ReproduceReport | NumericCompareReport;
 	source: ClaimSource;
 }): ClaimRecordV1 {
-	const text = claimText(input.check, input.conditions, input.passed);
+	const passed = input.report.passed;
+	const text = claimText(input.check, input.conditions, passed);
 	const body: Omit<ClaimRecordV1, "id"> = {
 		v: CLAIM_RECORD_VERSION,
 		type: "claim",
 		at: input.at,
 		project: input.project,
 		kind: input.conditions.kind,
-		verdict: input.passed ? "agrees" : "disagrees",
+		verdict: passed ? "agrees" : "disagrees",
 		text,
-		subject: subjectOf(input.check, input.conditions),
+		subject: subjectOf(input.check, input.report),
 		keys: keysOf(input.check, input.conditions, input.declaredCommand),
 		conditions: input.conditions,
 		source: input.source,
@@ -247,7 +245,7 @@ export function claimFromVerifyResult(input: {
 		check,
 		declaredCommand,
 		conditions,
-		passed: report.passed,
+		report,
 		source: input.source,
 	});
 }
@@ -289,7 +287,7 @@ export function claimsFromHostVerification(input: {
 				check: check.check,
 				declaredCommand: check.argv,
 				conditions,
-				passed: report.passed,
+				report,
 				source: { channel: "host-verification", runId: input.runId, receiptDigest: input.receiptDigest },
 			}),
 		);
