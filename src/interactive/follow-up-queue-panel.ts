@@ -83,7 +83,7 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 				const sendNow = options.getSendNowKey?.();
 				if (sendNow && sendNow.length > 0) hints.push(`[${spell(sendNow)}] send now`);
 				const dequeue = options.getDequeueKey?.();
-				hints.push(`[${dequeue && dequeue.length > 0 ? spell(dequeue) : "see /help"}] restore to editor`);
+				hints.push(`[${dequeue && dequeue.length > 0 ? spell(dequeue) : "see /help"}] all to editor`);
 				return hints.join(" · ");
 			};
 			// A narrow dock keeps every verb by giving up the second spelling of each key.

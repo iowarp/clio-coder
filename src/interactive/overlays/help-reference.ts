@@ -5,6 +5,7 @@ import { commandReference, SLASH_COMMAND_GROUPS } from "../../session-control/sl
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
 import { displaySafe } from "../display-safe.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
+import { MUTATION_PREVIEW_KEY, PERMISSION_STOP_KEY, PERMISSION_TERMS_KEY } from "../permission-hint.js";
 import { compactArgumentHint } from "../slash-autocomplete.js";
 import { clioTheme, dotSep, type Fact, factRows, statusChip, titleRow } from "../theme/index.js";
 import { formatKeybindingDetailBodyLines } from "./keybinding-detail.js";
@@ -44,9 +45,11 @@ export function openHelpOverlay(
 		.map((ref) => {
 			// Below 80 columns the flags are dropped before the description is cut:
 			// `/run [--agent-profile <profile>] …` left nothing of what /run does.
-			const { flags: _flags, ...withoutFlags } = ref.args ?? {};
+			const { flags, ...withoutFlags } = ref.args ?? {};
 			const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
-			const narrowUsage = positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`;
+			// The flags fold into one word so the row still says that it takes them.
+			const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
+			const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
 			const item: ListOverlayItem = {
 				id: ref.name,
 				label: `${ref.usage}  ${ref.description}`,
@@ -250,8 +253,8 @@ export function openHelpOverlay(
 				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
 					"Workers resolve asks per `fleet.permissions.mode` (Fleet approvals routing in /settings); headless runs deny what the safety judge does not allow.",
 				"**Inspecting a mutation**: a parked `write` or `edit` card carries the target, the byte count, and a `sha256` digest of the exact call arguments. " +
-					"Press `v` to read the complete proposed content, or the complete effective diff against the file on disk, and `v` again to put it away; ↑/↓ and PageUp/PageDown scroll it. " +
-					"Enter still allows, `s` still stops, and Esc still denies while it is open. The mutation text is shown locally and never enters the transcript, a notice, a desktop notification, or the render trace. " +
+					`Press ${MUTATION_PREVIEW_KEY} to read the complete proposed content, or the complete effective diff against the file on disk, and ${MUTATION_PREVIEW_KEY} again to put it away; ↑/↓ and PageUp/PageDown scroll it. ${PERMISSION_TERMS_KEY} opens the standing terms of the decision the same way. ` +
+					`Enter still allows and ${PERMISSION_STOP_KEY} still stops while either view is open; Esc closes the view and the card is as it was, and only Esc on the card itself denies. The mutation text is shown locally and never enters the transcript, a notice, a desktop notification, or the render trace. ` +
 					"A worker escalation has no preview because the call's arguments never leave the worker, and its card says so.",
 			],
 		},
@@ -262,8 +265,10 @@ export function openHelpOverlay(
 	const handle = openListOverlay(tui, {
 		markerId: "help",
 		title: "Help Center",
+		tall: true,
 		items,
 		filterable: true,
+		filterPlaceholder: "type to find a command, key or topic",
 		exactMatchesOnly: true,
 		...(initialFilter ? { initialFilter } : {}),
 		onClose,

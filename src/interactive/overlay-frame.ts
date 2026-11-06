@@ -46,13 +46,43 @@ export interface FocusBoxOptions {
 export class FocusBox extends Box {
 	private readonly inputTarget: InputTarget | null;
 	private readonly onInput: ((data: string) => void) | undefined;
+	private readonly padX: number;
+	private readonly padY: number;
+	private rows = 0;
 
 	constructor(children: Component | readonly Component[], options?: FocusBoxOptions) {
 		super(options?.x ?? 1, options?.y ?? 0);
+		this.padX = options?.x ?? 1;
+		this.padY = options?.y ?? 0;
 		const childList = Array.isArray(children) ? children : [children];
 		for (const child of childList) this.addChild(child);
 		this.inputTarget = options?.inputTarget === undefined ? (childList[0] ?? null) : options.inputTarget;
 		this.onInput = options?.onInput;
+	}
+
+	/**
+	 * When the rows run out, the text above the choices yields before the
+	 * choices do. The frame cuts a tall body from the bottom, and a chooser
+	 * whose explanation came first lost its choices at 40x15 while Enter still
+	 * committed the hidden selection. The explanation now keeps its first rows
+	 * and closes on an ellipsis; the choices, and anything under them, stay whole.
+	 */
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		if (this.rows <= 0 || lines.length <= this.rows) return lines;
+		const index = this.inputTarget === null ? -1 : this.children.indexOf(this.inputTarget as Component);
+		if (index <= 0) return lines;
+		const contentWidth = Math.max(1, width - this.padX * 2);
+		let lead = this.padY;
+		for (const child of this.children.slice(0, index)) lead += child.render(contentWidth).length;
+		const room = this.rows - (lines.length - lead);
+		if (room >= lead) return lines;
+		if (room <= 0) return lines.slice(lead);
+		const kept = lines.slice(0, room);
+		const last = (kept[room - 1] ?? "").replace(/\s+$/u, "");
+		kept[room - 1] =
+			visibleWidth(last) + 2 <= width ? `${last} ${GLYPH.ellipsis}` : truncateToWidth(last, width, GLYPH.ellipsis, false);
+		return [...kept, ...lines.slice(lead)];
 	}
 
 	get keyboardScope() {
@@ -71,6 +101,7 @@ export class FocusBox extends Box {
 	 * windowing itself, because the box, not the body, was what the frame saw.
 	 */
 	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
 		for (const child of this.children) {
 			if (isRowBudgeted(child)) child.setBodyRows(rows);
 		}
@@ -327,7 +358,7 @@ export interface ChoiceListOptions {
 	initialIndex?: number;
 }
 
-export interface ChoiceList extends Component {
+export interface ChoiceList extends Component, RowBudgetedBody {
 	/** The lead changed; the next render rebuilds it. */
 	touch(): void;
 	selected(): ChoiceListItem | null;
@@ -355,6 +386,7 @@ export function createChoiceList(options: ChoiceListOptions): ChoiceList {
 	};
 	list.onCancel = (): void => options.onCancel();
 	let revision = 0;
+	let rows = 0;
 	let memo: { key: string; lines: string[] } | null = null;
 	const selected = (): ChoiceListItem | null => {
 		const current = list.getSelectedItem();
@@ -363,23 +395,33 @@ export function createChoiceList(options: ChoiceListOptions): ChoiceList {
 	return {
 		render(width: number): string[] {
 			const focused = selected()?.value ?? "";
-			const key = `${width}|${focused}|${revision}|${skinEpoch()}`;
+			const key = `${width}|${rows}|${focused}|${revision}|${skinEpoch()}`;
 			if (memo?.key === key) return memo.lines;
 			const theme = clioTheme();
-			const lines = [...(options.lead?.(width) ?? [])];
-			if (lines.length > 0) lines.push("");
-			for (const item of options.items) {
-				lines.push(
-					...selectionRow(theme, {
-						focused: item.value === focused,
-						label: item.label,
-						...(item.description === undefined ? {} : { description: item.description }),
-						width,
-					}),
-				);
-			}
+			const lay = (describeAll: boolean): string[] => {
+				const lines = [...(options.lead?.(width) ?? [])];
+				if (lines.length > 0) lines.push("");
+				for (const item of options.items) {
+					const focusedRow = item.value === focused;
+					lines.push(
+						...selectionRow(theme, {
+							focused: focusedRow,
+							label: item.label,
+							...(item.description === undefined || !(describeAll || focusedRow) ? {} : { description: item.description }),
+							width,
+						}),
+					);
+				}
+				return lines;
+			};
+			// Short of rows, only the focused choice keeps its consequence under it, the way the settings scope card does.
+			let lines = lay(true);
+			if (rows > 0 && lines.length > rows) lines = lay(false);
 			memo = { key, lines };
 			return lines;
+		},
+		setBodyRows(budget: number): void {
+			rows = Math.max(0, Math.floor(budget));
 		},
 		handleInput: (data: string): void => list.handleInput(data),
 		invalidate(): void {
@@ -430,6 +472,9 @@ export type OverlayEscVerb =
 	| "back"
 	| "back, keeps draft"
 	| "back to list"
+	| "back to edit"
+	| "back to models"
+	| "back to choices"
 	| "back to sections"
 	| "cancel filter"
 	| "close settings";

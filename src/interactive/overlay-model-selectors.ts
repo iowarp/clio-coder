@@ -123,7 +123,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 	const openSettings = deps.openSettingsOverlay ?? openSettingsOverlay;
 	let settingsOverlayRefresh: (() => void) | null = null;
 
-	const openModelOverlayState = (): void => {
+	const openModelOverlayState = (initialSelection?: string): void => {
 		if (deps.transitions.state !== "closed") return;
 		const settings = deps.getSettings?.();
 		if (!settings) return;
@@ -136,9 +136,10 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			bus: deps.bus,
 			// The picker resolves what to run; the scope dialog resolves where it
 			// lands. Closing this overlay first keeps one modal on screen at a time.
+			...(initialSelection ? { initialSelection } : {}),
 			onSelect: (ref) => {
 				deps.closeOverlay();
-				openModelScopeState(ref);
+				openModelScopeState(ref, () => openModelOverlayState(`${ref.target}/${ref.model}`));
 			},
 			onToggleFavorite: (ref, favorite) => {
 				if (!deps.getSettings || !deps.writeSettings) return;
@@ -159,7 +160,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		deps.tui.requestRender();
 	};
 
-	const openModelScopeState = (ref: PendingModelScope): void => {
+	const openModelScopeState = (ref: PendingModelScope, backToPicker?: () => void): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "model-scope";
 		// Sized once: nothing grows the context while a request waits, and the frame loop must not re-estimate it.
@@ -173,8 +174,13 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		const residency = status
 			? modelResidencySentence(modelResidencyWord(status, ref.model), ref.model, ref.target)
 			: null;
+		const live = deps.getSettings?.()?.chat;
+		const liveTarget = live?.target?.trim() ?? "";
+		const liveModel = live?.model?.trim() ?? "";
+		const current = liveTarget.length === 0 ? null : liveModel.length === 0 ? liveTarget : `${liveTarget} · ${liveModel}`;
 		deps.transitions.handle = openModelScope(deps.tui, {
 			ref,
+			...(current ? { current } : {}),
 			...(residency ? { residency } : {}),
 			...(switchCost ? { switchCost } : {}),
 			...(deps.routeMoveWait
@@ -237,6 +243,14 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 				deps.closeOverlay();
 				deps.notify("info", "model unchanged");
 			},
+			...(backToPicker
+				? {
+						onBack: () => {
+							deps.closeOverlay();
+							backToPicker();
+						},
+					}
+				: {}),
 		});
 		deps.tui.requestRender();
 	};

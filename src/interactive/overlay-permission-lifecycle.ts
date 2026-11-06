@@ -199,7 +199,25 @@ function axisViewFromId(axisId: string | undefined, fallbackLevel: string): Appr
 function netReasonOf(decision: SafetyDecision): string | undefined {
 	if (decision.kind !== "ask") return undefined;
 	const reason = decision.policy?.kind === "ask" ? decision.policy.reasons[0] : decision.match?.reason;
-	return reason !== undefined && reason.length > 0 ? sanitizeCallTargetText(reason) : undefined;
+	return reason !== undefined && reason.length > 0 ? sanitizeCallTargetText(netReasonWords(reason)) : undefined;
+}
+
+/**
+ * The classifier's write-path codes as the card's `why` row says them. The code
+ * itself (`write-path-outside-cwd: /home/…`) is the classifier's audit word, and
+ * the card is read by someone deciding, not auditing.
+ */
+const WRITE_PATH_REASONS: ReadonlyArray<readonly [string, string]> = [
+	["write-path-outside-cwd: ", "it writes outside this workspace, to "],
+	["write-path-home-escape: ", "it writes through a home-directory path the workspace cannot bound: "],
+	["write-path-system-root: ", "it writes under the system directory "],
+];
+
+function netReasonWords(reason: string): string {
+	for (const [code, words] of WRITE_PATH_REASONS) {
+		if (reason.startsWith(code)) return `${words}${reason.slice(code.length)}`;
+	}
+	return reason;
 }
 
 /**
