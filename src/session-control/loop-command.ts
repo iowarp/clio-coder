@@ -639,7 +639,7 @@ function jobFromResult(result: ToolResult): JobRecord | null {
 function controlVerbText(action: LoopControlAction, job: JobRecord): string {
 	if (action === "pause") return `loop ${loopLabel(job)} paused`;
 	if (action === "resume") return `loop ${loopLabel(job)} resumed`;
-	if (jobIsComplete(job)) return `loop ${loopLabel(job)} ${action === "stop" ? "stopped" : "canceled"}`;
+	if (jobIsComplete(job)) return `loop ${loopLabel(job)} ${action === "stop" ? "stopped" : "cancelled"}`;
 	return action === "stop"
 		? `loop ${loopLabel(job)} stopping: the current run finishes and no new run starts`
 		: `loop ${loopLabel(job)} cancel requested: waiting for the current run to settle`;
@@ -774,7 +774,7 @@ function endedNotice(job: JobRecord): LoopNotice {
 			};
 		}
 		case "canceled":
-			return { level: "info", text: `loop ${loopLabel(job)} canceled after ${runs}` };
+			return { level: "info", text: `loop ${loopLabel(job)} cancelled after ${runs}` };
 		default:
 			return { level: "info", text: `loop ${loopLabel(job)} stopped after ${runs}` };
 	}

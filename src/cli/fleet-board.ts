@@ -194,8 +194,9 @@ function stateGlyph(paint: BoardPaint, card: WorkerCard): string {
 	}
 }
 
+/** The card state in the words the rest of Clio shows; `canceled` stays the state's wire spelling. */
 function stateWord(state: CardState): string {
-	return state === "succeeded" ? "done" : state;
+	return state === "succeeded" ? "done" : state === "canceled" ? "cancelled" : state;
 }
 
 /**
