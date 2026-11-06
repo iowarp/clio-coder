@@ -473,6 +473,8 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 	const oldLines = oldContent.split("\n");
 	const newLines = newContent.split("\n");
 	const lineNumWidth = String(Math.max(oldLines.length, newLines.length)).length;
+	// Removed lines carry their old number and every other line its number in the file as it now reads, so a
+	// context line after an insertion continues the added lines' count instead of stepping back to its old one.
 	let oldLineNum = 1;
 	let newLineNum = 1;
 	let lastWasChange = false;
@@ -513,7 +515,7 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 		if (hasLeadingChange && hasTrailingChange) {
 			if (raw.length <= contextLines * 2) {
 				for (const line of raw) {
-					output.push(` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
+					output.push(` ${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
 					oldLineNum += 1;
 					newLineNum += 1;
 				}
@@ -522,7 +524,7 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 				const trailing = raw.slice(raw.length - contextLines);
 				const skipped = raw.length - leading.length - trailing.length;
 				for (const line of leading) {
-					output.push(` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
+					output.push(` ${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
 					oldLineNum += 1;
 					newLineNum += 1;
 				}
@@ -530,7 +532,7 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 				oldLineNum += skipped;
 				newLineNum += skipped;
 				for (const line of trailing) {
-					output.push(` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
+					output.push(` ${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
 					oldLineNum += 1;
 					newLineNum += 1;
 				}
@@ -538,7 +540,7 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 		} else if (hasLeadingChange) {
 			const shown = raw.slice(0, contextLines);
 			for (const line of shown) {
-				output.push(` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
+				output.push(` ${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
 				oldLineNum += 1;
 				newLineNum += 1;
 			}
@@ -556,7 +558,7 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 				newLineNum += skipped;
 			}
 			for (const line of raw.slice(skipped)) {
-				output.push(` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`);
+				output.push(` ${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`);
 				oldLineNum += 1;
 				newLineNum += 1;
 			}
