@@ -438,9 +438,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				record,
 				plan: preview.plan,
 				columns: deps.terminal.columns,
+				// The preview is a layer over the snapshot list, so Esc goes back to the list with nothing changed.
 				onCancel: () => {
 					deps.closeOverlay();
-					deps.notify("info", "rewind cancelled; no files changed", "rewind:outcome");
+					openRewind();
 				},
 				onConfirm: () => {
 					deps.closeOverlay();
