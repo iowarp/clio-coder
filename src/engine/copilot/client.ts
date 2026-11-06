@@ -44,6 +44,64 @@ function runtimeEnvironment(): Record<string, string | undefined> {
 let shared: { client: CopilotClient; started: Promise<void> } | null = null;
 let holds = 0;
 
+/** The private fields of pinned SDK 1.0.26 this module relies on; nothing public exposes them. */
+interface PinnedClientInternals {
+	cliProcess?: ChildProcess | null;
+	cliStartTimeout?: ReturnType<typeof setTimeout> | null;
+	state?: string;
+}
+
+let layoutWarned = false;
+
+/**
+ * A missing private field means the SDK changed under the pin: one-shot commands may hang again and a lost
+ * runtime may go unnoticed. Say so once instead of skipping silently.
+ */
+function warnLayout(missingFields: readonly string[]): void {
+	if (layoutWarned || missingFields.length === 0) return;
+	layoutWarned = true;
+	process.emitWarning(
+		`@github/copilot-sdk no longer exposes ${missingFields.join(", ")} where Clio expects them (pinned 1.0.26); one-shot commands may not exit and a lost Copilot runtime may not be detected.`,
+		{ code: "CLIO_CODER_COPILOT_SDK_LAYOUT" },
+	);
+}
+
+const runtimeGoneListeners = new Set<(client: CopilotClient, reason: string) => void>();
+
+/** Notified when a started runtime exits or its connection is lost; its sessions are gone with it. */
+export function onCopilotRuntimeGone(listener: (client: CopilotClient, reason: string) => void): void {
+	runtimeGoneListeners.add(listener);
+}
+
+/** Forget a client whose runtime is gone, so the next use starts a fresh one, and tell its users. */
+function invalidate(client: CopilotClient, reason: string): void {
+	if (shared?.client !== client) return;
+	shared = null;
+	for (const listener of runtimeGoneListeners) listener(client, reason);
+	void client.forceStop().catch(() => {});
+}
+
+function watchRuntime(client: CopilotClient): void {
+	const internals = client as unknown as PinnedClientInternals;
+	const child = internals.cliProcess;
+	const absent = [
+		...(child ? [] : ["cliProcess"]),
+		...("cliStartTimeout" in internals ? [] : ["cliStartTimeout"]),
+		...(typeof internals.state === "string" ? [] : ["state"]),
+	];
+	warnLayout(absent);
+	if (!child) return;
+	const gone = () => invalidate(client, "The GitHub Copilot runtime exited; its sessions were lost.");
+	child.once("exit", gone);
+	child.stdout?.once("close", gone);
+}
+
+/** A client whose connection the SDK marked closed cannot be used again; only a fresh start helps. */
+function disconnected(client: CopilotClient): boolean {
+	const state = (client as unknown as PinnedClientInternals).state;
+	return state === "disconnected" || state === "error";
+}
+
 /**
  * The runtime child and its stdio pipes keep Node's event loop alive, so a one-shot command (configure, a
  * probe, headless run) would never exit while it runs. Work that awaits the runtime holds it; with no hold
@@ -52,11 +110,8 @@ let holds = 0;
  */
 function setRuntimeReferenced(client: CopilotClient, referenced: boolean): void {
 	// Pinned SDK 1.0.26 keeps the stdio child in `cliProcess` and leaves its 30 s start timeout armed after a
-	// successful start (`cliStartTimeout`); it exposes no public handle for either.
-	const internals = client as unknown as {
-		cliProcess?: ChildProcess | null;
-		cliStartTimeout?: ReturnType<typeof setTimeout> | null;
-	};
+	// successful start (`cliStartTimeout`); it exposes no public handle for either. watchRuntime warns when absent.
+	const internals = client as unknown as PinnedClientInternals;
 	const child = internals.cliProcess;
 	if (!child) return;
 	for (const handle of [child, child.stdin, child.stdout, child.stderr, internals.cliStartTimeout]) {
@@ -94,6 +149,11 @@ async function held<T>(use: () => Promise<T>): Promise<T> {
 
 /** The process's runtime client, started on first use; concurrent callers share one start. */
 export async function copilotClient(): Promise<CopilotClient> {
+	if (shared && disconnected(shared.client)) {
+		const stale = shared;
+		await stale.started.catch(() => {});
+		if (shared === stale && disconnected(stale.client)) invalidate(stale.client, "The Copilot connection was lost.");
+	}
 	if (!shared) {
 		const sdk = await loadCopilotSdk();
 		if (!shared) {
@@ -107,7 +167,10 @@ export async function copilotClient(): Promise<CopilotClient> {
 				env: runtimeEnvironment(),
 				logLevel: "error",
 			});
-			const started = client.start().then(() => setRuntimeReferenced(client, holds > 0));
+			const started = client.start().then(() => {
+				watchRuntime(client);
+				setRuntimeReferenced(client, holds > 0);
+			});
 			shared = { client, started };
 			started.catch(() => {
 				if (shared?.client === client) shared = null;

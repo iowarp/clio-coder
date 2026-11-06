@@ -12,17 +12,23 @@
  *
  * - Session state: `sessionStatePath` is `<cache>/copilot-sdk/state`, which nothing on disk uses. A path
  *   under it lands in this session's own directory, `<cache>/copilot-sdk/sessions/<session id>/`, per OS
- *   user, removed when Clio closes the conversation; `..` cannot leave it.
+ *   user, removed when Clio closes the conversation. Containment is physical, not only lexical: the cache
+ *   root is resolved once with realpath, every directory below it must be a real directory (a symlinked
+ *   component is refused, missing ones are created one level at a time), and the final entry is never a
+ *   symlink, so no state read, write, rename or cleanup follows a link out of the session directory.
  * - Everything else is the user's real filesystem, served read-only. Copilot's built-in tools are disabled
  *   and every change to the workspace goes through Clio's own tools and permission policy, so a write,
  *   mkdir, rename or rm there is refused.
  */
 
-import { rmSync } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { constants, lstatSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, unlink } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import type { SessionFsConfig, SessionFsProvider } from "@github/copilot-sdk";
 import { clioCacheDir } from "../../core/xdg.js";
+
+/** Directories below the trusted cache root that lead to every session directory. */
+const SESSIONS_PATH = ["copilot-sdk", "sessions"] as const;
 
 function copilotSdkCacheDir(): string {
 	return join(clioCacheDir(), "copilot-sdk");
@@ -41,19 +47,88 @@ export function copilotSessionFsConfig(cwd = process.cwd()): SessionFsConfig {
 	};
 }
 
-function sessionRoot(sessionId: string): string {
+function validSessionId(sessionId: string): string {
 	if (!/^[A-Za-z0-9_-]{1,128}$/u.test(sessionId)) throw new Error(`invalid Copilot session id: ${sessionId}`);
-	return join(copilotSdkCacheDir(), "sessions", sessionId);
+	return sessionId;
 }
 
-/** At process exit only synchronous work runs; this removes what a still-open conversation wrote. */
-export function removeCopilotSessionRecordsSync(sessionId: string): void {
-	rmSync(sessionRoot(sessionId), { recursive: true, force: true });
+class SessionFsEscape extends Error {
+	constructor(path: string, why: string) {
+		super(`Copilot session state refused at ${path}: ${why}`);
+		this.name = "SessionFsEscape";
+	}
 }
 
-/** A session's own directory, removed with its conversation. */
+function missing(error: unknown): boolean {
+	return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
+}
+
+/**
+ * Walk `parts` below `root`, each a real directory. With `create`, a missing level is made (one level, not
+ * recursive, so mkdir never walks through a link someone planted). Returns null for a missing level when not
+ * creating. A symlink or a non-directory anywhere on the way is refused.
+ */
+async function walkDirectories(root: string, parts: readonly string[], create: boolean): Promise<string | null> {
+	let current = root;
+	for (const part of parts) {
+		const next = join(current, part);
+		let info = await lstat(next).catch((error: unknown) => {
+			if (missing(error)) return null;
+			throw error;
+		});
+		if (info === null) {
+			if (!create) return null;
+			await mkdir(next).catch((error: unknown) => {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			});
+			info = await lstat(next);
+		}
+		if (info.isSymbolicLink()) throw new SessionFsEscape(next, "a symlinked directory is not followed");
+		if (!info.isDirectory()) throw new SessionFsEscape(next, "not a directory");
+		current = next;
+	}
+	return current;
+}
+
+/** The cache root as it really is on disk; everything below it is checked component by component. */
+async function trustedRoot(): Promise<string> {
+	return realpath(clioCacheDir());
+}
+
+function sessionParts(sessionId: string): string[] {
+	return [...SESSIONS_PATH, validSessionId(sessionId)];
+}
+
+/**
+ * Remove one session directory without following a link out: a symlinked step on the way means the
+ * directory was never Clio's, so only the link itself is removed. `rm` does not follow links inside the tree.
+ */
 export async function removeCopilotSessionRecords(sessionId: string): Promise<void> {
-	await rm(sessionRoot(sessionId), { recursive: true, force: true });
+	const root = await trustedRoot();
+	const parts = sessionParts(sessionId);
+	const parent = await walkDirectories(root, parts.slice(0, -1), false).catch(() => null);
+	if (parent === null) return;
+	const target = join(parent, parts[parts.length - 1] as string);
+	const info = await lstat(target).catch(() => null);
+	if (info === null) return;
+	if (info.isSymbolicLink() || !info.isDirectory()) await unlink(target);
+	else await rm(target, { recursive: true, force: true });
+}
+
+/** At process exit only synchronous work runs; the same rules as removeCopilotSessionRecords. */
+export function removeCopilotSessionRecordsSync(sessionId: string): void {
+	let current = realpathSync(clioCacheDir());
+	const parts = sessionParts(sessionId);
+	for (const part of parts.slice(0, -1)) {
+		current = join(current, part);
+		const info = lstatSync(current, { throwIfNoEntry: false });
+		if (!info || info.isSymbolicLink() || !info.isDirectory()) return;
+	}
+	const target = join(current, parts[parts.length - 1] as string);
+	const info = lstatSync(target, { throwIfNoEntry: false });
+	if (!info) return;
+	if (info.isSymbolicLink() || !info.isDirectory()) unlinkSync(target);
+	else rmSync(target, { recursive: true, force: true });
 }
 
 function refuseWorkspaceWrite(path: string): never {
@@ -62,47 +137,79 @@ function refuseWorkspaceWrite(path: string): never {
 	);
 }
 
+/** O_NOFOLLOW where the platform has it; elsewhere the lstat check before the open is the guard. */
+const NO_FOLLOW = (constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
+
 export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
-	const root = sessionRoot(sessionId);
 	const base = sessionStateBase();
-	/** The on-disk path for a runtime path, and whether it is this session's own state. */
-	const locate = (path: string): { real: string; state: boolean } => {
+	const parts = sessionParts(sessionId);
+	type Located = { state: false; real: string } | { state: true; inside: string[] };
+	/** Whether a runtime path is this session's own state, by its place in the runtime's namespace. */
+	const locate = (path: string): Located => {
 		const absolute = resolvePath(path);
 		const inside = relative(base, absolute);
-		if (inside === "") return { real: root, state: true };
-		if (!inside.startsWith("..") && !isAbsolute(inside)) return { real: join(root, inside), state: true };
-		return { real: absolute, state: false };
+		if (inside === "") return { state: true, inside: [] };
+		if (!inside.startsWith("..") && !isAbsolute(inside)) return { state: true, inside: inside.split(sep) };
+		return { state: false, real: absolute };
 	};
-	const writable = (path: string): string => {
-		const target = locate(path);
-		return target.state ? target.real : refuseWorkspaceWrite(path);
+	/**
+	 * The physical path of a state entry. Every directory from the trusted root to the entry's parent is a real
+	 * directory (created when `create`), and the entry itself is never a symlink. Null when absent and not created.
+	 */
+	const statePath = async (inside: string[], create: boolean): Promise<string | null> => {
+		const root = await trustedRoot();
+		if (inside.length === 0) return walkDirectories(root, parts, create);
+		const parent = await walkDirectories(root, [...parts, ...inside.slice(0, -1)], create);
+		if (parent === null) return null;
+		const entry = join(parent, inside[inside.length - 1] as string);
+		const info = await lstat(entry).catch((error: unknown) => {
+			if (missing(error)) return null;
+			throw error;
+		});
+		if (info?.isSymbolicLink()) throw new SessionFsEscape(entry, "a symlinked entry is not followed");
+		return entry;
 	};
-	const parentOf = async (real: string) => {
-		await mkdir(dirname(real), { recursive: true });
+	/** Where to read: a state entry under the containment rules, else the real workspace path. */
+	const readable = async (path: string): Promise<string> => {
+		const located = locate(path);
+		if (!located.state) return located.real;
+		const entry = await statePath(located.inside, false);
+		if (entry === null) throw Object.assign(new Error(`ENOENT: no such session entry ${path}`), { code: "ENOENT" });
+		return entry;
+	};
+	const writable = async (path: string): Promise<string> => {
+		const located = locate(path);
+		if (!located.state) return refuseWorkspaceWrite(path);
+		return (await statePath(located.inside, true)) as string;
+	};
+	/** Write through a descriptor opened without following a final link (the lstat above covers other OSes). */
+	const writeEntry = async (path: string, content: string, flags: number, mode: number | undefined) => {
+		const handle = await open(await writable(path), flags | NO_FOLLOW, mode);
+		try {
+			await handle.writeFile(content, "utf8");
+		} finally {
+			await handle.close();
+		}
 	};
 	return {
-		readFile: (path) => readFile(locate(path).real, "utf8"),
+		readFile: async (path) => readFile(await readable(path), "utf8"),
 		async writeFile(path, content, mode) {
-			const real = writable(path);
-			await parentOf(real);
-			await writeFile(real, content, mode !== undefined ? { mode } : {});
+			await writeEntry(path, content, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, mode);
 		},
 		async appendFile(path, content, mode) {
-			const real = writable(path);
-			await parentOf(real);
-			await appendFile(real, content, mode !== undefined ? { mode } : {});
+			await writeEntry(path, content, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND, mode);
 		},
 		async exists(path) {
 			try {
-				await stat(locate(path).real);
+				await stat(await readable(path));
 				return true;
 			} catch {
-				// Any stat failure reads as absent, which is what the runtime asks.
+				// Any stat failure, a refused link included, reads as absent, which is what the runtime asks.
 				return false;
 			}
 		},
 		async stat(path) {
-			const info = await stat(locate(path).real);
+			const info = await stat(await readable(path));
 			return {
 				isFile: info.isFile(),
 				isDirectory: info.isDirectory(),
@@ -112,21 +219,43 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 			};
 		},
 		async mkdir(path, recursive, mode) {
-			await mkdir(writable(path), { recursive, ...(mode !== undefined ? { mode } : {}) });
+			const located = locate(path);
+			if (!located.state) return refuseWorkspaceWrite(path);
+			const root = await trustedRoot();
+			if (recursive) {
+				await walkDirectories(root, [...parts, ...located.inside], true);
+				return;
+			}
+			const parent = await walkDirectories(root, [...parts, ...located.inside.slice(0, -1)], false);
+			if (parent === null)
+				throw Object.assign(new Error(`ENOENT: no parent for session entry ${path}`), { code: "ENOENT" });
+			const name = located.inside[located.inside.length - 1];
+			await mkdir(name === undefined ? parent : join(parent, name), mode !== undefined ? { mode } : {});
 		},
-		readdir: (path) => readdir(locate(path).real),
+		readdir: async (path) => readdir(await readable(path)),
 		async readdirWithTypes(path) {
-			const entries = await readdir(locate(path).real, { withFileTypes: true });
+			const entries = await readdir(await readable(path), { withFileTypes: true });
 			return entries.map((entry) => ({ name: entry.name, type: entry.isDirectory() ? "directory" : "file" }));
 		},
 		async rm(path, recursive, force) {
-			await rm(writable(path), { recursive, force });
+			const located = locate(path);
+			if (!located.state) return refuseWorkspaceWrite(path);
+			const root = await trustedRoot();
+			const name = located.inside[located.inside.length - 1];
+			const parent = await walkDirectories(root, [...parts, ...located.inside.slice(0, -1)], false);
+			const target = parent === null ? null : name === undefined ? parent : join(parent, name);
+			const info = target === null ? null : await lstat(target).catch(() => null);
+			if (target === null || info === null) {
+				if (!force) throw Object.assign(new Error(`ENOENT: no such session entry ${path}`), { code: "ENOENT" });
+				return;
+			}
+			// A link inside the session directory is removed as a link; rm never follows links inside a tree.
+			if (info.isSymbolicLink()) await unlink(target);
+			else await rm(target, { recursive, force });
 		},
 		async rename(src, dest) {
-			const from = writable(src);
-			const to = writable(dest);
-			await parentOf(to);
-			await rename(from, to);
+			// writable() refuses a symlinked source or destination and creates the destination's parents.
+			await rename(await writable(src), await writable(dest));
 		},
 	};
 }

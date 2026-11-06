@@ -33,6 +33,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import type {
+	CopilotClient,
 	CopilotSession,
 	Tool as CopilotTool,
 	SessionConfig,
@@ -42,7 +43,13 @@ import type {
 import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
 import { copilotConsentMissingMessage, hasCopilotConsent } from "../../domains/providers/copilot-consent.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
-import { COPILOT_CLIENT_NAME, copilotAccount, copilotClient, holdCopilotClient } from "./client.js";
+import {
+	COPILOT_CLIENT_NAME,
+	copilotAccount,
+	copilotClient,
+	holdCopilotClient,
+	onCopilotRuntimeGone,
+} from "./client.js";
 import { createCopilotSessionFs, removeCopilotSessionRecords, removeCopilotSessionRecordsSync } from "./session-fs.js";
 
 type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
@@ -128,13 +135,19 @@ function toolsSignature(tools: ReadonlyArray<Tool>): string {
 	return hash(JSON.stringify(tools.map((tool) => [tool.name, tool.description, tool.parameters])));
 }
 
-interface StepSink {
-	handle(event: SessionEvent): void;
+/** One cumulative session total and whether the last reading of it is a usable step boundary. */
+interface MetricsBoundary {
+	value: number;
+	valid: boolean;
 }
+
+/** Calls whose steps have settled; their late usage stays theirs. Bounded, oldest forgotten first. */
+const RETIRED_CALLS_LIMIT = 512;
 
 class Conversation {
 	readonly key: string;
 	readonly session: CopilotSession;
+	readonly client: CopilotClient;
 	readonly systemHash: string;
 	toolsHash: string;
 	model: string;
@@ -145,9 +158,22 @@ class Conversation {
 	busy = false;
 	disposed = false;
 	lastUsed = Date.now();
-	sink: StepSink | null = null;
-	/** The runtime's session accounting totals at the end of the previous step. */
-	metricsBaseline = { premiumRequests: 0, nanoAiu: 0 };
+	/** The open step; events reach no other. */
+	activeStep: Step | null = null;
+	/**
+	 * The runtime's cumulative accounting at the last step boundary, per quantity. A fresh session starts at
+	 * zero. A failed, late or partial reading leaves that quantity invalid: the next good reading becomes the
+	 * new boundary and the growth in between is attributed to no call.
+	 */
+	readonly boundaries: { premiumRequests: MetricsBoundary; nanoAiu: MetricsBoundary } = {
+		premiumRequests: { value: 0, valid: true },
+		nanoAiu: { value: 0, valid: true },
+	};
+	/** Readings are numbered; only the newest may move a boundary. */
+	metricsSeq = 0;
+	private readonly retiredCalls = new Set<string>();
+	/** Settled steps still owed one usage report Copilot sent without a call id. */
+	private unclaimedUsage = 0;
 	private readonly parked = new Map<string, Parked>();
 	private readonly delivered = new Map<string, ToolResultObject>();
 	private unsubscribe: (() => void) | null = null;
@@ -155,6 +181,7 @@ class Conversation {
 	constructor(input: {
 		key: string;
 		session: CopilotSession;
+		client: CopilotClient;
 		systemHash: string;
 		toolsHash: string;
 		model: string;
@@ -162,13 +189,49 @@ class Conversation {
 	}) {
 		this.key = input.key;
 		this.session = input.session;
+		this.client = input.client;
 		this.systemHash = input.systemHash;
 		this.toolsHash = input.toolsHash;
 		this.model = input.model;
 		this.reasoningEffort = input.reasoningEffort;
-		// Events reach only the step that is open. Usage a finished step never received stays with that step,
-		// which settled it as unreported; it is never handed to the next call.
-		this.unsubscribe = this.session.on((event) => this.sink?.handle(event));
+		this.unsubscribe = this.session.on((event) => this.route(event));
+	}
+
+	/**
+	 * Usage belongs to the call that made it. A report for a call whose step already settled stays with that
+	 * step (which settled it unreported) and never reaches the open step. A report without a call id while a
+	 * settled step still owes one cannot be placed, so it counts for neither and the open step's usage becomes
+	 * uncertain instead of absorbing it.
+	 */
+	private route(event: SessionEvent): void {
+		if (event.type === "assistant.usage" && !(event as { agentId?: string }).agentId && !event.data.parentToolCallId) {
+			const id = event.data.apiCallId;
+			if (id !== undefined && this.retiredCalls.has(id)) return;
+			if (id === undefined && this.unclaimedUsage > 0) {
+				this.unclaimedUsage -= 1;
+				this.activeStep?.markUsageUncertain();
+				return;
+			}
+		}
+		this.activeStep?.handle(event);
+	}
+
+	/** A settled step's calls keep their late usage; one that ended without its own usage moves no boundary. */
+	retire(step: Step): void {
+		for (const id of step.callIds) {
+			this.retiredCalls.add(id);
+			if (this.retiredCalls.size > RETIRED_CALLS_LIMIT) {
+				const oldest = this.retiredCalls.values().next().value;
+				if (oldest !== undefined) this.retiredCalls.delete(oldest);
+			}
+		}
+		if (step.owesAnonymousUsage) this.unclaimedUsage += 1;
+		if (!step.usageComplete) {
+			// Its usage may still be accounted later, so the runtime's next totals cannot split it from a successor.
+			this.boundaries.premiumRequests.valid = false;
+			this.boundaries.nanoAiu.valid = false;
+			this.metricsSeq += 1;
+		}
 	}
 
 	/** The SDK handler for one of Clio's tools: wait for Clio's own result for this call. */
@@ -212,12 +275,17 @@ class Conversation {
 		this.delivered.set(toolCallId, result);
 	}
 
-	/** Settle every parked handler, detach and remove the Copilot session. Idempotent. */
+	/**
+	 * Settle the open step and every parked handler, detach and remove the Copilot session. Idempotent. A step
+	 * still streaming ends with the reason as its error, so its stream and its runtime hold are released.
+	 */
 	async dispose(reason: string): Promise<void> {
 		if (this.disposed) return;
 		this.disposed = true;
 		const release = holdCopilotClient();
-		this.sink = null;
+		const step = this.activeStep;
+		this.activeStep = null;
+		if (step && !step.isFinished) step.finish("error", [], reason);
 		const error = new Error(reason);
 		for (const waiter of this.parked.values()) waiter.reject(error);
 		this.parked.clear();
@@ -398,14 +466,14 @@ function emptyUsage(): AssistantMessage["usage"] {
 }
 
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
-class Step implements StepSink {
+class Step {
 	readonly message: AssistantMessage & { copilotBilling?: CopilotStepBilling };
 	private textIndex: number | null = null;
 	private thinkingIndex: number | null = null;
 	private started = false;
 	private finished = false;
 	private error: string | null = null;
-	private readonly billing: CopilotStepBilling = { premiumRequests: null, nanoAiu: null, modelCalls: 0 };
+	private billing: CopilotStepBilling = { premiumRequests: null, nanoAiu: null, modelCalls: 0 };
 	private toolUse: string[] | null = null;
 	/** The tool-requesting call's id, when Copilot gave one, so only its own usage closes the step. */
 	private toolUseCall: string | null = null;
@@ -416,9 +484,15 @@ class Step implements StepSink {
 	/** The model the runtime reported serving this step's calls (`assistant.usage.model`). */
 	private servedModel: string | null = null;
 	/** Reads this step's premium requests and AI credits from the runtime's own session accounting. */
-	settle: (() => Promise<{ premiumRequests: number | null; nanoAiu: number | null }>) | null = null;
+	settle: ((step: Step) => Promise<{ premiumRequests: number | null; nanoAiu: number | null }>) | null = null;
+	/** Copilot's ids for this step's model calls, from its messages and usage. */
+	readonly callIds = new Set<string>();
+	/** Set when a usage report that cannot be placed arrived during this step: its own counts are then uncertain. */
+	private usageUncertain = false;
+	/** Whether the tool-requesting call's own usage arrived before the step settled. */
+	private toolUseUsageSeen = false;
 	/** Runs when the step stops taking events, before any settling; later usage then waits for the next step. */
-	onDetach: (() => void) | null = null;
+	onDetach: ((step: Step) => void) | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
 	onFinish: ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[] }) => void) | null = null;
 
@@ -488,7 +562,27 @@ class Step implements StepSink {
 		}
 	}
 
+	get isFinished(): boolean {
+		return this.finished;
+	}
+
+	markUsageUncertain(): void {
+		this.usageUncertain = true;
+	}
+
+	/** The step's own calls all reported usage, and none of it is mixed with a report it cannot place. */
+	get usageComplete(): boolean {
+		if (this.usageUncertain || this.usageEvents === 0) return false;
+		return this.toolUse === null || this.toolUseUsageSeen;
+	}
+
+	/** A tool-requesting call with no id that settled without its usage: its report may still arrive anonymously. */
+	get owesAnonymousUsage(): boolean {
+		return this.toolUse !== null && !this.toolUseUsageSeen && this.toolUseCall === null;
+	}
+
 	private usage(data: Extract<SessionEvent, { type: "assistant.usage" }>["data"]): void {
+		if (typeof data.apiCallId === "string") this.callIds.add(data.apiCallId);
 		const usage = this.message.usage;
 		const count = (value: unknown): number | undefined =>
 			typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -515,14 +609,16 @@ class Step implements StepSink {
 			this.nanoReports += 1;
 			this.nanoSum += nano;
 		}
-		// The tool-requesting call's own usage closes its step (see the tool-request case).
-		if (this.toolUse && (this.toolUseCall === null || data.apiCallId === this.toolUseCall))
-			this.finish("toolUse", this.toolUse);
 		if (typeof data.model === "string" && data.model.trim().length > 0) {
 			this.message.responseModel = data.model;
 			this.servedModel = data.model.trim();
 		}
 		if (typeof data.apiCallId === "string") this.message.responseId = data.apiCallId;
+		// The tool-requesting call's own usage closes its step (see the tool-request case).
+		if (this.toolUse && (this.toolUseCall === null || data.apiCallId === this.toolUseCall)) {
+			this.toolUseUsageSeen = true;
+			this.finish("toolUse", this.toolUse);
+		}
 	}
 
 	handle(event: SessionEvent): void {
@@ -541,6 +637,7 @@ class Step implements StepSink {
 				return;
 			case "assistant.message": {
 				if (event.data.parentToolCallId) return;
+				if (typeof event.data.apiCallId === "string") this.callIds.add(event.data.apiCallId);
 				const streamed = this.textIndex === null ? "" : (this.message.content[this.textIndex] as TextContent).text;
 				if (streamed.length === 0 && event.data.content) this.text(event.data.content);
 				const requests = event.data.toolRequests ?? [];
@@ -587,27 +684,18 @@ class Step implements StepSink {
 		if (this.finished) return;
 		this.finished = true;
 		if (this.toolUseTimer) clearTimeout(this.toolUseTimer);
-		this.onDetach?.();
+		this.onDetach?.(this);
 		const settle = this.settle;
 		if ((stop === "stop" || stop === "toolUse") && settle && this.billing.modelCalls > 0) {
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const late = new Promise<null>((resolve) => {
-				timer = setTimeout(() => resolve(null), SETTLE_METRICS_MS);
-			});
-			void Promise.race([settle(), late])
+			void settle(this)
 				.then((settled) => {
-					if (settled) {
-						this.billing.premiumRequests = settled.premiumRequests;
-						if (settled.nanoAiu !== null) this.billing.nanoAiu = settled.nanoAiu;
-					}
+					this.billing.premiumRequests = settled.premiumRequests;
+					this.billing.nanoAiu = settled.nanoAiu;
 				})
 				.catch(() => {
-					// No accounting answer leaves premium requests unknown; the step itself succeeded.
+					// No accounting answer leaves both quantities unknown; the step itself succeeded.
 				})
-				.finally(() => {
-					clearTimeout(timer);
-					this.complete(stop, toolCallIds, errorText);
-				});
+				.finally(() => this.complete(stop, toolCallIds, errorText));
 			return;
 		}
 		this.complete(stop, toolCallIds, errorText);
@@ -618,13 +706,17 @@ class Step implements StepSink {
 		this.closeOpenBlocks();
 		// A step that reached no model call billed nothing and records no seat units.
 		if (this.billing.modelCalls > 0) {
-			// AI credits are a complete total only when every call reported them; the runtime's session total wins.
-			if (this.billing.nanoAiu === null && this.nanoReports === this.usageEvents) this.billing.nanoAiu = this.nanoSum;
+			// AI credits: the step's own reports when every call sent them, else the runtime total's growth.
+			if (!this.usageUncertain && this.nanoReports === this.usageEvents) this.billing.nanoAiu = this.nanoSum;
+			if (this.usageUncertain) this.billing = { premiumRequests: null, nanoAiu: null, modelCalls: this.usageEvents };
 			this.message.copilotBilling = { ...this.billing };
 		}
-		(this.message.usage as { reportedFields?: string[] }).reportedFields = Object.entries(this.fieldReports)
-			.filter(([, reports]) => this.usageEvents > 0 && reports === this.usageEvents)
-			.map(([field]) => field);
+		// A count is reported only when every call of the step sent it and no unplaceable report was mixed in.
+		(this.message.usage as { reportedFields?: string[] }).reportedFields = this.usageUncertain
+			? []
+			: Object.entries(this.fieldReports)
+					.filter(([, reports]) => this.usageEvents > 0 && reports === this.usageEvents)
+					.map(([field]) => field);
 		if (this.billing.modelCalls > 0) {
 			(this.message as { responseModelIdObservation?: unknown }).responseModelIdObservation = this.servedModel
 				? { state: "reported", reportedModelId: this.servedModel }
@@ -713,6 +805,7 @@ async function openConversationHeld(input: {
 	conversation = new Conversation({
 		key: input.key,
 		session,
+		client,
 		systemHash: hash(input.systemPrompt),
 		toolsHash: toolsSignature(input.tools),
 		model: input.model.id,
@@ -744,6 +837,43 @@ function plan(key: string, systemHash: string, core: ReadonlyArray<CoreMessage>,
 	return { conversation: valid ? best : null };
 }
 
+/** The runtime's totals, read once per step; null when it does not answer in time. Never retried. */
+async function readMetrics(
+	conversation: Conversation,
+): Promise<{ seq: number; premium: number | null; nano: number | null } | null> {
+	conversation.metricsSeq += 1;
+	const seq = conversation.metricsSeq;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const late = new Promise<null>((resolve) => {
+		timer = setTimeout(() => resolve(null), SETTLE_METRICS_MS);
+	});
+	try {
+		const metrics = await Promise.race([conversation.session.rpc.usage.getMetrics().catch(() => null), late]);
+		if (metrics === null) return null;
+		const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null);
+		return { seq, premium: number(metrics.totalPremiumRequestCost), nano: number(metrics.totalNanoAiu) };
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/**
+ * A step's share of one cumulative total: the growth since the last boundary, when that boundary is valid and
+ * this step's own usage is complete. The reading becomes the next boundary only when it is the newest one taken;
+ * a quantity the reading omits, a failed reading or a late one leaves its boundary invalid.
+ */
+function stepShare(boundary: MetricsBoundary, reading: number | null, own: boolean, newest: boolean): number | null {
+	if (!newest) return null;
+	if (reading === null) {
+		boundary.valid = false;
+		return null;
+	}
+	const share = boundary.valid && own && reading >= boundary.value ? reading - boundary.value : null;
+	boundary.value = reading;
+	boundary.valid = true;
+	return share;
+}
+
 async function runStep(
 	model: Model<Api>,
 	context: TranscriptContext,
@@ -752,10 +882,15 @@ async function runStep(
 ): Promise<void> {
 	const step = new Step(stream, model);
 	const signal = options?.signal;
+	// Cancellation is observed from the first moment: an abort during any await below ends the step, and every
+	// await is followed by a check, so nothing is sent to Copilot after it.
+	const onAbort = () => step.finish("aborted", []);
 	if (signal?.aborted) {
-		step.finish("aborted", []);
+		onAbort();
 		return;
 	}
+	signal?.addEventListener("abort", onAbort, { once: true });
+	void stream.result().finally(() => signal?.removeEventListener("abort", onAbort));
 	const key = options?.sessionId ?? "default";
 	const systemPrompt = getCurrentSystemPrompt(context.messages);
 	const tools = getCurrentTools(context.messages);
@@ -777,51 +912,44 @@ async function runStep(
 		.slice(lastKept ? core.indexOf(lastKept) + 1 : 0)
 		.filter((message) => fingerprint(message) === null);
 
-	let abortListener: (() => void) | null = null;
+	let bound = false;
 	try {
 		if (!conversation) {
 			evictFor(key);
-			conversation = await openConversation({ key, model, systemPrompt, tools, reasoningEffort });
+			const opened = await openConversation({ key, model, systemPrompt, tools, reasoningEffort });
+			if (step.isFinished) {
+				// Cancelled while the session was being created: it never carries a message.
+				void opened.dispose("The Copilot step was cancelled before its session was used.");
+				return;
+			}
+			installRuntimeGoneHandler();
 			installExitCleanup();
-			conversations.push(conversation);
+			conversations.push(opened);
+			conversation = opened;
 		}
 		const active = conversation;
 		active.busy = true;
 		active.lastUsed = Date.now();
-		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort) {
-			await active.session.setModel(
-				model.id,
-				reasoningEffort !== undefined ? { reasoningEffort: reasoningEffort as ReasoningEffort } : undefined,
-			);
-			active.model = model.id;
-			active.reasoningEffort = reasoningEffort;
-		}
-		const toolsHash = toolsSignature(tools);
-		if (reused && active.toolsHash !== toolsHash) {
-			await active.session.setTools(declareTools(() => active, tools));
-			active.toolsHash = toolsHash;
-		}
-		active.sink = step;
-		step.onDetach = () => {
-			active.sink = null;
+		active.activeStep = step;
+		bound = true;
+		step.onDetach = (finished) => {
+			if (active.activeStep === finished) active.activeStep = null;
+			active.retire(finished);
 		};
-		step.settle = async () => {
-			const metrics = await active.session.rpc.usage.getMetrics();
-			const premium = metrics.totalPremiumRequestCost - active.metricsBaseline.premiumRequests;
-			const nano = typeof metrics.totalNanoAiu === "number" ? metrics.totalNanoAiu - active.metricsBaseline.nanoAiu : null;
-			active.metricsBaseline = {
-				premiumRequests: metrics.totalPremiumRequestCost,
-				nanoAiu: metrics.totalNanoAiu ?? active.metricsBaseline.nanoAiu,
-			};
-			return {
-				premiumRequests: Number.isFinite(premium) && premium >= 0 ? premium : null,
-				nanoAiu: nano !== null && Number.isFinite(nano) && nano >= 0 ? nano : null,
-			};
+		step.settle = async (finished) => {
+			const reading = await readMetrics(active);
+			const newest = reading !== null && reading.seq === active.metricsSeq;
+			const own = finished.usageComplete;
+			const premiumRequests = stepShare(active.boundaries.premiumRequests, reading?.premium ?? null, own, newest);
+			const nanoAiu = stepShare(active.boundaries.nanoAiu, reading?.nano ?? null, own, newest);
+			if (reading === null) {
+				active.boundaries.premiumRequests.valid = false;
+				active.boundaries.nanoAiu.valid = false;
+			}
+			return { premiumRequests, nanoAiu };
 		};
 		step.onFinish = ({ stop, toolCallIds }) => {
-			active.sink = null;
 			active.busy = false;
-			if (abortListener) signal?.removeEventListener("abort", abortListener);
 			if (stop === "toolUse" || stop === "stop") {
 				active.synced = [...prints, `a:${toolCallIds.join(",")}`];
 				active.state = stop === "toolUse" ? "awaiting-tools" : "idle";
@@ -831,10 +959,27 @@ async function runStep(
 				remove(active, "The Copilot step ended without a result; its conversation was closed");
 			}
 		};
-		abortListener = () => {
-			step.finish("aborted", []);
-		};
-		signal?.addEventListener("abort", abortListener, { once: true });
+		if (step.isFinished) {
+			// Aborted between planning and binding: the reused session stays as it was.
+			active.activeStep = null;
+			active.busy = false;
+			return;
+		}
+		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort) {
+			await active.session.setModel(
+				model.id,
+				reasoningEffort !== undefined ? { reasoningEffort: reasoningEffort as ReasoningEffort } : undefined,
+			);
+			if (step.isFinished) return;
+			active.model = model.id;
+			active.reasoningEffort = reasoningEffort;
+		}
+		const toolsHash = toolsSignature(tools);
+		if (reused && active.toolsHash !== toolsHash) {
+			await active.session.setTools(declareTools(() => active, tools));
+			if (step.isFinished) return;
+			active.toolsHash = toolsHash;
+		}
 
 		if (reused && active.state === "awaiting-tools") {
 			const results = fresh.filter(
@@ -893,9 +1038,20 @@ async function runStep(
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		if (conversation && !step.onFinish) remove(conversation);
+		if (conversation && !bound) remove(conversation);
 		step.finish("error", [], message);
 	}
+}
+
+let runtimeGoneHandlerInstalled = false;
+
+/** A lost runtime takes its sessions with it: settle and drop every conversation on that client. */
+function installRuntimeGoneHandler(): void {
+	if (runtimeGoneHandlerInstalled) return;
+	runtimeGoneHandlerInstalled = true;
+	onCopilotRuntimeGone((client, reason) => {
+		for (const conversation of [...conversations]) if (conversation.client === client) remove(conversation, reason);
+	});
 }
 
 function streamCopilot(

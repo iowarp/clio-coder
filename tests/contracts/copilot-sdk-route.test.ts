@@ -1,5 +1,16 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
@@ -14,6 +25,12 @@ import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/d
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
+import {
+	copilotSessionFsConfig,
+	createCopilotSessionFs,
+	removeCopilotSessionRecords,
+	removeCopilotSessionRecordsSync,
+} from "../../src/engine/copilot/session-fs.js";
 import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js";
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
@@ -25,8 +42,10 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
  * trip through a parked handler, a quota refusal, and a step whose tool is never answered.
  */
 const FAKE_SDK = String.raw`
+import { EventEmitter } from "node:events";
 const state = (globalThis.__clioCopilotFake ??= {
-	clients: [], sessions: [], deleted: [], disconnected: [], toolResults: [], rejected: [],
+	clients: [], instances: [], sessions: [], deleted: [], disconnected: [], toolResults: [], rejected: [],
+	omitInternals: false, createGate: null, creating: 0,
 	auth: { isAuthenticated: true, login: "octo", host: "https://github.com" },
 	models: [
 		{ id: "fake-model", name: "Fake Model", capabilities: { supports: { vision: false, reasoningEffort: false }, limits: { max_context_window_tokens: 64000 } }, policy: { state: "enabled", terms: "" } },
@@ -34,7 +53,8 @@ const state = (globalThis.__clioCopilotFake ??= {
 	],
 });
 class FakeSession {
-	constructor(config, index) {
+	constructor(config, index, client) {
+		this.client = client;
 		this.config = config;
 		this.sessionId = config.sessionId ?? "copilot-" + index;
 		this.handlers = new Set();
@@ -43,9 +63,19 @@ class FakeSession {
 		// The runtime's own session accounting, which usage.getMetrics() reads back.
 		this.metrics = { totalPremiumRequestCost: 0, totalNanoAiu: 0 };
 		this.metricsFail = false;
+		this.metricsFailOnce = false;
+		this.metricsDelayOnce = 0;
 		this.rpc = { usage: { getMetrics: async () => {
+			// The answer reflects the totals at the moment the request was made, however late it arrives.
+			const snapshot = { ...this.metrics };
 			if (this.metricsFail) throw new Error("metrics unavailable");
-			return { ...this.metrics, totalUserRequests: 0, totalApiDurationMs: 0, sessionStartTime: "", lastCallInputTokens: 0, lastCallOutputTokens: 0, modelMetrics: {}, codeChanges: {} };
+			if (this.metricsFailOnce) { this.metricsFailOnce = false; throw new Error("metrics unavailable"); }
+			if (this.metricsDelayOnce > 0) {
+				const delay = this.metricsDelayOnce;
+				this.metricsDelayOnce = 0;
+				await new Promise((resolve) => setTimeout(resolve, delay));
+			}
+			return { ...snapshot, totalUserRequests: 0, totalApiDurationMs: 0, sessionStartTime: "", lastCallInputTokens: 0, lastCallOutputTokens: 0, modelMetrics: {}, codeChanges: {} };
 		} } };
 	}
 	usage(data) {
@@ -59,7 +89,24 @@ class FakeSession {
 	async setTools(tools) { this.tools = new Map(tools.map((tool) => [tool.name, tool])); }
 	async abort() { this.aborted = true; }
 	async disconnect() { state.disconnected.push(this.sessionId); }
-	async send(options) { this.prompts.push(options.prompt); setTimeout(() => void this.run(options.prompt), 0); return "m"; }
+	async send(options) {
+		if (this.markedDisconnected) throw new Error("Session disconnected");
+		this.prompts.push(options.prompt);
+		setTimeout(() => void this.run(options.prompt), 0);
+		return "m";
+	}
+	/** As SDK 1.0.26 _markDisconnected(): handlers cleared, no terminal event. */
+	markDisconnected() { this.markedDisconnected = true; this.handlers.clear(); }
+	/** A tool request whose usage arrives only after Clio's tool result, as a late report. */
+	async lateUsageTool(toolCallId, callId) {
+		const name = [...this.tools.keys()][0];
+		this.emit("assistant.message", { messageId: "l1", ...(callId ? { apiCallId: callId } : {}), content: "", toolRequests: [{ toolCallId, name, arguments: {} }] });
+		const result = await this.tools.get(name).handler({}, { toolCallId, sessionId: this.sessionId, toolName: name, arguments: {}, signal: new AbortController().signal });
+		this.usage({ model: "fake-model", ...(callId ? { apiCallId: callId } : {}), inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+		this.usage({ model: "fake-model", ...(callId ? { apiCallId: callId + "-next" } : {}), inputTokens: 30, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
+		this.emit("assistant.message", { messageId: "l2", content: "after " + result.textResultForLlm });
+		this.emit("session.idle", {});
+	}
 	async callTool(toolCallId) {
 		const name = [...this.tools.keys()][0];
 		this.emit("assistant.message", { messageId: "a1", apiCallId: "call-a", content: "", toolRequests: [{ toolCallId, name, arguments: { path: "notes.txt" } }] });
@@ -80,6 +127,20 @@ class FakeSession {
 			return;
 		}
 		if (prompt.includes("park forever")) { await this.callTool("call_parked"); return; }
+		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a"); return; }
+		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null); return; }
+		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
+		if (prompt.includes("op:usage-wait")) {
+			this.usage({ model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 });
+			return;
+		}
+		if (prompt.includes("op:drop")) {
+			this.emit("assistant.message_delta", { messageId: "d1", deltaContent: "partial" });
+			this.client.dropRuntime();
+			return;
+		}
+		if (prompt.includes("op:metrics-fail-once")) this.metricsFailOnce = true;
+		if (prompt.includes("op:slow-metrics")) this.metricsDelayOnce = 1500;
 		if (prompt.includes("use tool")) {
 			const result = await this.callTool("call_1");
 			if (!result) return;
@@ -98,7 +159,7 @@ class FakeSession {
 			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0 });
 		} else {
 			// Omits the cache counts: the uncached input and both cache counts are unknown, not zero.
-			this.usage({ model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1 });
+			this.usage({ model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1, copilotUsage: { totalNanoAiu: 100 } });
 		}
 		this.emit("assistant.message_delta", { messageId: "a1", deltaContent: "hello" });
 		this.emit("assistant.message", { messageId: "a1", content: "hello" });
@@ -112,16 +173,35 @@ export class CopilotClient {
 			throw new Error("CopilotClient was created with mode: 'empty' but neither 'baseDirectory' nor 'sessionFs' was set. Empty mode requires an explicit per-session persistence location; pick one.");
 		this.options = options;
 		state.clients.push(options);
+		state.instances.push(this);
+		this.state = "disconnected";
+		this.sessionsOpen = [];
+		// The private 1.0.26 layout Clio's client watches: the stdio child, its start timer and the state field.
+		if (!state.omitInternals) {
+			const handle = () => Object.assign(new EventEmitter(), { ref() {}, unref() {} });
+			this.cliProcess = Object.assign(handle(), { stdin: handle(), stdout: handle(), stderr: handle() });
+			this.cliStartTimeout = null;
+		}
 	}
-	async start() {}
-	async stop() { return []; }
+	async start() { this.state = "connected"; }
+	async stop() { this.state = "disconnected"; return []; }
+	async forceStop() { this.state = "disconnected"; }
+	/** The runtime child exits: every session is marked disconnected, as the SDK does, and the child emits exit. */
+	dropRuntime() {
+		this.state = "disconnected";
+		for (const session of this.sessionsOpen) session.markDisconnected();
+		this.cliProcess?.emit("exit", 1);
+	}
 	async getAuthStatus() { return state.auth; }
 	async listModels() { return state.models; }
 	async deleteSession(id) { state.deleted.push(id); }
 	async createSession(config) {
 		if (this.options.mode === "empty" && config.availableTools === undefined)
 			throw new Error("CopilotClient is in mode: 'empty' but the session config did not specify 'availableTools'.");
-		const session = new FakeSession(config, state.sessions.length + 1);
+		state.creating += 1;
+		if (state.createGate) await state.createGate;
+		const session = new FakeSession(config, state.sessions.length + 1, this);
+		this.sessionsOpen.push(session);
 		if (this.options.sessionFs) {
 			if (!config.createSessionFsProvider) throw new Error("createSessionFsProvider is required in session config when sessionFs is enabled in client options.");
 			session.fs = config.createSessionFsProvider(session);
@@ -158,6 +238,10 @@ interface FakeState {
 	toolResults: Array<{ textResultForLlm: string; resultType: string }>;
 	rejected: string[];
 	auth: { isAuthenticated: boolean; login?: string; host?: string };
+	instances: unknown[];
+	omitInternals: boolean;
+	createGate: Promise<void> | null;
+	creating: number;
 }
 const fake = (): FakeState => (globalThis as { __clioCopilotFake?: FakeState }).__clioCopilotFake as FakeState;
 
@@ -211,9 +295,31 @@ const readTool = {
 	parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
 };
 
-async function step(context: Context, sessionId = "route-session"): Promise<AssistantMessage> {
-	return engineStreamSimple(model, normalizeContext(context), { sessionId }).result();
+async function step(context: Context, sessionId = "route-session", signal?: AbortSignal): Promise<AssistantMessage> {
+	return engineStreamSimple(model, normalizeContext(context), { sessionId, ...(signal ? { signal } : {}) }).result();
 }
+
+/** Settles with the promise's value, or "pending" when it has not settled within `ms`. */
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const pending = new Promise<"pending">((resolve) => {
+		timer = setTimeout(() => resolve("pending"), ms);
+	});
+	try {
+		return await Promise.race([promise, pending]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+const toolResult = (toolCallId: string, text: string) => ({
+	role: "toolResult" as const,
+	toolCallId,
+	toolName: "read",
+	content: [{ type: "text" as const, text }],
+	isError: false,
+	timestamp: 3,
+});
 
 const user = (text: string) => ({ role: "user" as const, content: text, timestamp: 1 });
 
@@ -466,6 +572,177 @@ test("sessionFs keeps session state in Clio's cache and serves the workspace rea
 		"state",
 	);
 	strictEqual(existsSync(config.sessionStatePath), false, "the state path itself is never written as is");
+});
+
+test("late usage stays with the call that made it and never lands on its successor", async () => {
+	for (const [prompt, key] of [
+		["op:late-usage", "late-session"],
+		["op:late-anon", "anon-session"],
+	] as const) {
+		const context: Context = { tools: [readTool], messages: [user(prompt)] };
+		const first = await step(context, key);
+		strictEqual(first.stopReason, "toolUse");
+		const firstFacts = callSettlementFromMessage(first, "none");
+		strictEqual(firstFacts.usage?.input.kind, "unknown", "the call's usage had not arrived when it settled");
+		strictEqual(firstFacts.billing, undefined);
+		const call = first.content.find((block) => block.type === "toolCall");
+		ok(call && call.type === "toolCall");
+		const second = await step({ ...context, messages: [...context.messages, first, toolResult(call.id, "r")] }, key);
+		strictEqual(second.stopReason, "stop");
+		const facts = callSettlementFromMessage(second, "none");
+		if (prompt === "op:late-usage") {
+			// The late report names its call; only the successor's own report counts.
+			deepStrictEqual(facts.usage?.input, { kind: "measured", value: 30, source: "provider" });
+			deepStrictEqual(facts.usage?.output, { kind: "measured", value: 5, source: "provider" });
+			deepStrictEqual(facts.billing?.modelCalls, { kind: "measured", value: 1, source: "local-count" });
+		} else {
+			// Without call ids the first report cannot be placed: the successor's counts are uncertain, never 90.
+			strictEqual(facts.usage?.input.kind, "unknown");
+			strictEqual(facts.usage?.output.kind, "unknown");
+		}
+		disposeCopilotConversations(key);
+	}
+});
+
+test("a lost runtime or a closed conversation settles the open step, and the client restarts", async () => {
+	const pending = step({ messages: [user("op:hang")] }, "hang-session");
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	disposeCopilotConversations("hang-session");
+	const closed = await within(pending, 500);
+	ok(closed !== "pending", "disposal settles the open step");
+	strictEqual(closed.stopReason, "error");
+	match(closed.errorMessage ?? "", /Clio session ended/);
+
+	const clientsBefore = fake().instances.length;
+	const dropped = await within(step({ messages: [user("op:drop")] }, "drop-session"), 500);
+	ok(dropped !== "pending", "a runtime exit settles the open step");
+	strictEqual(dropped.stopReason, "error");
+	match(dropped.errorMessage ?? "", /runtime exited/);
+	// The next use starts a fresh runtime instead of reusing the disconnected client. This client is built
+	// without the pinned private fields, which must be reported once rather than skipped silently.
+	fake().omitInternals = true;
+	const warnings: Error[] = [];
+	const onWarning = (warning: Error) => warnings.push(warning);
+	process.on("warning", onWarning);
+	try {
+		const answered = await step({ messages: [user("hello")] }, "drop-session");
+		strictEqual(answered.stopReason, "stop");
+		strictEqual(fake().instances.length, clientsBefore + 1);
+		await step({ messages: [user("hello")] }, "drop-session-2");
+		await new Promise((resolve) => setImmediate(resolve));
+		const layout = warnings.filter((warning) => (warning as { code?: string }).code === "CLIO_CODER_COPILOT_SDK_LAYOUT");
+		strictEqual(layout.length, 1);
+		match(layout[0]?.message ?? "", /cliProcess/);
+	} finally {
+		process.off("warning", onWarning);
+		fake().omitInternals = false;
+		disposeCopilotConversations("drop-session");
+		disposeCopilotConversations("drop-session-2");
+	}
+});
+
+test("cancelling while Copilot creates the session sends nothing and disposes the new session", async () => {
+	let open: () => void = () => {};
+	fake().createGate = new Promise<void>((resolve) => {
+		open = resolve;
+	});
+	const creatingBefore = fake().creating;
+	const controller = new AbortController();
+	const pending = step({ messages: [user("hello")] }, "cancel-session", controller.signal);
+	while (fake().creating === creatingBefore) await new Promise((resolve) => setTimeout(resolve, 5));
+	controller.abort();
+	const settled = await within(pending, 500);
+	ok(settled !== "pending", "the abort settles the step while creation is still pending");
+	strictEqual(settled.stopReason, "aborted");
+	fake().createGate = null;
+	open();
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	const created = fake().sessions.at(-1);
+	ok(created);
+	deepStrictEqual(created.prompts, [], "nothing is sent after the cancel");
+	ok(fake().disconnected.includes(created.sessionId), "the session created after the cancel is disposed");
+});
+
+test("billing boundaries are per quantity, and a gap is attributed to no call", async () => {
+	const key = "billing-session";
+	const messages: Context["messages"] = [];
+	const turn = async (text: string) => {
+		messages.push(user(text));
+		const answer = await step({ messages: [...messages] }, key);
+		messages.push(answer);
+		return callSettlementFromMessage(answer, "none").billing;
+	};
+	const measured = (value: number) => ({ kind: "measured", value, source: "provider" });
+	deepStrictEqual((await turn("a"))?.premiumRequests, measured(1));
+	const failed = await turn("op:metrics-fail-once b");
+	strictEqual(failed?.premiumRequests.kind, "unknown");
+	deepStrictEqual(failed?.nanoAiu, measured(100), "the step's own complete credit reports stand");
+	strictEqual((await turn("c"))?.premiumRequests.kind, "unknown", "the boundary is reacquired, not spanned");
+	deepStrictEqual((await turn("d"))?.premiumRequests, measured(1));
+	strictEqual((await turn("op:slow-metrics e"))?.premiumRequests.kind, "unknown");
+	strictEqual((await turn("f"))?.premiumRequests.kind, "unknown");
+	await new Promise((resolve) => setTimeout(resolve, 600));
+	// The late answer for e arrived after f's reading; it must not have moved f's boundary.
+	deepStrictEqual((await turn("g"))?.premiumRequests, measured(1));
+	disposeCopilotConversations(key);
+});
+
+test("an interrupted call keeps the positive counts its provider reported", async () => {
+	const controller = new AbortController();
+	const pending = step({ messages: [user("op:usage-wait")] }, "interrupt-session", controller.signal);
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	controller.abort();
+	const interrupted = await pending;
+	strictEqual(interrupted.stopReason, "aborted");
+	const facts = callSettlementFromMessage(interrupted, "none");
+	deepStrictEqual(facts.usage?.input, { kind: "measured", value: 100, source: "provider" });
+	deepStrictEqual(facts.usage?.output, { kind: "measured", value: 10, source: "provider" });
+	strictEqual(facts.usage?.cacheRead.kind, "unknown", "a reported zero on an interrupted call is not a measurement");
+	strictEqual(facts.usage?.cacheWrite.kind, "unknown", "an omitted count stays unknown");
+	strictEqual(facts.interruptedEstimate, undefined, "measured counts are not replaced by an estimate");
+	disposeCopilotConversations("interrupt-session");
+});
+
+test("session state containment is physical: no symlink leads a write or a cleanup out", async () => {
+	const victim = join(env.dir, "victim");
+	mkdirSync(join(victim, "kept-session"), { recursive: true });
+	writeFileSync(join(victim, "kept-session", "precious.txt"), "precious");
+	writeFileSync(join(victim, "secret.txt"), "secret");
+	const stateBase = copilotSessionFsConfig().sessionStatePath;
+	const sessions = join(resolveClioDirs().cache, "copilot-sdk", "sessions");
+	mkdirSync(sessions, { recursive: true });
+	const parked = `${sessions}.parked`;
+	renameSync(sessions, parked);
+	try {
+		// A planted link where the sessions directory should be.
+		symlinkSync(victim, sessions);
+		const fs = createCopilotSessionFs("linked-session");
+		await rejects(fs.appendFile(join(stateBase, "events.jsonl"), "{}"), /symlinked/);
+		await rejects(fs.mkdir(stateBase, true), /symlinked/);
+		strictEqual(existsSync(join(victim, "linked-session")), false);
+		await removeCopilotSessionRecords("kept-session");
+		removeCopilotSessionRecordsSync("kept-session");
+		strictEqual(readFileSync(join(victim, "kept-session", "precious.txt"), "utf8"), "precious");
+		unlinkSync(sessions);
+
+		// A planted link as a state entry inside a real session directory.
+		mkdirSync(join(sessions, "entry-session"), { recursive: true });
+		symlinkSync(join(victim, "secret.txt"), join(sessions, "entry-session", "events.jsonl"));
+		const entryFs = createCopilotSessionFs("entry-session");
+		await rejects(entryFs.appendFile(join(stateBase, "events.jsonl"), "{}"), /symlinked/);
+		await rejects(entryFs.writeFile(join(stateBase, "events.jsonl"), "{}"), /symlinked/);
+		await rejects(entryFs.readFile(join(stateBase, "events.jsonl")), /symlinked/);
+		await entryFs.rm(join(stateBase, "events.jsonl"), false, false);
+		strictEqual(readFileSync(join(victim, "secret.txt"), "utf8"), "secret");
+		// A link as the session directory itself: cleanup removes the link, never what it points at.
+		symlinkSync(join(victim, "kept-session"), join(sessions, "alias-session"));
+		await removeCopilotSessionRecords("alias-session");
+		strictEqual(existsSync(join(sessions, "alias-session")), false);
+		strictEqual(readFileSync(join(victim, "kept-session", "precious.txt"), "utf8"), "precious");
+	} finally {
+		rmSync(sessions, { recursive: true, force: true });
+		renameSync(parked, sessions);
+	}
 });
 
 test("a copilot-sdk target admits one request at a time unless its capacity says more", () => {
