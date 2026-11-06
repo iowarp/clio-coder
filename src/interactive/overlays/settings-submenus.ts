@@ -5,6 +5,7 @@ import {
 	isKeyRelease,
 	matchesKey,
 	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
@@ -95,6 +96,18 @@ export class ChoiceList implements Component, RowBudgetedBody {
 		const total = (blocks: string[][]): number => blocks.reduce((sum, block) => sum + block.length, 0);
 		let blocks = lay((this.options.descriptions ?? "all") === "all");
 		if (total(blocks) > budget) blocks = lay(false);
+		// Still too tall: the focused description keeps one row and an ellipsis, so every choice stays on screen.
+		// At 40x15 a three-row description windowed the scope card down to its first choice.
+		const focusedBlock = blocks[this.selectedIndex];
+		if (total(blocks) > budget && focusedBlock !== undefined && focusedBlock.length > 2) {
+			const second = (focusedBlock[1] ?? "").replace(/\s+$/u, "");
+			const marked =
+				visibleWidth(second) + 2 <= width ? `${second} ${GLYPH.ellipsis}` : truncateToWidth(second, width, GLYPH.ellipsis);
+			const clipped = blocks.map((block, index) => (index === this.selectedIndex ? [block[0] ?? "", marked] : block));
+			if (total(clipped) <= budget) blocks = clipped;
+			// Labels alone, when that is what keeps every choice in view: a choice off screen is worse than a missing gloss.
+			else if (this.items.length <= budget) blocks = clipped.map((block) => block.slice(0, 1));
+		}
 		const lines = blocks.flat();
 		if (lines.length <= budget) return lines;
 		// Window the flat lines so the focused block is whole and near the middle.
@@ -151,13 +164,35 @@ export class ChoiceList implements Component, RowBudgetedBody {
 export type SubmenuTitle = string | ((width: number) => string);
 
 /**
+ * What the settings center reads from an open page to route Esc and draw the
+ * rail. A single page is a SubmenuWrapper; a guided flow of several pages (the
+ * SSH node setup) implements the same three members, so its steps back out one
+ * at a time under the shared Esc rule instead of dropping to the list.
+ */
+export interface SubmenuSurface {
+	/** Where Esc lands when it is not the list behind this page; null means back to the list. */
+	readonly escape: { verb: string; short?: string; back: () => void } | null;
+	/** A text editor, whose Esc keeps what was typed for the next visit. */
+	readonly editsText: boolean;
+	/** The keys this page acts on, other than Esc, for the rail. */
+	railKeys(): ReadonlyArray<HintEntry>;
+}
+
+export function isSubmenuSurface(component: unknown): component is Component & SubmenuSurface {
+	if (component instanceof SubmenuWrapper) return true;
+	if (typeof component !== "object" || component === null) return false;
+	const candidate = component as Partial<SubmenuSurface>;
+	return "escape" in candidate && "editsText" in candidate && typeof candidate.railKeys === "function";
+}
+
+/**
  * One detail page: a title row, the dim note that explains the decision, the
  * page's own body, and the reason a submission was refused when there is one.
  * The page's keys are not drawn here: they ride the dock rail beside Esc, so
  * the commit key and the way out are read from one place at every width, and
  * the two rows a legend took go to the choices on a short terminal.
  */
-export class SubmenuWrapper implements Component, RowBudgetedBody {
+export class SubmenuWrapper implements Component, RowBudgetedBody, SubmenuSurface {
 	/**
 	 * Why the last submission was refused, or null while nothing is wrong. The
 	 * editor sets it instead of closing, so the operator corrects the value with

@@ -129,6 +129,21 @@ export function mutationFacts(tool: string, args: Record<string, unknown> | unde
 }
 
 /** `write · 482 B · sha256 3f9a1c22ee04b7d1`, the collapsed card's whole mutation line. */
+/**
+ * A parked change's target as the card and the transcript row show it. A
+ * file change's size placeholder (`content=<string 18 bytes>`) is
+ * serialization, and the mutation row under it already names the size and
+ * digest, so only the path stays.
+ */
+export function targetWithoutPayloadSize(
+	target: string | undefined,
+	mutation: MutationFacts | undefined,
+): string | undefined {
+	if (target === undefined || mutation === undefined) return target;
+	const kept = target.split(" · ").filter((part) => !/^[\w.-]+=<\w+ \d+ bytes?>$/u.test(part.trim()));
+	return kept.length > 0 ? kept.join(" · ") : target;
+}
+
 export function mutationFactsLine(facts: MutationFacts): string {
 	const shape =
 		facts.kind === "write"

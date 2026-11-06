@@ -479,7 +479,7 @@ describe("contracts/configure-onboarding", () => {
 			for (const expected of [
 				"Welcome to Clio Coder",
 				"Where does your model come from?",
-				"↑/↓ move",
+				"↑↓ move",
 				"reachable, 2 models",
 				"target openai-compat saved",
 				"chat runs on openai-compat",
@@ -532,7 +532,7 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 
 			const screen = plainText(result.transcript());
-			ok(screen.includes("space toggle"), `the list must say how to tick a row:\n${screen}`);
+			ok(screen.includes("Space toggle"), `the list must say how to tick a row:\n${screen}`);
 			ok(screen.includes("OpenCode"), `the detected agent is missing:\n${screen}`);
 			ok(!/\[y\/N\]/u.test(screen), `a per-agent yes/no question survived:\n${screen}`);
 			// The paragraph each proposal used to carry said the same two facts every

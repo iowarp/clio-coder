@@ -1214,7 +1214,7 @@ test("a worker card with a parent-owned window offers the hold, then says it is 
 			.join("\n");
 	match(card({ remainingMs: 119_000, held: false }), /No answer in 1:59 denies this call.*Any key holds the card\./u);
 	const held = card({ remainingMs: 822_000, held: true });
-	match(held, /Timer held\. No answer in 13:42 denies this call/u);
+	match(held, /Extended for you\. No answer in 13:42 denies this call/u);
 	doesNotMatch(held, /Any key holds/u);
 	match(card(null), /No key pauses this\./u, "a window inside the worker makes no promise a key can keep");
 	const owned = card(null, { ...view, origin: { kind: "worker", agentId: "coder", runId: "run", endsWithTurn: true } });
@@ -2105,6 +2105,22 @@ test("every surface spells a key one way: modifiers title-cased in Ctrl, Alt, Sh
 	strictEqual(fitHintEntries([{ key: "alt+x", verb: "stop" }], 80), "[Alt+X] stop");
 });
 
+test("a council card names the task in its pinned headline and does not repeat it in the plan section", async () => {
+	const { planFacts, planHeadline, readDispatchPlan } = await import("../../src/interactive/dispatch-plan-summary.js");
+	const plan = readDispatchPlan(
+		[
+			"dispatch plan: topology=council tasks=2",
+			'  1. role=fast agent=reviewer task_preview="review the mean function"',
+			"     council label=fast",
+			'  2. role=deep agent=reviewer task_preview="review the mean function"',
+			"     council label=deep",
+		].join("\n"),
+	);
+	ok(plan !== null);
+	strictEqual(planHeadline(plan), "Council of 2 (fast, deep) answers: review the mean function");
+	ok(!planFacts(plan).some((fact) => fact.label === "task"));
+});
+
 test("a plan step's worker card names its step, whether the step is announced before or after its run starts", () => {
 	const stream = createWorkerStream({ readResult: () => null });
 	const start = (runId: string) =>
@@ -2129,4 +2145,50 @@ test("a plan step's worker card names its step, whether the step is announced be
 	strictEqual(second?.planStep, "check-readme");
 	const header = renderWorkerEntryLines(second as never, 100, {}).map(stripTerminalSequences)[0] ?? "";
 	match(header, /coder · check-readme/u);
+});
+
+test("a summarizing compaction measures its written summary against the output cap and says when nothing is measurable", async () => {
+	const { formatContextActivityRailLines } = await import("../../src/interactive/context-activity.js");
+	const base = {
+		kind: "compaction" as const,
+		phase: "summarize" as const,
+		status: "running" as const,
+		startedAtMs: 0,
+		phaseStartedAtMs: 0,
+		updatedAtMs: 1000,
+		completedAtMs: null,
+		detail: null,
+		stages: ["compact", "summarize", "state"] as const,
+	};
+	const reading = formatContextActivityRailLines(
+		{ ...base, message: "reading 13.1K tokens of history", current: null, total: null, unit: "tokens" },
+		40,
+		1000,
+	).map(stripTerminalSequences);
+	match(reading[1] ?? "", / no output yet$/u, "a narrow rail keeps the measure on the bar row");
+	const capped = formatContextActivityRailLines(
+		{ ...base, message: "summarizing 13.1K tokens of history", current: 2000, total: 8000, unit: "tokens" },
+		80,
+		1000,
+	).map(stripTerminalSequences);
+	match(capped[1] ?? "", / 2K of 8K tokens$/u);
+	strictEqual((capped[1] ?? "").split("█").length - 1, 16, "a quarter of the cap fills a quarter of the bar");
+	const open = formatContextActivityRailLines(
+		{ ...base, message: "summarizing 13.1K tokens of history", current: 1, total: null, unit: "tokens" },
+		80,
+		1000,
+	).map(stripTerminalSequences);
+	match(open[1] ?? "", / 1 token, no limit$/u);
+	doesNotMatch(open[1] ?? "", /█/u);
+});
+
+test("a tool preview keeps whole lines and counts the lines it holds back, never wrapped rows", async () => {
+	const { previewLines } = await import("../../src/interactive/renderers/preview.js");
+	const lines = [["a1", "a2"], ["b1"], ["c1", "c2", "c3"], ["d1"]];
+	const head = previewLines(lines, 4, 40).map(stripTerminalSequences);
+	deepStrictEqual(head.slice(0, 3), ["a1", "a2", "b1"], "the third line would be cut between its rows, so it waits");
+	match(head[3] ?? "", /… 2 more lines · \/view/u);
+	const tail = previewLines(lines, 3, 40, true).map(stripTerminalSequences);
+	match(tail[0] ?? "", /… 3 earlier lines · \/view/u);
+	deepStrictEqual(tail.slice(1), ["d1"]);
 });

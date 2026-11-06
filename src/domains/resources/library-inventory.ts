@@ -114,7 +114,8 @@ export interface LibraryPackageRecord {
 	provides?: LibraryProvidedResource[];
 	/** Which reader produced the row: a catalog, a scoped index, or install state alone. */
 	catalogOrigin: LibraryPackageEntry["origin"];
-	copies: Array<{ scope: PluginScope; state: LibraryCopyState; update?: LibraryCopyUpdate }>;
+	/** The copies of this package, each with the version on disk, which an update leaves behind the catalog's. */
+	copies: Array<{ scope: PluginScope; state: LibraryCopyState; version?: string; update?: LibraryCopyUpdate }>;
 	refusal?: string;
 }
 
@@ -984,6 +985,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 				copies: own.map((copy) => ({
 					scope: copy.scope,
 					state: copy.state,
+					...(copy.version ? { version: copy.version } : {}),
 					...(copy.update ? { update: copy.update } : {}),
 				})),
 				...(refusal ? { refusal } : {}),

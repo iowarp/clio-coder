@@ -665,6 +665,8 @@ export interface CommandBlockOptions {
 	tone?: Tone;
 	/** Text role; near-white input text by default so the bytes read first. */
 	role?: SemanticRole;
+	/** Words rather than bytes: wrap at spaces and drop the space a row ends on, the way a sentence wraps. */
+	prose?: boolean;
 }
 
 /**
@@ -746,7 +748,9 @@ export function commandBlock(
 	const role = options.role ?? "inputText";
 	const rows = text.includes("\u001b")
 		? wrap(text, safe - 2)
-		: foldPlain(text, safe - 2).map((row) => theme.fg(role, row));
+		: options.prose === true
+			? wrap(text, safe - 2).map((row) => theme.fg(role, row))
+			: foldPlain(text, safe - 2).map((row) => theme.fg(role, row));
 	return rows.map((row) => `${gutter} ${row}`);
 }
 

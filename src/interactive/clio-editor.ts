@@ -17,7 +17,7 @@ import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { steerDraftToken } from "./editor-steer.js";
 import { type ContextOccupancyFacts, contextRailHint } from "./footer/context-rail.js";
 import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
-import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
+import { type PermissionInspectionHint, type PermissionTermsHint, permissionHintEntries } from "./permission-hint.js";
 import type { SlashCompletionItem } from "./slash-autocomplete.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
 import {
@@ -135,6 +135,7 @@ export interface EditorChrome {
 	 * inspect key on exactly the cards that have one (issue #254).
 	 */
 	getPermissionInspection?: () => PermissionInspectionHint;
+	getPermissionTerms?: () => PermissionTermsHint;
 	/**
 	 * Where a consumed prompt is between the editor and the stream. The editor
 	 * is cleared before admission, so without this the composer went straight
@@ -205,8 +206,13 @@ function confirmRailHint(
 	width: number,
 	hasDraft: boolean,
 	inspection: PermissionInspectionHint,
+	terms: PermissionTermsHint = "closed",
 ): string {
-	return theme.fg("decisionKey", fitHintEntries(permissionHintEntries(hasDraft, inspection), Math.max(1, width - 3)));
+	// The terms state rides along so an open terms view reads `[Esc] hide terms` here too, never `deny`.
+	return theme.fg(
+		"decisionKey",
+		fitHintEntries(permissionHintEntries(hasDraft, inspection, terms), Math.max(1, width - 3)),
+	);
 }
 
 // Stable meaning across providers: ordinary effort occupies one through four
@@ -804,6 +810,7 @@ export class ClioEditor extends Editor {
 						Math.max(1, room - (scroll ? visibleWidth(scroll) + 3 : 0)) + 3,
 						text.length > 0,
 						this.chrome.getPermissionInspection?.() ?? "none",
+						this.chrome.getPermissionTerms?.() ?? "closed",
 					)
 				: steer
 					? fitHintEntries(
@@ -818,7 +825,16 @@ export class ClioEditor extends Editor {
 							// The steer's keys take the approval's stretch: the composer's clear left cost them the send key at 40 columns.
 							Math.max(1, this.approvalLabelRoom(width) - (scroll ? visibleWidth(scroll) + 3 : 0)),
 						)
-					: "";
+					: this.isShowingAutocomplete()
+						? // An open list owns Tab and Esc; a bare rail left the way out of it unnamed.
+							fitHintEntries(
+								[
+									{ key: "Tab", verb: "complete", critical: true },
+									{ key: "Esc", verb: "close list, keep text", short: "close list" },
+								],
+								Math.max(1, this.approvalLabelRoom(width) - (scroll ? visibleWidth(scroll) + 3 : 0)),
+							)
+						: "";
 		const right = [scroll ? theme.fg("positionCount", scroll) : "", theme.base("keyboardHint", hint)]
 			.filter(Boolean)
 			.join(theme.fg("separator", " · "));
@@ -827,7 +843,7 @@ export class ClioEditor extends Editor {
 			theme,
 			rail,
 			right,
-			steer && mode !== "CONFIRM" ? this.approvalLabelRoom(width) : undefined,
+			(steer || this.isShowingAutocomplete()) && mode !== "CONFIRM" ? this.approvalLabelRoom(width) : undefined,
 		);
 		return this.renderedBottomRail;
 	}

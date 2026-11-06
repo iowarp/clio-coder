@@ -558,9 +558,14 @@ function packageDetail(
 	];
 	return {
 		head: [
-			// With an update pending the version shown is the catalog's, and it says so.
+			// An installed copy's own version leads, so the title never names a version that is not on disk;
+			// with an update pending the catalog's version follows it as the one available.
 			titleRow(theme, safe(record.name), width, {
-				meta: record.version ? `v${safe(record.version)}${here?.update ? " in the catalog" : ""}` : kindText,
+				meta: here?.version
+					? `v${safe(here.version)} installed${here.update && record.version ? `, v${safe(record.version)} available` : ""}`
+					: record.version
+						? `v${safe(record.version)}`
+						: kindText,
 			}),
 			...chipRows(theme, status, width),
 			...chipRows(theme, actionKeyChips(theme, actions), width),
@@ -1002,7 +1007,8 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 						]),
 						here ? undefined : () => chip(theme, "not installed", "muted"),
 						here ? undefined : () => chip(theme, `${view.scope} scope`, "muted"),
-						record.version ? `v${record.version}` : undefined,
+						// The version on disk when there is a copy here; the update chip names the catalog's.
+						here?.version ? `v${here.version}` : record.version ? `v${record.version}` : undefined,
 						libraryOriginShort(record.origin),
 						hints.length > 0
 							? `${hints.length} ${view.category === "plugin" ? "component" : view.category} hints`

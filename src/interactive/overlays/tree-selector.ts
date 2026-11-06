@@ -13,7 +13,13 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import { buildHint, centeredWindow, clioError, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	centeredWindow,
+	clioError,
+	fitHintEntries,
+	type RowBudgetedBody,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import { type ClioTheme, clioTheme, emptyState, GLYPH, positionRow, selectionRow } from "../theme/index.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
@@ -387,24 +393,35 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		return lines;
 	}
 
-	getHint(): string {
-		return this.footerText();
+	getHint(innerWidth = Number.POSITIVE_INFINITY): string {
+		return this.footerText(innerWidth);
 	}
 
-	private footerText(): string {
+	/** Fitted to the rail, with Enter and Esc kept: at 40 columns a cut rail kept a toggle and lost Enter. */
+	private footerText(innerWidth: number): string {
+		const room = Number.isFinite(innerWidth) ? innerWidth - 3 : Number.POSITIVE_INFINITY;
 		if (this.submode === "edit-label") {
-			return buildHint([{ key: "Enter", verb: "commit label" }], "back, keeps draft");
+			return fitHintEntries(
+				[
+					{ key: "Enter", verb: "commit label", short: "commit", critical: true },
+					{ key: "Esc", verb: "back, keeps draft", short: "back" },
+				],
+				room,
+			);
 		}
 		// Each toggle names its current setting in words, not a field:value code.
-		return buildHint([
-			{ key: "↑↓", verb: "move" },
-			{ key: "e", verb: "label" },
-			{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
-			{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
-			{ key: "Shift+T", verb: `times: ${this.showTimestamps ? "on" : "off"}` },
-			// A narrowing rail drops from the left, so the action the view exists for goes last.
-			{ key: "Enter", verb: "continue from here" },
-		]);
+		return fitHintEntries(
+			[
+				{ key: "Enter", verb: "continue from here", short: "continue", critical: true },
+				{ key: "↑↓", verb: "move" },
+				{ key: "e", verb: "label" },
+				{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
+				{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
+				{ key: "Shift+T", verb: `times: ${this.showTimestamps ? "on" : "off"}` },
+				{ key: "Esc", verb: "close" },
+			],
+			room,
+		);
 	}
 
 	invalidate(): void {}
@@ -543,6 +560,6 @@ export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHan
 		width: TREE_OVERLAY_WIDTH,
 		markerId: "tree",
 		title: "Session Tree",
-		footerHint: () => view.getHint(),
+		footerHint: (innerWidth: number) => view.getHint(innerWidth),
 	});
 }

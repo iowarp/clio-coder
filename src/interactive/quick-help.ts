@@ -1,7 +1,7 @@
 import { CLIO_APP_KEYBINDING_IDS } from "../domains/config/keybindings.js";
 import type { Component, Keybinding, OverlayHandle, TUI } from "../engine/tui.js";
 import { formatKeyLabel } from "./keybinding-manager.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
+import { fitRow, showClioOverlayFrame } from "./overlay-frame.js";
 import { clioTheme, fitUnits, GLYPH, padAnsi } from "./theme/index.js";
 
 /**
@@ -32,7 +32,7 @@ const COMPOSER_ROWS: ReadonlyArray<QuickHelpRow> = [
 	{ key: "?", verb: "this card" },
 	{ key: "←", verb: "workers" },
 	{ key: GLYPH.down, verb: "tasks" },
-	{ key: "Esc", verb: "cancel the run" },
+	{ key: "Esc", verb: "stops a run" },
 	{ key: "Ctrl+C ×2", verb: "exit" },
 ];
 
@@ -82,10 +82,21 @@ export interface QuickHelp {
 export function createQuickHelp(tui: TUI, bindings: QuickHelpKeys): QuickHelp {
 	let handle: OverlayHandle | null = null;
 	let cached: { width: number; lines: string[] } | null = null;
-	const component: Component = {
+	let bodyRows = 0;
+	const component: Component & { setBodyRows(rows: number): void } = {
+		setBodyRows(rows: number) {
+			bodyRows = Math.max(0, Math.floor(rows));
+		},
 		render(width) {
 			if (cached?.width !== width) cached = { width, lines: quickHelpRows(width, bindings) };
-			return cached.lines;
+			const lines = cached.lines;
+			if (bodyRows <= 1 || lines.length <= bodyRows) return lines;
+			// Any key closes this card, so rows it cannot show are named with where they live, not offered as a scroll.
+			const hidden = lines.length - (bodyRows - 1);
+			return [
+				...lines.slice(0, bodyRows - 1),
+				fitRow(clioTheme().fg("annotation", `${GLYPH.ellipsis} ${hidden} more in /help`), width),
+			];
 		},
 		invalidate() {
 			cached = null;

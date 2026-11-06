@@ -268,6 +268,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,
 		isAwaitingApproval: () => editorChrome.isAwaitingApproval?.() ?? false,
 		getPermissionInspection: () => editorChrome.getPermissionInspection?.() ?? "none",
+		getPermissionTerms: () => editorChrome.getPermissionTerms?.() ?? "closed",
 		getTurnPreparation: () => editorChrome.getTurnPreparation?.() ?? "idle",
 		getPreparationDetail: () => editorChrome.getPreparationDetail?.() ?? null,
 		getCompactionLabel: (room) => editorChrome.getCompactionLabel?.(room) ?? null,

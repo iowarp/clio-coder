@@ -29,7 +29,7 @@ export async function runBrowserConfigure(
 		clean(text)
 			.replaceAll("press Escape", "choose Back")
 			.replaceAll(
-				"Escape goes back a step, and from the first step leaves without saving.",
+				"Esc goes back a step, and from the first step leaves without saving.",
 				"Back returns to the previous step.",
 			);
 	const headings = (heading: string | readonly string[] | undefined) =>
