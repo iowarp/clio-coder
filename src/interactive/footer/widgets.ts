@@ -558,8 +558,14 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: Ra
 	const ranked = [...rest, ...(subject !== undefined && subject.name.length > 0 ? [named] : [])].sort(
 		(a, b) => b.keep - a.keep,
 	);
-	const chosen = new Map<RailFact, string>([[head, head.text]]);
-	let used = visibleWidth(head.text);
+	// The head keeps its long words only when the way out and the name still fit beside them: `waiting for a response`
+	// used to cost the rail its subject at 60 columns, where `Judge-model is waiting` said more.
+	const owedByAll = ranked
+		.filter((fact) => fact.keep >= RAIL_SUBJECT_KEEP)
+		.reduce((sum, fact) => sum + cost(fact, fact.short ?? fact.text), 0);
+	const headText = head.short !== undefined && visibleWidth(head.text) + owedByAll > room ? head.short : head.text;
+	const chosen = new Map<RailFact, string>([[head, headText]]);
+	let used = visibleWidth(headText);
 	for (const [index, fact] of ranked.entries()) {
 		const owed = ranked
 			.slice(index + 1)
@@ -1066,8 +1072,10 @@ export function composerPhasePresentation(
 	};
 	const waitLabel = (head: string, tight: string): string => {
 		const from = waitFrom();
+		// A mid room keeps the verb: `Judge-model waiting` dropped the word that made the strip a sentence.
+		const mid = head.startsWith("is waiting") && room >= 12 ? "is waiting" : tight;
 		return fit([
-			{ text: room >= 40 ? head : tight, keep: 9 },
+			{ text: room >= 40 ? head : mid, ...(room >= 40 && head !== mid ? { short: mid } : {}), keep: 9 },
 			{ text: elapsedFrom(from), keep: 8 },
 			...modelWaitFacts(status, now, from, server),
 		]);
