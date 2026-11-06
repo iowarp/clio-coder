@@ -1276,7 +1276,7 @@ function namesRuleCode(code: string, text: string): boolean {
 interface EnforcementNames {
 	/** Scripts that run unasked: cited only in backticks. */
 	scripts: ReadonlySet<string>;
-	/** Single-word failure codes (`lint`): cited only in backticks. */
+	/** Single-word failure codes (`lint`): cited in backticks, or named bare before "check" ("the prompts check"). */
 	codes: ReadonlySet<string>;
 	/** Codes with a hyphen or digit (`case-portable-paths`, `rule12`) and check functions, which prose names bare. */
 	named: ReadonlyArray<string>;
@@ -1327,6 +1327,11 @@ function namedEnforcement(rule: string, names: EnforcementNames): string[] {
 		const script = /^(?:pnpm|npm|yarn|bun)(?: run)? ([\w:.-]+)$/.exec(token)?.[1] ?? token;
 		if (names.scripts.has(script)) found.add(`script:${script}`);
 		if (names.codes.has(token)) found.add(`code:${token.toLowerCase()}`);
+	}
+	const lower = rule.toLowerCase();
+	for (const code of names.codes) {
+		const exact = code.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		if (new RegExp(`(?<![\\w\`.:-])${exact}\\s+checks?\\b`).test(lower)) found.add(`code:${code.toLowerCase()}`);
 	}
 	for (const name of names.named) if (namesRuleCode(name, rule)) found.add(`code:${checkCode(name)}`);
 	return [...found];

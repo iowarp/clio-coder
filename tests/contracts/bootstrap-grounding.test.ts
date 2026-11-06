@@ -212,6 +212,7 @@ function writeCarryFixture(): string[] {
 			'fail("case-portable-paths", "paths differ only by case and collide");',
 			'fail("retired-html", "docs/html was retired; write Markdown pages");',
 			'fail("gitignored-literal", "a joined literal names a gitignored path");',
+			'fail("corpus", "a docs page is missing from the docs corpus");',
 			"",
 		].join("\n"),
 	);
@@ -315,6 +316,7 @@ it("carries a section title the rewrite dropped with the blocks a running check 
 			"",
 			"- Write new pages as Markdown under `docs/`; the retired-html check in `scripts/check.js` refuses an HTML tree.",
 			"- Keep sentences short in `docs/guide.md`.",
+			"- Every page under `docs/` is reachable from `docs/guide.md`; the corpus check in `scripts/check.js` fails otherwise.",
 			"- Every anchor in `docs/guide.md` resolves; the stale-anchor check in `scripts/check.js` fails on a dead one.",
 			"",
 		].join("\n"),
@@ -340,6 +342,7 @@ it("carries a section title the rewrite dropped with the blocks a running check 
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0] ?? "";
 	ok(docs.includes("Write new pages as Markdown under `docs/`"), handbook);
+	ok(docs.includes("the corpus check in `scripts/check.js` fails otherwise"), handbook);
 	strictEqual(docs.includes("Keep sentences short"), false, handbook);
 	strictEqual(docs.includes("stale-anchor"), false, handbook);
 	const titles = [...handbook.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
