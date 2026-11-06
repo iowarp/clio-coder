@@ -415,16 +415,16 @@ entries:
       online launch to build its environment before it runs offline."
     version: 0.1.0
     sourceUrl: plugins/hpc
-    sha256: 1546d769b02e4e2a8d5e38f13f4fdc2a452e6785e3347f69b5c849869d39c19e
+    sha256: 5928c9771b31af135097dd408f54e95980849e337926b5c67788f814f6225950
     requires:
       - skill:slurm-jobs
     provides:
       - kind: skill
         name: hpc-chronolog
-        description: "Uses ChronoLog 4.0 as durable, time-ordered memory for HPC runs:
-          connects Clio to a ChronoLog instance through chronolog-mcp, records
-          run events under stable operation ids, and reads them back with an
-          explicit completeness verdict. Not for deploying Chrono"
+        description: "Uses ChronoLog as durable, time-ordered memory for HPC runs
+          through its MCP server: chrono-mcp from a released ChronoLog 3.x tree,
+          or chronolog-mcp from an unreleased ChronoLog 4.0 development build.
+          Records run events and reads them back, quoting what the"
       - kind: skill
         name: hpc-darshan
         description: "Characterizes an application's I/O from a Darshan log: runs
