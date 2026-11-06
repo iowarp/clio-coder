@@ -595,6 +595,14 @@ export interface DispatchContract {
 	 */
 	routeBreakers?(): ReadonlyArray<RouteBreakerView>;
 
+	/**
+	 * Fold retained route history in the background, shortly after the call, so
+	 * a later first dispatch pays only for what is still cold. Only a long-lived
+	 * surface (the terminal, ACP) asks: a one-shot process would spend the fold's
+	 * CPU while its own turn runs and exits before any dispatch could reuse it.
+	 */
+	warmRouteHistory?(): void;
+
 	/** Local cleanup and event-drain allowance; accepted durable writes follow settlement. */
 	drainAllowanceMs?(): number;
 

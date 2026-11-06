@@ -2379,6 +2379,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const acpMode = options.acp !== undefined;
 	const interactive = !options.headless && !acpMode && process.env.CLIO_CODER_INTERACTIVE === "1";
+	if (interactive || acpMode) dispatch?.warmRouteHistory?.();
 	if (!interactive && !options.headless && !acpMode) {
 		bootStdout(buildBanner());
 		if (process.env.CLIO_CODER_TIMING === "1") bootStdout(`${timer.report()}\n`);
