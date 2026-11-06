@@ -736,16 +736,20 @@ export class ListOverlayView implements Component {
 		return `${theme.fg("menuOption", fitted)}  ${theme.fg("menuDescription", cells.text)}`;
 	}
 
-	/** Whether the width cuts the lead or the text of any two-column row. */
+	/** Whether the width cuts the lead or the text of enough two-column rows to give the focused one its own line. */
 	private anyRowCut(width: number, items: ReadonlyArray<ListOverlayItem>, leadWidth: number): boolean {
 		const room = width - 2;
+		let rows = 0;
+		let cut = 0;
 		for (const item of items) {
 			const cells = item.cells;
 			if (!cells) continue;
+			rows += 1;
 			const lead = cells.narrowLead !== undefined && visibleWidth(cells.lead) > leadWidth ? cells.narrowLead : cells.lead;
-			if (visibleWidth(lead) > leadWidth || leadWidth + 2 + visibleWidth(cells.text) > room) return true;
+			if (visibleWidth(lead) > leadWidth || leadWidth + 2 + visibleWidth(cells.text) > room) cut += 1;
 		}
-		return false;
+		// A width that cuts one row in a hundred keeps its rows for the list; the detail key reads that one.
+		return cut > 0 && cut * 5 >= rows;
 	}
 
 	/**
