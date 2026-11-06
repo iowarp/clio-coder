@@ -17,8 +17,8 @@
 		{
 			"name": "arxiv-literature",
 			"source": "./library/skills/research/arxiv-literature",
-			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
-			"version": "0.5.3",
+			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
+			"version": "0.6.0",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
@@ -153,6 +153,26 @@
 			}
 		},
 		{
+			"name": "life-science",
+			"source": "./library/plugins/life-science",
+			"description": "Life-science pack: skills that query the RCSB Protein Data Bank, UniProtKB and PubChem over their public, key-free REST APIs with web_fetch, and stamp each answer with the source's entry revision or release. Every lookup needs network; offline the skills say the source is unreachable.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
+			"name": "literature",
+			"source": "./library/plugins/literature",
+			"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
 			"name": "map-codebase",
 			"source": "./library/skills/planning/map-codebase",
 			"description": "Interactive codebase maps from verified repository structure, symbols and imports, rendered natively as standalone HTML.",
@@ -212,7 +232,7 @@
 		{
 			"name": "science-data",
 			"source": "./library/plugins/science-data",
-			"description": "Science data pack: a skill that reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Reads run and file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
+			"description": "Science data pack: a skill that reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Read tools run without asking; file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
 			"version": "0.1.0",
 			"license": "Apache-2.0",
 			"author": {

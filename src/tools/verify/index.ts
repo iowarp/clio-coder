@@ -82,17 +82,27 @@ async function runResolvedVerify(
 			return listChecks(typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined);
 		case "frontend":
 			return runFrontendCheck(args, options);
-		case "catalog":
-			return runProjectCheck(resolution.check, options);
+		case "catalog": {
+			// The declared kind rides on the result as a typed field, so telemetry records it without reading the report.
+			const result = await runProjectCheck(resolution.check, options);
+			return { ...result, details: { ...result.details, checkKind: resolution.check.kind } };
+		}
 		case "package": {
 			const result = await runScriptCheck(resolution.check.id, args, options);
 			return {
 				...result,
-				details: { ...result.details, check: resolution.check.id, source: { ...resolution.check.source } },
+				details: {
+					...result.details,
+					check: resolution.check.id,
+					source: { ...resolution.check.source },
+					checkKind: "command",
+				},
 			};
 		}
-		case "toolchain":
-			return runToolchainCheck(resolution.check, resolution.argv, args, options);
+		case "toolchain": {
+			const result = await runToolchainCheck(resolution.check, resolution.argv, args, options);
+			return { ...result, details: { ...result.details, checkKind: "command" } };
+		}
 		case "unavailable":
 			return unavailableCheck(resolution.check);
 		case "unresolved":

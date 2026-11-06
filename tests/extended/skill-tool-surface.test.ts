@@ -71,6 +71,21 @@ it("keeps Architect's admitted artifact available under sprint-plan without wide
 	strictEqual(agentSkillToolPolicy([]), undefined);
 });
 
+it("lets a narrowed skill call the MCP capabilities its allowed-tools names", () => {
+	const catalog = loadSkills({
+		cwd: process.cwd(),
+		disableDiscovery: true,
+		explicitSkillPaths: [new URL("../../library/skills/research/arxiv-literature", import.meta.url).pathname],
+	});
+	const skill = catalog.items.find((entry) => entry.name === "arxiv-literature");
+	ok(skill);
+	const policy = agentSkillToolPolicy(["arxiv-literature"]);
+	ok(policy);
+	policy.loadedSkillPolicies.set(skill.name, skill);
+	strictEqual(evaluateSkillToolSurface(policy, "mcp_cite-nexus__get-citation"), null);
+	ok(evaluateSkillToolSurface(policy, "mcp_cite-nexus__search-papers"));
+});
+
 it("keeps yolo skill allow lists advisory while honoring explicit denials", () => {
 	const policy: PendingSkillToolPolicy = {
 		allowedSkillNames: ["research"],

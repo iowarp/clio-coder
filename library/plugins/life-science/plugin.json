@@ -1,0 +1,12 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "life-science",
+	"version": "0.1.0",
+	"description": "Life-science pack: skills that query the RCSB Protein Data Bank, UniProtKB and PubChem over their public, key-free REST APIs with web_fetch, and stamp each answer with the source's entry revision or release. Every lookup needs network; offline the skills say the source is unreachable.",
+	"license": "Apache-2.0",
+	"author": {
+		"name": "IOWarp"
+	},
+	"repository": "https://github.com/iowarp/clio-coder",
+	"keywords": ["life-science", "protein-data-bank", "uniprot", "pubchem", "bioinformatics", "cheminformatics"]
+}

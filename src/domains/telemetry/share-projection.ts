@@ -359,8 +359,10 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	},
 	"health.sampled": keep("windowMs", "loopLag", "rssBytes", "writer"),
 	"tool.settled": {
-		...keep("outcome", "durationMs", "parkedMs", "resultBytes", "images", "terminate", "blocked"),
+		...keep("outcome", "durationMs", "parkedMs", "resultBytes", "images", "terminate", "blocked", "fileExt", "checkKind"),
 		tool: "tool",
+		skill: "name",
+		capabilities: "tool",
 	},
 	// A rule and the policy source it came from are the operator's own names.
 	"tool.decided": {

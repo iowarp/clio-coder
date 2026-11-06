@@ -81,10 +81,12 @@ Usage:
   clio-coder fleet nodes|run|status|view|code-steps|verify|drain|resume  run playbooks on the fleet, status, code steps, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
+  clio-coder claims [show <id>]   list the project's recorded reproduce and numeric-compare claims
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
+  clio-coder telemetry insights [--project [<dir>]]  per-project research task categories and autonomy, a local heuristic
   clio-coder telemetry consent|share|import|prune|verify  manage research content consent; share or import telemetry archives; apply retention; verify a sealed scope or archive
   clio-coder systemone status|use|off|check  System One decisions: choose and check an engine (experimental)
   clio-coder extensions           install, list, enable, disable, or remove extension packages
@@ -316,6 +318,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["components", async (subArgs) => (await import("./components.js")).runComponentsCommand(subArgs)],
 	["evidence", async (subArgs) => (await import("./evidence.js")).runEvidenceCommand(subArgs)],
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
+	["claims", async (subArgs) => (await import("./claims.js")).runClaimsCommand(subArgs)],
 	["semantic", async (subArgs) => (await import("./semantic.js")).runSemanticCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
 	["telemetry", async (subArgs) => (await import("./telemetry.js")).runTelemetryCommand(subArgs)],
