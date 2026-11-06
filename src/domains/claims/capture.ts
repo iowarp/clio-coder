@@ -95,6 +95,7 @@ function numericConditions(
 	report: NumericCompareReport,
 	argv: ReadonlyArray<string>,
 	tree: { head: string; fingerprint: string } | undefined,
+	checkout?: { commit: string; trackedTreeClean: boolean },
 ): NumericClaimConditions {
 	const reference = digestRef(project, report.reference);
 	// Failing keys first, so the cap never drops the reason a claim disagrees.
@@ -109,7 +110,8 @@ function numericConditions(
 		...(reference !== undefined ? { reference } : {}),
 		...(report.actual !== undefined ? { actual: { ...report.actual } } : {}),
 		argv: [...argv],
-		commit: tree?.head ?? null,
+		commit: tree?.head ?? checkout?.commit ?? null,
+		...(tree === undefined && checkout !== undefined ? { trackedTreeClean: checkout.trackedTreeClean } : {}),
 		...(tree !== undefined ? { treeFingerprint: tree.fingerprint } : {}),
 		keys: kept.map((key) => ({ key: key.key, passed: key.passed, failed: [...key.failed] })),
 		keysOmitted: report.keys.length - kept.length,
@@ -153,7 +155,10 @@ export function claimText(check: string, conditions: ClaimConditions, passed: bo
 	const head = passed
 		? `numeric-compare check '${check}': ${total} key${total === 1 ? "" : "s"} agreed with ${reference} within the declared tolerance (${conditions.rule})`
 		: `numeric-compare check '${check}': ${list(failed)} did not agree with ${reference} within the declared tolerance (${conditions.rule})`;
-	const commit = conditions.commit === null ? "commit not recorded" : `at commit ${short(conditions.commit)}`;
+	const commit =
+		conditions.commit === null
+			? "commit not recorded"
+			: `at commit ${short(conditions.commit)}${conditions.trackedTreeClean === false ? " with uncommitted changes to tracked files" : ""}`;
 	return `${head}, ${commit}.`;
 }
 
@@ -238,7 +243,7 @@ export function claimFromVerifyResult(input: {
 	const conditions =
 		report.kind === "reproduce"
 			? reproduceConditions(input.project, report)
-			: numericConditions(input.project, report, declaredCommand, undefined);
+			: numericConditions(input.project, report, declaredCommand, undefined, checkoutOf(details.checkout));
 	return buildClaim({
 		project: input.project,
 		at: input.at,
@@ -248,6 +253,12 @@ export function claimFromVerifyResult(input: {
 		report,
 		source: input.source,
 	});
+}
+
+function checkoutOf(value: unknown): { commit: string; trackedTreeClean: boolean } | undefined {
+	return isRecord(value) && typeof value.commit === "string" && typeof value.trackedTreeClean === "boolean"
+		? { commit: value.commit, trackedTreeClean: value.trackedTreeClean }
+		: undefined;
 }
 
 /** One host verification check as its sealed receipt carries it. */

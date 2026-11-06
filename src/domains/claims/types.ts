@@ -62,10 +62,12 @@ export interface NumericClaimConditions {
 	actual?: { sha256: string; bytes: number };
 	argv: string[];
 	/**
-	 * HEAD of the checkout the check judged, from host verification's sealed tree. Null when the channel recorded no
-	 * tree: a main-thread numeric-compare result names no commit, and the claim must not invent one.
+	 * HEAD of the checkout the check judged: the verify result's checkout state on the main thread, host verification's
+	 * sealed tree for a worker run. Null outside a repository or when the channel recorded neither; never invented.
 	 */
 	commit: string | null;
+	/** Whether tracked files matched `commit` when the check ran; absent where the channel recorded a fingerprint instead. */
+	trackedTreeClean?: boolean;
 	/** Host verification's digest of HEAD plus the working-tree content the check saw. */
 	treeFingerprint?: string;
 	keys: Array<{ key: string; passed: boolean; failed: NumericFailureReason[] }>;
