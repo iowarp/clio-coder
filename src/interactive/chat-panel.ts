@@ -1341,10 +1341,21 @@ function renderTurnUsageLine(
 	const moved = usage.movedTo ? `moved to ${modelNickname(usage.movedTo)}` : null;
 	if (receipt === "compact") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
+		// Calls Clio never sent are part of the count, so they are said inside it: `2 calls · 1 call never sent` read as
+		// three calls.
+		const unsent = spend?.neverSent ?? 0;
 		const calls =
 			spend?.calls != null && (spend.calls > 1 || retries !== null || moved !== null)
-				? renderCalls(String(spend.calls), "call")
+				? `${renderCalls(String(spend.calls), "call")}${unsent > 0 && spend.calls > unsent ? `, ${unsent} never sent` : ""}`
 				: null;
+		const coverageNote =
+			unsent > 0 &&
+			calls !== null &&
+			spend?.calls != null &&
+			spend.calls > unsent &&
+			spend.coverageNote?.endsWith("never sent") === true
+				? null
+				: (spend?.coverageNote ?? null);
 		// A call moved away from has no amounts of its own. The row states the answering call beside the move, and
 		// Detailed keeps the sum.
 		const stated = moved !== null ? spend?.answer : spend;
@@ -1356,7 +1367,7 @@ function renderTurnUsageLine(
 		];
 		for (const fact of [
 			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
-			spend?.coverageNote ?? null,
+			coverageNote,
 			stated?.tokens ?? null,
 			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
 			stated?.cached != null ? `cached ${stated.cached}` : null,
