@@ -28,7 +28,9 @@ test("production panel bounds a provider failure while View and export retain re
 	const panel = createChatPanel();
 	panel.applyEvent(event);
 	const rendered = plain(panel.render(80));
-	assert.match(rendered, /\[error\].*HTTP 503/);
+	// The row's ✗ marks the failure; the store's `[error]` marker stays in /view.
+	assert.match(rendered, /✗ HTTP 503/);
+	assert.doesNotMatch(rendered, /\[error\]/);
 	assert.match(rendered, /Model unavailable/);
 	assert.ok(rendered.length < 1500);
 	assert.doesNotMatch(rendered, /fixture-secret-value|END-EVIDENCE/);
