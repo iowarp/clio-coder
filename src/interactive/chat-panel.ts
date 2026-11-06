@@ -140,7 +140,7 @@ const CHAT_MARKDOWN_OPTIONS = {
 	transform: (source: string, width: number) => {
 		const text = holdInlineMath(source, CODE_SPACE);
 		// Both transforms need a lex of the whole answer, so each runs only when the text can use it.
-		if (!mayNeedTableFit(text, width)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
+		if (!mayNeedTableFit(text)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
 		const tokens = tableParser.lexer(text);
 		const fitted = fitMarkdownTables(tokens, width);
 		if (!/mermaid/iu.test(fitted.text)) return fitted.text;
@@ -830,16 +830,34 @@ function tableFitsWidth(columns: number, width: number): boolean {
 	return width >= columns * 15 + 1;
 }
 
+/**
+ * Whether the grid still reads at this width: every field keeps 12 columns, and the cells' natural widths come
+ * to under 1.75 times the room the borders leave. Past that the long fields wrap into tall columns of two or three
+ * words a row (an 80-column summary drew a six-row cell per record), and records read better.
+ */
+function tableGridReads(table: Tokens.Table, width: number): boolean {
+	const columns = table.header.length;
+	if (!tableFitsWidth(columns, width)) return false;
+	const room = width - (columns * 3 + 1);
+	let natural = 0;
+	for (let index = 0; index < columns; index += 1) {
+		let widest = visibleWidth(table.header[index]?.text ?? "");
+		for (const row of table.rows) widest = Math.max(widest, visibleWidth(row[index]?.text ?? ""));
+		natural += widest;
+	}
+	return natural <= room * 1.75;
+}
+
 /** Whether a lex could find a table to rewrite. A false positive costs one lex; a false negative would keep a table. */
-function mayNeedTableFit(text: string, width: number): boolean {
+function mayNeedTableFit(text: string): boolean {
 	if (!text.includes("|")) return false;
 	// A lex also removes a repeated link definition, which closes up the blank rows around it, so keep it for those.
 	const definition = text.indexOf("]:");
 	if (definition >= 0 && text.includes("]:", definition + 2)) return true;
 	for (const match of text.matchAll(TABLE_DELIMITER_ROW)) {
 		const row = match[1] ?? "";
-		if (!/[:|]/u.test(row)) continue;
-		if (!tableFitsWidth(row.replace(/^\||\| *$/gu, "").split("|").length, width)) return true;
+		// Any table may need records once its cells are measured, so the width alone no longer rules one out.
+		if (/[:|]/u.test(row)) return true;
 	}
 	return false;
 }
@@ -850,7 +868,7 @@ function fitMarkdownTables(tokens: readonly Tokens.Generic[], width: number): { 
 		.map((token) => {
 			if (token.type !== "table") return token.raw;
 			const table = token as Tokens.Table;
-			if (tableFitsWidth(table.header.length, width) || table.rows.length === 0) {
+			if (tableGridReads(table, width) || table.rows.length === 0) {
 				return token.raw;
 			}
 			rewritten = true;
