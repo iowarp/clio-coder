@@ -339,16 +339,12 @@ const RUNTIME_STEP: Step = {
 		const previous = usable.findIndex((entry) => entry.runtimeId === answers.runtime?.id);
 		const featured = usable.findIndex((entry) => entry.featured);
 		const result = await wizard.select<string>({
-			heading: [
-				"",
-				chalk.bold("Which provider or app do you use?"),
-				chalk.dim("Each description ends with the runtime name Clio saves for the target."),
-			],
+			heading: ["", chalk.bold("Which provider or app do you use?")],
 			choices: usable.map((entry) => ({
 				value: entry.runtimeId,
 				label: entry.label,
 				// A summary that only repeats the label says nothing the row does not already say.
-				hint: `${entry.summary === entry.label ? "" : `${entry.summary} · `}runtime ${entry.runtimeId}`,
+				hint: `${entry.summary === entry.label ? "" : `${entry.summary} · `}saved as runtime ${entry.runtimeId}`,
 			})),
 			initialIndex: previous >= 0 ? previous : featured >= 0 ? featured : 0,
 			searchable: usable.length > 8,

@@ -506,6 +506,8 @@ export interface InspectorContext {
 	origin: SettingValueOrigin | null;
 	pinned: boolean;
 	pinnable: boolean;
+	/** The rows own the keys, so a row's own key (p) acts; while the filter is typed into, p is a letter. */
+	rowKeysLive: boolean;
 	/** The row's home section, shown only from Recent & Pinned. */
 	homeLabel?: string;
 }
@@ -546,8 +548,9 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 	const meaning = item.valueHelp?.[item.currentValue];
 	if (!item.readOnly && meaning) facts.push(chip(theme, meaning, "neutral"));
 	if (context.homeLabel !== undefined) facts.push(chip(theme, `in ${context.homeLabel}`, "muted"));
-	if (context.pinnable)
-		facts.push(chip(theme, context.pinned ? `${GLYPH.favorite} pinned · p unpins` : "p pins", "muted"));
+	if (context.pinnable && context.pinned)
+		facts.push(chip(theme, context.rowKeysLive ? `${GLYPH.favorite} pinned · p unpins` : `${GLYPH.favorite} pinned`, "muted"));
+	else if (context.pinnable && context.rowKeysLive) facts.push(chip(theme, "p pins", "muted"));
 	return facts;
 }
 
@@ -656,16 +659,29 @@ export function renderDetailLane(theme: ClioTheme, context: InspectorContext, wi
 	return pinNote(body, note, safe, height);
 }
 
+/**
+ * When a change to this row lands, in words. The keys are the rail's: a pane
+ * that also said `Enter edits` told the truth only while the rows held the
+ * keyboard, and was wrong the moment the filter took it.
+ */
 function scopeNote(item: SettingsCenterItem, context: InspectorContext): string {
-	const pin = context.pinnable ? (context.pinned ? ` · ${GLYPH.favorite} pinned, p unpins` : " · p pins") : "";
+	const pin = !context.pinnable
+		? ""
+		: context.pinned
+			? context.rowKeysLive
+				? ` · ${GLYPH.favorite} pinned, p unpins`
+				: ` · ${GLYPH.favorite} pinned`
+			: context.rowKeysLive
+				? " · p pins"
+				: "";
 	if (item.id.startsWith("maintenance.")) return `Run in a terminal: ${item.currentValue}`;
 	if (item.id === "targets.add-cta")
-		return "Enter opens the guided setup in the dock; Save writes global connection settings";
+		return "Opens the guided setup for a new connection; its last step saves it to your global settings";
 	if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
 		return `${item.affordance} · nothing changes until an action is confirmed`;
 	if (item.readOnly) return `Read-only here · ${item.affordance}`;
-	if (item.scope === "restart") return `Enter edits · saved to settings.yaml, applied after a restart${pin}`;
-	return `Enter edits · nothing changes until you pick a scope${pin}`;
+	if (item.scope === "restart") return `Saved to settings.yaml and applied after a restart${pin}`;
+	return `Nothing changes until you choose where it applies${pin}`;
 }
 
 /** Keep the note on the last rows; cut the body above it with a marker when the column is short. */

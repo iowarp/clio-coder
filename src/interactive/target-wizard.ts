@@ -391,10 +391,14 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			const selected = index === pending.selected;
 			const label = stripTerminalSequences(choice.label);
 			const hint = choice.hint ? stripTerminalSequences(choice.hint) : "";
+			// An unselected row carries its hint only whole, and only when the hint adds
+			// to the label: `LiteLLM gateway · LiteLLM gateway with…` said the name twice
+			// and cut the rest. The selected row's hint is wrapped beneath it in full.
+			const inline = `${selectionMark(false)} ${selectionLabel(false, label)}${theme.fg("annotation", ` · ${hint}`)}`;
+			const showHint =
+				hint.length > 0 && !hint.toLowerCase().startsWith(label.toLowerCase()) && visibleWidth(inline) <= width;
 			out.push(
-				selected || !hint
-					? `${selectionMark(selected)} ${selectionLabel(selected, label)}`
-					: `${selectionMark(false)} ${selectionLabel(false, label)}${theme.fg("annotation", ` · ${hint}`)}`,
+				selected || !showHint ? `${selectionMark(selected)} ${selectionLabel(selected, label)}` : inline,
 			);
 			if (selected) for (const row of hintRows) out.push(`    ${theme.fg("annotation", row)}`);
 		}

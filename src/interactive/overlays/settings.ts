@@ -3059,10 +3059,12 @@ function sectionCount(section: SettingsCenterSection, whole: SettingsCenterSecti
 	if (section.id === "targets") {
 		const count = whole.items.filter((item) => item.targetConsole !== undefined).length;
 		const noun = count === 1 ? "connection" : "connections";
-		// An action row such as Add a target is not a connection, so a filter that
-		// finds only the action reads `0 of 2 connections` above it.
-		const shown = section.items.filter((item) => item.targetConsole !== undefined).length;
-		return filtered ? `${shown} of ${count} ${noun}` : `${count} ${noun}`;
+		// An action row such as Add a target is not a connection. A filter that
+		// found only the action read `0 of 2 connections` beside `1 match`, so a
+		// filtered lane counts rows, the same unit the match count uses.
+		if (!filtered) return `${count} ${noun}`;
+		const rows = whole.items.filter((item) => item.presentationKind !== "group-header").length;
+		return `${matches} of ${rows} ${rows === 1 ? "row" : "rows"}`;
 	}
 	const count = whole.items.filter((item) => item.presentationKind !== "group-header").length;
 	const noun = count === 1 ? "setting" : "settings";
@@ -3817,6 +3819,7 @@ export class SettingsCenter implements Component {
 			origin,
 			pinned: item !== null && this.isPinned(item),
 			pinnable: isShortcutRow(item),
+			rowKeysLive: this.keyOwner() === "rows",
 			...(home ? { homeLabel: home.label } : {}),
 		};
 	}
