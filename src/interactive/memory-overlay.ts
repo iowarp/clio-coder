@@ -213,7 +213,9 @@ export class MemoryOverlayView implements Component {
 		const status = this.sync();
 		const theme = clioTheme();
 		// Without a repository identity only lessons kept for every project apply, and the header says so.
-		const scope = this.currentRepository ? "this repository" : "repository not identified";
+		const scope = this.currentRepository
+			? "lessons for this project"
+			: "no project folder here, so only lessons kept for every project apply";
 		// The facts an operator checks before reading a lesson: where it applies,
 		// whether the background step runs, what it holds and what it is doing.
 		const working = status.stepInFlight ? "step running" : (status.guardian ?? null);
