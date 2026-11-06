@@ -5810,6 +5810,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			nextTurn,
 			options.terminalLease.abortSignal,
 		);
+		// A lease closed during priming stops boot here; the shutdown that closed it owns the exit.
+		options.terminalLease.abortSignal.throwIfAborted();
 	}
 	await startInteractive({
 		jobs: jobHost.operations,

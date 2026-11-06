@@ -54,18 +54,28 @@ test("primed worker history is read a loop turn per run and taken once by the ma
 		await settledRun(project, "e");
 		strictEqual(readDurableWorkerRuns(project).length, 5);
 
-		// A stop during priming leaves nothing primed.
+		// A stop during priming reads no further run and leaves nothing primed.
 		const stop = new AbortController();
+		let stoppedTurns = 0;
 		await primeDurableWorkerRuns(
 			project,
 			undefined,
 			async () => {
+				stoppedTurns += 1;
 				stop.abort();
 			},
 			stop.signal,
 		);
+		strictEqual(stoppedTurns, 1);
 		await settledRun(project, "f");
 		strictEqual(readDurableWorkerRuns(project).length, 6);
+
+		// An already stopped boot primes nothing even when there is nothing to read.
+		const stopped = new AbortController();
+		stopped.abort();
+		await primeDurableWorkerRuns(other, undefined, async () => {}, stopped.signal);
+		await settledRun(other, "g");
+		strictEqual(readDurableWorkerRuns(other).length, 1);
 	} finally {
 		home.restore();
 	}
