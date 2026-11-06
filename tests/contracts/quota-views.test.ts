@@ -134,7 +134,7 @@ test("worker quota joins only known local credential owners and does not claim a
 		ttft: null,
 	};
 	const text = plain(renderWorkerUsage([row], [], quotaRows([account]), 100));
-	match(text, /↑ 1,000 {2}↓ 234/);
+	match(text, /in 1,000 {2}out 234/);
 	match(text, /not measured/);
 	match(text, /Shared antigravity/);
 	doesNotMatch(text, /\$0.00|quota saved/);

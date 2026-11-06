@@ -61,7 +61,13 @@ import {
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { USAGE_NOT_MEASURED, usageFigure, usageLineCoverage, usageSaysNothing } from "./usage-words.js";
+import {
+	USAGE_NOT_MEASURED,
+	usageFigure,
+	usageLineCoverage,
+	usageLineFigure,
+	usageSaysNothing,
+} from "./usage-words.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
@@ -887,6 +893,8 @@ function dispatchCardBody(
 	// Figures keep their lower-bound mark and the line states its coverage once, as its last unit, rather than a
 	// `(N calls unknown)` after every figure. A figure nothing measured reads `not measured`, never `?`.
 	const figure = (display: string): string => compactQuantity(display) ?? USAGE_NOT_MEASURED;
+	const lineFigure = (key: "prompt" | "output" | "total", display: string): string =>
+		row.usage.kind === "ready" ? usageLineFigure(row.usage[key]) : figure(display);
 	const tokenDisplays = [usage.prompt, usage.output, usage.total];
 	const nothingMeasured = tokenDisplays.every((display) => compactQuantity(display) === null);
 	const coverage =
@@ -899,12 +907,13 @@ function dispatchCardBody(
 	const tokenUnits = nothingMeasured
 		? [theme.fg("body", row.status === "running" || row.status === "enqueued" ? "not measured yet" : USAGE_NOT_MEASURED)]
 		: [
-				theme.fg("body", `${GLYPH.up} ${figure(usage.prompt)}`),
+				// Label-first words, as the turn receipt says them: `in 321 · out 12 · total 333`.
+				theme.fg("body", `in ${lineFigure("prompt", usage.prompt)}`),
 				theme.fg(
 					"body",
-					`${GLYPH.down} ${figure(usage.output)}${rate !== null ? (options.expanded === true ? ` (${rate}/s wall avg)` : ` ${rate}/s`) : ""}`,
+					`out ${lineFigure("output", usage.output)}${rate !== null ? (options.expanded === true ? ` (${rate}/s wall avg)` : ` ${rate}/s`) : ""}`,
 				),
-				theme.fg("body", `total ${figure(usage.total)}`),
+				theme.fg("body", `total ${lineFigure("total", usage.total)}`),
 			];
 
 	// The model id is user data and can outrun the card; mark the cut with `…`
@@ -1216,15 +1225,15 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	const upFigure = compactQuantity(usage.prompt);
-	const downFigure = compactQuantity(usage.output);
+	const upFigure = row.usage.kind === "ready" ? usageLineFigure(row.usage.prompt) : compactQuantity(usage.prompt);
+	const downFigure = row.usage.kind === "ready" ? usageLineFigure(row.usage.output) : compactQuantity(usage.output);
 	// Nothing counted yet reads as that, once, rather than as two question marks.
 	const tokens =
 		upFigure === null && downFigure === null
 			? theme.fg("body", isTerminalStatus(row.status) ? "tokens not measured" : "tokens not measured yet")
-			: `${theme.fg("body", `${GLYPH.up} ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
+			: `${theme.fg("body", `in ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
 					"body",
-					`${GLYPH.down} ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
+					`out ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
 				)}`;
 	const costUnit =
 		cost === "—" ? "" : `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
@@ -1695,10 +1704,10 @@ export function runTableRows(
 			cells.push(runActivityCell(theme, row, now));
 			return cells;
 		}
-		const figure = (glyph: string, text: string): TableCell =>
+		const figure = (label: string, text: string): TableCell =>
 			pending
 				? { text: USAGE_SHORT[text] ?? text, tone: "muted" }
-				: { text: glyph ? `${glyph} ${tableFigure(text)}` : text };
+				: { text: label ? `${label} ${tableFigure(text)}` : text };
 		const cells: Array<string | TableCell> = [];
 		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 		cells.push(
@@ -1724,7 +1733,7 @@ export function runTableRows(
 					tone: "muted",
 				}
 			: figure("", usage.cost);
-		cells.push(elapsed, figure(GLYPH.up, usage.prompt), figure(GLYPH.down, usage.output), costCell);
+		cells.push(elapsed, figure("in", usage.prompt), figure("out", usage.output), costCell);
 		if (anyAccount)
 			cells.push(
 				weekly === null
