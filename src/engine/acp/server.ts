@@ -7101,19 +7101,23 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		telemetry.turnStarted(active.turn);
 		const unsubscribe = attachTurnObserver(session.id, active);
 		try {
-			// The GUI requires message chunks to belong to a prompt, so startup
-			// notices wait for the first one. They do not count toward admission:
-			// a refused prompt must still fail as prompt_not_admitted.
+			// Startup notices are operator advice about the project, not the
+			// answer, so they cross as session_info_update metadata the way the
+			// memory and eggs state does: a client that ignores `_meta` shows a
+			// reply carrying only the model's text. They wait for the first prompt
+			// so the client has bound the session id, and they do not count toward
+			// admission: a refused prompt must still fail as prompt_not_admitted.
 			if (!startupHintsShown) {
 				startupHintsShown = true;
 				for (const hint of options.startupHints?.() ?? []) {
 					options.transport.notify("session/update", {
 						sessionId: session.id,
 						update: {
-							sessionUpdate: "agent_message_chunk",
-							content: textContent(`${safeStoredString(hint.text, ACP_MAX_CHUNK_BYTES - 2)}\n`),
+							sessionUpdate: "session_info_update",
+							_meta: {
+								[ACP_NOTICE_META_KEY]: { level: hint.level, text: safeStoredString(hint.text, ACP_MAX_CHUNK_BYTES) },
+							},
 						},
-						_meta: { ...ORCHESTRATOR_UPDATE_META, [ACP_NOTICE_META_KEY]: { level: hint.level } },
 					});
 				}
 			}

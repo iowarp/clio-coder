@@ -858,6 +858,16 @@ export class Supervisor {
 	private failTurn(entry: Entry, problem: AppProblem) {
 		this.finish(entry, "failed", null, problem.problem, new Date().toISOString());
 	}
+	/** Keeps the task's newest 32 distinct notice texts. */
+	private notice(entry: Entry, value: string) {
+		const text = boundedText(value, 16384).trim();
+		const notices = this.snapshot(entry.id).telemetry?.notices ?? [];
+		if (text && !notices.includes(text))
+			this.publish({
+				type: "session.telemetry",
+				payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { notices: [...notices, text].slice(-32) } },
+			});
+	}
 	private update(entry: Entry, value: unknown) {
 		const params = record(value),
 			update = record(params.update),
@@ -883,6 +893,10 @@ export class Supervisor {
 				payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { autonomy } },
 			});
 		}
+		// Startup notices arrive as session metadata, not reply text (`src/engine/acp/server.ts`).
+		const sessionNotice = record(record(update._meta)[ACP_NOTICE_META_KEY]);
+		if (update.sessionUpdate === "session_info_update" && typeof sessionNotice.text === "string")
+			this.notice(entry, sessionNotice.text);
 		const telemetry = sessionUpdateTelemetry(update);
 		if (telemetry)
 			this.publish({
@@ -937,13 +951,7 @@ export class Supervisor {
 			if (content.type !== "text" || typeof content.text !== "string")
 				throw new AppProblem("upstream_acp", "ACP message is not a text chunk.");
 			if (kind === "agent_message_chunk" && meta[ACP_NOTICE_META_KEY] !== undefined) {
-				const text = boundedText(content.text, 16384).trim();
-				const notices = this.snapshot(entry.id).telemetry?.notices ?? [];
-				if (text && !notices.includes(text))
-					this.publish({
-						type: "session.telemetry",
-						payload: { resource: entry.id, revision: common.revision, telemetry: { notices: [...notices, text].slice(-32) } },
-					});
+				this.notice(entry, content.text);
 				// A ceiling stop also stands as state until the turn moves again, so the
 				// banner can offer the raise while the request is parked (#424).
 				if (meta[ACP_BUDGET_META_KEY] !== undefined) {
