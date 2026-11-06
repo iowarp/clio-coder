@@ -46,6 +46,8 @@ export interface OpenModelScopeOverlayDeps {
 	switchCost?: string | null;
 	/** Whether the model is loaded where it would run, as the picker showed it, so the choice is made knowing the wait. */
 	residency?: string | null;
+	/** The route in use now, named the way the composer names it, so the card reads as a change from one to the other. */
+	current?: string | null;
 }
 
 /** The swap as the operator typed it, for the dialog title. */
@@ -60,22 +62,22 @@ function buildModelScopeItems(): ChoiceItem[] {
 		{
 			value: "session",
 			label: "Apply this session",
-			description: "route this session only; settings.yaml is untouched",
+			description: "Live now and not saved; the next session starts from the saved model",
 		},
 		{
 			value: "project",
 			label: "Apply and save for this project",
-			description: "save in .clio-coder/settings.local.yaml",
+			description: "Saved in this project's .clio-coder/settings.local.yaml, live now",
 		},
 		{
 			value: "global",
 			label: "Apply and save globally",
-			description: "also the orchestrator route the next launch starts on",
+			description: "Saved in your user settings.yaml for every project, live now",
 		},
 		{
 			value: "cancel",
 			label: "Cancel",
-			description: "keep the current model",
+			description: "Nothing changes; Clio keeps the current model",
 		},
 	];
 }
@@ -102,7 +104,9 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 			const room = Math.max(1, width);
 			const theme = clioTheme();
 			const text = deps.turnEffect?.();
+			const current = deps.current?.trim();
 			return [
+				...(current ? [...wrapTextWithAnsi(theme.fg("annotation", `Now on ${current}`), room), ""] : []),
 				...(text ? [...wrapTextWithAnsi(theme.fg("accent", text), room), ""] : []),
 				...(deps.residency ? [...wrapTextWithAnsi(theme.fg("annotation", deps.residency), room), ""] : []),
 				...(deps.switchCost ? [...wrapTextWithAnsi(theme.fg("annotation", deps.switchCost), room), ""] : []),
@@ -116,6 +120,6 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		width: MODEL_SCOPE_OVERLAY_WIDTH,
 		markerId: "model-scope",
 		title: `Apply ${formatPendingModelScope(deps.ref)}`,
-		footerHint: buildHint([{ key: "Enter", verb: "select" }], deps.onBack ? "back to models" : "close"),
+		footerHint: buildHint([{ key: "Enter", verb: "choose" }], deps.onBack ? "back to models" : "close"),
 	});
 }
