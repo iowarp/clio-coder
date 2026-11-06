@@ -149,8 +149,39 @@ export function renderNoticeRow(
 	const tagged = LEADING_TAG.exec(body);
 	const styled = tagged ? styleTaggedNotice(body) : theme.fg("body", body);
 	const inner = Math.max(1, width - 2);
-	const rows = visibleWidth(styled) <= inner ? [styled] : trimStrandedSeparators(wrapTextWithAnsi(styled, inner));
+	const rows =
+		visibleWidth(styled) <= inner
+			? [styled]
+			: !tagged && body.includes(" · ")
+				? packFacts(body, inner).map((row) => theme.fg("body", row))
+				: trimStrandedSeparators(wrapTextWithAnsi(styled, inner));
 	return rows.map((row, index) => (index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`));
+}
+
+/**
+ * Rows that break between ` · ` facts while each fact fits a row, so a way out such as `Esc stops` is never split
+ * across two rows (`· Esc` / `stops`). A fact wider than a row still wraps inside itself.
+ */
+function packFacts(body: string, inner: number): string[] {
+	const rows: string[] = [];
+	let current = "";
+	for (const fact of body.split(" · ")) {
+		const joined = current.length === 0 ? fact : `${current} · ${fact}`;
+		if (visibleWidth(joined) <= inner) {
+			current = joined;
+			continue;
+		}
+		if (current.length > 0) rows.push(current);
+		if (visibleWidth(fact) <= inner) {
+			current = fact;
+			continue;
+		}
+		const pieces = wrapTextWithAnsi(fact, inner);
+		rows.push(...pieces.slice(0, -1));
+		current = pieces.at(-1) ?? "";
+	}
+	if (current.length > 0) rows.push(current);
+	return rows;
 }
 
 const ANSI_RUN = "((?:\u001b\\[[0-9;]*m)*)";
