@@ -153,6 +153,8 @@ export interface LibraryStepOutcome {
 	status: LibraryStepStatus;
 	operation: LibraryOperation;
 	identity: LibraryPackageIdentity;
+	/** The folder the committed step wrote or removed, so the outcome can say where. */
+	destination?: string;
 	verification?: LibraryStepVerification;
 	recovery?: { packageBackup?: string; stateBackup?: string };
 	diagnostics: string[];
@@ -814,6 +816,7 @@ function applyStep(
 		status: "committed",
 		operation: step.operation,
 		identity: step.identity,
+		...(step.destination ? { destination: step.destination } : {}),
 		...(result.recovery ? { recovery: result.recovery } : {}),
 		diagnostics: result.diagnostics.map((d) => d.message),
 	};

@@ -13,6 +13,7 @@
  * that answer it, then lays every step out as a fact table under its own rule.
  */
 
+import { homedir } from "node:os";
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../../domains/extensions/envelope-review.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../../domains/interop/index.js";
 import {
@@ -355,6 +356,12 @@ function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: Librar
 	return "resource evidence from before refresh; no session refresh applied";
 }
 
+/** A path under the home folder as ~/…, the way the footer and the setup screens print it. */
+function shortenHomePath(target: string): string {
+	const home = homedir();
+	return target === home || target.startsWith(`${home}/`) ? `~${target.slice(home.length)}` : target;
+}
+
 /** Disk state in words; the common pairs read as one fact, anything else names both parts. */
 function diskText(verification: LibraryStepVerification): string {
 	if (verification.tree === "present" && verification.record === "recorded") return "files and install record written";
@@ -385,7 +392,13 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 	}
 	const verification = outcome.verification;
 	if (verification) {
-		facts.push({ label: "On disk", value: diskText(verification), tone: "muted" });
+		facts.push({
+			label: "On disk",
+			value: outcome.destination
+				? `${diskText(verification)} · ${shortenHomePath(outcome.destination)}`
+				: diskText(verification),
+			tone: "muted",
+		});
 		const label = evidenceLabel(verification.evidence, refresh);
 		const loaded =
 			verification.resources.length === 0
