@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
@@ -136,8 +137,12 @@ export function createHypothesisCaptureRegistration(options: {
 			const path = input.toolArgs?.path;
 			if (typeof path !== "string") return [];
 			const cwd = options.cwd();
+			const snapshot = snapshotSlate(resolve(cwd, path));
+			if (snapshot === null) return [];
+			// A capture that finds the file rewritten by the time it holds the log's lock records nothing: the
+			// newer write's own capture records the bytes the file holds.
 			await recordSlate({
-				absolute: resolve(cwd, path),
+				snapshot,
 				project: claimsProjectRoot(cwd),
 				at: now().toISOString(),
 				source: { channel: "slate", sessionId: input.sessionId ?? null, toolCallId: input.toolCallId ?? null },
@@ -147,31 +152,61 @@ export function createHypothesisCaptureRegistration(options: {
 	};
 }
 
-/** Read a file as it stands in the project and record the hypotheses it holds when it is a slate. */
+/** A file's bytes as read at one moment, and their sha256. */
+interface SlateSnapshot {
+	path: string;
+	text: string;
+	sha256: string;
+}
+
+/** A `.json` file's bytes as they stand, or null when it is absent, unreadable or past the slate bound. */
+function slateBytes(absolute: string): Buffer | null {
+	if (!absolute.endsWith(".json")) return null;
+	try {
+		if (statSync(absolute).size > SLATE_MAX_BYTES) return null;
+		const bytes = readFileSync(absolute);
+		return bytes.length <= SLATE_MAX_BYTES ? bytes : null;
+	} catch {
+		// A write that failed or a file removed since leaves no slate to record.
+		return null;
+	}
+}
+
+function bytesSha256(bytes: Buffer): string {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+
+function snapshotSlate(absolute: string): SlateSnapshot | null {
+	const bytes = slateBytes(absolute);
+	return bytes === null ? null : { path: absolute, text: bytes.toString("utf8"), sha256: bytesSha256(bytes) };
+}
+
+/**
+ * Record the hypotheses a slate snapshot holds. The file is read again once the log's lock is held, and nothing is
+ * written unless it still holds the snapshot's bytes: a capture that waited on the lock behind a newer write of the
+ * same slate would otherwise revise the newer record back to bytes the file no longer holds. Returns the number of
+ * records written, or null when the file changed after the snapshot.
+ */
 async function recordSlate(input: {
-	absolute: string;
+	snapshot: SlateSnapshot;
 	project: string;
 	at: string;
 	source: SlateOrigin;
-}): Promise<number> {
-	if (!input.absolute.endsWith(".json")) return 0;
-	let text: string;
-	try {
-		if (statSync(input.absolute).size > SLATE_MAX_BYTES) return 0;
-		text = readFileSync(input.absolute, "utf8");
-	} catch {
-		// A write that failed or a file removed since leaves no slate to record.
-		return 0;
-	}
+}): Promise<number | null> {
+	const { snapshot } = input;
 	const drafts = hypothesesFromSlate({
-		text,
-		path: input.absolute,
+		text: snapshot.text,
+		path: snapshot.path,
 		project: input.project,
 		at: input.at,
 		source: input.source,
 	});
 	if (drafts === null || drafts.length === 0) return 0;
-	return (await appendHypotheses(input.project, drafts)).length;
+	const written = await appendHypotheses(input.project, drafts, () => {
+		const bytes = slateBytes(snapshot.path);
+		return bytes !== null && bytesSha256(bytes) === snapshot.sha256;
+	});
+	return written === null ? null : written.length;
 }
 
 /**
@@ -217,7 +252,10 @@ export async function recordAcceptedWorkerSlates(input: {
 			return inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside);
 		})
 		.slice(0, WORKER_SLATE_PATHS_MAX);
-	for (const absolute of absolutes) recorded += await recordSlate({ absolute, project, at, source });
+	for (const absolute of absolutes) {
+		const snapshot = snapshotSlate(absolute);
+		if (snapshot !== null) recorded += (await recordSlate({ snapshot, project, at, source })) ?? 0;
+	}
 	return recorded;
 }
 

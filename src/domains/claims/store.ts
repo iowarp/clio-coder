@@ -116,20 +116,28 @@ export async function appendClaimRegressions(records: ReadonlyArray<ClaimRegress
 
 /**
  * Append the hypotheses one slate write holds (#406): an unchanged entry adds nothing, a changed one adds a record
- * revising the latest earlier one. Returns the records written.
+ * revising the latest earlier one. `stillCurrent` runs once the log's lock is held and refuses the whole append when
+ * it answers false, so a capture whose slate changed after it was read never revises the record of newer bytes.
+ * Returns the records written, or null when `stillCurrent` refused.
  */
 export async function appendHypotheses(
 	project: string,
 	drafts: ReadonlyArray<HypothesisDraft>,
-): Promise<HypothesisRecord[]> {
+	stillCurrent?: () => boolean,
+): Promise<HypothesisRecord[] | null> {
 	const written: HypothesisRecord[] = [];
 	if (drafts.length === 0) return written;
+	let refused = false;
 	await appendLines(claimsLogPath(project), (current) => {
+		if (stillCurrent !== undefined && !stillCurrent()) {
+			refused = true;
+			return [];
+		}
 		const added = deriveHypothesisRecords(parseClaimsLog(current, project).hypotheses, drafts);
 		written.push(...added);
 		return added.map((record) => JSON.stringify(record));
 	});
-	return written;
+	return refused ? null : written;
 }
 
 /**

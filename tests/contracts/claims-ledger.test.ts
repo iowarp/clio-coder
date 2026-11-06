@@ -1,8 +1,10 @@
 import { strict as assert, match } from "node:assert";
+import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runCommandVector } from "../../src/core/safe-exec.js";
+import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { claimLogRecordId } from "../../src/domains/claims/edges.js";
 import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
@@ -323,6 +325,41 @@ describe("claims ledger (#406)", () => {
 			);
 			assert.equal(read.unlinked, 2);
 			assert.equal(read.mismatched, 0);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("refuses a slate capture whose file changed before it held the log's lock", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const slate = join(repo, "h.json");
+			const capture = createHypothesisCaptureRegistration({ cwd: () => repo });
+			const wrote = { hook: "after_tool", toolName: "write", toolArgs: { path: "h.json" } } as const;
+			const older = slateText([{ id: "H1", check: "stats", statement: "H1 holds, first" }]);
+			const newer = slateText([{ id: "H1", check: "stats", statement: "H1 holds, second" }]);
+			writeFileSync(slate, older);
+			await capture.evaluateAsync?.(wrote);
+			writeFileSync(slate, newer);
+			await capture.evaluateAsync?.(wrote);
+			// A capture of the older bytes that waited on the log's lock while the newer bytes landed again records
+			// nothing, so the chain never revises back to a slate the file no longer holds.
+			let late: Promise<unknown> | undefined;
+			await withStateFileLock(claimsLogPath(project), () => {
+				writeFileSync(slate, older);
+				late = capture.evaluateAsync?.(wrote);
+				writeFileSync(slate, newer);
+			});
+			await late;
+			const read = readClaims(project);
+			assert.deepEqual(
+				read.hypotheses.map((record) => record.statement),
+				["H1 holds, first", "H1 holds, second"],
+			);
+			assert.equal(read.hypotheses.at(-1)?.source.slateSha256, createHash("sha256").update(newer).digest("hex"));
 		} finally {
 			env.restore();
 		}
