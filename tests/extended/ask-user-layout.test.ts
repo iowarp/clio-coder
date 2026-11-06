@@ -345,7 +345,7 @@ test("discarding a revised answer preserves committed option facts", async () =>
 	]);
 });
 
-test("Other replaces a discarded single-choice text draft", async () => {
+test("Other reopens a single-choice text draft that Esc kept", async () => {
 	const view = createAskUserViewForTesting({ rows: 30 });
 	const pending = view.ask([{ question: "First?", options: [{ label: "Provided details" }] }]);
 	view.handleInput(ENTER);
@@ -353,9 +353,11 @@ test("Other replaces a discarded single-choice text draft", async () => {
 	view.handleInput("\u001b");
 	view.handleInput(DOWN);
 	view.handleInput(ENTER);
-	for (const key of "Alternative") view.handleInput(key);
+	for (const key of " alternative") view.handleInput(key);
 	view.handleInput(ENTER);
-	deepStrictEqual((await pending).answers, [{ question: "First?", answer: "Alternative", value: "Alternative" }]);
+	deepStrictEqual((await pending).answers, [
+		{ question: "First?", answer: "draft alternative", value: "draft alternative" },
+	]);
 });
 
 for (const columns of [80, 120, 160])

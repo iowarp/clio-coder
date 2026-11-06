@@ -237,7 +237,7 @@ export function optionAsksForText(label: string): boolean {
 	);
 }
 
-function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>): SelectItem[] {
+function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>, draft = ""): SelectItem[] {
 	const options = question.options ?? [];
 	const explicitOtherIndex = options.findIndex((option) => isOtherOption(option.label));
 	const items: SelectItem[] = [];
@@ -263,7 +263,9 @@ function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>): 
 		items.push({
 			value: "other",
 			label: question.multi_select === true ? "[ ] Other" : "Other",
-			description: "type your answer",
+			// A draft left with Esc waits here, and the row says so, so backing out of the field reads as keeping it.
+			description:
+				draft.trim().length > 0 ? `your draft, kept: ${draft.trim().replace(/\s+/gu, " ")}` : "type your answer",
 		});
 	}
 	return items;
@@ -1100,9 +1102,9 @@ class AskUserOverlayView implements Component {
 		return [
 			text &&
 				questionHasOptions(question) && {
-					// The draft is dropped (#260 keeps Esc the discard gesture), so the words say so.
-					verb: "discard text, back to options",
-					short: "discard text",
+					// Backing out of the field keeps what was typed, the way every other field's Esc does; t opens it again.
+					verb: "back to options, keeps text",
+					short: "back",
 					back: () => this.escapeFromTextInput(question, state),
 				},
 			text &&
@@ -1499,7 +1501,7 @@ class AskUserOverlayView implements Component {
 		const state = this.currentState();
 		const selectedItem = this.list?.getSelectedItem();
 		if (!question || !state || !selectedItem) return [""];
-		const items = optionItems(question, state.selected);
+		const items = optionItems(question, state.selected, state.inputValue !== state.customAnswer ? state.inputValue : "");
 		const focusedIndex = Math.max(
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
@@ -1587,6 +1589,8 @@ class AskUserOverlayView implements Component {
 		} else {
 			const input = new Input();
 			input.setValue(initial);
+			// End, so a kept draft continues where it stopped.
+			input.handleInput("\x1b[F");
 			input.onSubmit = (value) => this.submitText(question, state, value);
 			this.text = new InputTextControl(input, caption);
 		}
@@ -1594,7 +1598,8 @@ class AskUserOverlayView implements Component {
 	}
 
 	private rebuildSelectList(question: AskUserQuestion, state: QuestionState): void {
-		const items = optionItems(question, state.selected);
+		const draft = state.inputValue !== state.customAnswer ? state.inputValue : "";
+		const items = optionItems(question, state.selected, draft);
 		const activeList = new SelectList(items, Math.max(1, items.length), DEFAULT_SELECT_THEME, {
 			minPrimaryColumnWidth: MIN_LABEL_COLUMN,
 			maxPrimaryColumnWidth: MAX_LABEL_COLUMN,
@@ -1666,19 +1671,18 @@ class AskUserOverlayView implements Component {
 	 * draft unrecoverable: a single-question round had no other question to answer
 	 * first, so the only way off `t` was to abandon the interview (issue #260). A
 	 * question with options has a surface behind the field, so Esc goes back to it
-	 * and drops the draft. A question with no options has nothing behind it, so Esc
-	 * keeps its old meaning and leaves the interview; the footer says which.
-	 *
-	 * The draft is dropped rather than parked because Esc is the discard gesture.
-	 * It never reached `answer`, `options`, or `value` in the first place, since
-	 * only a submit writes those, so #228's clearing rule holds either way.
+	 * and parks the draft where `t` finds it again, because backing out of a layer
+	 * never throws away what the operator typed. A question with no options has
+	 * nothing behind it, so Esc keeps its old meaning and leaves the interview; the
+	 * footer says which. The draft never reached `answer`, `options`, or `value`,
+	 * since only a submit writes those, so #228's clearing rule holds.
 	 */
 	private escapeFromTextInput(question: AskUserQuestion, state: QuestionState): void {
 		if (!questionHasOptions(question)) {
 			this.cancel();
 			return;
 		}
-		state.inputValue = "";
+		state.inputValue = this.text?.getText() ?? state.inputValue;
 		state.selected = new Set(state.selectedBeforeText ?? state.committedSelected);
 		state.selectedBeforeText = null;
 		state.mode = "select";
