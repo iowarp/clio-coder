@@ -2192,3 +2192,46 @@ test("a tool preview keeps whole lines and counts the lines it holds back, never
 	match(tail[0] ?? "", /… 3 earlier lines · \/view/u);
 	deepStrictEqual(tail.slice(1), ["d1"]);
 });
+
+test("a chained verify step naming no declared check seals no failed validation and leaves an earlier pass standing", async () => {
+	const { gatewayChainReceipts } = await import("../../src/tools/surface.js");
+	const chained = (unresolved: boolean) => ({
+		details: {
+			op: "chain",
+			chainResults: [
+				{
+					id: "v",
+					capability: "verify",
+					args: { check: "nosuch-check" },
+					isError: true,
+					result: {
+						content: [{ type: "text", text: "verify: 'nosuch-check' is not a declared check." }],
+						details: {
+							...(unresolved ? { unresolved: true } : {}),
+							chainAdmission: {
+								outcome: "error",
+								decision: "allowed",
+								actionClass: "execute",
+								...(unresolved ? { unresolved: true } : {}),
+							},
+						},
+					},
+				},
+			],
+		},
+	});
+	const [unknown] = gatewayChainReceipts("gateway", chained(true));
+	strictEqual(unknown?.admission.unresolved, true, "the chain receipt keeps the fact that nothing ran");
+	const [ranAndFailed] = gatewayChainReceipts("gateway", chained(false));
+	strictEqual(ranAndFailed?.admission.unresolved, undefined);
+	const stats = [{ tool: "verify", count: 2, ok: 1, errors: 1, blocked: 0 }];
+	const facts = typedValidationFactsFromVerifyCalls(stats, [
+		{ check: "lint", outcome: "ok" },
+		{ check: "nosuch-check", outcome: unknown?.admission.unresolved === true ? "unresolved" : "error" },
+	]);
+	deepStrictEqual(
+		facts.map((fact) => fact.passed),
+		[true],
+		"only the check that ran is sealed, and it passed",
+	);
+});

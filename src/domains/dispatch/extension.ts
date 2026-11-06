@@ -1048,7 +1048,10 @@ function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknow
 	if (event.type === "tool_execution_end") {
 		for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
 			if (child.capability === ToolNames.Verify)
-				log.calls.push({ check: verifyCheckIdentity(child.args), outcome: child.admission.outcome });
+				log.calls.push({
+					check: verifyCheckIdentity(child.args),
+					outcome: child.admission.unresolved === true ? "unresolved" : child.admission.outcome,
+				});
 		}
 		return;
 	}
