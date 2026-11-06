@@ -398,11 +398,12 @@ describe("ask_user tool", () => {
 			operator_only: true,
 		};
 		match(errorMessage(await fixture([]).call({ questions: [CHOICE, CACHE_QUESTION] })), /asked alone/);
-		for (const [replies, autonomy] of [
+		const unattended: Array<[Reply[], AutonomyLevel]> = [
 			[[{ answers: [], timedOut: { afterSeconds: 300 } }], "default"],
 			[[], "yolo"],
-		] as const) {
-			const f = fixture([...replies], autonomy, true);
+		];
+		for (const [replies, autonomy] of unattended) {
+			const f = fixture(replies, autonomy, true);
 			const result = await f.call({ questions: [CHOICE] });
 			strictEqual(interviewOf(result).event, "operator_choice_unanswered", autonomy);
 			deepStrictEqual(interviewOf(result).decisions, [], autonomy);
