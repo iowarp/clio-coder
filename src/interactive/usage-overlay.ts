@@ -425,8 +425,9 @@ class UsageOverlayBody implements Component {
 		const tabs = wrapTextWithAnsi(
 			USAGE_TABS.map((name, index) =>
 				index === this.tab
-					? theme.style("selectedOption", `${index + 1} ${name}`, { bold: true, underline: true })
-					: theme.fg("menuOption", `${index + 1} ${name}`),
+					? theme.style("selectedOption", `${index + 1}\u00a0${name}`, { bold: true, underline: true })
+					: // A no-break space keeps a tab's number with its name when the row wraps (`5` above `Workers`).
+						theme.fg("menuOption", `${index + 1}\u00a0${name}`),
 			).join("   "),
 			contentWidth,
 		);
