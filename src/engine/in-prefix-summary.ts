@@ -10,8 +10,10 @@
  *
  * Two kinds of cache qualify. A hosted cache (Anthropic, OpenAI Responses) keeps a prefix for a known lifetime and
  * bills a read at a fraction of input. A slot cache (llama-server's `cache_prompt`, also behind LiteLLM) declares no
- * lifetime and bills nothing: it keeps the last prompt's KV state until another request takes the slot, so it is
- * trusted only on an unpriced route whose last request just reported reusing a prefix.
+ * lifetime and bills nothing: it keeps the last prompt's KV state until another request takes the slot. It is trusted
+ * only on a route the caller knows bills nothing (a local-native runtime, or a target declaring `pricing: free` or zero
+ * rates) whose last request just reported reusing a prefix. Zero catalog rates alone prove nothing: an unpriced
+ * gateway such as LiteLLM can front a paid backend whose cache neither behaves like a slot nor is free.
  *
  * Whether the request is worth sending is the caller's call; `inputCost` prices it in base-input tokens (prefill
  * tokens on a slot cache) so the caller can weigh it against the portable request.
@@ -95,9 +97,13 @@ function hostedPricing(model: Model<Api>): PrefixPricing {
 		: { read: OPENAI_CACHE_READ_WEIGHT, write: 1, slack: 0 };
 }
 
-function priced(model: Model<Api>): boolean {
-	const { input, output, cacheRead, cacheWrite } = model.cost;
-	return input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0;
+/** What the caller knows about the route beyond the model row. */
+export interface InPrefixRoute {
+	/**
+	 * The route's billing resolved free: a local-native runtime, or a target declaring `pricing: free` or zero rates.
+	 * An unpriced gateway is not free; its pricing is unknown.
+	 */
+	free: boolean;
 }
 
 /** Routes whose request is the whole transcript re-sent, so an appended message extends the cached prefix. */
@@ -110,6 +116,7 @@ const PREFIX_APIS: ReadonlySet<string> = new Set(["anthropic-messages", "openai-
 export async function prepareInPrefixSummary(
 	agent: Agent,
 	last: MainRequestRecord | undefined,
+	route: InPrefixRoute,
 	signal?: AbortSignal,
 	now = Date.now(),
 ): Promise<InPrefixSummary | InPrefixRefusal> {
@@ -123,8 +130,9 @@ export async function prepareInPrefixSummary(
 		if (now - last.sentAt > lifetime * 1000 - EXPIRY_MARGIN_MS) return "expired";
 		pricing = hostedPricing(last.request.model);
 	} else {
-		// A priced route with no declared lifetime may already have dropped the entry and bills the miss.
-		if (priced(last.request.model)) return "lifetime-unknown";
+		// Without a declared lifetime only a route known to bill nothing is read as a slot cache; any other route
+		// (priced, or an unpriced gateway in front of an unknown backend) may have dropped the entry and bill the miss.
+		if (!route.free) return "lifetime-unknown";
 		// A slot cache has no clock: the last request reading from it is the evidence that it holds this prefix.
 		if (!last.cachedTokens || last.cachedTokens <= 0) return "no-cache-reuse";
 		pricing = { read: 0, write: 1, slack: Math.min(last.promptTokens, SLOT_RESTORE_SLACK_TOKENS) };

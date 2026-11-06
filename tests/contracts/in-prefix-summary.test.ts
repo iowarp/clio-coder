@@ -40,31 +40,46 @@ function record(m: EngineModel, cachedTokens: number | null): MainRequestRecord 
 	};
 }
 
-test("a slot cache is trusted only on an unpriced route whose last request reused a prefix", async () => {
-	const slot = model("openai-completions", { provider: "litellm" });
-	const admitted = await prepareInPrefixSummary(agent(slot), record(slot, 18_432), undefined, 2_000);
+const free = { free: true };
+const unknown = { free: false };
+
+test("a slot cache is trusted only on a route known to bill nothing whose last request reused a prefix", async () => {
+	const slot = model("openai-completions", { provider: "llamacpp" });
+	const admitted = await prepareInPrefixSummary(agent(slot), record(slot, 18_432), free, undefined, 2_000);
 	ok(typeof admitted === "object");
 	// Prefill bills nothing for cached tokens, but up to one checkpoint of them is prefilled again.
 	const tailCost = admitted.inputCost("") - 4096;
 	ok(tailCost > 0 && tailCost < 100);
-	strictEqual(await prepareInPrefixSummary(agent(slot), record(slot, 0), undefined, 2_000), "no-cache-reuse");
-	const pricedSlot = model("openai-completions", { cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } });
+	strictEqual(await prepareInPrefixSummary(agent(slot), record(slot, 0), free, undefined, 2_000), "no-cache-reuse");
+});
+
+test("an unpriced completions gateway reporting cache reads stays unknown and is refused", async () => {
+	// LiteLLM-style gateway with no declared rates: zero catalog cost, but its backend and cache are unknown.
+	const gateway = model("openai-completions", { provider: "litellm" });
 	strictEqual(
-		await prepareInPrefixSummary(agent(pricedSlot), record(pricedSlot, 18_432), undefined, 2_000),
+		await prepareInPrefixSummary(agent(gateway), record(gateway, 18_432), unknown, undefined, 2_000),
+		"lifetime-unknown",
+	);
+	const pricedGateway = model("openai-completions", { cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } });
+	strictEqual(
+		await prepareInPrefixSummary(agent(pricedGateway), record(pricedGateway, 18_432), unknown, undefined, 2_000),
 		"lifetime-unknown",
 	);
 });
 
 test("OpenAI Responses prices the cached prefix from the catalog and expires with the hosted lifetime", async () => {
 	const responses = model("openai-responses", { cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 0 } });
-	const admitted = await prepareInPrefixSummary(agent(responses), record(responses, 0), undefined, 2_000);
+	const admitted = await prepareInPrefixSummary(agent(responses), record(responses, 0), unknown, undefined, 2_000);
 	ok(typeof admitted === "object");
 	const tailCost = admitted.inputCost("") - 0.1 * 20_000;
 	ok(tailCost > 0 && tailCost < 100);
 	strictEqual(
-		await prepareInPrefixSummary(agent(responses), record(responses, 0), undefined, 1_000 + 300_000),
+		await prepareInPrefixSummary(agent(responses), record(responses, 0), unknown, undefined, 1_000 + 300_000),
 		"expired",
 	);
 	const google = model("google-generative-ai");
-	strictEqual(await prepareInPrefixSummary(agent(google), record(google, 0), undefined, 2_000), "unsupported-api");
+	strictEqual(
+		await prepareInPrefixSummary(agent(google), record(google, 0), unknown, undefined, 2_000),
+		"unsupported-api",
+	);
 });
