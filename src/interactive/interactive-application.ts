@@ -2410,7 +2410,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					if (!first) return;
 					appendNotice(
 						"info",
-						`${live.length === 1 ? "Another Clio session is" : `${live.length} other Clio sessions are`} open in this folder. This terminal keeps its own conversation, and both edit the same files.`,
+						`${live.length === 1 ? "Another Clio session is" : `${live.length} other Clio sessions are`} open in this folder. This terminal keeps its own conversation, and ${live.length === 1 ? "both" : "all of them"} work on the same files.`,
 						busNoticeSink,
 					);
 				})
