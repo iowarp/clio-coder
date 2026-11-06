@@ -743,6 +743,23 @@ export function scanAgentConfigs(options: AdoptionScanOptions): AdoptionScanResu
 	};
 }
 
+/**
+ * The scan restricted to the sources `keep` admits, with its import plan
+ * rebuilt from them. Snapshots and hash stay the full scan's, so recorded
+ * adoption state still compares equal to a later full rescan.
+ */
+export function restrictAdoptionScan(scan: AdoptionScanResult, keep: (path: string) => boolean): AdoptionScanResult {
+	const sources = scan.sources.filter((source) => keep(source.path));
+	const plan = buildImportPlan(sources);
+	return {
+		...scan,
+		sources,
+		rejected: scan.rejected.filter((rejected) => keep(rejected.path)),
+		importedRules: plan.importedRules,
+		conflicts: plan.conflicts,
+	};
+}
+
 function renderSourceList(paths: ReadonlyArray<string>): string {
 	if (paths.length <= 3) return paths.map((path) => `\`${path}\``).join(", ");
 	return `${paths

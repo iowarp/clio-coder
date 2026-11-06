@@ -1,0 +1,40 @@
+{
+	"mcpServers": {
+		"parquet": {
+			"type": "stdio",
+			"command": "clio-kit",
+			"args": ["mcp-server", "parquet"],
+			"timeoutMs": 120000,
+			"toolActionClasses": {
+				"aggregate_column_tool": "read",
+				"get_column_preview_tool": "read",
+				"read_slice_tool": "read",
+				"summarize_tool": "read"
+			}
+		},
+		"pandas": {
+			"type": "stdio",
+			"command": "clio-kit",
+			"args": ["mcp-server", "pandas"],
+			"timeoutMs": 120000,
+			"toolActionClasses": {
+				"clean_data": "read",
+				"correlation_analysis": "read",
+				"filter_data": "destructive",
+				"groupby_operations": "read",
+				"handle_missing_data": "read",
+				"hypothesis_testing": "read",
+				"load_data": "read",
+				"merge_datasets": "read",
+				"optimize_memory": "read",
+				"pivot_table": "read",
+				"profile_csv": "read",
+				"profile_data": "read",
+				"save_data": "destructive",
+				"statistical_summary": "read",
+				"time_series_operations": "read",
+				"validate_data": "read"
+			}
+		}
+	}
+}

@@ -17,12 +17,15 @@ import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
 	SENT_DISPOSITIONS,
 	sentCallCount,
+	sessionVerifiedOutcomes,
 	usageCoverage,
 	usageEstimatedCalls,
 	usageEstimates,
 	usageGap,
 	usageLineFigure,
 	usageLineNotes,
+	type VerifiedOutcomeWords,
+	verifiedOutcomeWords,
 } from "./usage-words.js";
 
 export interface ExitSummarySnapshot {
@@ -108,6 +111,8 @@ interface CollectorDeps {
 	getTurns: () => number | null;
 	getToolCounts: () => ReadonlyMap<string, number>;
 	getModel: () => { target: string; model: string } | null;
+	/** The session's whole ledger, every branch, for the verified outcomes its spend is divided over. */
+	readSessionEntries?: () => ReadonlyArray<unknown>;
 	/** The git hook drift guard's account of hook files changed this visit (src/domains/safety/hook-drift.ts). */
 	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string; key?: string }>;
 	now?: () => number;
@@ -141,6 +146,8 @@ export type ExitSpend =
 			/** `4 calls had no timing data`, said once after the time rather than inside it (F4). */
 			callTimeCoverage: string | null;
 			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
+			/** The session's verified outcomes and its tokens and cost per outcome, as /usage words them. */
+			verified: VerifiedOutcomeWords;
 	  };
 
 /**
@@ -188,7 +195,11 @@ function tokenBreakdown(view: TelemetryView, model?: string): string {
 	return [...figures, ...notes].join(" · ");
 }
 
-export function exitSpend(view: TelemetryView | null | undefined, visitFrom: string): ExitSpend {
+export function exitSpend(
+	view: TelemetryView | null | undefined,
+	visitFrom: string,
+	entries: ReadonlyArray<unknown> = [],
+): ExitSpend {
 	if (!view) return { kind: "unavailable" };
 	const session = view.session();
 	const sessionTokens = tokenFacts(view);
@@ -219,6 +230,7 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 			cost: group.usd.display,
 			breakdown: tokenBreakdown(view, group.key),
 		})),
+		verified: verifiedOutcomeWords(view, sessionVerifiedOutcomes(view, entries)),
 	};
 }
 
@@ -521,7 +533,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			}
-			const spend = exitSpend(deps.telemetry.read?.live(), visitFrom);
+			let entries: ReadonlyArray<unknown> = [];
+			try {
+				entries = deps.readSessionEntries?.() ?? [];
+			} catch {
+				// An unreadable ledger counts no ledger outcome; the card still closes with the spend it has.
+			}
+			const spend = exitSpend(deps.telemetry.read?.live(), visitFrom, entries);
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,

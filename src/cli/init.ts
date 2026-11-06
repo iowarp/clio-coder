@@ -207,6 +207,19 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		// aware that the requested rewrite did not happen. The plain heuristic
 		// fallback still exits 0: it is a legitimate degraded mode, and the
 		// warning line above already names it.
+		// A model failure late in a long run used to scroll its one fallback line
+		// away under progress output, and a heuristic handbook then read as the
+		// model's. Close with the verdict, naming the file and the reason.
+		const generation = result.telemetry.generation;
+		const written = result.summary.action === "wrote" || result.summary.action === "refreshed";
+		if (useModel && generation.mode === "heuristic" && (written || result.summary.action === "proposed")) {
+			const reason = (generation.fallbackReason ?? "the model draft was unusable").split("\n")[0]?.slice(0, 300) ?? "";
+			const file = written ? result.clioMdPath : "the CLIO-CODER.md proposal";
+			process.stderr.write(
+				`clio-coder context init: warning: ${file} is a heuristic draft, not a model draft (${reason}).\n` +
+					"  review it before committing, or rerun `clio-coder context init --rewrite` once the bootstrap target answers.\n",
+			);
+		}
 		if (parsed.options.rewriteClioMd === true && result.telemetry.generation.mode === "existing") {
 			process.stderr.write(
 				"clio-coder context init: --rewrite did not rewrite CLIO-CODER.md; the model draft failed and the existing file was preserved.\n" +

@@ -525,6 +525,43 @@ async function generateBootstrapWithModel(
 		if (attemptTelemetry)
 			attemptTelemetry = { ...attemptTelemetry, repairRan: true, repairProducedHandbook: producedHandbook };
 	}
+	// A section the evidence supports is asked for once more, alone, rather than
+	// shipping a handbook that silently lacks it; stabilization grounds the reply.
+	const missing = input.missingSections?.(output) ?? [];
+	if (missing.length > 0 && performance.now() - startedAtClock < timeoutMs) {
+		const titles = missing.map((section) => `"${section.title}"`).join(" and ");
+		const request = [
+			"<bootstrap-section-request>",
+			`The draft has no ${missing.map((section) => `"${section.title}" section (${section.reason})`).join("; ")}.`,
+			`Return the handbook JSON with the same projectName and identity, empty invariants and conventions, and sections holding only ${titles}. Every bullet cites its files in backticks, and a change recipe names every file the same commit must touch.`,
+			"This request has at most 4 exploration calls and only the remaining time under the original deadline.",
+			"</bootstrap-section-request>",
+		].join("\n");
+		runIdHint = newRunId();
+		toolCalls = 4;
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "requesting sections the draft omitted",
+			detail: missing.map((section) => section.title).join(", "),
+		});
+		try {
+			const extra = await attemptBootstrapDispatch(
+				dispatch,
+				attemptInput,
+				`${prompt}\n\n${request}`,
+				startedAtClock,
+				mode,
+				timeoutMs,
+				dispatchBootstrap,
+			);
+			const present = new Set((output.sections ?? []).map((section) => section.title.toLowerCase()));
+			const added = (extra.sections ?? []).filter((section) => !present.has(section.title.toLowerCase()));
+			if (added.length > 0) output = { ...output, sections: [...(output.sections ?? []), ...added] };
+		} catch {
+			// The draft stands without the section; context init warns that it is missing.
+		}
+	}
 	if (attemptTelemetry) input.reportGeneration?.(attemptTelemetry);
 	return output;
 }

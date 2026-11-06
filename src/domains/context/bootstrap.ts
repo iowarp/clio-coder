@@ -26,6 +26,7 @@ import {
 	adoptionSnapshotsHash,
 	RULE_KEYWORDS,
 	renderImportedAgentContext,
+	restrictAdoptionScan,
 	scanAgentConfigs,
 } from "./adoption.js";
 import type { BootstrapDepth, BootstrapEvidence } from "./bootstrap-evidence.js";
@@ -101,6 +102,8 @@ export interface BootstrapGenerateInput {
 	progress?: BootstrapProgressSink;
 	reportGeneration?: BootstrapGenerationSink;
 	assessDraft?: (draft: BootstrapStructuredOutput) => string | null;
+	/** Sections the evidence supports that a draft omits, each with the evidence that supports it. */
+	missingSections?: (draft: BootstrapStructuredOutput) => ExpectedSection[];
 }
 
 export type BootstrapGenerate = (
@@ -349,7 +352,10 @@ function resolveDefaultIdentity(
 	const description = metadata.description;
 	if (!description) return { text: head.slice(0, 600), bare: true, descriptionSource: null };
 	const cleaned = description.replace(/\.$/, "").trim();
-	const role = /^[a-z]/.test(cleaned) ? `It is ${cleaned}.` : `${cleaned}.`;
+	// A description is usually a noun phrase; one opening with an article
+	// ("An open-source coding agent") read as a verbless sentence after the head.
+	const phrase = /^(?:A|An|The)\s/.test(cleaned) ? `${cleaned[0]?.toLowerCase() ?? ""}${cleaned.slice(1)}` : cleaned;
+	const role = /^[a-z]/.test(phrase) ? `It is ${phrase}.` : `${phrase}.`;
 	return { text: `${head} ${role}`.slice(0, 600), bare: false, descriptionSource: metadata.descriptionSource };
 }
 
@@ -774,9 +780,17 @@ const CITED_LOCATION_RE = /^(.*[^:]):(\d+)(?:[-:]\d+)?$/;
 /** A symbol written as a call: `priceCart()`. */
 const CITED_CALL_RE = /^(.+?)\(\s*\)$/;
 
+/** A concrete file path: a directory part and a file name with an extension, no pattern, home or URL. */
+const CONCRETE_FILE_RE = /^[^\s~/:][^\s:]*\/[^\s/]*\.[A-Za-z0-9]+$/;
+
 function groundedLiteral(literal: string, evidence: ModelGroundingCorpus): boolean {
 	const lower = literal.toLowerCase();
 	const path = literal.replace(/^\.\//, "").replace(/\/$/, "");
+	// Cited paths decide which workers receive a rule (`handbook-units.ts`), so a
+	// file path must name a file from the repository root. A substring match let
+	// `tests/chat-composer.test.ts` through for `apps/clio-coder-gui/tests/`, and
+	// the rule then claimed the GUI tests live at the root.
+	if (CONCRETE_FILE_RE.test(path)) return evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path);
 	if (evidence.lower.includes(lower) || evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path))
 		return true;
 	// A directory is real when some visible file lives under it.
@@ -830,6 +844,30 @@ function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
 	return groundedName(token, evidence) || citedNames(token).some((name) => groundedName(name, evidence));
 }
 
+/**
+ * A slash makes a word a path only when it names one. Two prose words joined
+ * by a slash (verb pairs, the input-output abbreviation) grounded as a
+ * substring somewhere and came back wrapped as code. Patterns pass on to the citation
+ * rule, which grounds their literal pieces.
+ */
+function repositoryPathToken(token: string, evidence: ModelGroundingCorpus): boolean {
+	const path = token.replace(/^\.\//, "").replace(/\/$/, "");
+	if (/[*?<>{}]/.test(path)) return true;
+	if (evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path)) return true;
+	for (const candidate of evidence.repositoryPaths) if (candidate.startsWith(`${path}/`)) return true;
+	return false;
+}
+
+/**
+ * A case hump marks an identifier, except in a proper noun: `TypeScript` and
+ * `GitHub` are PascalCase words, not names in this repository. A PascalCase
+ * word is code only when the index defines it; lowerCamel is always code.
+ */
+function camelCaseIdentifier(token: string, evidence: ModelGroundingCorpus): boolean {
+	if (!/[a-z0-9][A-Z]/.test(token)) return false;
+	return /^[a-z]/.test(token) || evidence.symbolDefinitions.has(token.replace(/\(\)$/, ""));
+}
+
 // Nemotron's accurate first draft cited no names in backticks, so the citation rule dropped every line.
 // Backtick a bare name only when it reads as code and passes the same check a backticked citation faces.
 function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string {
@@ -846,11 +884,12 @@ function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string
 					const script = words[1] === "run" && words.length === 3 ? words[2] : words.length === 2 ? words[1] : undefined;
 					const invocation =
 						words[0] === evidence.packageManager && script !== undefined && evidence.scriptBodies.has(script);
-					// A case hump marks camelCase and PascalCase; a lone capitalized word may start a sentence,
-					// and "e.g" or "bold**" must not count as a name.
+					// "e.g" or "bold**" must not count as a name.
 					const dotted = token.replace(/\b\w{1,2}\./g, "");
 					const codeLike =
-						/[/_@]|[a-z0-9][A-Z]/.test(token) || (dotted.includes(".") && /^\.?[\w-]+(?:\.[\w-]+)*$/.test(dotted));
+						/[_@]/.test(token) ||
+						(token.includes("/") ? repositoryPathToken(token, evidence) : camelCaseIdentifier(token, evidence)) ||
+						(dotted.includes(".") && /^\.?[\w-]+(?:\.[\w-]+)*$/.test(dotted));
 					return invocation || (codeLike && groundedToken(token, evidence)) ? `\`${token}\`${punctuation}` : match;
 				},
 			);
@@ -859,9 +898,10 @@ function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string
 }
 
 // Real symbols were attributed to importing files; use indexed definitions to correct unambiguous ownership.
+// A path followed by 's ("in the index file's sibling") names a neighbor, not the owner: leave it.
 function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus): string {
 	return line.replace(
-		/(`[A-Za-z_$][\w$]*(?:\(\))?`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)`[A-Za-z_$][\w$]*(?:\(\))?`)*)\s+(in|from|of)\s+`([^`\n]+)`/g,
+		/(`[A-Za-z_$][\w$]*(?:\(\))?`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)`[A-Za-z_$][\w$]*(?:\(\))?`)*)\s+(in|from|of)\s+`([^`\n]+)`(?!['\u2019]s\b)/g,
 		(match, symbols: string, relation: string, citedPath: string) => {
 			const path = citedPath.replace(/^\.\//, "");
 			if (!/^[\w./-]+\.[A-Za-z0-9]+$/.test(path)) return match;
@@ -1034,22 +1074,218 @@ function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCo
 }
 
 // Repeated boundary rules consumed both invariant and convention slots; compare stable citation and prose tokens.
+// Citations keep a leading backtick so the two kinds stay apart.
 function handbookRuleTokens(rule: string): ReadonlySet<string> {
 	return new Set(
 		[
 			...normalizeHandbookRule(rule)
 				.toLowerCase()
 				.matchAll(/`([^`\n]+)`|\b[a-z]{4,}\b/g),
-		].map((match) => match[1] ?? match[0]),
+		].map((match) => (match[1] !== undefined ? `\`${match[1]}` : match[0])),
 	);
 }
 
+// A path below the root: a root document such as `CONTRIBUTING.md` is cited as the source of unrelated rules.
+const CITED_FILE_RE = /^`[^`\s/]+\/[^`\s]/;
+
+/**
+ * Two rules are one when most words match, or when they cite the same files
+ * and names. A model that states a rule as an invariant and again as a change
+ * recipe rewords it (Clio's own settings rule shared 42% of its words with its
+ * restatement) but cites the same `src/core/defaults.ts` symbols in both.
+ */
 function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
+	const citations = [...tokens].filter((token) => token.startsWith("`"));
 	return kept.some((other) => {
 		const shorter = tokens.size <= other.size ? tokens : other;
 		const longer = tokens.size <= other.size ? other : tokens;
-		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
+		if (shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7) return true;
+		const otherCitations = [...other].filter((token) => token.startsWith("`"));
+		const shared = citations.filter((token) => other.has(token));
+		const fewest = Math.min(citations.length, otherCitations.length);
+		return shared.length >= 2 && shared.some((token) => CITED_FILE_RE.test(token)) && shared.length / fewest >= 2 / 3;
 	});
+}
+
+const CHECKER_SECTION_TITLE = "Checker-enforced invariants";
+
+interface CheckerRule {
+	code: string;
+	path: string;
+	/** The rule as one or more whole sentences, its paths marked as code. */
+	sentence: string;
+	/** It constrains imports between path sets, so it is a hard invariant of the build. */
+	architectural: boolean;
+}
+
+const IMPORT_RULE_RE = /\b(?:value-)?import(?:s|er|ers|ed|ing)?\b/i;
+const RULE_PATH_RE = /@?[\w.*<>-]+(?:\/[\w.*<>-]*)+/g;
+const RULE_CODE_TOKEN_RE =
+	/(@?[\w.*<>-]+(?:\/[\w.*<>-]*)+|\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b[\w*-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml)\b)/g;
+
+/**
+ * A path in a rule's prose names repository paths when it is a pattern, a
+ * package scope, or exists here; `messages/ledger` in a sentence is prose.
+ */
+function rulePathToken(token: string, files: ReadonlySet<string>, directories: ReadonlySet<string>): boolean {
+	if (!token.includes("/")) return true;
+	if (/[*<>]/.test(token) || token.startsWith("@")) return true;
+	const path = token.replace(/\/$/, "");
+	return files.has(path) || directories.has(path);
+}
+
+function markRuleCode(text: string, files: ReadonlySet<string>, directories: ReadonlySet<string>): string {
+	return text.replace(RULE_CODE_TOKEN_RE, (match) => {
+		const token = match.replace(/\.+$/, "");
+		if (!rulePathToken(token, files, directories)) return match;
+		return `\`${token}\`${match.slice(token.length)}`;
+	});
+}
+
+/**
+ * Every coded rule the project's checkers declare, as a whole sentence with
+ * its subject. The failure message is the fallback only: it names the
+ * offending file and interpolates the rule's subject away.
+ */
+function checkerRuleList(input: BootstrapGenerateInput): CheckerRule[] {
+	const files = new Set(input.repositoryFiles ?? []);
+	const directories = new Set<string>();
+	for (const file of files) {
+		const parts = file.split("/");
+		for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join("/"));
+	}
+	const rules: CheckerRule[] = [];
+	for (const file of input.enforcement?.checkFiles ?? []) {
+		for (const rule of file.rules ?? []) {
+			const text =
+				rule.source === "failure" ? `A file that ${rule.text.replace(/^…\s*/, "").replace(/\(…\s*\)/g, "")}` : rule.text;
+			const sentence = markRuleCode(text.replace(/[\s.;:,]+$/, ""), files, directories);
+			const paths = [...rule.text.matchAll(RULE_PATH_RE)].length;
+			rules.push({
+				code: rule.code,
+				path: file.path,
+				sentence: `${sentence}. Checked as \`${rule.code}\` by \`${file.path}\`.`,
+				architectural: IMPORT_RULE_RE.test(rule.text) && paths > 0,
+			});
+		}
+	}
+	const number = (code: string): number => Number(/\d+/.exec(code)?.[0] ?? 0);
+	return rules.sort((a, b) => a.path.localeCompare(b.path) || number(a.code) - number(b.code));
+}
+
+/** Whether handbook prose names a rule code, alone (`rule8`) or in a list (`rules 10 and 14`). */
+function namesRuleCode(code: string, text: string): boolean {
+	const lower = text.toLowerCase();
+	const exact = code.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	if (new RegExp(`(?:^|[^a-z0-9])${exact}(?![a-z0-9])`).test(lower)) return true;
+	const parts = /^([a-z]+)(\d+[a-z]?)$/.exec(code.toLowerCase());
+	if (!parts) return false;
+	return new RegExp(`\\b${parts[1]}s\\s+(?:[\\w-]+\\s*(?:,|and|or|/|&)\\s*)*${parts[2]}(?![a-z0-9])`).test(lower);
+}
+
+/**
+ * A model rule the checker already states: it names only codes the checker
+ * declares in `stated`, or restates one of them in other words.
+ */
+function restatesCheckerRule(
+	rule: string,
+	stated: ReadonlyArray<CheckerRule>,
+	all: ReadonlyArray<CheckerRule>,
+	statedTokens: ReadonlyArray<ReadonlySet<string>>,
+): boolean {
+	const named = all.filter((checker) => namesRuleCode(checker.code, rule));
+	if (named.length > 0) return named.every((checker) => stated.includes(checker));
+	return restatesHandbookRule(handbookRuleTokens(rule), statedTokens);
+}
+
+/**
+ * The coded rules not stated above, listed so a checker rule is never silently
+ * missing from the handbook. Rules the model already names or restates in
+ * other words are left out.
+ */
+function uncoveredCheckerSection(
+	rules: ReadonlyArray<CheckerRule>,
+	handbook: string,
+	keptTokens: ReadonlyArray<ReadonlySet<string>>,
+): ClioMdSection | null {
+	const lines: string[] = [];
+	let chars = 0;
+	for (const rule of rules) {
+		if (namesRuleCode(rule.code, handbook)) continue;
+		if (restatesHandbookRule(handbookRuleTokens(rule.sentence), keptTokens)) continue;
+		const line = `- ${rule.sentence}`;
+		if (chars + line.length + 1 > HANDBOOK_TARGETS.sectionChars - 200) break;
+		lines.push(line);
+		chars += line.length + 1;
+	}
+	if (lines.length === 0) return null;
+	return {
+		title: CHECKER_SECTION_TITLE,
+		body: [
+			"Rules the project's checks declare that the rules above do not state, each in its checker's words. A change that breaks one fails that check.",
+			...lines,
+		].join("\n"),
+	};
+}
+
+/** Strictness flags whose meaning an agent cannot read off ordinary code. */
+const TSCONFIG_STRICT_FLAGS: ReadonlyArray<readonly [string, string]> = [
+	["exactOptionalPropertyTypes", "an optional property is omitted, never assigned `undefined`"],
+	["noUncheckedIndexedAccess", "an index access yields `T | undefined`"],
+	["noImplicitOverride", "an overriding member is marked `override`"],
+	["noPropertyAccessFromIndexSignature", "an index-signature key is read with brackets"],
+];
+
+/**
+ * The root `tsconfig.json` strictness flags a handbook does not already name,
+ * as one convention. Two drafts in a row dropped this line, and it decides
+ * whether code compiles.
+ */
+function tsconfigConvention(cwd: string, handbook: string): string | null {
+	let options: Record<string, unknown> = {};
+	try {
+		const raw = readFileSync(join(cwd, "tsconfig.json"), "utf8")
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/^\s*\/\/.*$/gm, "")
+			.replace(/,(\s*[}\]])/g, "$1");
+		const parsed = JSON.parse(raw) as { compilerOptions?: Record<string, unknown> };
+		options = parsed.compilerOptions ?? {};
+	} catch {
+		// No root tsconfig, or one this reader cannot parse: no convention is stated.
+		return null;
+	}
+	const enabled = TSCONFIG_STRICT_FLAGS.filter(([flag]) => options[flag] === true && !handbook.includes(flag));
+	if (enabled.length === 0) return null;
+	return `\`tsconfig.json\` enables ${enabled.map(([flag, meaning]) => `\`${flag}\` (${meaning})`).join(", ")}.`;
+}
+
+export interface ExpectedSection {
+	title: string;
+	reason: string;
+}
+
+/**
+ * The sections a handbook must carry when the evidence supports them. A draft
+ * from the same model on the same repository kept Change recipes in one run
+ * and dropped the whole section in the next, and nothing said so.
+ */
+function missingHandbookSections(
+	input: Pick<BootstrapGenerateInput, "cwd" | "enforcement">,
+	draft: Pick<BootstrapStructuredOutput, "sections">,
+): ExpectedSection[] {
+	const titles = (draft.sections ?? []).map((section) => section.title);
+	const missing: ExpectedSection[] = [];
+	const checks = (input.enforcement?.checkFiles ?? []).filter((file) => file.failures.length > 0);
+	if (checks.length > 0 && !titles.some((title) => /recipe/i.test(title))) {
+		missing.push({
+			title: "Change recipes",
+			reason: `${checks.map((file) => file.path).join(", ")} report failures a change can only fix by editing files together`,
+		});
+	}
+	if (typeof packageScripts(input.cwd).test === "string" && !titles.some((title) => /\btests?\b/i.test(title))) {
+		missing.push({ title: "Tests", reason: "package.json declares a test script" });
+	}
+	return missing;
 }
 
 function stabilizeGeneratedOutput(
@@ -1087,12 +1323,31 @@ function stabilizeGeneratedOutput(
 		}
 	}
 	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
-	// Invariants win over conventions, then both win over section bullets so boundary rules appear once.
-	const retainedInvariants = invariants.slice(0, HANDBOOK_TARGETS.invariants);
+	// A checker rule that constrains imports between path sets is a hard
+	// invariant: it leads, in the checker's own declaration, and a model rule
+	// that only restates one gives way to it.
+	const checkerRules = checkerRuleList(input);
+	const architectural = checkerRules.filter((rule) => rule.architectural);
+	const architecturalTokens = architectural.map((rule) => handbookRuleTokens(rule.sentence));
+	const restatesArchitecture = (rule: string): boolean =>
+		architectural.length > 0 && restatesCheckerRule(rule, architectural, checkerRules, architecturalTokens);
+	const retainedInvariants = [
+		...architectural.map((rule) => rule.sentence).filter((rule) => !invariants.includes(rule)),
+		// Authored invariants always stay; only a generated one gives way.
+		...invariants.filter((rule) => existing?.invariants.includes(rule) === true || !restatesArchitecture(rule)),
+	].slice(0, HANDBOOK_TARGETS.invariants);
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
-	const retainedConventions = conventions
-		.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens))
-		.slice(0, HANDBOOK_TARGETS.conventions);
+	const typescriptConvention = tsconfigConvention(
+		input.cwd,
+		[...retainedInvariants, ...conventions, ...(base.sections ?? []).map((section) => section.body)].join("\n"),
+	);
+	// Invariants win over conventions, then both win over section bullets so boundary rules appear once.
+	const retainedConventions = [
+		...(typescriptConvention ? [typescriptConvention] : []),
+		...conventions
+			.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
+			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
+	];
 	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
 	const verification = verificationSection(input.cwd, tomlFiles);
@@ -1106,7 +1361,8 @@ function stabilizeGeneratedOutput(
 		const body = handbookBlocks(section.body)
 			.filter(
 				(block) =>
-					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) || !restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens),
+					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
+					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) && !restatesArchitecture(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
@@ -1122,11 +1378,18 @@ function stabilizeGeneratedOutput(
 	for (const section of authoredRules) addSection(section);
 	// Authored sections, then the model's grounded sections, then heuristics:
 	// the model reads the repository, the heuristics only read its metadata.
-	for (const section of existingSections) addSection(section);
+	// The checker section is derived on every run; a stale copy from the previous handbook is not authored.
+	for (const section of existingSections) if (section.title !== CHECKER_SECTION_TITLE) addSection(section);
 	for (const section of base.sections ?? []) {
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
+	const checkerSection = uncoveredCheckerSection(
+		checkerRules.filter((rule) => !rule.architectural),
+		[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
+		[...keptRuleTokens, ...ordinarySections.flatMap((section) => handbookBlocks(section.body).map(handbookRuleTokens))],
+	);
+	if (checkerSection) addSection(checkerSection);
 	for (const section of inferredSections) addSection(section);
 	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
 	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);
@@ -1242,6 +1505,45 @@ function loadBootstrapSiblingFiles(adoption: AdoptionScanResult): SiblingContext
 		path: source.path,
 		content: source.content,
 	}));
+}
+
+function gitOutput(cwd: string, args: ReadonlyArray<string>): string | null {
+	try {
+		return execFileSync("git", internalGitArgv(args, cwd), {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			maxBuffer: 64 * 1024 * 1024,
+		});
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Project context sources Git does not track, when the handbook itself will
+ * be committed. Those sources are private to this checkout (a gitignored
+ * `.claude/CLAUDE.md`, an untracked personal `AGENTS.md`), and folding them
+ * into a tracked CLIO-CODER.md published one maintainer's machine paths, hosts
+ * and private routing to every contributor. An ignored handbook stays local
+ * and may still draw on them; outside Git nothing is shared, so nothing is withheld.
+ */
+function uncommittedContextSources(cwd: string, adoption: AdoptionScanResult): string[] {
+	const project = adoption.sources.filter((source) => source.scope === "project");
+	if (project.length === 0) return [];
+	const top = gitOutput(cwd, ["rev-parse", "--show-toplevel"])?.trim();
+	if (!top) return [];
+	// `check-ignore` prints the path when a rule ignores it; an ignored handbook is not shared.
+	if ((gitOutput(cwd, ["check-ignore", "--", "CLIO-CODER.md"]) ?? "").trim().length > 0) return [];
+	const listed = gitOutput(top, ["ls-files", "-z", "--full-name"]);
+	if (listed === null) return [];
+	const tracked = new Set(listed.split("\0").filter((path) => path.length > 0));
+	return project
+		.map((source) => source.path)
+		.filter((path) => {
+			const rel = relative(top, path).split("\\").join("/");
+			return rel.startsWith("../") || !tracked.has(rel);
+		});
 }
 
 function gitStatus(cwd: string): string {
@@ -1577,11 +1879,24 @@ async function runBootstrapWork(
 		message: "scanning project and sibling agent context",
 		detail: projectType,
 	});
-	const adoption = scanAgentConfigs({
+	const scanned = scanAgentConfigs({
 		cwd,
 		...(input.homeDir ? { homeDir: input.homeDir } : {}),
 		includeGlobal: input.includeGlobalImports === true,
 	});
+	const withheld = new Set(uncommittedContextSources(cwd, scanned));
+	const adoption = withheld.size > 0 ? restrictAdoptionScan(scanned, (path) => !withheld.has(path)) : scanned;
+	if (withheld.size > 0) {
+		out(
+			input.io,
+			`  left out ${withheld.size} context source${withheld.size === 1 ? "" : "s"} Git does not track, because CLIO-CODER.md is not ignored and would publish them: ${[
+				...withheld,
+			]
+				.map((path) => relative(cwd, path).split("\\").join("/"))
+				.slice(0, 6)
+				.join(", ")}${withheld.size > 6 ? ", ..." : ""}\n`,
+		);
+	}
 	const siblingFiles = loadBootstrapSiblingFiles(adoption);
 	progress(input, {
 		phase: "scan",
@@ -1677,10 +1992,15 @@ async function runBootstrapWork(
 	const reportGeneration: BootstrapGenerationSink = (reported) => {
 		if (reportedGeneration === undefined) reportedGeneration = reported;
 	};
+	let enforcementSeen: EnforcementInventory | undefined;
 	if (shouldGenerate) {
 		const depth = input.depth ?? "standard";
-		const repositoryFiles = await enumerateWorkspaceFilesAsync(cwd);
+		// The handbook this run writes is its output, not repository evidence. A
+		// tracked draft let a rewrite ground slash-joined prose in its own
+		// previous text; only --apply hands the old handbook over, as existingClioMd.
+		const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter((path) => path !== "CLIO-CODER.md");
 		const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
+		enforcementSeen = enforcement;
 		const anchors = codewiki.files
 			.filter((file) => file.lang !== "config" && file.role !== "test")
 			.sort(
@@ -1715,6 +2035,7 @@ async function runBootstrapWork(
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
 			reportGeneration,
+			missingSections: (draft) => missingHandbookSections({ cwd, enforcement }, draft),
 			// Deterministic sampling repeats an empty draft unless a bounded repair receives grounding feedback.
 			assessDraft: (draft) => {
 				let retained = 0;
@@ -1803,6 +2124,17 @@ async function runBootstrapWork(
 		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
 	if (shouldGenerate && generation.mode !== "existing") output = fitGeneratedHandbook(output);
+	if (shouldGenerate && generation.mode === "model") {
+		for (const section of missingHandbookSections(
+			{ cwd, ...(enforcementSeen ? { enforcement: enforcementSeen } : {}) },
+			output,
+		)) {
+			warn(
+				input.io,
+				`  warning: the generated CLIO-CODER.md has no ${section.title} section although ${section.reason}; rerun \`clio-coder context init --rewrite\` to draft it again.\n`,
+			);
+		}
+	}
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
