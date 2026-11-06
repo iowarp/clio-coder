@@ -204,6 +204,8 @@ const BEHIND_VIEW = "continues behind this view";
  * `Esc close`, and nothing on screen said the run was one key further away (S3).
  */
 const BEHIND_VIEW_STOP = "close this view, then Esc stops it";
+/** The same way out where the long form does not fit: at 60 and 40 columns the strip had no way out at all. */
+const BEHIND_VIEW_STOP_SHORT = "close, then Esc stops";
 
 /**
  * The line, or null when nothing is active. Candidates run from fullest to leanest and the first that fits wins. The
@@ -297,7 +299,10 @@ export function liveWorkStrip(
 					]
 				: []),
 			...(stoppable ? [render(ownedWith(tailCells([BEHIND_VIEW_STOP])), [BEHIND_VIEW_STOP])] : []),
+			...(stoppable ? [render(owned, [BEHIND_VIEW_STOP_SHORT])] : []),
 			render(owned, [BEHIND_VIEW]),
+			// The way out outranks the subject on a narrow strip, as it does on the rail.
+			...(stoppable ? [render(bare, [BEHIND_VIEW_STOP_SHORT])] : []),
 			render(owned, []),
 			render(bare, []),
 		];

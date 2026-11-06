@@ -93,7 +93,9 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
  */
 function knownSessionCount(quantity: Quantity): string | null {
 	// Clio's estimates count, marked `~`; calls that reported nothing leave the bound to /usage, as the receipt does.
-	const figure = renderCompactCount(quantity.fact).replace(/^≥/u, "").replace(/ \+\?$/u, "");
+	const figure = renderCompactCount(quantity.fact)
+		.replace(/^≥/u, "")
+		.replace(/ \+\?$/u, "");
 	return figure === "?" || figure === "n/a" ? null : figure;
 }
 

@@ -205,11 +205,14 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	const rows = workerRowsOf(state.dispatchRows);
 	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
 	const done = rows.filter((row) => row.status === "completed");
-	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status));
+	// A run someone stopped did not fail: `12 failed` sat over rows that each read `⊘ cancelled`.
+	const cancelled = rows.filter((row) => row.status === "aborted");
+	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status) && row.status !== "aborted");
 	const meta = [
 		active.length > 0 ? `${active.length} active` : null,
 		done.length > 0 ? `${done.length} done` : null,
 		failed.length > 0 ? `${failed.length} failed` : null,
+		cancelled.length > 0 ? `${cancelled.length} cancelled` : null,
 	]
 		.filter((part): part is string => part !== null)
 		.join(" · ");
@@ -872,7 +875,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	// A narrow footer spends no row on hints it cannot fit, so there the notice keeps the shared row it always had;
 	// only a quit or leader prompt outranks it.
 	if (narrow)
-		return [firstRow, row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, state.dismissKeyLabel))];
+		return [
+			firstRow,
+			row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, state.dismissKeyLabel)),
+		];
 	const noticeRow = renderNoticeRow(theme, notice, otherNotices, w, key, state.dismissKeyLabel);
 	const hintRow = row(controls);
 	// With nothing else to say on the hint row, the notice keeps the one row it always had.
