@@ -8,7 +8,7 @@
  */
 
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { QueuedChatMessage } from "../../session-control/chat-loop.js";
 import {
 	centeredWindow,
@@ -206,18 +206,26 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		if (selected) {
 			const detailBudget = bodyRows > 0 ? Math.max(2, bodyRows + takenRows.length - rows.length) : QUEUE_DETAIL_ROWS;
 			const slot = queueSlotWord(selected);
-			rows.push(
-				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
-					// The row's own word leads, so `later` in the list and the slot it means read as one thing.
-					meta: `${this.deps.isHeld?.() === true ? "held" : slot === "steer" ? "steer, Clio reads it at its next step" : "later, Clio reads it when the turn ends"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
-				}),
-			);
+			// The row's own word leads, so `later` in the list and the slot it means read as one thing.
+			const slotSentence =
+				this.deps.isHeld?.() === true
+					? "held"
+					: slot === "steer"
+						? "steer, Clio reads it at its next step"
+						: "later, Clio reads it when the turn ends";
+			const waiting = `waiting ${formatQueueAge(now - selected.enqueuedAt)}`;
+			const label = `Message ${this.selected + 1}`;
+			// A narrow rule cut the sentence mid-clause with no mark; it then takes its own wrapped row under the rule.
+			const inline = visibleWidth(label) + visibleWidth(slotSentence) + visibleWidth(waiting) + 12 <= safeWidth;
+			rows.push(sectionRule(theme, safeWidth, label, { meta: inline ? `${slotSentence} · ${waiting}` : waiting }));
+			const slotRows = inline ? [] : wrapTextWithAnsi(theme.fg("annotation", slotSentence), safeWidth);
+			rows.push(...slotRows);
 			const notice = this.sendNotice(selected).flatMap((line) =>
 				wrapTextWithAnsi(theme.fg("annotation", line), safeWidth),
 			);
 			rows.push(...notice);
 			const text = selected.text.split("\n").flatMap((line) => wrapTextWithAnsi(theme.fg("body", line), safeWidth));
-			const kept = text.slice(0, Math.max(1, detailBudget - 1 - notice.length));
+			const kept = text.slice(0, Math.max(1, detailBudget - 1 - slotRows.length - notice.length));
 			const last = kept.at(-1);
 			rows.push(
 				...(text.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept),
