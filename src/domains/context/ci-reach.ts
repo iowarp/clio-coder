@@ -76,7 +76,7 @@ function expansionEnd(line: string, start: number): number {
  * The simple commands of a shell command line, split at `&&`, `||`, `;`, `|`,
  * `&`, newlines and parentheses outside quotes, each as its words.
  */
-export function shellCommands(line: string): Word[][] {
+function shellCommands(line: string): Word[][] {
 	const commands: Word[][] = [];
 	let words: Word[] = [];
 	let word: Word | null = null;
