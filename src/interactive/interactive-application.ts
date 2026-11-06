@@ -2123,6 +2123,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				followBoardSelection();
 			},
 			toggleDetail: () => dispatchBoard.toggleDetail(),
+			// Without this the Esc router read every detail as closed, so the rail's `[Esc] hide` closed the whole board.
+			detailExpanded: () => dispatchBoard.detailExpanded(),
 		},
 		watchSelectedDispatch,
 		steerSelectedDispatch,
