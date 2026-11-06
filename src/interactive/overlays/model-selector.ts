@@ -32,6 +32,7 @@ import {
 	Input,
 	matchesKey,
 	stripTerminalSequences,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
@@ -80,6 +81,8 @@ const TARGET_COL_WIDTH_WIDE = 12;
 const RUNTIME_COL_WIDTH_NARROW = 10;
 const RUNTIME_COL_WIDTH_MEDIUM = 14;
 const RUNTIME_COL_WIDTH_WIDE = 18;
+const TARGET_COL_WIDTH_MAX = 24;
+const RUNTIME_COL_WIDTH_MAX = 28;
 const SELECTED_PREFIX_WIDTH = 4;
 const TAB = "\t";
 
@@ -582,10 +585,32 @@ const MODEL_TABLE_GAP = 2;
  * reads, so it is sized last from what the fixed columns leave, and runtime,
  * then target, drop whole when it would fall under `MODEL_MIN_WIDTH`.
  */
-function modelLayout(width: number, hasState: boolean): ModelLayout {
-	const targetWidth = width >= 92 ? TARGET_COL_WIDTH_WIDE : TARGET_COL_WIDTH_NARROW;
-	const runtimeWidth =
-		width >= 96 ? RUNTIME_COL_WIDTH_WIDE : width >= 78 ? RUNTIME_COL_WIDTH_MEDIUM : RUNTIME_COL_WIDTH_NARROW;
+function modelLayout(
+	width: number,
+	hasState: boolean,
+	content?: { model: number; target: number; runtime: number },
+): ModelLayout {
+	const fixed = columnLayout(
+		width,
+		hasState,
+		width >= 92 ? TARGET_COL_WIDTH_WIDE : TARGET_COL_WIDTH_NARROW,
+		width >= 96 ? RUNTIME_COL_WIDTH_WIDE : width >= 78 ? RUNTIME_COL_WIDTH_MEDIUM : RUNTIME_COL_WIDTH_NARROW,
+	);
+	if (content === undefined) return fixed;
+	// A wide picker cut `offline-audit` to `offline-aud…` with forty idle cells in
+	// the model column. When every id still fits whole, the target and runtime
+	// columns take the width their own names need instead of a fixed stop.
+	const fitted = columnLayout(
+		width,
+		hasState,
+		Math.min(content.target, TARGET_COL_WIDTH_MAX),
+		Math.min(content.runtime, RUNTIME_COL_WIDTH_MAX),
+	);
+	const idsWhole = fitted.modelWidth - MODEL_COL_GUTTER >= Math.max(MODEL_MIN_WIDTH, content.model);
+	return fitted.showTarget && fitted.showRuntime && idsWhole ? fitted : fixed;
+}
+
+function columnLayout(width: number, hasState: boolean, targetWidth: number, runtimeWidth: number): ModelLayout {
 	let showTarget = width >= 58;
 	let showRuntime = width >= 68;
 	let showState = hasState;
@@ -631,9 +656,25 @@ function activeMark(row: ModelRow): string {
  */
 function modelTableLines(rows: ReadonlyArray<ModelRow>, selectedIndex: number, width: number): string[] {
 	const theme = clioTheme();
+	const longest = (values: ReadonlyArray<string>, header: string): number =>
+		Math.max(header.length, ...values.map((value) => visibleWidth(value)));
 	const layout = modelLayout(
 		width,
 		rows.some((row) => row.residency != null),
+		{
+			model: longest(
+				rows.map((row) => row.model),
+				"model",
+			),
+			target: longest(
+				rows.map((row) => row.target),
+				"target",
+			),
+			runtime: longest(
+				rows.map((row) => row.runtimeShortName),
+				"runtime",
+			),
+		},
 	);
 	const modelColumnWidth = SELECTED_PREFIX_WIDTH + layout.modelWidth;
 	const columns: TableColumn[] = [
