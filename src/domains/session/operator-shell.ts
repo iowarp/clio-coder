@@ -14,7 +14,7 @@ import {
 	combineBashOutput,
 	runBashCommand,
 } from "../../core/bash-exec.js";
-import { redactKnownSecrets } from "../evidence/redact.js";
+import { CumulativeOutputMask, maskCommandOutput } from "../evidence/output-mask.js";
 import type { SessionEntryInput } from "./contract.js";
 
 export const OPERATOR_SHELL_TIMEOUT_MS = 300_000;
@@ -47,18 +47,34 @@ export interface OperatorShellLineRun {
 }
 
 export async function runOperatorShellLine(input: OperatorShellLineInput): Promise<OperatorShellLineRun> {
+	// Live output and the record are masked as a bash call's are: the record can join the model's context and is written to
+	// the session ledger, and the live frames reach the terminal and an ACP client.
+	const secrets = await bashSecretValues();
+	const stdoutMask = new CumulativeOutputMask(secrets);
+	const stderrMask = new CumulativeOutputMask(secrets);
+	const onUpdate = input.onUpdate;
 	const result = await (input.runBash ?? runBashCommand)(input.command, {
 		cwd: input.cwd,
 		timeoutMs: OPERATOR_SHELL_TIMEOUT_MS,
 		signal: input.signal,
-		...(input.onUpdate ? { onUpdate: input.onUpdate } : {}),
+		...(onUpdate
+			? {
+					onUpdate: (progress: BashCommandProgress) =>
+						onUpdate({
+							...progress,
+							stdout: stdoutMask.frame(progress.stdout),
+							stderr: stderrMask.frame(progress.stderr),
+						}),
+				}
+			: {}),
 	});
 	const unlabeled = input.excludeFromContext ? null : (input.label?.(input.command, input.cwd) ?? null);
-	// The record can join the model's context and is written to the session ledger.
-	const output = redactKnownSecrets(
-		appendStatusNotes(combineBashOutput(result), result, OPERATOR_SHELL_TIMEOUT_MS),
-		await bashSecretValues(),
-	);
+	const ending = result.aborted || result.timedOut || result.outputCapped ? "cut-off" : "complete";
+	const masked = {
+		stdout: stdoutMask.final(result.stdout, ending),
+		stderr: stderrMask.final(result.stderr, ending),
+	};
+	const output = appendStatusNotes(combineBashOutput(masked), result, OPERATOR_SHELL_TIMEOUT_MS, secrets);
 	return {
 		result,
 		unlabeled,
@@ -75,12 +91,17 @@ export async function runOperatorShellLine(input: OperatorShellLineInput): Promi
 	};
 }
 
-function appendStatusNotes(output: string, result: BashCommandResult, timeoutMs: number): string {
+function appendStatusNotes(
+	output: string,
+	result: BashCommandResult,
+	timeoutMs: number,
+	secrets: readonly string[],
+): string {
 	const notes: string[] = [];
 	if (result.aborted) notes.push("command aborted");
 	if (result.timedOut) notes.push(`command timed out after ${timeoutMs}ms`);
 	if (result.outputCapped) notes.push("command output exceeded the inline output limit");
-	if (result.error && output.trim().length === 0) notes.push(result.error.message);
+	if (result.error && output.trim().length === 0) notes.push(maskCommandOutput(result.error.message, secrets));
 	if (notes.length === 0) return output;
 	const suffix = notes.map((note) => `[${note}]`).join("\n");
 	return output.length > 0 ? `${output.replace(/\s+$/g, "")}\n${suffix}` : suffix;

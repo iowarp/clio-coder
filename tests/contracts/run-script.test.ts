@@ -311,13 +311,16 @@ process.stdout.write("${sentinel}");`,
 		ok(tail.endsWith(sentinel), `the tail ends with the stream's last bytes: ...${tail.slice(-64)}`);
 		match(tail, /^\[\.\.\. \d+ bytes omitted \.\.\.\]\n/u);
 		const marker = tail.slice(0, tail.indexOf("\n") + 1);
-		strictEqual(Buffer.byteLength(tail) - Buffer.byteLength(marker), RUN_SCRIPT_CAPS.resultTailBytes);
+		const shown = Buffer.byteLength(tail) - Buffer.byteLength(marker);
+		// The window's first tokens go, since a cut token could be what is left of a credential.
+		ok(shown <= RUN_SCRIPT_CAPS.resultTailBytes && shown > RUN_SCRIPT_CAPS.resultTailBytes - 64, `${shown} bytes shown`);
 		const log = readFileSync(detailsOf(result).stdoutPath as string);
 		strictEqual(
 			tail.slice(marker.length),
-			log.subarray(log.byteLength - RUN_SCRIPT_CAPS.resultTailBytes).toString("utf8"),
-			"the tail is exactly the last 8 KiB of the log",
+			log.subarray(log.byteLength - shown).toString("utf8"),
+			"the tail is exactly the end of the log",
 		);
+		strictEqual(marker, `[... ${log.byteLength - shown} bytes omitted ...]\n`, "the marker counts every byte not shown");
 	});
 });
 

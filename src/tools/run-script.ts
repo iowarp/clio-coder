@@ -28,7 +28,7 @@ import {
 import { knownSecretValues } from "../core/sandbox/env-scrub.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import type { DynamicToolName } from "../core/tool-names.js";
-import { redactKnownSecrets } from "../domains/evidence/redact.js";
+import { maskCommandOutput } from "../domains/evidence/output-mask.js";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
 import { StringEnum } from "../engine/ai.js";
@@ -809,7 +809,8 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 				...(await bashSecretValues(options?.shellSandbox?.env.secretNames)),
 				...knownSecretValues(request.env),
 			];
-			const mask = (text: string): string => redactKnownSecrets(text, secrets);
+			// A progress tail is a frame of output still growing, which holds back a credential it may have cut.
+			const mask = (text: string): string => maskCommandOutput(text, secrets, "open");
 			const progress =
 				options?.onUpdate === undefined
 					? null
@@ -824,6 +825,8 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			const startedAt = now();
 			let result: SafeCommandResult;
 			let failure: string | null = null;
+			// A run the runner stopped, or one that never resolved, may end inside a credential.
+			let outputEnding: "complete" | "cut-off" = "cut-off";
 			progress?.start();
 			try {
 				result = await runCommand(request.interpreterPath, vector, {
@@ -849,6 +852,7 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 						},
 					},
 				});
+				if (!result.aborted && !result.timedOut && !result.outputCapped) outputEnding = "complete";
 			} catch (error) {
 				// The runner threw or rejected instead of resolving: the run never
 				// produced a process outcome, but its directory exists and the
@@ -870,7 +874,11 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			}
 
 			// Only the tails shaped for the result are masked; the logs on disk keep the bytes the script wrote.
-			result = { ...result, stdout: mask(result.stdout), stderr: mask(result.stderr) };
+			result = {
+				...result,
+				stdout: maskCommandOutput(result.stdout, secrets, outputEnding),
+				stderr: maskCommandOutput(result.stderr, secrets, outputEnding),
+			};
 			const finishedAt = now();
 			const outcome = classifyOutcome(result);
 			const outputRefs: RunOutputRef[] = [];
