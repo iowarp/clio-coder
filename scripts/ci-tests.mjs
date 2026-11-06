@@ -18,6 +18,19 @@ export const coreTests = [
 	"bash-exec-settlement",
 	"bash-output-cap",
 	"damage-control-shell-segments",
+	"damage-control-git-words",
+	"internal-git-hooks",
+	"safety-gates",
+	"default-containment",
+	"contained-secrets",
+	"true-yolo",
+	"yolo-script-sandbox",
+	"search-completeness",
+	"tool-boundaries",
+	"test-runner-vocabulary",
+	"bootstrap-schema-retry-identity",
+	"installed-package-ci",
+	"release-boundary",
 	"dispatch-session-ownership",
 	"gateway-authority",
 	"mutation-atomicity",
@@ -48,9 +61,14 @@ export const guiTests = [
 	"ssh-model",
 	"machine-proxy",
 	"openapi",
+	"boundaries",
 ].map((name) => `tests/${name}.test.ts`);
 
-export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
+export const packageTests = [
+	"tests/smoke/installed-package.test.ts",
+	"tests/smoke/native-call-timing.test.ts",
+	"tests/contracts/instant-shell-import-graph.test.ts",
+];
 
 // Qualification runs the core, GUI and package tiers at once. Core at four
 // (da71294f7) was measured alone on 24 CPUs; on a 4-vCPU hosted runner the
