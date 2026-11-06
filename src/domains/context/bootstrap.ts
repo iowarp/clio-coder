@@ -95,6 +95,12 @@ export interface BootstrapGenerateInput {
 	codewiki: Codewiki;
 	existingClioMd?: ParsedClioMd;
 	existingClioMdText?: string;
+	/**
+	 * Hard invariants of the handbook a rewrite replaces. The draft ignores
+	 * them as source; each one a check the repository still runs enforces is
+	 * carried forward.
+	 */
+	previousInvariants?: ReadonlyArray<string>;
 	/** What CI runs and which custom checks exist; the model explains each as a rule. */
 	enforcement?: EnforcementInventory;
 	depth?: BootstrapDepth;
@@ -1240,6 +1246,85 @@ function namesRuleCode(code: string, text: string): boolean {
 	return new RegExp(`\\b${parts[1]}s\\s+(?:[\\w-]+\\s*(?:,|and|or|/|&)\\s*)*${parts[2]}(?![a-z0-9])`).test(lower);
 }
 
+interface EnforcementNames {
+	/** Package scripts and single-word codes: cited only in backticks. */
+	cited: ReadonlySet<string>;
+	/** Codes with a hyphen or digit (`case-portable-paths`, `rule12`) and check functions, which prose names bare. */
+	named: ReadonlyArray<string>;
+}
+
+/**
+ * Every name under which the inventory shows a check failing a change. A
+ * check file's path is not one: a rule citing `scripts/check-hygiene.ts` may
+ * name a check that file no longer runs.
+ */
+function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
+	const cited = new Set<string>(Object.keys(packageScripts(input.cwd)));
+	const named = new Set<string>();
+	const addCode = (code: string): void => {
+		if (/[-\d]/.test(code)) named.add(code);
+		else cited.add(code);
+	};
+	for (const file of input.enforcement?.checkFiles ?? []) {
+		for (const check of file.checks) named.add(check);
+		for (const failure of file.failures) {
+			const head = /^([\w.:/-]+): /.exec(failure)?.[1];
+			for (const code of head?.split("/") ?? []) addCode(code);
+		}
+		for (const rule of file.rules ?? []) addCode(rule.code);
+	}
+	return { cited, named: [...named] };
+}
+
+/** The enforcement names a rule cites or names. */
+function namedEnforcement(rule: string, names: EnforcementNames): string[] {
+	const found = new Set<string>();
+	for (const match of rule.matchAll(/`([^`\n]+)`/g)) {
+		const token = (match[1] ?? "").trim();
+		const script = /^(?:pnpm|npm|yarn|bun)(?: run)? ([\w:.-]+)$/.exec(token)?.[1];
+		if (names.cited.has(token)) found.add(token);
+		else if (script !== undefined && names.cited.has(script)) found.add(script);
+	}
+	for (const name of names.named) if (namesRuleCode(name, rule)) found.add(name);
+	return [...found];
+}
+
+/** The checks a rule names, a check function (`checkDocsSource`) keyed as its failure code (`docs-source`). */
+function namedChecks(rule: string, names: EnforcementNames): string[] {
+	return namedEnforcement(rule, names)
+		.filter((name) => !names.cited.has(name))
+		.map((name) =>
+			/^check[A-Z]/.test(name)
+				? name
+						.slice(5)
+						.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+						.toLowerCase()
+				: name.toLowerCase(),
+		);
+}
+
+/**
+ * The previous handbook's hard invariants that a check the repository still
+ * runs enforces, grounded like a model line. A rewrite drafts afresh, and a
+ * small model left four such rules (case-colliding paths, retired HTML docs,
+ * the gitignored-literal join, the throwing `prepublishOnly`) out of Hard
+ * invariants while every one of their checks still failed on them. A rule
+ * whose check is gone, or whose citations no longer ground, is not carried.
+ */
+function enforcedPreviousInvariants(
+	input: BootstrapGenerateInput,
+	names: EnforcementNames,
+	corpus: ModelGroundingCorpus,
+): string[] {
+	const carried: string[] = [];
+	for (const invariant of input.previousInvariants ?? []) {
+		if (namedEnforcement(invariant, names).length === 0) continue;
+		const grounded = groundedModelLine(invariant, corpus);
+		if (grounded && namedEnforcement(grounded, names).length > 0) pushUnique(carried, grounded);
+	}
+	return carried;
+}
+
 /**
  * A model rule the checker already states: it names only codes the checker
  * declares in `stated`, or restates one of them in other words.
@@ -1388,10 +1473,31 @@ function stabilizeGeneratedOutput(
 	const architecturalTokens = architectural.map((rule) => handbookRuleTokens(rule.sentence));
 	const restatesArchitecture = (rule: string): boolean =>
 		architectural.length > 0 && restatesCheckerRule(rule, architectural, checkerRules, architecturalTokens);
+	const names = enforcementNames(input);
+	const carryCorpus =
+		(input.previousInvariants?.length ?? 0) > 0 ? (groundingCorpus ?? createModelGroundingCorpus(input)) : null;
+	const carried = carryCorpus
+		? enforcedPreviousInvariants(input, names, carryCorpus).filter((rule) => !restatesArchitecture(rule))
+		: [];
+	const carriedTokens = carried.map(handbookRuleTokens);
+	const carriedChecks = new Set(carried.flatMap((rule) => namedChecks(rule, names)));
+	// A rule restates a carried invariant when it reads the same, or when every check it names is one a carried invariant names.
+	const restatesCarried = (rule: string): boolean => {
+		if (carried.length === 0) return false;
+		const checks = namedChecks(rule, names);
+		if (checks.length > 0 && checks.every((check) => carriedChecks.has(check))) return true;
+		return restatesHandbookRule(handbookRuleTokens(rule), carriedTokens);
+	};
 	const retainedInvariants = [
 		...architectural.map((rule) => rule.sentence).filter((rule) => !invariants.includes(rule)),
+		...carried.filter((rule) => !invariants.includes(rule)),
 		// Authored invariants always stay; only a generated one gives way.
-		...invariants.filter((rule) => existing?.invariants.includes(rule) === true || !restatesArchitecture(rule)),
+		...invariants.filter(
+			(rule) =>
+				existing?.invariants.includes(rule) === true ||
+				carried.includes(rule) ||
+				(!restatesArchitecture(rule) && !restatesCarried(rule)),
+		),
 	].slice(0, HANDBOOK_TARGETS.invariants);
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
 	const typescriptConvention = tsconfigConvention(
@@ -1402,7 +1508,12 @@ function stabilizeGeneratedOutput(
 	const retainedConventions = [
 		...(typescriptConvention ? [typescriptConvention] : []),
 		...conventions
-			.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
+			.filter(
+				(rule) =>
+					!restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) &&
+					!restatesArchitecture(rule) &&
+					!restatesCarried(rule),
+			)
 			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
 	];
 	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
@@ -1419,7 +1530,9 @@ function stabilizeGeneratedOutput(
 			.filter(
 				(block) =>
 					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
-					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) && !restatesArchitecture(block)),
+					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) &&
+						!restatesArchitecture(block) &&
+						!restatesCarried(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
@@ -2032,6 +2145,8 @@ async function runBootstrapWork(
 	const existingClioMdText = useExistingClioMdAsSource ? originalClioMdText : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
 	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
+	const replaced = hadClioMd && input.rewriteClioMd === true ? tryReadClioMd(cwd) : null;
+	const previousInvariants = replaced?.ok && replaced.value ? replaced.value.invariants : [];
 	const replaceClioMd = input.applyClioMd === true || input.rewriteClioMd === true;
 	if (
 		input.adopt === true &&
@@ -2105,6 +2220,7 @@ async function runBootstrapWork(
 			repositoryFiles,
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
+			...(previousInvariants.length > 0 ? { previousInvariants } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
 			reportGeneration,
 			missingSections: (draft) => missingHandbookSections({ cwd, enforcement }, draft),
@@ -2160,6 +2276,7 @@ async function runBootstrapWork(
 				repositoryFiles,
 				...(existingParsed ? { existingClioMd: existingParsed } : {}),
 				...(existingClioMdText ? { existingClioMdText } : {}),
+				...(previousInvariants.length > 0 ? { previousInvariants } : {}),
 			},
 			output,
 			() => {

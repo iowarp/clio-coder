@@ -470,7 +470,7 @@ Run `clio-coder context <subcommand> --help` for the installed usage. The subcom
 | `--heuristic` | For `context init`, skip model exploration and use the deterministic generator. |
 | `--adopt` | For `context init`, refresh only the managed imported-agent-context section. |
 | `--global` | For `context init`, include global sibling agent context from the user home directory. |
-| `--propose`, `--apply`, `--rewrite` | For `context init` over an existing CLIO-CODER.md: write an ignored draft, update the handbook from a draft grounded in it, or replace it with a fresh draft that ignores it. |
+| `--propose`, `--apply`, `--rewrite` | For `context init` over an existing CLIO-CODER.md: write an ignored draft, update the handbook from a draft grounded in it, or replace it with a fresh draft that ignores it, keeping only the Hard invariants that name a check the repository still runs. |
 | `--depth` | For `context init`, exploration bound: `quick` (8 calls, 2 minutes), `standard` (16, 4) or `deep` (32, 8). For `context wiki`, generation depth: `auto`, `simple`, `medium`, or `detailed`. |
 | `--target`, `--model`, `--thinking` | For `context init` and `context wiki`, override the route for one run. `--model` and `--thinking` need `--target` on `init`. The wiki accepts `off`, `low`, `medium` or `high` for `--thinking`. For `context replay`, `--target` is the fraction of the window an eviction batches down to, above 0 and below 1 and below `--threshold`. |
 | `--wiki` | For `context refresh`, also update the Markdown wiki. |

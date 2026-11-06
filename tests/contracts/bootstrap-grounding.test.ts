@@ -104,6 +104,47 @@ it("drops a reviewer requirement placed in a file that names no reviewer, keepin
 	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 });
 
+it("carries a check-enforced hard invariant through a rewrite, and not one whose check is gone", async () => {
+	mkdirSync(join(cwd, "scripts"));
+	writeFileSync(
+		join(cwd, "scripts", "check.js"),
+		'function checkCasePortablePaths() {\n\tfail("case-portable-paths", "paths differ only by case and collide");\n}\n',
+	);
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			"1. Do not add paths that differ only by case: they collide on case-insensitive filesystems (case-portable-paths check in `scripts/check.js`).",
+			"2. Never render widgets from `src/index.ts`: the widget-entry check in `scripts/check.js` refuses it.",
+			"",
+		].join("\n"),
+	);
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				// The draft states the case rule only as a convention, which gives way to the carried invariant.
+				invariants: [],
+				conventions: ["`checkCasePortablePaths` in `scripts/check.js` fails on paths that differ only by case."],
+				sections: [],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes("1. Do not add paths that differ only by case"), handbook);
+	strictEqual(handbook.includes("widget-entry"), false, handbook);
+	strictEqual(handbook.includes("`checkCasePortablePaths`"), false, handbook);
+});
+
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
 	const draft = {
 		projectName: "harbor",

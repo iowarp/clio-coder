@@ -20,7 +20,8 @@ the codewiki index, and the .clio-coder state. The configured Clio
 target drafts CLIO-CODER.md grounded in the existing handbook, codewiki structure, and
 sibling agent context. Existing CLIO-CODER.md files are preserved by default; use
 --propose for an ignored draft, --apply to update the handbook using it as source,
-or --rewrite to replace it with a fresh draft that ignores the current CLIO-CODER.md.
+or --rewrite to replace it with a fresh draft that ignores the current CLIO-CODER.md,
+except Hard invariants that name a check the repository still runs.
 
 Options:
   --preview        show the plan without writing any files
@@ -29,7 +30,8 @@ Options:
   --global         include global sibling agent context from user home directory
   --propose        write an ignored .clio-coder/proposals/CLIO-CODER-*.md draft when CLIO-CODER.md exists
   --apply          replace an existing CLIO-CODER.md with a draft grounded in the existing handbook
-  --rewrite        replace an existing CLIO-CODER.md with a fresh draft that ignores it as source
+  --rewrite        replace an existing CLIO-CODER.md with a fresh draft that ignores it as source,
+                   keeping Hard invariants that name a check the repository still runs
   --json           emit one machine-readable result object on stdout
   --depth <level>  bounded exploration: quick (8 calls, 2m), standard (16 calls, 4m), deep (32 calls, 8m)
   --target <id>    override the configured bootstrap target for this noninteractive run
