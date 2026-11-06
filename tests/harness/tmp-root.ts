@@ -23,6 +23,7 @@ import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isMainThread } from "node:worker_threads";
+import { resolveClioDirs } from "../../src/core/xdg.js";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 
@@ -116,19 +117,37 @@ function sweepStaleRoots(): void {
 	}
 }
 
-const inherited = process.env[ROOT_ENV];
-// The same predicate the delete is gated on: a root that would not be safe to
-// remove is not one to write into either, so a stale or hostile value from the
-// environment is replaced by a fresh root rather than trusted.
-if (
-	inherited !== undefined &&
-	(isRemovableRoot(inherited) ||
-		(resolve(inherited) === systemTmp &&
-			basename(systemTmp).startsWith(TEST_TMP_ROOT_PREFIX) &&
-			lstatSync(systemTmp, { throwIfNoEntry: false })?.isDirectory()))
-) {
+/**
+ * The canonical path of an inherited run root this process may trust, else null.
+ *
+ * Every Clio root the run writes through is confined to this directory, so it
+ * must itself sit physically inside the approved scratch boundary, the real
+ * temp dir. A lexical prefix check is not enough: `<tmp>/alias/clio-coder-tests-x`
+ * passes it when `alias` points at a real home. A test child sees the root as
+ * its own temp dir, so the root may also equal the boundary. The final component
+ * must be a real directory (lstat), matching what the exit cleanup accepts.
+ */
+function trustedInheritedRoot(value: string | undefined): string | null {
+	if (value === undefined || !isAbsolute(value)) return null;
+	if (!lstatSync(value, { throwIfNoEntry: false })?.isDirectory()) return null;
+	let real: string;
+	try {
+		real = realpathSync(value);
+	} catch {
+		return null;
+	}
+	if (!basename(real).startsWith(TEST_TMP_ROOT_PREFIX)) return null;
+	return real === systemTmp || real.startsWith(`${systemTmp}${sep}`) ? real : null;
+}
+
+// A root that is not physically inside the scratch boundary is not one to write
+// into, so a stale or hostile value from the environment is replaced by a fresh
+// root rather than trusted.
+const inherited = trustedInheritedRoot(process.env[ROOT_ENV]);
+if (inherited !== null) {
 	// A test child inside a run that already has a root. Use it; the process that
 	// created it is the one that removes it.
+	process.env[ROOT_ENV] = inherited;
 	process.env.TMPDIR = inherited;
 } else {
 	// Only the run that creates a root sweeps; a test child inherits one and has
@@ -235,6 +254,24 @@ function confineClioRootEnv(env: NodeJS.ProcessEnv, runRoot: string): string[] {
 	return dropped;
 }
 
+/**
+ * Refuse to run when any root Clio would actually write through escapes the run
+ * root. Confining the variables is not enough on its own: `<runRoot>/home` or
+ * `<home>/state` can already be a link to a real home, and xdg.ts appends the
+ * role after the variables are read. This asks xdg.ts for the same answer the
+ * product gets and checks each one physically.
+ */
+function assertClioDirsConfined(realRunRoot: string): void {
+	const dirs = resolveClioDirs();
+	const escaped = (Object.keys(dirs) as Array<keyof typeof dirs>).filter(
+		(role) => confinedPath(dirs[role], realRunRoot) === null,
+	);
+	if (escaped.length === 0) return;
+	throw new Error(
+		`tests/harness/tmp-root.ts: refusing to run, the Clio ${escaped.map((role) => `${role} root ${dirs[role]}`).join(", ")} resolves outside the run root ${realRunRoot}`,
+	);
+}
+
 // A test must never inherit the operator's Clio roots or platform defaults. The
 // preload runs before every test module, so this catches settingsPath() and
 // every XDG role resolver without requiring each call site to remember an
@@ -249,6 +286,7 @@ function confineClioRootEnv(env: NodeJS.ProcessEnv, runRoot: string): string[] {
 				`tests/harness/tmp-root.ts: ignoring inherited ${dropped.join(", ")}; tests use the run root ${runRoot}\n`,
 			);
 		}
+		assertClioDirsConfined(realpathSync(runRoot));
 	}
 }
 
