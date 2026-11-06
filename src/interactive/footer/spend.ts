@@ -87,6 +87,18 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 	};
 }
 
+/**
+ * The session's tokens as the read model displays them, without the `≥ … +?` bound the row has no room to explain:
+ * the measured part alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252`.
+ */
+function knownSessionCount(quantity: Quantity): string | null {
+	// Clio's estimates count, marked `~`; calls that reported nothing leave the bound to /usage, as the receipt does.
+	const figure = renderCompactCount(quantity.fact)
+		.replace(/^≥/u, "")
+		.replace(/ \+\?$/u, "");
+	return figure === "?" || figure === "n/a" ? null : figure;
+}
+
 export function footerTelemetry(view: TelemetryView | null | undefined): FooterTelemetry {
 	if (!view) return { kind: "unavailable" };
 	if (view.seeding) return { kind: "reading" };
@@ -107,7 +119,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 	const spend: FooterTelemetry = {
 		kind: "ready",
 		tokens: contributed(session.totals.tokens) ? renderCompactCount(session.totals.tokens.fact) : null,
-		measuredTokens: contributed(session.totals.tokens) ? measuredCount(session.totals.tokens) : null,
+		measuredTokens: contributed(session.totals.tokens) ? knownSessionCount(session.totals.tokens) : null,
 		cost: contributed(session.totals.usd) ? session.totals.usd.display : null,
 		neverSent:
 			contributed(neverSent) && !zero(neverSent) && !("kind" in neverSent.fact)
