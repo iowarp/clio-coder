@@ -592,9 +592,10 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: Ra
 const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc stops" };
 const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model to switch", short: "/model" };
 /** Once output has started a route change waits for the next turn, so the way to another model now runs through Esc. */
-const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model to switch", short: "then /model" };
+// Whole or absent: a bare `/model` beside a wait named no action, and the action is what the fact is for (HS22).
+const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model to switch" };
 /** While nothing has come back, a pick reroutes the request itself. */
-const MODEL_MOVES: Omit<RailFact, "keep"> = { text: "/model to reroute", short: "/model" };
+const MODEL_MOVES: Omit<RailFact, "keep"> = { text: "/model to reroute" };
 
 /** The server a route goes to, by the name the operator gave it, or plain words when the rail does not know it. */
 function serverName(target: string | undefined): string {
