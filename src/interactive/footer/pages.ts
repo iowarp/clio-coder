@@ -767,7 +767,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
 	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
 	// Until the first probe lands the branch is unknown, not absent: say nothing.
-	const named = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? "no Git branch");
+	// A detached HEAD is still a repository: name the commit rather than claim there is no branch to speak of.
+	const unnamed =
+		state.workspace.detachedAt !== undefined ? `detached at ${state.workspace.detachedAt}` : "no Git branch";
+	const named = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? unnamed);
 	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "  ";
 	const gitRoom = Math.max(4, Math.floor(workspaceWidth * 0.3));
 	// A branch name may lose its middle; the sentence that says there is none is whole or absent (`no Gi…ranch`).

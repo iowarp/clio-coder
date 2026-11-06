@@ -54,6 +54,8 @@ export interface WorkspaceFacts {
 	branch: string | null;
 	/** The first probe has not landed, so a missing branch means unknown rather than no Git. */
 	branchPending?: boolean;
+	/** HEAD names no branch: the abbreviated commit it sits on, which the footer names instead of `no Git branch`. */
+	detachedAt?: string;
 	dirty: boolean | null;
 	projectType: string | null;
 	remote: string | null;

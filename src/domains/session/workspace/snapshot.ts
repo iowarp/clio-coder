@@ -20,6 +20,8 @@ export interface WorkspaceSnapshot {
 	behind: number | null;
 	recentCommits: ReadonlyArray<WorkspaceCommit>;
 	remoteUrl: string | null;
+	/** HEAD names no branch: the abbreviated commit it sits on (`git-probe.ts`). */
+	detachedAt?: string;
 	projectType: ProjectType;
 	capturedAt: string;
 	/** Set only on the placeholder returned before the first probe lands: its Git fields are unknown, not absent. */
@@ -60,6 +62,7 @@ function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
 		behind: git.behind,
 		recentCommits: git.recentCommits,
 		remoteUrl: git.remoteUrl,
+		...(git.detachedAt !== undefined ? { detachedAt: git.detachedAt } : {}),
 		projectType,
 		capturedAt: new Date().toISOString(),
 		...(git.undetermined === true ? { gitUnknown: true as const } : {}),
