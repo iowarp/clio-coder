@@ -7,7 +7,12 @@ import TreeSitter, {
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import { loadPinnedAsset } from "../../../core/pinned-asset.js";
-import { fetchedGrammarAsset, fetchedGrammarForFile } from "./fetched-grammars.js";
+import {
+	fetchedGrammarAsset,
+	fetchedGrammarForFile,
+	GRAMMAR_FETCH_RETRY_MS,
+	GRAMMAR_FETCH_TIMEOUT_MS,
+} from "./fetched-grammars.js";
 import { TREE_SITTER_RUNTIME_WASM } from "./grammar-assets.js";
 import type {
 	CodewikiLanguage,
@@ -89,19 +94,6 @@ const FUNCTION_LIKE_NODE_TYPES = new Set([
 const PY_SCOPE_NODE_TYPES = new Set(["function_definition", "class_definition"]);
 
 /**
- * One first-use grammar download may hold an index build this long. Both
- * grammars are a few MB; past this the network is treated as absent.
- */
-const GRAMMAR_FETCH_TIMEOUT_MS = 15_000;
-/**
- * After a failed download the grammar is not retried for this long, so an
- * air-gapped node pays the timeout once per window rather than on every
- * incremental index update.
- */
-const GRAMMAR_FETCH_RETRY_MS = 10 * 60_000;
-const grammarFetchFailedAt = new Map<string, number>();
-
-/**
  * The grammar's wasm: vendored ones load from the package by path, fetched ones
  * from the verified cache bytes. Null means the grammar is unavailable now and
  * its files take the regex fallback; code_nav says so (fetched-grammars.ts).
@@ -109,16 +101,14 @@ const grammarFetchFailedAt = new Map<string, number>();
 async function grammarSource(file: string): Promise<string | Uint8Array | null> {
 	const fetched = fetchedGrammarForFile(file);
 	if (!fetched) return grammarAssetPath(file);
-	const failedAt = grammarFetchFailedAt.get(file);
-	if (failedAt !== undefined && performance.now() - failedAt < GRAMMAR_FETCH_RETRY_MS) return null;
 	try {
-		const bytes = await loadPinnedAsset(fetchedGrammarAsset(fetched), GRAMMAR_FETCH_TIMEOUT_MS);
-		grammarFetchFailedAt.delete(file);
-		return bytes;
+		return await loadPinnedAsset(fetchedGrammarAsset(fetched), {
+			timeoutMs: GRAMMAR_FETCH_TIMEOUT_MS,
+			retryAfterMs: GRAMMAR_FETCH_RETRY_MS,
+		});
 	} catch {
 		// Offline or blocked: the regex extractor indexes these files instead, and
-		// code_nav reports the missing grammar from the absent cache file.
-		grammarFetchFailedAt.set(file, performance.now());
+		// code_nav reports the missing grammar with the recorded reason.
 		return null;
 	}
 }

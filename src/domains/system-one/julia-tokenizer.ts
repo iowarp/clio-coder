@@ -40,7 +40,7 @@ export function loadJuliaTokenizer(): Promise<boolean> {
 	loading ??= (async () => {
 		const bytes = await loadPinnedAsset(
 			{ label: "the Julia-1 tokenizer", url: SOURCE, sha256: SHA256, path: juliaTokenizerPath() },
-			DOWNLOAD_TIMEOUT_MS,
+			{ timeoutMs: DOWNLOAD_TIMEOUT_MS },
 		);
 		const count = createBpeCounter(JSON.parse(bytes.toString("utf8")) as TokenizerFile);
 		registerExactBound("julia-1", (question, options) => juliaBound(question, options, count));
