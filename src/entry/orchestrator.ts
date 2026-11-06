@@ -1563,6 +1563,7 @@ async function runCompactionFlow(
 	budget?: Pick<
 		CompactInput,
 		| "providerCompaction"
+		| "livePrefix"
 		| "providerFallbackReason"
 		| "providerReplayFallback"
 		| "keepRecentTokens"
@@ -1946,6 +1947,7 @@ export function createProductionAutoCompact(
 	budget?: Pick<
 		CompactInput,
 		| "providerCompaction"
+		| "livePrefix"
 		| "providerFallbackReason"
 		| "providerReplayFallback"
 		| "keepRecentTokens"

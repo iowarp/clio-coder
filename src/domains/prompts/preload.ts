@@ -82,7 +82,12 @@ export function selectProjectPreload(
 		const includedChars = text.length;
 		const includedLines = renderedLines(text);
 		const omittedFiles = sources.filter((source) => source.omissionReason !== null);
-		const reason = mode !== "partial" ? null : (bindingReason ?? (chars > maxChars ? "size" : "lines"));
+		const reason =
+			mode === "none"
+				? "no-clio-md"
+				: mode !== "partial"
+					? null
+					: (bindingReason ?? (chars > maxChars ? "size" : "lines"));
 		const coverageLabel = omittedFiles
 			.map((source) => {
 				const path = relative(options.cwd ?? process.cwd(), source.path) || "CLIO-CODER.md";
@@ -114,9 +119,11 @@ export function selectProjectPreload(
 	};
 	if (fits(context.text)) {
 		const sources = context.handbookSources.map(({ path, source }) => coverage(path, source, source));
+		// Support fragments, the absent-handbook line among them, keep the text nonempty without a handbook;
+		// the class reports the handbook, so it says none rather than every support line loaded (FW-7).
 		return {
 			text: context.text,
-			classification: classify(context.text, context.text.length === 0 ? "none" : "full", sources, 0),
+			classification: classify(context.text, sources.length === 0 ? "none" : "full", sources, 0),
 		};
 	}
 	const retrieval =
