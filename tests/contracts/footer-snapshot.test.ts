@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { it, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -7,6 +7,7 @@ import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } 
 import { createFollowUpQueuePanel } from "../../src/interactive/follow-up-queue-panel.js";
 import { buildFooterDashboard, capabilityLabels } from "../../src/interactive/footer/dashboard.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
+import type { Notification } from "../../src/interactive/footer/notifications.js";
 import { formatNotificationPanel } from "../../src/interactive/footer/notifications.js";
 import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
@@ -14,6 +15,52 @@ import { createKeybindingManager } from "../../src/interactive/keybinding-manage
 import { GLYPH } from "../../src/interactive/theme/index.js";
 import { footerState } from "../harness/footer-fixture.js";
 import { goldenTelemetryRecords, telemetryViewOf } from "../harness/telemetry-view.js";
+
+test("unchanged footer refresh preserves rendered rows while changed state and width invalidate them", () => {
+	let now = 10_000;
+	let used = 100;
+	const notices: Notification[] = [];
+	const panel = buildFooterDashboard({
+		providers: { list: () => [] } as never,
+		resolveCurrentBranch: async () => null,
+		getTerminalColumns: () => 120,
+		getContextUsage: () => ({ tokens: used, contextWindow: 1000, percent: used / 10 }),
+		now: () => now,
+		getNotifications: () => notices,
+		getAgentStatus: () => ({
+			phase: "writing",
+			since: 8000,
+			lastMeaningfulAt: now,
+			watchdogTier: 0,
+			watchdogPeak: 0,
+			localRuntime: false,
+		}),
+	});
+	try {
+		const first = panel.view.render(120);
+		panel.refresh();
+		strictEqual(panel.view.render(120), first);
+		now += 1000;
+		panel.refresh();
+		strictEqual(panel.view.render(120), first, "elapsed status is owned by the composer");
+		used = 200;
+		panel.refresh();
+		notStrictEqual(panel.view.render(120), first);
+		const narrow = panel.view.render(60);
+		strictEqual(narrow.length, 1);
+		strictEqual(panel.view.render(60), narrow);
+		notStrictEqual(panel.view.render(120), narrow);
+		strictEqual(panel.view.render(120).length, 2);
+		notices.push({ id: "warning", level: "warning", text: "Needs attention", key: null, addedAt: now, expiresAt: null });
+		panel.refresh();
+		strictEqual(panel.view.render(60).length, 2);
+		notices.pop();
+		panel.refresh();
+		strictEqual(panel.view.render(60).length, 1);
+	} finally {
+		panel.dispose();
+	}
+});
 
 test("footer hydration reads time and notices once per snapshot", () => {
 	let clocks = 0;
