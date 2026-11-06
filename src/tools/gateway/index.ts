@@ -93,7 +93,7 @@ export interface GatewayToolDeps {
 }
 
 const DESCRIPTION =
-	'Discover registered builtin, extension and MCP capabilities. op="find" searches; op="describe" returns a schema; op="call" executes with args under its own admission; op="chain" runs tool steps. Put capability at the top level and its parameters inside args. After an argument error, describe the capability before retrying. For chain syntax: op="describe", capability="gateway". Gateway operations are not chain capabilities. Discovery grants no authority.';
+	'Discover registered builtin, extension and MCP capabilities. op="find" searches, and an exact name also returns its schema; op="describe" returns a schema; op="call" executes with args under its own admission; op="chain" runs tool steps. Put capability at the top level and its parameters inside args. After an argument error, describe the capability before retrying. For chain syntax: op="describe", capability="gateway". Gateway operations are not chain capabilities. Discovery grants no authority.';
 
 export const gatewayToolSurface = {
 	name: ToolNames.Gateway,
@@ -487,9 +487,23 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			const total = entries.length;
 			const shown = entries.slice(offset, offset + limit);
 			const truncated = offset + shown.length < total;
+			// An exact name answers with what describe would, so the model can call it without a describe round trip,
+			// which resends the whole context once more (OAI-6). A recorded MCP catalog describes without launching.
+			const registered = exactName && offset === 0 ? registry.get(exactName.name as ToolName) : undefined;
+			const exactSpec = registered && surfaceSpecPlacement(registered, allowed) === "gateway" ? registered : undefined;
+			const fromCatalog =
+				exactName && offset === 0 && registered === undefined && exactName.kind === "mcp"
+					? describedFromCatalog(exactName.name)
+					: undefined;
+			const described =
+				exactSpec !== undefined
+					? describedSpec(exactSpec, false, allowed)
+					: fromCatalog !== undefined && !("message" in fromCatalog)
+						? fromCatalog
+						: undefined;
 			// Guidance follows the already-filtered page: it never reveals an excluded capability.
 			const examples =
-				query.length > 0
+				query.length > 0 && described === undefined
 					? shown.slice(0, 1).flatMap((entry) => {
 							const spec = registry.get(entry.name as ToolName);
 							return spec ? gatewayExamples(spec, rawQuery, 1, allowed) : [];
@@ -499,6 +513,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				capabilities: shown,
 				count: shown.length,
 				total,
+				...(described !== undefined ? { described } : {}),
 				...(examples.length > 0
 					? {
 							examples,
@@ -577,14 +592,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	 * snapshot, and the call path validates against the server's live listing,
 	 * so launching to describe would buy nothing and spend a process.
 	 */
-	const describeFromCatalog = (name: string): ToolResult => {
+	const describedFromCatalog = (name: string) => {
 		const found = deps.mcp?.metadata(name);
-		if (found?.metadata == null) {
-			return {
-				kind: "error",
-				message: `gateway: ${found?.reason ?? `unknown capability ${name}`}`,
-			};
-		}
+		if (found?.metadata == null) return { message: `gateway: ${found?.reason ?? `unknown capability ${name}`}` };
 		const { metadata } = found;
 		const authority = [
 			...admissionNotes(metadata.name, metadata.actionClass),
@@ -598,18 +608,24 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		const mcpNote = deps.mcp?.authorityNote(metadata.name);
 		if (mcpNote) authority.push(mcpNote);
 		return {
+			name: metadata.name,
+			kind: "mcp",
+			description: metadata.description,
+			parameters: wireParameterSchema(metadata.parameters),
+			actionClass: metadata.actionClass,
+			executionMode: "sequential",
+			catalog: metadata.provenance,
+			authority,
+		};
+	};
+
+	const describeFromCatalog = (name: string): ToolResult => {
+		const described = describedFromCatalog(name);
+		if ("message" in described) return { kind: "error", message: described.message };
+		return {
 			kind: "ok",
-			output: JSON.stringify({
-				name: metadata.name,
-				kind: "mcp",
-				description: metadata.description,
-				parameters: wireParameterSchema(metadata.parameters),
-				actionClass: metadata.actionClass,
-				executionMode: "sequential",
-				catalog: metadata.provenance,
-				authority,
-			}),
-			details: { op: "describe", described: metadata.name, catalog: metadata.provenance },
+			output: JSON.stringify(described),
+			details: { op: "describe", described: described.name, catalog: described.catalog },
 		};
 	};
 
@@ -659,6 +675,17 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				message: `gateway: ${directCallGuidance(name)}`,
 			};
 		}
+		const kind = gatewayCapabilityKind(spec.name);
+		return {
+			kind: "ok",
+			output: JSON.stringify(describedSpec(spec, direct, allowed)),
+			details: { op: "describe", described: spec.name, ...(kind === "mcp" ? { catalog: "live" } : {}) },
+		};
+	};
+
+	/** What describe answers for a spec the caller may see; find embeds it for an exact name hit. */
+	const describedSpec = (spec: ToolSpec, direct: boolean, allowed: ReadonlySet<string> | null) => {
+		const name = spec.name;
 		const kind = gatewayCapabilityKind(spec.name);
 		const authority = direct
 			? [directCallGuidance(spec.name), autonomyNote(spec.baseActionClass)]
@@ -727,11 +754,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					}
 				: {}),
 		};
-		return {
-			kind: "ok",
-			output: JSON.stringify(payload),
-			details: { op: "describe", described: spec.name, ...(kind === "mcp" ? { catalog: "live" } : {}) },
-		};
+		return payload;
 	};
 
 	const runCall = async (
