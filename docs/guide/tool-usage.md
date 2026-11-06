@@ -27,7 +27,7 @@ Tool registration and argument normalization are owned by [agent-tools.ts](../..
 
 Main Clio Coder sessions attach a small basic surface: `read`, `bash`, `edit`,
 `write`, `verify`, `ask_user` and `gateway`, plus `dispatch` when delegation is
-wired. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
+wired and `consult` when a decision route is bound. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
 execution and observation tools. Ordinary dispatch has a compact attached
 schema; `gateway(op="describe", capability="dispatch")` returns that schema plus
 an `advanced` block with the canonical fields it omits, such as `candidates`,
@@ -50,7 +50,7 @@ One gateway provides `find`, `describe`, `call`, and `chain`. Source: [index.ts]
 | `refresh` | Find only; explicitly connect and refresh the named server. |
 | `steps` | Chain: 1–16 operations with unique `id`, `capability`, `args`, and optional `after:[ids]`. |
 
-`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
+`find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. A first-page `find` whose query names a gateway capability exactly also returns, as `described`, what `describe` would answer, so the call needs no describe round trip; a recorded MCP catalog entry is described from the catalog without launching its server. Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
 authority notes; `call` validates against the live schema and runs under the
 capability's own authority. Direct tools are called directly, or included as
 steps in a chain. Describing `gateway` returns composition syntax; describing
@@ -58,7 +58,7 @@ steps in a chain. Describing `gateway` returns composition syntax; describing
 
 | Placement | Tools |
 | --- | --- |
-| Direct in main sessions | read, bash, edit, write, verify, ask_user, gateway; dispatch when wired |
+| Direct in main sessions | read, bash, edit, write, verify, ask_user, gateway; dispatch and consult when wired |
 | Gateway in main sessions | Every other wired builtin, including grep, find, ls, code_nav, context, run_script, tasks, monitor, steer, ledger, panes, music, limitation, decide and self_compact |
 | Direct in workers | The builtins that `TOOL_PLACEMENT` marks direct and the recipe admits. `find` and `ls` move behind the gateway when the worker's surface admits `bash`. See its discovered tools rather than assuming the main surface |
 | Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>` |
@@ -178,7 +178,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `music` | direct | gateway | orchestrate | read | sequential |
 | `limitation` | direct | gateway | orchestrate | read | parallel |
 | `decide` | direct | gateway | orchestrate | read | sequential |
-| `consult` | direct | gateway | orchestrate | read | parallel |
+| `consult` | direct | direct | orchestrate | read | parallel |
 | `vision` | gateway | gateway | observe | read | parallel |
 | `web_read` | gateway | gateway | retrieve | read | parallel |
 | `web_fetch` | gateway | gateway | retrieve | read; outward for a non-GET method or a body | parallel |
@@ -238,7 +238,9 @@ Documents render to text first, and `offset`, `limit`, `tail` and `line_numbers`
 
 A bundled `docs/*.md` file read with no `offset`, `limit` or `tail` returns an 80-line head plus an index of its sections with start and end lines, and no `next` continuation. Read one section with `offset` and `limit`, or pass `offset=1` without `limit` for an explicit full read within the per-call caps. `clio_docs` hits carry the ready `read` arguments.
 
-Use grep to locate a region, then read that span. Use tail for logs.
+Use grep to locate a region, then read that span. Use tail for logs. A directory path is refused with a pointer to `ls`.
+
+In an installed package, most `.ts` files under `src/` ship packed in `dist/assets/source.pack` rather than as loose files. `read` serves a packed member at its `src/` path exactly like the loose file, and answers a directory that exists only in the pack as a directory. `grep`, `find` and `bash` do not see packed files; `code_nav source=clio` does. A checkout reads its real files ([source-pack.ts](../../src/core/source-pack.ts)).
 
 ```text
 read(path="src/tools/read.ts", offset=80, limit=60)
@@ -381,7 +383,7 @@ Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777
 
 ### Scientific formats
 
-HDF5 and NetCDF-4 are read by h5wasm 0.10.3 (the HDF5 C library compiled to wasm), Parquet by hyparquet 1.31.5, and classic NetCDF (CDF-1, CDF-2 and CDF-5) by a reader built into Clio. The two libraries are not shipped: each is downloaded once on first use as its npm registry tarball, accepted only when its sha256 matches the pin in `src/tools/data/reader-assets.ts`, and unpacked under `<cache>/data-readers/`. A failed download is recorded beside the cache path, and no process on the host tries again for 10 minutes. The refusal names the reader, the URL, the cache path to copy the tarball to on an offline host, and the `run_script` route with h5py, netCDF4 or pyarrow. Classic NetCDF needs no download.
+HDF5 and NetCDF-4 are read by h5wasm 0.10.3 (the HDF5 C library compiled to wasm), Parquet by hyparquet 1.31.5, and classic NetCDF (CDF-1, CDF-2 and CDF-5) by a reader built into Clio. The two libraries are not shipped: each is downloaded once on first use as its npm registry tarball, accepted only when its sha256 matches the pin in `src/tools/data/reader-assets.ts`, and unpacked under `<cache>/data-readers/<package>@<version>/`. The cached tarball is hashed again on every load, so a copy whose sha256 differs is fetched afresh. One download may hold the call for up to 20 s. A failed download is recorded beside the cache path, and no process on the host tries again for 10 minutes. The refusal names the reader, the URL, the cache path to copy the tarball to on an offline or air-gapped host, and the `run_script` route with h5py, netCDF4 or pyarrow. Classic NetCDF needs no download.
 
 Every call runs in a worker thread with a 120 s ceiling, so a long pass never blocks the session and an abort stops it. Files are opened read-only and read lazily: HDF5 reads only the metadata and chunks a call touches, Parquet reads its footer and then only the column chunks of the row groups in the window.
 
@@ -646,16 +648,16 @@ Version 1 remains readable and means `kind: command`; version 2 adds `numeric-co
 | `cwd` | Existing repository-relative directory, at most 512 bytes; absolute paths, parent escapes, and symlink escapes fail. |
 | `timeoutMs` | Integer from 1 to 900000. |
 | `tags` | Up to 16 unique tags matching `[a-z0-9][a-z0-9._-]*`, at most 32 bytes each. |
-| `runs` | Optional, version 2, `command` and `numeric-compare` only. A repository-relative directory whose subdirectories are the runs of one sweep. The check then runs only as `verify(check="<id>/<run>")`, where `<run>` is one existing directory name under `runs`; its path, relative to `cwd`, is appended as the last argv entry, and a bare call is refused. Dispatch verification refuses a `runs` check. |
+| `runs` | Optional, version 2, `command` and `numeric-compare` only; `perf-budget` and `reproduce` refuse it. A repository-relative directory whose subdirectories are the runs of one sweep. The check then runs only as `verify(check="<id>/<run>")`, where `<run>` is one existing directory name under `runs` (letters, digits, `.`, `_` and `-`, at most 128 characters) whose real path stays inside the workspace. Its path, relative to `cwd`, is appended as the last argv entry, so the safety scan, the approval card and the recorded claim name the judged run, and `details.run` carries it. A bare call, a missing run and an escaping run are refused. The listing shows the `<id>/<run>` form. Dispatch verification refuses a `runs` check, because host verification has no run to append. |
 | File | At most 262144 bytes and 128 checks. |
 
 Catalog and package IDs share one namespace; a collision or invalid catalog prevents listing and execution. Checks run declared argv without model-supplied args, cwd, timeout, or environment overrides (a `runs` check appends only the named run's directory), through safe-exec's environment allowlist and 600000-byte output cap. Judged output and reference/baseline files are capped at 32 MiB. Nonzero exit, timeout, abort, or output cap prevents judgement. Results include exact argv/cwd/exit/duration and `aborted`/`timedOut`/`outputCapped` flags; judged checks also report numeric deviations or measured time, budget, and ratio. `judgement.execution` is `succeeded`, `failed`, `unavailable`, `timed-out`, `aborted`, or `output-capped`; validation is `passed`, `failed`, `exit-code`, or `not-run`. `scientificValidity` is always `not established by this check`.
 
-A `reproduce` check hashes every input in the checkout first. Any mismatch refuses the check before anything runs, and the refusal names each path with its expected and actual sha256. Each run then gets a fresh clean environment under the state directory's `scratch/reproduce/`, never inside the checkout: `worktree` (the default) is a detached worktree of HEAD added with hooks off, and `copy` is a directory holding only the declared inputs, so a `copy` check declares its script as an input too. Inputs are copied in at their relative paths and hashed again, so gitignored raw data reaches the run with the pinned bytes. The environment is removed when the run ends, on failure and abort included. A `python` or `python3` command runs through the project `.venv` interpreter by absolute path, `VIRTUAL_ENV`, or `python`/`python3` on PATH; a uv project without `.venv` is refused as needing provisioning. The seed variable is added to the safe-exec environment of every run. The command prints a JSON object whose metrics are numbers, rectangular nested number arrays, or `{"value": ..., "units": "..."}` objects; a ragged array fails judgement. `compare: twice` runs the command in two separate clean environments and judges run 1 against run 2; `compare: {reference}` judges one run against a reference file in the same format. Every metric on either side must be present on both, have the same shape and agree within the tolerance. Each declared `units` entry must be reported exactly by every run, and by the reference when it reports units. Each declared shape must match. The verdict states agreement within the declared tolerance, never correctness. A pass is evidence only; it changes no permission, budget or job clock.
+A `reproduce` check hashes every input in the checkout first. Any mismatch refuses the check before anything runs, and the refusal names each path with its expected and actual sha256; a refusal is reported as `unavailable` with validation `not-run`. Each run then gets a fresh clean environment under the state directory's `scratch/reproduce/`, never inside the checkout: `worktree` (the default) is a detached worktree of HEAD added with hooks off, and `copy` is a directory holding only the declared inputs, so a `copy` check declares its script as an input too. Inputs are copied in at their relative paths and hashed again, so gitignored raw data reaches the run with the pinned bytes. The environment is removed when the run ends, on failure and abort included. A `python` or `python3` command runs through the project `.venv` interpreter by absolute path, `VIRTUAL_ENV`, or `python`/`python3` on PATH; a uv project without `.venv` is refused as needing provisioning. The seed variable is added to the safe-exec environment of every run. The command prints a JSON object whose metrics are numbers, rectangular nested number arrays, or `{"value": ..., "units": "..."}` objects; a ragged array fails judgement. A run that fails, times out or cannot start leaves the check unjudged. When the first run's process could not be created, the check is `unavailable`, as for any check that cannot start. When run 2 cannot start or its environment cannot be prepared after run 1 completed, the check did run: the result is a failed, unjudged run 2 and `details.completedRuns` lists the runs that finished. `compare: twice` runs the command in two separate clean environments and judges run 1 against run 2; `compare: {reference}` judges one run against a reference file in the same format. Every metric on either side must be present on both, have the same shape and agree within the tolerance. Each declared `units` entry must be reported exactly by every run, and by the reference when it reports units. Each declared shape must match. The verdict states agreement within the declared tolerance, never correctness. A pass is evidence only; it changes no permission, budget or job clock.
 
 The `reproduce` report records its conditions: `inputs` (`path`, `sha256`, `sizeBytes`, and `tracked` at the commit), `environment`, `commit`, `trackedTreeClean` (whether the checkout's tracked files matched HEAD; a worktree run judges the committed tree), `seed`, `platform` (`os`, `arch`, `release`, `nodeVersion`, `clioVersion`, and for Python `interpreter` and `pythonVersion`), the resolved `argv` and `cwd`, the tolerance and its rule, each run's exit, duration and payload sha256, the reference identity, and a per-metric verdict with its agreement, units and shape results. Dispatch host verification runs a sealed `reproduce` check through the same runner and never reuses a memoized pass.
 
-Numeric reports identify the reference and extracted payload by SHA-256 and byte count. Non-finite report values serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Version 2 performance baselines record wall time, check, timestamp, and host (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`); version 1 still loads. Host differences are reported but do not change the verdict.
+Numeric reports identify the reference and extracted payload by SHA-256 and byte count, and a `numeric-compare` result in a git checkout also records the HEAD commit and whether tracked files matched it, read before the command runs. Non-finite report values serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Version 2 performance baselines record wall time, check, timestamp, and host (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`); version 1 still loads. Host differences are reported but do not change the verdict.
 
 ### Guided catalog authoring
 
@@ -841,6 +843,8 @@ Modes:
 
 For `outline`, `deps`, and `dependents` the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an `omitted` count, and `next`); an omitted remainder suggests `next: limit=<2x>`. 16KB cap with the JSON stub on overflow.
 
+The Ruby and C# tree-sitter grammars are not shipped. The indexer downloads each the first time a file of that language is indexed, from the pinned `@vscode/tree-sitter-wasm` release on jsDelivr, accepts it only on a sha256 match, and keeps it under Clio's cache directory. A download is bounded at 5 s and a failure is not retried for 10 minutes, so on an offline host those files fall back to the line-pattern extractor, and workspace `symbol` and `outline` results carry a `grammarNote` saying their symbols come from line patterns and that grep is the exhaustive search ([fetched-grammars.ts](../../src/domains/context/codewiki/fetched-grammars.ts)).
+
 ### Related bundle
 
 `related=true` answers "what surrounds this definition" in one call, in place of chaining `outline`, `deps` and `dependents`. With `mode=symbol` it needs a symbol defined in exactly one indexed file. With `mode=outline` the `query` must be the exact indexed path, and a partial match errors with the exact path to retry. The result is one JSON bundle: the matching `definitions` (name, kind, line, signature), the owning `file`, its direct `imports` (`internal` and `external`), its `importers`, and its `testImporters` (importers whose role is `test`).
@@ -909,6 +913,7 @@ Read-only view of known synchronous and detached runs from the dispatch ledger, 
 | `run_id` | Optional dispatch run ID. |
 | `mode` | `list`, `status`, `peek`, `record`, `wait`, `collect`, or `tools`; defaults to status with run_id, list otherwise. |
 | `batch_id`, `run_ids` | `collect`: provide a detached batch ID or nonempty run list; one `run_ids` entry also serves as `run_id` for single-run modes. |
+| `scope`, `job_id` | Session-owned interval jobs instead of worker runs: `scope="jobs"` with `mode="list"` lists them, and `job_id` supports `status` and `wait`. Jobs carry occurrence evidence, never worker run records. |
 | `timeout_ms` | `wait` default 60000 ms, `collect` default 30000 ms, maximum 600000 ms for both. Ignored by other modes. |
 
 | Mode | Result |
@@ -1035,17 +1040,21 @@ absent tool means the current session has no model-facing pane layer.
 
 Arguments:
 
-- `action` (required). `show`, `open`, `handoff`, `close`, or `list`.
-- `target` (show or close). For `show`, an agent id or run-id prefix. For
+- `action` (required). `show`, `open`, `handoff`, `send`, `wait`, `read`, `close`, or `list`.
+- `target` (show, send, wait, read or close). For `show`, an agent id or run-id prefix. For
+  `send`, `wait` and `read`, a handoff pane id or peer name. For
   `close`, a Clio Coder-owned pane id, label, agent id, or `all`.
 - `preset` (open). One of `files`, `logs`, or `shell`. Opening a preset whose pane is already open focuses that pane instead of splitting again. Opening `files` while the files pane is hidden shows it and focuses it.
-- `peer` (handoff, required). One of `claude-code`, `codex`, `opencode`, `antigravity`, or `pi`.
-- `brief` (handoff). Task brief, at most 8192 bytes.
+- `peer` (handoff, required). One of `clio`, `claude-code`, `codex`, `opencode`, `antigravity`, or `pi`.
+- `brief` (handoff). Optional initial prompt, at most 8192 bytes.
 - `cwd` (handoff). Selected workspace path.
+- `text` or `interrupt` (send). A prompt for the peer, at most 8192 bytes, or one interrupt key, `esc` or `ctrl+c`; not both.
+- `timeout_ms` (wait). Default 120000, maximum 600000.
+- `lines` (read). Recent terminal lines, default 120, maximum 400.
 
 `show` takes the workers dock over for a live dispatched run without moving the keyboard. `open` accepts only the
 fixed preset enum. Arbitrary argv is operator-only through `/panes open` and is
-rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio Coder-owned pane. It produces no managed run and no run record. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
+rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio Coder-owned pane. It produces no managed run and no run record. `send`, `wait` and `read` work with a handoff pane only, never a utility pane. `send` delivers a prompt or an interrupt key and nothing else; no field types raw text or presses a key that could accept an approval, a prompt is subject to the same information-flow check as a handoff brief, and a peer that is blocked on its own operator is refused. A `clio` peer is a second Clio that queues the prompt as a turn labelled as coming from the sender. `wait` reports when the peer settles, is blocked asking its operator, or is still running after the budget. `read` returns the peer's recent terminal under an untrusted-content banner, with credentials masked as bash output is; treat it as the peer's unverified claim. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
 reports mux health, notification policy, the state of the files, workers and music docks, and the current inventory. Each dock reads `visible`, `hidden` (parked and still running) or `closed`, and the music dock adds what it is playing (`playing <title>` or `paused`). The model reads dock state there rather than from settings files, and `list` reports it whether or not `integrations.music.agentControl` is on. The tool has no action that hides a dock.
 
 ```text
