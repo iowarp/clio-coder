@@ -44,6 +44,8 @@ export const coreTests = [
 	"read-only-mode",
 	"sandbox-clio-roots",
 	"fleet-run-history-prime",
+	"codewiki-worker-identity",
+	"telemetry-multi-install",
 	"approval-card-arguments",
 	"copilot-sdk-route",
 ].map((name) => `tests/contracts/${name}.test.ts`);

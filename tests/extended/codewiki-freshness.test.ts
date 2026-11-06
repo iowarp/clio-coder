@@ -76,28 +76,6 @@ describe("codewiki global freshness", () => {
 		strictEqual(existsSync(join(cwd, ".clio-coder")), false);
 	});
 
-	it("read-only navigation keeps the object it holds when the tree is unchanged", async () => {
-		// code_nav caches its index per codewiki object; a clone from the worker
-		// rebuilt that index on every call.
-		const cwd = isolated.dir;
-		writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
-		const transient = await loadCodewikiForTool(cwd, { readOnly: true });
-		ok(transient.ok);
-		const again = await loadCodewikiForTool(cwd, { readOnly: true });
-		ok(again.ok);
-		strictEqual(again.codewiki, transient.codewiki);
-		ok(await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" })));
-		const disk = await loadCodewikiForTool(cwd, { readOnly: true });
-		ok(disk.ok);
-		const unchanged = await loadCodewikiForTool(cwd, { readOnly: true });
-		ok(unchanged.ok);
-		strictEqual(unchanged.codewiki, disk.codewiki);
-		writeFileSync(join(cwd, "a.ts"), "export const two = 2;\n");
-		const stale = await loadCodewikiForTool(cwd, { readOnly: true });
-		ok(stale.ok);
-		ok(stale.codewiki.symbols.some((symbol) => symbol.name === "two"));
-	});
-
 	it("recognizes Go exports and unrestricted Rust pub without claiming local or restricted declarations", async () => {
 		const cwd = isolated.dir;
 		writeFileSync(
