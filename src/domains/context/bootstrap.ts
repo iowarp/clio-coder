@@ -1106,7 +1106,70 @@ function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<R
 }
 
 const CHECKER_SECTION_TITLE = "Checker-enforced invariants";
-const CODED_FAILURE_RE = /^([A-Za-z]{0,12}\d{1,4}[a-z]?(?:\/[A-Za-z]{0,12}\d{1,4}[a-z]?)*): (.+)$/;
+
+interface CheckerRule {
+	code: string;
+	path: string;
+	/** The rule as one or more whole sentences, its paths marked as code. */
+	sentence: string;
+	/** It constrains imports between path sets, so it is a hard invariant of the build. */
+	architectural: boolean;
+}
+
+const IMPORT_RULE_RE = /\b(?:value-)?import(?:s|er|ers|ed|ing)?\b/i;
+const RULE_PATH_RE = /@?[\w.*<>-]+(?:\/[\w.*<>-]*)+/g;
+const RULE_CODE_TOKEN_RE =
+	/(@?[\w.*<>-]+(?:\/[\w.*<>-]*)+|\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b[\w*-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml)\b)/g;
+
+/**
+ * A path in a rule's prose names repository paths when it is a pattern, a
+ * package scope, or exists here; `messages/ledger` in a sentence is prose.
+ */
+function rulePathToken(token: string, files: ReadonlySet<string>, directories: ReadonlySet<string>): boolean {
+	if (!token.includes("/")) return true;
+	if (/[*<>]/.test(token) || token.startsWith("@")) return true;
+	const path = token.replace(/\/$/, "");
+	return files.has(path) || directories.has(path);
+}
+
+function markRuleCode(text: string, files: ReadonlySet<string>, directories: ReadonlySet<string>): string {
+	return text.replace(RULE_CODE_TOKEN_RE, (match) => {
+		const token = match.replace(/\.+$/, "");
+		if (!rulePathToken(token, files, directories)) return match;
+		return `\`${token}\`${match.slice(token.length)}`;
+	});
+}
+
+/**
+ * Every coded rule the project's checkers declare, as a whole sentence with
+ * its subject. The failure message is the fallback only: it names the
+ * offending file and interpolates the rule's subject away.
+ */
+function checkerRuleList(input: BootstrapGenerateInput): CheckerRule[] {
+	const files = new Set(input.repositoryFiles ?? []);
+	const directories = new Set<string>();
+	for (const file of files) {
+		const parts = file.split("/");
+		for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join("/"));
+	}
+	const rules: CheckerRule[] = [];
+	for (const file of input.enforcement?.checkFiles ?? []) {
+		for (const rule of file.rules ?? []) {
+			const text =
+				rule.source === "failure" ? `A file that ${rule.text.replace(/^…\s*/, "").replace(/\(…\s*\)/g, "")}` : rule.text;
+			const sentence = markRuleCode(text.replace(/[\s.;:,]+$/, ""), files, directories);
+			const paths = [...rule.text.matchAll(RULE_PATH_RE)].length;
+			rules.push({
+				code: rule.code,
+				path: file.path,
+				sentence: `${sentence}. Checked as \`${rule.code}\` by \`${file.path}\`.`,
+				architectural: IMPORT_RULE_RE.test(rule.text) && paths > 0,
+			});
+		}
+	}
+	const number = (code: string): number => Number(/\d+/.exec(code)?.[0] ?? 0);
+	return rules.sort((a, b) => a.path.localeCompare(b.path) || number(a.code) - number(b.code));
+}
 
 /** Whether handbook prose names a rule code, alone (`rule8`) or in a list (`rules 10 and 14`). */
 function namesRuleCode(code: string, text: string): boolean {
@@ -1119,35 +1182,45 @@ function namesRuleCode(code: string, text: string): boolean {
 }
 
 /**
- * Every coded rule a check file declares and the handbook does not name,
- * stated in that checker's own failure message. A model given fourteen
- * boundary rules and ten invariant slots dropped the session-control and
- * turn-control import rules; a reader is now told each rule exists, and why
- * it is listed in the checker's words rather than the model's.
+ * A model rule the checker already states: it names only codes the checker
+ * declares in `stated`, or restates one of them in other words.
  */
-function uncoveredCheckerRules(enforcement: EnforcementInventory | undefined, handbook: string): ClioMdSection | null {
+function restatesCheckerRule(
+	rule: string,
+	stated: ReadonlyArray<CheckerRule>,
+	all: ReadonlyArray<CheckerRule>,
+	statedTokens: ReadonlyArray<ReadonlySet<string>>,
+): boolean {
+	const named = all.filter((checker) => namesRuleCode(checker.code, rule));
+	if (named.length > 0) return named.every((checker) => stated.includes(checker));
+	return restatesHandbookRule(handbookRuleTokens(rule), statedTokens);
+}
+
+/**
+ * The coded rules not stated above, listed so a checker rule is never silently
+ * missing from the handbook. Rules the model already names or restates in
+ * other words are left out.
+ */
+function uncoveredCheckerSection(
+	rules: ReadonlyArray<CheckerRule>,
+	handbook: string,
+	keptTokens: ReadonlyArray<ReadonlySet<string>>,
+): ClioMdSection | null {
 	const lines: string[] = [];
 	let chars = 0;
-	for (const file of enforcement?.checkFiles ?? []) {
-		const seen = new Set<string>();
-		for (const failure of file.failures) {
-			const head = CODED_FAILURE_RE.exec(failure);
-			const label = head?.[1];
-			if (!label || seen.has(label)) continue;
-			seen.add(label);
-			const codes = label.split("/");
-			if (codes.every((code) => namesRuleCode(code, handbook))) continue;
-			const line = `- ${codes.map((code) => `\`${code}\``).join(", ")} in \`${file.path}\`: ${head?.[2] ?? ""}`;
-			if (chars + line.length + 1 > HANDBOOK_TARGETS.sectionChars - 200) break;
-			lines.push(line);
-			chars += line.length + 1;
-		}
+	for (const rule of rules) {
+		if (namesRuleCode(rule.code, handbook)) continue;
+		if (restatesHandbookRule(handbookRuleTokens(rule.sentence), keptTokens)) continue;
+		const line = `- ${rule.sentence}`;
+		if (chars + line.length + 1 > HANDBOOK_TARGETS.sectionChars - 200) break;
+		lines.push(line);
+		chars += line.length + 1;
 	}
 	if (lines.length === 0) return null;
 	return {
 		title: CHECKER_SECTION_TITLE,
 		body: [
-			"Coded rules the checks below declare that the rules above do not state, quoted from each failure message (… marks an interpolated value). A change that matches one fails that check.",
+			"Rules the project's checks declare that the rules above do not state, each in its checker's words. A change that breaks one fails that check.",
 			...lines,
 		].join("\n"),
 	};
@@ -1188,11 +1261,23 @@ function stabilizeGeneratedOutput(
 		}
 	}
 	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
-	// Invariants win over conventions, then both win over section bullets so boundary rules appear once.
-	const retainedInvariants = invariants.slice(0, HANDBOOK_TARGETS.invariants);
+	// A checker rule that constrains imports between path sets is a hard
+	// invariant: it leads, in the checker's own declaration, and a model rule
+	// that only restates one gives way to it.
+	const checkerRules = checkerRuleList(input);
+	const architectural = checkerRules.filter((rule) => rule.architectural);
+	const architecturalTokens = architectural.map((rule) => handbookRuleTokens(rule.sentence));
+	const restatesArchitecture = (rule: string): boolean =>
+		architectural.length > 0 && restatesCheckerRule(rule, architectural, checkerRules, architecturalTokens);
+	const retainedInvariants = [
+		...architectural.map((rule) => rule.sentence).filter((rule) => !invariants.includes(rule)),
+		// Authored invariants always stay; only a generated one gives way.
+		...invariants.filter((rule) => existing?.invariants.includes(rule) === true || !restatesArchitecture(rule)),
+	].slice(0, HANDBOOK_TARGETS.invariants);
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
+	// Invariants win over conventions, then both win over section bullets so boundary rules appear once.
 	const retainedConventions = conventions
-		.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens))
+		.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
 		.slice(0, HANDBOOK_TARGETS.conventions);
 	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
@@ -1207,7 +1292,8 @@ function stabilizeGeneratedOutput(
 		const body = handbookBlocks(section.body)
 			.filter(
 				(block) =>
-					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) || !restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens),
+					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
+					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) && !restatesArchitecture(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
@@ -1229,11 +1315,12 @@ function stabilizeGeneratedOutput(
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
-	const checkerRules = uncoveredCheckerRules(
-		input.enforcement,
+	const checkerSection = uncoveredCheckerSection(
+		checkerRules.filter((rule) => !rule.architectural),
 		[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
+		[...keptRuleTokens, ...ordinarySections.flatMap((section) => handbookBlocks(section.body).map(handbookRuleTokens))],
 	);
-	if (checkerRules) addSection(checkerRules);
+	if (checkerSection) addSection(checkerSection);
 	for (const section of inferredSections) addSection(section);
 	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
 	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);

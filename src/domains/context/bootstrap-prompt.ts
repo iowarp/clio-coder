@@ -35,7 +35,7 @@ WHAT BELONGS. The reader is a coding agent that can already read this code, and 
 WHERE THE RULES ARE. The enforcement inventory lists CI commands, reached scripts, and custom check functions and coded failures. Prioritize the most consequential rules and remedies supported by the evidence brief. When a check demands that files change together, write a change recipe naming all of them. A check names only the files it reads: before writing a recipe, trace the table or registry the change starts from (code_nav references on its symbol) and add every file the same commit must touch, including those only the type checker or runtime validation enforces. Spend remaining tool calls on this tracing rather than stopping early. When it forbids something, write an invariant. Cover every coded failure shown in the brief that an ordinary change can trigger with its own rule when space permits. Read a targeted missing range when the excerpt is insufficient, rather than every check file in full. Skip formatter fixes and boilerplate. When a failure carries a rule code (such as \`rule1\` or \`E501\`), state what that rule forbids from its definition in the check file, in the direction the code checks; a failure message alone can read backwards. Never restate a package script or CI step body: Clio's verification section already lists them exactly. Find which test directories CI actually runs by following its test commands to the discovery roots, and state where a regression test must live so CI runs it, including omitted test directories. The script inventory includes available checks as well as CI-reached checks: do not treat test:full, test:package, or every test directory as part of ordinary CI unless a CI command actually reaches them. Clio includes the exact declared test script in its verification section; do not replace its selectors with broader globs. Treat contributor guides and sibling handbooks as evidence of project rules; directory-scoped skills keep their own scope.
 
 FIELDS.
-- invariants: up to ${HANDBOOK_TARGETS.invariants} rules whose violation breaks the build, corrupts data, or crosses a trust boundary, most damaging first, because small models keep early rules best. Each is the rule and its reason in one or two sentences.
+- invariants: up to ${HANDBOOK_TARGETS.modelInvariants} rules whose violation breaks the build, corrupts data, or crosses a trust boundary, most damaging first, because small models keep early rules best. Each is the rule and its reason in one or two sentences.
 - conventions: up to ${HANDBOOK_TARGETS.conventions} code conventions that differ from the defaults, each naming a file that shows it.
 - sections: up to ${HANDBOOK_TARGETS.sections} H2 sections, "Change recipes" first when there are any. Prefer these titles, because Clio routes each section to the fleet workers that need it: "Verification that is not obvious", "Change recipes", "Tests", "Docs and prose", "Git and release", "Gotchas". Rules about operating the agent harness itself go under a title containing "Operating"; they stay with the main session.
 
@@ -359,7 +359,7 @@ export function parseBootstrapModelOutput(text: string): BootstrapStructuredOutp
 		invariants: stringArray(
 			record.invariants,
 			"invariants",
-			HANDBOOK_TARGETS.invariants,
+			HANDBOOK_TARGETS.modelInvariants,
 			HANDBOOK_TARGETS.invariantChars,
 		),
 		sections: structuredSections(record.sections),

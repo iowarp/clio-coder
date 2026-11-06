@@ -19,6 +19,20 @@ export interface EnforcementCheckFile {
 	checks: string[];
 	/** Heads of the coded failure messages it emits (`rule6: ...`), with interpolations elided. */
 	failures: string[];
+	/** Each coded rule the file emits, stated as the file declares it. */
+	rules?: EnforcementRule[];
+}
+
+export interface EnforcementRule {
+	code: string;
+	/** The rule in the checker's words, comment markers removed. */
+	text: string;
+	/**
+	 * `declaration` is a numbered rule list item (`8. src/session-control/** never imports ...`),
+	 * `doc` the doc comment of the function that reports it, `failure` its failure message
+	 * when the file declares the rule nowhere else.
+	 */
+	source: "declaration" | "doc" | "failure";
 }
 
 export interface EnforcementInventory {
@@ -187,6 +201,92 @@ function failureHeads(text: string): string[] {
 	return heads;
 }
 
+const CODE_PARTS_RE = /^([A-Za-z]{0,12})(\d{1,4})([a-z]?)$/;
+const COMMENT_ITEM_RE = /^\s*(?:\*|\/\/|#)\s*(\d{1,4})\.\s+(\S.*)$/;
+const COMMENT_CONTINUATION_RE = /^\s*(?:\*|\/\/|#)\s{2,}(\S.*)$/;
+const RULE_DOC_RE = /\b(?:never|only|must|may not|no|immutable|always|forbid\w*)\b/i;
+const MAX_RULE_CHARS = 700;
+
+/** Numbered list items in comments (`*   8. src/session-control/** never imports ...`), by number. */
+function numberedCommentItems(text: string): Map<string, string> {
+	const items = new Map<string, string>();
+	let current: { number: string; parts: string[] } | null = null;
+	const close = (): void => {
+		if (current && !items.has(current.number)) items.set(current.number, current.parts.join(" "));
+		current = null;
+	};
+	for (const line of text.split("\n")) {
+		const item = COMMENT_ITEM_RE.exec(line);
+		if (item?.[1] && item[2]) {
+			close();
+			current = { number: item[1], parts: [item[2].trim()] };
+			continue;
+		}
+		const continuation = current ? COMMENT_CONTINUATION_RE.exec(line) : null;
+		if (current && continuation?.[1] && !/^\*\/$/.test(continuation[1])) current.parts.push(continuation[1].trim());
+		else close();
+	}
+	close();
+	return items;
+}
+
+/** The doc comment directly above the function that encloses `at`, when it states a rule. */
+function enclosingFunctionDoc(text: string, at: number): string | null {
+	const before = text.slice(0, at);
+	const declarations = [...before.matchAll(/(?:^|\n)[ \t]*(?:export\s+)?(?:async\s+)?function\s+\w+/g)];
+	const start = declarations.at(-1)?.index;
+	if (start === undefined) return null;
+	const head = text.slice(0, start).trimEnd();
+	if (!head.endsWith("*/")) return null;
+	const open = head.lastIndexOf("/**");
+	if (open < 0) return null;
+	const doc = head
+		.slice(open + 3, -2)
+		.split("\n")
+		.map((line) => line.replace(/^\s*\*\s?/, "").trim())
+		.join(" ")
+		.replace(/\s+/g, " ")
+		.trim();
+	return RULE_DOC_RE.test(doc) ? doc : null;
+}
+
+/**
+ * Each coded rule a check file emits, as the file declares it. A failure
+ * message names the offending file and leaves the rule's subject to an
+ * interpolation (`rule1: … outside src/engine (value import)`), so a reader
+ * learned that something failed, not what the rule protects.
+ */
+function checkerRules(text: string, failures: ReadonlyArray<string>): EnforcementRule[] {
+	const items = numberedCommentItems(text);
+	const rules: EnforcementRule[] = [];
+	const seen = new Set<string>();
+	for (const failure of failures) {
+		const head = /^([A-Za-z]{0,12}\d{1,4}[a-z]?(?:\/[A-Za-z]{0,12}\d{1,4}[a-z]?)*): (.+)$/.exec(failure);
+		if (!head?.[1]) continue;
+		for (const code of head[1].split("/")) {
+			if (seen.has(code)) continue;
+			seen.add(code);
+			const number = CODE_PARTS_RE.exec(code)?.[2];
+			const declared = number !== undefined ? items.get(number) : undefined;
+			if (declared) {
+				rules.push({ code, text: clauseBounded(declared, MAX_RULE_CHARS), source: "declaration" });
+				continue;
+			}
+			const site = [`"${code}"`, `'${code}'`, `\`${code}:`, `"${code}:`, `'${code}:`]
+				.map((needle) => text.indexOf(needle))
+				.filter((index) => index >= 0)
+				.sort((a, b) => a - b)[0];
+			const doc = site !== undefined ? enclosingFunctionDoc(text, site) : null;
+			rules.push(
+				doc
+					? { code, text: clauseBounded(doc, MAX_RULE_CHARS), source: "doc" }
+					: { code, text: head[2] ?? "", source: "failure" },
+			);
+		}
+	}
+	return rules;
+}
+
 export function collectEnforcementInventory(root: string, files?: ReadonlyArray<string>): EnforcementInventory {
 	let visible: ReadonlyArray<string> = files ?? [];
 	if (!files) {
@@ -221,7 +321,9 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 	for (const path of candidates.slice(0, MAX_CHECK_FILES)) {
 		const text = readText(root, path);
 		if (text === null || text.includes("\u0000")) continue;
-		checkFiles.push({ path, checks: checkNames(text), failures: failureHeads(text) });
+		const failures = failureHeads(text);
+		const rules = checkerRules(text, failures);
+		checkFiles.push({ path, checks: checkNames(text), failures, ...(rules.length > 0 ? { rules } : {}) });
 	}
 	return { ciCommands: ciCommands.slice(0, MAX_CI_COMMANDS), scripts, checkFiles };
 }
