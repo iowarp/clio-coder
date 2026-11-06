@@ -2,10 +2,12 @@ import { strict as assert, match } from "node:assert";
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { runCommandVector } from "../../src/core/safe-exec.js";
 import { claimLogRecordId } from "../../src/domains/claims/edges.js";
 import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
 	appendClaims,
+	bindHostVerificationHypotheses,
 	claimFromVerifyResult,
 	claimStatuses,
 	claimsLogPath,
@@ -21,6 +23,7 @@ import {
 	recordAcceptedWorkerSlates,
 	recordHostVerificationClaims,
 } from "../../src/domains/claims/index.js";
+import { runHostVerification } from "../../src/domains/dispatch/host-verification.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const source = { channel: "verify", sessionId: "s1", toolCallId: "t1", requestedBy: "model" } as const;
@@ -383,6 +386,65 @@ describe("claims ledger (#406)", () => {
 				hypotheses: bound,
 			});
 			assert.equal(statusOfH2(), "refuted");
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("never counts a reproduce check whose executable did not launch as a test", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			writeFileSync(join(repo, "h.json"), slateText([{ id: "H1", check: "repro" }]));
+			await createHypothesisCaptureRegistration({ cwd: () => repo }).evaluateAsync?.({
+				hook: "after_tool",
+				toolName: "write",
+				toolArgs: { path: "h.json" },
+			});
+			const missing = "clio-no-such-executable-406";
+			// The runner resolves rather than throws on ENOENT; the launched fact is what says nothing ran.
+			const spawned = await runCommandVector(missing, [], { cwd: repo, workspaceRoot: repo });
+			assert.equal(spawned.launched, false);
+			const hypotheses = bindHostVerificationHypotheses(repo, ["repro"]);
+			assert.equal(hypotheses.get("repro")?.length, 1);
+			const verification = await runHostVerification({
+				runId: "run1",
+				workerSuccessful: true,
+				stateDir: join(env.dir, "host-state"),
+				request: {
+					resolvedVerification: [
+						{
+							check: "repro",
+							argv: [missing, "metrics.json"],
+							cwd: repo,
+							timeoutMs: 10_000,
+							kind: "reproduce",
+							reproduce: {
+								declaredCwd: ".",
+								spec: { inputs: [], environment: "copy", compare: { mode: "twice" }, tolerance: { absolute: 0 } },
+							},
+						},
+					],
+				},
+			});
+			const [check] = verification?.checks ?? [];
+			assert.equal(check?.notRun, "spawn-failed");
+			assert.ok(check);
+			await recordHostVerificationClaims({
+				runId: "run1",
+				receiptDigest: "d".repeat(64),
+				checks: [check],
+				projectCwd: repo,
+				hypotheses,
+			});
+			const read = readClaims(project);
+			assert.equal(read.hypothesisTests.length, 0);
+			assert.equal(
+				hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(read.hypotheses[0]?.id ?? "")?.status,
+				"proposed",
+			);
 		} finally {
 			env.restore();
 		}

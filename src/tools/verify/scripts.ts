@@ -281,6 +281,7 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 		)
 		.replace(/^verify:\s*/u, "");
 	const startup =
+		result.details?.launched === false ||
 		/^(?:spawn .+ (?:ENOENT|EACCES|EROFS)\b|bwrap:|sandbox:|sandbox-exec:|(?:sh|bash): .+(?:not found|Permission denied)|\S+: No module named (?:pytest|tox|nox)\b)/u.test(
 			diagnostic,
 		) ||
@@ -436,6 +437,7 @@ function commandFacts(result: SafeCommandResult): Record<string, unknown> {
 		command: [result.file, ...result.args].join(" "),
 		argv: [result.file, ...result.args],
 		cwd: result.cwd,
+		launched: result.launched === true,
 		exitCode: result.exitCode,
 		durationMs: result.durationMs,
 		aborted: result.aborted,

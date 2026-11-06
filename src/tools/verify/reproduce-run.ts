@@ -69,6 +69,8 @@ export interface ReproduceRefusal {
 export interface ReproduceRunFacts {
 	argv: string[];
 	cwd: string;
+	/** Whether this run's process was created; false when spawn failed or the sandbox refused, so nothing ran. */
+	launched: boolean;
 	exitCode: number | null;
 	durationMs: number;
 	aborted: boolean;
@@ -78,9 +80,8 @@ export interface ReproduceRunFacts {
 
 export type ReproduceOutcome =
 	| { kind: "refused"; refusal: ReproduceRefusal }
-	/** A run did not complete cleanly, so nothing was judged. `run` is 1 or 2. */
-	/** `notStarted` is set when run 1's process could not be created, so nothing ran at all. */
-	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; message: string; notStarted?: true }
+	/** A run did not complete cleanly, so nothing was judged. `run` is 1 or 2; `facts.launched` says whether it started. */
+	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; message: string }
 	/** The command completed but its output or the reference could not be judged. */
 	| { kind: "unjudgeable"; message: string; facts: ReproduceRunFacts[] }
 	| { kind: "judged"; report: ReproduceReport; facts: ReproduceRunFacts[] };
@@ -286,6 +287,7 @@ function runFacts(result: SafeCommandResult, argv: string[], cwd: string): Repro
 	return {
 		argv,
 		cwd,
+		launched: result.launched === true,
 		exitCode: result.exitCode,
 		durationMs: result.durationMs,
 		aborted: result.aborted,
@@ -295,6 +297,8 @@ function runFacts(result: SafeCommandResult, argv: string[], cwd: string): Repro
 }
 
 function runFailure(result: SafeCommandResult, timeoutMs: number): string | null {
+	if (result.launched !== true)
+		return `could not start: ${(result.stderr || result.failure || "no process was created").trim()}`;
 	if (result.aborted) return "aborted";
 	if (result.timedOut) return `timed out after ${timeoutMs}ms`;
 	if (result.outputCapped) return `output exceeded ${REPRODUCE_MAX_OUTPUT_BYTES} bytes before judgement`;
@@ -439,6 +443,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 				facts: {
 					argv: [...argv],
 					cwd: input.cwd,
+					launched: false,
 					exitCode: null,
 					durationMs: 0,
 					aborted: false,
@@ -446,7 +451,6 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 					outputCapped: false,
 				},
 				message: `run ${run} could not start: ${errorText(error)}`,
-				...(run === 1 ? { notStarted: true as const } : {}),
 			};
 		} finally {
 			await environment.dispose();
