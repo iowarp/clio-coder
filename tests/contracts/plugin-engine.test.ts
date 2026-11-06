@@ -121,6 +121,28 @@ describe("agent plugin engine", () => {
 		);
 	});
 
+	it("refuses the evals key removed in 0.7.0 at install and in an installed copy", () => {
+		const declareEvals = (manifest: Record<string, unknown>) => {
+			manifest.extensions = { "ai.iowarp.clio": { manifestVersion: 1, evals: { check: "evals/check.yaml" } } };
+		};
+		const removed = (diagnostics: ReadonlyArray<{ message: string }>) =>
+			diagnostics.some((diagnostic) => /'evals' was removed in 0\.7\.0/u.test(diagnostic.message));
+		const source = fixture();
+		rewriteManifest(source, declareEvals);
+		const candidate = readPluginManifest(source);
+		strictEqual(candidate.valid, false);
+		ok(removed(candidate.diagnostics), JSON.stringify(candidate.diagnostics));
+		strictEqual(installPlugin(source, { cwd: project }).plugin, undefined);
+
+		const installed = installPlugin(fixture(), { cwd: project }).plugin;
+		ok(installed);
+		rewriteManifest(installed.rootPath, declareEvals);
+		const entry = listInstalledPlugins(project).find((plugin) => plugin.id === "research-kit");
+		strictEqual(entry?.loadable, false);
+		ok(removed(entry?.diagnostics ?? []), JSON.stringify(entry?.diagnostics));
+		deepStrictEqual(enabledPluginResourceRoots("skills", project), []);
+	});
+
 	it("loads native resources into the namespaced project installation", () => {
 		const root = fixture();
 		mkdirSync(join(root, "ai.iowarp.clio", "prompts"), { recursive: true });
