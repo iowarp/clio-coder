@@ -37,6 +37,8 @@ export const coreTests = [
 	"url-userinfo-hold",
 	"url-credential-surfaces",
 	"retired-settings-keys",
+	"doctor-unknown-runtime",
+	"plugin-engine",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
