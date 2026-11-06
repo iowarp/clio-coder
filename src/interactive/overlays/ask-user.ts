@@ -1016,6 +1016,14 @@ class AskUserOverlayView implements Component {
 			// Narrowest, the count stands for the answers: `1 kept on cancel` still says what Esc keeps.
 			const keepsCounted = `${escKeeps} kept on cancel${pointer}`;
 			const narrow = [...shortPosition, ...move];
+			// A consequence cut after `kept on` no longer says when (B06): with no room beside the position, it takes its own row.
+			if (escKeeps > 0 && !fits(full) && !fits([...narrow, keepsCounted]) && narrow.length > 0) {
+				const counted = `${escKeeps} ${keepsNamed}`;
+				const consequence = fits([counted]) ? counted : keepsCounted;
+				return [narrow.join(" · "), consequence].map((row) =>
+					fitRow(theme.style("positionCount", row, { bold: true }), width),
+				);
+			}
 			parts =
 				escKeeps > 0 && !fits(full)
 					? fits([...narrow, keepsNamed])
@@ -1485,8 +1493,13 @@ class AskUserOverlayView implements Component {
 			// A body without headers counts answers on its position row.
 			if (!fit.headers) return [];
 			// Said before the key is pressed, because Esc ends the turn and an operator should not have to guess at the rest.
-			const esc = this.escapeAtRoot() ? " · kept if you cancel" : "";
-			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", `${count}${esc}`), width)];
+			// A narrow box cut it to `kept if you canc…` (B06), so the count gives up words before the consequence does.
+			const n = entries.length;
+			const forms = this.escapeAtRoot()
+				? [`${count} · kept if you cancel`, `${n} answer${n === 1 ? "" : "s"} kept if you cancel`, `${n} kept on cancel`]
+				: [count];
+			const row = forms.find((form) => visibleWidth(form) <= width) ?? forms[forms.length - 1] ?? count;
+			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", row), width)];
 		}
 		const rows: string[] = [];
 		for (const entry of entries) {
