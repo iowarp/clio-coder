@@ -1023,7 +1023,8 @@ function toolActivity(
 	const subjectCells = slot !== undefined ? visibleWidth(subject) + 1 : 0;
 	const othersCells = others > 0 ? 2 + String(others).length : 0;
 	const spare = room - wayOut - clockCells - subjectCells - othersCells;
-	const lead = tight || spare - visibleWidth(full) >= 24 ? full : full.replace(/^is /u, "");
+	// A stop keeps its "is": `Clio stopping` read as a label, and the command text gives up the cells instead.
+	const lead = tight || verb !== null || spare - visibleWidth(full) >= 24 ? full : full.replace(/^is /u, "");
 	const span = object === null ? null : Math.max(4, Math.min(48, spare - visibleWidth(lead) - 3));
 	const bareObject = activity === undefined ? "a command" : (/^is \S+ (.+)$/u.exec(activity.bare)?.[1] ?? null);
 	const bareWords = tight ? (bareObject === null ? full : `${full} ${bareObject}`) : activity?.bare;
