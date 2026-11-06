@@ -196,11 +196,33 @@ function axisViewFromId(axisId: string | undefined, fallbackLevel: string): Appr
 	return null;
 }
 
-/** The rule's reason for a net-axis ask: the policy verdict's first reason, else the damage-control match's. */
+/**
+ * The rule's reason for a net-axis ask in words: the policy verdict's first reason that is a sentence, else the
+ * damage-control match's. A policy can lead with its audit code (`damage-control:truncate-size-zero`), which the
+ * card printed as its `why` beside an effect that already said it in words (B05); the code stays on the rule row
+ * and in inspection.
+ */
 function netReasonOf(decision: SafetyDecision): string | undefined {
 	if (decision.kind !== "ask") return undefined;
-	const reason = decision.policy?.kind === "ask" ? decision.policy.reasons[0] : decision.match?.reason;
-	return reason !== undefined && reason.length > 0 ? sanitizeCallTargetText(netReasonWords(reason)) : undefined;
+	const reasons = [
+		...(decision.policy?.kind === "ask" ? decision.policy.reasons : []),
+		...(decision.match?.reason !== undefined ? [decision.match.reason] : []),
+	];
+	for (const reason of reasons) {
+		const words = reasonSentence(reason);
+		if (words !== null) return sanitizeCallTargetText(netReasonWords(words));
+	}
+	return undefined;
+}
+
+/** A damage-control match's reason names its rule first (`matched truncate-size-zero: …`); the card keeps the words. */
+const MATCHED_RULE_PREFIX = /^matched [\w.:-]+: (?=\S)/u;
+
+/** A reason as words, or null for an audit code: one token with no space in it is never a sentence. */
+function reasonSentence(reason: string): string | null {
+	const trimmed = reason.trim();
+	if (trimmed.length === 0 || !/\s/u.test(trimmed)) return null;
+	return trimmed.replace(MATCHED_RULE_PREFIX, "");
 }
 
 /**
