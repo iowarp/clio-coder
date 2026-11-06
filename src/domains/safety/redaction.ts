@@ -54,10 +54,14 @@ const JDBC_ORACLE_PREFIX = String.raw`jdbc:oracle:[a-z0-9]+:[^\s/@:"]*\/`;
 const JDBC_ORACLE_USERINFO_RE = new RegExp(String.raw`(${JDBC_ORACLE_PREFIX})("[^"\s]*"|[^\s"/@]*)(?=@)`, "giu");
 // A token can be the whole username, as in `https://<token>@github.com`. `alice` and `first.last` are ordinary names, while
 // a long opaque run holding a digit is not one worth keeping. A known git host token also counts ahead of a colon, where a
-// long opaque name would more often be a host and its port (#446).
+// long opaque name would more often be a host and its port (#446). Every opener the userinfo pattern reads opens one, and a
+// percent-encoded URL ends it at `%40` (#448).
 const GIT_TOKEN_PREFIX = "(?:gh[pousr]_|github_pat_|glpat-)";
+const OPAQUE_NAME = String.raw`(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,}`;
+const PERCENT_OPENER_BEHIND = String.raw`(?<=[a-z0-9+.-]%3a%2f%2f)`;
 export const URL_USERNAME_TOKEN_RE = new RegExp(
-	`(?<=:\\/\\/)(?:(?=[a-z0-9_-]*\\d)[a-z0-9_-]{20,}(?=@)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=:[^\\s/@]*@))`,
+	String.raw`(?<=${AUTHORITY_OPENER})(?:${OPAQUE_NAME}(?=@)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=:[^\s/@]*@))` +
+		String.raw`|${PERCENT_OPENER_BEHIND}(?:${OPAQUE_NAME}(?=%40)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=%3a${PERCENT_PASSWORD_RUN}%40))`,
 	"giu",
 );
 const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
@@ -317,9 +321,11 @@ function shownUserinfoEnd(value: string, start: number, lastAt: number): number 
 }
 
 const AUTHORITY_OPENER_RE = new RegExp(AUTHORITY_OPENER, "giu");
-// A percent-encoded or Oracle password that text still to come may continue, matched up to where it starts (#448).
+// A percent-encoded or Oracle password that text still to come may continue, matched up to where it starts (#448). A known
+// git host token stays back whole, as it does after a literal opener.
 const OPEN_USERINFO_RES: readonly RegExp[] = [
 	new RegExp(`(?<=[a-z0-9+.-])%3a%2f%2f${PERCENT_NAME_RUN}%3a(?=${PERCENT_PASSWORD_RUN}(?:%[0-9a-f]?)?$)`, "giu"),
+	new RegExp(`(?<=[a-z0-9+.-])%3a%2f%2f(?=${GIT_TOKEN_PREFIX}${PERCENT_PASSWORD_RUN}(?:%[0-9a-f]?)?$)`, "giu"),
 	new RegExp(String.raw`${JDBC_ORACLE_PREFIX}(?=(?:"[^"\s]*"?|[^\s"/@]*)$)`, "giu"),
 ];
 
@@ -569,7 +575,10 @@ export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
 }
 
 // The username token's shape at the very end of a stream that stopped. No `@` will come, and a frame's hold reads it as a host (#446).
-const CUT_OFF_USERNAME_TOKEN_RE = /(?<=:\/\/)(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,}(?=:?$)/iu;
+const CUT_OFF_USERNAME_TOKEN_RE = new RegExp(
+	String.raw`(?<=${AUTHORITY_OPENER})${OPAQUE_NAME}(?=:?$)|${PERCENT_OPENER_BEHIND}${OPAQUE_NAME}(?=(?:%(?:3a?|4)?)?$)`,
+	"iu",
+);
 
 /**
  * What a text that stopped short may still show. An open frame keeps an opaque name, which reads as a host until an `@` comes,

@@ -1281,7 +1281,23 @@ const ESCAPED_SHAPES: ReadonlyArray<readonly [string, string]> = [
 	["//alice:ZQXJ@h/x", "//alice:[redacted]@h/x"],
 	["jdbc:oracle:thin:scott/ZQXJ@//db:1521/svc", "jdbc:oracle:thin:scott/[redacted]@//db:1521/svc"],
 	["jdbc:sqlserver://db:1433;password=ZQ@XJ;", "jdbc:sqlserver://db:1433;password=[redacted];"],
+	["https:\\/\\/ghp_ZQXJ0123456789ZQXJ@h\\/r", "https:\\/\\/[redacted]@h\\/r"],
+	["//ghp_ZQXJ0123456789ZQXJ@h/x", "//[redacted]@h/x"],
+	["https%3A%2F%2Fghp_ZQXJ0123456789ZQXJ%40h", "https%3A%2F%2F[redacted]%40h"],
 ];
+
+test("an opaque username token hides behind every opener, and a stream cut off inside one sends none of it", () => {
+	const token = "ZQXJ0123456789ZQXJ0123";
+	for (const [opener, at] of [
+		["https:\\/\\/", "@"],
+		["//", "@"],
+		["https%3A%2F%2F", "%40"],
+	] as const) {
+		strictEqual(redactUrlCredentials(`see ${opener}${token}${at}h x`), `see ${opener}[redacted]${at}h x`);
+		ok(!SECRET_LETTERS.test(redactSecretsText(`see ${opener}${token}${at}h x`, createRedactionTally())), opener);
+		strictEqual(redactFinalUrlCredentials(`see ${opener}${token}`, false), `see ${opener}`);
+	}
+});
 
 test("the URL rule hides a fragment token, an escaped or scheme-relative URL and a JDBC password", () => {
 	for (const [shape, redacted] of ESCAPED_SHAPES) {
