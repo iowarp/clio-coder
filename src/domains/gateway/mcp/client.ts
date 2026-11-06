@@ -26,13 +26,20 @@ import { performance } from "node:perf_hooks";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../../core/safe-exec.js";
 import { planSandboxedSpawn } from "../../../core/sandbox/worker-process.js";
 import { clampTimerDelayMs, sleep } from "../../../core/timers.js";
-import type { JsonRpcId, JsonRpcMessage } from "./protocol.js";
+import type { JsonRpcErrorObject, JsonRpcId, JsonRpcMessage } from "./protocol.js";
 import {
 	createLineFramer,
 	DEFAULT_MAX_LINE_BYTES,
 	encodeJsonRpcMessage,
 	JSON_RPC_METHOD_NOT_FOUND,
+	MCP_META_CLIENT_CAPABILITIES,
+	MCP_META_CLIENT_INFO,
+	MCP_META_PROTOCOL_VERSION,
+	MCP_META_SERVER_INFO,
+	MCP_MODERN_PROTOCOL_VERSION,
 	MCP_PROTOCOL_VERSION,
+	MCP_TASKS_EXTENSION,
+	MCP_UNSUPPORTED_PROTOCOL_VERSION,
 	McpError,
 	structuredContentJson,
 } from "./protocol.js";
@@ -56,6 +63,12 @@ const MCP_TOOL_LIST_PAGE_CAP = 100;
 const MIN_OUTBOUND_BYTES = 4096;
 /** How long a teardown waits for a SIGKILLed group to disappear before it gives up and says so. */
 export const DEFAULT_TEARDOWN_BOUND_MS = 2_000;
+/** Poll interval for a task whose server suggests none. */
+export const DEFAULT_TASK_POLL_INTERVAL_MS = 1_000;
+/** Floor under a server-suggested poll interval, so a zero cannot spin the event loop. */
+const MIN_TASK_POLL_INTERVAL_MS = 10;
+/** Silence on the server/discover probe after which the legacy handshake is sent beside it. */
+const DISCOVER_PROBE_GRACE_MS = 1_000;
 
 export interface McpServerSpec {
 	id: string;
@@ -111,6 +124,7 @@ export type McpClientState = ({ status: Exclude<McpClientStatus, "failed"> } | {
 };
 
 export interface McpServerInfo {
+	/** The negotiated legacy revision, or the modern revision when the `server/discover` probe selected it. */
 	protocolVersion: string;
 	serverInfo: { name: string; version: string } | null;
 	capabilities: Record<string, unknown>;
@@ -291,6 +305,78 @@ function parseServerInfo(value: unknown): McpServerInfo | McpError {
 	};
 }
 
+/**
+ * Read a `server/discover` result. Null sends the client down the handshake
+ * path: the answer is not a DiscoverResult (a lenient legacy server answering
+ * an unknown method), or it lists no modern revision Clio speaks.
+ */
+function parseDiscoverResult(value: unknown): McpServerInfo | null {
+	if (!isRecord(value) || !Array.isArray(value.supportedVersions)) return null;
+	if (!value.supportedVersions.includes(MCP_MODERN_PROTOCOL_VERSION)) return null;
+	const meta = isRecord(value._meta) ? value._meta : {};
+	const reported = meta[MCP_META_SERVER_INFO];
+	return {
+		protocolVersion: MCP_MODERN_PROTOCOL_VERSION,
+		serverInfo: isRecord(reported)
+			? {
+					name: typeof reported.name === "string" ? reported.name : "",
+					version: typeof reported.version === "string" ? reported.version : "",
+				}
+			: null,
+		capabilities: isRecord(value.capabilities) ? value.capabilities : {},
+		instructions: typeof value.instructions === "string" ? value.instructions : null,
+	};
+}
+
+type McpTaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
+
+/** One observed state of an MCP Tasks task: a CreateTaskResult or a tasks/get result. */
+interface McpTaskState {
+	taskId: string;
+	status: McpTaskStatus;
+	statusMessage: string | null;
+	ttlMs: number | null;
+	pollIntervalMs: number | null;
+	result: unknown;
+	error: unknown;
+}
+
+const TASK_STATUSES: ReadonlySet<string> = new Set(["working", "input_required", "completed", "failed", "cancelled"]);
+
+function parseTaskState(value: unknown, method: string, expectedId: string | null): McpTaskState | McpError {
+	if (!isRecord(value)) return new McpError("protocol", `${method} result is not an object`);
+	if (typeof value.taskId !== "string" || value.taskId.length === 0) {
+		return new McpError("protocol", `${method} result lacks a taskId`);
+	}
+	if (expectedId !== null && value.taskId !== expectedId) {
+		return new McpError("protocol", `${method} answered for task ${value.taskId}, not ${expectedId}`);
+	}
+	if (typeof value.status !== "string" || !TASK_STATUSES.has(value.status)) {
+		return new McpError("protocol", `${method} result has an unknown task status ${JSON.stringify(value.status)}`);
+	}
+	const finite = (field: unknown): number | null =>
+		typeof field === "number" && Number.isFinite(field) && field >= 0 ? field : null;
+	return {
+		taskId: value.taskId,
+		status: value.status as McpTaskStatus,
+		statusMessage: typeof value.statusMessage === "string" ? value.statusMessage : null,
+		ttlMs: finite(value.ttlMs),
+		pollIntervalMs: finite(value.pollIntervalMs),
+		result: value.result,
+		error: value.error,
+	};
+}
+
+/** A JSON-RPC error carried in a task or a reply, worded like a direct error answer to `tools/call`. */
+function serverErrorFrom(method: string, error: unknown, fallback: string): McpError {
+	if (isRecord(error) && typeof error.code === "number" && typeof error.message === "string") {
+		const object: JsonRpcErrorObject = { code: error.code, message: error.message };
+		if (error.data !== undefined) object.data = error.data;
+		return new McpError("server", `${method}: ${object.message} (code ${object.code})`, object);
+	}
+	return new McpError("server", `${method}: ${fallback}`);
+}
+
 function parseToolDescriptor(value: unknown): McpToolDescriptor | McpError {
 	if (!isRecord(value)) return new McpError("protocol", "tools/list entry is not an object");
 	if (typeof value.name !== "string" || value.name.length === 0) {
@@ -423,6 +509,12 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 	let initializePromise: Promise<McpServerInfo> | null = null;
 	let closePromise: Promise<McpTeardownOutcome> | null = null;
 	let info: McpServerInfo | null = null;
+	/**
+	 * Which protocol era the server speaks, settled once by the discovery probe.
+	 * Legacy keeps the initialize session and sends every request unchanged;
+	 * modern stamps each request with the version, identity and capabilities.
+	 */
+	let era: "legacy" | "modern" = "legacy";
 	let nextId = 1;
 	const pending = new Map<number, PendingRequest>();
 	const outbound: OutboundEntry[] = [];
@@ -747,8 +839,31 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		return true;
 	};
 
-	const request = (method: string, params: unknown, timeoutMs: number, signal?: AbortSignal): Promise<unknown> =>
+	/**
+	 * The modern per-request envelope. The tasks extension is declared only on
+	 * requests whose task this client drives to a terminal state (`tools/call`
+	 * and the `tasks/*` methods), so a server never hands a task to a request
+	 * that cannot follow it. Nothing is added on the legacy path.
+	 */
+	const withEnvelope = (method: string, params: unknown): unknown => {
+		if (era !== "modern" && method !== "server/discover") return params;
+		const base = isRecord(params) ? params : {};
+		const meta = isRecord(base._meta) ? base._meta : {};
+		const drivesTasks = method === "tools/call" || method.startsWith("tasks/");
+		return {
+			...base,
+			_meta: {
+				...meta,
+				[MCP_META_PROTOCOL_VERSION]: MCP_MODERN_PROTOCOL_VERSION,
+				[MCP_META_CLIENT_INFO]: { name: MCP_CLIENT_NAME, version: clientVersion },
+				[MCP_META_CLIENT_CAPABILITIES]: drivesTasks ? { extensions: { [MCP_TASKS_EXTENSION]: {} } } : {},
+			},
+		};
+	};
+
+	const request = (method: string, rawParams: unknown, timeoutMs: number, signal?: AbortSignal): Promise<unknown> =>
 		new Promise<unknown>((resolve, reject) => {
+			const params = withEnvelope(method, rawParams);
 			if (signal?.aborted) {
 				reject(new McpError("aborted", `${method} aborted before it was sent`));
 				return;
@@ -790,15 +905,20 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 					return;
 				}
 				// Cancellation has no required acknowledgement. A terminal response
-				// or a bounded ping confirms a usable transport; neither retries the
-				// cancelled tool, which may already have produced side effects.
+				// or a bounded liveness request confirms a usable transport; neither
+				// retries the cancelled tool, which may already have produced side
+				// effects. The modern revision removed ping, so it asks server/discover.
 				entry.resolve = () => settle(() => reject(error));
 				entry.reject = () => settle(() => reject(error));
 				enqueueOutbound(
 					{ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: error.message } },
 					null,
 				);
-				void request("ping", undefined, Math.max(1, options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS)).then(
+				void request(
+					era === "modern" ? "server/discover" : "ping",
+					undefined,
+					Math.max(1, options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS),
+				).then(
 					() => settle(() => reject(error)),
 					() => stop(),
 				);
@@ -857,6 +977,42 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 	const initialize = (signal?: AbortSignal): Promise<McpServerInfo> =>
 		withDiscoverySignal(signal, () => initializeOnce(signal));
 
+	/**
+	 * The stdio backward-compatibility probe of MCP 2026-07-28 (basic/transports/stdio):
+	 * `server/discover` goes first. A DiscoverResult listing the modern revision
+	 * makes the server modern. A recognized modern error means a modern server
+	 * Clio cannot speak to, and the spec forbids falling back to initialize then.
+	 * Any other error answer, or silence until the initialize timeout, means a
+	 * legacy server, and null sends the client down the handshake path.
+	 */
+	const discoverEra = async (signal?: AbortSignal): Promise<McpServerInfo | null> => {
+		let result: unknown;
+		try {
+			result = await request("server/discover", {}, initializeTimeoutMs, signal);
+		} catch (error) {
+			const cause = error instanceof McpError ? error : new McpError("protocol", errorMessage(error));
+			const answered = cause.code === "server" && isRecord(cause.data) ? cause.data : null;
+			if (answered?.code === MCP_UNSUPPORTED_PROTOCOL_VERSION) {
+				const data = isRecord(answered.data) ? answered.data : {};
+				const supported = Array.isArray(data.supported) ? data.supported.map(String).join(", ") : "none listed";
+				fail(
+					new McpError(
+						"protocol",
+						`initialize failed: mcp server ${spec.id} does not support MCP ${MCP_MODERN_PROTOCOL_VERSION} (it supports ${supported})`,
+						answered,
+					),
+				);
+				await close();
+				throw closedError();
+			}
+			if (answered !== null || cause.code === "timeout") return null;
+			fail(new McpError(cause.code, `initialize failed: ${cause.message}`, cause.data));
+			await close();
+			throw closedError();
+		}
+		return parseDiscoverResult(result);
+	};
+
 	const initializeOnce = (signal?: AbortSignal): Promise<McpServerInfo> => {
 		if (status === "closed" || status === "failed") return Promise.reject(closedError());
 		if (initializePromise !== null) return initializePromise;
@@ -871,9 +1027,8 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 				await close();
 				throw closedError();
 			}
-			let result: unknown;
-			try {
-				result = await request(
+			const handshake = (): Promise<unknown> =>
+				request(
 					"initialize",
 					{
 						protocolVersion: MCP_PROTOCOL_VERSION,
@@ -883,6 +1038,50 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 					initializeTimeoutMs,
 					signal,
 				);
+			// Many legacy servers drop an unknown method without answering, and
+			// waiting out the whole initialize timeout for each of them would slow
+			// every start. After a short grace the handshake goes out beside the
+			// pending probe and the first decisive answer picks the era. Servers
+			// read stdin in order, so a modern server that is merely slow to start
+			// still answers the probe it read first.
+			const probe = discoverEra(signal);
+			probe.catch(() => {
+				// Observed through the races below; a fatal probe has already failed the client.
+			});
+			const grace = new AbortController();
+			const early = await Promise.race([
+				probe.then((found) => ({ answered: true as const, found })),
+				sleep(Math.min(DISCOVER_PROBE_GRACE_MS, initializeTimeoutMs), grace.signal).then(
+					() => ({ answered: false as const, found: null }),
+					() => ({ answered: false as const, found: null }),
+				),
+			]);
+			grace.abort();
+			let pendingHandshake: Promise<unknown> | null = null;
+			let discovered = early.found;
+			if (!early.answered) {
+				const started = handshake();
+				pendingHandshake = started;
+				started.catch(() => {
+					// Awaited below when the server turns out to be legacy.
+				});
+				discovered = await Promise.race([
+					probe,
+					started.then(
+						() => null,
+						() => probe,
+					),
+				]);
+			}
+			if (discovered !== null) {
+				era = "modern";
+				info = discovered;
+				if (status === "starting") status = "ready";
+				return discovered;
+			}
+			let result: unknown;
+			try {
+				result = await (pendingHandshake ?? handshake());
 			} catch (error) {
 				const cause = error instanceof McpError ? error : new McpError("protocol", errorMessage(error));
 				fail(new McpError(cause.code, `initialize failed: ${cause.message}`, cause.data));
@@ -941,10 +1140,129 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		if (callOptions.signal?.aborted) throw new McpError("aborted", "tools/call aborted before it was sent");
 		await ensureReady(callOptions.signal);
 		const timeoutMs = clampTimerDelayMs(callOptions.timeoutMs ?? requestTimeoutMs);
+		const startedAt = performance.now();
 		const result = await request("tools/call", { name, arguments: args }, timeoutMs, callOptions.signal);
+		if (era === "modern" && isRecord(result) && result.resultType !== undefined && result.resultType !== "complete") {
+			if (result.resultType === "task") return awaitTask(result, startedAt, timeoutMs, callOptions.signal);
+			// Multi round-trip input (resultType input_required) needs elicitation or
+			// sampling, which this client does not offer.
+			throw new McpError(
+				"protocol",
+				`tools/call returned resultType ${JSON.stringify(result.resultType)}, which this client does not handle`,
+			);
+		}
 		const parsed = parseToolCallResult(result, maxResultTextBytes);
 		if (parsed instanceof McpError) throw parsed;
 		return parsed;
+	};
+
+	/**
+	 * Ask the server to stop a task Clio is abandoning. The ack is cooperative
+	 * and bounded by the cancel grace; a server that cannot even acknowledge
+	 * within it is treated like a wedged direct call and the client is closed.
+	 */
+	const cancelTask = async (taskId: string, cause: McpError): Promise<void> => {
+		try {
+			await request("tasks/cancel", { taskId }, Math.max(1, options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS));
+		} catch (error) {
+			// A JSON-RPC error answer (for example a task that already finished) still proves a live transport.
+			if (error instanceof McpError && error.code === "server") return;
+			fail(cause);
+			await close();
+		}
+	};
+
+	/**
+	 * Follow a task the server created for `tools/call` to its terminal state
+	 * (MCP Tasks extension, specification 2026-07-28). The whole task is the one
+	 * tool call the gateway admitted: polling shares the call's timeout and abort
+	 * signal, and the completed task yields the same McpToolCallResult a direct
+	 * answer would. Polling waits the server's pollIntervalMs between tasks/get
+	 * requests, stops at a terminal status, and sends tasks/cancel when the turn
+	 * aborts, the call times out, the task outlives its ttlMs, or the server
+	 * asks for input this client cannot give.
+	 */
+	const awaitTask = async (
+		created: Record<string, unknown>,
+		startedAt: number,
+		timeoutMs: number,
+		signal: AbortSignal | undefined,
+	): Promise<McpToolCallResult> => {
+		const first = parseTaskState(created, "tools/call", null);
+		if (first instanceof McpError) throw first;
+		const taskId = first.taskId;
+		const deadline = timeoutMs > 0 ? startedAt + timeoutMs : Number.POSITIVE_INFINITY;
+		// The ttl counts from the server's creation; the local receipt time is a
+		// conservative stand-in that no clock skew between the two can stretch.
+		const expiresAt = first.ttlMs === null ? Number.POSITIVE_INFINITY : performance.now() + first.ttlMs;
+		const timedOut = (): McpError => new McpError("timeout", `tools/call timed out after ${timeoutMs}ms`);
+		const aborted = (): McpError => new McpError("aborted", "tools/call aborted");
+		let task = first;
+		try {
+			for (;;) {
+				switch (task.status) {
+					case "completed": {
+						const parsed = parseToolCallResult(task.result, maxResultTextBytes);
+						if (parsed instanceof McpError) throw parsed;
+						return parsed;
+					}
+					case "failed":
+						throw serverErrorFrom(
+							"tools/call",
+							task.error,
+							`task ${taskId} failed${task.statusMessage ? `: ${task.statusMessage}` : ""}`,
+						);
+					case "cancelled":
+						throw new McpError(
+							"server",
+							`tools/call: task ${taskId} was cancelled by the server${task.statusMessage ? `: ${task.statusMessage}` : ""}`,
+						);
+					case "input_required":
+						await cancelTask(taskId, new McpError("server", `tools/call: task ${taskId} required input`));
+						throw new McpError(
+							"server",
+							`tools/call: task ${taskId} asked for client input (elicitation or sampling), which this client does not provide; the task was cancelled`,
+						);
+					case "working":
+						break;
+				}
+				const now = performance.now();
+				if (now >= expiresAt) {
+					const expired = new McpError(
+						"server",
+						`tools/call: task ${taskId} did not finish within its ${first.ttlMs}ms lifetime`,
+					);
+					await cancelTask(taskId, expired);
+					throw expired;
+				}
+				const remaining = deadline - now;
+				if (remaining <= 0) throw timedOut();
+				const interval = Math.max(MIN_TASK_POLL_INTERVAL_MS, task.pollIntervalMs ?? DEFAULT_TASK_POLL_INTERVAL_MS);
+				try {
+					await sleep(Math.min(interval, remaining, expiresAt - now), signal);
+				} catch {
+					throw aborted();
+				}
+				const left = deadline - performance.now();
+				if (left <= 0) throw timedOut();
+				let polled: unknown;
+				try {
+					polled = await request("tasks/get", { taskId }, Number.isFinite(left) ? Math.max(1, Math.ceil(left)) : 0, signal);
+				} catch (error) {
+					if (error instanceof McpError && error.code === "timeout") throw timedOut();
+					if (error instanceof McpError && error.code === "aborted") throw aborted();
+					throw error;
+				}
+				const next = parseTaskState(polled, "tasks/get", taskId);
+				if (next instanceof McpError) throw next;
+				task = next;
+			}
+		} catch (error) {
+			if (error instanceof McpError && (error.code === "aborted" || error.code === "timeout")) {
+				await cancelTask(taskId, error);
+			}
+			throw error;
+		}
 	};
 
 	/**
