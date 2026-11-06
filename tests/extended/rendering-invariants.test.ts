@@ -1924,9 +1924,9 @@ describe("transcript block grammar", () => {
 		const viaGateway = stripTerminalSequences(
 			renderToolPreview(gatewayLoad, 110, transcriptDetail("standard")).join("\n"),
 		);
-		match(viaGateway, /loaded skill test-hygiene · by model · via gateway · drifted/u);
+		match(viaGateway, /loaded skill test-hygiene · by model · drifted/u);
 		match(viaGateway, /narrows tools to read/u);
-		match(viaGateway, /via gateway/u);
+		doesNotMatch(viaGateway, /via gateway/u);
 		doesNotMatch(render("compact"), /narrows|Keep tests deterministic|1 section/u);
 		// Standard nests the surface the skill declares, then what it is for.
 		for (const style of ["standard", "detailed"] as const) {
@@ -2393,7 +2393,7 @@ describe("tool classes", () => {
 			);
 			strictEqual(
 				mcp[0],
-				`${GLYPH.classExternal} called github › search_issues · query "flaky retry test" · state open · via gateway ✓ · 42ms`,
+				`${GLYPH.classExternal} called github › search_issues · query "flaky retry test" · state open ✓ · 42ms`,
 			);
 			doesNotMatch(mcp.join("\n"), /op ›|capability ›|args ›/u);
 			const builtin = rows(
@@ -2404,7 +2404,7 @@ describe("tool classes", () => {
 				),
 				style,
 			);
-			match(builtin[0] ?? "", new RegExp(`^${GLYPH.classNetwork} fetched github\\.com/.* · 200 · via gateway ✓`, "u"));
+			match(builtin[0] ?? "", new RegExp(`^${GLYPH.classNetwork} fetched github\\.com/.* · 200 ✓`, "u"));
 			const find = rows(
 				settled("gateway", { op: "find", query: "github issues" }, text("…", { op: "find", count: 3, total: 7 })),
 				style,

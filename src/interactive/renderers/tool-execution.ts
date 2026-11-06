@@ -195,9 +195,10 @@ export interface ToolExecutionFinished {
 }
 
 /**
- * A gateway op=call renders as the capability it ran, marked `via gateway`:
- * its label, argument preview, streaming output, exit status and diff read as
- * a direct call of that capability read in v056. Unwrapping once, at every
+ * A gateway op=call renders as the capability it ran, exactly as a direct call:
+ * its label, argument preview, streaming output, exit status and diff. Which door
+ * the model used changes nothing the operator reads or can act on, so the row does
+ * not say it; exports and the session tree still record `via gateway`. Unwrapping once, at every
  * exported entry point, keeps each helper below keyed on the capability's own
  * name and arguments. A chain, find and describe stay gateway rows.
  */
@@ -750,7 +751,6 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 		if (status?.aborted === true) parts.push("aborted");
 		if (details?.outputCapped === true) parts.push("output capped");
 	}
-	if (row.viaGateway) parts.push("via gateway");
 	if (finished.excludeFromContext === true) parts.push("not sent to model");
 	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	const stat = executed && !finished.isError ? changeStat(finished.result) : null;
@@ -1268,7 +1268,6 @@ function sublineParts(
 	const head = (inline: string): string =>
 		`${classMark(row.spec.class)}${actor}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${requestedBy}${scope}${answer}${resource}${inline}`;
 	const ledger = finished === null ? null : ledgerTail(finished, row);
-	const via = row.viaGateway ? toolMeta(" · via gateway") : "";
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
 	// A check here would state the call beside a card whose run may read `!` or `✗`, so the card alone states the outcome.
 	const cardDuration = optionalCompactMs(meta.durationMs);
@@ -1283,7 +1282,7 @@ function sublineParts(
 	const compose = (inline: string): SublineParts =>
 		ledger !== null
 			? { lead: `${head(inline)}${ledger.facts}`, tail: `${tail}${ledger.offload}` }
-			: { lead: `${head(inline)}${via}${local}`, tail };
+			: { lead: `${head(inline)}${local}`, tail };
 	const full = compose(inlineText);
 	if (width === undefined || inlineText.length === 0 || visibleWidth(`${full.lead}${full.tail}`) <= width) return full;
 	// A row whose status would wrap onto a second line gives up its scalar
@@ -2554,9 +2553,10 @@ export function renderToolPreview(
 				),
 			);
 		}
-		// Guidance middleware attached for the model is not the tool's output: it
-		// states as one toolMeta row, and /view keeps the result as the model read it.
-		if (notes.length > 0) {
+		// Guidance middleware attached for the model is not the tool's output and asks
+		// nothing of the operator: Detailed states it as one toolMeta row, Standard leaves
+		// it out, and /view keeps the result as the model read it.
+		if (notes.length > 0 && detail.style === "detailed") {
 			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
 			rows.push(
 				`${failure ? RAIL_ERROR() : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
