@@ -5,6 +5,7 @@ import {
 	isKeyRelease,
 	matchesKey,
 	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
@@ -95,6 +96,18 @@ export class ChoiceList implements Component, RowBudgetedBody {
 		const total = (blocks: string[][]): number => blocks.reduce((sum, block) => sum + block.length, 0);
 		let blocks = lay((this.options.descriptions ?? "all") === "all");
 		if (total(blocks) > budget) blocks = lay(false);
+		// Still too tall: the focused description keeps one row and an ellipsis, so every choice stays on screen.
+		// At 40x15 a three-row description windowed the scope card down to its first choice.
+		const focusedBlock = blocks[this.selectedIndex];
+		if (total(blocks) > budget && focusedBlock !== undefined && focusedBlock.length > 2) {
+			const second = (focusedBlock[1] ?? "").replace(/\s+$/u, "");
+			const marked =
+				visibleWidth(second) + 2 <= width ? `${second} ${GLYPH.ellipsis}` : truncateToWidth(second, width, GLYPH.ellipsis);
+			const clipped = blocks.map((block, index) => (index === this.selectedIndex ? [block[0] ?? "", marked] : block));
+			if (total(clipped) <= budget) blocks = clipped;
+			// Labels alone, when that is what keeps every choice in view: a choice off screen is worse than a missing gloss.
+			else if (this.items.length <= budget) blocks = clipped.map((block) => block.slice(0, 1));
+		}
 		const lines = blocks.flat();
 		if (lines.length <= budget) return lines;
 		// Window the flat lines so the focused block is whole and near the middle.
