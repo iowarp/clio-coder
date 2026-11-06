@@ -1295,18 +1295,28 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	const upFigure = row.usage.kind === "ready" ? usageLineFigure(row.usage.prompt) : compactQuantity(usage.prompt);
-	const downFigure = row.usage.kind === "ready" ? usageLineFigure(row.usage.output) : compactQuantity(usage.output);
-	// Nothing counted yet reads as that, once, rather than as two question marks.
-	const tokens =
-		upFigure === null && downFigure === null
-			? theme.fg("body", isTerminalStatus(row.status) ? "tokens not measured" : "tokens not measured yet")
-			: `${theme.fg("body", `in ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
-					"body",
-					`out ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
-				)}`;
+	const measured = (figure: string | null): string | null => (figure === USAGE_NOT_MEASURED ? null : figure);
+	const upFigure = measured(
+		row.usage.kind === "ready" ? usageLineFigure(row.usage.prompt) : compactQuantity(usage.prompt),
+	);
+	const downFigure = measured(
+		row.usage.kind === "ready" ? usageLineFigure(row.usage.output) : compactQuantity(usage.output),
+	);
+	// Nothing counted yet reads as that, once, rather than as a `not measured` per figure.
+	const unmeasured = upFigure === null && downFigure === null;
+	const tokens = unmeasured
+		? theme.fg(
+				"body",
+				`${cost === USAGE_NOT_MEASURED ? "tokens and cost" : "tokens"} not measured${isTerminalStatus(row.status) ? "" : " yet"}`,
+			)
+		: `${theme.fg("body", `in ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
+				"body",
+				`out ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
+			)}`;
 	const costUnit =
-		cost === "—" ? "" : `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
+		cost === "—" || (unmeasured && cost === USAGE_NOT_MEASURED)
+			? ""
+			: `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
 	// A narrow dock drops the cost whole before it cuts the token figures, so no unit ends mid-word.
 	const telemetryLine = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
