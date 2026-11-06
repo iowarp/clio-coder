@@ -54,6 +54,7 @@ export const coreTests = [
 	"url-credential-surfaces",
 	"in-prefix-summary",
 	"packed-source-directory",
+	"code-nav",
 	"skill-frontmatter-cache",
 	"fleet-run-history-prime",
 	"approval-card-arguments",

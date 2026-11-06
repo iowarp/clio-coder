@@ -48,6 +48,8 @@ function artifactRef(current: Codewiki): CodewikiArtifactRef {
 	};
 }
 
+type CodewikiWriteRequest = Exclude<CodewikiBuildWorkerRequest, { kind: "check" }>;
+
 /**
  * Hand the worker a reference to the committed artifact instead of the parsed
  * object. Cloning the object serializes it on this thread, deserializes it on
@@ -57,7 +59,7 @@ function artifactRef(current: Codewiki): CodewikiArtifactRef {
  * the lease (`held`), which is the committed file by construction; any other
  * object is shipped as it was given.
  */
-function byReference(request: CodewikiBuildWorkerRequest, held: Codewiki | null): CodewikiBuildWorkerRequest {
+function byReference(request: CodewikiWriteRequest, held: Codewiki | null): CodewikiWriteRequest {
 	if (request.kind === "build" || request.current === null || "source" in request.current) return request;
 	if (held === null || request.current !== held) return request;
 	return { ...request, current: artifactRef(held) };
@@ -208,7 +210,7 @@ export function coordinateCodewikiWrite(
 	select: (
 		current: Codewiki | null,
 		workspace: string,
-	) => CodewikiBuildWorkerRequest | null | Promise<CodewikiBuildWorkerRequest | null>,
+	) => CodewikiWriteRequest | null | Promise<CodewikiWriteRequest | null>,
 	options: CodewikiCoordinateOptions = {},
 ): Promise<CodewikiCoordinatedResult | null> {
 	const workspace = resolve(cwd);
@@ -282,6 +284,15 @@ export function coordinateCodewikiExclusive<T>(
 export async function reconcileCodewikiCandidate(
 	request: Extract<CodewikiBuildWorkerRequest, { kind: "ensure" }> & { current: Codewiki | null },
 ): Promise<CodewikiBuildWorkerResult> {
+	if (request.current !== null) {
+		const check = await executeInWorker({
+			kind: "check",
+			cwd: request.cwd,
+			current: artifactRef(request.current),
+			previous: request.previous,
+		});
+		if (!check.changed) return { codewiki: request.current, fingerprint: check.fingerprint, changed: false };
+	}
 	const outcome = await executeInWorker(request);
 	const codewiki = outcome.codewiki ?? request.current;
 	if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");

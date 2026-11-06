@@ -1,10 +1,12 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { executeCodewikiBuildOutcome } from "../../src/domains/context/codewiki/build-operation.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
+import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 import type { ToolRegistry, ToolResult } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -96,6 +98,32 @@ describe("code_nav tool", () => {
 		const miss = await payload({ mode: "symbol", query: "noSuchSymbol" });
 		deepStrictEqual([miss.symbols, miss.next], [[], "mode=path query=noSuchSymbol"]);
 		strictEqual((await payload({ mode: "path", query: "docs/" })).next, "mode=entries");
+	});
+
+	it("keeps an unchanged private index without a return clone and still detects same-metadata source edits", async () => {
+		const initial = await loadCodewikiForTool(workspace, { readOnly: true });
+		if (!initial.ok) throw new Error(initial.message);
+		for (const needsBackfill of [false, true]) {
+			const outcome = await executeCodewikiBuildOutcome({
+				kind: "check",
+				cwd: workspace,
+				current: { needsBackfill, loc: initial.fingerprint.loc },
+				previous: initial.fingerprint,
+			});
+			strictEqual(outcome.changed, needsBackfill);
+			strictEqual(outcome.codewiki, null);
+			deepStrictEqual(outcome.fingerprint, initial.fingerprint);
+		}
+		const unchanged = await loadCodewikiForTool(workspace, { readOnly: true });
+		if (!unchanged.ok) throw new Error(unchanged.message);
+		strictEqual(unchanged.codewiki, initial.codewiki);
+		const file = join(workspace, "src/grid.ts");
+		const stats = statSync(file);
+		writeFileSync(file, readFileSync(file, "utf8").replaceAll("parseGrid", "parseCell"));
+		utimesSync(file, stats.atime, stats.mtime);
+		deepStrictEqual((await payload({ mode: "symbol", query: "parseGrid" })).symbols, []);
+		strictEqual(((await payload({ mode: "symbol", query: "parseCell" })).symbols as unknown[]).length, 1);
+		strictEqual(existsSync(join(workspace, ".clio-coder")), false);
 	});
 
 	it("reports an absent wiki as operator-only instead of generating one", async () => {
