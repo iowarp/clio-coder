@@ -39,6 +39,8 @@ export const coreTests = [
 	"url-credential-surfaces",
 	"in-prefix-summary",
 	"packed-source-directory",
+	"skill-frontmatter-cache",
+	"fleet-run-history-prime",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
