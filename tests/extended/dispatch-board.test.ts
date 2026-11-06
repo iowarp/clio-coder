@@ -778,7 +778,7 @@ describe("dispatch quality presentation", () => {
 				for (const style of ["compact", "standard", "detailed"] as const) {
 					const lines = renderWorkerEntryLines(worker, 76, { detail: transcriptDetail(style) });
 					ok(plain(lines).includes(quality === "fail" ? "validation failed" : `quality ${wording}`), plain(lines));
-					match(plain(lines), /execution ok/u);
+					match(plain(lines), /✓ done|· it finished/u);
 					ok(lines.every((line) => visibleWidth(line) <= 76));
 				}
 				const monitor = createMonitorTool({

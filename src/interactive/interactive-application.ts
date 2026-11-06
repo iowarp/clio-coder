@@ -1580,7 +1580,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		notify,
 		terminal,
 		dispatchBoard,
-		setFleetRunPhase: (runId, phase) => dispatchBoardStore.setFleetPhase(runId, phase),
+		setFleetRunPhase: (runId, phase) => {
+			dispatchBoardStore.setFleetPhase(runId, phase);
+			// The step's worker card names its step too, so two steps sharing an agent and a task read apart.
+			interactiveSubscriptions.tagPlanStep(runId, phase.stepId);
+		},
 		fleetPlans: dispatchBoardStore.plans,
 		chatPanel,
 		resetTranscript: adoptExistingConversation,

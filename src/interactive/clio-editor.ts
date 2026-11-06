@@ -812,7 +812,8 @@ export class ClioEditor extends Editor {
 								...(steer.live && !steer.queued
 									? [{ key: "Enter", verb: `send to ${steer.agentId}`, short: "send", critical: true }]
 									: []),
-								{ key: "Esc", verb: "cancel steer, keep text", short: "cancel" },
+								// A bare `cancel` beside a worker's name reads as stopping the worker, so the short form says back.
+								{ key: "Esc", verb: "cancel steer, keep text", short: "back" },
 							],
 							// The steer's keys take the approval's stretch: the composer's clear left cost them the send key at 40 columns.
 							Math.max(1, this.approvalLabelRoom(width) - (scroll ? visibleWidth(scroll) + 3 : 0)),
