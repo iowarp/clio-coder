@@ -350,7 +350,10 @@ function resolveDefaultIdentity(
 	const description = metadata.description;
 	if (!description) return { text: head.slice(0, 600), bare: true, descriptionSource: null };
 	const cleaned = description.replace(/\.$/, "").trim();
-	const role = /^[a-z]/.test(cleaned) ? `It is ${cleaned}.` : `${cleaned}.`;
+	// A description is usually a noun phrase; one opening with an article
+	// ("An open-source coding agent") read as a verbless sentence after the head.
+	const phrase = /^(?:A|An|The)\s/.test(cleaned) ? `${cleaned[0]?.toLowerCase() ?? ""}${cleaned.slice(1)}` : cleaned;
+	const role = /^[a-z]/.test(phrase) ? `It is ${phrase}.` : `${phrase}.`;
 	return { text: `${head} ${role}`.slice(0, 600), bare: false, descriptionSource: metadata.descriptionSource };
 }
 
@@ -775,9 +778,17 @@ const CITED_LOCATION_RE = /^(.*[^:]):(\d+)(?:[-:]\d+)?$/;
 /** A symbol written as a call: `priceCart()`. */
 const CITED_CALL_RE = /^(.+?)\(\s*\)$/;
 
+/** A concrete file path: a directory part and a file name with an extension, no pattern, home or URL. */
+const CONCRETE_FILE_RE = /^[^\s~/:][^\s:]*\/[^\s/]*\.[A-Za-z0-9]+$/;
+
 function groundedLiteral(literal: string, evidence: ModelGroundingCorpus): boolean {
 	const lower = literal.toLowerCase();
 	const path = literal.replace(/^\.\//, "").replace(/\/$/, "");
+	// Cited paths decide which workers receive a rule (`handbook-units.ts`), so a
+	// file path must name a file from the repository root. A substring match let
+	// `tests/chat-composer.test.ts` through for `apps/clio-coder-gui/tests/`, and
+	// the rule then claimed the GUI tests live at the root.
+	if (CONCRETE_FILE_RE.test(path)) return evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path);
 	if (evidence.lower.includes(lower) || evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path))
 		return true;
 	// A directory is real when some visible file lives under it.
@@ -1035,21 +1046,36 @@ function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCo
 }
 
 // Repeated boundary rules consumed both invariant and convention slots; compare stable citation and prose tokens.
+// Citations keep a leading backtick so the two kinds stay apart.
 function handbookRuleTokens(rule: string): ReadonlySet<string> {
 	return new Set(
 		[
 			...normalizeHandbookRule(rule)
 				.toLowerCase()
 				.matchAll(/`([^`\n]+)`|\b[a-z]{4,}\b/g),
-		].map((match) => match[1] ?? match[0]),
+		].map((match) => (match[1] !== undefined ? `\`${match[1]}` : match[0])),
 	);
 }
 
+// A path below the root: a root document such as `CONTRIBUTING.md` is cited as the source of unrelated rules.
+const CITED_FILE_RE = /^`[^`\s/]+\/[^`\s]/;
+
+/**
+ * Two rules are one when most words match, or when they cite the same files
+ * and names. A model that states a rule as an invariant and again as a change
+ * recipe rewords it (Clio's own settings rule shared 42% of its words with its
+ * restatement) but cites the same `src/core/defaults.ts` symbols in both.
+ */
 function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
+	const citations = [...tokens].filter((token) => token.startsWith("`"));
 	return kept.some((other) => {
 		const shorter = tokens.size <= other.size ? tokens : other;
 		const longer = tokens.size <= other.size ? other : tokens;
-		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
+		if (shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7) return true;
+		const otherCitations = [...other].filter((token) => token.startsWith("`"));
+		const shared = citations.filter((token) => other.has(token));
+		const fewest = Math.min(citations.length, otherCitations.length);
+		return shared.length >= 2 && shared.some((token) => CITED_FILE_RE.test(token)) && shared.length / fewest >= 2 / 3;
 	});
 }
 
