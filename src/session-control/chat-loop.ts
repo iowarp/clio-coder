@@ -3084,8 +3084,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						options.requestContinuation !== true,
 					);
 				} catch (err) {
-					emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
-					if (err instanceof Error && err.name === "AbortError") {
+					const tokens = context.contextUsage().tokens;
+					// The cheaper stages run before the summary and may have applied, so the size is stated, not "unchanged".
+					const size = tokens !== null ? `; context at ${footerTokens(tokens)} tokens` : "";
+					const aborted = err instanceof Error && err.name === "AbortError";
+					// Worded as the operator's /context compact failure is: the size, why in words, and the way on (HS14).
+					// A failure here does not stop the turn, which goes out without a summary. A settled card already states a cancel.
+					if (!aborted) {
+						emitNotice(
+							`[Clio Coder] auto-compaction failed${size}. ${compactionFailureReason(err)}. This turn goes on without it; /context compact tries again; /model picks another route to summarize on.`,
+							"warning",
+						);
+					} else if (!context.lastCompactionCardSettled()) {
+						emitNotice(`[Clio Coder] auto-compaction cancelled${size}`);
+					}
+					if (aborted) {
 						await recordCanceledBeforeAdmission({
 							userTurnId: reservedUserTurnId,
 							continuation: options.requestContinuation === true,

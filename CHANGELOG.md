@@ -45,7 +45,7 @@ Clio Coder 0.6.9 makes the terminal tell the truth about what is happening and w
 - A retried attempt no longer settles as failed. The rail holds a `retrying` phase with a countdown, provider waits read `will retry in X, provider asked to wait Y` and count as provider waits rather than attempts, and the attempts collapse into one row and one receipt.
 - Background model calls such as memory review, the safety judge and prewarm appear on the rail. Approval and interview waits never trip the stuck watchdog, and receipts split work time from waiting time.
 - Every overlay that hides the rail keeps a live strip above the footer that names the phase, times the phase rather than the turn and says how to stop the run behind it.
-- Compaction names its stage with a clock, the history it is reading and the summary written so far against its cap. A cancelled one says the context stayed at its size, and a failed `/context compact` states its cause in words.
+- Compaction names its stage with a clock, the history it is reading and the summary written so far against its cap. A cancelled one says the context stayed at its size, and a failed compaction, whether `/context compact` or the automatic one before a submit, states its cause in words and how to go on.
 - The spinner moves only beside live model, tool or harness work, and a wait on you shows a still mark.
 - A Git probe that times out retries once with 5 seconds, is not cached, and reads `unknown` or `Git did not answer yet` instead of claiming there is no repository.
 
