@@ -4,7 +4,7 @@ The [proactive memory guide](../guide/proactive-memory.md) explains when memory 
 
 Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. A finished run's evidence is its sealed telemetry scope: when a dispatched run settles, the run's journal owner assesses it and journals an `evidence.assessed` record after `run.settled` and before `run.sealed`, so the seal covers the assessment. There is no evidence directory to build and no evidence index; every reader reads the read model's run DTO. Long-term memory records are local and evidence-linked, and only an approved record reaches prompt selection. Approval comes from the operator or the narrow repository-knowledge gate described below. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders can propose durable records whose approval remains governed separately. Use the TUI [`/view`](observability.md#view) command for interactive inspection of runs, dispatch output, durable tool output, compaction summaries, and session accountability before citing evidence.
 
-Source of truth: `src/domains/evidence/`, `src/domains/memory/`, `src/domains/evolution/`, [evidence.ts](../../src/cli/evidence.ts), [memory.ts](../../src/cli/memory.ts), and [evolve.ts](../../src/cli/evolve.ts). The journal, seal and bundle format are specified in [Telemetry](telemetry.md#evidence).
+Source of truth: `src/domains/evidence/`, `src/domains/memory/`, `src/domains/evolution/`, `src/domains/claims/`, [evidence.ts](../../src/cli/evidence.ts), [memory.ts](../../src/cli/memory.ts), [claims.ts](../../src/cli/claims.ts), and [evolve.ts](../../src/cli/evolve.ts). The journal, seal and bundle format are specified in [Telemetry](telemetry.md#evidence).
 
 ---
 
@@ -376,10 +376,10 @@ Usage errors exit 2 with the usage text on stderr; every other failure exits 1.
 | --- | --- |
 | `id` | `mem-` followed by 16 lowercase hex characters, derived from the source so a retried proposal finds the existing record. |
 | `scope` | One of `global`, `repo`, `language`, `runtime`, `agent`, `task-family`, `hpc-domain`. |
-| `key` | A stable key such as `evidence:<runId>` or `promotion:<sourceKind>:<sessionId>:<entryId>`. |
-| `lesson`, `appliesWhen`, `avoidWhen` | The lesson text and the conditions around it. Evidence proposals truncate the lesson to 240 characters. |
+| `key` | A stable key such as `evidence:<runId>`, `claim:<claimId>` or `promotion:<sourceKind>:<sessionId>:<entryId>`. |
+| `lesson`, `appliesWhen`, `avoidWhen` | The lesson text and the conditions around it. Evidence proposals truncate the lesson to 240 characters. A claim proposal's lesson is `Recorded claim: <text>`, truncated to 480 characters. |
 | `evidenceRefs` | At least one reference. Required for prompt injection. |
-| `confidence` | A number from 0 to 1. Evidence proposals score 0.55 to 0.75; promotions start at 0.6. |
+| `confidence` | A number from 0 to 1. Evidence proposals score 0.55 to 0.75; claim proposals score 0.5; promotions start at 0.6. |
 | `createdAt`, `lastVerifiedAt`, `rejectedAt`, `approved`, `regressions` | Lifecycle fields. An approved record must not carry `rejectedAt`. A non-empty `regressions` list suppresses injection. |
 | `repository`, `runtime`, `agent` | Structured applicability identities, required for the matching scope and invalid for any other. |
 | `provenance` | Source kind (`evidence`, `task-bank-entry` or `handoff-snapshot`), source session and entry, and the redaction facts. |
@@ -393,6 +393,7 @@ Only `global`, `repo`, `runtime` and `agent` records can be created by the CLI, 
 ```mermaid
 stateDiagram-v2
     evidence --> proposed: propose --from-evidence
+    claim --> proposed: propose --from-claim
     taskBank --> proposed: /memory selected-entry action
     taskBank --> proposed: model-tier reminder reaches the operator
     redactedHandoff --> proposed: promote --from-handoff
@@ -467,6 +468,61 @@ evidence, which supports a reviewed lesson about repository A learned while
 working in repository B. Runtime and agent overrides may only select an exact
 identity already recorded by the evidence. Global scope always requires its
 own acknowledgement. No inference path widens an explicit choice.
+
+---
+
+## Claims ledger
+
+The claims ledger is an append-only per-project log of judged check results ([store.ts](../../src/domains/claims/store.ts), [record.ts](../../src/domains/claims/record.ts)). It lives at `<stateDir>/claims/<sha256 of project root>.jsonl`, where the project root is the real path of the enclosing repository root, so every subdirectory of a checkout shares one log. It is kept in the state directory so a cloned repository cannot ship claims. Each line is one JSON record, appended under a state lock and fsynced. A line torn by a crash is skipped on read and closed off by the next append. The line types are `claim`, `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test`.
+
+### What a claim records
+
+Only the two judged check kinds record claims: `reproduce` and `numeric-compare` ([types.ts](../../src/domains/claims/types.ts)). Command and perf-budget checks record nothing. A claim's `verdict` is `agrees` or `disagrees`: agreement within the check's tolerance, never a verdict on truth.
+
+| Field | Meaning |
+| --- | --- |
+| `id` | SHA-256 of the record's canonical JSON without the id. `clio-coder claims show` accepts a prefix. |
+| `kind`, `verdict`, `text` | The check kind, the verdict, and one sentence stating it. |
+| `subject`, `keys` | The check id and the digests of every judged payload and input, plus the check id, canonical argv and judged paths (project-relative where possible) used to match later work. |
+| `conditions` | Tolerance, comparison rule, reference digest and per-metric or per-key verdicts. A `reproduce` claim adds commit, working directory, inputs, seed, environment and platform. A `numeric-compare` claim adds argv, the HEAD commit (or null) and the working-tree state, and keeps at most 256 per-key verdicts with the rest counted. |
+| `source` | `verify` (session, tool call and whether the model or the harness asked) or `host-verification` (run id and receipt digest). |
+| `flagged` | `instruction-markers` when the claim text is instruction-shaped. Delivery then withholds the text. |
+
+Capture runs in the main session only. A main-thread `verify` result is recorded by the `observer.claims-capture` middleware, and host verification of a worker run records a claim when the run declares a gate. A worker's own `verify` call never writes the log, and `run --agent` records none.
+
+### Edges and statuses
+
+Edges are derived under the lock at append time and compare no text ([edges.ts](../../src/domains/claims/edges.ts)). Each kind pins its conditions: for `numeric-compare` the commit, argv, reference and tolerance; for `reproduce` the commit, argv and working directory, reference, input digests, tolerance, comparison, seed, environment and platform (kernel release and Clio version excluded). The judged output is never pinned. A new claim:
+
+- `contradicts` the latest earlier claim with equal pins when the two verdicts differ. Only a flip adds an edge, so several agreements followed by one disagreement add one edge. The working tree of a `numeric-compare` claim is not pinned, so an uncommitted edit at the same commit can still contradict, and the edge sentence says how the trees differed.
+- `supersedes` every earlier claim of the same check and kind whose pins differ, such as a new commit or new input digests, unless it is already superseded.
+
+A claim with no recorded commit has no pins, so it can be superseded but never contradicted. A claim's status is `superseded` when any supersedes edge targets it, otherwise `contested` when it sits on either end of a contradicts edge, otherwise `standing`.
+
+### Memory regressions
+
+When a later claim disagrees under the same pins as an earlier claim that agreed, every earlier agreeing claim that is not superseded is overturned. Every memory record citing one of them, by `claim:<id>` or by the run id whose host verification produced it, receives a regression through [claim-link.ts](../../src/domains/memory/claim-link.ts), as described under [Host-evidence approval](#host-evidence-approval-for-repository-knowledge). The log also appends a `regression` line listing the memory ids reached, empty when none were. `clio-coder memory propose --from-claim <prefix>` (at least 4 hex characters) builds the unapproved `repo` record that cites a claim, with key `claim:<id>` and the conditions the claim recorded.
+
+### Delivery to the main agent
+
+When work touches a check with a contested or superseded claim, the main agent receives a note in the message tail: a `<system-reminder>` at turn start, or a note on the tool result ([delivery.ts](../../src/domains/claims/delivery.ts)). The system prompt and tool schemas never change. Work touches a check when the check id or one of its paths appears as a whole token in the task text, when `verify` names the check, or when a read, edit or write touches a path from the check's keys or command. The note names both sides of an open contradiction, counts superseded claims, and tells the agent not to repeat a superseded verdict as current. A note is capped at 1,200 characters per check, two checks per hook point and 280 characters of claim text. Each check's state is offered once per session, and again only when its open contradiction or latest supersede changes. Offers persist in `<stateDir>/claims/<digest>.offers.jsonl`, so a `run --session` continuation does not repeat them. Workers receive no claim notes.
+
+### Hypotheses
+
+A hypothesis slate (`clio-coder.hypothesis-slate.v1`, written by the literature pack's hypothesis workflow skill, see [Resource library](../guide/resource-library.md)) is recorded in the same log ([hypotheses.ts](../../src/domains/claims/hypotheses.ts)). The main session's Write or Edit of a `.json` slate of at most 1 MiB is read back from disk and its digest taken from the raw bytes. A worker's slate is recorded only from bytes the host accepted, for at most 64 paths per run, and only entries still at `proposed`. Statement and prediction are clipped to 1,000 characters, ids match `H<n>`, and hypothesis text is never evidence. A changed entry becomes a new record that revises the earlier one.
+
+A hypothesis names a check to test it. Its status is derived from the log, never from the slate:
+
+| Status | Meaning |
+| --- | --- |
+| `proposed` | Recorded from a slate; no run of its check yet. A slate always records `proposed`. |
+| `tested` | Its check ran but produced no judged claim (a command check, a crash, a timeout or an unjudgeable payload). |
+| `supported` | The latest judged run of its check recorded an `agrees` claim. |
+| `refuted` | The latest judged run of its check recorded a `disagrees` claim. |
+
+A later unjudged run does not demote `supported` or `refuted`. A `check-start` line binds the current revisions before the check runs, so a revision appended during a run is not credited. A `verify` call that ran a hypothesis's check also gets the hypothesis status once per deciding test, with an instruction to report the ledger status and leave the slate as written.
+
+`clio-coder claims [list] [--check <id>] [--json]` lists claims, hypotheses and their statuses, and `clio-coder claims show <id-prefix> [--json]` prints one claim or hypothesis; see [Commands and modes](../guide/commands-and-modes.md).
 
 ---
 

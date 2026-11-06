@@ -182,6 +182,42 @@ and unrelated successes decide nothing. Two recurrences, after submission, of
 the failure the reminder was about record it as contradicted. Source:
 `src/domains/memory/intervention.ts`.
 
+## Claims and hypotheses that reach memory
+
+Clio Coder keeps a claims ledger beside memory: every judged `reproduce` or
+`numeric-compare` check the main session runs, through `verify` or host
+verification of a worker run with a declared gate, appends a claim saying
+whether the result agreed with its reference within tolerance. Agreement is not
+a verdict on truth. The log is per project, under
+`<stateDir>/claims/`, and the full record is specified in
+[Evidence and memory](../architecture/evidence-and-memory.md#claims-ledger).
+
+- **Notes on contested or superseded results.** When the task text names a
+  check or one of its paths, `verify` runs it, or a read, edit or write touches
+  one of its files, and a claim of that check is contested or superseded, the
+  main agent gets a short note at the tail of the turn or on the tool result.
+  It names both sides of an open contradiction and says not to repeat a
+  superseded verdict as current. Each state is offered once per session.
+  Workers get no notes. Source: `src/domains/claims/delivery.ts`.
+- **A lesson from a claim.** `clio-coder memory propose --from-claim <prefix>`
+  builds an unapproved `repo` lesson citing `claim:<id>`. Approve it like any
+  other proposal.
+- **Regressions from a contradiction.** When a check that agreed later
+  disagrees under the same commit, inputs, reference and tolerance, every
+  memory record citing the overturned claim receives a regression. The record
+  keeps its approval, stops reaching the prompt and `memory_recall`, and
+  `clio-coder memory approve <id>` clears the regression after review. Source:
+  `src/domains/memory/claim-link.ts`.
+- **Hypotheses.** A hypothesis slate written by the literature pack's
+  hypothesis workflow (see [Resource library](resource-library.md)) is
+  recorded in the same ledger. Each hypothesis starts `proposed`. A run of its
+  check that records no judged claim marks it `tested`, and the latest judged
+  run marks it `supported` (agrees) or `refuted` (disagrees). The status comes
+  from the ledger, never from what the slate says.
+
+`clio-coder claims` lists claims and hypotheses with their statuses, and
+`clio-coder claims show <id-prefix>` prints one.
+
 ## Offer a lesson beside the action it concerns
 
 An eligible approved lesson can appear at the session's first workspace change,
