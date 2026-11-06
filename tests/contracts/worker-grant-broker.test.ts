@@ -126,10 +126,13 @@ describe("grant broker", () => {
 		broker.dispose();
 	});
 
-	it("revokes on expiry, turn cancellation and worker exit", async () => {
+	it("revokes on expiry, turn cancellation and worker exit", (t) => {
+		t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
 		const { broker, delivered } = brokerWithLog();
 		const expiring = opened(broker, { workerRequestId: "perm-exp", runId: "run-exp", deadlineAt: Date.now() + 20 });
-		await new Promise((resolve) => setTimeout(resolve, 80));
+		t.mock.timers.tick(19);
+		strictEqual(broker.get(expiring.requestId)?.state, "pending");
+		t.mock.timers.tick(1);
 		strictEqual(broker.get(expiring.requestId)?.state, "expired");
 		strictEqual(
 			broker.decide(expiring.requestId, { decision: "approve", issuer: "main", sessionId: "session-1" }).ok,
