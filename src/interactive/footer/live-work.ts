@@ -311,8 +311,13 @@ export function liveWorkStrip(
 			render(bare, []),
 		];
 	} else {
-		const lead = `${theme.fg("activity", GLYPH.running)} ${theme.fg("activity", workers ?? "")}`;
-		candidates = [render(lead, [BEHIND_VIEW]), lead];
+		// A run being stopped does not continue: `verifier stopping · continues behind this view` claimed both.
+		const stopping =
+			facts.background.length === 0 &&
+			facts.workers.length > 0 &&
+			facts.workers.every((row) => row.status === "cancelling" || row.plan?.state === "cancelling");
+		const lead = `${theme.fg(stopping ? "counter" : "activity", stopping ? GLYPH.cancelled : GLYPH.running)} ${theme.fg(stopping ? "counter" : "activity", workers ?? "")}`;
+		candidates = stopping ? [lead] : [render(lead, [BEHIND_VIEW]), lead];
 	}
 	const fitted = candidates.find((candidate) => visibleWidth(candidate) <= room);
 	return fitted ?? truncateToWidth(candidates.at(-1) ?? "", room, GLYPH.ellipsis, false);

@@ -1262,6 +1262,8 @@ export function composerPhasePresentation(
 			const short = room < 24;
 			// Cancelling a request does not call back a load it started: the server may finish it regardless.
 			const leftLoading = status.modelRequest?.abandonedLoad === true;
+			// The run was cancelled, not the model: `Judge-model was cancelled` named the wrong thing, so no subject leads it.
+			if ((stop === "cancelled" || stop === "aborted") && slot !== undefined) slot.name = "";
 			label =
 				stop === "error"
 					? fit(failedTurnFacts({ text: "failed", keep: 9 }, status.summary?.failure))
@@ -1269,7 +1271,7 @@ export function composerPhasePresentation(
 						? fit([{ text: short ? "stopped" : "stopped generating tool arguments", keep: 9 }])
 						: stop === "cancelled" || stop === "aborted"
 							? fit([
-									{ text: short ? "cancelled" : "was cancelled", keep: 9 },
+									{ text: "run cancelled", keep: 9 },
 									{ text: leftLoading ? `${server} may finish the load` : null, short: "may still load", keep: 5 },
 								])
 							: stop === "length"

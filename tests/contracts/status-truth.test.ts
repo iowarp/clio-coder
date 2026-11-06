@@ -566,7 +566,7 @@ test("a cancel that leaves a load behind and a restore that outlives the cancel 
 		200,
 		at + 2_000,
 	).label;
-	match(ended, /was cancelled · the server may finish the load/);
+	match(ended, /run cancelled · the server may finish the load/);
 	const stopping = composerPhasePresentation(
 		{
 			...INITIAL_STATUS,
