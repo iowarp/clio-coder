@@ -77,7 +77,7 @@ function attachmentNote(
 	}
 	for (const [filePath, pages] of [...partial].slice(0, ATTACHMENT_NOTE_LIMIT))
 		parts.push(
-			`attached ${pages} of ${shortAttachmentPath(filePath, cwd)}, which is all that fits, so Clio reads the rest with its tools`,
+			`attached ${pages} of ${shortAttachmentPath(filePath, cwd)}, which is all that fits; Clio reads the rest with its tools`,
 		);
 	for (const filePath of byName.slice(0, ATTACHMENT_NOTE_LIMIT))
 		parts.push(

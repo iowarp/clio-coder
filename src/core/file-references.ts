@@ -287,7 +287,7 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				const of = rendered.pageCount !== undefined ? ` of ${rendered.pageCount}` : "";
 				return result(
 					renderTextFile(filePath, content),
-					[{ type: "info", message: `pages 1-${lastPage}${of}`, path: filePath }],
+					[{ type: "info", message: `the first ${lastPage}${of} pages`, path: filePath }],
 					[],
 					[filePath],
 				);
