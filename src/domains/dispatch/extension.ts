@@ -15,7 +15,13 @@ import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
-import { recordHostVerificationClaims } from "../claims/index.js";
+import {
+	type AcceptedWorkerSlates,
+	bindHostVerificationHypotheses,
+	recordAcceptedWorkerSlates,
+	recordHostVerificationClaims,
+	snapshotAcceptedWorkerSlates,
+} from "../claims/index.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
@@ -8843,6 +8849,20 @@ export function createDispatchBundle(
 					onDiagnostic: (error: unknown) =>
 						reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
 				};
+				// The hypotheses each declared check tests are bound now, before any of them starts (#406): a check-start
+				// record per bound check enters the project's log, so a slate that lands while they run is not credited.
+				let hypothesisBindings: ReadonlyMap<string, ReadonlyArray<string>> | undefined;
+				if ((req.resolvedVerification?.length ?? 0) > 0) {
+					try {
+						hypothesisBindings = await bindHostVerificationHypotheses(
+							req.taskWorktree?.root ?? lifecycle.cwd,
+							envelope.id,
+							(req.resolvedVerification ?? []).map((check) => check.check),
+						);
+					} catch (error) {
+						reportDispatchDiagnostic(`bind hypotheses for ${envelope.id}`, error);
+					}
+				}
 				// This await is the batch barrier. It already sits before
 				// buildReceiptDraft below, which is why batch settlement needs no
 				// receipt restructuring: every member parks here with its outcome
@@ -9200,6 +9220,32 @@ export function createDispatchBundle(
 					}
 				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
+				// A hypothesis slate the worker wrote enters the log only once the host accepted the run into the project
+				// (#406): a merged task worktree's changed paths, or the observed writes of a run in the checkout that
+				// settled succeeded; nothing the worker reported is used. The bytes are read here, in the same synchronous
+				// step that accepted the run, and recorded after the receipt is sealed only while the files still hold them.
+				let acceptedSlates: AcceptedWorkerSlates = [];
+				const checkoutChanges = receiptDraft.checkoutChanges;
+				const acceptedPaths =
+					finalOutcome !== "succeeded"
+						? []
+						: req.taskWorktree !== undefined
+							? worktreeReceipt?.applied === true
+								? (worktreeReceipt.changedPaths ?? []).map((path) => resolvePath(req.taskWorktree?.root ?? lifecycle.cwd, path))
+								: []
+							: checkoutChanges !== undefined
+								? checkoutChanges.changedPaths.map((path) => resolvePath(checkoutChanges.cwd, path))
+								: [...observedRunEffects.mutatedPaths];
+				if (acceptedPaths.some((path) => path.endsWith(".json"))) {
+					try {
+						acceptedSlates = snapshotAcceptedWorkerSlates({
+							projectCwd: req.taskWorktree?.root ?? lifecycle.cwd,
+							paths: acceptedPaths,
+						});
+					} catch (error) {
+						reportDispatchDiagnostic(`read hypothesis slates for ${envelope.id}`, error);
+					}
+				}
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -9238,9 +9284,29 @@ export function createDispatchBundle(
 							receiptDigest: receipt.digest,
 							checks: receipt.hostVerification.checks,
 							projectCwd: req.taskWorktree?.root ?? lifecycle.cwd,
+							...(hypothesisBindings !== undefined ? { hypotheses: hypothesisBindings } : {}),
 						});
 					} catch (error) {
 						reportDispatchDiagnostic(`record claims for ${envelope.id}`, error);
+					}
+				}
+				if (acceptedSlates.length > 0) {
+					try {
+						const ingested = await recordAcceptedWorkerSlates({
+							runId: receipt.runId,
+							receiptDigest: receipt.digest,
+							projectCwd: req.taskWorktree?.root ?? lifecycle.cwd,
+							slates: acceptedSlates,
+						});
+						if (ingested.drifted.length > 0)
+							reportDispatchDiagnostic(
+								`record hypotheses for ${envelope.id}`,
+								new Error(
+									`not recorded, changed after the host accepted the run: ${ingested.drifted.map((path) => relative(lifecycle.cwd, path) || path).join(", ")}`,
+								),
+							);
+					} catch (error) {
+						reportDispatchDiagnostic(`record hypotheses for ${envelope.id}`, error);
 					}
 				}
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {

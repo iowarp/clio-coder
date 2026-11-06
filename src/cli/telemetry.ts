@@ -181,12 +181,32 @@ function runConsent(argv: ReadonlyArray<string>): number {
 /** The read model's commands; its module, the folds and the session loader load only for them. */
 const READ_COMMANDS = new Set(["inspect", "calls", "cost", "cache", "timeline", "why-stopped", "explain"]);
 
+/**
+ * The help a leaf prints for `--help`. Each leaf parser refuses flags it does not
+ * know, so without this `telemetry share --help` answered "--help needs a value"
+ * and the others exited 2 with an unknown-flag error.
+ */
+async function leafHelp(command: string): Promise<string | null> {
+	if (READ_COMMANDS.has(command)) return (await import("./telemetry-read.js")).READ_HELP;
+	if (command === "share" || command === "import") return (await import("./telemetry-share.js")).SHARE_HELP;
+	if (command === "insights") return (await import("./telemetry-insights.js")).INSIGHTS_HELP;
+	if (command === "consent" || command === "prune" || command === "doctor") return HELP;
+	return null;
+}
+
 export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<number> {
 	if (argv[0] === "--help" || argv[0] === "-h") {
 		process.stdout.write(
 			`${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}${(await import("./telemetry-insights.js")).INSIGHTS_HELP}`,
 		);
 		return 0;
+	}
+	if (argv[0] !== undefined && (argv.includes("--help") || argv.includes("-h"))) {
+		const help = await leafHelp(argv[0]);
+		if (help !== null) {
+			process.stdout.write(help);
+			return 0;
+		}
 	}
 	if (argv[0] !== undefined && READ_COMMANDS.has(argv[0]))
 		return (await import("./telemetry-read.js")).runTelemetryReadCommand(argv);

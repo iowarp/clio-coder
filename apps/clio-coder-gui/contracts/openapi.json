@@ -5278,7 +5278,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_bc394250"
+															"$ref": "#/components/schemas/Union_325fa38b"
 														}
 													}
 												},
@@ -16305,7 +16305,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_bc394250"
+															"$ref": "#/components/schemas/Union_325fa38b"
 														}
 													}
 												},
@@ -18074,12 +18074,6 @@
 					"$ref": "#/components/schemas/Object_calls_role_tokens_a64459ef"
 				}
 			},
-			"Array_5aada9b0": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_argv_baseComparison_check_2f094a61"
-				}
-			},
 			"Array_605e9bdc": {
 				"type": "array",
 				"items": {
@@ -18354,6 +18348,12 @@
 					"$ref": "#/components/schemas/Object_fill_key_label_85b68f62"
 				},
 				"maxItems": 4
+			},
+			"Array_f9d40dc7": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_argv_baseComparison_check_40cf7442"
+				}
 			},
 			"Array_fdb8a333": {
 				"type": "array",
@@ -21343,7 +21343,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_argv_baseComparison_check_2f094a61": {
+			"Object_argv_baseComparison_check_40cf7442": {
 				"type": "object",
 				"required": [
 					"check",
@@ -21357,7 +21357,7 @@
 					"baseComparison"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_1103e78c"
+					"$ref": "#/components/schemas/Shape_56ce3fbf"
 				},
 				"additionalProperties": false
 			},
@@ -22716,7 +22716,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checkoutChanges_failureMessage_hostVerification_bbb1e0da": {
+			"Object_checkoutChanges_failureMessage_hostVerification_c17b05d1": {
 				"type": "object",
 				"required": [
 					"version",
@@ -22728,7 +22728,7 @@
 					"hostVerification"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_f9a7138a"
+					"$ref": "#/components/schemas/Shape_99feab09"
 				},
 				"additionalProperties": false
 			},
@@ -22757,11 +22757,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checks_reason_4f6695e9": {
+			"Object_checks_reason_5673249a": {
 				"type": "object",
 				"required": ["reason", "checks"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_a3b267fe"
+					"$ref": "#/components/schemas/Shape_ee83f435"
 				},
 				"additionalProperties": false
 			},
@@ -24966,11 +24966,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_state_value_41d3540a": {
+			"Object_state_value_7572a8f3": {
 				"type": "object",
 				"required": ["state", "value"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_59883bb4"
+					"$ref": "#/components/schemas/Shape_c60e3b7d"
 				},
 				"additionalProperties": false
 			},
@@ -25133,7 +25133,7 @@
 						"$ref": "#/components/schemas/Union_4dc8870f"
 					},
 					"result": {
-						"$ref": "#/components/schemas/Union_bc394250"
+						"$ref": "#/components/schemas/Union_325fa38b"
 					},
 					"assessment": {
 						"anyOf": [
@@ -26020,46 +26020,6 @@
 				},
 				"truncated": {
 					"type": "boolean"
-				}
-			},
-			"Shape_1103e78c": {
-				"check": {
-					"type": "string"
-				},
-				"argv": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"cwd": {
-					"type": "string"
-				},
-				"exitCode": {
-					"type": "integer"
-				},
-				"durationMs": {
-					"type": "number",
-					"minimum": 0
-				},
-				"memo": {
-					"type": "boolean"
-				},
-				"outputTail": {
-					"type": "string"
-				},
-				"evidenceRunId": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"baseComparison": {
-					"$ref": "#/components/schemas/Union_7e4ed1ca"
 				}
 			},
 			"Shape_12e39c26": {
@@ -27067,6 +27027,49 @@
 					"$ref": "#/components/schemas/Union_aa0baad3"
 				}
 			},
+			"Shape_56ce3fbf": {
+				"check": {
+					"type": "string"
+				},
+				"argv": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"cwd": {
+					"type": "string"
+				},
+				"exitCode": {
+					"type": "integer"
+				},
+				"durationMs": {
+					"type": "number",
+					"minimum": 0
+				},
+				"memo": {
+					"type": "boolean"
+				},
+				"outputTail": {
+					"type": "string"
+				},
+				"evidenceRunId": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"notRun": {
+					"enum": ["refused", "unconfigured", "spawn-failed"]
+				},
+				"baseComparison": {
+					"$ref": "#/components/schemas/Union_7e4ed1ca"
+				}
+			},
 			"Shape_5788f5fd": {
 				"id": {
 					"type": "string",
@@ -27178,15 +27181,6 @@
 							"type": "null"
 						}
 					]
-				}
-			},
-			"Shape_59883bb4": {
-				"state": {
-					"type": "string",
-					"const": "resolved"
-				},
-				"value": {
-					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_bbb1e0da"
 				}
 			},
 			"Shape_5a1e7f2e": {
@@ -27823,6 +27817,44 @@
 					"$ref": "#/components/schemas/Union_afe90f89"
 				}
 			},
+			"Shape_99feab09": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"output": {
+					"$ref": "#/components/schemas/Union_9db58400"
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_4df9aa34"
+				},
+				"checkoutChanges": {
+					"$ref": "#/components/schemas/Union_6397a89f"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_f05158e4"
+				}
+			},
 			"Shape_9c1b08b0": {
 				"type": {
 					"type": "string",
@@ -27838,21 +27870,6 @@
 				},
 				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
-				}
-			},
-			"Shape_a3b267fe": {
-				"reason": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"checks": {
-					"$ref": "#/components/schemas/Array_5aada9b0"
 				}
 			},
 			"Shape_a7a7e801": {
@@ -28553,6 +28570,15 @@
 					"type": "boolean"
 				}
 			},
+			"Shape_c60e3b7d": {
+				"state": {
+					"type": "string",
+					"const": "resolved"
+				},
+				"value": {
+					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_c17b05d1"
+				}
+			},
 			"Shape_ca0d468f": {
 				"state": {
 					"enum": ["final", "partial"]
@@ -28906,6 +28932,21 @@
 					"$ref": "#/components/schemas/Array_66ac8916"
 				}
 			},
+			"Shape_ee83f435": {
+				"reason": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"checks": {
+					"$ref": "#/components/schemas/Array_f9d40dc7"
+				}
+			},
 			"Shape_f0cf5df2": {
 				"type": {
 					"type": "string",
@@ -29001,44 +29042,6 @@
 				},
 				"changedAfterCommit": {
 					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
-				}
-			},
-			"Shape_f9a7138a": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"output": {
-					"$ref": "#/components/schemas/Union_9db58400"
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_4df9aa34"
-				},
-				"checkoutChanges": {
-					"$ref": "#/components/schemas/Union_6397a89f"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_4c1db78b"
 				}
 			},
 			"Shape_fb70d91d": {
@@ -30382,6 +30385,19 @@
 					}
 				]
 			},
+			"Union_325fa38b": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_state_value_7572a8f3"
+					},
+					{
+						"$ref": "#/components/schemas/Object_state_d674a4a9"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_32c5dc3c": {
 				"anyOf": [
 					{
@@ -30598,16 +30614,6 @@
 					},
 					{
 						"$ref": "#/components/schemas/Object_kind_reason_43e7de9e"
-					}
-				]
-			},
-			"Union_4c1db78b": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_checks_reason_4f6695e9"
-					},
-					{
-						"type": "null"
 					}
 				]
 			},
@@ -31707,19 +31713,6 @@
 					}
 				]
 			},
-			"Union_bc394250": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_state_value_41d3540a"
-					},
-					{
-						"$ref": "#/components/schemas/Object_state_d674a4a9"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_be300fe4": {
 				"anyOf": [
 					{
@@ -32081,6 +32074,16 @@
 				"anyOf": [
 					{
 						"enum": ["raised", "removed", "cleared", "refused", "aborted"]
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_f05158e4": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_checks_reason_5673249a"
 					},
 					{
 						"type": "null"

@@ -25,10 +25,17 @@ export {
 	overturnedAgreements,
 	supersedeConditions,
 } from "./edges.js";
+export type { HypothesisState } from "./hypotheses.js";
+export { hypothesisStatuses } from "./hypotheses.js";
+export type { AcceptedWorkerSlates } from "./record.js";
 export {
+	bindHostVerificationHypotheses,
 	CLAIM_CAPTURE_REGISTRATION_ID,
 	createClaimCaptureRegistration,
+	createHypothesisCaptureRegistration,
+	recordAcceptedWorkerSlates,
 	recordHostVerificationClaims,
+	snapshotAcceptedWorkerSlates,
 } from "./record.js";
 export type { ClaimsLogRead } from "./store.js";
 export { appendClaimRegressions, appendClaims, claimsLogPath, claimsProjectRoot, readClaims } from "./store.js";
@@ -47,6 +54,8 @@ export type {
 	ClaimSource,
 	ClaimStatus,
 	ClaimVerdict,
+	HypothesisRecord,
+	HypothesisStatus,
 	NumericClaimConditions,
 	ReproduceClaimConditions,
 } from "./types.js";

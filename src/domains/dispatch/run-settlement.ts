@@ -320,6 +320,7 @@ export function settleFinishedRun(
 							memo: check.memo,
 							outputTail: check.outputTail,
 							evidenceRunId: check.evidenceRunId ?? null,
+							...(check.notRun !== undefined ? { notRun: check.notRun } : {}),
 							baseComparison: check.baseComparison ? { ...check.baseComparison } : null,
 						})),
 					}

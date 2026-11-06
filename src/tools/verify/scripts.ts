@@ -270,7 +270,9 @@ export function unavailableCheck(check: ToolchainCheck): ToolResult {
 function classifyUnavailable(result: ToolResult, check: string, command: ReadonlyArray<string>): ToolResult {
 	if (
 		result.kind !== "error" ||
-		(result.details?.judgement && (result.details.judgement as CheckJudgement).execution === "unavailable")
+		(result.details?.judgement && (result.details.judgement as CheckJudgement).execution === "unavailable") ||
+		// A reproduce run that failed after an earlier one completed: the check ran, so its runner was available.
+		(Array.isArray(result.details?.completedRuns) && result.details.completedRuns.length > 0)
 	)
 		return result;
 	const message = result.message;
@@ -281,6 +283,7 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 		)
 		.replace(/^verify:\s*/u, "");
 	const startup =
+		result.details?.launched === false ||
 		/^(?:spawn .+ (?:ENOENT|EACCES|EROFS)\b|bwrap:|sandbox:|sandbox-exec:|(?:sh|bash): .+(?:not found|Permission denied)|\S+: No module named (?:pytest|tox|nox)\b)/u.test(
 			diagnostic,
 		) ||
@@ -436,6 +439,7 @@ function commandFacts(result: SafeCommandResult): Record<string, unknown> {
 		command: [result.file, ...result.args].join(" "),
 		argv: [result.file, ...result.args],
 		cwd: result.cwd,
+		launched: result.launched === true,
 		exitCode: result.exitCode,
 		durationMs: result.durationMs,
 		aborted: result.aborted,
@@ -527,7 +531,11 @@ function reproduceToolResult(outcome: ReproduceOutcome): ToolResult {
 			return {
 				kind: "error",
 				message: `verify: reproduce ${outcome.message}`,
-				details: { ...outcome.facts, judgement: judgement(executionOutcome(outcome.facts), "not-run") },
+				details: {
+					...outcome.facts,
+					...(outcome.completed.length > 0 ? { completedRuns: outcome.completed } : {}),
+					judgement: judgement(executionOutcome(outcome.facts), "not-run"),
+				},
 			};
 		case "unjudgeable":
 			return {
