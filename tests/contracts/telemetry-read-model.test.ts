@@ -593,13 +593,19 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 });
 
 test("a cache break re-prefills past the shared band, or an unknown amount on a missed cache, never a boundary loss (#423, #434 §13.2)", () => {
+	// Attempts sort by start time, then attempt id; ids minted in one millisecond are random
+	// UUIDv7s, so each call gets its own start second to keep the journal order.
+	let second = 0;
 	const call = (
 		verdict: CallSettled["cache"]["verdict"],
 		rePrefilled: CallSettled["cache"]["rePrefilledTokens"],
 		cacheRead: number | null = 0,
 		timed?: { input: number; uncached: number },
 	) =>
-		telemetryCall("cache-breaks", { usage: { cacheRead, ...(timed ? { input: timed.input } : {}) } }).map((record) =>
+		telemetryCall("cache-breaks", {
+			at: new Date(Date.UTC(2026, 10, 6, 12, 0, second++)).toISOString(),
+			usage: { cacheRead, ...(timed ? { input: timed.input } : {}) },
+		}).map((record) =>
 			record.k === "call.settled"
 				? ({
 						...record,
