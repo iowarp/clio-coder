@@ -200,6 +200,21 @@ function formatDecisionsOverlayBodyLines(
 					? "Finished without recording an answer."
 					: "Cancelled before an answer was recorded.";
 			lines.push(...emptyState(theme, words, Math.max(1, width - 2)).map((line) => fitRow(`  ${line}`, width)));
+			// What it asked, so an interview that recorded nothing still says what it was about.
+			const asked = interview.questions ?? [];
+			if (asked.length > 0) {
+				lines.push(
+					...factRows(
+						theme,
+						asked.map((question, index) => ({
+							label: index === 0 ? "asked" : "",
+							value: question,
+							tone: "muted" as const,
+						})),
+						Math.max(1, width - 4),
+					).map((line) => fitRow(`    ${line}`, width)),
+				);
+			}
 			continue;
 		}
 		interview.decisions.forEach((decision, decisionIndex) => {
