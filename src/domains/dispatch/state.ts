@@ -213,8 +213,7 @@ function readRuns(): RunEnvelope[] {
 	const envelopes: RunEnvelope[] = [];
 	const check = rowChecks(parsed.length);
 	for (const entry of parsed) {
-		if (!isRecord(entry) || entry.version !== 1 || !check.spend(entry.spend) || !check.sums(entry.spendSums))
-			return [];
+		if (!isRecord(entry) || entry.version !== 1 || !check.spend(entry.spend) || !check.sums(entry.spendSums)) return [];
 		envelopes.push(entry as unknown as RunEnvelope);
 	}
 	return envelopes;
