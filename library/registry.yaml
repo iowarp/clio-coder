@@ -443,6 +443,35 @@ entries:
           Darshan counters. Not for serial file reading; not for choosing the
           science stored in the file.
   - kind: plugin
+    name: life-science
+    description: "Life-science pack: skills that query the RCSB Protein Data Bank,
+      UniProtKB and PubChem over their public, key-free REST APIs with
+      web_fetch, and stamp each answer with the source's entry revision or
+      release. Every lookup needs network; offline the skills say the source is
+      unreachable."
+    version: 0.1.0
+    sourceUrl: plugins/life-science
+    sha256: fb08f8923eacbd06b15fa7e916ce4c5beb8edcd77328641764a453c7d21d02e7
+    provides:
+      - kind: skill
+        name: pdb-structures
+        description: "Looks up macromolecular structures in the RCSB Protein Data Bank
+          over its public REST APIs with web_fetch: entry metadata, method and
+          resolution, entities and their UniProt mapping, ligands, full-text
+          search, and coordinate file URLs, each answer stamped w"
+      - kind: skill
+        name: pubchem-compounds
+        description: "Looks up small molecules in PubChem over PUG REST with web_fetch:
+          name or SMILES to CID, computed properties (formula, weight, SMILES,
+          InChIKey, IUPAC name), synonyms, with request pacing inside PubChem's
+          usage limits. Not for property prediction or synthe"
+      - kind: skill
+        name: uniprot-proteins
+        description: "Looks up proteins in UniProtKB over the UniProt REST API with
+          web_fetch: entries by accession, field-selected search, FASTA
+          sequences, and cross-references such as PDB IDs, each answer stamped
+          with the UniProt release and entry version. Not for sequence al"
+  - kind: plugin
     name: literature
     description: "Literature pack: verifies citations and resolves DOIs and arXiv
       IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free
