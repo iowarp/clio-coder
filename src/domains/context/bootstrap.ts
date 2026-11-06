@@ -1073,8 +1073,54 @@ function withoutCiClaims(line: string): string {
 }
 
 const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
-const PRELOAD_FLAG_RE = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader)(?:=|\s+)(["']?)([^\s"']+)\1/g;
 const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
+const SHELL_SYNTAX_RE = /[;&|<>`$(){}\n'"\\]/;
+const NODE_PRELOAD_FLAGS = new Set(["--import", "--require", "-r", "--loader", "--experimental-loader"]);
+const NODE_NONEXECUTING_MODES = new Set([
+	"-e",
+	"--eval",
+	"-p",
+	"--print",
+	"-c",
+	"--check",
+	"-i",
+	"--interactive",
+	"-v",
+	"--version",
+	"-h",
+	"--help",
+	"--run",
+	"--v8-options",
+]);
+
+/**
+ * What a package script makes Node preload and run, read only from a plain
+ * `node` command whose preload flags precede the program. Shell syntax (an
+ * `echo`, a `cd` before the command, a chain), a non-executing mode, and flags
+ * after the program, which become the program's own arguments, prove nothing.
+ */
+function plainNodeLaunch(script: string, dir: string): { preloads: string[]; program: string | null } | null {
+	if (SHELL_SYNTAX_RE.test(script)) return null;
+	const words = script.trim().split(/\s+/);
+	if (words[0] !== "node") return null;
+	const preloads: string[] = [];
+	for (let index = 1; index < words.length; index++) {
+		const word = words[index] ?? "";
+		if (word === "--") {
+			const program = words[index + 1];
+			return { preloads, program: program === undefined ? null : posix.join(dir, program) };
+		}
+		if (!word.startsWith("-")) return { preloads, program: posix.join(dir, word) };
+		const equals = word.indexOf("=");
+		const flag = equals === -1 ? word : word.slice(0, equals);
+		if (NODE_NONEXECUTING_MODES.has(flag)) return null;
+		if (!NODE_PRELOAD_FLAGS.has(flag)) continue;
+		const value = equals === -1 ? words[++index] : word.slice(equals + 1);
+		if (!value) return null;
+		preloads.push(posix.join(dir, value));
+	}
+	return { preloads, program: null };
+}
 
 /**
  * Mark a module a line calls preloaded that no package script preloads. A
@@ -1082,15 +1128,20 @@ const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
  * `tests/harness/scratch-env.ts` preloaded; `test:file` preloads only the first,
  * and tests import the second's helpers. Scripts of every visible package.json
  * count, resolved from that package's directory, so a workspace app's own
- * preload is supported. A cited file that passes preload flags itself, such as a
- * test runner, is the launcher, not a claimed preload.
+ * preload is supported. Only a plain `node` command counts (`plainNodeLaunch`);
+ * anything less certain marks the claim. The program such a script runs, such
+ * as a test runner, is the launcher, not a claimed preload.
  */
 function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCorpus): string {
 	if (!PRELOAD_CLAIM_RE.test(line)) return line;
 	// fileText is lowercased, so every comparison here is.
 	const preloaded = new Set<string>();
+	const launchers = new Set<string>();
 	const addPreloads = (dir: string, script: string): void => {
-		for (const match of script.matchAll(PRELOAD_FLAG_RE)) preloaded.add(posix.join(dir, match[2] ?? "").toLowerCase());
+		const launch = plainNodeLaunch(script, dir);
+		if (!launch) return;
+		for (const path of launch.preloads) preloaded.add(path.toLowerCase());
+		if (launch.program) launchers.add(launch.program.toLowerCase());
 	};
 	for (const script of evidence.scriptBodies.values()) addPreloads("", script);
 	for (const path of evidence.repositoryPaths) {
@@ -1106,10 +1157,7 @@ function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCor
 	}
 	return withUnsupportedClaimsMarked(line, PRELOAD_CLAIM_RE, (cited) => {
 		const missing = cited.filter(
-			(path) =>
-				MODULE_FILE_RE.test(path) &&
-				!preloaded.has(path.toLowerCase()) &&
-				!/--(?:import|require|loader|experimental-loader)\b/.test(evidence.fileText(path) ?? ""),
+			(path) => MODULE_FILE_RE.test(path) && !preloaded.has(path.toLowerCase()) && !launchers.has(path.toLowerCase()),
 		);
 		if (missing.length === 0) return null;
 		return `${missing.map((path) => `\`${path}\``).join(", ")} ${missing.length === 1 ? "is" : "are"} not preloaded by a package script`;

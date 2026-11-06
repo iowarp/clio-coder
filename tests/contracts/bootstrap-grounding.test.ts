@@ -171,7 +171,7 @@ it("cuts a model line's claim that CI runs a check, but keeps a carried invarian
 	strictEqual(/(?:fails|enforced)(?: on| in)? CI/.test(handbook.replace(carried, "")), false, handbook);
 });
 
-it("marks a module a rule calls preloaded when no package script preloads it", async () => {
+it("marks a module a rule calls preloaded when no plain node script preloads it", async () => {
 	mkdirSync(join(cwd, "tests", "harness"), { recursive: true });
 	mkdirSync(join(cwd, "scripts"));
 	writeFileSync(
@@ -179,15 +179,23 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 		JSON.stringify({
 			name: "harbor",
 			type: "module",
-			scripts: { "test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test" },
+			scripts: {
+				"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
+				test: "node scripts/run-tests.mjs",
+				echo: "echo node --import ./tests/harness/echoed.ts",
+				after: "node scripts/run-tests.mjs --import ./tests/harness/after.ts",
+				"test:web": "cd apps/web && node --import ./tests/harness/no-network.ts --test",
+				syntax: "node --check --import ./tests/harness/checked.ts scripts/run-tests.mjs",
+			},
 		}),
 	);
 	writeFileSync(join(cwd, "tests", "harness", "tmp-root.ts"), "export const root = process.env.TMPDIR;\n");
 	writeFileSync(join(cwd, "tests", "harness", "scratch-env.ts"), "export function isolateEnv(): void {}\n");
-	writeFileSync(
-		join(cwd, "scripts", "run-tests.mjs"),
-		'spawn(process.execPath, ["--import", "./tests/harness/tmp-root.ts", "--test"]);\n',
-	);
+	for (const name of ["echoed", "after", "no-network", "checked"])
+		writeFileSync(join(cwd, "tests", "harness", `${name}.ts`), `export const ${name.replace("-", "")} = true;\n`);
+	const spawn = '["--import", "./tests/harness/tmp-root.ts", "--test"]';
+	writeFileSync(join(cwd, "scripts", "run-tests.mjs"), `spawn(process.execPath, ${spawn});\n`);
+	writeFileSync(join(cwd, "scripts", "spawn-tests.mjs"), `spawn(process.execPath, ${spawn});\n`);
 	mkdirSync(join(cwd, "apps", "web", "tests", "harness"), { recursive: true });
 	writeFileSync(
 		join(cwd, "apps", "web", "package.json"),
@@ -198,6 +206,14 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 	const claim =
 		"The `test:file` script in `package.json` preloads `tests/harness/tmp-root.ts` and `tests/harness/scratch-env.ts` for isolation.";
 	const launcher = "`scripts/run-tests.mjs` preloads `tests/harness/tmp-root.ts` for every test file.";
+	// Each names text a script carries but no plain node command preloads or runs.
+	const uncertain = {
+		"tests/harness/echoed.ts": "Logging is set up by preloading `tests/harness/echoed.ts`.",
+		"tests/harness/after.ts": "Timing hooks come from the preloaded `tests/harness/after.ts`.",
+		"tests/harness/no-network.ts": "Root suites run offline because `tests/harness/no-network.ts` is preloaded.",
+		"tests/harness/checked.ts": "Syntax checks preload `tests/harness/checked.ts`.",
+		"scripts/spawn-tests.mjs": "`scripts/spawn-tests.mjs` preloads `tests/harness/tmp-root.ts` into every spawned suite.",
+	};
 	await runBootstrap({
 		cwd,
 		rewriteClioMd: true,
@@ -206,7 +222,7 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 			return {
 				projectName: "harbor",
 				identity: "A widget renderer.",
-				invariants: [claim],
+				invariants: [claim, ...Object.values(uncertain)],
 				conventions: [launcher, workspace],
 				sections: [],
 			};
@@ -221,6 +237,11 @@ it("marks a module a rule calls preloaded when no package script preloads it", a
 	);
 	ok(handbook.includes(launcher), handbook);
 	ok(handbook.includes(`${workspace}\n`), handbook);
+	for (const [path, rule] of Object.entries(uncertain))
+		ok(
+			handbook.includes(`${rule.slice(0, -1)} (unverified: \`${path}\` is not preloaded by a package script).`),
+			handbook,
+		);
 });
 
 it("carries every previous hard invariant verbatim while its citations still exist", async () => {
