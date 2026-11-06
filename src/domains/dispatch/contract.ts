@@ -6,6 +6,7 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DeclaredCheckKind } from "../../tools/verify/catalog.js";
 import type { NumericTolerance } from "../../tools/verify/numeric.js";
 import type { PerfBudgetSpec } from "../../tools/verify/perf.js";
+import type { DeclaredReproduce } from "../../tools/verify/reproduce.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
@@ -45,6 +46,12 @@ export interface ResolvedVerificationCheck {
 	numeric?: { reference: string; tolerance: NumericTolerance };
 	/** Sealed at admission with the baseline as an absolute path. */
 	perf?: { budget?: PerfBudgetSpec; baseline?: string; tolerance?: { relative?: number } };
+	/**
+	 * Sealed at admission with paths kept repository-relative and the declared
+	 * cwd beside them, so host verification derives the root from `cwd` and
+	 * judges the inputs, digests and reference the catalog declared.
+	 */
+	reproduce?: { spec: DeclaredReproduce; declaredCwd: string };
 }
 
 export interface DispatchRequest extends JobSpec {

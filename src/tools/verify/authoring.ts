@@ -36,6 +36,7 @@ import {
 export type { VerifierProposalAuthority, VerifierProvenance, VerifierSignalKind } from "./toolchain.js";
 
 import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
+import { type DeclaredReproduce, REPRODUCE_CATALOG_FIELDS, reproduceCatalogFields } from "./reproduce.js";
 import { discoverDeclaredChecksAtRoot, discoverDeclaredProjectEntriesAtRoot } from "./scripts.js";
 
 export interface AuthoringCheck {
@@ -49,6 +50,7 @@ export interface AuthoringCheck {
 	kind?: DeclaredCheckKind;
 	numeric?: DeclaredNumericCompare;
 	perf?: DeclaredPerfBudget;
+	reproduce?: DeclaredReproduce;
 	provenance: VerifierProvenance;
 	state: "active" | "existing" | "proposed" | "manual";
 	/** The id this check has in the on-disk catalog, so a rename still edits its node in place. */
@@ -111,7 +113,10 @@ export type VerifierRevision =
 			kind: "edit";
 			id: string;
 			changes: Partial<
-				Pick<AuthoringCheck, "description" | "command" | "cwd" | "timeoutMs" | "tags" | "kind" | "numeric" | "perf">
+				Pick<
+					AuthoringCheck,
+					"description" | "command" | "cwd" | "timeoutMs" | "tags" | "kind" | "numeric" | "perf" | "reproduce"
+				>
 			>;
 	  }
 	| { kind: "rename"; id: string; newId: string }
@@ -187,20 +192,24 @@ function cloneCheck(check: AuthoringCheck): AuthoringCheck {
 		tags: [...check.tags],
 		...(check.numeric !== undefined ? { numeric: structuredClone(check.numeric) } : {}),
 		...(check.perf !== undefined ? { perf: structuredClone(check.perf) } : {}),
+		...(check.reproduce !== undefined ? { reproduce: structuredClone(check.reproduce) } : {}),
 		provenance: { ...check.provenance },
 	};
 }
 
 /** The kind fields of a declared or authored check, absent for a plain command check. */
 function kindFields(
-	check: Pick<DeclaredCheck, "kind" | "numeric" | "perf"> | Pick<AuthoringCheck, "kind" | "numeric" | "perf">,
-): Pick<AuthoringCheck, "kind" | "numeric" | "perf"> {
+	check:
+		| Pick<DeclaredCheck, "kind" | "numeric" | "perf" | "reproduce">
+		| Pick<AuthoringCheck, "kind" | "numeric" | "perf" | "reproduce">,
+): Pick<AuthoringCheck, "kind" | "numeric" | "perf" | "reproduce"> {
 	const kind = check.kind ?? "command";
 	if (kind === "command") return {};
 	return {
 		kind,
 		...(check.numeric !== undefined ? { numeric: structuredClone(check.numeric) } : {}),
 		...(check.perf !== undefined ? { perf: structuredClone(check.perf) } : {}),
+		...(check.reproduce !== undefined ? { reproduce: structuredClone(check.reproduce) } : {}),
 	};
 }
 
@@ -553,6 +562,7 @@ function catalogEntry(check: AuthoringCheck): Record<string, unknown> {
 		if (check.perf.baseline !== undefined) entry.baseline = check.perf.baseline;
 		if (check.perf.tolerance !== undefined) entry.tolerance = { ...check.perf.tolerance };
 	}
+	if (check.reproduce !== undefined) Object.assign(entry, reproduceCatalogFields(check.reproduce));
 	return entry;
 }
 
@@ -590,7 +600,7 @@ function serializeVerifierDraft(draft: VerifierDraft): string {
 			changed = true;
 		}
 		// A check that returned to a plain command drops the kind fields it no longer carries.
-		for (const field of ["kind", "reference", "tolerance", "budget", "baseline"]) {
+		for (const field of ["kind", "reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS]) {
 			if (Object.hasOwn(current, field) && !Object.hasOwn(entry, field)) {
 				node.delete(field);
 				changed = true;
@@ -728,10 +738,12 @@ function reviseVerifierDraft(draft: VerifierDraft, revisions: ReadonlyArray<Veri
 				kind: revision.changes.kind,
 				...(revision.changes.numeric !== undefined ? { numeric: revision.changes.numeric } : {}),
 				...(revision.changes.perf !== undefined ? { perf: revision.changes.perf } : {}),
+				...(revision.changes.reproduce !== undefined ? { reproduce: revision.changes.reproduce } : {}),
 			});
 			delete check.kind;
 			delete check.numeric;
 			delete check.perf;
+			delete check.reproduce;
 			Object.assign(check, next);
 		}
 		diagnostics.push(`Edited check '${revision.id}' without changing its deterministic ID.`);
@@ -779,6 +791,18 @@ function renderKind(check: AuthoringCheck): string[] {
 		if (check.perf.budget !== undefined) lines.push(`  budget: ${JSON.stringify(check.perf.budget)}`);
 		if (check.perf.baseline !== undefined) lines.push(`  baseline: ${check.perf.baseline}`);
 		if (check.perf.tolerance !== undefined) lines.push(`  tolerance: ${JSON.stringify(check.perf.tolerance)}`);
+	}
+	if (check.reproduce !== undefined) {
+		const spec = check.reproduce;
+		lines.push(
+			`  environment: ${spec.environment ?? "worktree"}`,
+			`  seed: ${spec.seed === undefined ? "none" : `${spec.seed.env}=${spec.seed.value}`}`,
+			`  compare: ${spec.compare.mode === "twice" ? "twice" : `reference ${spec.compare.reference}`}`,
+			`  tolerance: ${JSON.stringify(spec.tolerance)}`,
+			...spec.inputs.map((input) => `  input: ${input.path} sha256=${input.sha256}`),
+			...(spec.units !== undefined ? [`  units: ${JSON.stringify(spec.units)}`] : []),
+			...(spec.shapes !== undefined ? [`  shapes: ${JSON.stringify(spec.shapes)}`] : []),
+		);
 	}
 	return lines;
 }

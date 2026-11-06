@@ -1196,7 +1196,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				: null;
 		const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
 		const verifyArgv =
-			verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs);
+			verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs, cwd);
 		const verifyCommand = verifyArgv?.join(" ") ?? null;
 		const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call, rawClassification)).filter(
 			(scan) => scan !== "",
@@ -1598,7 +1598,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const verifyCommand =
 			verifyResolution === null || verifyArgs === null
 				? null
-				: (verifyResolutionArgv(verifyResolution, verifyArgs)?.join(" ") ?? null);
+				: (verifyResolutionArgv(verifyResolution, verifyArgs, cwd)?.join(" ") ?? null);
 		const checkCwd =
 			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
 				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
