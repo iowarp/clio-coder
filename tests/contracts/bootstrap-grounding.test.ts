@@ -188,6 +188,87 @@ it("carries a hard invariant only while a check that runs still enforces it", as
 	strictEqual(handbook.includes("`checkCasePortablePaths`"), false, handbook);
 });
 
+/** A repository whose CI runs three checks in `scripts/check.js`, and a previous handbook whose invariants they enforce. */
+function writeCarryFixture(): string[] {
+	mkdirSync(join(cwd, "scripts"), { recursive: true });
+	writeFileSync(
+		join(cwd, "package.json"),
+		JSON.stringify({
+			name: "harbor",
+			type: "module",
+			scripts: {
+				check: "node scripts/check.js",
+				prepublishOnly: "node -e \"throw new Error('publish from the release job')\"",
+			},
+		}),
+	);
+	writeFileSync(
+		join(cwd, ".github", "workflows", "ci.yml"),
+		"jobs:\n  build:\n    name: ci (22)\n    steps:\n      - run: pnpm run check\n",
+	);
+	writeFileSync(
+		join(cwd, "scripts", "check.js"),
+		[
+			'fail("case-portable-paths", "paths differ only by case and collide");',
+			'fail("retired-html", "docs/html was retired; write Markdown pages");',
+			'fail("gitignored-literal", "a joined literal names a gitignored path");',
+			"",
+		].join("\n"),
+	);
+	const carried = [
+		"Do not add paths that differ only by case: they collide on case-insensitive filesystems (case-portable-paths check in `scripts/check.js`).",
+		"Never recreate the retired HTML documentation tree: the retired-html check in `scripts/check.js` refuses it.",
+		"Never join a gitignored directory name into a string literal: the gitignored-literal check in `scripts/check.js` refuses it.",
+		"Never publish from a workstation: the `prepublishOnly` script in `package.json` throws.",
+	];
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			...carried.map((rule, i) => `${i + 1}. ${rule}`),
+			"",
+		].join("\n"),
+	);
+	return carried;
+}
+
+it("removes only the model rules a carried invariant covers, not every rule naming its check", async () => {
+	writeCarryFixture();
+	const recipe =
+		"Renaming `src/widgets/render.ts`: update the export in `src/index.ts` in the same commit; the case-portable-paths check in `scripts/check.js` refuses a case-only rename.";
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [
+					// The same script and file as the carried rule, in other words: it states nothing new.
+					"The `prepublishOnly` script in `package.json` throws, so publication runs only from the release job.",
+					"Keep each widget's tests beside it under `src/widgets/`; the case-portable-paths check in `scripts/check.js` also runs on test file names.",
+				],
+				conventions: [
+					"`renderWidget` returns a string and never touches the DOM; a case-only rename of its file fails the case-portable-paths check in `scripts/check.js`.",
+				],
+				sections: [{ title: "Change recipes", body: `- ${recipe}` }],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes("Never publish from a workstation"), handbook);
+	strictEqual(handbook.includes("publication runs only from the release job"), false, handbook);
+	ok(handbook.includes("Keep each widget's tests beside it under `src/widgets/`"), handbook);
+	ok(handbook.includes("`renderWidget` returns a string and never touches the DOM"), handbook);
+	ok(handbook.includes(recipe), handbook);
+});
+
 it("records the spend of every bootstrap dispatch, not only the draft that survived", async () => {
 	const draft = {
 		projectName: "harbor",

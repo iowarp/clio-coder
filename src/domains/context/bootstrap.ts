@@ -1268,8 +1268,10 @@ function namesRuleCode(code: string, text: string): boolean {
 }
 
 interface EnforcementNames {
-	/** Package scripts and single-word codes: cited only in backticks. */
-	cited: ReadonlySet<string>;
+	/** Scripts that run unasked: cited only in backticks. */
+	scripts: ReadonlySet<string>;
+	/** Single-word failure codes (`lint`): cited only in backticks. */
+	codes: ReadonlySet<string>;
 	/** Codes with a hyphen or digit (`case-portable-paths`, `rule12`) and check functions, which prose names bare. */
 	named: ReadonlyArray<string>;
 }
@@ -1282,11 +1284,12 @@ interface EnforcementNames {
  * removed, or a script nothing runs, enforces nothing.
  */
 function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
-	const cited = new Set<string>(input.enforcement?.executedScripts ?? []);
+	const scripts = new Set<string>(input.enforcement?.executedScripts ?? []);
+	const codes = new Set<string>();
 	const named = new Set<string>();
 	const addCode = (code: string): void => {
 		if (/[-\d]/.test(code)) named.add(code);
-		else cited.add(code);
+		else codes.add(code);
 	};
 	for (const file of input.enforcement?.checkFiles ?? []) {
 		if (file.executed !== true) continue;
@@ -1297,34 +1300,38 @@ function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
 		}
 		for (const rule of file.rules ?? []) addCode(rule.code);
 	}
-	return { cited, named: [...named] };
+	return { scripts, codes, named: [...named] };
 }
 
-/** The enforcement names a rule cites or names. */
+/** A check function (`checkCasePortablePaths`) keyed as its failure code (`case-portable-paths`). */
+function checkCode(name: string): string {
+	return /^check[A-Z]/.test(name)
+		? name
+				.slice(5)
+				.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+				.toLowerCase()
+		: name.toLowerCase();
+}
+
+/** The enforcement a rule names, typed so a script and a code of one name stay apart: `script:prepublishOnly`, `code:case-portable-paths`. */
 function namedEnforcement(rule: string, names: EnforcementNames): string[] {
 	const found = new Set<string>();
 	for (const match of rule.matchAll(/`([^`\n]+)`/g)) {
 		const token = (match[1] ?? "").trim();
-		const script = /^(?:pnpm|npm|yarn|bun)(?: run)? ([\w:.-]+)$/.exec(token)?.[1];
-		if (names.cited.has(token)) found.add(token);
-		else if (script !== undefined && names.cited.has(script)) found.add(script);
+		const script = /^(?:pnpm|npm|yarn|bun)(?: run)? ([\w:.-]+)$/.exec(token)?.[1] ?? token;
+		if (names.scripts.has(script)) found.add(`script:${script}`);
+		if (names.codes.has(token)) found.add(`code:${token.toLowerCase()}`);
 	}
-	for (const name of names.named) if (namesRuleCode(name, rule)) found.add(name);
+	for (const name of names.named) if (namesRuleCode(name, rule)) found.add(`code:${checkCode(name)}`);
 	return [...found];
 }
 
-/** The checks a rule names, a check function (`checkDocsSource`) keyed as its failure code (`docs-source`). */
-function namedChecks(rule: string, names: EnforcementNames): string[] {
-	return namedEnforcement(rule, names)
-		.filter((name) => !names.cited.has(name))
-		.map((name) =>
-			/^check[A-Z]/.test(name)
-				? name
-						.slice(5)
-						.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-						.toLowerCase()
-				: name.toLowerCase(),
-		);
+/** What a rule cites besides the enforcement it names: its files, symbols and commands. */
+function citedSubjects(rule: string, names: EnforcementNames): string[] {
+	return [...rule.matchAll(/`([^`\n]+)`/g)]
+		.map((match) => (match[1] ?? "").trim())
+		.filter((token) => namedEnforcement(`\`${token}\``, names).length === 0)
+		.map((token) => token.toLowerCase());
 }
 
 /**
@@ -1504,13 +1511,23 @@ function stabilizeGeneratedOutput(
 		? enforcedPreviousInvariants(input, names, carryCorpus).filter((rule) => !restatesArchitecture(rule))
 		: [];
 	const carriedTokens = carried.map(handbookRuleTokens);
-	const carriedChecks = new Set(carried.flatMap((rule) => namedChecks(rule, names)));
-	// A rule restates a carried invariant when it reads the same, or when every check it names is one a carried invariant names.
-	const restatesCarried = (rule: string): boolean => {
-		if (carried.length === 0) return false;
-		const checks = namedChecks(rule, names);
-		if (checks.length > 0 && checks.every((check) => carriedChecks.has(check))) return true;
-		return restatesHandbookRule(handbookRuleTokens(rule), carriedTokens);
+	const carriedCoverage = carried.map((rule) => ({
+		enforcement: new Set(namedEnforcement(rule, names)),
+		subjects: new Set(citedSubjects(rule, names)),
+	}));
+	// A model invariant duplicates a carried one when it reads the same, or when it names only enforcement and
+	// subjects one carried invariant names: it then states no obligation that invariant does not. Sharing a
+	// check alone is not enough; a rename recipe that names the case check still asks for other edits.
+	const duplicatesCarried = (rule: string): boolean => {
+		if (restatesHandbookRule(handbookRuleTokens(rule), carriedTokens)) return true;
+		const enforcement = namedEnforcement(rule, names);
+		if (enforcement.length === 0) return false;
+		const subjects = citedSubjects(rule, names);
+		return carriedCoverage.some(
+			(coverage) =>
+				enforcement.every((name) => coverage.enforcement.has(name)) &&
+				subjects.every((subject) => coverage.subjects.has(subject)),
+		);
 	};
 	const retainedInvariants = [
 		...architectural.map((rule) => rule.sentence).filter((rule) => !invariants.includes(rule)),
@@ -1520,7 +1537,7 @@ function stabilizeGeneratedOutput(
 			(rule) =>
 				existing?.invariants.includes(rule) === true ||
 				carried.includes(rule) ||
-				(!restatesArchitecture(rule) && !restatesCarried(rule)),
+				(!restatesArchitecture(rule) && !duplicatesCarried(rule)),
 		),
 	].slice(0, HANDBOOK_TARGETS.invariants);
 	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
@@ -1532,12 +1549,7 @@ function stabilizeGeneratedOutput(
 	const retainedConventions = [
 		...(typescriptConvention ? [typescriptConvention] : []),
 		...conventions
-			.filter(
-				(rule) =>
-					!restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) &&
-					!restatesArchitecture(rule) &&
-					!restatesCarried(rule),
-			)
+			.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
 			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
 	];
 	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
@@ -1554,9 +1566,7 @@ function stabilizeGeneratedOutput(
 			.filter(
 				(block) =>
 					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
-					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) &&
-						!restatesArchitecture(block) &&
-						!restatesCarried(block)),
+					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) && !restatesArchitecture(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
