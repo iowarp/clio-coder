@@ -14,62 +14,61 @@ Clio Coder is a TypeScript/Node.js project. It is an open-source coding agent fo
 8. `src/session-control/**` never imports `src/interactive/**`, type-only included. It is the one session contract the TUI, headless run and the ACP server all call, so a render module in its graph would make the terminal a dependency of every surface. Checked as `rule8` by `tests/boundaries/check-boundaries.ts`.
 9. `src/engine/**` never imports `src/interactive/**`, type-only included. The ACP server reaches session behavior through `src/session-control`. Checked as `rule9` by `tests/boundaries/check-boundaries.ts`.
 10. Never commit or push a path that `.gitignore` excludes: `scripts/git-guard.mjs` refuses it locally and the tracked-ignored check fails CI; agents once shipped private plans this way (purged in 0.5.9). Unstage with `git rm --cached <path>`.
-11. Do not add tracked paths that differ only by case (files or module stems): they collide on case-insensitive filesystems and break extensionless imports; Linux CI never sees it, so the case-portable-paths check in `scripts/check-hygiene.ts` is the only guard.
-12. Only the telemetry domain writes under the telemetry root; every other module goes through the telemetry writers (rule11), and the producer path from `src/core/telemetry/producer.ts` may not import persistence or do synchronous I/O (rule13).
-13. Provider usage must never be mutated or put on a ledger payload: Clio accounting stays beside the raw usage and links the call journal (rule12 in `tests/boundaries/check-boundaries.ts`).
-14. Do not run `npm publish` directly: `prepublishOnly` in `package.json` throws; publication happens only through the approved GitHub release job.
-15. Never join a gitignored literal onto this checkout's own root in `scripts/` or `src/`: it works in your working copy but is absent on a fresh clone (gitignored-reference check, #84).
-16. Do not restore retired HTML documentation: `docs/html/` must not exist, no Markdown may link into it, and `package.json` files must not ship `docs/html/**` (docs-source and prompts checks).
-17. Do not add `continue-on-error`, `--ignore-scripts`, or unpinned `uses:` to `.github/workflows/ci.yml` or `release.yml`; keep job names `ci (22)` and `ci (24)`, both consuming one prepared package, per check-hygiene's ci-scripts rule.
-18. Do not write under the telemetry root outside `src/domains/telemetry/` (rule11), import persistence or do synchronous I/O on the telemetry producer path (rule13), or mutate provider usage / put usage-shaped keys on ledger payloads outside `src/engine/` (rule12) in `tests/boundaries/check-boundaries.ts`.
-19. Publication is one-way: never move a published tag, rebuild a qualified candidate, or republish different bytes (`CONTRIBUTING.md`); publish npm first, then the GitHub tag/release, then promote `main` and `gh-pages`, resuming a partial failure with the original artifact.
-20. Provider usage inside message/ledger payloads is immutable outside `src/engine/**`: keep Clio accounting beside the raw usage and link the call journal; the ledger is the conversation record, the call journal owns usage (rule12 in `tests/boundaries/check-boundaries.ts`).
+11. Never move a published tag, rebuild a qualified candidate, or republish different bytes: release artifacts are immutable and a partial publish is resumed from the original artifact (`CONTRIBUTING.md`).
+12. Do not add tracked paths that differ only by case (files or module stems): they collide on case-insensitive filesystems and break extensionless imports; Linux CI never sees it, so the case-portable-paths check in `scripts/check-hygiene.ts` is the only guard.
+13. Only the telemetry domain writes under the telemetry root; every other module goes through the telemetry writers (rule11), and the producer path from `src/core/telemetry/producer.ts` may not import persistence or do synchronous I/O (rule13).
+14. Provider usage must never be mutated or put on a ledger payload: Clio accounting stays beside the raw usage and links the call journal (rule12 in `tests/boundaries/check-boundaries.ts`).
+15. Do not run `npm publish` directly: `prepublishOnly` in `package.json` throws; publication happens only through the approved GitHub release job.
+16. Never join a gitignored literal onto this checkout's own root in `scripts/` or `src/`: it works in your working copy but is absent on a fresh clone (gitignored-reference check, #84).
+17. Do not restore retired HTML documentation: `docs/html/` must not exist, no Markdown may link into it, and `package.json` files must not ship `docs/html/**` (docs-source and prompts checks).
+18. Keep `.github/workflows/ci.yml` and `.github/workflows/release.yml` dispatch-only with read-only contents, SHA-pinned actions, no `continue-on-error`, and job names `ci (22)` / `ci (24)`: `checkCiScripts` in `scripts/check-hygiene.ts` encodes the branch-protection contract.
+19. Do not join a gitignored literal onto this checkout's own root (`import.meta.url`-anchored) in `scripts/` or `src/`: it is absent on a fresh clone and fails `gitignored-reference` in `scripts/check-hygiene.ts`; use `resolvePackageRoot()` for installed-package resources.
+20. Telemetry: only the telemetry domain writes under the telemetry root (rule11), the producer path never imports persistence or does synchronous I/O (rule13), money is formatted only through `renderPricing`/`renderUsdSum` in `src/core/telemetry/render.ts` (rule10), and surfaces show the read model's quantity display instead of summing token/cost fields (rule14, exemptions in `SURFACE_TOTAL_EXEMPTIONS`).
 
 ## Conventions
 
-- `tsconfig.json` enables `noImplicitOverride` (an overriding member is marked `override`).
-- Formatting is tabs, double quotes, trailing commas, 120 columns per `biome.json`; `pnpm run lint` runs `biome check .` plus `scripts/check-hygiene.ts`, so a style-only diff still fails the gate.
-- TypeScript is strict with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` and `noUnusedLocals` in `tsconfig.json`; index access returns `T | undefined` and unused locals are compile errors, not warnings.
-- `src/interactive/**` outside `theme/` carries no raw SGR escapes, `38;2;`/`48;5;` fragments or hex colors (`scripts/check-hygiene.ts` theme-discipline); take colors from the theme module.
-- Project state paths use the `clio-coder` namespace: a `.clio` path (not followed by `coder`) in any tracked text file fails product-namespace in `scripts/check-hygiene.ts`; only `CHANGELOG.md`, `CLIO-CODER.md`, `docs/history/` and `.github/releases/` may quote the old name.
-- Tracked paths must not differ only by case, including module stems (`approval.ts` vs `Approval.tsx`), because extensionless imports resolve to the wrong file on case-insensitive filesystems (case-portable-paths in `scripts/check-hygiene.ts`).
-- An `export function` used only by its own file fails export-hygiene in `scripts/check-hygiene.ts`; drop the keyword when a helper is local.
-- Markdown links and backticked `src/`, `tests/`, `scripts/`, `apps/` paths in `docs/**`, `README.md` and `CONTRIBUTING.md` must resolve to real files and heading anchors (documentation-links in `scripts/check-hygiene.ts`).
+- `biome.json` formats with tabs, double quotes, trailing commas, 120-column lines; `apps/clio-coder-gui` is excluded from the root Biome config, so run `pnpm run check:gui` for GUI code.
+- `tsconfig.json` enables `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, and `noImplicitOverride`; type-check with `pnpm run typecheck` (`tsc -p tsconfig.tests.json`).
+- Keep CLI subcommands dynamically imported to preserve fast `--help` and startup (`CONTRIBUTING.md`).
+- Terminal colors live in `src/interactive/theme`: no raw SGR escapes, `38;2;`/`48;5;` fragments, or hex colors anywhere else under `src/interactive` (`theme-discipline` in `scripts/check-hygiene.ts`).
+- Project state paths use the `clio-coder` namespace; the legacy `.clio` form fails `product-namespace` in `scripts/check-hygiene.ts` (exempt: `CHANGELOG.md`, `CLIO-CODER.md`, `docs/history/`, `.github/releases/`).
 
 ## Change recipes
 
-- Add or change a setting: update `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML` together in `src/core/defaults.ts` (the YAML must parse to exactly the object, defaults-yaml), add or edit the row for the dotted path in the `## Settings inventory` section of `docs/guide/configuration-and-targets.md` with its default value and an effect timing word (`immediately`, `next turn`, `next session`, `next dispatch`, `restart`), and keep the inventory at least 40 rows (settings-inventory in `scripts/check-hygiene.ts`).
-- Read a new `CLIO_*` environment variable from `src/`: add its row to `docs/guide/environment-variables.md`; when you remove the last read, delete the row. The page must keep the sentence "The render trace takes a path, not `1`" (environment-variable-inventory in `scripts/check-hygiene.ts`).
-- Write a new entry under the state root via `clioStateDir()`, `stateRoot` or `resolveClioDirs().state`: name that entry in `docs/architecture/artifact-placement.md` (state-root-inventory in `scripts/check-hygiene.ts`).
-- Add a file the installed package resolves from its root: add it to `files` in `package.json` and, if the release gate needs it, to `scripts/release-manifest.json`; never ship gitignored generated state (packaging in `scripts/check-hygiene.ts`).
-- Change the README install steps or `scripts/install-local.sh`: keep the npm block installing the package from `package.json`, cloning with `--branch v<installable version>`, verifying by the installer's bin-dir path, and asking `command -v clio-coder` (readme-install-block in `scripts/check-hygiene.ts`).
-- Adding a new doc page: it must land in the `context(scope="docs")` corpus (`listDocsCorpus` in `src/tools/context/docs-engine.ts`) or the prompts check fails; never link to retired HTML docs (`docs-source`).
+- Change a settings default: update `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML` together in `src/core/defaults.ts` (the `defaults-yaml` check requires the YAML to parse to exactly the object), add or update the row for that path in the `## Settings inventory` section of `docs/guide/configuration-and-targets.md` with its default value and an effect timing (`immediately`, `next turn`, `next session`, `next dispatch`, or `restart`), and if a new `CLIO_*` variable is read, add it to `docs/guide/environment-variables.md`.
+- Add a state-root entry under the Clio state directory in `src/`: name the entry in `docs/architecture/artifact-placement.md` (`state-root-inventory` in `scripts/check-hygiene.ts`).
+- Ship a new runtime resource: add it to the `files` allowlist in `package.json` and to `requiredFiles`/`requiredPrefixes` in `scripts/release-manifest.json`; `checkPackaging` cross-checks both against every `resolvePackageRoot()` join in `src/`, and `patches/`, `scripts/`, `tests/` must stay checkout-only.
+- Add a bundled doc: create the Markdown under `docs/` (never `docs/html/`), keep `docs/**/*.md` in `package.json` `files`, and make sure it lands in the `context(scope="docs")` corpus (`prompts` check in `scripts/check-hygiene.ts`).
+- Add a skill or library payload: re-pin with `pnpm run skills:pin` / `pnpm run library:pin`; `library/registry.yaml` pins must match repository content (`library-pin` check).
+- Adding or changing a setting: update `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML` in `src/core/defaults.ts` together (the defaults-yaml check parses the YAML and deep-compares it to the object), add an inventory row for every new leaf path under `## Settings inventory` in `docs/guide/configuration-and-targets.md` with its default and an effect timing word (`immediately`, `next turn`, `next session`, `next dispatch`, `restart`), and keep the section at 40+ rows.
+- Writing a new entry under the state root (`clioStateDir()`, `stateRoot`, etc.): name it in `docs/architecture/artifact-placement.md` or the state-root-inventory check fails.
 
 ## Tests
 
-- Run a single file with `pnpm run test:file -- tests/contracts/<name>.test.ts`; it preloads `tests/harness/tmp-root.ts` for state isolation, and use `tests/harness/scratch-env.ts` for environment isolation (`CONTRIBUTING.md`) (unverified: `tests/harness/scratch-env.ts` is not preloaded by a package script).
-- Never mutate `process.stdout.write` across async test boundaries (`CONTRIBUTING.md`).
+- Ordinary CI runs the explicit file lists in `scripts/ci-tests.mjs`: core is a fixed set of `tests/contracts/*.test.ts`, gui is a fixed set under `apps/clio-coder-gui/tests/` (React-rendering checks are `.tsx`), and package is `tests/smoke/installed-package.test.ts` plus `tests/smoke/native-call-timing.test.ts`. A new regression test must be added to the matching list in `scripts/ci-tests.mjs` or CI will not run it; other files in `tests/contracts/`, `tests/extended/`, and `tests/smoke/` are full-investigation only (`pnpm run test:full`).
+- Run one file with `pnpm run test:file -- tests/contracts/<name>.test.ts`; the script preloads `tests/harness/tmp-root.ts` for state isolation, and `tests/harness/scratch-env.ts` is available for more (unverified: `tests/harness/scratch-env.ts` is not preloaded by a package script).
+- `scripts/check-dist.mjs` (pretest gate) builds a missing `dist/` but refuses a `dist/` built from another commit; do not silently rebuild before binary-driven tests.
+
+## Docs and prose
+
+- Every relative link, heading anchor, and backticked `src/`, `tests/`, `scripts/`, or `apps/` path in `docs/*.md`, `README.md`, and `CONTRIBUTING.md` must resolve; `documentation-links` in `scripts/check-hygiene.ts` checks all three files.
+- `docs/guide/environment-variables.md` is bidirectional: every `CLIO_*` variable read in `src/` (as `env.NAME`, a quoted name, or `$NAME` in generated shell) needs a row, and every backticked variable on the page must still be read; comment lines do not count as reads.
+- The README `## Get started` block is checked against `scripts/install-local.sh`: it must install the package from npm, clone with the pinned version branch, verify via the installer's bin dir path, and ask `command -v clio-coder` (`readme-install-block`).
+- Project state paths use the `clio-coder` namespace: `.clio` (without `-coder`) is banned in tracked text files by the product-namespace check, except `CHANGELOG.md`, `CLIO-CODER.md`, `docs/history/`, and `.github/releases/` which quote the old names.
+- New Markdown docs must be reachable by the docs corpus: the prompts check fails if a file under `docs/` (outside `docs/html/` and `docs/wiki/`) is missing from the `context(scope="docs")` corpus or vice versa.
 
 ## Git and release
 
 - Work on a focused branch cut from the current version branch (e.g. `v062`) and open the pull request against it; `main` moves only by fast-forward when a stable release completes (`CONTRIBUTING.md`).
-- Qualification is a manual `ci.yml` dispatch with the exact candidate sha; `release.yml` reuses that qualification run's artifact without installing, building or testing, and its release job needs the protected `release` environment with owner approval (`CONTRIBUTING.md`, `.github/workflows/release.yml`).
-- Agents must leave npm publish and the release approval to the owner (`CONTRIBUTING.md`); `prepublishOnly` in `package.json` throws for direct `npm publish`.
+- Publish order is npm first, then the GitHub tag/release, then promote `main` and `gh-pages`; there is no atomic transaction, so resume a partial failure with the original artifact.
+- Agents must leave npm publish and the owner approval of the `release` environment to humans (`CONTRIBUTING.md`).
 
 ## Gotchas
 
+- `export-hygiene` fails on an `export` keyword for a function used only by its own file; drop the keyword rather than adding a consumer.
+- `scripts/check-release.mjs` must keep reading `scripts/release-manifest.json` rather than its own copy (`checkPackaging` asserts this).
+- The render-trace env var takes a path, not `1`; that exception sentence must stay in `docs/guide/environment-variables.md`.
 - A function used only by its own file must not carry the `export` keyword: export-hygiene sweeps `src/entry`, `src/cli`, `src/core`, `src/engine`, `src/tools`, `src/interactive`, and `src/domains`.
-
-## Docs and prose
-
-- Every relative link, heading anchor, and backticked `src/`, `tests/`, `scripts/`, or `apps/` path in `docs/**/*.md`, `README.md`, and `CONTRIBUTING.md` must resolve; the documentation-links check fails on a missing target, anchor, or cited path.
-- New Markdown docs must be reachable by the docs corpus: the prompts check fails if a file under `docs/` (outside `docs/html/` and `docs/wiki/`) is missing from the `context(scope="docs")` corpus or vice versa.
-
-## Checker-enforced invariants
-
-Rules the project's checks declare that the rules above do not state, each in its checker's words. A change that breaks one fails that check.
-- Root and GUI monetary display uses core/telemetry/render.ts; browser code consumes display strings rendered by the server. Checked as `rule10` by `tests/boundaries/check-boundaries.ts`.
-- `src/interactive/**`, `src/engine/acp/**` and `src/cli/**` sum no token or cost field: their figures are the read model's quantity displays, except the functions `SURFACE_TOTAL_EXEMPTIONS` names with a reason. Checked as `rule14` by `tests/boundaries/check-boundaries.ts`.
 
 ## Verification expectations
 
