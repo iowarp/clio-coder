@@ -1,14 +1,14 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "literature",
-	"version": "0.1.0",
-	"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
+	"version": "0.2.0",
+	"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Adds a hypothesis workflow: cited grounding, independent council proposals, a testability ranking and the smallest experiment per hypothesis, ending at the operator's own choice. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
 	"license": "Apache-2.0",
 	"author": {
 		"name": "IOWarp"
 	},
 	"repository": "https://github.com/iowarp/clio-coder",
-	"keywords": ["literature", "citations", "doi", "crossref", "arxiv", "bibtex"],
+	"keywords": ["literature", "citations", "doi", "crossref", "arxiv", "bibtex", "hypotheses"],
 	"extensions": {
 		"ai.iowarp.clio": {
 			"manifestVersion": 1,
@@ -30,6 +30,17 @@
 					"id": "citation-check",
 					"path": "skills/citation-check/SKILL.md",
 					"requires": ["script:extract-citations"]
+				},
+				{
+					"kind": "script",
+					"id": "hypothesis-slate",
+					"path": "assets/scripts/hypothesis_slate.py"
+				},
+				{
+					"kind": "skill",
+					"id": "hypothesis-workflow",
+					"path": "skills/hypothesis-workflow/SKILL.md",
+					"requires": ["script:hypothesis-slate", "skill:citation-check"]
 				}
 			]
 		}

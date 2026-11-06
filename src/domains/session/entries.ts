@@ -450,6 +450,12 @@ export interface DecisionRecord {
 	alternatives?: string[];
 	/** Why `value` won over `alternatives`. Only agent decisions carry this. */
 	rationale?: string;
+	/**
+	 * The operator answered an `ask_user` question marked `operator_only`
+	 * themselves. Only the ask_user harness sets it, from a live answer; `decide`,
+	 * `action=complete` and answers Clio chose for an absent operator never do.
+	 */
+	operator_choice?: true;
 }
 
 /**
@@ -792,6 +798,7 @@ export function isDecisionRecord(value: unknown): value is DecisionRecord {
 	if (value.revisionSource !== undefined && !isOneOf(value.revisionSource, ["operator", "agent"])) return false;
 	if (value.alternatives !== undefined && !isStringArray(value.alternatives)) return false;
 	if (!isOptionalString(value.rationale)) return false;
+	if (value.operator_choice !== undefined && (value.operator_choice !== true || value.source === "agent")) return false;
 	if (!isOptionalString(value.revisedAt) || !isOptionalString(value.correction)) return false;
 	return value.status === "superseded"
 		? isString(value.revisedAt)

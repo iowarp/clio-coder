@@ -108,6 +108,7 @@ function finalizedInterviewEntryFields(policy: AskUserToolPolicy): DecisionLedge
 			...(decision.source === "agent" ? { source: "agent" as const } : {}),
 			...(decision.alternatives && decision.alternatives.length > 0 ? { alternatives: [...decision.alternatives] } : {}),
 			...(decision.rationale ? { rationale: decision.rationale } : {}),
+			...(decision.operator_choice === true && decision.source !== "agent" ? { operator_choice: true as const } : {}),
 		});
 	}
 	return {

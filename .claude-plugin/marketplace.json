@@ -155,8 +155,8 @@
 		{
 			"name": "literature",
 			"source": "./library/plugins/literature",
-			"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
-			"version": "0.1.0",
+			"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Adds a hypothesis workflow: cited grounding, independent council proposals, a testability ranking and the smallest experiment per hypothesis, ending at the operator's own choice. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
+			"version": "0.2.0",
 			"license": "Apache-2.0",
 			"author": {
 				"name": "IOWarp"

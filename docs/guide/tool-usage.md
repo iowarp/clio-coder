@@ -1132,6 +1132,7 @@ Arguments:
   - `header` (optional): Short header.
   - `options` (optional array): Suggested choices (`{label, description}`).
   - `multi_select` (optional boolean): Allows multiple selections.
+  - `operator_only` (optional boolean): Marks a choice only the operator makes, such as which research question or hypothesis to pursue, or confirmation of a hazardous experiment. It must be the only question of its call. See below for how it is answered and recorded.
 - `decisions` (optional array). For `action="complete"`, key-value objects representing settled configurations.
 - `summary` (optional). Closeout explanation for `action="complete"`.
 - `max_rounds` (optional number). Round limit for this interview (default 6, max 24).
@@ -1142,6 +1143,8 @@ After `action="complete"` closes an interview, a later `mode="single_question"` 
 What the operator sees is one box above the composer, sized to the round: the question header, the question with bold spans and hanging numbered lists, then every option with its whole description. A round of several questions names them all in a strip at the top. A question longer than the box scrolls with PgUp/PgDn while its options stay on screen. Enter records the focused option; `t` records it and opens a multi-line answer field (Shift+Enter for a newline, Esc back to the options); an option whose label says the operator will type, such as "Provided details" or "Other", opens the field on Enter. Space toggles a multi-select option, Left/Right move between the questions of a round, `a` opens the answers recorded so far, and `?` shows the decision's tier, effect, and reversibility. Each answered round is recorded in the transcript as the question headers and the answers.
 
 In the TUI a round nobody answers within `safety.unattendedAfterSeconds` (default 300 seconds, `0` waits forever) closes on its own: each open question takes its first, recommended option, a free-text question proceeds on best judgment, and an outward question is answered no. At `yolo` a round never reaches the operator: Clio answers every question at once with its first option, an outward one included. Either way the model is told which options Clio chose and to state them as assumptions, and the decision board records them as Clio's decisions. List the recommended option first.
+
+An `operator_only` question is the exception. Nobody answers it for an absent operator: in the TUI the card shows no recommended pick, and when `safety.unattendedAfterSeconds` passes it closes unanswered; at `yolo` it is never shown; over ACP an interview request that times out closes it the same way. In each case the tool returns `operator_choice_unanswered`, records no decision, and ends the turn. Only the operator's own answer becomes a decision, and the decision board marks it `operator_choice`. `decide` cannot set that mark, and an `action=complete` decision with the same key leaves the operator's answer unchanged. A headless run has no `ask_user`, so no such decision exists there.
 
 Ask only when blocked on a decision the request does not answer. Never ask about anything the operator already stated: a request that names its own scope ("all tools", "read only") has answered the interview before it starts.
 

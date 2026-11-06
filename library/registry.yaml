@@ -447,12 +447,14 @@ entries:
     description: "Literature pack: verifies citations and resolves DOIs and arXiv
       IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free
       Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for
-      BibTeX and Markdown and a web_fetch fallback. Extends arxiv-literature.
-      Needs network for every lookup; the server needs one online launch to
-      install."
-    version: 0.1.0
+      BibTeX and Markdown and a web_fetch fallback. Adds a hypothesis workflow:
+      cited grounding, independent council proposals, a testability ranking and
+      the smallest experiment per hypothesis, ending at the operator's own
+      choice. Extends arxiv-literature. Needs network for every lookup; the
+      server needs one online launch to install."
+    version: 0.2.0
     sourceUrl: plugins/literature
-    sha256: 15ae1029900eb3e8d24a5731a1e91561a43de30259b8b4c40774d575be115c1c
+    sha256: c011cbaaca1226e997695240726208f1abf13fcb1e10b5bf498cb6966686e8e8
     requires:
       - skill:arxiv-literature
     provides:
@@ -462,6 +464,12 @@ entries:
           records: extracts BibTeX entries, DOIs and arXiv IDs offline, verifies
           each through the CiteNexus server (Crossref, DataCite, Europe PMC,
           arXiv), and reports VERIFIED, MISMATCH, NOT_FOUND, "
+      - kind: skill
+        name: hypothesis-workflow
+        description: Turns a research question into ranked, testable hypotheses with
+          cited grounding and the smallest experiment for each, then stops for
+          the operator's choice. Intake through ask_user, literature through the
+          researcher agent and citation-check, independent cou
   - kind: extension
     name: local-status
     description: A small local status command and ambient status example.

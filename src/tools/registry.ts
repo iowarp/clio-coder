@@ -606,6 +606,8 @@ export interface AskUserTranscriptQuestion {
 	header?: string;
 	options?: Array<{ label: string; description?: string }>;
 	multi_select?: boolean;
+	/** The question was the operator's own choice; nobody could answer it for them. */
+	operator_only?: true;
 }
 
 export interface AskUserTranscriptAnswer {
@@ -644,6 +646,12 @@ export interface AskUserTranscriptDecision {
 	source?: "agent";
 	alternatives?: string[];
 	rationale?: string;
+	/**
+	 * The operator's own answer to an `operator_only` question: the one record
+	 * of a choice only they may make. Harness-derived, never model-supplied, and
+	 * never set on an answer Clio chose for an absent operator.
+	 */
+	operator_choice?: true;
 }
 
 export interface AskUserTranscriptRound {

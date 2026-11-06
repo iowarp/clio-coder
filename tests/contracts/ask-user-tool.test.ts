@@ -389,4 +389,32 @@ describe("ask_user tool", () => {
 		deepStrictEqual(f.shown, []);
 		strictEqual(f.policy.status, "idle");
 	});
+
+	it("never answers an operator_only choice for the operator, and only their answer carries operator_choice", async () => {
+		const CHOICE = {
+			question: "Which hypothesis should we pursue?",
+			header: "Hypothesis choice",
+			options: [{ label: "H1" }, { label: "H2" }],
+			operator_only: true,
+		};
+		match(errorMessage(await fixture([]).call({ questions: [CHOICE, CACHE_QUESTION] })), /asked alone/);
+		for (const [replies, autonomy] of [
+			[[{ answers: [], timedOut: { afterSeconds: 300 } }], "default"],
+			[[], "yolo"],
+		] as const) {
+			const f = fixture([...replies], autonomy, true);
+			const result = await f.call({ questions: [CHOICE] });
+			strictEqual(interviewOf(result).event, "operator_choice_unanswered", autonomy);
+			deepStrictEqual(interviewOf(result).decisions, [], autonomy);
+			strictEqual(result.kind === "ok" ? result.terminate : undefined, true, autonomy);
+			strictEqual(f.shown.length, autonomy === "yolo" ? 0 : 1);
+		}
+		const f = fixture([{ answers: [{ question: CHOICE.question, answer: "H2", options: ["H2"] }] }]);
+		await f.call({ questions: [CHOICE] });
+		await f.call({ action: "complete", decisions: [{ key: "hypothesis_choice", value: "H1" }] });
+		deepStrictEqual(
+			f.policy.decisions.map(({ key, value, operator_choice }) => ({ key, value, operator_choice })),
+			[{ key: "hypothesis_choice", value: "H2", operator_choice: true }],
+		);
+	});
 });

@@ -2,7 +2,8 @@
 
 Checks citations and turns paper identifiers into citation-ready entries. The
 pack declares the CiteNexus MCP server (`cite-nexus-mcp` 0.2.3) and adds the
-`citation-check` skill, plus an offline extractor for BibTeX and Markdown. It
+`citation-check` skill, plus an offline extractor for BibTeX and Markdown, and
+the `hypothesis-workflow` skill with its offline slate checker. It
 requires the `arxiv-literature` skill package, which uses the same server for
 BibTeX export and arXiv ID checks.
 
@@ -15,7 +16,27 @@ clio-coder mcp trust cite-nexus
 | Skill | What it does |
 | --- | --- |
 | `citation-check` | Extracts BibTeX entries, DOIs and arXiv IDs from `.bib`, `.tex` or `.md` files offline, verifies each through CiteNexus, and reports VERIFIED, MISMATCH, NOT_FOUND, UNAVAILABLE or UNVERIFIABLE, with the evidence for each. It never edits a bibliography. |
+| `hypothesis-workflow` | Turns a research question into ranked, testable hypotheses: intake through `ask_user`, literature grounding through the researcher agent and `citation-check` with every statement cited or marked unsourced, independent council proposals merged with disagreements kept, a testability ranking recorded with `decide` as advice, the smallest experiment for each top hypothesis (a `reproduce` or `numeric-compare` check where the work is computational), and a hazard checkpoint. It ends at the operator's own choice; a headless run ends with the ranked options. |
 | `arxiv-literature` (required package) | Searches arXiv and writes paper cards. With CiteNexus installed it exports BibTeX, RIS or CSL-JSON and verifies arXiv IDs. |
+
+## The operator chooses
+
+`hypothesis-workflow` never chooses the research question or the hypothesis.
+It asks the choice as an `ask_user` question marked `operator_only`, which is
+asked alone, never answered for an absent operator (a timeout or yolo autonomy
+closes it unanswered and ends the turn), and recorded on the decision board
+only from the operator's own answer. A headless run has no `ask_user`, so it
+stops before the choice and reports the ranked options.
+
+The slate the skill writes (`research/hypotheses/<slug>.json`) is checked by
+`assets/scripts/hypothesis_slate.py` (stdlib Python 3.10+, offline, writes
+nothing). The checker refuses an uncited statement that is not marked
+unsourced, a hypothesis without a falsifiable prediction, a ranking that
+misses a hypothesis, and any key that records a choice. Its term screen for
+biological, chemical and radiological hazards flags hypotheses that need the
+operator's explicit confirmation before the choice. The screen is a floor; the
+skill adds its own judgment, and Clio's safety policy and safety judge still
+review every tool call.
 
 ## The server
 
