@@ -29,6 +29,7 @@ import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker
 import { bindExternalUsage } from "../external-call-telemetry.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
+import type { WorkerRefusal } from "../worker-refusals.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
 import { loadClaudeAgentSdk } from "./sdk-module.js";
@@ -354,6 +355,8 @@ interface PermissionGateInput {
 	emit: WorkerEventEmit;
 	onPermissionFailure(): void;
 	handledToolDecisions: Map<string, ClaudeToolPermissionDecision>;
+	/** Execute refusals so far in this run; the shared decision appends to it once per tool use. */
+	executeRefusals: WorkerRefusal[];
 	/** Admitted tool surface (Clio builtin names) narrowed by any tool_profile. */
 	allowedTools: ReadonlySet<string>;
 	budgetGate?: ClaudeWorkerBudgetGate;
@@ -452,12 +455,16 @@ export function createClaudeWorkerBudgetGate(
 	};
 }
 
-/** CLB-5: an execute ask with no responder is a deterministic permission failure. */
+/**
+ * CLB-5: an ask with no responder ends the run under `fail`. Under `deny` an
+ * execute refusal returns to the model, which may take another route, and only
+ * the WORKER_REFUSAL_LIMIT-th ends the run, as in the native worker.
+ */
 function endsPermissionRun(decision: ClaudeToolPermissionDecision, input: PermissionGateInput): boolean {
 	return (
 		decision.kind === "deny" &&
 		decision.permissionRequired &&
-		(input.onPermission === "fail" || decision.decision.classification.actionClass === "execute")
+		(input.onPermission === "fail" || decision.refusalLimitReached === true)
 	);
 }
 
@@ -505,6 +512,7 @@ function decideToolUse(
 			onPermission: input.onPermission,
 			...(input.mainGrantsUnavailable === true ? { mainGrantsUnavailable: true } : {}),
 			emit: input.emit,
+			executeRefusals: input.executeRefusals,
 			allowedTools: input.allowedTools,
 			...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
 		});
@@ -686,6 +694,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			: {}),
 		emit,
 		handledToolDecisions: new Map<string, ClaudeToolPermissionDecision>(),
+		executeRefusals: [],
 		onPermissionFailure() {
 			permissionFailure = true;
 			abort();
