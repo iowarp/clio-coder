@@ -10,6 +10,7 @@ import { previewBudget, previewRows } from "./preview.js";
 import {
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
+	councilCollectedWords,
 	presentCouncilReport,
 	presentWorkerContractAnswer,
 	safeWorkerAnswerText,
@@ -350,6 +351,8 @@ function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnsw
 	// A council's synthesis seals the whole council as one report; the card reads it as answers, not as JSON.
 	if (entry.council?.label === COUNCIL_SYNTHESIS_LABEL && !isPending(entry)) {
 		const report = parseCouncilReport(entry.text);
+		// A council that only collected has no answer of its own, and each member's answer is on its row just above.
+		if (report !== null && report.synthesis.kind === "none") return { lines: [], footer: councilCollectedWords(report) };
 		if (report !== null) return presentCouncilReport(report);
 	}
 	const kind = entry.result?.contractKind;
@@ -999,7 +1002,10 @@ export function renderWorkerEntryLines(
 					"warning",
 					safeWidth,
 				);
-	const qualityText = isPending(entry) || stopping ? null : qualityRow(entry.result, entry.runId, inspect);
+	// A council that only collected produced nothing of its own to check; each member's row is its own record.
+	const collected = isSynthesis(entry) && !isPending(entry) && parseCouncilReport(entry.text)?.synthesis.kind === "none";
+	const qualityText =
+		isPending(entry) || stopping || (collected && !inspect) ? null : qualityRow(entry.result, entry.runId, inspect);
 	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
