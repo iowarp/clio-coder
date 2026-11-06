@@ -11,10 +11,11 @@ import { withRunFailureReporting, writeRunDiagnostic } from "../../src/cli/run-f
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
-import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
+import { appendRunFeed, holdBack, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	endsInOpenCredential,
+	headGuardAfter,
 	holdUnresolvedUserinfo,
 	redactFinalUrlCredentials,
 	redactSecretString,
@@ -144,6 +145,31 @@ test("a run feed bound never leaves a secret query value without its name", asyn
 		ok(!value.join("\n").match(SECRET_LETTERS), JSON.stringify(value.map((row) => row.slice(0, 60))));
 	} finally {
 		env.restore();
+	}
+});
+
+test("a feed's hold back checks each word of repeated secret names a bounded number of times", () => {
+	for (const unit of ["password: ", "token "]) {
+		const text = unit.repeat(3000);
+		let checks = 0;
+		const counted = (removed: string) => {
+			checks += 1;
+			return headGuardAfter(removed);
+		};
+		let carry = "";
+		let guarded = 0;
+		let deltas = 0;
+		for (let at = 0; at < text.length; at += 8) {
+			const held = holdBack(carry + text.slice(at, at + 8), guarded, counted);
+			// Every word names a secret, so none of the run can leave without the value that would follow it.
+			strictEqual(held.head, "");
+			carry = held.tail;
+			guarded = held.guardedThrough;
+			deltas += 1;
+		}
+		strictEqual(carry, text);
+		// Rescanning the carry per delta made these checks grow with the square of the run: 3.5 ms per delta at 138 KB (#448).
+		ok(checks <= 4 * deltas, `${unit}: ${checks} checks for ${deltas} deltas`);
 	}
 });
 
