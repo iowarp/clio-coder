@@ -76,11 +76,8 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 		if (!force && now() - lastWorkspaceProbeAt < 5_000) return Promise.resolve();
 		if (inFlight) return inFlight;
 		lastWorkspaceProbeAt = now();
-		// A repository whose first probe timed out is asked again, rather than read as no repository for the session.
-		if (!base.isGit && base.gitUnknown !== true) {
-			liveWorkspaceSnapshot = base;
-			return Promise.resolve();
-		}
+		// Every refresh asks Git, a session that recorded no repository included: that record can be a probe that lost
+		// its answer, or a resumed session from before `git init`, and either would hold `no Git branch` for good.
 		inFlight = gitProbe(base.cwd)
 			.then((git) => {
 				applyGitStatus(deps.getSessionWorkspace() ?? bootWorkspace, git);

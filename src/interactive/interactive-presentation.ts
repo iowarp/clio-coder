@@ -381,7 +381,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
 	});
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
-	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
+	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
 	/**
 	 * The submit binding as the operator has it, or null when it is unbound or
@@ -406,7 +406,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		providers: deps.providers,
 		getTerminalRows: () => (deps.tui as Partial<Pick<TUI, "terminal">>).terminal?.rows,
 		...(deps.agents ? { getAgentCount: () => deps.agents?.listSpecs().filter(isUserVisibleAgent).length ?? 0 } : {}),
-		getWorkspaceSnapshot,
+		// The launchpad's Git row reads the same live probe as the footer, so the two never disagree about the repository.
+		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
 		// The authoritative project-context reader. It is synchronous on a cache
 		// miss, so the banner refreshes it off the frame rather than calling it
 		// during render; the frame that shows the result is asked for below.
