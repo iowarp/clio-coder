@@ -119,9 +119,16 @@ function sealedResultAnswer(receipt: RunResult): string {
 	const bullets = (value: unknown): string[] => strings(value).map((item) => `- ${item}`);
 	let lines: string[];
 	switch (structured.kind) {
-		case "mutation-report":
-			lines = [...strings([data.summary]), ...bullets(data.observations)];
+		case "mutation-report": {
+			// A coder's report names what it changed; a person reads that as a line, not as the JSON it sealed.
+			const changed = strings(data.mutatedPaths);
+			lines = [
+				...strings([data.summary]),
+				...bullets(data.observations),
+				...(changed.length > 0 ? [`changed: ${changed.join(", ")}`] : []),
+			];
 			break;
+		}
 		case "scout-report":
 		case "research-report":
 			lines = claims(data.findings);
@@ -143,7 +150,9 @@ function sealedResultAnswer(receipt: RunResult): string {
 
 /** The human answer, settled evidence limits, and the run result line in that order. */
 export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
-	const whole = streamedAnswer.length > 0 ? streamedAnswer : sealedResultAnswer(receipt);
+	// A worker whose last words were its sealed JSON report reads in the words the report holds, as the card does.
+	const streamedReport = receipt.output?.structured !== undefined && /^\s*\{[\s\S]*\}\s*$/u.test(streamedAnswer);
+	const whole = streamedAnswer.length > 0 && !streamedReport ? streamedAnswer : sealedResultAnswer(receipt);
 	// A run that never settled a final message can have stopped inside a URL, so what it holds stays hidden (#446).
 	const cutOff = receipt.output === undefined ? receipt.exitCode !== 0 : receipt.output.state === "partial";
 	const answer = cutOff ? holdCutOffText(whole) : whole;
