@@ -75,7 +75,7 @@ export function createSideRequestAdmission(deps: {
 			if (settled) return;
 			settled = true;
 			try {
-				call?.settle(callSettlementFromMessage(message, pricing.pricedBy), reportedModelFromMessage(message));
+				call?.settle(callSettlementFromMessage(message, pricing), reportedModelFromMessage(message));
 			} finally {
 				void lease?.release();
 			}

@@ -14,7 +14,7 @@ import {
 	sumRunSpend,
 	unobservedRunUsageFacts,
 } from "../core/telemetry/pricing.js";
-import { renderFactField, renderPricing } from "../core/telemetry/render.js";
+import { renderFactField, renderPricedBy, renderPricing } from "../core/telemetry/render.js";
 import type { RunUsageFacts } from "../core/telemetry/schemas.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ALL_TOOL_NAMES, ToolNames } from "../core/tool-names.js";
@@ -358,7 +358,7 @@ function dispatchUsage(
 	const spend = spendOf(receipt);
 	const { pricing } = spend;
 	return (
-		`; run=${runId}; tokens: ${usageDetail(spend, cacheReadText(spend, cache))}; cost=${renderPricing(pricing)} (priced by ${pricing.pricedBy})` +
+		`; run=${runId}; tokens: ${usageDetail(spend, cacheReadText(spend, cache))}; cost=${renderPricing(pricing)} (priced by ${renderPricedBy(pricing)})` +
 		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "") +
 		breakdown
 	);

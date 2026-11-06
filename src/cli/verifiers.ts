@@ -1,4 +1,6 @@
-import { SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../core/safe-exec.js";
+import { createHash } from "node:crypto";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../core/safe-exec.js";
 import {
 	createVerifierDraft,
 	discoverVerifierAuthoring,
@@ -14,6 +16,7 @@ import {
 } from "../tools/verify/catalog.js";
 import { verifyTool } from "../tools/verify/index.js";
 import { normalizeNumericTolerance } from "../tools/verify/numeric.js";
+import { type DeclaredReproduce, normalizeReproduce } from "../tools/verify/reproduce.js";
 import { discoverDeclaredChecksAtRoot, recordPerfBaseline } from "../tools/verify/scripts.js";
 import { printError, printOk } from "./argv.js";
 import { runVerifiersInspect } from "./verifiers-inspect.js";
@@ -36,13 +39,20 @@ Fields:
   --cwd <path>            repository-relative working directory (default .)
   --timeout-ms <number>   bounded timeout in milliseconds (default 120000)
   --tags <a,b>            comma-separated catalog tags
-  --kind <kind>           command (default), numeric-compare, or perf-budget
-  --reference <path>      numeric-compare: repository-relative reference JSON of string -> number | number[]
+  --kind <kind>           command (default), numeric-compare, perf-budget, or reproduce
+  --reference <path>      numeric-compare: repository-relative reference JSON of string -> number | number[];
+                          reproduce: reference metrics JSON in the command's own output format
   --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?,"combine"?:all|any,"nonFinite"?:fail|match}, at least one numeric bound;
                           perf-budget with --baseline: {"relative"} headroom over the baseline
   --budget-ms <number>    perf-budget: wall-time bound in milliseconds
   --budget-relative <r>   perf-budget with --budget-ms: fractional headroom over the bound
   --baseline <path>       perf-budget: repository-relative baseline JSON written by 'verifiers baseline <id>'
+  --input <path>[=<sha>]  reproduce, repeatable: pinned input file; without =<sha> the current file's sha256 is pinned
+  --compare twice         reproduce: run twice in two clean environments instead of --reference
+  --environment <env>     reproduce: worktree (default, detached worktree of HEAD) or copy (only the inputs)
+  --seed <NAME>=<value>   reproduce: environment variable set for every run
+  --units <json>          reproduce: {"metric": "units"} each metric must report beside its value
+  --shapes <json>         reproduce: {"metric": [dims]} nested-array shape each metric must have
 
 baseline runs a perf-budget check once and records its wall time at the check's
 baseline path; a failing or timed-out command records nothing.
@@ -72,6 +82,12 @@ const VALUE_OPTIONS = new Set([
 	"--budget-ms",
 	"--budget-relative",
 	"--baseline",
+	"--input",
+	"--compare",
+	"--environment",
+	"--seed",
+	"--units",
+	"--shapes",
 ]);
 
 interface ParsedAuthoringArgs {
@@ -148,7 +164,89 @@ function tags(value: string | undefined): string[] {
 				.filter((tag) => tag.length > 0);
 }
 
-type KindFields = Pick<Extract<VerifierRevision, { kind: "add" }>["check"], "kind" | "numeric" | "perf">;
+type KindFields = Pick<Extract<VerifierRevision, { kind: "add" }>["check"], "kind" | "numeric" | "perf" | "reproduce">;
+
+const REPRODUCE_OPTIONS = ["--input", "--compare", "--environment", "--seed", "--units", "--shapes"] as const;
+
+/** SHA-256 of a repository file, read in chunks so a large data file is never held whole. */
+function pinnedDigest(relative: string): string | Error {
+	let resolved: string;
+	try {
+		resolved = resolveSafeCwd(relative, process.cwd());
+	} catch (error) {
+		return new Error(`--input ${relative}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	let fd: number;
+	try {
+		fd = openSync(resolved, "r");
+	} catch (error) {
+		return new Error(`--input ${relative} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	try {
+		if (!fstatSync(fd).isFile()) return new Error(`--input ${relative} is not a regular file`);
+		const hash = createHash("sha256");
+		const buffer = Buffer.alloc(1024 * 1024);
+		for (;;) {
+			const read = readSync(fd, buffer, 0, buffer.length, null);
+			if (read === 0) break;
+			hash.update(buffer.subarray(0, read));
+		}
+		return hash.digest("hex");
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/** The reproduce declaration from the option set, through the catalog's own normalizer. */
+function reproduceFromArgs(parsed: ParsedAuthoringArgs): DeclaredReproduce | Error {
+	const inputs: Array<{ path: string; sha256: string }> = [];
+	for (const entry of parsed.values.get("--input") ?? []) {
+		const separator = entry.lastIndexOf("=");
+		const pinPath = separator > 0 ? entry.slice(0, separator) : entry;
+		const digest = separator > 0 ? entry.slice(separator + 1) : pinnedDigest(entry);
+		if (digest instanceof Error) return digest;
+		inputs.push({ path: pinPath, sha256: digest });
+	}
+	const record: Record<string, unknown> = { inputs };
+	const compare = oneValue(parsed, "--compare");
+	const reference = oneValue(parsed, "--reference");
+	if ((compare === undefined) === (reference === undefined)) {
+		return new Error("--kind reproduce requires exactly one of --compare twice or --reference <path>");
+	}
+	if (compare !== undefined) {
+		if (compare !== "twice") return new Error("--compare takes twice; use --reference <path> to compare with a file");
+		record.compare = "twice";
+	} else {
+		record.compare = { reference };
+	}
+	const toleranceValue = oneValue(parsed, "--tolerance");
+	if (toleranceValue === undefined) return new Error("--tolerance is required for --kind reproduce");
+	const tolerance = parseJsonObject(toleranceValue, "--tolerance");
+	if (tolerance instanceof Error) return tolerance;
+	record.tolerance = tolerance;
+	const environment = oneValue(parsed, "--environment");
+	if (environment !== undefined) record.environment = environment;
+	const seed = oneValue(parsed, "--seed");
+	if (seed !== undefined) {
+		const separator = seed.indexOf("=");
+		if (separator <= 0) return new Error("--seed must be NAME=value");
+		record.seed = { env: seed.slice(0, separator), value: seed.slice(separator + 1) };
+	}
+	for (const [option, field] of [
+		["--units", "units"],
+		["--shapes", "shapes"],
+	] as const) {
+		const value = oneValue(parsed, option);
+		if (value === undefined) continue;
+		const json = parseJsonObject(value, option);
+		if (json instanceof Error) return json;
+		record[field] = json;
+	}
+	const spec = normalizeReproduce(record, "reproduce", (value, location) =>
+		typeof value === "string" && value.length > 0 ? value : new Error(`${location} must be a non-empty path`),
+	);
+	return spec instanceof Error ? new Error(`--kind reproduce: ${spec.message}`) : spec;
+}
 
 function parseJsonObject(value: string, option: string): Record<string, unknown> | Error {
 	try {
@@ -180,6 +278,15 @@ function kindFieldsFromArgs(parsed: ParsedAuthoringArgs): KindFields | Error {
 	const budgetMs = oneValue(parsed, "--budget-ms");
 	const budgetRelative = oneValue(parsed, "--budget-relative");
 	const baseline = oneValue(parsed, "--baseline");
+	const reproduceOptions = REPRODUCE_OPTIONS.filter((option) => oneValue(parsed, option) !== undefined);
+	if (kind === "reproduce") {
+		if (budgetMs !== undefined || budgetRelative !== undefined || baseline !== undefined) {
+			return new Error("--budget-ms, --budget-relative, and --baseline belong to --kind perf-budget");
+		}
+		const reproduce = reproduceFromArgs(parsed);
+		return reproduce instanceof Error ? reproduce : { kind, reproduce };
+	}
+	if (reproduceOptions.length > 0) return new Error(`${reproduceOptions.join(", ")} belong to --kind reproduce`);
 	if (kind === "command") {
 		const stray = [
 			["--reference", reference],
@@ -189,7 +296,9 @@ function kindFieldsFromArgs(parsed: ParsedAuthoringArgs): KindFields | Error {
 			["--baseline", baseline],
 		].filter(([, value]) => value !== undefined);
 		if (stray.length > 0)
-			return new Error(`${stray.map(([name]) => name).join(", ")} require --kind numeric-compare or perf-budget`);
+			return new Error(
+				`${stray.map(([name]) => name).join(", ")} require --kind numeric-compare, perf-budget, or reproduce`,
+			);
 		return {};
 	}
 	if (kind === "numeric-compare") {
@@ -306,6 +415,7 @@ function editRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 		changes.kind = kindFields.kind ?? "command";
 		if (kindFields.numeric !== undefined) changes.numeric = kindFields.numeric;
 		if (kindFields.perf !== undefined) changes.perf = kindFields.perf;
+		if (kindFields.reproduce !== undefined) changes.reproduce = kindFields.reproduce;
 	}
 	if (Object.keys(changes).length === 0) return new Error("edit requires at least one changed field");
 	return { kind: "edit", id, changes };

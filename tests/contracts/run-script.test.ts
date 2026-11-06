@@ -295,6 +295,22 @@ fs.writeFileSync("out/result.txt", "sum=" + input.trim().split(",").map(Number).
 		deepStrictEqual(runDirs(link), runDirs(real));
 	});
 
+	it("writes the logs masked, a token split across writes included, and keeps every other byte", async () => {
+		const root = workspace();
+		const relative = script(
+			root,
+			"token.js",
+			`process.stdout.write(Buffer.from([0xff, 0x0a]));
+process.stdout.write("token ghp_ZQXJ01");
+setTimeout(() => process.stdout.write("23456789ZQXJabcdef\\n"), 100);`,
+		);
+		const result = await tool(root).run({ interpreter: "node", script: relative });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		const log = readFileSync(detailsOf(result).stdoutPath as string);
+		deepStrictEqual(log, Buffer.concat([Buffer.from([0xff, 0x0a]), Buffer.from("token [redacted:github-token]\n")]));
+	});
+
 	it("keeps the stream's final bytes in the result tail", async () => {
 		const root = workspace();
 		const sentinel = `FINAL-${randomBytes(6).toString("hex")}`;
@@ -311,13 +327,16 @@ process.stdout.write("${sentinel}");`,
 		ok(tail.endsWith(sentinel), `the tail ends with the stream's last bytes: ...${tail.slice(-64)}`);
 		match(tail, /^\[\.\.\. \d+ bytes omitted \.\.\.\]\n/u);
 		const marker = tail.slice(0, tail.indexOf("\n") + 1);
-		strictEqual(Buffer.byteLength(tail) - Buffer.byteLength(marker), RUN_SCRIPT_CAPS.resultTailBytes);
+		const shown = Buffer.byteLength(tail) - Buffer.byteLength(marker);
+		// The window's first tokens go, since a cut token could be what is left of a credential.
+		ok(shown <= RUN_SCRIPT_CAPS.resultTailBytes && shown > RUN_SCRIPT_CAPS.resultTailBytes - 64, `${shown} bytes shown`);
 		const log = readFileSync(detailsOf(result).stdoutPath as string);
 		strictEqual(
 			tail.slice(marker.length),
-			log.subarray(log.byteLength - RUN_SCRIPT_CAPS.resultTailBytes).toString("utf8"),
-			"the tail is exactly the last 8 KiB of the log",
+			log.subarray(log.byteLength - shown).toString("utf8"),
+			"the tail is exactly the end of the log",
 		);
+		strictEqual(marker, `[... ${log.byteLength - shown} bytes omitted ...]\n`, "the marker counts every byte not shown");
 	});
 });
 

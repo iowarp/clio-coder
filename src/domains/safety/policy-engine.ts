@@ -1196,7 +1196,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				: null;
 		const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
 		const verifyArgv =
-			verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs);
+			verifyResolution === null || verifyArgs === null ? null : verifyResolutionArgv(verifyResolution, verifyArgs, cwd);
 		const verifyCommand = verifyArgv?.join(" ") ?? null;
 		const scans = (verifyCommand !== null ? [verifyCommand] : damageControlScans(call, rawClassification)).filter(
 			(scan) => scan !== "",
@@ -1598,7 +1598,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const verifyCommand =
 			verifyResolution === null || verifyArgs === null
 				? null
-				: (verifyResolutionArgv(verifyResolution, verifyArgs)?.join(" ") ?? null);
+				: (verifyResolutionArgv(verifyResolution, verifyArgs, cwd)?.join(" ") ?? null);
 		const checkCwd =
 			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
 				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
@@ -2940,6 +2940,9 @@ const READ_ONLY_INSPECTORS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 	["printf", ["-v"]],
 	["true", []],
 	["which", []],
+	// -s and --set change the clock, and -f reads a list of dates from a file. A bare operand that is not a `+FORMAT`
+	// also sets the clock, which dateOperandsOnlyFormat refuses.
+	["date", ["-s", "--set", "-f", "--file"]],
 	["cut", []],
 	["tr", []],
 	["grep", ["-f", "--file", "--exclude-from"]],
@@ -2985,6 +2988,7 @@ const SHORT_VALUE_LETTERS: ReadonlyMap<string, string> = new Map([
 	["stat", "c"],
 	["nl", "bdfhilnsvw"],
 	["basename", "s"],
+	["date", "dfrsI"],
 ]);
 
 /** `sed -n` with a print-only line script (`1,80p`, `5p`, `10,$p`); every other sed program can write or execute. */
@@ -3539,6 +3543,7 @@ function readOnlyInspectionRule(
 		args.push(...matches);
 	}
 	if (command === "rg" && rgConfigRefusal() !== null) return null;
+	if (command === "date" && !dateOperandsOnlyFormat(args)) return null;
 	if (command === "sed") {
 		if (!args.includes("-n")) return null;
 		let sawScript = false;
@@ -3576,6 +3581,32 @@ function readOnlyInspectionRule(
 			"recursive grep reaches a zero-access file or too many entries, or uses -R; name the files or use the grep tool",
 		);
 	return `builtin:read-only:${command}`;
+}
+
+/**
+ * True when every bare `date` operand is a `+FORMAT`. `date MMDDhhmm` sets the clock with no option at all, so an operand
+ * that is neither a format nor the value of `-d` or `-r` is not an inspection.
+ */
+function dateOperandsOnlyFormat(args: ReadonlyArray<string>): boolean {
+	let valueNext = false;
+	for (const arg of args) {
+		if (valueNext) {
+			valueNext = false;
+			continue;
+		}
+		if (arg === "--") continue;
+		if (arg.startsWith("--")) {
+			valueNext = /^--(?:da|dat|date|r|re|ref|refe|refer|refere|referen|referenc|reference)$/u.test(arg);
+			continue;
+		}
+		if (arg.startsWith("-") && arg.length > 1) {
+			// A cluster ending in -d or -r takes the next word as its value; attached text is the value itself.
+			valueNext = /^-[A-Za-z]*[dr]$/u.test(arg) && !/^-[A-Za-z]*I/u.test(arg);
+			continue;
+		}
+		if (!arg.startsWith("+")) return false;
+	}
+	return true;
 }
 
 /**

@@ -20,7 +20,9 @@ recipes by their described capabilities, tools and bound skills, not by
 guessing names. Copy an exact operator assignment verbatim into task, minus the
 delegation wording around it ("Dispatch a coder worker to", "Use a worker
 for"): task is the work itself. Keep your evidence in briefing and declare
-intent paths. intent.verification is an array of {check:"<declared id>"}
+intent paths. Evidence means what you verified: a suspicion goes into task or
+briefing as a question to test, never as a finding, or the worker confirms what
+the task suggested. intent.verification is an array of {check:"<declared id>"}
 entries; an undeclared id is refused with the declared ids named, so no verify()
 listing is needed first. A label such as "test suite" is not an id, and a single
 object is not an array. When the operator names a target or
@@ -32,7 +34,8 @@ host.
 Use parallel tasks for independent work and pipeline for work consuming a
 previous result. Never edit files owned by a pending or successful worker.
 Use run records for synthesis, spot-check consequential evidence, and resolve
-limitations. A failed run supplies leads, not verification: confirm the few
+limitations. Do not certify two implementations equivalent or report no defects
+until every path that changes the compared state is traced in each. A failed run supplies leads, not verification: confirm the few
 relevant locations instead of repeating its exploration, and do not repeat the
 same goal and files under a new wording. Report refused dispatches and why any
 replacement fits. Never narrate a worker you did not run. Operator-shared

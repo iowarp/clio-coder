@@ -72,10 +72,17 @@ export const UsageSchema = Type.Object(
 	closed,
 );
 export type CallUsage = Static<typeof UsageSchema>;
+/**
+ * Which rule made a call free: the target declared `pricing: free`, the target's declared rates are all zero, or the
+ * runtime is local by kind. Optional beside `pricedBy: free`, so records written before it read unchanged.
+ */
+export const FreeRuleSchema = vocabulary(["declared", "zero-rates", "local-native"]);
+export type FreeRule = Static<typeof FreeRuleSchema>;
 export const PricingSchema = Type.Object(
 	{
 		usd: factSchema(duration),
 		pricedBy: vocabulary(["provider", "target-rates", "catalog", "free", "none"]),
+		freeRule: Type.Optional(FreeRuleSchema),
 		rateRef: Type.Optional(ObjectRefSchema),
 	},
 	closed,
@@ -309,7 +316,11 @@ export const RunUsageSchema = Type.Object(
 		apiCalls: FactSumSchema,
 		unmeteredCalls: FactSumSchema,
 		pricing: Type.Object(
-			{ usd: FactSumSchema, pricedBy: vocabulary(["provider", "target-rates", "catalog", "free", "none"]) },
+			{
+				usd: FactSumSchema,
+				pricedBy: vocabulary(["provider", "target-rates", "catalog", "free", "none"]),
+				freeRule: Type.Optional(FreeRuleSchema),
+			},
 			closed,
 		),
 	},

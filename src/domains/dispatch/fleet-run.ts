@@ -19,7 +19,7 @@ import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
-import { type PricingSum, sumFacts, sumPricing, sumRunSpend } from "../../core/telemetry/pricing.js";
+import { freeClaim, type PricingSum, sumFacts, sumPricing, sumRunSpend } from "../../core/telemetry/pricing.js";
 import { renderPricing } from "../../core/telemetry/render.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
@@ -339,7 +339,10 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 		runtimeId: settled.route.runtimeId,
 		nodeId: settled.node?.id ?? "local",
 		changedPaths: [...(delivered?.worktree?.changedPaths ?? []), ...(delivered?.checkoutChanges?.changedPaths ?? [])],
-		pricing: { usd: "unknownCount" in usd ? usd : sumFacts([usd]), free: settled.pricing.pricedBy === "free" },
+		pricing: {
+			usd: "unknownCount" in usd ? usd : sumFacts([usd]),
+			...freeClaim(settled.pricing.pricedBy === "free", settled.pricing.freeRule),
+		},
 	};
 }
 

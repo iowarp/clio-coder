@@ -166,6 +166,13 @@ export function readMaxBytes(): number {
 
 // Number only an already bounded slice, retaining its explicit physical line
 // count: a truncated slice ending in a blank line can look like a terminator.
+// Models read a directory to see what is in it; naming the tool that lists it saves the turn a blind retry spends.
+function notAFileMessage(filePath: string, directory: boolean): string {
+	return directory
+		? `read: ${filePath} is a directory, not a file. List its entries with ls.`
+		: `read: not a file: ${filePath}`;
+}
+
 function numberSourceLines(content: string, firstLine: number, lineCount: number): string {
 	return content
 		.split("\n")
@@ -833,7 +840,8 @@ export const readTool: ToolSpec = {
 			// results below that never open the file.
 			const entry = await stat(filePath);
 			file = { bytes: entry.size, mtimeMs: entry.mtimeMs };
-			if (!entry.isFile()) return { kind: "error", message: `read: not a file: ${filePath}`, details: { file } };
+			if (!entry.isFile())
+				return { kind: "error", message: notAFileMessage(filePath, entry.isDirectory()), details: { file } };
 			if (reservation.exhausted) {
 				const exhausted = observationBudgetExhausted({
 					tool: ToolNames.Read,
@@ -852,7 +860,8 @@ export const readTool: ToolSpec = {
 			// The descriptor's own identity is what every read below describes.
 			const opened = await handle.stat();
 			file = { bytes: opened.size, mtimeMs: opened.mtimeMs };
-			if (!opened.isFile()) return { kind: "error", message: `read: not a file: ${filePath}`, details: { file } };
+			if (!opened.isFile())
+				return { kind: "error", message: notAFileMessage(filePath, opened.isDirectory()), details: { file } };
 			await readTestSeams.afterIdentity?.(file, filePath);
 			const first = await readExact(handle, 0, Math.min(file.bytes, READ_SCAN_CHUNK_BYTES));
 			if (detectSupportedImageMimeType(first) !== null)

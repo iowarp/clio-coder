@@ -1,7 +1,7 @@
 import type { Fact, FactSum } from "./fact.js";
-import type { PricedBy, Pricing, RunSpendSums, RunUsageFacts } from "./schemas.js";
+import type { FreeRule, PricedBy, Pricing, RunSpendSums, RunUsageFacts } from "./schemas.js";
 
-export type { PricedBy, Pricing, RunSpendSums };
+export type { FreeRule, PricedBy, Pricing, RunSpendSums };
 
 const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
 
@@ -10,8 +10,13 @@ const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
  * target is a measured local zero, a catalog rate is a guess at someone else's price list and stays estimated, and
  * an amount nobody priced is unknown, never zero.
  */
-export function pricedUsd(pricedBy: PricedBy, usd: number | null): Pricing {
-	if (pricedBy === "free") return { usd: { kind: "measured", value: 0, source: "local-count" }, pricedBy };
+export function pricedUsd(pricedBy: PricedBy, usd: number | null, freeRule?: FreeRule): Pricing {
+	if (pricedBy === "free")
+		return {
+			usd: { kind: "measured", value: 0, source: "local-count" },
+			pricedBy,
+			...(freeRule !== undefined ? { freeRule } : {}),
+		};
 	if (pricedBy === "none" || usd === null || !Number.isFinite(usd) || usd < 0)
 		return { usd: notObserved, pricedBy: "none" };
 	if (pricedBy === "catalog") return { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy };
@@ -19,6 +24,37 @@ export function pricedUsd(pricedBy: PricedBy, usd: number | null): Pricing {
 		usd: { kind: "measured", value: usd, source: pricedBy === "provider" ? "provider" : "local-count" },
 		pricedBy,
 	};
+}
+
+/** Who priced a route and, when free, by which rule: what a call's settlement needs to price it (#434). */
+export interface PricingBasis {
+	pricedBy: Exclude<PricedBy, "provider">;
+	freeRule?: FreeRule;
+}
+
+const FREE_RULES: ReadonlySet<string> = new Set<FreeRule>(["declared", "zero-rates", "local-native"]);
+
+/** True for a free rule a persisted record may carry; anything else reads as no rule. */
+export function isFreeRule(value: unknown): value is FreeRule {
+	return typeof value === "string" && FREE_RULES.has(value);
+}
+
+/** A route or resolution that carries a basis among its other fields; its free rule may be explicitly absent. */
+export interface PricingBasisSource {
+	pricedBy: PricingBasis["pricedBy"];
+	freeRule?: FreeRule | undefined;
+}
+
+/** A basis from the bare `pricedBy` that older call paths and persisted accounting carry, which states no free rule. */
+export function pricingBasis(value: PricingBasis["pricedBy"] | PricingBasisSource): PricingBasis {
+	return pricingBasisFields(typeof value === "string" ? { pricedBy: value } : value);
+}
+
+/** The basis fields of a resolved pricing without its rates, for a record that carries who priced it. */
+export function pricingBasisFields(pricing: PricingBasisSource): PricingBasis {
+	return pricing.freeRule !== undefined && pricing.pricedBy === "free"
+		? { pricedBy: pricing.pricedBy, freeRule: pricing.freeRule }
+		: { pricedBy: pricing.pricedBy };
 }
 
 /** True when a target's rates put a number on a call, so its spend can be projected before it runs. */
@@ -50,17 +86,39 @@ export function sumFacts(facts: Iterable<Fact<number>>): FactSum {
 	return sum;
 }
 
-/** Several priced amounts as one sum; `free` holds only when every amount was a free target's measured zero. */
+/**
+ * Several priced amounts as one sum; `free` holds only when every amount was a free target's measured zero, and
+ * `freeRule` names the rule only when every one of them states the same one.
+ */
 export interface PricingSum {
 	usd: FactSum;
 	free: boolean;
+	freeRule?: FreeRule;
+}
+
+/** The free rule every part states, or undefined when any part is not free, states none, or states another. */
+export function agreedFreeRule(
+	parts: Iterable<Pick<Pricing, "pricedBy" | "freeRule"> | undefined>,
+): FreeRule | undefined {
+	let agreed: FreeRule | undefined;
+	for (const part of parts) {
+		if (part?.pricedBy !== "free" || part.freeRule === undefined) return undefined;
+		if (agreed !== undefined && agreed !== part.freeRule) return undefined;
+		agreed = part.freeRule;
+	}
+	return agreed;
+}
+
+/** A free sum's claim: `free`, plus the agreed rule when there is one. */
+export function freeClaim(free: boolean, freeRule: FreeRule | undefined): Pick<PricingSum, "free" | "freeRule"> {
+	return free && freeRule !== undefined ? { free, freeRule } : { free };
 }
 
 export function sumPricing(pricings: Iterable<Pricing>): PricingSum {
 	const list = [...pricings];
 	return {
 		usd: sumFacts(list.map((pricing) => pricing.usd)),
-		free: list.length > 0 && list.every((pricing) => pricing.pricedBy === "free"),
+		...freeClaim(list.length > 0 && list.every((pricing) => pricing.pricedBy === "free"), agreedFreeRule(list)),
 	};
 }
 
@@ -87,7 +145,10 @@ export function sumRunSpend(runs: Iterable<{ spend: RunUsageFacts; spendSums: Ru
 	const list = [...runs];
 	return {
 		usd: sumFactSums(list.map((run) => run.spendSums.usd)),
-		free: list.length > 0 && list.every((run) => run.spend.pricing.pricedBy === "free"),
+		...freeClaim(
+			list.length > 0 && list.every((run) => run.spend.pricing.pricedBy === "free"),
+			agreedFreeRule(list.map((run) => run.spend.pricing)),
+		),
 	};
 }
 

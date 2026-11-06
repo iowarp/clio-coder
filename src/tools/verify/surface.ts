@@ -24,7 +24,7 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 export const verifyToolSurface = {
 	name: ToolNames.Verify,
 	description:
-		'Run a declared verification check: check=<id> runs one, and an undeclared id names the declared ones; check="frontend" with path validates an HTML/CSS/JS artifact; no arguments lists declared and build/CI-derived checks.',
+		'Run a declared verification check: check=<id> runs one, and an undeclared id names the declared ones; check="frontend" with path validates an HTML/CSS/JS artifact; no arguments lists declared and build/CI-derived checks. Catalog check kinds: command (exit code), numeric-compare (output numbers against a reference within a tolerance), perf-budget (wall time against a budget or baseline), reproduce (refuses on an input sha256 mismatch, then reruns in a clean worktree or copy with the declared seed and judges metrics, units and shapes against a reference or a second clean run within a tolerance). A pass states agreement within the declared tolerance, not correctness.',
 	parameters: Type.Object({
 		check: Type.Optional(
 			Type.String({

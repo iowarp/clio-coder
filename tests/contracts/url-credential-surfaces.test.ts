@@ -632,7 +632,8 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 		const wire = JSON.stringify(live.updates());
 		ok(!wire.includes("hunter2"), wire);
 		ok(!result.output.includes("hunter2"), result.output);
-		ok(result.output.includes(SAFE_URL), result.output);
+		// Shell output passes the command-output mask, whose marker names the kind it hid.
+		ok(result.output.includes("https://alice:[redacted:url-userinfo]@git.example.com/r.git"), result.output);
 		const started = live.updates().find((update) => update.sessionUpdate === "tool_call");
 		deepStrictEqual(started?.rawInput, { command: `echo ${SAFE_URL}`, excludeFromContext: false });
 		strictEqual(started?.title, `echo ${SAFE_URL}`);
@@ -641,7 +642,7 @@ test("an ACP shell line hides URL passwords in its echo, its live output and its
 			sessionId: meta.id,
 			command: "printf 'https://u:hun'; printf 'ter'; sleep 1; printf '2@h/ done\\n'",
 		})) as { output: string };
-		strictEqual(held.output.trim(), "https://u:[redacted]@h/ done");
+		strictEqual(held.output.trim(), "https://u:[redacted:url-userinfo]@h/ done");
 		const frames = live
 			.updates()
 			.filter((update) => update.status === "in_progress" && update.content !== undefined)
@@ -1281,7 +1282,23 @@ const ESCAPED_SHAPES: ReadonlyArray<readonly [string, string]> = [
 	["//alice:ZQXJ@h/x", "//alice:[redacted]@h/x"],
 	["jdbc:oracle:thin:scott/ZQXJ@//db:1521/svc", "jdbc:oracle:thin:scott/[redacted]@//db:1521/svc"],
 	["jdbc:sqlserver://db:1433;password=ZQ@XJ;", "jdbc:sqlserver://db:1433;password=[redacted];"],
+	["https:\\/\\/ghp_ZQXJ0123456789ZQXJ@h\\/r", "https:\\/\\/[redacted]@h\\/r"],
+	["//ghp_ZQXJ0123456789ZQXJ@h/x", "//[redacted]@h/x"],
+	["https%3A%2F%2Fghp_ZQXJ0123456789ZQXJ%40h", "https%3A%2F%2F[redacted]%40h"],
 ];
+
+test("an opaque username token hides behind every opener, and a stream cut off inside one sends none of it", () => {
+	const token = "ZQXJ0123456789ZQXJ0123";
+	for (const [opener, at] of [
+		["https:\\/\\/", "@"],
+		["//", "@"],
+		["https%3A%2F%2F", "%40"],
+	] as const) {
+		strictEqual(redactUrlCredentials(`see ${opener}${token}${at}h x`), `see ${opener}[redacted]${at}h x`);
+		ok(!SECRET_LETTERS.test(redactSecretsText(`see ${opener}${token}${at}h x`, createRedactionTally())), opener);
+		strictEqual(redactFinalUrlCredentials(`see ${opener}${token}`, false), `see ${opener}`);
+	}
+});
 
 test("the URL rule hides a fragment token, an escaped or scheme-relative URL and a JDBC password", () => {
 	for (const [shape, redacted] of ESCAPED_SHAPES) {

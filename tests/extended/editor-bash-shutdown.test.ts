@@ -75,9 +75,12 @@ describe("operator shell and wiki shutdown", { concurrency: false, skip: process
 				});
 				const cleanupErrors: unknown[] = [];
 				try {
+					await waitFor(() => existsSync(join(home.dir, "descendant.pid")) || child.exitCode !== null, 10_000);
+					// An owner that exits before its descendant starts names its own failure here rather than as a
+					// missing owned.json below.
 					assert.ok(
-						await waitFor(() => existsSync(join(home.dir, "descendant.pid")) || child.exitCode !== null, 10_000),
-						stderr,
+						existsSync(join(home.dir, "descendant.pid")),
+						`descendant never started; owner exit ${child.exitCode} signal ${child.signalCode}; ${stderr}`,
 					);
 					owned.push(...(JSON.parse(readFileSync(join(home.dir, "owned.json"), "utf8")) as Identity[]));
 					assert.equal(owned.length, 2);

@@ -1,13 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js";
 import type { AgentEvent } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
-import { startWorkerRun } from "../../src/engine/worker-runtime.js";
+import { startWorkerRun, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../src/worker/spec-contract.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -108,5 +109,77 @@ describe("worker execute refusals", () => {
 		const named = `bash \`./mark.sh ${"x".repeat(190)}…\` refused by rule bash-unrecognized`;
 		ok(run.resolved[0]?.startsWith(`permission denied by policy: ${named}; `), run.resolved[0]);
 		ok(run.toolResults[0]?.includes(named), "the line cap keeps the command and rule");
+	});
+});
+
+/** A stand-in SDK whose `query` asks canUseTool about each scripted Bash command, as the CLI does before running one. */
+const FAKE_SDK = `export function query({ options }) {
+	const script = globalThis.__clioFakeClaudeSdk;
+	const run = (async function* () {
+		for (const [index, command] of script.commands.entries()) {
+			const verdict = await options.canUseTool("Bash", { command }, { signal: options.abortController.signal, toolUseID: "toolu_" + index });
+			script.verdicts.push(verdict);
+			if (verdict.interrupt === true) return;
+		}
+		yield { type: "result", subtype: "success", is_error: false, result: "done", usage: {} };
+	})();
+	run.close = () => {};
+	return run;
+}
+`;
+
+describe("Claude SDK worker execute refusals", () => {
+	it("counts refusals toward the same limit, and fail still ends at the first", { timeout: 30_000 }, async () => {
+		const env = await isolateClioEnv("clio-sdk-refusal-");
+		const sdkDir = join(env.dir, "sdk", "node_modules", "@anthropic-ai", "claude-agent-sdk");
+		mkdirSync(sdkDir, { recursive: true });
+		writeFileSync(join(env.dir, "sdk", "package.json"), "{}");
+		writeFileSync(join(sdkDir, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
+		writeFileSync(join(sdkDir, "index.js"), FAKE_SDK);
+		process.env.CLIO_CODER_CLAUDE_SDK_DIR = join(env.dir, "sdk");
+		const run = async (commands: string[], onPermission: "deny" | "fail") => {
+			const script = { commands, verdicts: [] as Array<{ interrupt?: boolean }> };
+			(globalThis as { __clioFakeClaudeSdk?: unknown }).__clioFakeClaudeSdk = script;
+			const resolved: string[] = [];
+			const input = {
+				agentId: "coder",
+				systemPrompt: "Run the marker script when asked.",
+				task: "Run ./mark.sh.",
+				target: { id: "claude", runtime: "claude-sdk" },
+				wireModelId: "claude-sonnet-5-5",
+				apiKey: "fixture",
+				thinkingLevel: "off",
+				allowedTools: ["bash"],
+				noSkills: true,
+				cwd: env.dir,
+				onPermission,
+			} as unknown as WorkerRunInput;
+			const { promise } = startClaudeSdkWorkerRun(input, (event) => {
+				if (event.type === "clio_coder_permission_resolved") resolved.push(event.payload.reason ?? "");
+			});
+			return { result: await promise, resolved, verdicts: script.verdicts };
+		};
+		try {
+			const recovered = await run(["./mark.sh one"], "deny");
+			strictEqual(recovered.result.exitCode, 0, "one refusal returns to the model");
+			strictEqual(recovered.verdicts[0]?.interrupt, false);
+
+			const stuck = await run(["./mark.sh one", "./mark.sh two", "./mark.sh three", "./mark.sh four"], "deny");
+			strictEqual(stuck.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED);
+			strictEqual(stuck.resolved.length, 3, "the third refusal ends the run");
+			const final = stuck.resolved.at(-1) ?? "";
+			ok(final.startsWith("permission refusal limit reached"), final);
+			deepStrictEqual(
+				["./mark.sh one", "./mark.sh two", "./mark.sh three"].map((command) => final.includes(`\`${command}\``)),
+				[true, true, true],
+				final,
+			);
+
+			const failed = await run(["./mark.sh one", "./mark.sh two"], "fail");
+			strictEqual(failed.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED);
+			strictEqual(failed.resolved.length, 1);
+		} finally {
+			env.restore();
+		}
 	});
 });

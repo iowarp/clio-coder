@@ -4,6 +4,7 @@ import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../..
 import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "./catalog.js";
 import { type DeclaredCheckDiscoveryResult, discoverDeclaredChecksAtRoot } from "./discovery.js";
 import { prepareVerifyArguments } from "./surface.js";
+import { resolveCleanRunArgv } from "./toolchain.js";
 import {
 	discoverToolchainChecks,
 	TOOLCHAIN_DISCOVERY_SOURCES,
@@ -75,10 +76,19 @@ export function resolveVerifyCall(workspaceRoot: string, args: Record<string, un
  * command. The safety scan and the approval card both name this one command, so
  * neither can describe a check the tool would not run.
  */
-export function verifyResolutionArgv(resolution: VerifyResolution, args: Record<string, unknown>): string[] | null {
+export function verifyResolutionArgv(
+	resolution: VerifyResolution,
+	args: Record<string, unknown>,
+	workspaceRoot: string = process.cwd(),
+): string[] | null {
 	switch (resolution.kind) {
-		case "catalog":
-			return resolution.check.command;
+		case "catalog": {
+			// A reproduce check runs its python command through the resolved
+			// interpreter; the scan and the approval card name that argv.
+			if (resolution.check.kind !== "reproduce") return resolution.check.command;
+			const clean = resolveCleanRunArgv(resolution.check.command, workspaceRoot);
+			return clean.ok ? clean.argv : resolution.check.command;
+		}
 		case "toolchain":
 			return resolution.argv;
 		case "package": {

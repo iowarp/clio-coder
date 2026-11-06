@@ -1,4 +1,4 @@
-import type { PricedBy } from "../../core/telemetry/schemas.js";
+import type { FreeRule, PricedBy } from "../../core/telemetry/schemas.js";
 import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/ai.js";
 import type { Api, KnownProvider, Model, Usage } from "../../engine/types.js";
 import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
@@ -82,6 +82,8 @@ export function listCatalogModelsForRuntime(runtimeId: string): Model<Api>[] {
 export interface EffectivePricing {
 	rates: Model<Api>["cost"] | null;
 	pricedBy: Exclude<PricedBy, "provider">;
+	/** Set exactly when `pricedBy` is `free`: the rule that made the route free, which receipts name. */
+	freeRule?: FreeRule;
 }
 
 export function calculatePricingCostUsd(
@@ -168,17 +170,16 @@ export function resolveEffectivePricing(
 			cacheRead: target.pricing.cacheRead ?? 0,
 			cacheWrite: target.pricing.cacheWrite ?? 0,
 		};
-		return {
-			rates,
-			pricedBy: Object.values(rates).every((rate) => rate === 0) ? "free" : "target-rates",
-		};
+		return Object.values(rates).every((rate) => rate === 0)
+			? { rates, pricedBy: "free", freeRule: "zero-rates" }
+			: { rates, pricedBy: "target-rates" };
 	}
-	if (target.pricing === "free") return { rates: { ...FREE_RATES }, pricedBy: "free" };
+	if (target.pricing === "free") return { rates: { ...FREE_RATES }, pricedBy: "free", freeRule: "declared" };
 	// A runtime that is local by kind (LM Studio, llama.cpp, Ollama, vLLM, SGLang,
 	// Lemonade) bills nothing: 109 of 142 campaign receipts read "unknown" only
 	// because those targets declare no price. Proxies such as LiteLLM are protocol
 	// tier and can front paid cloud models, so they stay unknown until priced.
-	if (runtime.tier === "local-native") return { rates: { ...FREE_RATES }, pricedBy: "free" };
+	if (runtime.tier === "local-native") return { rates: { ...FREE_RATES }, pricedBy: "free", freeRule: "local-native" };
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
 	if (!catalogModel) return { rates: null, pricedBy: "none" };
 	return {

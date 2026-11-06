@@ -332,6 +332,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 										},
 									}
 								: {}),
+							...(check.reproduce !== undefined
+								? { reproduce: { spec: structuredClone(check.reproduce), declaredCwd: check.cwd } }
+								: {}),
 						};
 					}),
 				};

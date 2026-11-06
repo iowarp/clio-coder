@@ -338,7 +338,8 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 				(typedAt[0] as number) < hydration.at && (typedAt.at(-1) as number) > hydration.at,
 				`typing spans hydration: ${typedAt[0]?.toFixed(0)}..${typedAt.at(-1)?.toFixed(0)}ms around ${hydration.at}ms`,
 			);
-			const recovered = stripVTControlCharacters(output).match(/^\[draft\] (.*)$/mu)?.[1];
+			// The SIGTERM lands after hydration, so the lease is adopted and the draft prints as an unsent one.
+			const recovered = stripVTControlCharacters(output).match(/^Unsent draft, not delivered to Clio:\r?\n(.*)$/mu)?.[1];
 			strictEqual(recovered, typed, "the recovered draft is every key, once, in typing order");
 			assertRestoredOnce(output);
 			assertNoFailure(output);
