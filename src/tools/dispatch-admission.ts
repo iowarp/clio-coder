@@ -299,6 +299,14 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				const normalized = normalizeDispatchIntent(rawIntent, byId);
 				if (!normalized.ok)
 					return { ok: false, reason: normalized.reason, message: `${normalized.reason}: ${normalized.message}` };
+				// A sweep check judges one named run; host verification seals a fixed argv and has no run to append.
+				const perRun = normalized.intent.verification.find((entry) => byId.get(entry.check)?.runs !== undefined);
+				if (perRun !== undefined) {
+					return {
+						ok: false,
+						message: `verification_check_per_run: '${perRun.check}' judges one sweep run per call; run it on the main thread as verify(check="${perRun.check}/<run>").`,
+					};
+				}
 				announceDotWriteRoot(deps, rawIntent);
 				return {
 					ok: true,

@@ -413,9 +413,9 @@ entries:
       Darshan I/O analysis, and ChronoLog run records. The skills drive the
       cluster's own command-line tools; the clio-kit Slurm server needs one
       online launch to build its environment before it runs offline."
-    version: 0.1.0
+    version: 0.2.0
     sourceUrl: plugins/hpc
-    sha256: 5928c9771b31af135097dd408f54e95980849e337926b5c67788f814f6225950
+    sha256: 4f9555f7b20404a146471498e4302fd304dfb3ab2af67a313cded97dbba2e58c
     requires:
       - skill:slurm-jobs
     provides:
@@ -442,6 +442,12 @@ entries:
           one file correctly and collectively, and checks the result with
           Darshan counters. Not for serial file reading; not for choosing the
           science stored in the file.
+      - kind: skill
+        name: hpc-sweep
+        description: "Runs a Slurm parameter sweep as an experiment: plans a job array
+          and shows a dry run, submits on the operator's word, checks each run
+          with its declared verify check, and tabulates every run, failed and
+          unverified included. Not for a single job."
   - kind: plugin
     name: life-science
     description: "Life-science pack: skills that query the RCSB Protein Data Bank,
