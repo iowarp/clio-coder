@@ -51,8 +51,10 @@ export interface WorkspaceSurfaceDeps {
 	leaveHint(): string;
 	/** The terminal's height, which bounds how many dock rows the island tiles take. */
 	terminalRows?(): number;
-	/** A workspace key was pressed through the leader menu. */
-	press(extensionId: string, action: string): void;
+	/** A workspace key or a band action was pressed through the leader menu. */
+	press(extensionId: string, action: string, source?: "leader" | "band"): void;
+	/** The leader key as the footer prints it, or null when none is bound. */
+	leaderLabel?(): string | null;
 	/** Open the board in the pressable panel; absent where no such panel exists. */
 	focusBoard?(extensionId: string, title: string, view: () => View | undefined): void;
 	leave(): void;
@@ -93,6 +95,28 @@ export interface WorkspaceSurfaces {
 	/** The active workspace's leader entries: its declared keys, then how to leave. */
 	leaderTargets(): Array<{ key: string; label: string; run: () => void }>;
 	dispose(): void;
+}
+
+/** The action rows inside a band, in drawing order. */
+function bandActionItems(view: View): Array<{ id: string; label: string }> {
+	if (view.t === "actions") return view.items;
+	if (view.t === "box") return view.children.flatMap(bandActionItems);
+	return [];
+}
+
+/** A copy of a band whose action rows show the key that presses them. */
+function withBandKeys(view: View, keys: ReadonlyMap<string, string>): View {
+	if (view.t === "actions")
+		return {
+			...view,
+			// A band's own hotkey is never live, since a band never holds the keys; only the leader chord is shown.
+			items: view.items.map(({ hotkey: _unused, ...item }) => {
+				const key = keys.get(item.id);
+				return key === undefined ? item : { ...item, hotkey: key };
+			}),
+		};
+	if (view.t === "box") return { ...view, children: view.children.map((child) => withBandKeys(child, keys)) };
+	return view;
 }
 
 /** Whether a view names an action a row, card or node press would send. */
@@ -197,6 +221,20 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 		deps.tui.requestRender();
 	});
 
+	/** Every band action with the leader suffix that presses it: digits, in band order, up to nine. */
+	const bandPresses = (): Array<{ extensionId: string; action: string; label: string; key: string }> => {
+		const presses: Array<{ extensionId: string; action: string; label: string; key: string }> = [];
+		for (const id of deps.model.ids().sort()) {
+			const band = deps.model.entry(id)?.band;
+			if (!band) continue;
+			for (const item of bandActionItems(band)) {
+				if (presses.length >= 9) return presses;
+				presses.push({ extensionId: id, action: item.id, label: item.label, key: String(presses.length + 1) });
+			}
+		}
+		return presses;
+	};
+
 	const board: Component = {
 		render(width) {
 			const budget = islandBudget();
@@ -206,13 +244,22 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 				const lines = view ? draw(view, width, BOARD_ROWS) : [];
 				const workspace = deps.model.activeWorkspace;
 				if (workspace) lines.push(...islandRows(workspace, width, budget));
+				const leader = deps.leaderLabel?.() ?? null;
+				const pressKeys = bandPresses();
 				for (const id of deps.model.ids().sort()) {
 					const band = deps.model.entry(id)?.band;
 					if (!band) continue;
 					// The band is labelled with the name the operator installed, not the package id.
 					const owner = clioTheme().fg("sectionHeading", `${extensionOwnerLabel(id)} · `);
 					const indent = " ".repeat(visibleWidth(owner));
-					const rows = draw(band, Math.max(1, width - visibleWidth(owner)), 3);
+					// A band never holds the keyboard, so its actions are pressed through the leader
+					// menu, and each row names that chord instead of a cursor nothing can move.
+					const keys = new Map(
+						leader === null
+							? []
+							: pressKeys.filter((press) => press.extensionId === id).map((press) => [press.action, `${leader} ${press.key}`]),
+					);
+					const rows = draw(withBandKeys(band, keys), Math.max(1, width - visibleWidth(owner)), 3);
 					lines.push(
 						...rows.map((row, index) =>
 							truncateToWidth(`${index === 0 ? owner : indent}${row}`, width, GLYPH.ellipsis, false),
@@ -301,9 +348,15 @@ export function createWorkspaceSurfaces(deps: WorkspaceSurfaceDeps): WorkspaceSu
 			});
 		},
 		leaderTargets() {
+			const bands = bandPresses().map((press) => ({
+				key: press.key,
+				label: `${extensionOwnerLabel(press.extensionId)}: ${press.label}`,
+				run: () => deps.press(press.extensionId, press.action, "band"),
+			}));
 			const active = deps.model.activeWorkspace;
-			if (!active) return [];
+			if (!active) return bands;
 			return [
+				...bands,
 				...active.keys
 					.filter((binding) => binding.key !== WORKSPACE_LEAVE_KEY && binding.key !== WORKSPACE_FOCUS_KEY)
 					.map((binding) => ({

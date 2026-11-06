@@ -748,10 +748,19 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					return leader ? `${formatKeyLabel(leader, "")} ${WORKSPACE_LEAVE_KEY} or /workspace off` : "/workspace off";
 				},
 				terminalRows: () => terminal.rows,
-				press: (extensionId, action) => {
+				press: (extensionId, action, source = "leader") => {
 					void operatorExtensions
-						.action(extensionId, { id: action, source: "leader" })
-						.catch((error) => notify("warning", `${extensionId}: ${error instanceof Error ? error.message : String(error)}`));
+						.action(extensionId, { id: action, source })
+						.catch((error) =>
+							notify(
+								"warning",
+								`${extensionOwnerLabel(extensionId)}: ${error instanceof Error ? error.message : String(error)}`,
+							),
+						);
+				},
+				leaderLabel: () => {
+					const leader = keybindings.getKeys("clio-coder.leader")[0];
+					return leader ? formatKeyLabel(leader, "") : null;
 				},
 				leave: () => {
 					operatorExtensions.leaveWorkspace();
