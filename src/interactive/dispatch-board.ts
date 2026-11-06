@@ -274,8 +274,9 @@ export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 	return (
 		row.plan === undefined &&
 		runKindSupportsLiveSteering(row.runtimeKind) &&
-		// A queued run has no worker yet, so a message would have nowhere to go.
-		(row.status === "running" || row.status === "stale")
+		// A queued run has no worker yet, and a stale one has stopped answering, so a message would reach no one. A
+		// stale worker that speaks again is running again, and takes messages again.
+		row.status === "running"
 	);
 }
 
@@ -721,6 +722,11 @@ function planFailureWords(plan: FleetPlanRunView): string | null {
 	return plan.failure === undefined ? null : sanitizeCallTargetText(plan.failure.replace(/^dispatch:\s*/u, ""));
 }
 
+/** Steps whose worker finished with a caveat its own card marks as a warning, such as a refused call. */
+export function planWarnedStepCount(plan: FleetPlanRunView): number {
+	return plan.steps.filter((step) => step.state === "passed" && (step.worker?.caveat ?? null) !== null).length;
+}
+
 function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailure = true): string {
 	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
 	const failed = plan.steps.find((step) => step.state === "failed" && !planStepStopped(plan, step.stepId));
@@ -733,7 +739,9 @@ function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailu
 	// Where a status cell already reads cancelled, repeating it on the count only doubles the word.
 	if (plan.state === "cancelled") return statusShown ? count : `${count} · cancelled`;
 	if (plan.failure !== undefined) return withFailure ? `${count} · ${planFailureWords(plan)}` : count;
-	return failed === undefined ? count : `${count} · ${failed.stepId} failed`;
+	if (failed !== undefined) return `${count} · ${failed.stepId} failed`;
+	const warned = planWarnedStepCount(plan);
+	return warned === 0 ? count : `${count} · ${warned} with warnings`;
 }
 
 const PLAN_STEP_MARKS: Record<
@@ -757,11 +765,19 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 	const nameWidth = Math.max(...plan.steps.map((step) => visibleWidth(step.stepId)));
 	return plan.steps.map((step) => {
 		const stopped = planStepStopped(plan, step.stepId) && step.state !== "passed";
+		// The worker's own caveat rides the step, so a step that passed reads the refused call its run's row shows.
+		const caveat = stopped ? null : (step.worker?.caveat ?? null);
+		// A command step passed its exit check. A worker step only finished: nothing checked its work, and a caveat
+		// on it is a warning, as its own card marks it.
 		const mark = stopped
 			? plan.state === "cancelling" && step.state === "running"
 				? { glyph: GLYPH.cancelled, token: "warning" as const, word: "stopping" }
 				: { glyph: GLYPH.cancelled, token: "annotation" as const, word: "stopped" }
-			: PLAN_STEP_MARKS[step.state];
+			: step.state === "passed" && step.worker !== undefined
+				? caveat !== null
+					? { glyph: GLYPH.warn, token: "warning" as const, word: "finished" }
+					: { ...PLAN_STEP_MARKS.passed, word: "done" }
+				: PLAN_STEP_MARKS[step.state];
 		// A step still pending at the end was never reached; while the plan runs it is only waiting.
 		const word =
 			stopped || step.state !== "pending"
@@ -775,8 +791,6 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 		const finishing = !stopped && step.state === "running" && step.worker?.settled === true;
 		// A stopped step's exit code is the signal the stop sent, not a result; its duration still says how far it got.
 		const detail = stopped ? step.detail?.replace(/^exit -?\d+ · /u, "") : step.detail;
-		// The worker's own caveat rides the step, so a step that passed reads the refused call its run's row shows.
-		const caveat = stopped ? null : (step.worker?.caveat ?? null);
 		const facts = [
 			finishing ? "finishing" : word,
 			...(caveat !== null ? [caveat] : []),
@@ -848,8 +862,10 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): stri
 	const passed = plan.state === "passed";
 	const cancelled = plan.state === "cancelled";
 	const rail = theme.fg("gutter", "  │ ");
-	const tone = passed ? "success" : cancelled ? "toolMetadata" : "error";
-	const glyph = passed ? GLYPH.ok : cancelled ? GLYPH.cancelled : GLYPH.error;
+	// A plan whose steps all ran but one carries a warning reads as its warned steps do, never as a clean pass.
+	const warned = passed && planWarnedStepCount(plan) > 0;
+	const tone = warned ? "warning" : passed ? "success" : cancelled ? "toolMetadata" : "error";
+	const glyph = warned ? GLYPH.warn : passed ? GLYPH.ok : cancelled ? GLYPH.cancelled : GLYPH.error;
 	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(tone, `${glyph} ${planProgressText(plan, false, false)}`)}`;
 	const room = Math.max(1, width - 4);
 	const why = planFailureWords(plan);
@@ -1387,7 +1403,14 @@ function councilMemberView(
 		tailText: sanitizeMultilineDisplayText(councilMemberTail(row)).text,
 		droppedLines: row.progress?.droppedLines ?? 0,
 		...(isTerminalStatus(row.status) ? { settled: true } : {}),
+		...memberWhy(row),
 	};
+}
+
+function memberWhy(row: DispatchBoardRow): { why?: string } {
+	if (!isTerminalStatus(row.status) || row.status === "completed") return {};
+	const why = workerFailureHeadline(terminalDetail(row));
+	return why === null ? {} : { why: sanitizeCallTargetText(why) };
 }
 
 /**
@@ -1930,7 +1953,9 @@ function boardColumnNote(note: string): string {
 	if (match?.[1] === undefined) return plain;
 	const words = [...new Set(match[1].split(", ").map((label) => DROPPED_COLUMN_WORDS[label.trim()] ?? label.trim()))];
 	const list = words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
-	return `${GLYPH.ellipsis} detail below has ${list}`;
+	// The detail under the table may itself be cut to a few rows, so the note says where the facts live, not that
+	// they are on screen.
+	return `${GLYPH.ellipsis} each run's detail shows its ${list}`;
 }
 
 function formatDispatchBoardBody(
@@ -2115,10 +2140,11 @@ export function dispatchBoardHintEntries(
 	if (row.plan === undefined) {
 		// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read. A
 		// council's detail is its members' answers, which want the rows the table holds.
-		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
-		// The watch pane splits the terminal, so it says so before the key is pressed.
+		// The watch pane splits the terminal, so it says so before the key is pressed. It is listed ahead of Enter
+		// because a narrow rail keeps its later keys first, and the run's detail matters more than a split pane.
 		if (row.council === undefined && board.canWatch())
 			entries.push({ key: "w", verb: "watch in a pane", short: "watch" });
+		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
 	}
 	if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
 	if (isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });

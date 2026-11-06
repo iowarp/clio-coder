@@ -279,17 +279,19 @@ function settledAgainst(result: WorkerRunResultSummary): string | null {
  */
 function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): string {
 	// A worker that exited cleanly without executing one tool did none of an
-	// assignment that needed tools, so "execution ok" would read as a done task.
+	// assignment that needed tools, so "done" would read as a done task.
 	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
 	const caveat = settledCaveat(result, synthesizes);
 	if (caveat?.kind === "against") {
-		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}execution ok`)}`;
+		// The run itself ended cleanly, which is all the trailing words claim; the caveat is what to act on.
+		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}it finished`)}`;
 	}
 	if (caveat?.kind === "no-tools") return theme.fg("toolMetadata", `${GLYPH.queued} ${caveat.words}`);
 	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
 	if (caveat?.kind === "refused") return theme.fg("warning", `${GLYPH.warn} finished with ${caveat.words}`);
-	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
+	// The board, the dock and a council's grid call this outcome done, so the card does too.
+	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} done`);
 	if (isStopping(result)) return theme.fg("warning", `${GLYPH.cancelled} stopping`);
 	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
 	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
@@ -324,7 +326,9 @@ function needsInputUnit(): string {
  * A block with no settled result yet: the live mark, spinner-free. The row's
  * progress line says what the run is doing; `/view` spells the state out.
  */
-function pendingUnit(): string {
+function pendingUnit(entry: WorkerEntryState): string {
+	// A worker gone quiet as a process is not live work: its mark says so in the dock's own glyph.
+	if (entry.progress?.quietSinceMs !== undefined) return theme.fg("warning", GLYPH.warn);
 	return theme.fg("activity", GLYPH.running);
 }
 
@@ -482,9 +486,22 @@ function keptWorktreeLines(entry: WorkerEntryState, width: number): string[] {
 	if (result === undefined || result.outcome === "canceled" || result.mergeDetail !== undefined) return [];
 	if (task === undefined || !task.kept || task.changedPaths === 0) return [];
 	const files = `${task.changedPaths} changed ${task.changedPaths === 1 ? "file" : "files"}`;
+	// The change waits on the operator, so the card names the two git commands that read it and take it.
+	return [
+		...railLines(
+			sanitizeCallTargetText(`${files} on branch ${task.branch} in its worktree, not in your checkout`),
+			"toolMetadata",
+			width,
+		),
+		...branchCommandLines(task.branch, width),
+	];
+}
+
+/** The two git commands that read a kept branch and take it, for a card whose change waits on the operator. */
+function branchCommandLines(branch: string, width: number): string[] {
 	return railLines(
-		sanitizeCallTargetText(`${files} on branch ${task.branch} in its worktree, not in your checkout`),
-		"toolMetadata",
+		sanitizeCallTargetText(`git diff HEAD...${branch} to review it · git merge ${branch} to take it`),
+		"annotation",
 		width,
 	);
 }
@@ -514,7 +531,10 @@ function cancelLines(entry: WorkerEntryState, width: number): string[] {
 	// The header already says cancelled; the row is only for who stopped it and what became of its worktree.
 	if (why === "cancelled" && worktree === null) return [];
 	const text = `${GLYPH.cancelled} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${worktree === null ? "" : `${SEPARATOR}${worktree}`}`;
-	return railLines(sanitizeCallTargetText(text), "toolMetadata", width);
+	return [
+		...railLines(sanitizeCallTargetText(text), "toolMetadata", width),
+		...(task?.kept === true && task.changedPaths > 0 ? branchCommandLines(task.branch, width) : []),
+	];
 }
 
 /**
@@ -530,7 +550,7 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 	const identity = `${cardPrefix(entry)}${identityUnits(entry, withRunId).join(meta(SEPARATOR))}`;
 	const status =
 		isPending(entry) || entry.result === undefined
-			? pendingUnit()
+			? pendingUnit(entry)
 			: workerNeedsInput(entry)
 				? needsInputUnit()
 				: outcomeUnit(entry.result, isSynthesis(entry));
@@ -677,7 +697,7 @@ function alignedHeader(
 	const timer = meta(elapsed.padStart(TIMER_WIDTH));
 	const pending = isPending(entry);
 	const mark = pending
-		? pendingUnit()
+		? pendingUnit(entry)
 		: workerNeedsInput(entry)
 			? theme.fg("warning", GLYPH.phaseBlocked)
 			: entry.result?.outcome === "canceled"

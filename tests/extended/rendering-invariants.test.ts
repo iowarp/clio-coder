@@ -608,7 +608,7 @@ describe("worker rendering invariants", () => {
 			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
 			// The failure leads; the execution fact stays in words wherever the row has room for it.
 			match(plain, /✗ validation failed/u);
-			if (width >= 44) match(plain, /execution ok/u);
+			if (width >= 44) match(plain, /it finished/u);
 			match(plain, /(?<!recorded )validation failed/u);
 			doesNotMatch(plain, /Ctrl\+O/u);
 		}
@@ -2176,7 +2176,7 @@ describe("transcript block grammar", () => {
 		const inspected = renderWorkerEntryLines(entry, 80, { unbounded: true }).map(stripTerminalSequences);
 		// The same header, spend, trail and quality rows, in the same words.
 		strictEqual(inspected[0], detailed[0]);
-		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ execution ok");
+		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ done");
 		strictEqual(inspected[1], "  │ contract pass");
 		match(detailed[1] ?? "", /verdict/u);
 		for (const row of detailed.filter((line) => /│ (⚙|quality )/u.test(line))) ok(inspected.includes(row), row);
@@ -2641,7 +2641,7 @@ describe("tool classes", () => {
 			const receipt = panel.render(width).map(stripTerminalSequences);
 			for (const [rendered, facts] of [
 				[row, ["exit 0", "18 lines"]],
-				[spend, ["execution ok"]],
+				[spend, ["✓ done"]],
 				[receipt, ["in 94.4k", "out 930", "reasoning 276"]],
 			] as const) {
 				for (const fact of facts)
@@ -2964,7 +2964,7 @@ describe("agent invocations", () => {
 			[`${GLYPH.workerHuman} council · round 1`, `${GLYPH.workerHuman} council · round 2`],
 		);
 		ok(
-			rows.some((row) => row.startsWith("  Architect · dynamo/qwen ✓ execution ok")),
+			rows.some((row) => row.startsWith("  Architect · dynamo/qwen ✓ done")),
 			rows.join("\n"),
 		);
 		ok(
@@ -2992,7 +2992,7 @@ describe("agent invocations", () => {
 			],
 		});
 		const rows = renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("standard") }).map(stripTerminalSequences);
-		match(rows[0] ?? "", /dynamo\/qwen · attempt 2 ✓ execution ok/u);
+		match(rows[0] ?? "", /dynamo\/qwen · attempt 2 ✓ done/u);
 		ok(
 			rows.some((row) => row.includes("↻ failed over → attempt 2 on dynamo/qwen")),
 			rows.join("\n"),

@@ -47,6 +47,7 @@ import { openContextOverlay } from "./context-overlay.js";
 import {
 	type createDispatchBoardView,
 	dispatchBoardHintEntries,
+	planWarnedStepCount,
 	planWithWorkerRows,
 	renderFleetPlanCard,
 } from "./dispatch-board.js";
@@ -803,10 +804,11 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			onNotice: (text) => deps.stderr(`plan ${preview.name}: ${text}\n`),
 		};
 		// The settled card reads each step beside its worker's own row, and draws at the width of each paint.
-		const appendPlanCard = (settled: FleetPlanRunView): void => {
+		const appendPlanCard = (settled: FleetPlanRunView): FleetPlanRunView => {
 			const view = planWithWorkerRows(settled, deps.getDispatchRows?.() ?? []);
 			if (deps.appendBlock !== undefined) deps.appendBlock((width) => renderFleetPlanCard(view, width));
 			else deps.stderr(`${renderFleetPlanCard(view, deps.terminal.columns).join("\n")}\n`);
+			return view;
 		};
 		fleetInFlight = { name: preview.name };
 		void run(args)
@@ -816,7 +818,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				// A stop asked for from the board, and a refusal that said this plan runs, are over once it settles.
 				for (const key of [...progressNoticeKeys(fleetRootId), "fleet-run:in-flight"]) deps.dismissNotification?.(key);
 				const plan = deps.fleetPlans?.settle(fleetRootId, outcome);
-				if (plan) appendPlanCard(plan);
+				const warned = plan ? planWarnedStepCount(appendPlanCard(plan)) : 0;
 				if (plan?.state === "cancelled") {
 					deps.notify(
 						"info",
@@ -826,9 +828,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					return;
 				}
 				deps.notify(
-					outcome.cleanRun ? "success" : "warning",
-					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on.
-					`plan ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
+					outcome.cleanRun && warned === 0 ? "success" : "warning",
+					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on. Steps whose
+					// worker finished with a warning say so, as their rows on the card do.
+					`plan ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps ${warned === 0 ? "succeeded" : `finished, ${warned} with warnings`}, ${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
 					"fleet-run:settled",
 				);
 			})
