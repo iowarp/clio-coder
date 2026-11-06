@@ -17,7 +17,15 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
  * evidence, and it yields to a probe this process ran because that evidence is
  * newer.
  */
-export type EndpointCapacitySource = "override" | "discovered" | "discovered-prior" | "local-native-default";
+export type EndpointCapacitySource =
+	| "override"
+	| "discovered"
+	| "discovered-prior"
+	| "local-native-default"
+	| "runtime-default";
+
+/** One seat's runtime: a copilot-sdk target admits one request at a time unless `maxConcurrentRequests` says more. */
+const COPILOT_SDK_RUNTIME = "copilot-sdk";
 
 export interface EndpointCapacity {
 	key: string;
@@ -38,6 +46,9 @@ const UNBOUNDED_LOCAL_NATIVE_RUNTIMES = new Set(["vllm", "sglang"]);
  * aliases do not collapse because Clio cannot prove they reach the same server.
  */
 export function canonicalEndpointKey(value: TargetDescriptor | string): string | null {
+	// A copilot-sdk target has no URL; the seat behind the target is its scheduler.
+	if (typeof value !== "string" && value.runtime === COPILOT_SDK_RUNTIME && value.url === undefined)
+		return `${COPILOT_SDK_RUNTIME}://${encodeURIComponent(value.id)}`;
 	return canonicalEndpointUrl(typeof value === "string" ? value : value.url);
 }
 
@@ -155,6 +166,8 @@ export function endpointCapacityFor(
 	if (prior !== undefined && prior.runtimeId === (input.runtime?.id ?? input.target.runtime)) {
 		return { key, label, limit: prior.slots, source: "discovered-prior" };
 	}
+	if ((input.runtime?.id ?? input.target.runtime) === COPILOT_SDK_RUNTIME)
+		return { key, label, limit: 1, source: "runtime-default" };
 	if (input.runtime?.tier !== "local-native" || UNBOUNDED_LOCAL_NATIVE_RUNTIMES.has(input.runtime.id)) return null;
 	return { key, label, limit: 1, source: "local-native-default" };
 }

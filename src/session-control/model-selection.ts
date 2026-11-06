@@ -2,6 +2,7 @@ import { rememberRecentModel } from "../core/recent-models.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../domains/providers/eligibility.js";
 import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/model-runtime-capabilities.js";
+import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import type { ThinkingLevel } from "../domains/providers/types/capability-flags.js";
 
 export function clampThinkingLevel(
@@ -25,7 +26,7 @@ export function selectModel(
 	const runtime = providers.getRuntime(descriptor.runtime);
 	if (!runtime)
 		throw new Error(
-			`cannot use target '${selection.target}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
+			`cannot use target '${selection.target}' as orchestrator target because ${runtimeNotRegistered(descriptor.runtime)}`,
 		);
 	if (!isOrchestratorEligibleRuntime(runtime))
 		throw new Error(

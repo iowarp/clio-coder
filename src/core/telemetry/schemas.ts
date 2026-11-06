@@ -288,6 +288,22 @@ export const CallSettledSchema = Type.Object(
 		),
 		responseId: Type.Optional(text),
 		/**
+		 * What a seat-billed call cost in the seat's own units, as its runtime reported them: GitHub Copilot premium
+		 * requests (the model multiplier for a user-initiated step, zero for an agent continuation) and AI credits
+		 * in nano-AIU. Kept apart from `pricing`, which stays in dollars and unknown for a seat.
+		 */
+		billing: Type.Optional(
+			Type.Object(
+				{
+					provider: vocabulary(["github-copilot"]),
+					premiumRequests: factSchema(Type.Number({ minimum: 0 })),
+					nanoAiu: factSchema(Type.Number({ minimum: 0 })),
+					modelCalls: factSchema(count),
+				},
+				closed,
+			),
+		),
+		/**
 		 * What an interrupted call the provider never reported on is estimated to have spent: the prompt side from the
 		 * turn's context accounting and the output from the text that arrived. A transcript shows it; no fold sums it,
 		 * so the usage above stays the measured lower bound (#423, #430, #434).
@@ -978,6 +994,8 @@ export const RunResultObjectSchema = Type.Object(
 								memo: Type.Boolean(),
 								outputTail: Type.String(),
 								evidenceRunId: nullable(Type.String()),
+								/** Why the check ran nothing (refused, unconfigured, or its executable never started); absent when it ran. */
+								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed"])),
 								/** The same check replayed on the task base; null when it was not compared. */
 								baseComparison: nullable(
 									Type.Object(

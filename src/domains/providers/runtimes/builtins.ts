@@ -27,6 +27,7 @@ import openaiCodex from "./cloud/openai-codex.js";
 import openrouter from "./cloud/openrouter.js";
 import typesafeJev from "./cloud/typesafe-jev.js";
 import codexCli from "./codex/codex-cli.js";
+import copilotSdk from "./copilot/copilot-sdk.js";
 import { opencodeCliRuntime, piCliRuntime } from "./external-cli-peers.js";
 import lemonadeAnthropic from "./local-native/lemonade-anthropic.js";
 import lemonadeOpenai from "./local-native/lemonade-openai.js";
@@ -75,6 +76,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	vllm,
 	claudeCode,
 	claudeSdk,
+	copilotSdk,
 	codexCli,
 	opencodeCliRuntime,
 	piCliRuntime,

@@ -153,7 +153,12 @@ named another place, in this shape:
 ```
 
 `status` stays `proposed`: tested, supported and refuted come later, from
-evidence. Run the checker with `run_script` (or `bash` and `python3` when the
+evidence. Write the slate with `write` or `edit`: Clio then records each
+hypothesis in the project's claims ledger as proposed, and moves it when the
+check its `verifyId` names runs: tested when it ran, supported or refuted by
+the claim that run's judgement produced. Report that status from the ledger
+(`clio-coder claims`, or the note on the `verify` result) and never edit it
+into the slate. Run the checker with `run_script` (or `bash` and `python3` when the
 pack is installed outside the workspace) and fix every error it reports:
 
 ```text

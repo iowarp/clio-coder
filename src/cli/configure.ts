@@ -24,6 +24,7 @@ import { resolveClioDirs } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import {
 	buildProviderSupportEntry,
 	configuredTargetsForRuntime,
@@ -471,6 +472,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 			return 1;
 		}
 	}
+	if (runtime.id === "copilot-sdk") {
+		// Non-interactive: the target is written, and its calls are refused until consent is given.
+		const ready = await prepareCopilotSdk({ print: (text) => process.stdout.write(`${text}\n`) });
+		if (!ready.ok) process.stderr.write(`warning: ${ready.message}\n`);
+	}
 	initializeClioHome();
 	const settings = readSettings();
 	const auth = openAuthStorage();
@@ -784,6 +790,18 @@ async function runTargetSetupInteractive(
 			});
 		} catch (error) {
 			printError(error instanceof Error ? error.message : String(error));
+			return 1;
+		}
+	}
+	if (runtime.id === "copilot-sdk") {
+		const ready = await prepareCopilotSdk({
+			...((rl.input as { isTTY?: boolean }).isTTY === true
+				? { confirm: (question: string) => askYesNo(rl, question, false) }
+				: {}),
+			print: (text) => process.stdout.write(`${text}\n`),
+		});
+		if (!ready.ok) {
+			printError(ready.message);
 			return 1;
 		}
 	}

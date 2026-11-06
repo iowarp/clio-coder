@@ -62,6 +62,12 @@ export interface SafeCommandResult {
 	durationMs: number;
 	/** Wall-clock instant the child was spawned. Optional only so hand-built test doubles stay valid. */
 	startedAt?: number;
+	/**
+	 * Whether a process was created. False when the sandbox refused the command or spawn failed (ENOENT, EACCES), so
+	 * nothing ran and the exit code reports no run. runCommandVector always sets it; it is optional only so hand-built
+	 * test doubles stay valid, and a reader that needs proof of a launch reads absence as no launch.
+	 */
+	launched?: boolean;
 	/** Exact bytes the child wrote to stdout, whether or not they were all retained. */
 	stdoutBytes?: number;
 	stderrBytes?: number;
@@ -510,6 +516,7 @@ export function runCommandVector(
 				outputCapped: false,
 				durationMs: 0,
 				startedAt,
+				launched: false,
 				failure: sandbox.message,
 			});
 			return;
@@ -524,6 +531,8 @@ export function runCommandVector(
 				stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			},
 		);
+		// A spawn that fails (ENOENT, EACCES) leaves no pid and reports through `error` later.
+		const launched = child.pid !== undefined;
 		// The main-session sandbox removes git config and commondir files its command
 		// planted once the sandbox is gone, before the result resolves (#419).
 		if (containedPlan?.kind === "sandboxed") child.once("exit", containedPlan.afterExit);
@@ -611,6 +620,7 @@ export function runCommandVector(
 				outputCapped,
 				durationMs: Math.round(performance.now() - startedAtClock),
 				startedAt,
+				launched,
 				descendantsCleaned: cleanup.status?.descendantsCleaned ?? false,
 				cleanupIncomplete: cleanup.status?.incomplete ?? false,
 				pipeDrainIncomplete,

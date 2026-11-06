@@ -28,6 +28,7 @@ import {
 import { probeCapabilitiesForModel } from "../domains/providers/model-capabilities.js";
 import { loadedContextWindowForModel } from "../domains/providers/model-discovery.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import type {
 	ProbeContext,
 	ProbeModelStatus,
@@ -327,7 +328,7 @@ export function setOrchestratorPointer(
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
-			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
+			`cannot use target '${descriptor.id}' as orchestrator target because ${runtimeNotRegistered(descriptor.runtime)}`,
 		);
 	}
 	if (!isOrchestratorEligibleRuntime(runtime)) {
@@ -369,7 +370,7 @@ export function assertOrchestratorReplacementEligible(settings: ClioSettings, de
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
-			`cannot update ${role} target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
+			`cannot update ${role} target '${descriptor.id}' because ${runtimeNotRegistered(descriptor.runtime)}`,
 		);
 	}
 	if (!isOrchestratorEligibleRuntime(runtime)) {
@@ -484,6 +485,15 @@ export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): st
 						: probe.failureKind === "unsupported-feature"
 							? "update `agy`; this integration requires its structured JSON model catalog"
 							: "run `agy` directly to inspect setup, then re-run `clio-coder targets --probe`";
+			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
+		}
+		if (descriptor.runtime === "copilot-sdk") {
+			const next =
+				probe.failureKind === "missing"
+					? "install the Copilot SDK component with `clio-coder tools install copilot-sdk`, then re-run `clio-coder targets --probe`"
+					: probe.failureKind === "authentication"
+						? "sign in with the official GitHub Copilot CLI (`copilot login`); Clio never signs in to Copilot itself"
+						: "check that `copilot login` succeeded and the account has Copilot models enabled, then re-run `clio-coder targets --probe`";
 			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
 		}
 		const where = descriptor.url ? ` ${descriptor.url}` : "";
