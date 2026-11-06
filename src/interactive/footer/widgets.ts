@@ -1169,7 +1169,8 @@ export function composerPhasePresentation(
 			break;
 		case "dispatching":
 			label = fit([
-				{ text: "is waiting for a worker", keep: 9 },
+				// A narrow rail keeps the way out beside a shorter wait rather than the long wait alone.
+				{ text: "is waiting for a worker", short: "awaits a worker", keep: 9 },
 				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 			]);
 			break;
