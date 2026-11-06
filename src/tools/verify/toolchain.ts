@@ -250,6 +250,35 @@ export function pythonInterpreter(workspaceRoot: string, launcher: string[]): st
 	return null;
 }
 
+export type CleanRunArgvResolution =
+	| { ok: true; argv: string[]; interpreter?: string }
+	| { ok: false; reason: string; provisionCommand?: string[] };
+
+/**
+ * The argv a clean-environment check runs when its command names `python` or
+ * `python3`. A clean worktree or copy has no `.venv`, so the project's
+ * environment is named by absolute path; a uv project without one needs
+ * provisioning, which a verifier never does on its own. Any other executable
+ * runs exactly as declared.
+ */
+export function resolveCleanRunArgv(command: ReadonlyArray<string>, workspaceRoot: string): CleanRunArgvResolution {
+	const [executable, ...rest] = command;
+	if (executable === undefined) return { ok: false, reason: "command is empty" };
+	if (executable !== "python" && executable !== "python3") return { ok: true, argv: [...command] };
+	const launcher = pythonLauncher(workspaceRoot);
+	if (launcher.length > 0 && !existsSync(path.join(workspaceRoot, ".venv"))) {
+		return {
+			ok: false,
+			reason: "uv project has no .venv; a clean-environment check does not provision one",
+			provisionCommand: ["uv", "sync"],
+		};
+	}
+	const resolved = pythonInterpreter(workspaceRoot, []);
+	if (resolved === null) return { ok: false, reason: "neither python nor python3 is executable on PATH" };
+	const interpreter = resolved === "python" || resolved === "python3" ? resolved : path.resolve(workspaceRoot, resolved);
+	return { ok: true, argv: [interpreter, ...rest], interpreter };
+}
+
 const PYTEST_REQUIREMENT_RE = /^\s*pytest(?![\w.-])/u;
 
 /** Whether any dependency list pyproject.toml declares names pytest itself. */

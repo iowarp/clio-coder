@@ -430,6 +430,7 @@ const DATA_VERBS: Readonly<Record<string, readonly [string, string]>> = {
 	inspect: ["inspecting", "inspected"],
 	select: ["selecting from", "selected from"],
 	validate: ["validating", "validated"],
+	stats: ["summarizing", "summarized"],
 };
 
 const MONITOR_VERBS: Readonly<Record<string, readonly [string, string]>> = {

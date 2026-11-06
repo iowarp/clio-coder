@@ -13,7 +13,7 @@ import { TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-fr
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
-import { redactKnownSecrets } from "../domains/evidence/redact.js";
+import { CumulativeOutputMask } from "../domains/evidence/output-mask.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -367,11 +367,12 @@ export const bashTool: ToolSpec = {
 		}
 		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
 		try {
-			// Credential values are masked where output is shaped, once per progress
-			// snapshot and once on the captured streams; model context, the cap result
-			// and any offload all read the masked text.
+			// Credentials are masked where output is shaped, by known value and by shape, so model context, the cap result
+			// and any offload all read the masked text. Each stream is masked once as it grows, and a progress frame holds
+			// back a credential its snapshot may have cut.
 			const secrets = await bashSecretValues(options?.shellSandbox?.env.secretNames);
-			const mask = (text: string): string => redactKnownSecrets(text, secrets);
+			const stdoutMask = new CumulativeOutputMask(secrets);
+			const stderrMask = new CumulativeOutputMask(secrets);
 			const runOptions: Parameters<typeof runBashCommand>[1] = {
 				cwd,
 				timeoutMs: timeout,
@@ -380,14 +381,23 @@ export const bashTool: ToolSpec = {
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
-					const output = combineLiveBashOutput({ stdout: mask(progress.stdout), stderr: mask(progress.stderr) });
+					const output = combineLiveBashOutput({
+						stdout: stdoutMask.frame(progress.stdout),
+						stderr: stderrMask.frame(progress.stderr),
+					});
 					options.onUpdate?.(shapeBashProgress(output, progress.outputBytes, outputPolicy));
 				};
 			}
 			const startedAt = performance.now();
 			const captured = await runBashCommand(args.command, runOptions);
 			const elapsedMs = Math.round(performance.now() - startedAt);
-			const result = { ...captured, stdout: mask(captured.stdout), stderr: mask(captured.stderr) };
+			// A command stopped by a signal, its timeout or the byte cap may end inside a credential.
+			const ending = captured.aborted || captured.timedOut || captured.outputCapped ? "cut-off" : "complete";
+			const result = {
+				...captured,
+				stdout: stdoutMask.final(captured.stdout, ending),
+				stderr: stderrMask.final(captured.stderr, ending),
+			};
 			const { error, aborted, timedOut, outputCapped } = result;
 			const rawOutput = combineBashOutput(result);
 			const output = rawOutput.trim();

@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { parseCodewikiRaw } from "../../domains/context/codewiki/artifact.js";
+import { missingGrammarNote } from "../../domains/context/codewiki/fetched-grammars.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/schema.js";
 import { readWikiPage } from "../../domains/context/wiki/frontmatter.js";
 import { listWikiPages } from "../../domains/context/wiki/layout.js";
@@ -27,7 +29,16 @@ import {
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
-const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codemap.json");
+const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codemap.json.gz");
+// A dist built before the map shipped gzipped carries one of these plain names instead.
+const CLIO_CODEWIKI_PLAIN_PATHS = [join("dist", "assets", "codemap.json"), join("dist", "assets", "codewiki.json")];
+
+function readClioCodewikiText(packageRoot: string): string {
+	const gzipped = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
+	if (existsSync(gzipped)) return gunzipSync(readFileSync(gzipped)).toString("utf8");
+	const plain = CLIO_CODEWIKI_PLAIN_PATHS.map((path) => join(packageRoot, path)).find((path) => existsSync(path));
+	return readFileSync(plain ?? gzipped, "utf8");
+}
 
 type CodeNavSource = "workspace" | "clio";
 
@@ -88,9 +99,7 @@ function loadClioCodewikiForTool(): { ok: true; loaded: LoadedNavSource } | { ok
 		if (clioCodewikiCache?.packageRoot === packageRoot) {
 			return { ok: true, loaded: { codewiki: clioCodewikiCache.codewiki, entryRoot: packageRoot } };
 		}
-		const canonical = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
-		const artifactPath = existsSync(canonical) ? canonical : join(packageRoot, "dist", "assets", "codewiki.json");
-		const parsed = parseCodewikiRaw(readFileSync(artifactPath, "utf8"));
+		const parsed = parseCodewikiRaw(readClioCodewikiText(packageRoot));
 		if (!parsed) throw new Error("bundled artifact is not a valid codemap");
 		const codewiki = packageRootResolvedCodewiki(packageRoot, parsed);
 		clioCodewikiCache = { packageRoot, codewiki };
@@ -825,10 +834,12 @@ export const codeNavTool: ToolSpec = {
 				hint: "Use a lower limit or continue in a follow-up turn.",
 			});
 		}
+		let grammarNote: string | undefined;
 		const close = (nav: NavPayload | ToolResult): ToolResult => {
 			if ("kind" in nav) return nav;
 			const next = source === "clio" && nav.next !== undefined ? `source=clio ${nav.next}` : nav.next;
-			const payload = next === nav.next ? nav.payload : { ...nav.payload, next };
+			const paged = next === nav.next ? nav.payload : { ...nav.payload, next };
+			const payload = grammarNote !== undefined ? { ...paged, grammarNote } : paged;
 			return finalizeObservation({
 				tool: ToolNames.CodeNav,
 				unit: "results",
@@ -865,6 +876,16 @@ export const codeNavTool: ToolSpec = {
 		}
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = navIndexFor(loaded.loaded.codewiki);
+		// Symbol and outline answers depend on how files were parsed; a symbol
+		// search spans every language in the index, an outline only its file's.
+		if (source === "workspace" && (mode === "symbol" || mode === "outline")) {
+			const outlined = mode === "outline" ? resolveFile(index, query) : null;
+			const langs =
+				outlined === null
+					? new Set<string>(loaded.loaded.codewiki.files.map((file) => file.lang))
+					: new Set<string>("error" in outlined ? [] : [outlined.lang]);
+			grammarNote = missingGrammarNote(langs);
+		}
 		const sourcePrefix = source === "clio" ? "source=clio " : "";
 		if (mode === "symbol") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };

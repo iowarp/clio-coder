@@ -562,7 +562,7 @@ describe("contracts/files pane theme", () => {
 		// Every literal color in both documents is one of Clio's tokens.
 		const colors = new Set([...`${theme}${herdr}`.matchAll(/#[0-9a-f]{6}/gu)].map((m) => m[0]));
 		for (const color of colors) ok(theme.includes(color) || herdr.includes(color));
-		// Ten unknown-background tokens for yazi, five dark tokens and two row surfaces for herdr.
-		strictEqual(colors.size <= 17, true);
+		// Ten unknown-background tokens for yazi, four dark tokens and two row surfaces for herdr.
+		strictEqual(colors.size <= 16, true);
 	});
 });

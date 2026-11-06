@@ -2,7 +2,8 @@ import { responseModelIdObservationFromRecord } from "../../core/response-model-
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
-import { pricedUsd } from "../../core/telemetry/pricing.js";
+import type { PricingBasisSource } from "../../core/telemetry/pricing.js";
+import { pricedUsd, pricingBasis } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
 import type { EffectivePricing } from "../providers/catalog.js";
@@ -115,10 +116,11 @@ export interface InterruptedUsageEstimate {
 
 export function callSettlementFromMessage(
 	message: unknown,
-	pricedBy: EffectivePricing["pricedBy"],
+	priced: EffectivePricing["pricedBy"] | PricingBasisSource,
 	cause?: FailureCause,
 	interrupted?: InterruptedUsageEstimate | null,
 ): Omit<CallSettled, keyof CallStarted | "stages"> {
+	const { pricedBy, freeRule } = pricingBasis(priced);
 	const raw = record(message);
 	const usage = record(raw.usage);
 	const failure = record(raw.failure);
@@ -173,7 +175,7 @@ export function callSettlementFromMessage(
 	const usd = amount(cost.total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
-	else if (pricedBy === "free") pricing = pricedUsd("free", 0);
+	else if (pricedBy === "free") pricing = pricedUsd("free", 0, freeRule);
 	else if (usd !== null && observed) {
 		// Declared target rates price measured tokens as measured, ranked only below a provider's own cost. The Pi
 		// catalog rate is a guess at someone else's price list and stays estimated (#434). Pi marks a total the provider

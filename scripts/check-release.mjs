@@ -28,6 +28,7 @@ import { parseArgs } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { bundledGuiAuditLockfiles, shippedAdvisoryFindings } from "./release-audit.mjs";
 import { releaseVersionErrors, SNAPSHOT_VERSION } from "./release-version-policy.mjs";
+import { planSourcePack, readSourcePackMembers } from "./source-pack-plan.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { values } = parseArgs({ options: { tarball: { type: "string" }, report: { type: "string" } } });
@@ -70,6 +71,8 @@ const SHIPPED_SCRIPTS = new Set(manifest.requiredFiles.filter((file) => file.sta
 // up to the next 0.5 MB plus that class's cycle allowance. A re-pin needs the
 // maintainer's explicit approval in the release session; a gate the release
 // session raises on its own gates nothing (#442).
+const CODEMAP = "dist/assets/codemap.json.gz";
+const SOURCE_PACK = "dist/assets/source.pack";
 const SIZE_BUDGETS = [
 	{
 		class: "grammars",
@@ -78,7 +81,7 @@ const SIZE_BUDGETS = [
 	},
 	{
 		class: "codemap",
-		match: (path) => path === "dist/assets/codemap.json",
+		match: (path) => path === CODEMAP,
 		// 0.6.6 measured 5,082,737 bytes: re-pinned to 5.5 MB with the maintainer's approval in the release session (#442).
 		maxBytes: 5_500_000,
 	},
@@ -87,7 +90,8 @@ const SIZE_BUDGETS = [
 		match: (path) =>
 			path.startsWith("dist/") &&
 			!path.startsWith("dist/assets/grammars/") &&
-			path !== "dist/assets/codemap.json" &&
+			path !== CODEMAP &&
+			path !== SOURCE_PACK &&
 			!path.startsWith("dist/gui/client/"),
 		// The 0.6.9 candidate measured 17,224,118 bytes: re-pinned to 18.0 MB, 17.5 MB rounded up plus a 0.5 MB cycle allowance, with the maintainer's approval in the release session (#442).
 		maxBytes: 18_000_000,
@@ -99,7 +103,8 @@ const SIZE_BUDGETS = [
 	},
 	{
 		class: "src",
-		match: (path) => path.startsWith("src/"),
+		// The packed TypeScript source is still src/, stored in one file (scripts/build-source-pack.ts).
+		match: (path) => path.startsWith("src/") || path === SOURCE_PACK,
 		// The 0.6.9 candidate measured 20,956,258 bytes: 21.0 MB rounded up plus a 0.5 MB cycle allowance, with the maintainer's approval in the release session (#442).
 		maxBytes: 21_500_000,
 	},
@@ -306,6 +311,37 @@ for (const prefix of REQUIRED_PREFIXES) {
 	if (!files.some((f) => f.startsWith(prefix))) {
 		errors.push(`no files under required tree: ${prefix}`);
 	}
+}
+
+checkSourcePack();
+
+/**
+ * The tarball must agree with the source-pack plan computed from this
+ * checkout: every packed file is in source.pack and absent as a loose file,
+ * and every file the public extension types reach (package.json `exports`
+ * types and the scaffold's tsconfig paths) ships loose, so a new import in
+ * that closure cannot silently break installed extension type-checking.
+ */
+function checkSourcePack() {
+	let plan;
+	let members;
+	try {
+		plan = planSourcePack(root);
+		members = new Set(readSourcePackMembers(join(packageRoot, SOURCE_PACK)));
+	} catch (error) {
+		errors.push(`unable to check the source pack: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+	const missingLoose = plan.closure.filter((file) => !fileSet.has(file));
+	if (missingLoose.length > 0)
+		errors.push(`extension type closure files not shipped loose: ${missingLoose.slice(0, 10).join(", ")}`);
+	const doubled = [...members].filter((file) => fileSet.has(file));
+	if (doubled.length > 0) errors.push(`packed source also shipped loose: ${doubled.slice(0, 10).join(", ")}`);
+	const unpacked = plan.packed.filter((file) => !members.has(file) && !fileSet.has(file));
+	if (unpacked.length > 0)
+		errors.push(`source missing from the package and the pack: ${unpacked.slice(0, 10).join(", ")}`);
+	const strays = [...members].filter((file) => !plan.packed.includes(file));
+	if (strays.length > 0) errors.push(`source pack carries files outside the plan: ${strays.slice(0, 10).join(", ")}`);
 }
 
 const requiredRecipeKeys = new Set([

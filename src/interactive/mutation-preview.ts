@@ -15,11 +15,10 @@
  * crosses into the transcript, the notices, and the worker seam.
  */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
+import { mutationFacts, readEdits } from "../session-control/approval-request-facts.js";
 import type { MutationFacts } from "../session-control/approval-request-view.js";
 import {
 	applyEditsToNormalizedContent,
@@ -42,6 +41,7 @@ export const MUTATION_PREVIEW_VISIBLE_ROWS = 16;
  */
 export const MUTATION_PREVIEW_MAX_CHARS = 262_144;
 
+export { mutationFacts } from "../session-control/approval-request-facts.js";
 export type { MutationFacts } from "../session-control/approval-request-view.js";
 
 export interface MutationPreview {
@@ -62,71 +62,6 @@ export interface MutationPreview {
  * is itself something the operator needs to read before deciding.
  */
 export type MutationInspector = () => MutationPreview;
-
-function canonicalJson(value: unknown): string {
-	if (value === null || value === undefined) return "null";
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-	if (typeof value === "object") {
-		const entries = Object.entries(value as Record<string, unknown>)
-			.filter(([, entry]) => entry !== undefined)
-			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-		return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
-	}
-	if (typeof value === "string") return JSON.stringify(value);
-	if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : "null";
-	if (typeof value === "boolean") return value ? "true" : "false";
-	return "null";
-}
-
-/**
- * The identity a decision is bound to. Key order and absent optional fields do
- * not change it, so the same call digests the same way wherever it is read;
- * anything else about the arguments does, which is the point: a call that
- * differs from the previewed one cannot inherit its preview.
- */
-function callArgumentsDigest(args: Record<string, unknown> | undefined): string {
-	return createHash("sha256")
-		.update(canonicalJson(args ?? {}), "utf8")
-		.digest("hex")
-		.slice(0, 16);
-}
-
-function readEdits(value: unknown): Edit[] | null {
-	if (!Array.isArray(value)) return null;
-	const edits: Edit[] = [];
-	for (const entry of value) {
-		if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
-		const record = entry as Record<string, unknown>;
-		if (typeof record.oldText !== "string" || typeof record.newText !== "string") return null;
-		edits.push({ oldText: record.oldText, newText: record.newText });
-	}
-	return edits;
-}
-
-/**
- * The size-and-digest facts for a parked call, or null when the tool is not a
- * file mutation or its arguments are not the shape this can describe. The card
- * keeps rendering its allowlisted target either way.
- */
-export function mutationFacts(tool: string, args: Record<string, unknown> | undefined): MutationFacts | null {
-	if (!args || typeof args.path !== "string" || args.path.length === 0) return null;
-	if (tool === ToolNames.Write) {
-		if (typeof args.content !== "string") return null;
-		return {
-			kind: "write",
-			bytes: Buffer.byteLength(args.content, "utf8"),
-			replacements: 1,
-			digest: callArgumentsDigest(args),
-		};
-	}
-	if (tool === ToolNames.Edit) {
-		const edits = readEdits(args.edits);
-		if (edits === null || edits.length === 0) return null;
-		const bytes = edits.reduce((total, edit) => total + Buffer.byteLength(edit.newText, "utf8"), 0);
-		return { kind: "edit", bytes, replacements: edits.length, digest: callArgumentsDigest(args) };
-	}
-	return null;
-}
 
 /** `write · 482 B · sha256 3f9a1c22ee04b7d1`, the collapsed card's whole mutation line. */
 /**

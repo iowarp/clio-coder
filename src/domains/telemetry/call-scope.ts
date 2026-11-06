@@ -1,6 +1,7 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { asSideAgent } from "../../core/telemetry/context.js";
 import type { AgentRole } from "../../core/telemetry/enums.js";
+import { pricingBasisFields } from "../../core/telemetry/pricing.js";
 import type { TelemetryCall } from "../../core/telemetry/producer.js";
 import { beginCall, processTelemetryContext } from "../../core/telemetry/producer.js";
 import type { CallSettled, CallStarted } from "../../core/telemetry/schemas.js";
@@ -18,6 +19,7 @@ export interface CallJournalOptions {
 	targetId: string;
 	runtimeId: string;
 	pricedBy: EffectivePricing["pricedBy"];
+	freeRule?: EffectivePricing["freeRule"];
 	onSettled?: (facts: CallSettled) => void;
 }
 
@@ -78,7 +80,9 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 		},
 		settle(message: unknown): CallSettled | undefined {
 			if (!call || !options) return undefined;
-			return settled(call.settle(callSettlementFromMessage(message, options.pricedBy), reportedModelFromMessage(message)));
+			return settled(
+				call.settle(callSettlementFromMessage(message, pricingBasisFields(options)), reportedModelFromMessage(message)),
+			);
 		},
 		/** Time a gate as the current attempt's admission stage, so a wait reads as admission and never as a stall. */
 		async admit<T>(gate: (hold: AdmissionHold) => T | Promise<T>): Promise<T> {

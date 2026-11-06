@@ -63,3 +63,24 @@ it("masks credential values in the operator shell record", async () => {
 	});
 	strictEqual(run.entry.output.trim(), MASKED);
 });
+
+it("masks a credential by its shape, even split across writes, and leaves ordinary output alone", async () => {
+	const halves = ["ghp_ZQXJ01", "23456789ZQXJabcdef"];
+	const ordinary = "BASE_TOKENS=100 max_tokens: 128000000 sk-worker-deployment";
+	const progress: string[] = [];
+	const result = await bashTool.run(
+		{
+			command: `echo '${ordinary}'; printf 'split ${halves[0]}'; sleep 0.3; printf '${halves[1]}\\n'`,
+			timeout_ms: 5_000,
+		},
+		{
+			onUpdate: (update) => {
+				if (update.kind === "ok") progress.push(update.output);
+			},
+		},
+	);
+	ok(result.kind === "ok", JSON.stringify(result));
+	strictEqual(result.output.split("\n").slice(0, 2).join("\n"), `${ordinary}\nsplit [redacted:github-token]`);
+	ok(progress.length > 0, "the command reported progress");
+	for (const shown of progress) doesNotMatch(shown, /ZQXJ/u);
+});

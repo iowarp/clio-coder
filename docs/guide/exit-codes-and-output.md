@@ -107,7 +107,7 @@ The limits of the contract:
 - Only `execute` refusals count: `deny`-mode refusals and main-authority denials by the safety judge or the main agent. A denied call of any other class, and an operator's or timeout's denial of an escalated call, returns to the worker and never ends the run.
 - `fail` mode ends the run at the first refusal of any class with `permission required for <tool> (<class>); fleet.permissions.mode=fail ends this run`, with the same exit code and outcome.
 - An escalation that has no responder applies its fallback mode, `deny` or `fail`, at once.
-- The Claude SDK worker runtime ends the run at its first execute refusal.
+- The Claude SDK worker runtime counts its `deny`-mode execute refusals against the same limit and ends at the first refusal under `fail`. That runtime has not been exercised against a live Claude subscription.
 - The route history labels the run `permission_required`, and dispatch blocks an identical re-dispatch in the same user turn.
 
 ---

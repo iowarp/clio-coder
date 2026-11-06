@@ -31,7 +31,14 @@ import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/tel
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
-import { type PricingSum, sumFactSums } from "../../core/telemetry/pricing.js";
+import {
+	agreedFreeRule,
+	type FreeRule,
+	freeClaim,
+	type Pricing,
+	type PricingSum,
+	sumFactSums,
+} from "../../core/telemetry/pricing.js";
 import {
 	renderCount,
 	renderCountSum,
@@ -1338,13 +1345,35 @@ function allFree(parts: readonly Part[]): boolean {
 	return any;
 }
 
-function display(metric: FactMetric, fact: Fact<number> | FactSum, free: boolean, pricedBy = "none"): string {
+/** The free rule every priced contribution of the parts states, which a free cost's wording names. */
+function partsFreeRule(parts: readonly Part[]): FreeRule | undefined {
+	const pricings: Array<Pick<Pricing, "pricedBy" | "freeRule">> = [];
+	const add = (attempts: readonly Attempt[]) => {
+		for (const attempt of attempts) if (invoked(attempt) && attempt.settled) pricings.push(attempt.settled.pricing);
+	};
+	for (const part of parts) {
+		if (part.run) {
+			if (part.run.fold.source === "aggregate" && part.run.fold.aggregate) pricings.push(part.run.fold.aggregate.pricing);
+			add(part.run.attempts);
+		}
+		add(part.attempts ?? []);
+	}
+	return agreedFreeRule(pricings);
+}
+
+function display(
+	metric: FactMetric,
+	fact: Fact<number> | FactSum,
+	free: boolean,
+	pricedBy = "none",
+	freeRule?: FreeRule,
+): string {
 	const family = FAMILY[metric];
 	if ("kind" in fact) {
-		if (family === "usd") return renderUsdFact(fact, pricedBy);
+		if (family === "usd") return renderUsdFact(fact, pricedBy, freeRule);
 		return renderFact(fact, family === "duration" ? "duration" : family === "percent" ? "percent" : "count");
 	}
-	if (family === "usd") return renderUsdSum(fact, free);
+	if (family === "usd") return renderUsdSum(fact, free, freeRule);
 	if (family === "duration") return renderDurationSum(fact);
 	return renderCountSum(fact);
 }
@@ -1516,15 +1545,18 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 			? attemptFact(attempt, metric)
 			: attemptsSum([attempt], metric);
 		// A cache-break bill names the rates it was priced by, which a free call's local zero depends on.
-		const pricedBy = (metric === "breakUsd" ? attempt.settled?.cache.bill : attempt.settled?.pricing)?.pricedBy;
+		const priced = metric === "breakUsd" ? attempt.settled?.cache.bill : attempt.settled?.pricing;
+		const pricedBy = priced?.pricedBy;
 		return {
-			quantity: { fact, display: display(metric, fact, pricedBy === "free", pricedBy), ref: encoded },
+			quantity: { fact, display: display(metric, fact, pricedBy === "free", pricedBy, priced?.freeRule), ref: encoded },
 			selection,
 		};
 	}
 	const sums = selection.parts.map((part) => partSum(part, ref.metric));
 	const fact = sums.length === 1 && sums[0] ? sums[0] : sumFactSums(sums);
-	return { quantity: { fact, display: display(ref.metric, fact, allFree(selection.parts)), ref: encoded }, selection };
+	const free = allFree(selection.parts);
+	const freeRule = free ? partsFreeRule(selection.parts) : undefined;
+	return { quantity: { fact, display: display(ref.metric, fact, free, "none", freeRule), ref: encoded }, selection };
 }
 
 /**
@@ -1557,6 +1589,8 @@ export interface TurnsSum {
 	display: string;
 	/** Every priced call among the turns was free, which the cost display's free claim rests on. */
 	free: boolean;
+	/** The free rule every one of those calls states, when they agree. */
+	freeRule?: FreeRule;
 }
 
 /**
@@ -1575,7 +1609,8 @@ export function turnsSum(source: SessionSource, turnIds: readonly string[], metr
 	for (const run of analysis.runs.values()) if (keys.has(run.turnId ?? "-")) parts.push({ run, gap: runGap(run) });
 	const fact = withGap(sumFactSums(parts.map((part) => partSum(part, metric))), keys.size > 0 ? analysis.gap : 0);
 	const free = allFree(parts);
-	return { fact, display: display(metric, fact, free), free };
+	const freeRule = free ? partsFreeRule(parts) : undefined;
+	return { fact, display: display(metric, fact, free, "none", freeRule), ...freeClaim(free, freeRule) };
 }
 
 /**
@@ -1590,7 +1625,8 @@ export function attemptsTotal(source: SessionSource, attemptIds: readonly string
 	const fact = withGap(attemptsSum(attempts, metric), missing + (wanted.size > 0 ? analysis.gap : 0));
 	const part: Part = { attempts, gap: 0 };
 	const free = allFree([part]);
-	return { fact, display: display(metric, fact, free), free };
+	const freeRule = free ? partsFreeRule([part]) : undefined;
+	return { fact, display: display(metric, fact, free, "none", freeRule), ...freeClaim(free, freeRule) };
 }
 
 function quantity(view: View, ref: ParsedFactRef): Quantity {
@@ -2070,10 +2106,10 @@ export function runsTotal(sums: readonly FactSum[]): RunsTotal {
  * canonical renderer: an estimated part marks the whole `~`, and an unpriced call leaves it a lower bound (§11.3).
  */
 export function runsCost(pricings: readonly PricingSum[]): { fact: FactSum; display: string } {
-	const sum: PricingSum = {
-		usd: sumFactSums(pricings.map((pricing) => pricing.usd)),
-		free: pricings.length > 0 && pricings.every((pricing) => pricing.free),
-	};
+	const free = pricings.length > 0 && pricings.every((pricing) => pricing.free);
+	const rules = new Set(pricings.map((pricing) => pricing.freeRule));
+	const freeRule = rules.size === 1 ? [...rules][0] : undefined;
+	const sum: PricingSum = { usd: sumFactSums(pricings.map((pricing) => pricing.usd)), ...freeClaim(free, freeRule) };
 	return { fact: sum.usd, display: renderPricingSum(sum) };
 }
 

@@ -285,7 +285,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 					execution.cancelled = entry.cancelled;
 					execution.truncated = entry.truncated;
 					execution.fullOutputPath = entry.fullOutputPath;
-					execution.totalBytes = Math.max(execution.totalBytes ?? 0, Buffer.byteLength(combineBashOutput(result), "utf8"));
+					// The record is masked, so a credential it hides changes its size. Only a capped run has bytes the card cannot show.
+					execution.totalBytes = entry.truncated
+						? Math.max(execution.totalBytes ?? 0, Buffer.byteLength(combineBashOutput(result), "utf8"))
+						: Buffer.byteLength(entry.output, "utf8");
 				}
 				// `parentTurnId` was the leaf when the command started and stays the
 				// entry's anchor. The chat leaf is a different question: a prompt

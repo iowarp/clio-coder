@@ -71,7 +71,7 @@ Capabilities that the gateway directory implements itself, and the other gateway
 | --- | --- | --- |
 | `clio_docs` | `query` (omit to list the corpus), `limit` | [clio_docs](#cliodocs-retrieve-bundled-documentation-through-the-gateway) |
 | `clio_library` | `query`, `kind`, `ref`, `limit`, `offset` | [clio_library](#cliolibrary-inspect-the-component-catalog-through-the-gateway) |
-| `data` | `op` is `inspect`, `select` or `validate`, plus the format and window arguments | [data](#data-inspect-structured-files-through-the-gateway) |
+| `data` | `op` is `inspect`, `select`, `validate` or `stats`, plus the format, window and hyperslab arguments | [data](#data-inspect-structured-files-through-the-gateway) |
 | `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `vision`, `configure_clio` | Each tool's own schema | The tool's own section |
 | `extension_<id>__<name>` | The tool's schema, from an extension command tool or an api 2 runtime tool | [Extensions](harness-extensions.md) |
 | `mcp_<id>__<tool>` | The MCP server tool's schema | The MCP paragraphs below |
@@ -304,7 +304,7 @@ Filesystem targets resolving outside the workspace escalate to `system_modify`. 
 | `metadata-only` | The result header and outcome facts. Stdout and stderr stay out of model context. | 16 KiB cap on the header. |
 | `full` | The complete output and a metadata trailer. | 16 KiB. When the output does not fit, the result downgrades to `bounded` with a tail excerpt, records a `full` to `bounded` downgrade with reason `hard-budget`, and names the retrieval path. |
 
-Operator display is independently folded and tail-biased at 16 KiB. If display or context omits captured bytes, terminal output is retained in a per-session scratch artifact; live updates follow the selected policy but create no artifacts. Results record requested/applied context modes, captured/display/context bytes, truncation/downgrade, retrieval path, and exit/signal/timeout/abort/cap facts. Scratch retrieval may contain raw output; summary is the redacted projection. More than 16 MiB combined stdout/stderr stops with error; use `run_script` for larger output.
+Operator display is independently folded and tail-biased at 16 KiB. If display or context omits captured bytes, terminal output is retained in a per-session scratch artifact; live updates follow the selected policy but create no artifacts. Results record requested/applied context modes, captured/display/context bytes, truncation/downgrade, retrieval path, and exit/signal/timeout/abort/cap facts. Credentials are masked before any of these, the scratch artifact included, as [Command output](../architecture/evidence-and-memory.md#command-output) describes; `summary` also applies repository-secret redaction. More than 16 MiB combined stdout/stderr stops with error; use `run_script` for larger output.
 
 At `default` the main session runs `bash` inside the main-session sandbox when the host has a backend, and such a contained call runs without asking whatever the recognition below says; see [Containment at default](../architecture/safety-model.md#containment-at-default). Recognition decides a worker's command, the main session's command on a host without a backend or with `safety.sandbox: off`, and a call with `unsandboxed: true`. Repository test runners are allowed without confirmation at both levels, except that an attended main session (TUI or ACP) at `default` asks once before its first uncontained test runner, whoever wrote the code it runs, and that approval covers test runners for the rest of the session. A headless `clio-coder run` runs them without asking. The runners are `npm test`, `npm run test` and `npm run test:<name>` (also `pnpm`, `yarn` and `bun`), `node --test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `uv run --no-sync pytest` and `uv run --no-sync python -m pytest`, `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words to qualify as recognized. The Python runners also accept a leading `PYTHONPATH=<relative paths>`, such as `PYTHONPATH=src python3 -m pytest`; an absolute or `..` entry leaves the command unrecognized ([Recognized commands](../architecture/safety-model.md#recognized-commands)). Read-only inspection on workspace paths also runs without asking (`cat`, `head`, `tail`, `wc`, `ls`, `grep`, `rg`, `find`, `sed -n`, `git status`, `git diff`, `git log`, `git show` and similar), joined by `&&`, `||`, `;` or `|` and redirected only to `/dev/null` or `2>&1`. The statement the model receives is the `safety.default` fragment. An `&&` chain is admitted in `default` only if each command qualifies. Repository build, lint, typecheck and CI scripts (`npm run lint`, `npm run build`, `npm run typecheck`, `npm run ci`) are unrecognized by default: uncontained at `default` they go to the safety judge, and they run in `yolo`. A project safety policy entry can recognize one. Its `requireConfirmation` setting asks in `default`, contained or not, and is skipped in `yolo`.
 
@@ -339,10 +339,10 @@ Runs one workspace script through safe-exec, with stdout/stderr logs and a prove
 | `cwd` | Workspace-relative directory, default root; symlink escapes refused, except in a contained call at `default` or at `yolo`. |
 | `timeout_ms` | Positive integer, default 600000; values above 21600000 clamp to six hours. |
 | `inputs`, `outputs` | Up to 64 workspace-relative provenance references each; they do not restrict process I/O. |
-| `env` | Optional map, max 32 keys matching `[A-Z_][A-Z0-9_]*`, values max 4096 bytes. Adds to safe-exec environment. Manifest stores keys/redacted key names, not values. Args and script output are literal; do not pass secrets there expecting redaction. |
+| `env` | Optional map, max 32 keys matching `[A-Z_][A-Z0-9_]*`, values max 4096 bytes. Adds to safe-exec environment. Manifest stores keys/redacted key names, not values. Args are literal. Script output is masked as [Command output](../architecture/evidence-and-memory.md#command-output) describes, which covers a declared value only under a credential name and any other secret only by its shape. |
 | `unsandboxed` | Optional boolean. At `default`, run outside the main-session sandbox, only after the script failed because of the sandbox; the safety judge reviews that call. |
 
-Logs stream to `.clio-coder/runs/<runId>/stdout.log` and `stderr.log`; disk use is not bounded by model-view caps. Progress is throttled with 2 KiB tails; terminal tails retain 8 KiB. `run.json` records script/interpreter identity, exact argv/cwd/timeout/timing, environment keys, input identities, and output state (`created`, `modified`, `unchanged`, `absent`). File hashes cap at 64 MiB and record omission reason if unavailable. No install or automatic retry occurs.
+Logs stream to `.clio-coder/runs/<runId>/stdout.log` and `stderr.log` with credentials masked as in the result; `run.json` counts the bytes the script wrote. Disk use is not bounded by model-view caps. Progress is throttled with 2 KiB tails; terminal tails retain 8 KiB. `run.json` records script/interpreter identity, exact argv/cwd/timeout/timing, environment keys, input identities, and output state (`created`, `modified`, `unchanged`, `absent`). File hashes cap at 64 MiB and record omission reason if unavailable. No install or automatic retry occurs.
 
 Outcomes: `succeeded`, `failed`, `timed-out`, `aborted`, `spawn-failed`, `cleanup-incomplete`, `pipe-drain-incomplete`. Failure returns retained logs and observed partial outputs. `exitCode` is effective status; `leaderExit` records the process code/signal. Cleanup/drain failure changes a leader zero to effective 1. Cancellation after leader exit can retain exit 0 with `aborted=true`; inspect outcome and flags. Neither zero exit nor output existence proves scientific validity; verify separately.
 
@@ -355,31 +355,47 @@ verify(check="compare-stats")
 
 ## data: inspect structured files through the gateway
 
-Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL, plus `inspect` and `select` for SQLite databases. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and no parser is installed.
+Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL; `inspect` and `select` for SQLite databases; and `inspect`, `select`, and `stats` for HDF5, NetCDF and Parquet. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and nothing is installed into the project or Clio's package.
 
 | Argument | Contract |
 | --- | --- |
 | `op`, `path` | Required operation and file path. |
-| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, or `sqlite`. |
+| `format` | Optional explicit `csv`, `tsv`, `json`, `jsonl`, `sqlite`, `hdf5`, `netcdf`, or `parquet`. The file's signature still decides between HDF5 (which includes NetCDF-4) and classic NetCDF. |
 | `delimiter`, `header` | CSV/TSV overrides; delimiter is one character, header defaults to `auto`. Detection considers comma, tab, semicolon, pipe. |
 | `sample_rows` | Inspection preview; default 10, max 1000. |
 | `max_rows` | Inspect/validate scan bound; default 100000, `null` means scan to EOF. |
-| `offset`, `limit` | Select window; zero-based offset (default 0), result limit (default 50, max 1000). |
+| `offset`, `limit` | Select window; zero-based offset (default 0), result limit (default 50, max 1000). Parquet `stats`: the rows summarized (default all). |
 | `columns` | CSV/TSV projection by header or zero-based index. |
 | `pointer` | JSON RFC 6901 pointer; empty string selects the document. |
 | `sql` | SQLite select: one read-only `SELECT`, `WITH`, `VALUES` or `EXPLAIN` statement, windowed by `offset` and `limit`. |
 | `table` | SQLite: inspect counts and samples this table; select reads it instead of `sql`, with `columns` as a projection. |
+| `variable` | HDF5/NetCDF: a variable or group path; `inspect` narrows to it, `select` and `stats` read it. Parquet `stats`: the column. |
+| `start`, `count`, `stride` | HDF5/NetCDF hyperslab, one entry per dimension: first index (default 0), elements (default the rest of the dimension), step (default 1). |
+| `max_bytes` | `stats`: raw bytes read before the pass stops; default 256 MiB, max 8 GiB. |
 
 `path` is workspace-relative or absolute and uses normal path policy. Inspect returns schema/dimensions and a bounded sample; select returns rows, records, or a JSON value. Validate covers only scanned rows unless `max_rows=null`; `rowCount:null` means scan stopped early. Results include `view={exact,sampled,converted}`: `sampled` means scan stopped before EOF; `exact=false,sampled=false` means a selected value was cut to budget. `$summary`/`$truncated` mark cuts. Samples may be cut while whole-file counts remain exact. `converted` is always false.
 
 CSV cells stay strings. Empty cells and missing sentinels are counted separately, never coerced to zero/null. Numeric precision issues are surfaced (`unsafe-integer`, `excess-digits`, `inexact`, `overflow`, `underflow`, `oversized-literal`); unrepresentable JSON numbers use `$literal` plus precision metadata. No units are inferred; extrema affected by precision loss are approximate. Format/schema validity establishes neither physical meaning nor transformation correctness.
 
-Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777,216; JSONL lines 1,048,576; JSON nesting 1024. Binary/NUL, invalid UTF-8, malformed syntax, unsupported formats, missing pointers, and unknown columns error. Duplicate-key and precision tracking are bounded and report omissions. Gateway observations cap data at 32 KiB and use the shared turn budget. SQLite runs in a child process that opens the database read-only, sets `query_only`, and accepts one statement with a 30 s timeout; a database whose read-only open fails is reopened with `immutable=1`, and the result says changes still in its WAL are not visible. HDF5, NetCDF, and Parquet need `run_script` plus an operator-provided library. After a transform, validate output schema, precision, missing values, and scientific invariants separately.
+Readers stream with bounded captures: CSV fields 1,048,576 chars, records 16,777,216; JSONL lines 1,048,576; JSON nesting 1024. Binary/NUL, invalid UTF-8, malformed syntax, unsupported formats, missing pointers, and unknown columns error. Duplicate-key and precision tracking are bounded and report omissions. Gateway observations cap data at 32 KiB and use the shared turn budget. SQLite runs in a child process that opens the database read-only, sets `query_only`, and accepts one statement with a 30 s timeout; a database whose read-only open fails is reopened with `immutable=1`, and the result says changes still in its WAL are not visible. After a transform, validate output schema, precision, missing values, and scientific invariants separately.
+
+### Scientific formats
+
+HDF5 and NetCDF-4 are read by h5wasm 0.10.3 (the HDF5 C library compiled to wasm), Parquet by hyparquet 1.31.5, and classic NetCDF (CDF-1, CDF-2 and CDF-5) by a reader built into Clio. The two libraries are not shipped: each is downloaded once on first use as its npm registry tarball, accepted only when its sha256 matches the pin in `src/tools/data/reader-assets.ts`, and unpacked under `<cache>/data-readers/`. A failed download is recorded beside the cache path, and no process on the host tries again for 10 minutes. The refusal names the reader, the URL, the cache path to copy the tarball to on an offline host, and the `run_script` route with h5py, netCDF4 or pyarrow. Classic NetCDF needs no download.
+
+Every call runs in a worker thread with a 120 s ceiling, so a long pass never blocks the session and an abort stops it. Files are opened read-only and read lazily: HDF5 reads only the metadata and chunks a call touches, Parquet reads its footer and then only the column chunks of the row groups in the window.
+
+- `inspect` lists groups, variables (dtype, shape, unlimited dimensions as `null` in `maxshape`, named dimensions), global and per-variable attributes with a `cf` block for `units`, `long_name`, `standard_name`, `_FillValue`, `missing_value`, `scale_factor`, `add_offset`, `calendar`, `valid_min`, `valid_max`, `valid_range` and `coordinates`, plus layout, chunk shape, the filter pipeline with deflate level, and uncompressed size. NetCDF-4 files report `format: "netcdf"` with their dimensions, and the netCDF library's own bookkeeping attributes are hidden. Classic NetCDF also reports each variable's exact on-disk size; HDF5 reports `storageBytes: null`, because the bundled reader exposes no storage size. Parquet pages compressed with SNAPPY, GZIP, ZSTD or BROTLI are decoded; other codecs such as LZ4 are refused with the column named. Parquet reports rows, the schema with physical and logical types, per-column codecs and compressed and uncompressed sizes, row groups, and the footer statistics folded across row groups (min, max, null count, and how many row groups carried them). Nothing is scanned. A result past 28 KiB drops attributes to the `cf` block and a count, then lists fewer variables, and says so.
+- `select` reads a hyperslab. With `count` omitted it returns the first 200 elements in row-major order, fewer if their values render past 24 KiB, and marks the result truncated. An explicit `count` above 2000 elements, or one whose values render past 24 KiB, is refused with `selection-too-large`. Parquet selects a row window (`offset`, `limit` up to 1000, `columns`) and cuts rows to 24 KiB, saying so. Values are raw as stored: `scale_factor` and `add_offset` are not applied and fill values are not masked. Float32 values print at float32 precision; integers past 2^53 and non-finite values are `$literal`; classic NetCDF `char` variables are joined into strings along their last dimension.
+- `stats` reports `min`, `max`, `mean`, population `std`, and `validCount`, `nanCount`, `infCount`, `fillCount` and `missingValueCount` over the selection (Parquet: a numeric column and its nulls). It reads 8 MiB slabs, chunk by chunk for chunked HDF5 data, and stops before `max_bytes` or after 60 s with `complete: false`, `stoppedBy` and the elements actually covered. With `scale_factor` or `add_offset`, an `unpacked` block repeats the summary in unpacked units. Fill and missing values come only from the `_FillValue` and `missing_value` attributes, so an HDF5 dataset-creation fill value (h5py `fillvalue=`) is not counted.
 
 ```text
 gateway(op="call", capability="data", args={op: "inspect", path: "results.csv", max_rows: null})
 gateway(op="call", capability="data", args={op: "select", path: "results.json", pointer: "/runs/0"})
 gateway(op="call", capability="data", args={op: "select", path: "runs.db", sql: "SELECT node, sum(bytes) FROM runs GROUP BY node"})
+gateway(op="call", capability="data", args={op: "inspect", path: "climate.nc", variable: "tas"})
+gateway(op="call", capability="data", args={op: "select", path: "sim.h5", variable: "fields/pressure", start: [0, 0], count: [4, 10], stride: [10, 5]})
+gateway(op="call", capability="data", args={op: "stats", path: "sim.h5", variable: "fields/pressure", max_bytes: 1073741824})
 ```
 
 ## grep: search file contents with ripgrep
@@ -596,15 +612,31 @@ checks:
     cwd: .
     timeoutMs: 600000
     tags: [scientific, performance]
+  - id: temperature-analysis
+    description: Reproduce the temperature analysis from pinned raw data
+    kind: reproduce
+    command: [python, analysis.py]
+    inputs:
+      - {path: data/raw.csv, sha256: c2baa1a4b19d6061c8cb910723d7e1dbd45e6ca4a1103a0e995a0a1f45826ed3}
+    environment: worktree
+    seed: {env: ANALYSIS_SEED, value: "1234"}
+    compare: twice
+    tolerance: {relative: 1.0e-12}
+    units: {mean_temp: K}
+    shapes: {histogram: [5], moments: [2, 3]}
+    cwd: .
+    timeoutMs: 60000
+    tags: [scientific]
 ```
 
-Version 1 remains readable and means `kind: command`; version 2 adds `numeric-compare` and `perf-budget`. Required core fields are `id`, `description`, `command`, `cwd`, `timeoutMs`, and `tags`. Unknown fields and duplicate IDs fail closed; YAML aliases are disabled.
+Version 1 remains readable and means `kind: command`; version 2 adds `numeric-compare`, `perf-budget` and `reproduce`. Required core fields are `id`, `description`, `command`, `cwd`, `timeoutMs`, and `tags`. Unknown fields and duplicate IDs fail closed; YAML aliases are disabled.
 
 | Kind | Contract |
 | --- | --- |
 | `command` | Passes on exit code zero. |
 | `numeric-compare` | Compare stdout JSON object `string -> number or number[]` with a repository-relative `reference` JSON file of the same shape. `tolerance` requires finite, non-negative `relative`, `absolute`, or `ulp`; `combine: all` (default) requires every named bound, `any` requires at least one. Missing keys and unequal array lengths fail. `nonFinite: fail` (default) rejects non-finite pairs; `match` accepts NaN/NaN and same-signed infinities. `ulp` is an integer up to 9007199254740991. Relative error against zero passes only on equality. |
 | `perf-budget` | Compare measured wall time with exactly one of `budget: {wallTimeMs, tolerance?: {relative}}` or a repository-relative `baseline`. Relative tolerance is non-negative fractional headroom. `verifiers baseline <id>` records a successful run. |
+| `reproduce` | Rerun an analysis from pinned inputs in a clean environment and judge its metrics. Required: `inputs` (repository-relative files, each with a lowercase hex `sha256`), `compare` (`twice` or `{reference: <path>}`), and `tolerance` (the `numeric-compare` tolerance object). Optional: `environment`, `seed: {env, value}`, `units` (metric to units string) and `shapes` (metric to shape array, `[]` for a scalar). Details follow the table. |
 
 | Field | Constraint |
 | --- | --- |
@@ -617,6 +649,10 @@ Version 1 remains readable and means `kind: command`; version 2 adds `numeric-co
 | File | At most 262144 bytes and 128 checks. |
 
 Catalog and package IDs share one namespace; a collision or invalid catalog prevents listing and execution. Checks run declared argv without model-supplied args, cwd, timeout, or environment overrides, through safe-exec's environment allowlist and 600000-byte output cap. Judged output and reference/baseline files are capped at 32 MiB. Nonzero exit, timeout, abort, or output cap prevents judgement. Results include exact argv/cwd/exit/duration and `aborted`/`timedOut`/`outputCapped` flags; judged checks also report numeric deviations or measured time, budget, and ratio. `judgement.execution` is `succeeded`, `failed`, `unavailable`, `timed-out`, `aborted`, or `output-capped`; validation is `passed`, `failed`, `exit-code`, or `not-run`. `scientificValidity` is always `not established by this check`.
+
+A `reproduce` check hashes every input in the checkout first. Any mismatch refuses the check before anything runs, and the refusal names each path with its expected and actual sha256. Each run then gets a fresh clean environment under the state directory's `scratch/reproduce/`, never inside the checkout: `worktree` (the default) is a detached worktree of HEAD added with hooks off, and `copy` is a directory holding only the declared inputs, so a `copy` check declares its script as an input too. Inputs are copied in at their relative paths and hashed again, so gitignored raw data reaches the run with the pinned bytes. The environment is removed when the run ends, on failure and abort included. A `python` or `python3` command runs through the project `.venv` interpreter by absolute path, `VIRTUAL_ENV`, or `python`/`python3` on PATH; a uv project without `.venv` is refused as needing provisioning. The seed variable is added to the safe-exec environment of every run. The command prints a JSON object whose metrics are numbers, rectangular nested number arrays, or `{"value": ..., "units": "..."}` objects; a ragged array fails judgement. `compare: twice` runs the command in two separate clean environments and judges run 1 against run 2; `compare: {reference}` judges one run against a reference file in the same format. Every metric on either side must be present on both, have the same shape and agree within the tolerance. Each declared `units` entry must be reported exactly by every run, and by the reference when it reports units. Each declared shape must match. The verdict states agreement within the declared tolerance, never correctness. A pass is evidence only; it changes no permission, budget or job clock.
+
+The `reproduce` report records its conditions: `inputs` (`path`, `sha256`, `sizeBytes`, and `tracked` at the commit), `environment`, `commit`, `trackedTreeClean` (whether the checkout's tracked files matched HEAD; a worktree run judges the committed tree), `seed`, `platform` (`os`, `arch`, `release`, `nodeVersion`, `clioVersion`, and for Python `interpreter` and `pythonVersion`), the resolved `argv` and `cwd`, the tolerance and its rule, each run's exit, duration and payload sha256, the reference identity, and a per-metric verdict with its agreement, units and shape results. Dispatch host verification runs a sealed `reproduce` check through the same runner and never reuses a memoized pass.
 
 Numeric reports identify the reference and extracted payload by SHA-256 and byte count. Non-finite report values serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Version 2 performance baselines record wall time, check, timestamp, and host (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`); version 1 still loads. Host differences are reported but do not change the verdict.
 
@@ -635,12 +671,13 @@ clio-coder verifiers validate
 clio-coder verifiers dry-run rust-workspace
 clio-coder verifiers baseline solver-time
 clio-coder verifiers add --id validate-grid --description "Validate the grid" --command '["python","tools/check_grid.py"]' --kind numeric-compare --reference tests/grid.json --tolerance '{"relative":1e-6}' --yes
+clio-coder verifiers add --id temperature-analysis --description "Reproduce the temperature analysis" --command '["python","analysis.py"]' --kind reproduce --input data/raw.csv --compare twice --seed ANALYSIS_SEED=1234 --tolerance '{"relative":1e-12}' --units '{"mean_temp":"K"}' --shapes '{"histogram":[5]}' --yes
 clio-coder verifiers edit validate-grid --timeout-ms 300000
 clio-coder verifiers rename validate-grid validate-regional-grid --yes
 clio-coder verifiers remove validate-regional-grid --yes
 ```
 
-CLI fields: `add` requires `--id`, `--description`, and `--command` as a JSON argv array; `edit` accepts these plus `--cwd`, `--timeout-ms`, `--tags`, and kind options. Numeric checks take `--reference` and JSON `--tolerance`; performance checks take `--budget-ms` with optional `--budget-relative`, or `--baseline` with optional relative `--tolerance`. Mutations need `--yes`. `validate` runs the production parser and declared-check discovery; an ID collision with a package script fails validation. `dry-run <id>` executes one admitted check, and `baseline <id>` runs one performance check and writes only on success.
+CLI fields: `add` requires `--id`, `--description`, and `--command` as a JSON argv array; `edit` accepts these plus `--cwd`, `--timeout-ms`, `--tags`, and kind options. Numeric checks take `--reference` and JSON `--tolerance`; performance checks take `--budget-ms` with optional `--budget-relative`, or `--baseline` with optional relative `--tolerance`. Reproduce checks take repeatable `--input <path>[=<sha256>]` (without a digest the file's current sha256 is pinned and shown in the preview), exactly one of `--compare twice` or `--reference <path>`, JSON `--tolerance`, and optional `--environment worktree|copy`, `--seed NAME=value`, JSON `--units` and JSON `--shapes`; `edit --kind reproduce` restates every reproduce field. Mutations need `--yes`. `validate` runs the production parser and declared-check discovery; an ID collision with a package script fails validation. `dry-run <id>` executes one admitted check, and `baseline <id>` runs one performance check and writes only on success.
 
 `verify(check="frontend", path=...)` checks an in-workspace `.html`, `.htm`, `.css`, `.js`, `.mjs`, or `.cjs` file without shell access: HTML tag balance, classic/module script syntax, CSS balance, and local script/stylesheet existence. External and root-relative references are skipped. Optional browser load: `auto` warns if Chromium/Chrome/Edge is unavailable, `required` fails, `off` skips. Checks report pass/warn/fail/skip; any fail errors the tool. Details include `{action, check, path, browserMode, status, checks}`.
 

@@ -131,6 +131,69 @@ export function headForRedaction(text: string, maxChars: number): string {
 	return text.slice(0, end).trimEnd();
 }
 
+// Command output reaches the model and the operator as a program printed it, so it masks only the shapes that are almost
+// never anything but a credential. The assignment shape stays out: test and build output is full of `max_tokens: 128000000`
+// and fixture `secret: placeholder` lines whose values it would blank.
+const COMMAND_OUTPUT_SECRET_KINDS: ReadonlySet<string> = new Set([
+	"url-userinfo",
+	"url-username",
+	"pem",
+	"aws-access-key",
+	"github-token",
+	"sk-key",
+	"slack-token",
+	"google-api-key",
+	"jwt",
+	"authorization",
+]);
+const COMMAND_OUTPUT_SECRET_PATTERNS = SECRET_PATTERNS.filter((pattern) =>
+	COMMAND_OUTPUT_SECRET_KINDS.has(pattern.kind),
+);
+// A real `sk-` key holds a digit, while a hyphenated name such as `sk-worker-deployment` does not.
+const HAS_DIGIT_RE = /\d/u;
+// A query value in printed source is often code, as in `"?token=" + value`, whose quote the URL rule would take. Only a
+// plain value long enough to be a credential is masked in output.
+const COMMAND_OUTPUT_URL_PARAM_VALUE_RE = /^[A-Za-z0-9._~%+/=-]{8,}$/u;
+
+/**
+ * Mask the credential shapes trusted on command output: URL userinfo and username tokens, plain secret query values, PEM
+ * private keys, AWS access keys, GitHub, `sk-`, Slack and Google API keys, JWTs and Authorization headers.
+ */
+export function redactCommandOutputSecrets(text: string, tally?: RedactionTally): string {
+	let out = text;
+	for (const pattern of COMMAND_OUTPUT_SECRET_PATTERNS) {
+		out = out.replace(pattern.re, (...match: unknown[]) => {
+			if (pattern.kind === "sk-key" && !HAS_DIGIT_RE.test(String(match[0]))) return String(match[0]);
+			return replaceSecretMatch(pattern.kind, match, tally);
+		});
+	}
+	const parts: string[] = [];
+	let copied = 0;
+	for (const { start, end } of secretUrlParamValues(out)) {
+		if (!COMMAND_OUTPUT_URL_PARAM_VALUE_RE.test(out.slice(start, end))) continue;
+		if (tally) tally.count += 1;
+		parts.push(out.slice(copied, start), "[redacted:url-param]");
+		copied = end;
+	}
+	parts.push(out.slice(copied));
+	return parts.join("");
+}
+
+/** The replacement for one {@link SECRET_PATTERNS} match: the head a pattern keeps, then its marker. */
+function replaceSecretMatch(kind: string, match: unknown[], tally?: RedactionTally): string {
+	if (kind === "url-userinfo") {
+		if (!urlUserinfoHoldsSecret(String(match[2]))) return String(match[0]);
+		if (tally) tally.count += 1;
+		return `${String(match[1])}[redacted:url-userinfo]`;
+	}
+	if (tally) tally.count += 1;
+	if (kind === "assignment" || kind === "authorization" || kind === "jwt") {
+		// Keep the key and separator, or the run ahead of the token; replace only the value.
+		return `${String(match[1])}[redacted:${kind}]`;
+	}
+	return `[redacted:${kind}]`;
+}
+
 /** Replace every secret-shaped value in `text`, tallying replacements. */
 export function redactSecretsText(
 	text: string,
@@ -146,22 +209,12 @@ export function redactSecretsText(
 	let out = text;
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
-			if (pattern.kind === "url-userinfo") {
-				if (!urlUserinfoHoldsSecret(String(match[2]))) return String(match[0]);
-				tally.count += 1;
-				return `${String(match[1])}[redacted:url-userinfo]`;
-			}
 			if (pattern.kind === "assignment" && options?.keepAssignmentValue) {
 				const key = String(match[1]);
 				const before = String(match[4]).slice(0, Number(match[3]) + key.length);
 				if (options.keepAssignmentValue(String(match[2]), before)) return String(match[0]);
 			}
-			tally.count += 1;
-			if (pattern.kind === "assignment" || pattern.kind === "authorization" || pattern.kind === "jwt") {
-				// Keep the key and separator, or the run ahead of the token; replace only the value.
-				return `${String(match[1])}[redacted:${pattern.kind}]`;
-			}
-			return `[redacted:${pattern.kind}]`;
+			return replaceSecretMatch(pattern.kind, match, tally);
 		});
 	}
 	return redactUrlParams(out, tally);
