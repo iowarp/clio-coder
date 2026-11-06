@@ -13,6 +13,7 @@ export interface DecisionLedgerEntryFields {
 	endedAt: string;
 	roundCount: number;
 	summary?: string;
+	questions?: string[];
 	transcriptPath?: string;
 	exposure?: AutonomyExposure;
 	decisions: DecisionRecord[];
@@ -87,6 +88,9 @@ function finalizedInterviewEntryFields(policy: AskUserToolPolicy): DecisionLedge
 		throw new Error(`decision board: interview ${policy.id} finalized with status ${policy.status}`);
 	}
 	const endedAt = policy.endedAt ?? policy.updatedAt;
+	const asked = [
+		...new Set(policy.rounds.flatMap((round) => round.questions.map((question) => question.question.trim()))),
+	].filter((question) => question.length > 0);
 	const decisionsByKey = new Map<string, DecisionRecord>();
 	for (const decision of policy.decisions) {
 		const decidedAt = decision.source_question
@@ -115,6 +119,7 @@ function finalizedInterviewEntryFields(policy: AskUserToolPolicy): DecisionLedge
 		endedAt,
 		roundCount: policy.rounds.length,
 		...(policy.summary ? { summary: policy.summary } : {}),
+		...(asked.length > 0 ? { questions: asked } : {}),
 		...(policy.transcriptPath ? { transcriptPath: policy.transcriptPath } : {}),
 		exposure: policy.exposure ?? "local",
 		decisions: [...decisionsByKey.values()],
@@ -218,6 +223,7 @@ export function createDecisionBoardStore(deps: DecisionBoardStoreDeps = {}): Dec
 			endedAt: interview.endedAt,
 			roundCount: interview.roundCount,
 			...(interview.summary ? { summary: interview.summary } : {}),
+			...(interview.questions ? { questions: [...interview.questions] } : {}),
 			...(interview.transcriptPath ? { transcriptPath: interview.transcriptPath } : {}),
 			...(interview.exposure ? { exposure: interview.exposure } : {}),
 			decisions: interview.decisions.map((decision) => {

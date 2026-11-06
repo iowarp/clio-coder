@@ -46,6 +46,7 @@ import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
 import {
 	type createDispatchBoardView,
+	dispatchBoardEscapeEntry,
 	dispatchBoardHintEntries,
 	planWarnedStepCount,
 	planWithWorkerRows,
@@ -446,9 +447,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				record,
 				plan: preview.plan,
 				columns: deps.terminal.columns,
+				// The preview is a layer over the snapshot list, so Esc goes back to the list with nothing changed.
 				onCancel: () => {
 					deps.closeOverlay();
-					deps.notify("info", "rewind cancelled; no files changed", "rewind:outcome");
+					openRewind();
 				},
 				onConfirm: () => {
 					deps.closeOverlay();
@@ -582,7 +584,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	const dispatchBoardHint = (innerWidth: number): string =>
-		buildResponsiveHint(dispatchBoardHintEntries(deps.dispatchBoard))(innerWidth);
+		buildResponsiveHint(
+			dispatchBoardHintEntries(deps.dispatchBoard),
+			dispatchBoardEscapeEntry(deps.dispatchBoard),
+		)(innerWidth);
 
 	/**
 	 * `/btw <question>`: one model round beside the session, rendered in an

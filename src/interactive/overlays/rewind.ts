@@ -359,7 +359,7 @@ export function openRewindConfirmOverlay(tui: TUI, options: OpenRewindConfirmOpt
 		...(actionable ? { approval: true, awaitingInput: true, tone: "decisionCue" as const } : {}),
 		footerHint: buildResponsiveHint(
 			[...(actionable ? [{ key: "Enter", verb: "restore files" }] : []), { key: "↑↓", verb: "scroll" }],
-			{ key: "Esc", verb: "cancel" },
+			{ key: "Esc", verb: "back to snapshots, nothing changed", short: "back" },
 		),
 	});
 }

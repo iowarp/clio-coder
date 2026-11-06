@@ -1048,6 +1048,12 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				};
 				policy.rounds.push(round);
 				if (result.cancelled === true) {
+					// The card promises that answers recorded before Esc are kept, so they
+					// reach the decisions board as well as the model; questions left open stay off it.
+					if (!standalone) {
+						const recorded = result.answers.filter((answer) => answer.answer.trim().length > 0);
+						if (recorded.length > 0) upsertDecisions(policy, deriveAnswerDecisions(questions, recorded, policy));
+					}
 					policy.status = "cancelled";
 					policy.cancelled = true;
 					policy.endedAt = answeredAt;
