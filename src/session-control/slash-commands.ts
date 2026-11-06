@@ -1176,11 +1176,8 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 			lines.push(row(index === 0 ? "Open now" : "", `${pane.label}${notes.length > 0 ? ` (${notes.join(", ")})` : ""}`));
 		}
 	// One preset per row, command first, so each reads as something to type.
-	const presetWidth = Math.max(...PANES_PRESETS.map((preset) => `/panes open ${preset.id}`.length));
 	for (const [index, preset] of PANES_PRESETS.entries())
-		lines.push(
-			row(index === 0 ? "Open one" : "", `${`/panes open ${preset.id}`.padEnd(presetWidth)}  ${preset.summary}`),
-		);
+		lines.push(row(index === 0 ? "Open one" : "", `/panes open ${preset.id} · ${preset.summary}`));
 	if (status.available) {
 		const alerts =
 			status.settings.notifications === "failures"
@@ -3517,10 +3514,10 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 					const state = runtime.entries().find((entry) => entry.id === row.extensionId)?.state;
 					const next =
 						state === "ready"
-							? `${owner} is still running; correct the command and run it again.`
+							? "It is still running; correct the command and run it again."
 							: state === "failed" || state === undefined
-								? `${owner} stopped; /extensions shows why, and r there restarts it.`
-								: `${owner} is ${state}; /extensions shows its state, and r there restarts it.`;
+								? "It stopped; /extensions shows why, and r there restarts it."
+								: `It is ${state}; /extensions shows its state, and r there restarts it.`;
 					ctx.notice("error", `/${command.token} failed: ${sentence(reason)} ${next}`);
 				}
 			});

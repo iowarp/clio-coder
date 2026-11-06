@@ -166,9 +166,18 @@ function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: Comman
 		for (const rawLine of normalized.split("\n")) {
 			const leading = /^[ \t]*/u.exec(rawLine)?.[0] ?? "";
 			const indent = leading.replace(/\t/gu, "    ").slice(0, Math.max(0, width - 1));
-			lines.push(
-				...wrap(rawLine.slice(leading.length), Math.max(1, width - indent.length)).map((line) => `${indent}${line}`),
-			);
+			const body = rawLine.slice(leading.length);
+			// An indented "Label   value" row wraps under its value, not under its label,
+			// so a narrow terminal keeps the label column readable.
+			const labelled = indent.length > 0 ? /^(\S(?:\S| (?! ))*? {2,})\S/u.exec(body) : null;
+			const hang = labelled ? indent.length + (labelled[1]?.length ?? 0) : 0;
+			if (labelled && hang <= Math.floor(width / 2)) {
+				const label = labelled[1] ?? "";
+				const value = wrap(body.slice(label.length), Math.max(1, width - hang));
+				lines.push(...value.map((line, index) => `${index === 0 ? `${indent}${label}` : " ".repeat(hang)}${line}`));
+				continue;
+			}
+			lines.push(...wrap(body, Math.max(1, width - indent.length)).map((line) => `${indent}${line}`));
 		}
 		return lines;
 	});
