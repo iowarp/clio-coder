@@ -1065,9 +1065,13 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 			for (const wrapped of wrapTextWithAnsi(row, width)) out.push(`${SECONDARY()}${wrapped}${RESET}`);
 		return out;
 	}
+	// The row's ✗ already says it failed; `✗ [error] cannot load…` said it twice in the store's own marker. /view keeps it.
 	const shown = unbounded
 		? providerErrorEvidence(seg.text)
-		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null });
+		: presentProviderError(seg.text, { remedyStated: seg.route !== undefined && seg.route !== null }).replace(
+				/^\[error\] /u,
+				"",
+			);
 	for (const line of shown.split("\n")) {
 		for (const wrapped of wrapTextWithAnsi(line, width)) {
 			out.push(`${RED_CRIT()}${wrapped}${RESET}`);

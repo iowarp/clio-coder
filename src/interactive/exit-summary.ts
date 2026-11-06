@@ -201,7 +201,6 @@ export function renderExitSummary(
 	const lines: string[] = [];
 	const paint = (row: string, lead: number): string =>
 		theme ? `${theme.fg("fieldName", row.slice(0, lead))}${theme.fg("body", row.slice(lead))}` : row;
-	const wrap = (text: string): string[] => (tty ? wrapTextWithAnsi(text, room) : [text]);
 	/** One row of facts; the lead is the row's own `Key: ` and is painted as a field name. */
 	const add = (key: string, facts: ReadonlyArray<string>): void => {
 		const lead = `${key}: `;
@@ -222,7 +221,13 @@ export function renderExitSummary(
 	const gitHooks = gitHooksSummary(snapshot);
 	const internalGit = internalGitSummary(snapshot);
 	const session = snapshot.sessionName ? `${snapshot.sessionName} · ${snapshot.sessionId}` : snapshot.sessionId;
-	const resumeLines = wrap(theme?.fg("commandHint", resume) ?? resume);
+	// The command and its id are one thing to type, so a narrow card breaks before `/resume`, never between them (E7).
+	const resumeCommand = `/resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
+	const resumeRows =
+		!tty || visibleWidth(resume) <= room
+			? [resume]
+			: ["To resume: clio-coder, then", resumeCommand].flatMap((row) => wrapTextWithAnsi(row, room));
+	const resumeLines = resumeRows.map((row) => theme?.fg("commandHint", row) ?? row);
 	const visitTime = `${formatCompactMs(snapshot.wallMs)} this visit`;
 	if (!tty) lines.push(`Clio Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
 	// Session names can be arbitrarily long; keep identity from consuming the page.
@@ -371,7 +376,8 @@ export function renderExitSummary(
 				`${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", style === "report" ? "· Session report" : "· Session summary")}`,
 				lines,
 				Math.max(4, Math.floor(width)),
-				{ rightMeta: "this visit" },
+				// Whole or absent: `t…` in the corner said nothing; the Time row still says `this visit`.
+				Math.floor(width) >= 52 ? { rightMeta: "this visit" } : {},
 			)
 		: lines;
 }

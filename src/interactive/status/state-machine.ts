@@ -475,9 +475,11 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 			};
 		case "submit_settled":
 			if (prev.preparingSubmission !== true) return prev;
+			// A submission that never became a turn (a `/context compact`, a refused admission) ends in idle. Going back to
+			// `ended` showed the previous turn's `✓ finished` again after a compaction was cancelled (T9).
 			return {
 				...prev,
-				phase: prev.summary ? "ended" : "idle",
+				phase: "idle",
 				since: ctx.now,
 				preparingSubmission: undefined,
 				resumePhase: undefined,

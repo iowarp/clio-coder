@@ -195,6 +195,11 @@ export function besideCardDetail(
  * `continues`, read as two different claims depending on the width (S2). The view's own rail carries its Esc.
  */
 const BEHIND_VIEW = "continues behind this view";
+/**
+ * Esc inside a view closes the view, so the strip says how the run behind it stops: the view's rail could only offer
+ * `Esc close`, and nothing on screen said the run was one key further away (S3).
+ */
+const BEHIND_VIEW_STOP = "close this view, then Esc stops it";
 
 /**
  * The line, or null when nothing is active. Candidates run from fullest to leanest and the first that fits wins. The
@@ -234,17 +239,29 @@ export function liveWorkStrip(
 		const subject = loose.subject ?? facts.actor;
 		const glyph = theme.fg(loose.token, loose.live ? GLYPH.running : loose.glyph);
 		const railFree = (text: string): string => text.replace(RAIL_ONLY_FACTS, "");
+		// A turn waiting on a worker is timed by the worker's own clock beside it, as the rail shows it; two clocks read
+		// `waiting for a worker · 6s · coder waiting on the model · 6s`.
+		const awaitsWorker =
+			workers !== null && (facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch);
 		const clocked = (text: string): string => {
-			const elapsed = CARRIES_ELAPSED.test(stripTerminalSequences(text))
-				? null
-				: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
+			const elapsed =
+				awaitsWorker || CARRIES_ELAPSED.test(stripTerminalSequences(text))
+					? null
+					: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
 			return theme.fg(loose.token, elapsed === null ? text : `${text} · ${elapsed}`);
 		};
 		// The clock the strip may add takes up to eight cells, which the words leave for it.
-		const ownedLabel = railFree(present(room - 2 - visibleWidth(subject) - 1 - 8).label);
-		const owned = `${glyph} ${theme.fg("activeModelIdentity", subject)} ${clocked(ownedLabel)}`;
+		// The words give up their lesser facts to a tail that has to stay whole, so the way to stop outranks them.
+		const ownedWith = (tail: number): string =>
+			`${glyph} ${theme.fg("activeModelIdentity", subject)} ${clocked(railFree(present(room - 2 - visibleWidth(subject) - 1 - 8 - tail).label))}`;
+		const owned = ownedWith(0);
+		const tailCells = (parts: ReadonlyArray<string | null>): number =>
+			parts.filter((part): part is string => part !== null).reduce((sum, part) => sum + 3 + visibleWidth(part), 0);
 		const bare = `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
+		// A stop already asked for owes nothing more; anything else a person may want to stop says how.
+		const stoppable = facts.status.phase !== "cancelling";
 		candidates = [
+			...(stoppable ? [render(ownedWith(tailCells([workers, BEHIND_VIEW_STOP])), [workers, BEHIND_VIEW_STOP])] : []),
 			render(owned, [workers, BEHIND_VIEW]),
 			...(workers === null ? [] : [render(owned, [workers])]),
 			// A worker asking outranks the tail: with an overlay over its card, this row is all that says time is running.
@@ -254,6 +271,7 @@ export function liveWorkStrip(
 						`${glyph} ${quiet(workerSummary(facts, room - 2) ?? "")}`,
 					]
 				: []),
+			...(stoppable ? [render(ownedWith(tailCells([BEHIND_VIEW_STOP])), [BEHIND_VIEW_STOP])] : []),
 			render(owned, [BEHIND_VIEW]),
 			render(owned, []),
 			render(bare, []),
