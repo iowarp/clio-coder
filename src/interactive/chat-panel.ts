@@ -983,9 +983,7 @@ function fitCodeLine(line: string, fenceIndent: string, width: number, bareFence
 	const body = text.startsWith(lead) ? text.slice(lead.length) : text.replace(/^ +/u, "");
 	const mark = bareFences ? lead : `${lead}${theme.fg("annotation", GLYPH.codeWrap)} `;
 	const room = Math.max(1, width - visibleWidth(mark));
-	return wrapPaths(body, room).map((part, index) =>
-		theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`),
-	);
+	return wrapPaths(body, room).map((part, index) => theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`));
 }
 
 function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: RowMemo): string[] {
@@ -1323,6 +1321,8 @@ function settledExcerptLimit(rows: ReadonlyArray<string>, text: string, limit: n
 	return limit;
 }
 
+const THINKING_LEAD = "thinking · ";
+
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(
 	thinking: string,
@@ -1338,10 +1338,15 @@ function renderThinkingRail(
 		"",
 	);
 	if (text.length === 0) return [];
-	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
-	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
+	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
+	// that says what it is, because the rail alone is the same mark a tool's output wears.
+	const wrapped = wrapTextWithAnsi(`${THINKING_LEAD}${text}`, Math.max(1, width - PROSE_GUTTER_WIDTH));
 	const kept = unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0);
-	const rows = kept.map((row) => `${REASON_RAIL()}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`);
+	const rows = kept.map((row, index) => {
+		const lead = index === 0 && row.startsWith(THINKING_LEAD) ? THINKING_LEAD : "";
+		const body = row.slice(lead.length);
+		return `${REASON_RAIL()}${lead ? clioTheme().fg("annotation", lead) : ""}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", body)}${RESET}`;
+	});
 	if (unbounded) return rows;
 	return previewRows(
 		rows,

@@ -319,9 +319,9 @@ describe("Clio rendering invariants", () => {
 		doesNotMatch(rendered, /read the module|the test is next|run it/u);
 		// Stretches of reasoning that nothing visible separates are one run and one marker.
 		strictEqual(markerRows(rendered).length, 2, rendered);
-		match(rendered, /│ summarize the cause\n\n✦ The jitter was real randomness\./u);
+		match(rendered, /│ thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
 		const detailed = thinkingTurn("detailed", [["read the module", "read"]]);
-		match(detailed, /│ read the module\n\n▸ read src\/retry\.js/u);
+		match(detailed, /│ thinking · read the module\n\n▸ read src\/retry\.js/u);
 	});
 
 	it("replaces cumulative partials and re-expands at the latest state", () => {
