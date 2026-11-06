@@ -4,7 +4,11 @@
  */
 export function assistantMessageNeverSent(message: unknown): boolean {
 	if (message === null || typeof message !== "object" || Array.isArray(message)) return false;
-	const record = message as { callInvoked?: unknown; failure?: { invoked?: unknown }; usage?: { callInvoked?: unknown } };
+	const record = message as {
+		callInvoked?: unknown;
+		failure?: { invoked?: unknown };
+		usage?: { callInvoked?: unknown };
+	};
 	return record.callInvoked === false || record.failure?.invoked === false || record.usage?.callInvoked === false;
 }
 

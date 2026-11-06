@@ -20,10 +20,10 @@ import {
 /** Bounded worker summaries share the main transcript's output style. */
 
 import {
-	settledRunCaveat,
 	plainOutcomeLabel,
 	refusedCallsWords,
 	STALLED_RUN_HEADLINE,
+	settledRunCaveat,
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
 import { fleetNodeTaskBrief } from "../../domains/dispatch/fleet-node-prompt.js";
