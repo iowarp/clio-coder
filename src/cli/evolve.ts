@@ -106,7 +106,7 @@ export async function runEvolveCommand(args: ReadonlyArray<string>): Promise<num
 		parsed = parseEvolveArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {

@@ -43,7 +43,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const allowed = new Set(["--json"]);
 	for (const arg of args) {
 		if (!allowed.has(arg)) {
-			process.stderr.write(`clio-coder context index: unknown flag ${arg}\n`);
+			process.stderr.write(`clio-coder context index: unknown flag: ${arg}\n`);
 			return 2;
 		}
 	}

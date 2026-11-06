@@ -718,7 +718,7 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 	const parsed = parseViewArgs(args);
 	if (typeof parsed === "string") {
 		process.stderr.write(`clio-coder fleet view: ${parsed}\n`);
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {

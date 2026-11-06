@@ -30,9 +30,13 @@ Notes:
 
 export async function runInteropCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
-	if (sub === undefined || sub === "--help" || sub === "-h") {
+	if (sub === undefined) {
+		process.stderr.write(HELP);
+		return 2;
+	}
+	if (sub === "--help" || sub === "-h") {
 		process.stdout.write(HELP);
-		return sub === undefined ? 2 : 0;
+		return 0;
 	}
 	if ((sub === "adopt" || sub === "inspect") && (args.includes("--help") || args.includes("-h"))) {
 		process.stdout.write(HELP);
@@ -41,7 +45,7 @@ export async function runInteropCommand(args: ReadonlyArray<string>): Promise<nu
 	if (sub === "adopt") return await runAdopt(args.slice(1));
 	if (sub === "inspect") return await runInteropInspect(args.slice(1));
 	printError(`unknown interop command: ${sub}`);
-	process.stdout.write(HELP);
+	process.stderr.write(HELP);
 	return 2;
 }
 

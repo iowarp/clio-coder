@@ -63,7 +63,9 @@ a fork child folds its own calls, and inspect adds the lineage total. --json
 emits the read-model DTO the TUI, ACP and GUI serve. explain also takes a
 usage report's repo:<window> reference, refolded over that window ending now.
 cost --days folds the window usage report reads: the sessions and runs of one
-repository (--repo) or of every repository, over the last <n> days.
+repository (--repo) or of every repository, over the last <n> days. cost --by
+defaults to role, and to model with --run. calls --run <run-id> without a
+session lists that run's own calls.
 --imported <install-id> on any of these reads the scopes telemetry import placed
 from that installation instead of your own; the two are never folded together.
 `;
@@ -100,7 +102,7 @@ function parse(argv: ReadonlyArray<string>): Args | string {
 		else if (arg.startsWith("--")) {
 			const name = arg.slice(2);
 			const value = rest[index + 1];
-			if (!VALUE_FLAGS.has(name)) return `unknown flag ${arg}`;
+			if (!VALUE_FLAGS.has(name)) return `unknown flag: ${arg}`;
 			if (value === undefined || value.startsWith("--")) return `${arg} needs a value`;
 			values.set(name, value);
 			index += 1;

@@ -72,7 +72,7 @@ function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			}
 			default:
-				throw new Error(`unknown flag: ${arg}`);
+				throw new Error(arg.startsWith("-") ? `unknown flag: ${arg}` : `unexpected argument: ${arg}`);
 		}
 	}
 	return out;
@@ -212,7 +212,7 @@ export async function runSystemOneCommand(argv: ReadonlyArray<string>): Promise<
 		return 2;
 	}
 	if ((parsed.command === "use" || parsed.command === "check") && parsed.name === undefined) {
-		printError(`${parsed.command} requires an engine`);
+		printError(parsed.command === "use" ? "use requires a route" : "check requires an engine");
 		process.stderr.write(SYSTEM_ONE_HELP);
 		return 2;
 	}

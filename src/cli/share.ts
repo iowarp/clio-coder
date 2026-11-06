@@ -244,7 +244,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 	switch (parsed.command) {
 		case "export": {
 			if (!parsed.out) {
-				process.stderr.write("usage: clio-coder share export --out <path>\n");
+				process.stderr.write("usage: clio-coder share export --out <path> [options]\n");
 				return 2;
 			}
 			const outPath = resolve(parsed.out);
@@ -263,7 +263,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 		case "import": {
 			const archivePath = parsed.positional[0];
 			if (!archivePath || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio-coder share import <path> [--dry-run] [--force]\n");
+				process.stderr.write("usage: clio-coder share import <path> [--dry-run] [--force] [--project|--user] [--json]\n");
 				return 2;
 			}
 			const options = {
@@ -281,7 +281,7 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 		case "inspect": {
 			const archivePath = parsed.positional[0];
 			if (!archivePath || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio-coder share inspect <path>\n");
+				process.stderr.write("usage: clio-coder share inspect <path> [--json]\n");
 				return 2;
 			}
 			const plan = planShareImport(resolve(archivePath), { dryRun: true, force: true });

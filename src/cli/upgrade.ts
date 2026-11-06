@@ -34,7 +34,8 @@ import { printError } from "./shared.js";
 const CHANNELS = ["latest", "beta", "dev"] as const;
 type Channel = (typeof CHANNELS)[number];
 
-const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--refresh-runtime] [--restart] [--json]
+const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--refresh-runtime]
+                   [--post-install] [--rollback] [--restart] [--json]
 
 Upgrade Clio Coder and apply pending state migrations. An npm-installed
 binary is updated in its existing prefix. An install.sh install gets the new

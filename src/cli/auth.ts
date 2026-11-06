@@ -512,7 +512,7 @@ export async function runAuthCommand(args: ReadonlyArray<string>): Promise<numbe
 			return 0;
 		}
 		if (rest.length > 0 && rest.some((arg) => arg !== "--help" && arg !== "-h")) {
-			printError("auth list does not accept target arguments");
+			printError("auth list takes no arguments");
 			process.stderr.write(USAGE);
 			return 2;
 		}
