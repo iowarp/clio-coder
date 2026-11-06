@@ -3149,7 +3149,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					);
 				}
 				ctx.render?.();
-			})();
+			})().catch((error: unknown) => {
+				// A switch that threw did not happen; say so rather than leave the old model looking chosen.
+				ctx.notice("error", `model not changed: ${error instanceof Error ? error.message : String(error)}`);
+				ctx.render?.();
+			});
 		},
 	},
 	{
