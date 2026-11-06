@@ -333,7 +333,7 @@ describe("library review and outcome wording", () => {
 		match(body, /session refresh failed: reload threw; press R to retry/);
 		// Disk and resource evidence predate the refresh; a failed refresh must not
 		// read as "this session now has it".
-		match(body, /resource evidence from before refresh; current session admission is unverified/);
+		match(body, /read before the reload, which failed, so what loads now is\s+unverified/);
 		match(body, /Unattempted steps were never started/);
 		match(body, /never repeats a write/);
 	});
@@ -362,7 +362,7 @@ describe("library review and outcome wording", () => {
 				90,
 			).join("\n"),
 		);
-		match(body, /reopen the Library\s+for\s+current\s+admission/);
+		match(body, /reopen the Library\s+to\s+see\s+what\s+loads\s+now/);
 		// A package can be on disk while one resource is still unavailable.
 		match(body, /not available: skill:ship \(untrusted project import\)/);
 		match(body, /This session already sees the change/);

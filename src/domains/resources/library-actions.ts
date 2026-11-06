@@ -155,6 +155,8 @@ export interface LibraryStepOutcome {
 	identity: LibraryPackageIdentity;
 	/** The folder the committed step wrote or removed, so the outcome can say where. */
 	destination?: string;
+	/** The step came from an import of another agent's files, not from a catalog install. */
+	imported?: true;
 	verification?: LibraryStepVerification;
 	recovery?: { packageBackup?: string; stateBackup?: string };
 	diagnostics: string[];
@@ -1004,7 +1006,16 @@ export function libraryImportOutcome(plan: LibraryImportPlan, result: LibraryImp
 		status: "committed",
 		operation: "install",
 		identity,
-		diagnostics: [...result.diagnostics, `foreign trust; project-import gate ${String(result.admission.gateEnabled)}`],
+		imported: true,
+		...(plan.destination ? { destination: plan.destination } : {}),
+		diagnostics: [
+			...result.diagnostics,
+			result.admission.gateEnabled === true
+				? "imported content keeps its outside origin, and the setting that admits imported content is on"
+				: result.admission.gateEnabled === false
+					? "imported content keeps its outside origin, and the setting that admits imported content is off, so it does not load yet"
+					: "imported content keeps its outside origin; whether it loads depends on the setting that admits imported content",
+		],
 	};
 	annotateVerification(outcome, plan.cwd, "pre-refresh", false);
 	return outcome;

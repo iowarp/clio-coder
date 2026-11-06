@@ -324,7 +324,8 @@ export function libraryOutcomeHeadline(
 	const only = result.outcomes.length === 1 ? result.outcomes[0] : undefined;
 	if (only) {
 		const place = `${only.operation === "remove" ? "from" : "in"} ${only.identity.scope} scope`;
-		if (only.status === "committed") return `${PAST_TENSE[only.operation]} ${only.identity.ref} ${place}`;
+		if (only.status === "committed")
+			return `${only.imported ? "Imported" : PAST_TENSE[only.operation]} ${only.identity.ref} ${place}`;
 		if (only.status === "failed") return `Could not ${only.operation} ${only.identity.ref} ${place}`;
 		return `Did not start the ${only.operation} of ${only.identity.ref}`;
 	}
@@ -352,10 +353,9 @@ function refreshChip(refresh: LibraryRefreshResult): string {
 function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: LibraryRefreshResult): string {
 	if (evidence === "post-refresh") return "";
 	if (refresh.status === "refreshed")
-		return "resource evidence from before refresh; session refreshed, reopen the Library for current admission";
-	if (refresh.status === "failed")
-		return "resource evidence from before refresh; current session admission is unverified because refresh failed";
-	return "resource evidence from before refresh; no session refresh applied";
+		return "read before this session reloaded; reopen the Library to see what loads now";
+	if (refresh.status === "failed") return "read before the reload, which failed, so what loads now is unverified";
+	return "read from disk; no reload was needed";
 }
 
 /** Resources grouped by kind with a count each: "6 skills: a, b; 20 prompts: c, d" reads faster than 26 kind:name refs. */
@@ -426,7 +426,7 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 						.join("; ");
 		// Nothing loads from a package that is gone; the fact would only restate it.
 		if (verification.effective || verification.resources.length > 0)
-			facts.push({ label: "Loads", value: label ? `${label}: ${loaded}` : loaded, tone: "muted" });
+			facts.push({ label: "Loads", value: label ? `${loaded} (${label})` : loaded, tone: "muted" });
 		facts.push({
 			label: "In effect",
 			value: verification.effective
