@@ -15,6 +15,8 @@ import { type ReasoningUsageView, reasoningFromQuantity } from "./status/reasoni
 export interface TurnSpend {
 	/** API calls the turn made, its workers' included; null when the count is unknown. */
 	calls: number | null;
+	/** How many of those calls Clio prepared but never sent. */
+	neverSent?: number;
 	input: string;
 	output: string;
 	/** Null when the provider served nothing from its prompt cache. */
@@ -122,6 +124,7 @@ export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?:
 	const neverSentNote = skipped > 0 ? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent` : null;
 	return {
 		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,
+		...(skipped > 0 ? { neverSent: skipped } : {}),
 		input: compactFigure(input),
 		output: compactFigure(output),
 		cacheRead: nonZero(cacheRead) ? compactFigure(cacheRead) : null,

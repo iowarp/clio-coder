@@ -301,7 +301,7 @@ function optionalCompactMs(durationMs: number | undefined): string | null {
  * diagnosis as the body line.
  */
 const COMMAND_STATUS_LINE =
-	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: command (?<aborted>aborted))$/u;
+	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: command (?<aborted>aborted)(?: after \d+s of its \S+ time limit\. The host ended the run(?:: (?<cause>.+)| and recorded no cause\.))?)$/u;
 
 interface CommandStatus {
 	/** Index of the status line in the result text's lines. */
@@ -311,6 +311,8 @@ interface CommandStatus {
 	aborted: boolean;
 	/** Text the status line carried beyond the status itself. */
 	message: string | null;
+	/** Why the run ended under an aborted command, as the host recorded it. */
+	cause: string | null;
 }
 
 function commandStatusLine(result: unknown): CommandStatus | null {
@@ -328,6 +330,7 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 			timedOut: match.groups.timeout !== undefined,
 			aborted: match.groups.aborted !== undefined,
 			message: match.groups.message ?? null,
+			cause: match.groups.cause ?? null,
 		};
 	}
 	return null;
@@ -664,7 +667,26 @@ function lineRange(finished: ToolExecutionFinished, observation: Record<string, 
 }
 
 /** `1.4KB`, or `1.4KB of 4.3KB` when the result kept only part of what it read. */
+/**
+ * How a command the run ended under stopped, in the operator's words. The tool's own line is written for the model
+ * (`aborted after 8s of its 5m time limit. The host ended the run: Cancelled at your request.`); the row already shows
+ * the stop mark and the time, so it says who stopped it, and that it had to be killed when it ignored the stop.
+ */
+function abortedFact(cause: string | null, details: Record<string, unknown> | null): string {
+	const killed = details?.signal === "SIGKILL";
+	const byOperator = cause !== null && /^cancel+ed at your request\.?$/iu.test(cause.trim());
+	if (byOperator) return killed ? "killed, it ignored your stop" : "stopped by you";
+	const why = cause === null ? null : cause.trim().replace(/\.$/u, "");
+	const reason = why === null || why.length === 0 ? "stopped when the run ended" : `stopped: ${why}`;
+	return killed ? `${reason}, killed after it ignored the stop` : reason;
+}
+
 function sizeFacts(finished: ToolExecutionFinished): string[] {
+	// An aborted command's result text is mostly the status the model reads; its size is the command's own output.
+	const details = detailsOf(finished.result);
+	if (details?.aborted === true && typeof details.outputBytes === "number") {
+		return details.outputBytes > 0 ? [formatSize(details.outputBytes)] : [];
+	}
 	const bytes = shownBytesOf(finished);
 	if (bytes === null || bytes <= 0) return [];
 	const total = totalBytesOf(finished);
@@ -748,7 +770,7 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 			const limit = typeof row.args.timeout_ms === "number" ? optionalCompactMs(row.args.timeout_ms) : null;
 			parts.push(limit === null ? "timed out" : `timed out after ${limit}`);
 		}
-		if (status?.aborted === true) parts.push("aborted");
+		if (status?.aborted === true) parts.push(abortedFact(status.cause, details));
 		if (details?.outputCapped === true) parts.push("output capped");
 	}
 	if (finished.excludeFromContext === true) parts.push("not sent to model");

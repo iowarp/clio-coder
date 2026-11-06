@@ -434,8 +434,13 @@ function callMarkupOpen(prev: boolean, partialText: string | undefined): boolean
 }
 
 export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceContext): AgentStatus {
-	const next = reduceEvent(prev, event, ctx);
-	if (next === prev) return prev;
+	const reduced = reduceEvent(prev, event, ctx);
+	if (reduced === prev) return prev;
+	// A new phase, or a tool's arguments starting to stream inside `writing`, starts a new phase clock.
+	const next =
+		reduced.phase !== prev.phase || (reduced.preparingToolCall === true) !== (prev.preparingToolCall === true)
+			? { ...reduced, phaseSince: ctx.now }
+			: reduced;
 	const waited = withHumanWait(next, ctx.now);
 	const awaitingModel =
 		waited.phase === "waiting_model" ||
