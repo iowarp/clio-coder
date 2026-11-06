@@ -516,9 +516,15 @@ function isCriticalEntry(entry: HintEntry): boolean {
 	return entry.critical ?? isCriticalHintKey(entry.key);
 }
 
-function renderHintEntries(entries: ReadonlyArray<HintEntry>, short: boolean): string {
+/** Every label short (`true`), every label full (`false`), or every label short but the Esc entry's (`"keep-esc"`). */
+type HintSpelling = boolean | "keep-esc";
+
+function renderHintEntries(entries: ReadonlyArray<HintEntry>, short: HintSpelling): string {
 	return entries
-		.map((entry) => `[${canonicalizeKey(entry.key)}] ${short ? (entry.short ?? entry.verb) : entry.verb}`)
+		.map((entry) => {
+			const shortened = short === true || (short === "keep-esc" && canonicalizeKey(entry.key) !== "Esc");
+			return `[${canonicalizeKey(entry.key)}] ${shortened ? (entry.short ?? entry.verb) : entry.verb}`;
+		})
 		.join(" · ");
 }
 
@@ -545,9 +551,12 @@ export function fitHintEntries(entries: ReadonlyArray<HintEntry>, maxWidth: numb
 export function fitHintEntryList(
 	entries: ReadonlyArray<HintEntry>,
 	maxWidth: number,
-): { kept: HintEntry[]; short: boolean } {
+): { kept: HintEntry[]; short: HintSpelling } {
 	if (entries.length === 0) return { kept: [], short: false };
-	for (const short of [false, true]) {
+	// Esc keeps its whole verb longest, because it is the key whose word says
+	// what backing out costs (`cancel interview`, `discard text`); the keys
+	// beside it give up their long spellings first.
+	for (const short of [false, "keep-esc", true] as const) {
 		if (visibleWidth(renderHintEntries(entries, short)) <= maxWidth) return { kept: [...entries], short };
 	}
 	const fits = (list: ReadonlyArray<HintEntry>): boolean => visibleWidth(renderHintEntries(list, true)) <= maxWidth;
