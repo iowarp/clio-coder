@@ -3125,6 +3125,19 @@ interface ScopeCardBack {
 	back: () => void;
 }
 
+/** Words a person adds to a phrase that a settings label rarely carries. */
+const SETTINGS_FILTER_FILLER = new Set(["a", "an", "the", "to", "for", "of", "my", "new"]);
+
+/** A filter query's terms, lowercased, without filler; a query of filler alone keeps its words. */
+function settingsFilterTerms(query: string): string[] {
+	const words = query
+		.toLowerCase()
+		.split(/\s+/u)
+		.filter((word) => word.length > 0);
+	const meaningful = words.filter((word) => !SETTINGS_FILTER_FILLER.has(word));
+	return meaningful.length > 0 ? meaningful : words;
+}
+
 export class SettingsCenter implements Component {
 	/** The stack level that owns input; "detail" is implied by an open submenu. */
 	private level: SettingsCenterLane = "rows";
@@ -3474,16 +3487,16 @@ export class SettingsCenter implements Component {
 		return (this.filterDraft ?? this.filterQuery).trim();
 	}
 
-	/** The area and group names are searchable too, so "delegation" finds what lives under Agents & Delegation. */
+	/**
+	 * The area and group names are searchable too, so "delegation" finds what lives under Agents & Delegation. Each
+	 * term matches on its own, in any order and any field, and filler words are not required: "Add target" found
+	 * nothing while "Add a target" found the wizard (B04).
+	 */
 	private matchesFilter(item: SettingsCenterItem, context: string): boolean {
-		const query = this.effectiveFilterQuery().toLowerCase();
-		if (query.length === 0) return true;
-		return (
-			(item.label ?? "").toLowerCase().includes(query) ||
-			(item.configPath ?? "").toLowerCase().includes(query) ||
-			(item.description ?? "").toLowerCase().includes(query) ||
-			context.toLowerCase().includes(query)
-		);
+		const terms = settingsFilterTerms(this.effectiveFilterQuery());
+		if (terms.length === 0) return true;
+		const haystack = [item.label ?? "", item.configPath ?? "", item.description ?? "", context].join("\n").toLowerCase();
+		return terms.every((term) => haystack.includes(term));
 	}
 
 	/**
