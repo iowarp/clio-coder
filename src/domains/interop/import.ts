@@ -41,6 +41,8 @@ export interface LibraryImportPlan {
 	action: "install" | "blocked";
 	/** Why the plan is blocked, or review notes for an installable plan. */
 	reasons: string[];
+	/** The conversion note among the reasons, which describes the import and never blocks it. */
+	note?: string;
 	id?: string;
 	version?: string;
 	destination?: string;
@@ -162,6 +164,7 @@ export function planLibraryImport(
 			...base,
 			action: blocked ? "blocked" : "install",
 			reasons: [value.note, ...reasons],
+			note: value.note,
 			id: value.id,
 			version: value.version,
 			destination: path.join(pluginBaseDir(scope, cwd), value.id),

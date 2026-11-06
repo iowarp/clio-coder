@@ -437,7 +437,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				// reviewed bytes leave no trace, not merely that nothing was installed.
 				releaseLibraryImport(plan);
 				restore();
-				deps.notice("info", `import ${source}: cancelled; nothing was written.`);
+				deps.notice("info", `Import of ${plan.id ?? source} cancelled; nothing was written.`);
 				review.hide();
 			},
 			onDone: (result) => {

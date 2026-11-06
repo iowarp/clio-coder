@@ -562,9 +562,10 @@ function formatLibraryImportReview(
 		...(plan.requirements.length
 			? [{ label: "Requires", value: `installed packages ${plan.requirements.join(", ")}`, tone: "warning" as const }]
 			: []),
-		...plan.reasons.map(
-			(reason): Fact => ({ label: install ? "Note" : "Blocked", value: reason, tone: install ? "muted" : "error" }),
-		),
+		...plan.reasons.map((reason): Fact => {
+			const blocks = !install && reason !== plan.note;
+			return { label: blocks ? "Blocked" : "Note", value: reason, tone: blocks ? "error" : "muted" };
+		}),
 		{
 			label: "Provenance",
 			value:
@@ -582,7 +583,7 @@ function formatLibraryImportReview(
 	return [
 		...headline(
 			install ? "decisionQuestion" : "error",
-			`${install ? "import" : "blocked"} ${plan.id ?? plan.source.input} into ${plan.scope} scope`,
+			`${install ? "import" : "Cannot import"} ${plan.id ?? plan.source.input} into ${plan.scope} scope`,
 			width,
 		),
 		...chipRows(
