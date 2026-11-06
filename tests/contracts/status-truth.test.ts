@@ -2130,7 +2130,6 @@ test("a plan step's worker card names its step, whether the step is announced be
 	match(header, /coder · check-readme/u);
 });
 
-
 test("a summarizing compaction measures its written summary against the output cap and says when nothing is measurable", async () => {
 	const { formatContextActivityRailLines } = await import("../../src/interactive/context-activity.js");
 	const base = {
