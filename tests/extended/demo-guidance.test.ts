@@ -61,7 +61,7 @@ test("footer tips expire, have cooldown, respect custom keys, and do not repeat"
 		contextBusy: false,
 		dashboardKey: "ctrl+x",
 	};
-	match(hints(input) ?? "", /Explore \/help/);
+	match(hints(input) ?? "", /\? lists keys · Ctrl\+G opens every action/);
 	strictEqual(hints({ ...input, now: 10_001 }), null);
 	strictEqual(hints({ ...input, now: 59_999, agentActive: true }), null);
 	match(hints({ ...input, now: 60_000, agentActive: true }) ?? "", /ctrl\+x → Activity/);
@@ -72,6 +72,27 @@ test("footer tips expire, have cooldown, respect custom keys, and do not repeat"
 	strictEqual(hints({ ...input, now: 180_000, toolsUsed: true }), null);
 	match(hints({ ...input, now: 180_000, contextBusy: true }) ?? "", /\/context/);
 	strictEqual(hints({ ...input, now: 240_000, contextBusy: true }), null);
+});
+
+test("a slash command with a key earns one nudge naming the key, until the key is used", () => {
+	const hints = createDemoHints();
+	const input = {
+		enabled: true,
+		now: 0,
+		quiet: false,
+		agentActive: false,
+		toolsUsed: false,
+		contextBusy: false,
+		dashboardKey: "Alt+U",
+		learned: () => true,
+		lastCommand: "/model",
+		shortcutFor: (command: string) => (command === "/model" ? "Alt+M" : null),
+	};
+	match(hints(input) ?? "", /Alt\+M → \/model without typing it/);
+	strictEqual(hints({ ...input, now: 60_000 }), null);
+	strictEqual(hints({ ...input, now: 120_000, lastCommand: "/help" }), null);
+	match(hints({ ...input, now: 180_000, lastCommand: "/fleet", shortcutFor: () => "Alt+W" }) ?? "", /Alt\+W → \/fleet/);
+	strictEqual(hints({ ...input, now: 240_000, lastCommand: "/fleet", shortcutFor: () => null }), null);
 });
 
 test("a live tip follows current eligibility and keybindings without a late welcome", () => {

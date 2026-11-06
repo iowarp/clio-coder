@@ -6,7 +6,10 @@
  *
  *   - `matches(data, id)`  : replaces raw byte comparisons in the router
  *   - `getKeys(id)`        : resolved KeyId[] for a binding, for help display
- *   - `getDescription(id)` : short description used by `/help`
+ *   - `getDescription(id)` : the sentence `/help` shows
+ *   - `getLabel(id)`       : the short name every other surface shows
+ *   - `actionLabel(id)`    : the one spelling hints show (`Alt+M`, or `Ctrl+G M`)
+ *   - `fullActionLabel(id)`: every route, for `/help` (`Alt+M · Ctrl+G M`)
  *   - `getConflicts()`     : duplicate-binding diagnostics for /settings
  *   - `hotkeyEntries()`    : ordered list for the global /help section
  *   - `overrideCount()`    : count of entries the user has customized
@@ -64,11 +67,13 @@ export interface ClioKeybindingManager {
 	matches(data: string, id: Keybinding): boolean;
 	getKeys(id: Keybinding): ReadonlyArray<KeyId>;
 	getDescription(id: Keybinding): string;
+	getLabel(id: Keybinding): string;
 	readonly generation: number;
 	reload(overrides: Readonly<Record<string, string | string[]>>): void;
 	onReload(listener: () => void): () => void;
 	isDisabled(id: Keybinding): boolean;
 	actionLabel(id: Keybinding): string;
+	fullActionLabel(id: Keybinding): string;
 	getConflicts(): ReadonlyArray<KeybindingConflict>;
 	overrideCount(): number;
 	invalidCount(): number;
@@ -418,7 +423,7 @@ export function formatPlatformKeybindingNotice(warnings: ReadonlyArray<PlatformK
 				return base ? `Alt+${base.toUpperCase()}` : key;
 			})
 			.join(", ");
-		return `Clio keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt, or use Ctrl+G then the shortcut letter, slash commands (/help lists commands), and /help.\n`;
+		return `Clio keybinding notice: Terminal.app may not send Option-letter shortcuts by default (${keys}). Enable Use Option as Meta key in Settings ▸ Profiles ▸ Keyboard for native Alt; until then Ctrl+G and the same letter does the same thing, and the hints say so.\n`;
 	}
 	const count = warnings.reduce((sum, entry) => sum + entry.keys.length, 0);
 	const detail = warnings
@@ -532,23 +537,31 @@ function buildManager(
 		});
 		return [...app, ...VIEWPORT_LEADER_TARGETS].filter(({ id }) => !isDisabled(id));
 	};
-	const actionLabel = (id: Keybinding): string => {
-		const keys = inner.getKeys(id);
+	const support = detectTerminalKeySupport(env);
+	const menuSpelling = (id: Keybinding): string | null => {
 		const suffix = leaderTargets().find((entry) => entry.id === id)?.key;
 		const leader = inner.getKeys("clio-coder.leader")[0];
-		return (
-			[
-				keys.map((key) => formatKeyLabel(key)).join(" / "),
-				leader && suffix ? `${formatKeyLabel(leader)} ${formatKeyLabel(suffix)}` : "",
-			]
-				.filter(Boolean)
-				.join(" · ") || "unbound; see /help"
-		);
+		return leader && suffix ? `${formatKeyLabel(leader)} ${formatKeyLabel(suffix)}` : null;
 	};
+	const actionLabel = (id: Keybinding): string =>
+		isDisabled(id)
+			? "unbound; see /help"
+			: (preferredSpelling(inner.getKeys(id), menuSpelling(id), support) ?? "unbound; see /help");
+	const fullActionLabel = (id: Keybinding): string =>
+		[
+			inner
+				.getKeys(id)
+				.map((key) => formatKeyLabel(key))
+				.join(" / "),
+			menuSpelling(id) ?? "",
+		]
+			.filter(Boolean)
+			.join(" · ") || "unbound; see /help";
 	return {
 		matches: (data, id) => inner.matches(data, id),
 		getKeys: (id) => inner.getKeys(id),
 		getDescription: (id) => inner.getDefinition(id).description ?? "",
+		getLabel: (id) => labelOf(id, inner.getDefinition(id).description ?? ""),
 		getConflicts: () => effectiveConflicts(inner),
 		get generation() {
 			return generation;
@@ -568,6 +581,7 @@ function buildManager(
 		},
 		isDisabled,
 		actionLabel,
+		fullActionLabel,
 		overrideCount: () => Object.keys(validated.valid).length,
 		invalidCount: () => validated.invalid.reduce((sum, entry) => sum + entry.keys.length, 0),
 		invalidBindings: () => validated.invalid,
@@ -597,10 +611,45 @@ export function createKeybindingManagerForTesting(
 	return buildManager(overrides, env, false);
 }
 
-/** The label of the first key bound to `actionId` in the installed bindings, or null when unbound. */
-export function boundKeyLabel(actionId: ClioKeybinding): string | null {
-	const key = getKeybindings().getKeys(actionId)[0];
-	return key ? formatKeyLabel(key) : null;
+function labelOf(id: Keybinding, fallback: string): string {
+	return Object.hasOwn(CLIO_APP_KEYBINDINGS, id) ? CLIO_APP_KEYBINDINGS[id as ClioKeybinding].label : fallback;
+}
+
+/**
+ * The one spelling a hint shows: the first direct key, or the menu route when there is none.
+ * A terminal that composes Option-letter as text gets the menu route for Alt letters instead,
+ * because a hint naming a key that cannot arrive teaches nothing.
+ */
+function preferredSpelling(
+	keys: ReadonlyArray<KeyId>,
+	menu: string | null,
+	support: TerminalKeySupport,
+): string | null {
+	const direct = keys[0];
+	if (direct && !(support.altLetterMode === "text" && menu && keyUsesAltLetter(direct))) return formatKeyLabel(direct);
+	return menu;
+}
+
+/**
+ * The hint spelling of an action from the installed bindings: `Alt+M`, `Ctrl+G Y` for a
+ * menu-only action, or null when the operator disabled it or nothing reaches it. Editor
+ * and viewport actions spell their first key.
+ */
+export function actionKeyLabel(
+	actionId: Keybinding,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+	const bindings = getKeybindings();
+	const user = bindings.getUserBindings()[actionId];
+	if (Array.isArray(user) && user.length === 0) return null;
+	let letter: string | undefined;
+	if (Object.hasOwn(CLIO_APP_KEYBINDINGS, actionId)) {
+		const descriptor = CLIO_APP_KEYBINDINGS[actionId as ClioKeybinding];
+		if ("leader" in descriptor) letter = descriptor.leader;
+	}
+	const leader = bindings.getKeys("clio-coder.leader")[0];
+	const menu = leader && letter ? `${formatKeyLabel(leader)} ${formatKeyLabel(letter)}` : null;
+	return preferredSpelling(bindings.getKeys(actionId), menu, detectTerminalKeySupport(env));
 }
 
 /** The canonical spelling of a KeyId for chrome hints, preserving each caller's fallback. */

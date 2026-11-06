@@ -105,7 +105,7 @@ export function openHelpOverlay(
 	const keyItems = (): ListOverlayItem[] => {
 		const conflicts = manager.getConflicts();
 		const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
-			const formattedKeys = formatKey(manager.actionLabel(row.id));
+			const formattedKeys = formatKey(manager.fullActionLabel(row.id));
 			// A rebound key says so, and a key two actions share carries the warning
 			// glyph, so the conflict is visible before the row is opened.
 			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
@@ -163,16 +163,16 @@ export function openHelpOverlay(
 	// and with the live footer hints on the surface it documents.
 	const topics: ListOverlayItem[] = [
 		{
-			id: "topic-keyboard-migration",
-			label: "keyboard migration  Defaults, action menu, editing and explicit overrides",
-			cells: { lead: "keyboard migration", text: "Defaults, action menu, editing and explicit overrides" },
+			id: "topic-keyboard-model",
+			label: "keyboard model  Alt for actions, Ctrl+G for any terminal, Ctrl for editing",
+			cells: { lead: "keyboard model", text: "Alt for actions, Ctrl+G for any terminal, Ctrl for editing" },
 			group: "Topics",
 			detail: () => [
-				"# Keyboard migration",
-				"Default keys: Alt+L Library, Alt+M model, Shift+Tab effort, Alt+S send now, Alt+K queue navigator, Alt+Q restore queued messages. Ctrl+Q no longer queues for the end of the turn; the navigator's t key does. Alt+B/D and Home/End now edit the composer.",
-				`The persistent action menu is ${manager.actionLabel("clio-coder.leader")}. Fixed suffixes work independently of direct key overrides; arrows and Enter reach every available entry.`,
-				"Existing configured action IDs are preserved. Explicit [] disables an action's direct and menu routes. This help lists your effective keys; settings are never rewritten.",
-				"Pasted slash and bang text remains literal until a deliberate submit. Ctrl+R searches the fullscreen transcript; Ctrl+C closes focused search or a dialog before cancelling other work.",
+				"# Keyboard model",
+				"Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a Clio action: Alt+M model, Alt+L library, Alt+O output, Alt+U dashboard, Alt+W workers, Alt+E files, Alt+A music, Alt+S send now, Alt+Q queue, Alt+G external editor; Shift+Tab cycles thinking effort.",
+				`${manager.actionLabel("clio-coder.leader")} opens the action menu, and the same letter runs the same action there, so it works in terminals that never deliver Alt. A few actions live only in the menu: t thinking, d background worker, x dismiss notice, y autonomy. Arrows and Enter reach every entry.`,
+				"On an empty composer: ? shows the key card, / commands, ! shell, @ a file, left arrow the workers, down arrow the tasks. Esc stops a run; Ctrl+C twice or Ctrl+D exits.",
+				"Rebinding a direct key never moves its menu letter. An explicit [] disables both. This help lists your effective keys; settings are never rewritten.",
 			],
 		},
 		{
@@ -222,7 +222,7 @@ export function openHelpOverlay(
 				`**Send now** (${manager.actionLabel("clio-coder.message.interrupt")} or /interrupt <text>): settle active work and deliver the draft as a fresh prompt; with an empty draft it flushes the queue. Queued messages stay queued for the new run. While a tool is running you are asked whether to stop it or wait for it.`,
 				`**Queue navigator** (${manager.actionLabel("clio-coder.queue.open")}): reorder, edit, remove, change the slot of, or send now any queued message.`,
 				"**Interrupt is refused** while an attached dispatch is running (the abort would kill the worker's run with no sealed run record; steer it with `@<agent>` or cancel it with Esc) and while a permission ask is parked (it is already waiting on you). In both cases the message is queued for the next slot and a notice says why.",
-				`**Recover queues**: ${manager.actionLabel("clio-coder.message.dequeue")}. Workers accept next-slot steering through @<agent>.`,
+				`**Recover queues**: ${manager.actionLabel("clio-coder.queue.open")}, then a puts every queued message back in the composer. Workers accept next-slot steering through @<agent>.`,
 			],
 		},
 		{
