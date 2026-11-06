@@ -19,7 +19,7 @@ const SETTLED_STATUS: Partial<Record<RunStatus, DispatchBoardStatus>> = {
 };
 
 /** The run's usage as its own journal folds it, the same quantities a live row reads from the session view. */
-function recordedUsage(runId: string): DispatchRunUsage {
+export function recordedRunUsage(runId: string): DispatchRunUsage {
 	try {
 		const record = readRunRecord(clioStateDir(), runId);
 		if (record === null) return { kind: "unavailable" };
@@ -57,7 +57,7 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 		status,
 		elapsedMs: Number.isFinite(endedAt - startedAt) ? Math.max(0, endedAt - startedAt) : 0,
 		...(Number.isFinite(endedAt) ? { settledAtMs: endedAt } : {}),
-		usage: recordedUsage(run.id),
+		usage: recordedRunUsage(run.id),
 		ttft: null,
 		...(run.outcomeDetail ? { outcomeDetail: run.outcomeDetail } : {}),
 		...(run.node !== undefined ? { node: run.node.id } : {}),

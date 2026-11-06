@@ -1715,9 +1715,11 @@ export function runTableRows(
 						row.usage.kind === "unavailable"
 							? USAGE_NOT_MEASURED
 							: isTerminalStatus(row.status)
-								? row.status === "completed"
+								? row.earlier === true && row.status === "completed"
 									? "earlier session"
-									: "no calls here"
+									: row.status === "completed"
+										? USAGE_NOT_MEASURED
+										: "no calls here"
 								: USAGE_NO_CALLS,
 					tone: "muted",
 				}
@@ -2445,6 +2447,8 @@ export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
 	readDurablePlans?: () => ReadonlyArray<FleetPlanRunView>,
 	readDurableRuns?: () => ReadonlyArray<DispatchBoardRow>,
+	/** A settled run's usage from its own record, for a run this session's journal never referenced, such as a plan step. */
+	readRecordedUsage?: (runId: string) => DispatchRunUsage,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
@@ -2485,6 +2489,22 @@ export function createDispatchBoardStore(
 					: { ...row, usage: dispatchRunUsage(view, row.runId), ttft: dispatchRunTtft(view, row.runId), telemetry };
 			});
 	};
+	// Read once per settled run: its record no longer changes, and a repaint must not read the disk.
+	const recorded = new Map<string, DispatchRunUsage>();
+	const settledUsage = (runId: string, usage: DispatchRunUsage): DispatchRunUsage => {
+		if (usage.kind !== "pending" || readRecordedUsage === undefined) return usage;
+		let found = recorded.get(runId);
+		if (found === undefined) {
+			try {
+				found = readRecordedUsage(runId);
+			} catch {
+				// An unreadable record leaves the usage pending, which the row already words.
+				found = usage;
+			}
+			recorded.set(runId, found);
+		}
+		return found.kind === "ready" ? found : usage;
+	};
 	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
 		const view = projection.read?.live() ?? null;
 		return [...current.runs]
@@ -2495,7 +2515,9 @@ export function createDispatchBoardStore(
 					(b.finishedAtMs ?? b.startedAtMs) - (a.finishedAtMs ?? a.startedAtMs),
 			)
 			.map((run) => {
-				const row = toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId), dispatchRunTtft(view, run.runId));
+				const live = dispatchRunUsage(view, run.runId);
+				const usage = isTerminalStatus(run.status) ? settledUsage(run.runId, live) : live;
+				const row = toRow(run, current.generatedAt, usage, dispatchRunTtft(view, run.runId));
 				return {
 					...row,
 					telemetry: view?.run(run.runId) ?? null,

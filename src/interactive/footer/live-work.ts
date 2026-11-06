@@ -200,6 +200,12 @@ function escapeNote(verb: string | null, subject: string): { long: string; short
 	return { long: action, short: going, tiny: "continues" };
 }
 
+/** Esc's note while every worker in view is being stopped: closing the view changes nothing, and nothing keeps going. */
+function stoppingNote(verb: string | null): { long: string; short: string; tiny: string } {
+	const long = verb?.startsWith("back") ? "Esc goes back, the stop goes on" : "Esc closes this view, the stop goes on";
+	return { long, short: "the stop goes on", tiny: "stopping" };
+}
+
 /**
  * The line, or null when nothing is active. Candidates run from fullest to
  * leanest and the first that fits wins, so at 40 columns the phase and its
@@ -217,20 +223,23 @@ export function liveWorkStrip(
 	const workers = [workerSummary(facts, room), backgroundSummary(facts, room)].filter(Boolean).join(" · ") || null;
 	if (!mainActive && workers === null) return null;
 	const dot = theme.fg("border", " · ");
-	const note = escapeNote(
-		escVerb,
-		mainActive
-			? facts.status.tool?.operatorShell === true
-				? "the command"
-				: "the run"
-			: facts.workers.length > 1
-				? "work"
-				: facts.workers.length === 1
-					? facts.workers[0]?.plan !== undefined
-						? "the plan"
-						: "the worker"
-					: "it",
-	);
+	const stopping = !mainActive && facts.workers.length > 0 && facts.workers.every((row) => row.status === "cancelling");
+	const note = stopping
+		? stoppingNote(escVerb)
+		: escapeNote(
+				escVerb,
+				mainActive
+					? facts.status.tool?.operatorShell === true
+						? "the command"
+						: "the run"
+					: facts.workers.length > 1
+						? "work"
+						: facts.workers.length === 1
+							? facts.workers[0]?.plan !== undefined
+								? "the plan"
+								: "the worker"
+							: "it",
+			);
 	const quiet = (text: string): string => theme.fg("annotation", text);
 	const render = (lead: string, parts: ReadonlyArray<string | null>): string =>
 		[lead, ...parts.filter((part): part is string => part !== null).map(quiet)].join(dot);

@@ -66,7 +66,7 @@ import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import { createFleetDock } from "./fleet-dock.js";
 import { readDurableFleetPlans } from "./fleet-plan-history.js";
 import type { FleetPlanRunView } from "./fleet-plan-runs.js";
-import { readDurableWorkerRuns } from "./fleet-run-history.js";
+import { readDurableWorkerRuns, recordedRunUsage } from "./fleet-run-history.js";
 import type { FollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
@@ -492,6 +492,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		deps.telemetry,
 		() => readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
 		() => readDurableWorkerRuns(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+		recordedRunUsage,
 	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
