@@ -93,7 +93,7 @@ export interface GatewayToolDeps {
 }
 
 const DESCRIPTION =
-	'Discover registered builtin, extension and MCP capabilities. op="find" searches, and an exact name also returns its schema; op="describe" returns a schema; op="call" executes with args under its own admission; op="chain" runs tool steps. Put capability at the top level and its parameters inside args. After an argument error, describe the capability before retrying. For chain syntax: op="describe", capability="gateway". Gateway operations are not chain capabilities. Discovery grants no authority.';
+	'Discover builtin, extension and MCP capabilities. op="find" searches; an exact name adds its schema. op="describe" returns a schema; op="call" runs it with args under its own admission; op="chain" runs tool steps. Put capability at top level, its parameters in args. After an argument error, describe the capability before retrying. Chain syntax: op="describe", capability="gateway"; gateway ops are not chain capabilities. Discovery grants no authority.';
 
 export const gatewayToolSurface = {
 	name: ToolNames.Gateway,
