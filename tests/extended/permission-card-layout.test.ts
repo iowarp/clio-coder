@@ -83,10 +83,7 @@ for (const columns of [80, 120, 160]) {
 			.join(" ")
 			.replace(/\s*▌\s*/gu, " ")
 			.replace(/\s+/g, " ");
-		for (const token of [
-			"task-03-protocol-arc-melting-and-aging.md",
-			"sha256 6e068cd0028e23c4",
-		]) {
+		for (const token of ["task-03-protocol-arc-melting-and-aging.md", "sha256 6e068cd0028e23c4"]) {
 			ok(joined.includes(token), `${columns}: lost "${token}"`);
 		}
 		doesNotMatch(joined, /…/u, "nothing is ellipsized");
