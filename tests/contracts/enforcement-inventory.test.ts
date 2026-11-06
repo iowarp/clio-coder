@@ -42,7 +42,7 @@ beforeEach(() => {
 	);
 	write(
 		"scripts/check-drift.mjs",
-		"function checkDocsTable() {}\nasync function checkEnvRows() {}\nconst checks = [checkDocsTable, checkEnvRows];\n",
+		"function checkDocsTable() {}\nasync function checkEnvRows() {}\nconst checks = [checkDocsTable, checkEnvRows];\nfor (const check of checks) await check();\n",
 	);
 	write(
 		"tests/boundaries/check-imports.ts",
@@ -180,6 +180,69 @@ it("marks the check files that run, and reads only the checks something live nam
 	deepStrictEqual(imports?.checks, ["checkEngineImports"]);
 	deepStrictEqual(imports?.failures, ["rule1: the engine is imported outside src/engine"]);
 	deepStrictEqual(inventory.executedScripts, ["lint", "prepack"]);
+});
+
+it("counts an export, a registry or an import as running only when live code uses it", () => {
+	write(".github/workflows/ci.yml", "jobs:\n  check:\n    steps:\n      - run: pnpm run lint\n");
+	write(
+		"package.json",
+		JSON.stringify({ scripts: { lint: "node scripts/check-hygiene.mjs && node scripts/check-pack.mjs" } }),
+	);
+	write(
+		"scripts/check-hygiene.mjs",
+		[
+			'import { runBoundaryCheck, checkDormant, checkSeams } from "../tests/boundaries/check-imports.js";',
+			'import type { Shape } from "../tests/boundaries/check-shapes.js";',
+			'import { type Rule } from "../tests/boundaries/check-rules.js";',
+			"function legacy() {",
+			"\tcheckSeams();",
+			"}",
+			"function checkUsed() {",
+			'\tfail("used-check", "the registry a loop reads runs this check");',
+			"}",
+			"function checkDropped() {",
+			'\tfail("dropped-check", "a registry nothing reads lists this check");',
+			"}",
+			"function checkNow() {",
+			'\tfail("now-check", "a binding computed from a call runs it at once");',
+			"}",
+			"const checks = [checkUsed];",
+			"const available = [checkDropped];",
+			"const report = checkNow();",
+			"for (const check of checks) check();",
+			"runBoundaryCheck();",
+			"",
+		].join("\n"),
+	);
+	// This file names checkDormant but does not import the checker, so it does not make the export live.
+	write("scripts/check-pack.mjs", "function checkDormant() {}\ncheckDormant();\n");
+	write(
+		"tests/boundaries/check-imports.ts",
+		[
+			'export function runBoundaryCheck() { fail("rule1", "the engine is imported outside src/engine"); }',
+			'export function checkDormant() { fail("rule2", "a seam is reached without a declaration"); }',
+			'export function checkSeams() { fail("rule3", "a seam leads back into stage zero"); }',
+			"",
+		].join("\n"),
+	);
+	write(
+		"tests/boundaries/check-shapes.ts",
+		'export type Shape = string;\nfail("rule4", "shapes erase at compile time");\n',
+	);
+	write(
+		"tests/boundaries/check-rules.ts",
+		'export type Rule = string;\nfail("rule5", "rules erase at compile time");\n',
+	);
+	const byPath = Object.fromEntries(collectEnforcementInventory(root).checkFiles.map((file) => [file.path, file]));
+	deepStrictEqual(byPath["scripts/check-hygiene.mjs"]?.failures, [
+		"used-check: the registry a loop reads runs this check",
+		"now-check: a binding computed from a call runs it at once",
+	]);
+	deepStrictEqual(byPath["tests/boundaries/check-imports.ts"]?.failures, [
+		"rule1: the engine is imported outside src/engine",
+	]);
+	strictEqual(byPath["tests/boundaries/check-shapes.ts"]?.executed, undefined);
+	strictEqual(byPath["tests/boundaries/check-rules.ts"]?.executed, undefined);
 });
 
 it("hands the inventory to the bootstrap model", () => {

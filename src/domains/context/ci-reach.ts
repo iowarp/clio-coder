@@ -365,7 +365,17 @@ const FUNCTION_RE =
 /** Text that makes a following `function` an expression, whose name binds only inside it. */
 const EXPRESSION_BEFORE_RE = /(?:[=(,:?[!&|]|\b(?:return|yield|await|void|typeof|new))\s*$/;
 /** A relative static or dynamic import: `from "../tests/check.js"`, `import("./x")`, `require("./x")`. */
-const IMPORT_RE = /\b(?:from|import|require)\s*\(?\s*(["'])(\.{1,2}\/[^"'\n]+)\1/g;
+const IMPORT_RE = /\b(from|import|require)\s*\(?\s*(["'])(\.{1,2}\/[^"'\n]+)\2/g;
+/** The specifiers of the import or export statement a `from` closes: `import type { A } ` before `from "./a"`. */
+const IMPORT_HEAD_RE = /^[\s\S]*(?:^|[^\w$.])(?:import|export)\b([^;]*)$/;
+/** A binding through its initializer's `=`, past a one-line type annotation: `export const checks: Check[] = `. */
+const DECLARATION_RE =
+	/(?<![\w$.])(export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^;\n]*?)?(?<![=!<>])=(?![=>])\s*/g;
+/** What may follow a held initializer when the statement ends there; a line that starts `.`, `(` or an operator continues it. */
+const STATEMENT_END_RE =
+	/^[^\S\n]*(?:(?:as|satisfies)\b[^;\n]*)?(?:;|$|\/[/*]|\n\s*(?:$|\/[/*]|[{}'"]|(?!(?:as|satisfies|instanceof|in)\b)[\w$]))/;
+/** A static import statement, whose names say what a file may use, not what it runs. */
+const IMPORT_STATEMENT_RE = /(?<![\w$.])import\s+[\w$*{}\s,]*?\bfrom\s*(["'])[^"'\n]*\1/g;
 
 /** Whether an offset lies in a string, comment or regex, outside a template's `${…}`. */
 function literalAt(scan: Scan): (at: number) => boolean {
@@ -389,9 +399,9 @@ function literalAt(scan: Scan): (at: number) => boolean {
 	};
 }
 
-interface DeclaredFunction {
+interface Owner {
 	name: string;
-	/** From `export`/`function` through the body's closing brace. */
+	/** From `export`, `function` or `const` through the body's closing brace or the declaration's end. */
 	start: number;
 	end: number;
 	exported: boolean;
@@ -424,14 +434,29 @@ function bodyOpen(scan: Scan, paramsClose: number): number | null {
 	return null;
 }
 
-/** The repository files a JavaScript or TypeScript program imports by relative path. */
+/** Whether import or export specifiers bring in types only: `type { A }`, `{ type A, type B }`. */
+function typeOnly(head: string): boolean {
+	if (/^\s*type\b/.test(head)) return true;
+	const list = /^\s*\{([^}]*)\}\s*$/.exec(head)?.[1];
+	const names = list
+		?.split(",")
+		.map((name) => name.trim())
+		.filter((name) => name.length > 0);
+	return names !== undefined && names.length > 0 && names.every((name) => /^type\s/.test(name));
+}
+
+/** The repository files a JavaScript or TypeScript program value-imports by relative path. */
 export function staticImports(text: string, path: string, visible: ReadonlySet<string>): string[] {
 	if (!JS_PROGRAM_RE.test(path)) return [];
 	const inLiteral = literalAt(scanProgram(text));
 	const found: string[] = [];
 	for (const match of text.matchAll(IMPORT_RE)) {
-		if (inLiteral(match.index ?? 0)) continue;
-		const target = posix.normalize(posix.join(posix.dirname(path), match[2] ?? ""));
+		const at = match.index ?? 0;
+		if (inLiteral(at)) continue;
+		// A type-only import erases at compile time: it runs nothing.
+		const head = match[1] === "from" ? IMPORT_HEAD_RE.exec(text.slice(Math.max(0, at - 2000), at))?.[1] : undefined;
+		if (head !== undefined && typeOnly(head)) continue;
+		const target = posix.normalize(posix.join(posix.dirname(path), match[3] ?? ""));
 		const resolved = [
 			target,
 			target.replace(/\.js$/, ".ts"),
@@ -448,20 +473,56 @@ export function staticImports(text: string, path: string, visible: ReadonlySet<s
 	return found;
 }
 
+/** Program text with its static import statements blanked, so a name only imported does not read as used. */
+export function withoutImports(text: string): string {
+	return text.replace(IMPORT_STATEMENT_RE, (statement) => statement.replace(/[^\n]/g, " "));
+}
+
 /**
- * A JavaScript or TypeScript program with each top-level named function that
- * nothing live names blanked out, newlines kept. Top-level code names a
- * function by calling it or by listing it (`["case-portable-paths",
- * checkCasePortablePaths]`); a function a live function names is live; an
- * exported one is live when `importers` names it. A check whose definition
- * stayed after its invocation was removed then reports nothing. Other
- * languages are returned whole.
+ * Where a binding's initializer at `at` ends when it only holds data or code
+ * for later: an array, object, `Map` or `Set` literal, or a function with a
+ * body, standing alone. Such a binding runs what it names only when something
+ * uses it. Null for any other initializer, which runs now.
+ */
+function heldUntil(scan: Scan, at: number): number | null {
+	const text = scan.text;
+	const head = text.slice(at, at + 200);
+	let close: number | undefined;
+	if (text[at] === "[" || text[at] === "{") close = scan.close.get(at);
+	const collection = /^new\s+(?:Map|Set|WeakMap|WeakSet)\b[^(;]*\(/.exec(head);
+	if (collection) close = scan.close.get(at + collection[0].length - 1);
+	const fn = /^(?:async\s+)?function\b[^(;]*\(/.exec(head);
+	const params = fn ? at + fn[0].length - 1 : /^(?:async\s*)?\(/.exec(head) ? text.indexOf("(", at) : -1;
+	const paramsClose = params < 0 ? undefined : scan.close.get(params);
+	const arrow =
+		paramsClose === undefined
+			? /^(?:async\s+)?[A-Za-z_$][\w$]*\s*=>\s*\{/.exec(head)
+			: /^\s*(?::[^=;{]+)?=>\s*\{/.exec(text.slice(paramsClose + 1, paramsClose + 200));
+	if (fn && paramsClose !== undefined) {
+		const open = bodyOpen(scan, paramsClose);
+		close = open === null ? undefined : scan.close.get(open);
+	} else if (arrow) {
+		close = scan.close.get((paramsClose === undefined ? at : paramsClose + 1) + arrow[0].length - 1);
+	}
+	return close !== undefined && STATEMENT_END_RE.test(text.slice(close + 1, close + 200)) ? close : null;
+}
+
+/**
+ * A JavaScript or TypeScript program with each top-level named function or
+ * held binding that nothing live names blanked out, newlines kept. Top-level
+ * code names a function by calling it or by using a binding that lists it
+ * (`const checks = [["case-portable-paths", checkCasePortablePaths]]` read by
+ * a loop); a function or binding something live names is live; an exported
+ * one is live when `importers`, the live code of the files that import this
+ * one, names it. A check whose definition stayed after its invocation was
+ * removed, or a registry nothing reads, then reports nothing. Other languages
+ * are returned whole.
  */
 export function liveCode(text: string, path: string, importers: string): string {
 	if (!JS_PROGRAM_RE.test(path)) return text;
 	const scan = scanProgram(text);
 	const inLiteral = literalAt(scan);
-	const declared: DeclaredFunction[] = [];
+	const declared: Owner[] = [];
 	for (const match of text.matchAll(FUNCTION_RE)) {
 		const start = match.index ?? 0;
 		if (inLiteral(start) || EXPRESSION_BEFORE_RE.test(text.slice(Math.max(0, start - 40), start))) continue;
@@ -470,37 +531,50 @@ export function liveCode(text: string, path: string, importers: string): string 
 		const end = open === null ? undefined : scan.close.get(open);
 		if (end !== undefined) declared.push({ name: match[2] ?? "", start, end, exported: match[1] !== undefined });
 	}
-	const functions = declared.filter(
-		(inner) => !declared.some((outer) => outer !== inner && outer.start < inner.start && inner.end <= outer.end),
+	for (const match of text.matchAll(DECLARATION_RE)) {
+		const start = match.index ?? 0;
+		if (inLiteral(start)) continue;
+		const end = heldUntil(scan, start + match[0].length);
+		if (end !== null) declared.push({ name: match[2] ?? "", start, end, exported: match[1] !== undefined });
+	}
+	const owners = declared.filter(
+		(inner) =>
+			!declared.some(
+				(outer) =>
+					outer !== inner &&
+					outer.start <= inner.start &&
+					inner.end <= outer.end &&
+					(outer.start < inner.start || inner.end < outer.end),
+			),
 	);
-	const owner = (at: number) => functions.find((fn) => fn.start <= at && at <= fn.end);
-	const live = new Set<DeclaredFunction>();
-	const namedBy = new Map<DeclaredFunction, DeclaredFunction[]>();
-	for (const fn of functions) {
+	const ownerAt = (at: number) => owners.find((owner) => owner.start <= at && at <= owner.end);
+	const live = new Set<Owner>();
+	const namedBy = new Map<Owner, Owner[]>();
+	for (const owner of owners) {
 		// A property access (`report.checkX`) is not a reference; a spread (`...checkX(`) is.
-		const reference = new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escapeRegExp(fn.name)}(?![\\w$])`, "g");
-		if (fn.exported && new RegExp(reference.source).test(importers)) live.add(fn);
+		const reference = new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escapeRegExp(owner.name)}(?![\\w$])`, "g");
+		if (owner.exported && new RegExp(reference.source).test(importers)) live.add(owner);
 		for (const match of text.matchAll(reference)) {
 			const at = match.index ?? 0;
 			if (inLiteral(at)) continue;
-			const from = owner(at);
-			if (from === fn) continue;
-			if (!from) live.add(fn);
-			else namedBy.set(from, [...(namedBy.get(from) ?? []), fn]);
+			const from = ownerAt(at);
+			if (from === owner) continue;
+			if (!from) live.add(owner);
+			else namedBy.set(from, [...(namedBy.get(from) ?? []), owner]);
 		}
 	}
 	const pending = [...live];
-	for (let fn = pending.shift(); fn; fn = pending.shift()) {
-		for (const named of namedBy.get(fn) ?? []) {
+	for (let owner = pending.shift(); owner; owner = pending.shift()) {
+		for (const named of namedBy.get(owner) ?? []) {
 			if (live.has(named)) continue;
 			live.add(named);
 			pending.push(named);
 		}
 	}
 	let result = text;
-	for (const fn of functions) {
-		if (live.has(fn)) continue;
-		result = `${result.slice(0, fn.start)}${result.slice(fn.start, fn.end + 1).replace(/[^\n]/g, " ")}${result.slice(fn.end + 1)}`;
+	for (const owner of owners) {
+		if (live.has(owner)) continue;
+		result = `${result.slice(0, owner.start)}${result.slice(owner.start, owner.end + 1).replace(/[^\n]/g, " ")}${result.slice(owner.end + 1)}`;
 	}
 	return result;
 }

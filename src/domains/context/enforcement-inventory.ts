@@ -12,7 +12,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CI_FILE_RE, ciRunCommands } from "../../core/ci-commands.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
-import { changesDirectory, commandReach, liveCode, staticImports } from "./ci-reach.js";
+import { changesDirectory, commandReach, liveCode, staticImports, withoutImports } from "./ci-reach.js";
 
 export interface EnforcementCheckFile {
 	path: string;
@@ -394,16 +394,34 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 	const candidates = visible.filter(isCheckFile);
 	// A check file a running program imports runs too: Clio's hygiene script imports its boundary checker.
 	const executed = new Set([...declaredPrograms, ...hookFiles]);
+	const order = [...executed];
 	const executedText = new Map<string, string>();
-	const pending = [...executed];
-	for (let path = pending.shift(); path !== undefined; path = pending.shift()) {
+	const importedBy = new Map<string, string[]>();
+	for (const path of order) {
 		const text = readText(root, path);
 		if (text === null) continue;
 		executedText.set(path, text);
 		for (const imported of staticImports(text, path, visibleSet)) {
-			if (executed.has(imported) || !isCheckFile(imported)) continue;
+			if (!isCheckFile(imported)) continue;
+			importedBy.set(imported, [...(importedBy.get(imported) ?? []), path]);
+			if (executed.has(imported)) continue;
 			executed.add(imported);
-			pending.push(imported);
+			order.push(imported);
+		}
+	}
+	// An export is live when the live code of a file importing it names it. Importers mostly come first in
+	// this order; repeating until nothing changes settles the rest, since liveness only grows.
+	const liveText = new Map<string, string>();
+	for (let pass = 0, changed = true; changed && pass <= order.length; pass += 1) {
+		changed = false;
+		for (const path of order) {
+			const text = executedText.get(path);
+			if (text === undefined) continue;
+			const importers = (importedBy.get(path) ?? []).map((other) => withoutImports(liveText.get(other) ?? ""));
+			const live = liveCode(text, path, importers.join("\n"));
+			if (live === liveText.get(path)) continue;
+			liveText.set(path, live);
+			changed = true;
 		}
 	}
 	// Files that CI or a check script invokes by path come first: they are the ones that fail a change.
@@ -413,11 +431,8 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 		const text = readText(root, path);
 		if (text === null || text.includes("\u0000")) continue;
 		const isExecuted = executed.has(path);
-		// An exported check is live when a running program names it; nothing runs an unexecuted file, so all of its exports stay.
-		const importers = isExecuted
-			? [...executedText].flatMap(([other, body]) => (other === path ? [] : [body])).join("\n")
-			: text;
-		const live = liveCode(text, path, importers);
+		// Nothing runs an unexecuted file, so all of its exports stay.
+		const live = (isExecuted ? liveText.get(path) : undefined) ?? liveCode(text, path, text);
 		const failures = failureHeads(live);
 		const rules = checkerRules(live, failures);
 		checkFiles.push({
