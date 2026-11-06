@@ -1,16 +1,21 @@
 ---
 name: arxiv-literature
-description: Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards. Prefer the Researcher shadow agent for noisy multi-paper retrieval.
+description: Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Prefer the Researcher shadow agent for noisy multi-paper retrieval.
 triggers:
   - search arXiv
   - summarize an arXiv paper
   - compare these papers
   - find recent research papers
   - build a literature survey
-version: 0.5.3
+  - bibtex for this arxiv paper
+version: 0.6.0
 license: Apache-2.0
 allowed-tools:
   - web_fetch
+  - gateway
+  - mcp_cite-nexus__get-citation
+  - mcp_cite-nexus__batch-citations
+  - mcp_cite-nexus__verify-citation
   - dispatch
   - read
   - grep
@@ -144,3 +149,4 @@ report the network failure plainly and stop.
   paper cards are the chat reply, never a document; do not go looking for a
   way to save one.
 - When vetting a draft reply or dispatch prompt, read references/red-flags.md.
+- For a BibTeX, RIS or CSL-JSON entry, or to check a cited ID, read references/citations.md.
