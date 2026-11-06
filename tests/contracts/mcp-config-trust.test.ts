@@ -703,4 +703,24 @@ describe("plugin mcp.json declarations", () => {
 		strictEqual(server?.trust.status, "trusted");
 		strictEqual(mcpToolActionClass(server, { name: "get_queue_info", annotations: null }), "unknown");
 	});
+
+	it("classifies a trusted plugin server's tools by the per-tool classes its mcp.json declares", async () => {
+		env = await isolateClioEnv("clio-coder-mcp-plugin-");
+		const { project } = scratch();
+		const source = pluginWithServer(env.dir, "data-kit", "hdf5");
+		writeFileSync(
+			join(source, "mcp.json"),
+			JSON.stringify({
+				mcpServers: {
+					hdf5: { command: "node", args: ["server.mjs"], toolActionClasses: { write_dataset: "destructive" } },
+				},
+			}),
+		);
+		ok(installPlugin(source, { cwd: project }).plugin?.loadable);
+		ok(trustMcpServer({ cwd: project, id: "hdf5", actionClass: "read" }).ok);
+		const server = resolveMcpServers({ cwd: project }).servers.find((entry) => entry.id === "hdf5");
+		strictEqual(server?.trust.status, "trusted");
+		strictEqual(mcpToolActionClass(server, { name: "write_dataset", annotations: null }), "destructive");
+		strictEqual(mcpToolActionClass(server, { name: "read_dataset", annotations: null }), "read");
+	});
 });

@@ -66,7 +66,16 @@ const SERVER_FIELDS = new Set([
 /** The Agent Plugins `mcp.json` file at a plugin root. */
 export const MCP_PLUGIN_CONFIG_FILENAME = "mcp.json";
 const PLUGIN_ROOT_FIELDS = new Set(["$schema", "mcpServers"]);
-const PLUGIN_SERVER_FIELDS = new Set(["type", "command", "args", "cwd", "env", "timeoutMs", "network"]);
+const PLUGIN_SERVER_FIELDS = new Set([
+	"type",
+	"command",
+	"args",
+	"cwd",
+	"env",
+	"timeoutMs",
+	"toolActionClasses",
+	"network",
+]);
 const SHELL_EXECUTABLES = new Set([
 	"bash",
 	"cmd",
@@ -723,6 +732,8 @@ function loadFile(filePath: string, scope: McpServerScope, root: string): McpCon
 /**
  * One plugin's `mcp.json`, in the Agent Plugins shape
  * `{"mcpServers": {"<id>": {"type": "stdio", "command", "args", "env"}}}`.
+ * A server may add Clio's `toolActionClasses`; the declaration digest covers
+ * them, so the operator's trust names the classes it approved.
  * Each server keeps the id it declares and runs in the plugin root. Clio's
  * client speaks stdio only, so another transport is reported and skipped; a
  * malformed file contributes nothing (fail closed).
