@@ -13,7 +13,7 @@
  */
 
 import type { ThinkingLevel } from "../../core/defaults.js";
-import { type Component, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import { type Component, type OverlayHandle, type TUI, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
@@ -119,7 +119,18 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 		anchor: "center",
 		width: MODEL_SCOPE_OVERLAY_WIDTH,
 		markerId: "model-scope",
-		title: `Apply ${formatPendingModelScope(deps.ref)}`,
+		// A narrow rail keeps the model being applied and gives up the connection's name first.
+		title: (context?: { room: number }) => {
+			const thinking = deps.ref.thinkingLevel ? ` with thinking ${deps.ref.thinkingLevel}` : "";
+			const candidates = [
+				`Apply ${formatPendingModelScope(deps.ref)}`,
+				`Apply ${deps.ref.model}${thinking}`,
+				`Apply ${deps.ref.model}`,
+				deps.ref.model,
+			];
+			const room = context === undefined ? Number.POSITIVE_INFINITY : context.room - 4;
+			return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? deps.ref.model;
+		},
 		footerHint: buildHint([{ key: "Enter", verb: "choose" }], deps.onBack ? "back to models" : "close"),
 	});
 }

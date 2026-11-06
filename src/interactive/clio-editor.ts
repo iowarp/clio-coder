@@ -847,7 +847,8 @@ export class ClioEditor extends Editor {
 		// A body that stops asking to grow returns to the shared height, so the slice is also capped at what it was given.
 		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : Math.min(entry.rowsUsed, bodyRows));
 		const pad = " ".repeat(gutter);
-		const plainTitle = entry.frame.dockTitle();
+		// A title that can shorten itself is told the rail's room, the way an approval's title is.
+		const plainTitle = entry.frame.dockTitle({ room, actor: "" });
 		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", plainTitle, { bold: true });
 		// A question holds the rail like a card does, so it says what it is not holding up too.
 		const beside = entry.frame.dockAwaitingInput?.()
