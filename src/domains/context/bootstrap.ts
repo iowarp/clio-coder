@@ -871,9 +871,10 @@ function wrapBareCitations(line: string, evidence: ModelGroundingCorpus): string
 }
 
 // Real symbols were attributed to importing files; use indexed definitions to correct unambiguous ownership.
+// A path followed by 's ("in the index file's sibling") names a neighbor, not the owner: leave it.
 function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus): string {
 	return line.replace(
-		/(`[A-Za-z_$][\w$]*(?:\(\))?`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)`[A-Za-z_$][\w$]*(?:\(\))?`)*)\s+(in|from|of)\s+`([^`\n]+)`/g,
+		/(`[A-Za-z_$][\w$]*(?:\(\))?`(?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)`[A-Za-z_$][\w$]*(?:\(\))?`)*)\s+(in|from|of)\s+`([^`\n]+)`(?!['\u2019]s\b)/g,
 		(match, symbols: string, relation: string, citedPath: string) => {
 			const path = citedPath.replace(/^\.\//, "");
 			if (!/^[\w./-]+\.[A-Za-z0-9]+$/.test(path)) return match;
