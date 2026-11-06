@@ -674,7 +674,7 @@ function lineRange(finished: ToolExecutionFinished, observation: Record<string, 
 function abortedFact(cause: string | null, details: Record<string, unknown> | null): string {
 	const killed = details?.signal === "SIGKILL";
 	const byOperator = cause !== null && /^cancel+ed at your request\.?$/iu.test(cause.trim());
-	if (byOperator) return killed ? "stopped by you, killed after it ignored the stop" : "stopped by you";
+	if (byOperator) return killed ? "killed, it ignored your stop" : "stopped by you";
 	const why = cause === null ? null : cause.trim().replace(/\.$/u, "");
 	const reason = why === null || why.length === 0 ? "stopped when the run ended" : `stopped: ${why}`;
 	return killed ? `${reason}, killed after it ignored the stop` : reason;

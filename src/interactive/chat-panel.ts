@@ -1991,6 +1991,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * transcript with nothing running keeps the old mutation-only invalidation.
 	 */
 	let renderedRunningTool = false;
+	/** The `isLive` of each replay block still reporting live, so the frame after one settles is never a cache hit. */
+	const liveReplayBlocks = new Set<() => boolean>();
 	/**
 	 * Each stable entry keeps its render for the last few layout keys (width,
 	 * height budget, style). Alt+O cycles three styles, and holding one render
@@ -2724,6 +2726,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// pinned to 0 whenever nothing is counting so a settled transcript
 		// re-renders no more often than it did before.
 		const tick = renderedRunningTool ? Math.floor(nowMs / 100) : 0;
+		// A live block that settled since the last frame changed what it renders, which no mutation marked: a `!false`
+		// that exited inside one 100 ms tick kept reading `you are running` beside a rail reading `exited 1`.
+		for (const live of liveReplayBlocks) {
+			if (live()) continue;
+			liveReplayBlocks.delete(live);
+			dirty = true;
+		}
 		if (
 			!dirty &&
 			cachedWidth === width &&
@@ -2932,6 +2941,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			markDirty();
 		},
 		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
+			if (isLive !== undefined) liveReplayBlocks.add(isLive);
 			appendRow({ role: "replayBlock", renderBlock, at: stamp(), isLive });
 			markDirty();
 		},
@@ -3122,6 +3132,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.length = 0;
 			lastSettledReceipt = null;
 			liveReceipts.clear();
+			liveReplayBlocks.clear();
 			receiptView = null;
 			runTurnId = undefined;
 			runStartedAt = undefined;
