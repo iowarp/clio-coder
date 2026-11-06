@@ -48,6 +48,9 @@ export const coreTests = [
 	"fleet-run-history-prime",
 	"approval-card-arguments",
 	"copilot-sdk-route",
+	"retired-settings-keys",
+	"doctor-unknown-runtime",
+	"plugin-engine",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
