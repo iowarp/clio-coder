@@ -125,6 +125,13 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - `dist` is minified with every function and class name kept, so stack traces name the same symbols. The Node bundles shrink from 17.22 MB to 13.97 MB.
 - Source pack members compress concurrently, and the extension type declarations ship bundled.
 
+### Keyboard
+
+- One keyboard model: Ctrl edits, Alt+letter runs a Clio action, and Ctrl+G then the same letter runs it in any terminal. Send now is `Ctrl+G s` (was `i`), the queue is `Alt+Q`/`Ctrl+G q` (was `Alt+K`/`n`), background is `Ctrl+G d` (was `s`), and the external editor gains `Alt+G`.
+- `Alt+Q` no longer restores the queue from the composer; in the queue navigator `a` puts every message back in the draft. `clio-coder.message.dequeue` keeps its ID with no default key.
+- Hints, the `?` card, the welcome and the footer spell each action one way: its direct key, or `Ctrl+G` and the letter. In Terminal.app, where Option types text, they spell the `Ctrl+G` route. `/help` still lists every route, and its keyboard topic states the three rules.
+- With demo guidance on, the idle footer offers `? Keys`, and running a slash command that has a key shows one tip naming the key until you press it.
+
 ## 0.6.9 - 2026-11-06
 
 Clio Coder 0.6.9 makes the terminal tell the truth about what is happening and who it is waiting on. The status rail names the model, worker, server or person a turn waits on, with a clock and the key that stops it, and states a silence with its evidence instead of a spinner. Provider waits read as waits and are sat out in full, a model pick can move a request still waiting on its first output, and a worker's approval card can be held while you read it. Esc and Ctrl+C back out one layer at a time and never throw away typed text, and a stop holds queued messages instead of joining them (#447). Receipts, `/usage`, the exit summary and Fleet Runs count calls and tokens one way and say "not measured" instead of guessing. The line also moves to the Pi SDK 1.5.0, clears every open dependency advisory and closes two installer gaps.

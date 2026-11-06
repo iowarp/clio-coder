@@ -1,7 +1,8 @@
 /**
  * Idle footer tips for demo guidance: a small session-local budget, one tip at
  * a time. No timers or model calls; a tip whose feature the operator already
- * uses (the harness profile) is skipped.
+ * uses (the harness profile) is skipped. A slash command that has a key earns
+ * one nudge per session naming that key, until the operator presses it.
  */
 import { GLYPH } from "../theme/index.js";
 
@@ -17,6 +18,12 @@ export function createDemoHints() {
 		toolsUsed: boolean;
 		contextBusy: boolean;
 		dashboardKey: string;
+		/** The action menu key; the welcome tip names it. */
+		menuKey?: string;
+		/** The last slash command run this session, such as `/model`. */
+		lastCommand?: string | null;
+		/** The not-yet-used key that does what `command` does, or null. */
+		shortcutFor?: (command: string) => string | null;
 		/** True when the operator already uses `feature`; absent means nothing is learned. */
 		learned?: (feature: string) => boolean;
 	}): string | null => {
@@ -25,11 +32,14 @@ export function createDemoHints() {
 			return null;
 		}
 		const learned = input.learned ?? (() => false);
+		const command = input.lastCommand ?? null;
+		const shortcut = command === null ? null : (input.shortcutFor?.(command) ?? null);
 		const choices: [string, boolean, string][] = [
+			[`key ${command}`, shortcut !== null, `${shortcut} ${GLYPH.next} ${command} without typing it.`],
 			["agents", input.agentActive, `${input.dashboardKey} ${GLYPH.next} Activity shows agents' current actions.`],
 			["context", input.contextBusy && !learned("/context"), "/context shows what occupies your context window."],
 			["tools", input.toolsUsed && !learned("/view"), "/view lets you inspect recorded tool calls and results."],
-			["welcome", !learned("/help"), "Explore /help · guidance in /settings"],
+			["welcome", !learned("/help"), `? lists keys · ${input.menuKey ?? "Ctrl+G"} opens every action · /help`],
 		];
 		if (current && input.now < current.until) {
 			const active = choices.find(([id, eligible]) => id === current?.id && eligible);

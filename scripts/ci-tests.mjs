@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { appendFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +48,7 @@ export const coreTests = [
 	"plugin-engine",
 	"claims-ledger",
 	"cli-leaf-help",
+	"keyboard-model",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
@@ -60,7 +61,13 @@ export const guiTests = [
 	"app-state",
 	"ssh-model",
 	"machine-proxy",
-].map((name) => `tests/${name}.test.ts`);
+	"library-http",
+	"public-help",
+].map((name) => {
+	// A check that renders React is a .tsx file.
+	const tsx = `tests/${name}.test.tsx`;
+	return existsSync(join(root, "apps/clio-coder-gui", tsx)) ? tsx : `tests/${name}.test.ts`;
+});
 
 export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
 

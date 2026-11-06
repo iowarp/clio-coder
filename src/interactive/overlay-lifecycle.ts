@@ -588,7 +588,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 						toEditor: deps.queueNavigator.toEditor,
 						sendNow: deps.queueNavigator.sendNow,
 						restoreAll: deps.queueNavigator.restoreAll,
-						restoreAllLabel: () => keybindings.actionLabel("clio-coder.message.dequeue"),
 						matchesRestoreAll: (data: string) => keybindings.matches(data, "clio-coder.message.dequeue"),
 					},
 				}

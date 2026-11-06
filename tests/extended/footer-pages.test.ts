@@ -425,7 +425,7 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 		const hints = Array.from({ length: 40 }, (_, i) =>
 			footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, "idle"),
 		).join("\n");
-		match(hints, /Ctrl\+M Model picker/);
+		match(hints, /Ctrl\+M Model(?! picker)/);
 		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
 		match(hints, /newline/);
 		match(hints, /Thinking effort/);

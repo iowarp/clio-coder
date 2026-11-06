@@ -135,9 +135,9 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 	};
 	const keyLabel = (action: string): string | null =>
 		({
-			"tui.input.newLine": "Ctrl+J",
+			"clio-coder.leader": "Ctrl+G",
 			"clio-coder.model.select": "Alt+M",
-			"clio-coder.editor.external": "Ctrl+G",
+			"clio-coder.editor.external": "Alt+G",
 		})[action] ?? null;
 	for (const width of [160, 200, 240]) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.7", width, "launchpad", 0, keyLabel).map(stripTerminalSequences);
@@ -151,8 +151,8 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 		strictEqual(column("Claude"), column("Up to date"));
 		strictEqual(column("Choose a model"), column("Browse plugins"));
 		strictEqual(column("Explore commands"), column("Browse plugins"));
-		strictEqual(column("New line"), column("Model picker"));
-		strictEqual(column("Open your external"), column("Model picker"));
+		strictEqual(column("Every action by letter"), column("Model picker"));
+		strictEqual(column("Write in your own"), column("Model picker"));
 		const local = lines.find((line) => line.includes("Local"));
 		if (!local) {
 			match(lines.join("\n"), /… \/usage/u);
