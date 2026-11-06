@@ -14,6 +14,7 @@ import type { ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
+	SENT_DISPOSITIONS,
 	usageCoverage,
 	usageEstimatedCalls,
 	usageEstimates,
@@ -179,14 +180,11 @@ function tokenBreakdown(view: TelemetryView, model?: string): string {
 	return [...figures, ...notes].join(" · ");
 }
 
-/** Calls that reached the provider or may have; a never-sent attempt asked the model nothing. */
-const SENT = ["sent_unsettled", "settled_no_usage", "settled", "incomplete"] as const;
-
 export function exitSpend(view: TelemetryView | null | undefined, visitFrom: string): ExitSpend {
 	if (!view) return { kind: "unavailable" };
 	const session = view.session();
 	const sessionTokens = tokenFacts(view);
-	const visit = view.calls({ from: visitFrom, dispositions: [...SENT] });
+	const visit = view.calls({ from: visitFrom, dispositions: [...SENT_DISPOSITIONS] });
 	// `settle` runs from each attempt's start, retries included, so it holds the silent wait for the first token that
 	// `modelTime` (first token to settle) leaves out. It also holds any admission hold Clio put on the request.
 	const callTime =

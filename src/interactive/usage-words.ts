@@ -7,7 +7,9 @@
  * `3 calls had no usage data`.
  */
 
+import type { AgentRole } from "../core/telemetry/enums.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
+import type { TelemetryView } from "../domains/telemetry/contract.js";
 
 export const USAGE_NOT_MEASURED = "not measured";
 
@@ -159,4 +161,21 @@ export function usageLineNotes(
 			...(running > 0 ? [usageStillRunning(running)] : []),
 		],
 	};
+}
+
+/** Calls that reached the provider or may have; a never-sent attempt asked the model nothing. */
+export const SENT_DISPOSITIONS = ["sent_unsettled", "settled_no_usage", "settled", "incomplete"] as const;
+
+/**
+ * Model calls that went out, counted once per call across its attempts. `/usage` counted the memory guardian's skipped
+ * steps as model calls (20) beside an exit card that counted the 11 that were sent; both count this now.
+ */
+export function sentCallCount(view: TelemetryView, filter: { roles?: AgentRole[]; from?: string } = {}): number {
+	try {
+		const calls = view.calls({ ...filter, dispositions: [...SENT_DISPOSITIONS] }).calls;
+		return new Set(calls.map((call) => call.callId)).size;
+	} catch {
+		// A read model that cannot list calls has no sent count to give; the caller shows its own total instead.
+		return Number.NaN;
+	}
 }

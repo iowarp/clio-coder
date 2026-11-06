@@ -92,9 +92,10 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
  * the measured part alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252`.
  */
 function knownSessionCount(quantity: Quantity): string | null {
-	// Clio's estimates count, marked `~`; calls that reported nothing leave the bound to /usage, as the receipt does.
+	// One mark at most, the one /usage and the exit card give the same sum: `≥` while some call reported nothing, and
+	// no `~`, whose calls those surfaces name in words. The footer said `~27.3k` beside `≥27,252` in /usage.
 	const figure = renderCompactCount(quantity.fact)
-		.replace(/^≥/u, "")
+		.replace(/^(≥?)~/u, "$1")
 		.replace(/ \+\?$/u, "");
 	return figure === "?" || figure === "n/a" ? null : figure;
 }

@@ -132,6 +132,17 @@ function sessionTokens(theme: ClioTheme, measured: string | null, width: number)
 	return theme.fg("counter", width < 60 ? `${measured} tok` : `session ${measured} tokens`);
 }
 
+/**
+ * The tool tally as one chip that fits its row: the registered count gives way first, so a narrow page keeps what ran
+ * and what failed. At 40 columns `tools 8 available · bash 1 · 1 failed` wrapped and lost `failed` below the fold.
+ */
+function toolChip(tally: string, width: number): string {
+	const room = Math.max(1, width - 2 - visibleWidth("tools "));
+	if (visibleWidth(tally) <= room) return tally;
+	const called = tally.replace(/^\d+ available · /u, "");
+	return called.length > 0 ? called : tally;
+}
+
 /** A settled rate says which call it belongs to; beside `last turn` it read as a live figure. */
 function lastCallThroughput(state: FooterDashboardRenderState): string | null {
 	const figures = formattedThroughput(clioTheme(), state.throughput, state.telemetry);
@@ -149,7 +160,13 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	const headline = chipRows(
 		theme,
 		[
-			buildHarnessStatePill(theme, state.status, state.toolCounts, state.tick, state.now, Math.max(width, 40)),
+			// Idle has one name, the rail's `is ready` two rows down; `◌ Idle` here was a third (HS01). With nothing running
+			// the row leads with the last turn, or says there has been none.
+			state.status.phase === "idle" && (state.toolCounts.active ?? 0) <= 0
+				? lastTurn
+					? null
+					: theme.fg("counter", "no turn yet")
+				: buildHarnessStatePill(theme, state.status, state.toolCounts, state.tick, state.now, Math.max(width, 40)),
 			contextWork
 				? theme.fg(
 						contextWork.status === "failed" ? "error" : contextWork.status === "completed" ? "success" : "activity",
@@ -190,7 +207,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								? null
 								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
-			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
+			tools === null ? null : labelled("tools", theme.fg("counter", toolChip(clean(tools), width))),
 		],
 		width,
 	);
