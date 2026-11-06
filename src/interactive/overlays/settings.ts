@@ -2069,8 +2069,11 @@ export function targetRows(
 		const liveHealth = activitySegment ?? routeBreakerSegment(routes) ?? healthSegment;
 		const breakerText = routes.length > 0 ? ` · Breaker: ${routes.map(routeBreakerPhrase).join("; ")}` : "";
 		const runtime = status?.runtime?.id ?? target.runtime;
+		// A down target's latency is how fast the connection was refused, which read as a healthy `2 ms` beside `down`.
 		const latency =
-			status?.health.latencyMs === null || status?.health.latencyMs === undefined ? "—" : `${status.health.latencyMs} ms`;
+			status?.health.latencyMs === null || status?.health.latencyMs === undefined || status.health.status === "down"
+				? "—"
+				: `${status.health.latencyMs} ms`;
 		const lastProbe = status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never";
 		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : "none");
 		const valueSegments = [

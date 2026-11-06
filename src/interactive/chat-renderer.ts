@@ -702,7 +702,8 @@ function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[
 }
 
 function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {
-	return renderNoticeRow(`[thinking] ${entry.thinkingLevel}`, "info", width);
+	// The words the hint row uses for the same setting; `[thinking] low` was the session record talking.
+	return renderNoticeRow(`Thinking effort ${entry.thinkingLevel}`, "info", width);
 }
 
 function renderFileEntry(entry: FileEntryEntry, width: number): string[] {
