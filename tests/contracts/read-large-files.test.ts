@@ -472,7 +472,7 @@ describe("read windowed reader", () => {
 	it("refuses a named pipe and a directory from stat alone, without opening them", { timeout: 10_000 }, async (t) => {
 		const dir = await readTool.run({ path: scratch.dir });
 		ok(dir.kind === "error");
-		match(dir.message, /not a file/);
+		match(dir.message, /is a directory, not a file\. List its entries with ls\./);
 		deepStrictEqual(dir.details?.file, identity(scratch.dir));
 		const fifo = join(scratch.dir, "pipe.fifo");
 		try {

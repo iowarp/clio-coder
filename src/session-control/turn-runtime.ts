@@ -850,7 +850,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const settlement = withCachePhysics(
 					callSettlementFromMessage(
 						message,
-						localRuntime.runtimeResolution.pricedBy,
+						localRuntime.runtimeResolution,
 						message.role === "assistant" && message.stopReason === "aborted"
 							? state.routeMove !== null
 								? "route_moved"
@@ -1102,10 +1102,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
 						const settlement = withCachePhysics(
-							callSettlementFromMessage(
-								{ ...message, ...(failure ? { failure } : {}) },
-								localRuntime.runtimeResolution.pricedBy,
-							),
+							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, localRuntime.runtimeResolution),
 							message,
 						);
 						const facts = modelCall.settle(settlement, reportedModelFromMessage(message));
@@ -1743,8 +1740,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					: (usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
 						? "provider"
 						: localRuntime.runtimeResolution.pricedBy;
+				const freeRule = pricedBy === "free" ? localRuntime.runtimeResolution.freeRule : undefined;
 				Object.assign(message, {
-					callAccounting: { usageObserved: observed, pricedBy, targetId: localRuntime.targetId },
+					callAccounting: {
+						usageObserved: observed,
+						pricedBy,
+						...(freeRule !== undefined ? { freeRule } : {}),
+						targetId: localRuntime.targetId,
+					},
 				});
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,

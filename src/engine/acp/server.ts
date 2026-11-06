@@ -109,6 +109,8 @@ import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import { mutationFacts } from "../../session-control/approval-request-facts.js";
+import type { MutationFacts } from "../../session-control/approval-request-view.js";
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import {
 	classifyTurnEnding,
@@ -2936,6 +2938,7 @@ function decisionMeta(
 	presentation: DecisionPresentation,
 	callTarget: string,
 	consequence: ReadonlyArray<string>,
+	mutation: MutationFacts | null = null,
 ): Record<string, unknown> {
 	const axis =
 		facts.axis.kind === "safety-net"
@@ -2979,6 +2982,11 @@ function decisionMeta(
 			reversibility: facts.reversibility,
 			...(target.length > 0 ? { target } : {}),
 			...(consequenceLines.length > 0 ? { consequenceLines } : {}),
+			// The size and digest of a parked write or edit, the facts the terminal
+			// card shows on its mutation row. Only numbers, an enum and a hex digest,
+			// so a client can bind what it renders from `rawInput` to the exact call
+			// it approves.
+			...(mutation !== null ? { mutation } : {}),
 		},
 	};
 }
@@ -3195,6 +3203,7 @@ function installPermissionBridge(input: {
 										presentation,
 										describeCallTarget(call.tool, call.args),
 										describeMainCallConsequences(call),
+										mutationFacts(call.tool, call.args),
 									),
 									// The plan admission rendered, whose hash a plan-scale run seals.
 									...(meta.dispatchPlan !== undefined

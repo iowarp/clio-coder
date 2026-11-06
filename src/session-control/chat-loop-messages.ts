@@ -1,6 +1,6 @@
 import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
-import { type Pricing, type PricingSum, sumPricing } from "../core/telemetry/pricing.js";
+import { isFreeRule, type Pricing, type PricingSum, sumPricing } from "../core/telemetry/pricing.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import type { CacheReadField } from "../core/token-split.js";
 import type { EffectivePricing } from "../domains/providers/catalog.js";
@@ -600,7 +600,11 @@ function messageSettlements(
 	if (usage === null) return { settled: [], journaled: null };
 	const pricedBy =
 		typeof usage.pricedBy === "string" ? (usage.pricedBy as EffectivePricing["pricedBy"]) : fallbackPricedBy;
-	return { settled: [callSettlementFromMessage({ ...message, usage }, pricedBy)], journaled: null };
+	const freeRule = isFreeRule(usage.freeRule) ? usage.freeRule : undefined;
+	return {
+		settled: [callSettlementFromMessage({ ...message, usage }, { pricedBy, ...(freeRule ? { freeRule } : {}) })],
+		journaled: null,
+	};
 }
 
 /**

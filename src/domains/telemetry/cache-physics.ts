@@ -64,7 +64,12 @@ function bill(
 	usage: { uncached: number | null; cacheRead: number | null; cacheWrite: number | null },
 ): NonNullable<CachePhysics["bill"]> {
 	if (rePrefilled.kind !== "measured") return { usd: rePrefilled, pricedBy: "none" };
-	if (pricing.pricedBy === "free") return { usd: counted(0), pricedBy: "free" };
+	if (pricing.pricedBy === "free")
+		return {
+			usd: counted(0),
+			pricedBy: "free",
+			...(pricing.freeRule !== undefined ? { freeRule: pricing.freeRule } : {}),
+		};
 	if (pricing.rates === null || pricing.pricedBy === "none" || usage.uncached === null || usage.cacheRead === null)
 		return { usd: { kind: "unknown", reason: "provider-omitted" }, pricedBy: "none" };
 	// Moving the re-prefilled tokens to the cache-read rate keeps the prompt size, so a tiered rate map prices both

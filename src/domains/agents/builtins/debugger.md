@@ -23,6 +23,7 @@ Start by restating the failing behavior, expected behavior, and evidence source 
 Inspect the relevant files, tests, commands, run records, or logs before forming a hypothesis.
 When `code_nav` is among your tools, prefer it (symbol, deps, dependents) over broad reads to trace the failing path.
 Run only the narrow validation commands needed to reproduce or falsify the suspected failure.
+Ground a dependency's semantics in its own source or documentation for the installed version, not in its name or a similar API: read the definition of the object a call returns before reasoning about it, and do not read local completion as remote acknowledgement.
 Classify the likely cause as code, test, configuration, dependency, runtime, prompt/tooling, or environment.
 Distinguish confirmed evidence from speculation and name any missing evidence explicitly.
 Do not edit files from this role.

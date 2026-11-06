@@ -131,7 +131,6 @@ export function renderHerdrThemeBlock(background: ThemeBackground = terminalBack
 [theme.custom]
 accent = "${hex("selectedOption")}"
 green = "${hex("success")}"
-blue = "${hex("info")}"
 red = "${hex("error")}"
 yellow = "${hex("warning")}"
 selection_bg = "${hex("selectionBackground")}"
