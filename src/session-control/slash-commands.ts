@@ -645,6 +645,17 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
  * A private path would have had to reproduce that, and would eventually have
  * reproduced it wrongly.
  */
+/**
+ * A council's failure in the words a person acts on. The dispatch tool's result opens with the note its approval
+ * leaves for the model (`[operator approval] The operator approved this dispatch call once …`), which the operator,
+ * who gave that approval, has no use for; what follows is the failure itself, read through the shared headline.
+ */
+function councilFailureWords(message: string): string {
+	const lines = message.split("\n");
+	const body = (/^\[(?:operator )?approval\]/u.test(lines[0] ?? "") ? lines.slice(1) : lines).join(" ").trim();
+	return workerFailureHeadline(body) ?? (body.length > 0 ? body : "the council stopped before any member answered");
+}
+
 async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: SlashCommandContext): Promise<void> {
 	// Refused, never queued, exactly as `/oracle` and `/fleet run` are. An
 	// approved council describes the workspace as it stands, and a turn in
@@ -673,9 +684,9 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 			ctx.standingTurnConstraints?.(),
 		);
 		if (outcome.status === "blocked") ctx.notice("warn", `/council was not admitted: ${outcome.reason}`);
-		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${outcome.message}`);
+		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
 	} catch (err) {
-		ctx.notice("error", `/council failed: ${err instanceof Error ? err.message : String(err)}`);
+		ctx.notice("error", `/council failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);
 	}
 }
 

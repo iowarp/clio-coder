@@ -161,7 +161,16 @@ function councilMemberLines(
 	];
 	// A member this process did not watch has no tail here; its answer is in its record, so the column says where.
 	if (member.settled === true && member.tailText.trim().length === 0) {
-		lines.push(truncateToWidth(theme.fg("annotation", `answer in /view dispatch:${member.runId}`), width, "…", false));
+		// A member that failed has no answer anywhere; its record says why, which is what the pointer offers instead.
+		const failed = member.status.token === "error";
+		lines.push(
+			truncateToWidth(
+				theme.fg("annotation", `${failed ? "no answer · why in" : "answer in"} /view dispatch:${member.runId}`),
+				width,
+				"…",
+				false,
+			),
+		);
 	}
 	return lines.map((line) => padAnsi(line, width));
 }
