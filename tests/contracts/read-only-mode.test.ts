@@ -21,6 +21,7 @@ const { readTargetModelSnapshot, recordTargetModelSnapshot, targetModelSnapshotP
 const { endpointSlotsPath, readDiscoveredEndpointSlots, recordDiscoveredEndpointSlots } = await import(
 	"../../src/domains/providers/endpoint-slots-store.js"
 );
+const { withStateFileLock } = await import("../../src/core/state-file-lock.js");
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const target = { id: "local", runtime: "openai-compat", url: "http://127.0.0.1:9/v1" };
@@ -47,7 +48,14 @@ describe("read-only mode", () => {
 	it("a process in read-only mode for good reads both and leaves them as it found them", async () => {
 		const snapshotFile = targetModelSnapshotPath(target.id);
 		const before = [readFileSync(snapshotFile, "utf8"), readFileSync(endpointSlotsPath(), "utf8")];
-		enterReadOnlyMode();
+		// A slot write already waiting for the lock when the mode turns on records nothing once it holds it.
+		let waiting: Promise<void> | undefined;
+		await withStateFileLock(endpointSlotsPath(), async () => {
+			waiting = recordDiscoveredEndpointSlots(slots(2));
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			enterReadOnlyMode();
+		});
+		await waiting;
 		equal(recordTargetModelSnapshot(target, ["model-b"]), false);
 		await recordDiscoveredEndpointSlots(slots(1));
 		deepEqual([readFileSync(snapshotFile, "utf8"), readFileSync(endpointSlotsPath(), "utf8")], before);

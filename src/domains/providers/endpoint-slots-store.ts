@@ -169,15 +169,15 @@ export async function recordDiscoveredEndpointSlots(
 ): Promise<void> {
 	if (!Number.isInteger(entry.slots) || entry.slots <= 0) return;
 	if (entry.endpointKey.length === 0 || entry.runtimeId.length === 0) return;
-	if (readOnlyMode()) return;
-	// Checked before the lock because acquiring it recreates the state root, and
-	// again under it because an uninstall can land while this call waits.
-	if (stateRootRemoved()) return;
+	// Both checked before the lock because acquiring it creates the lock file, and
+	// again under it because read-only mode or an uninstall can land while this
+	// call waits.
+	if (readOnlyMode() || stateRootRemoved()) return;
 	const nowMs = options?.nowMs ?? Date.now();
 	const ttlMs = options?.ttlMs ?? endpointSlotsTtlMs();
 	try {
 		await withStateFileLock(endpointSlotsPath(), () => {
-			if (stateRootRemoved()) return;
+			if (readOnlyMode() || stateRootRemoved()) return;
 			const kept = readRecords().filter(
 				(record) => record.endpointKey !== entry.endpointKey && fresh(record, nowMs, ttlMs),
 			);

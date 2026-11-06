@@ -56,17 +56,25 @@ describe("main-session sandbox Clio roots", () => {
 	it("a Clio root the spawn cannot create refuses the command", () => {
 		const file = join(home, "not-a-dir");
 		writeFileSync(file, "");
-		const policy = resolveMainSandboxPolicy({
-			workspace,
-			scratchRoots: [],
-			cacheRoots: [],
-			codeCaches: [],
-			clioDirs: [join(file, "cache")],
-		});
 		const available = { available: true, backend: "bwrap" as const, executable: "/usr/bin/bwrap", reason: null };
-		const plan = planMainSandboxSpawn(policy, { argv: ["/bin/true"] }, workspace, available);
-		equal(plan.kind, "refused");
-		if (plan.kind === "refused") match(plan.message, /could not create Clio's directory .*the command was not run/u);
+		// Under the file and at the file itself: a regular file is no root to bind read-only over.
+		for (const [dir, code] of [
+			[join(file, "cache"), "ENOTDIR"],
+			[file, "EEXIST"],
+		] as const) {
+			const policy = resolveMainSandboxPolicy({
+				workspace,
+				scratchRoots: [],
+				cacheRoots: [],
+				codeCaches: [],
+				clioDirs: [dir],
+			});
+			const plan = planMainSandboxSpawn(policy, { argv: ["/bin/true"] }, workspace, available);
+			equal(plan.kind, "refused", dir);
+			if (plan.kind === "refused") {
+				match(plan.message, new RegExp(`could not create Clio's directory .*${code}.*the command was not run`, "u"));
+			}
+		}
 	});
 
 	it("under bwrap a spawn creates an absent Clio cache root and keeps it read-only", async (t) => {

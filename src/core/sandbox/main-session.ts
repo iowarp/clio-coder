@@ -557,9 +557,9 @@ export function planMainSandboxSpawn(
 		};
 	}
 	// A read-only bind needs its path to exist, and naming the policy created none.
-	// A dangling link fails here as it did when the policy created the roots.
+	// No existence shortcut: a recursive mkdir passes only a directory, so a
+	// dangling link or a regular file in a root's place refuses the command.
 	for (const dir of policy.clioDirs) {
-		if (existsSync(dir)) continue;
 		try {
 			mkdirSync(dir, { recursive: true });
 		} catch (error) {
