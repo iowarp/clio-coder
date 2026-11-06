@@ -77,14 +77,15 @@ export function describeMusicResult(result: MusicResult): string {
 	}
 	if (result.status === "paused") return result.title ? `music paused (${result.title})` : "music paused";
 	if (result.status === "shown") {
-		const what = result.playing ? (result.title ? `♫ ${result.title}` : "music playing") : "music paused";
-		return `music pane shown, ${what.replace(/^music /, "")}`;
+		// A shown pane with nothing playing says how to start it, since the pane alone makes no sound.
+		if (!result.playing) return "music pane shown; nothing is playing. /music on plays, /music hides the pane";
+		return `music pane shown, ${result.title ? `♫ ${result.title}` : "playing"}`;
 	}
 	if (result.status === "hidden") {
 		const still = result.playing ? (result.title ? `, still playing ♫ ${result.title}` : ", still playing") : "";
 		return `music pane hidden${still}`;
 	}
-	if (result.status === "stopped") return "music is off";
+	if (result.status === "stopped") return "music is off; /music on plays again";
 	return result.reason;
 }
 

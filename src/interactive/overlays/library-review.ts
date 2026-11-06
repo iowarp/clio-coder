@@ -13,6 +13,7 @@
  * that answer it, then lays every step out as a fact table under its own rule.
  */
 
+import { homedir } from "node:os";
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../../domains/extensions/envelope-review.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../../domains/interop/index.js";
 import {
@@ -23,6 +24,7 @@ import {
 	type LibraryRefreshResult,
 	type LibraryStepOutcome,
 	type LibraryStepReview,
+	type LibraryStepVerification,
 } from "../../domains/resources/index.js";
 import {
 	type Component,
@@ -147,6 +149,12 @@ function afterwardsText(after: NonNullable<LibraryPlanStep["effectiveAfter"]>): 
 function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined, detail: boolean): Fact[] {
 	const theme = clioTheme();
 	const facts: Fact[] = [{ label: "Package", value: step.identity.ref }];
+	const versions = step.versions;
+	if (versions?.from && versions.to && versions.from !== versions.to)
+		facts.push({ label: "Version", value: `${versions.from} installed → ${versions.to}` });
+	else if (versions?.to && !versions.from) facts.push({ label: "Version", value: versions.to });
+	else if (versions?.from && step.operation === "update")
+		facts.push({ label: "Version", value: `${versions.from}, same version with changed content` });
 	if (step.refusal) facts.push({ label: "Refused", value: statusChip(theme, "error", step.refusal) });
 	if (step.content && !step.content.valid)
 		facts.push({
@@ -155,8 +163,10 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 		});
 	if (step.content?.resources.length)
 		facts.push({
-			label: "Projects",
-			value: step.content.resources.map((item) => `${item.kind}:${item.name}${item.valid ? "" : " (invalid)"}`).join(", "),
+			label: "Adds",
+			value: resourceSummary(
+				step.content.resources.map((item) => ({ kind: item.kind, name: `${item.name}${item.valid ? "" : " (invalid)"}` })),
+			),
 		});
 	if (step.dependencies.missing.length)
 		facts.push({ label: "Missing", value: `requires ${step.dependencies.missing.join(", ")}`, tone: "warning" });
@@ -196,11 +206,20 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 	return facts;
 }
 
+/** What Enter does on each operation's review, in the words of the change itself. */
+const APPLY_CONSEQUENCE: Record<LibraryLifecyclePlan["request"]["operation"], string> = {
+	install: "makes exactly this change",
+	update: "replaces the installed copy with this one",
+	enable: "turns this copy back on",
+	disable: "keeps the files and turns this copy off",
+	remove: "deletes this copy",
+};
+
 /** The keys every review answers to, with what each one does. */
 function reviewChoices(applicable: boolean, verb: string, consequence: string, detail: boolean): Choice[] {
 	return [
 		...(applicable ? [{ key: "Enter", verb, consequence, tone: "action" as const }] : []),
-		{ key: "Esc", verb: "cancel", consequence: "writes nothing and releases the staged source" },
+		{ key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
 		{ key: "d", verb: "paths", consequence: detail ? "hides paths and digests" : "shows paths and digests" },
 	];
 }
@@ -247,7 +266,7 @@ export function formatLibraryPlanReview(
 			reviewChoices(
 				plan.applicable,
 				plan.request.operation,
-				"applies the reviewed plan; verification then reads the copy back from disk and reports which resources the loaders actually admit",
+				`${APPLY_CONSEQUENCE[plan.request.operation]}, then shows what Clio loads afterwards`,
 				detail,
 			),
 			width,
@@ -278,33 +297,55 @@ export function formatLibraryPlanReview(
 
 /** What the extension reload did, in the words of what the operator will see next. */
 const EXTENSION_REFRESH_TEXT = {
-	reloading: "extension runtimes and hooks are reloading; the result follows as a notice",
+	reloading: "Extensions are restarting now; a notice says when they are ready.",
 	queued:
-		"extension runtimes and hooks reload once this Library closes and the session is idle; the result follows as a notice, and until then extensions stay as they were loaded",
-	unavailable:
-		"extension runtimes and hooks were not reloaded because this session has no extension host; restart to load them",
+		"Extensions restart once you close the Library and Clio is idle; until then the ones already running stay as they are.",
+	unavailable: "This session has no extension host, so extensions were not restarted; restart Clio to load them.",
 } as const;
 
-/** The refresh as one clause for a notice: the status, plus what happened to extensions when one changed. */
+/** The refresh as one sentence for a notice, in what the operator will see next. */
 export function libraryRefreshSummary(refresh: LibraryRefreshResult): string {
-	if (refresh.status !== "refreshed" || !refresh.extensions) return refresh.status;
-	return `refreshed, extensions ${refresh.extensions === "unavailable" ? "not reloaded" : refresh.extensions}`;
+	if (refresh.status === "failed")
+		return `The session refresh failed (${refresh.error}); reopen the Library and press R.`;
+	if (refresh.status === "not-applicable") return "";
+	if (refresh.extensions) return EXTENSION_REFRESH_TEXT[refresh.extensions];
+	return "This session already sees the change.";
+}
+
+const PAST_TENSE: Record<LibraryStepOutcome["operation"], string> = {
+	install: "Installed",
+	update: "Updated",
+	enable: "Enabled",
+	disable: "Disabled",
+	remove: "Removed",
+};
+
+/**
+ * The outcome as one sentence: what changed, where. A batch, or one that did
+ * not fully land, adds its counts, because two of three writes committing is
+ * a different situation from all of them, and the sentence must not hide it.
+ */
+export function libraryOutcomeHeadline(
+	result: Pick<LibraryApplyResult, "outcomes" | "committed" | "failed" | "unattempted">,
+): string {
+	const only = result.outcomes.length === 1 ? result.outcomes[0] : undefined;
+	if (only) {
+		const place = `${only.operation === "remove" ? "from" : "in"} ${only.identity.scope} scope`;
+		if (only.status === "committed")
+			return `${only.imported ? "Imported" : PAST_TENSE[only.operation]} ${only.identity.ref} ${place}`;
+		if (only.status === "failed") return `Could not ${only.operation} ${only.identity.ref} ${place}`;
+		return `Did not start the ${only.operation} of ${only.identity.ref}`;
+	}
+	return `${result.committed} committed · ${result.failed} failed · ${result.unattempted} unattempted`;
 }
 
 function refreshChip(refresh: LibraryRefreshResult): string {
 	const theme = clioTheme();
-	if (refresh.status === "refreshed") {
-		const resources = `session resources refreshed (generation ${refresh.generation}${refresh.changed ? ", changed" : ", unchanged"})`;
-		if (!refresh.extensions) return statusChip(theme, "ok", resources);
-		return statusChip(
-			theme,
-			refresh.extensions === "unavailable" ? "warning" : "ok",
-			`${resources}; ${EXTENSION_REFRESH_TEXT[refresh.extensions]}`,
-		);
-	}
+	if (refresh.status === "refreshed")
+		return statusChip(theme, refresh.extensions === "unavailable" ? "warning" : "ok", libraryRefreshSummary(refresh));
 	if (refresh.status === "failed")
 		return statusChip(theme, "error", `session refresh failed: ${refresh.error}; press R to retry`);
-	return chip(theme, `session refresh not applicable: ${refresh.reason}`, "muted");
+	return chip(theme, `no session refresh needed: ${refresh.reason}`, "muted");
 }
 
 /**
@@ -317,12 +358,41 @@ function refreshChip(refresh: LibraryRefreshResult): string {
  * an operator reading "available" deserves to know which of the two it means.
  */
 function evidenceLabel(evidence: "pre-refresh" | "post-refresh", refresh: LibraryRefreshResult): string {
-	if (evidence === "post-refresh") return "resources verified after the session refresh";
+	if (evidence === "post-refresh") return "";
 	if (refresh.status === "refreshed")
-		return "resource evidence from before refresh; session refreshed, reopen the Library for current admission";
-	if (refresh.status === "failed")
-		return "resource evidence from before refresh; current session admission is unverified because refresh failed";
-	return "resource evidence from before refresh; no session refresh applied";
+		return "read before this session reloaded; reopen the Library to see what loads now";
+	if (refresh.status === "failed") return "read before the reload, which failed, so what loads now is unverified";
+	return "read from disk; no reload was needed";
+}
+
+/** Resources grouped by kind with a count each: "6 skills: a, b; 20 prompts: c, d" reads faster than 26 kind:name refs. */
+function resourceSummary(items: ReadonlyArray<{ kind: string; name: string }>): string {
+	const groups = new Map<string, string[]>();
+	for (const item of items) groups.set(item.kind, [...(groups.get(item.kind) ?? []), item.name]);
+	return [...groups]
+		.map(([kind, names]) => `${names.length} ${names.length === 1 ? kind : `${kind}s`}: ${names.join(", ")}`)
+		.join("; ");
+}
+
+/** A path under the home folder as ~/…, the way the footer and the setup screens print it. */
+function shortenHomePath(target: string): string {
+	const home = homedir();
+	return target === home || target.startsWith(`${home}/`) ? `~${target.slice(home.length)}` : target;
+}
+
+/** Disk state in words; the common pairs read as one fact, anything else names both parts. */
+function diskText(verification: LibraryStepVerification): string {
+	if (verification.tree === "present" && verification.record === "recorded") return "files and install record written";
+	if (verification.tree === "absent" && verification.record === "absent") return "files and install record removed";
+	const tree = { present: "files present", absent: "files absent", changed: "files changed after the write" }[
+		verification.tree
+	];
+	const record = {
+		recorded: "install record written",
+		absent: "no install record",
+		unreadable: "install record unreadable",
+	}[verification.record];
+	return `${tree}, ${record}`;
 }
 
 function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult): Fact[] {
@@ -340,25 +410,36 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 	}
 	const verification = outcome.verification;
 	if (verification) {
-		facts.push({ label: "Disk", value: `tree ${verification.tree}, record ${verification.record}`, tone: "muted" });
 		facts.push({
-			label: "Resources",
-			value: `${evidenceLabel(verification.evidence, refresh)}: ${
-				verification.resources.length === 0
-					? "none admitted"
-					: verification.resources
-							.map(
-								(item) =>
-									`${item.kind}:${item.name} ${item.available ? "available" : `unavailable (${item.reason ?? "no reason recorded"})`}`,
-							)
-							.join(", ")
-			}`,
+			label: "On disk",
+			value: outcome.destination
+				? `${diskText(verification)} · ${shortenHomePath(outcome.destination)}`
+				: diskText(verification),
 			tone: "muted",
 		});
+		const label = evidenceLabel(verification.evidence, refresh);
+		const loaded =
+			verification.resources.length === 0
+				? outcome.identity.kind === "extension"
+					? "no skills, agents, prompts or playbooks; an extension adds its commands and status instead"
+					: "nothing Clio can load from it"
+				: [
+						resourceSummary(verification.resources.filter((item) => item.available)),
+						...verification.resources
+							.filter((item) => !item.available)
+							.map((item) => `not available: ${item.kind}:${item.name} (${item.reason ?? "no reason recorded"})`),
+					]
+						.filter(Boolean)
+						.join("; ");
+		// Nothing loads from a package that is gone; the fact would only restate it.
+		if (verification.effective || verification.resources.length > 0)
+			facts.push({ label: "Loads", value: label ? `${loaded} (${label})` : loaded, tone: "muted" });
 		facts.push({
-			label: "Effective",
+			label: "In effect",
 			value: verification.effective
-				? `${verification.effective.scope} copy, ${verification.effective.loadable ? "loadable" : "not loadable"}`
+				? verification.effective.loadable
+					? `the ${verification.effective.scope} copy, which Clio loads`
+					: `the ${verification.effective.scope} copy, which Clio cannot load`
 				: "no copy remains",
 			tone: "muted",
 		});
@@ -384,22 +465,27 @@ export function formatLibraryOutcome(rawResult: LibraryApplyResult, width: numbe
 	const theme = clioTheme();
 	const result = displaySafe(rawResult);
 	const rows: string[] = [
-		...headline(
-			result.failed > 0 ? "error" : "success",
-			`${result.committed} committed · ${result.failed} failed · ${result.unattempted} unattempted`,
-			width,
-		),
+		...headline(result.failed > 0 ? "error" : "success", libraryOutcomeHeadline(result), width),
 		...chipRows(theme, [refreshChip(result.refresh)], width),
 		...choiceRows(
 			theme,
 			[
+				// Retry is offered where there is something to retry; R still answers after a success.
+				...(result.refresh.status === "failed"
+					? [
+							{
+								key: "R",
+								verb: "retry refresh",
+								consequence: "retries the session refresh only; it never repeats a write",
+								tone: "action" as const,
+							},
+						]
+					: []),
 				{
-					key: "R",
-					verb: "retry refresh",
-					consequence: "retries the session refresh only; it never repeats a write",
-					...(result.refresh.status === "failed" ? { tone: "action" as const } : {}),
+					key: "Esc",
+					verb: "close",
+					consequence: result.committed > 0 ? "returns to the Library; the change stands" : "returns to the Library",
 				},
-				{ key: "Esc", verb: "close", consequence: "closes; the committed writes stand" },
 			],
 			width,
 		),
@@ -412,7 +498,9 @@ export function formatLibraryOutcome(rawResult: LibraryApplyResult, width: numbe
 				...(outcome.status === "failed" ? { token: "error" as const } : {}),
 			}),
 		);
-		rows.push(...chipRows(theme, [statusChip(theme, status, outcome.status)], width));
+		// One committed step is already the headline; a chip repeating it is noise.
+		if (outcome.status !== "committed" || result.outcomes.length > 1)
+			rows.push(...chipRows(theme, [statusChip(theme, status, outcome.status)], width));
 		rows.push(...factRows(theme, outcomeFacts(outcome, result.refresh), width, FACT_OPTIONS));
 	}
 	if (result.unattempted > 0)
@@ -451,18 +539,21 @@ function formatLibraryImportReview(
 	const detail = options.detail === true;
 	const install = plan.action === "install";
 	const facts: Fact[] = [
-		{ label: "Source", value: `${plan.source.input} (${plan.source.transport})` },
+		{
+			label: "Source",
+			value: `${shortenHomePath(plan.source.input)}${plan.source.transport === "local" ? "" : ` (${plan.source.transport})`}`,
+		},
 		...(plan.format ? [{ label: "Format", value: plan.format }] : []),
 		...(plan.version ? [{ label: "Version", value: plan.version }] : []),
-		...(plan.destination ? [{ label: "Destination", value: plan.destination }] : []),
+		...(plan.destination ? [{ label: "Destination", value: shortenHomePath(plan.destination) }] : []),
 		{
-			label: "Projects",
+			label: "Adds",
 			value:
 				plan.outcomes.length === 0
 					? "no resources"
-					: `${plan.outcomes.length} resource${plan.outcomes.length === 1 ? "" : "s"}: ${plan.outcomes
-							.map((outcome) => `${outcome.kind}:${outcome.name} (${outcome.status})`)
-							.join(", ")}`,
+					: resourceSummary(
+							plan.outcomes.map((outcome) => ({ kind: outcome.kind, name: `${outcome.name} (${outcome.status})` })),
+						),
 			tone: "info",
 		},
 		...plan.unsupported.map(
@@ -472,9 +563,10 @@ function formatLibraryImportReview(
 		...(plan.requirements.length
 			? [{ label: "Requires", value: `installed packages ${plan.requirements.join(", ")}`, tone: "warning" as const }]
 			: []),
-		...plan.reasons.map(
-			(reason): Fact => ({ label: install ? "Note" : "Blocked", value: reason, tone: install ? "muted" : "error" }),
-		),
+		...plan.reasons.map((reason): Fact => {
+			const blocks = !install && reason !== plan.note;
+			return { label: blocks ? "Blocked" : "Note", value: reason, tone: blocks ? "error" : "muted" };
+		}),
 		{
 			label: "Provenance",
 			value:
@@ -492,7 +584,7 @@ function formatLibraryImportReview(
 	return [
 		...headline(
 			install ? "decisionQuestion" : "error",
-			`${install ? "import" : "blocked"} ${plan.id ?? plan.source.input} into ${plan.scope} scope`,
+			`${install ? "import" : "Cannot import"} ${plan.id ?? plan.source.input} into ${plan.scope} scope`,
 			width,
 		),
 		...chipRows(
@@ -505,8 +597,8 @@ function formatLibraryImportReview(
 			],
 			width,
 		),
-		...choiceRows(theme, reviewChoices(install, "import", "imports exactly this projection", detail), width),
-		sectionRule(theme, width, "Projection"),
+		...choiceRows(theme, reviewChoices(install, "import", "writes exactly what is listed below", detail), width),
+		sectionRule(theme, width, "What import writes"),
 		...factRows(theme, facts, width, FACT_OPTIONS),
 	];
 }
@@ -618,6 +710,8 @@ interface ReviewOverlaySpec {
 	commit: () => (width: number) => string[];
 	/** Refresh only; returns the replacement outcome body. Never repeats a write. */
 	retryRefresh: () => (width: number) => string[];
+	/** Whether the outcome's refresh failed, which is when the footer offers R. */
+	refreshFailed: () => boolean;
 	onCancel: () => void;
 	onDone: () => void;
 }
@@ -697,7 +791,10 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 		title: () => (body.outcome ? "Library outcome" : spec.title),
 		footerHint: (innerWidth: number) =>
 			body.outcome
-				? buildResponsiveHint([{ key: "R", verb: "retry refresh" }], { key: "Esc", verb: "close" })(innerWidth)
+				? buildResponsiveHint(spec.refreshFailed() ? [{ key: "R", verb: "retry refresh" }] : [], {
+						key: "Esc",
+						verb: "close",
+					})(innerWidth)
 				: buildResponsiveHint(
 						[
 							...(spec.applicable ? [{ key: "Enter", verb: spec.verb }] : []),
@@ -746,6 +843,7 @@ export function openLibraryReviewOverlay(tui: TUI, options: OpenLibraryReviewOpt
 			applied = applied ? { ...applied, refresh } : applied;
 			return (width) => formatLibraryOutcome(applied as LibraryApplyResult, width);
 		},
+		refreshFailed: () => applied?.refresh.status === "failed",
 		onCancel: options.onCancel,
 		onDone: () => {
 			if (applied) options.onDone(applied);
@@ -789,6 +887,7 @@ export function openLibraryImportOverlay(tui: TUI, options: OpenLibraryImportOpt
 			applied = applied ? { ...applied, refresh } : applied;
 			return (width) => formatLibraryOutcome(applied as LibraryApplyResult, width);
 		},
+		refreshFailed: () => applied?.refresh.status === "failed",
 		onCancel: options.onCancel,
 		onDone: () => {
 			if (applied) options.onDone(applied);

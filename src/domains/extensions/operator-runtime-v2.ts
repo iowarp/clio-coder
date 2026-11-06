@@ -846,8 +846,12 @@ export class OperatorExtensionRuntimeV2 {
 		signal?: AbortSignal,
 	): Promise<ExtensionOutputV2> {
 		this.reconcile();
-		if (this.closed || !this.options.isIdle() || this.reloading)
-			throw new Error("extension command requires an idle session");
+		// The first command after a turn that created the session is what starts
+		// the reload adopting it; refusing over that reload failed a command the
+		// operator typed at an idle prompt, so it waits for the generation instead.
+		while (this.reloading && this.reloadTask && !this.closed) await this.reloadTask;
+		if (this.closed) throw new Error("extension runtimes have shut down");
+		if (!this.options.isIdle()) throw new Error("Clio is busy; run it again once the current turn finishes");
 		if (Buffer.byteLength(args) > RUNTIME_LIMITS.argumentBytes) throw new Error("extension arguments exceed 16 KiB");
 		const row = this.commands(promptNames).find((candidate) => candidate.invocation === invocation);
 		if (!row?.available) throw new Error(row?.reason ?? `/${invocation} is not an available extension command`);

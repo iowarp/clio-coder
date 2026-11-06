@@ -67,7 +67,11 @@ export function createMusicSession(options: MusicSessionOptions): MusicOperation
 
 	const unavailableReason = (): string | null => {
 		const missing: string[] = [];
-		if (!options.getSettings().enabled) missing.push("integrations.music.enabled is false in settings.yaml");
+		// Off is the default, so the remedy names where to turn it on, not only the key.
+		if (!options.getSettings().enabled)
+			missing.push(
+				"it is off; turn on Music pane in /settings (Appearance, Panes) or set integrations.music.enabled: true",
+			);
 		if (!options.mux.available()) {
 			missing.push(`herdr panes are not available (${options.mux.detection().reason})`);
 		}

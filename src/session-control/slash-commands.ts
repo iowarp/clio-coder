@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import path from "node:path";
 import { mcpCommandOutput } from "../cli/mcp.js";
 import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
@@ -24,6 +25,7 @@ import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import { isExtensionCommandToken, promptRefs } from "../domains/extensions/operator-commands.js";
 import type { OperatorCommandOutput, OperatorExtensions } from "../domains/extensions/operator-extensions.js";
+import { extensionOwnerLabel } from "../domains/extensions/owner-label.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
@@ -221,7 +223,7 @@ type SlashCommandVariant =
 	/** A preset the model may also ask for, or operator-only argv. Never both. */
 	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string>; once?: boolean }
 	| { kind: "peer-pane"; peer: PanePeerId; brief?: string; cwd?: string }
-	| { kind: "peer-pane-usage"; reason?: string }
+	| { kind: "peer-pane-usage"; reason?: string; listing?: boolean }
 	/** Toggle zoom on a Clio-owned pane; the bare form targets the watch pane. */
 	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
@@ -736,6 +738,8 @@ export interface PromptReferenceCard {
 	source: string;
 	/** The body to show, already reduced to its reference block. */
 	text: string;
+	/** What the card is, beside its source; `reference` when absent. An extension's answer is a `result`. */
+	kind?: string;
 }
 
 /**
@@ -1139,35 +1143,55 @@ function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
  * its promise not to reach a renderer.
  */
 function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
-	const server = status.server ? `pane host ${status.server.version}, protocol ${status.server.protocol}` : "no server";
-	const lines = [
-		`panes: mode=${status.mode} ${status.available ? "available" : "unavailable"} (${server})`,
-		`  ${status.reason}`,
-		...(status.socketPath ? [`  socket ${status.socketPath}`] : []),
-		`  settings: enabled=${status.settings.enabled} notifications=${status.settings.notifications} layout=${status.settings.layout} journal=${status.settings.journal}`,
-		`  files: enabled=${status.settings.yazi.enabled} mode=${status.settings.yazi.mode} profile=${status.settings.yazi.profile} followCwd=${status.settings.yazi.followCwd}`,
-		`  file pane: mode=${status.yazi.mode} pane=${status.yazi.paneId ?? "none"} cwd=${status.yazi.paneCwd ?? "unknown"} lastLine=${status.yazi.lastLineAt === null ? "never" : new Date(status.yazi.lastLineAt).toISOString()} dropped=${status.yazi.droppedLines}`,
-	];
-	if (status.docks.length > 0) {
+	// What an operator asks first: can Clio open panes here, and which are open.
+	// The settings and wire facts follow on one details line, in words.
+	const host = status.server ? `Herdr ${status.server.version}` : "the pane host";
+	const lead = status.available
+		? `Panes: ${host} is available. Clio opens panes beside this one, ${status.mode === "embedded" ? "in its own workspace" : "as a guest in this workspace"}.`
+		: `Panes: unavailable. ${status.reason}`;
+	const row = (label: string, value: string): string => `  ${label.padEnd(12)} ${value}`;
+	const files =
+		status.yazi.mode === "closed" || status.yazi.paneId === null
+			? status.settings.yazi.enabled
+				? "closed · /files opens it"
+				: "off · turn on Files pane in /settings (Workspace & Files), then /files opens it"
+			: `open${status.yazi.paneCwd ? ` in ${status.yazi.paneCwd}` : ""} · picks land in the composer as @ mentions${status.yazi.droppedLines > 0 ? ` · ${status.yazi.droppedLines} picks dropped` : ""}`;
+	const lines = [lead, row("Files pane", files)];
+	for (const dock of status.docks) {
+		const share = `${(dock.targetShare * 100).toFixed(0)}% of the window`;
+		const slot = `${dock.slot[0]?.toUpperCase() ?? ""}${dock.slot.slice(1)} dock`;
 		lines.push(
-			`  docks: ${status.docks
-				.map(
-					(dock) => `${dock.slot}=${dock.paneId} @${(dock.targetShare * 100).toFixed(0)}%${dock.hidden ? " hidden" : ""}`,
-				)
-				.join(", ")}`,
+			row(
+				slot,
+				dock.hidden
+					? `hidden; it takes ${share} when shown${dock.slot === "music" ? " · /music shows it" : ""}`
+					: `shown · ${share}`,
+			),
 		);
 	}
-	if (status.panes.length === 0) {
-		lines.push("  no Clio-owned panes");
-	} else {
-		lines.push(`  ${status.panes.length} Clio-owned pane(s):`);
-		for (const pane of status.panes) {
-			const adopted = pane.adopted ? " adopted" : "";
-			const pending = pane.pending ? " opening" : "";
-			lines.push(`    ${pane.paneId} ${pane.purpose} ${pane.label}${adopted}${pending}`);
+	if (status.panes.length === 0) lines.push(row("Open now", "none"));
+	else
+		for (const [index, pane] of status.panes.entries()) {
+			const notes = [pane.adopted ? "adopted from an earlier session" : "", pane.pending ? "opening" : ""].filter(Boolean);
+			lines.push(row(index === 0 ? "Open now" : "", `${pane.label}${notes.length > 0 ? ` (${notes.join(", ")})` : ""}`));
 		}
+	// One preset per row, command first, so each reads as something to type.
+	for (const [index, preset] of PANES_PRESETS.entries())
+		lines.push(row(index === 0 ? "Open one" : "", `/panes open ${preset.id} · ${preset.summary}`));
+	if (status.available) {
+		const alerts =
+			status.settings.notifications === "failures"
+				? "Herdr toasts for failed runs"
+				: status.settings.notifications === "all"
+					? "Herdr toasts for every finished run"
+					: "no Herdr toasts";
+		lines.push(
+			row(
+				"Details",
+				`${status.socketPath ? `socket ${status.socketPath} · ` : ""}${status.server ? `protocol ${status.server.protocol} · ` : ""}${alerts} · journal ${status.settings.journal ? "on" : "off"}`,
+			),
+		);
 	}
-	lines.push(`  presets: ${PANES_PRESETS.map((preset) => `${preset.id} (${preset.summary})`).join(", ")}`);
 	return lines;
 }
 
@@ -2592,10 +2616,22 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "peer-pane-usage", reason: parsed.error };
+			if (parsed.error)
+				return {
+					kind: "peer-pane-usage",
+					...(parsed.positionals.length === 0 ? { listing: true } : {}),
+					// The one required argument is the peer, so name the choices rather than the parser's field.
+					reason:
+						parsed.positionals.length === 0
+							? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt.`
+							: parsed.error,
+				};
 			const peer = parsed.positionals[0] ?? "";
 			if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
-				return { kind: "peer-pane-usage", reason: `peer must be one of ${PANE_PEER_IDS.join(", ")}` };
+				return {
+					kind: "peer-pane-usage",
+					reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}.`,
+				};
 			}
 			const cwd = parsed.flags.get("--cwd");
 			return {
@@ -2607,6 +2643,25 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "peer-pane-usage") {
+				const listing = command.listing ? ctx.panes?.peers?.() : undefined;
+				if (listing && ctx.panes) {
+					// The bare command answers "which agents would open here?" with what is on this machine.
+					const status = ctx.panes.status();
+					const width = Math.max(...listing.map((row) => row.peer.length));
+					const lines = [
+						status.available
+							? "Peers: coding agents Clio can open in a pane beside this one. Clio does not track or review their work."
+							: `Peers: none can open now. ${status.reason}`,
+						...listing.map(
+							(row) =>
+								`  ${row.peer.padEnd(width)}  ${row.found ? "installed" : `not found; install ${row.binary} to use it`}`,
+						),
+						`  ${"Open one".padEnd(width)}  /peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
+					];
+					for (const line of lines) ctx.io.stdout(`${line}\n`);
+					ctx.render?.();
+					return;
+				}
 				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "peer");
 				if (entry) ctx.notice("info", command.reason ? `${command.reason}\n${usageNotice(entry)}` : usageNotice(entry));
 				return;
@@ -2627,7 +2682,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (result.status === "opened") {
 					ctx.notice(
 						"success",
-						`opened ${command.peer} in pane ${result.paneId} at ${result.cwd}; interactive handoff, no managed run record`,
+						`Opened ${command.peer} in a pane beside this one, working in ${result.cwd}. It runs on its own: Clio keeps no run record of it and does not review its changes.`,
 					);
 				} else if (result.status === "missing-binary") {
 					ctx.notice("warn", result.detail);
@@ -2832,20 +2887,22 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					if (result.paneId !== null) {
 						ctx.notice(
 							"success",
-							result.revealed
-								? `files pane shown (${result.paneId})`
-								: result.existing
-									? `files pane focused (${result.paneId})`
-									: `files pane opened (${result.paneId})`,
+							`${result.revealed ? "Files pane shown" : result.existing ? "Files pane focused" : "Files pane opened"} beside this one. Picks land in the composer as @ mentions; /files hides it.`,
 						);
 					}
 				} else if (result.status === "hidden") {
-					ctx.notice("info", "files pane hidden; /files shows it again and keeps its directory");
+					ctx.notice("info", "Files pane hidden; /files shows it again in the same directory.");
 				} else if (result.status === "closed") {
-					ctx.notice("info", "files pane closed");
+					ctx.notice("info", "Files pane closed.");
 				} else if (result.status === "missing-binary") {
 					ctx.io.stdout(`${result.detail}\n`);
 					ctx.render?.();
+				} else if (result.status === "refused" && /interface\.panes\.files\.enabled/u.test(result.reason)) {
+					// The gate's reason names the key; the operator also needs where to flip it.
+					ctx.notice(
+						"warn",
+						"The files pane is off. Turn on Files pane in /settings (Workspace & Files), or set interface.panes.files.enabled: true, then run /files again.",
+					);
 				} else {
 					ctx.notice("warn", result.reason);
 				}
@@ -3447,7 +3504,21 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 						dispatchSlashCommand(command, ctx);
 						return;
 					}
-					ctx.notice("error", `/${command.token} failed: ${error instanceof Error ? error.message : String(error)}`);
+					// What failed, whether the extension survived it, and the next step. A
+					// runtime that rethrows keeps its own "Error:" prefix; one is enough.
+					const raw = (error instanceof Error ? error.message : String(error)).replace(/^Error:\s*/u, "");
+					const owner = extensionOwnerLabel(row.extensionId);
+					const reason = raw.startsWith(`/${command.token} is not an available`)
+						? "it is not available now"
+						: plainExtensionError(raw, owner);
+					const state = runtime.entries().find((entry) => entry.id === row.extensionId)?.state;
+					const next =
+						state === "ready"
+							? "It is still running; correct the command and run it again."
+							: state === "failed" || state === undefined
+								? "It stopped; /extensions shows why, and r there restarts it."
+								: `It is ${state}; /extensions shows its state, and r there restarts it.`;
+					ctx.notice("error", `/${command.token} failed: ${sentence(reason)} ${next}`);
 				}
 			});
 			return "accepted";
@@ -3548,4 +3619,35 @@ export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
 				...(entry.subcommandDescriptions ? { subcommandDescriptions: entry.subcommandDescriptions } : {}),
 			};
 		});
+}
+
+/** A reason as one sentence: capitalised, with closing punctuation. */
+function sentence(text: string): string {
+	const trimmed = text.trim();
+	if (trimmed.length === 0) return "";
+	const head = trimmed[0]?.toUpperCase() + trimmed.slice(1);
+	return /[.!?]$/u.test(head) ? head : `${head}.`;
+}
+
+/**
+ * A Node file error from an extension, in words. "ENOENT: no such file or
+ * directory, open '/abs/project/missing.json'" names the code and an absolute
+ * path; the operator needs which file and what went wrong with it.
+ */
+function plainExtensionError(raw: string, owner: string, cwd: string = process.cwd()): string {
+	const match = /^(ENOENT|EACCES|EPERM|EISDIR|ENOTDIR): [^,]*, \w+ '([^']+)'$/u.exec(raw.trim());
+	if (!match) return raw;
+	const [, code, target = ""] = match;
+	const relative = path.isAbsolute(target) ? path.relative(cwd, target) : target;
+	const shown = relative && !relative.startsWith("..") ? relative : target;
+	switch (code) {
+		case "ENOENT":
+			return `${owner} could not find ${shown}`;
+		case "EISDIR":
+			return `${owner} expected a file but ${shown} is a folder`;
+		case "ENOTDIR":
+			return `${owner} expected a folder on the way to ${shown}`;
+		default:
+			return `${owner} is not allowed to read or write ${shown}`;
+	}
 }

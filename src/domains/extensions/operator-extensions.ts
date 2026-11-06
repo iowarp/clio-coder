@@ -53,7 +53,13 @@ export class OperatorExtensions {
 	readonly v2: OperatorExtensionRuntimeV2;
 	/** While above zero, a manager's own reload report is folded into the combined one. */
 	private combining = 0;
-	private queuedReload = false;
+	/**
+	 * The reload waiting for an idle session, by the reason it was asked for. A
+	 * replay that forgot the reason announced a startup or session-change reload
+	 * as one the operator asked for, so a plain session saw "Extensions reloaded"
+	 * after work that never touched an extension. An operator's reload wins.
+	 */
+	private queuedReload: ReloadReason | null = null;
 
 	constructor(private readonly options: OperatorExtensionsOptions) {
 		const forward = (result: OperatorReloadResult, reason: ReloadReason): void => {
@@ -108,7 +114,7 @@ export class OperatorExtensions {
 	}
 	maintenance(): void {
 		if (this.queuedReload && !this.busy && this.options.isIdle()) {
-			void this.reload();
+			void this.reload(this.queuedReload);
 			return;
 		}
 		this.v1.maintenance();
@@ -123,7 +129,7 @@ export class OperatorExtensions {
 	async reload(reason: ReloadReason = "reload"): Promise<OperatorReloadResult> {
 		// Do not commit api 1/hooks while an api 2 command still owns its generation.
 		if (!this.canReloadNow) {
-			this.queuedReload = true;
+			this.queuedReload = this.queuedReload === "reload" || reason === "reload" ? "reload" : reason;
 			this.options.onChange?.();
 			return {
 				status: "deferred",
@@ -131,7 +137,7 @@ export class OperatorExtensions {
 				message: "extension reload deferred until the session and operator commands are idle",
 			};
 		}
-		this.queuedReload = false;
+		this.queuedReload = null;
 		this.combining++;
 		let results: [OperatorReloadResult, OperatorReloadResult];
 		try {

@@ -133,14 +133,3 @@ export function parseExtensionOutput(value: unknown, declaration: ExtensionRunti
 	}
 	return output;
 }
-
-export function extensionPanelText(panel: ExtensionPanel): string {
-	return [
-		panel.title,
-		...panel.sections.flatMap((section) => {
-			if (section.kind === "text") return [section.text];
-			if (section.kind === "metrics") return section.items.map((item) => `${item.label}: ${item.value}`);
-			return [section.columns.join(" | "), ...section.rows.map((row) => row.join(" | "))];
-		}),
-	].join("\n\n");
-}

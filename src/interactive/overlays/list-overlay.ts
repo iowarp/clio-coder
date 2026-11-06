@@ -982,7 +982,12 @@ export class ListOverlayView implements Component {
 		// room for its position either and shows the row alone.
 		const wanted =
 			selectedItem.detailFormat === "rows" ? Math.max(0, Math.floor(selectedItem.detailHead?.(width) ?? 0)) : 0;
-		const head = height > 1 && wanted > 0 && height - wanted - 1 >= 2 ? Math.min(wanted, all.length) : 0;
+		// The head stays pinned only while a third of the pane is left to scroll; a
+		// tall head over a two-row window showed almost none of the detail.
+		const head =
+			height > 1 && wanted > 0 && height - wanted - 1 >= Math.max(2, Math.ceil(height / 3))
+				? Math.min(wanted, all.length)
+				: 0;
 		const scrollable = all.slice(head);
 		const withPosition = height - head >= 2;
 		const page = withPosition ? height - head - 1 : Math.max(1, height - head);
@@ -1115,7 +1120,8 @@ export class ListOverlayView implements Component {
 		const bodyRows = Math.max(1, this.viewportRows - 2);
 		const chromeRows = (): number => tabRows.length + statusRows.length + filterRows.length;
 		const filterSheddable = (): boolean => filterRows.length > 0 && this.filterText.length === 0 && !this.isFilterFocused;
-		if (bodyRows - chromeRows() < 1 && filterSheddable()) filterRows = [];
+		// A short dock spends no row on an empty, unfocused search line; "/" still opens it.
+		if ((bodyRows < 10 || bodyRows - chromeRows() < 1) && filterSheddable()) filterRows = [];
 		if (bodyRows - chromeRows() < 1) tabRows = [];
 		if (bodyRows - chromeRows() < 1) statusRows = [];
 
@@ -1155,14 +1161,16 @@ export class ListOverlayView implements Component {
 				const avail = Math.max(1, availableRows - keyLines.length);
 				const lines: string[] = [];
 				if (isSplit && hasDetail) {
-					const detailWidth = Math.max(32, Math.floor(width * 0.45));
-					const listWidth = width - detailWidth - 1;
+					// A space either side of the divider, so a right-aligned row state and the
+					// pane's first word never touch the rule between them.
+					const detailWidth = Math.max(32, Math.floor(width * 0.45)) - 1;
+					const listWidth = width - detailWidth - 3;
 					const listLines = this.renderList(listWidth, avail, filteredItems, renderedRows);
 					const detailLines = this.renderDetail(detailWidth, avail, selectedItem);
 					const rows = Math.min(avail, Math.max(listLines.length, detailLines.length));
 					const separator = theme.fg("border", "│");
 					for (let i = 0; i < rows; i++) {
-						lines.push(`${listLines[i] ?? " ".repeat(listWidth)}${separator}${detailLines[i] ?? " ".repeat(detailWidth)}`);
+						lines.push(`${listLines[i] ?? " ".repeat(listWidth)} ${separator} ${detailLines[i] ?? " ".repeat(detailWidth)}`);
 					}
 					lines.push(...keyLines);
 					return { lines, headText: this.detailHeadText, drawn: true, takeover: false, paneRows: rows };

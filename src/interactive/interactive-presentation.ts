@@ -285,7 +285,13 @@ function draftOperator(text: string): "command" | "shell" | null {
 }
 
 /** What Enter does with this draft, for the hint row. An empty composer has nothing to say about Enter. */
-function draftKeyContext(text: string, streaming: boolean, holding: boolean, localShell: boolean): ComposerKeyContext {
+function draftKeyContext(
+	text: string,
+	streaming: boolean,
+	holding: boolean,
+	localShell: boolean,
+	runsCommand: (token: string) => boolean = () => false,
+): ComposerKeyContext {
 	const empty = text.trim().length === 0;
 	if (parseEditorBashCommand(text)) {
 		if (streaming || localShell) return "shell-refused";
@@ -295,7 +301,9 @@ function draftKeyContext(text: string, streaming: boolean, holding: boolean, loc
 		const parsed = parseSlashCommand(text.trim());
 		const name = truncateToWidth(text.trim().split(/\s+/u)[0] ?? "", 24, GLYPH.ellipsis, false);
 		if (parsed.kind === "usage-error") return `usage:${name}`;
-		if (parsed.kind === "unknown-command") return `check:${name}`;
+		// The parser knows only built-in commands; an installed extension's command runs too, and saying
+		// Enter only "checks" it read as if the command were not there.
+		if (parsed.kind === "unknown-command" && !runsCommand(parsed.token)) return `check:${name}`;
 		return streaming ? `run-command:${name}` : `command:${name}`;
 	}
 	if (streaming) return empty ? "steer-empty" : "steer";
@@ -694,6 +702,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				deps.chat.isStreaming(),
 				deps.chat.turnPreparation().phase !== "idle",
 				localBashStartedAt !== null,
+				(token) => deps.extensionCommands?.().some((row) => row.available && row.invocation === token) ?? false,
 			);
 			// A failed turn is the newest thing on screen until a shell line or another turn follows it.
 			return context === "idle" && lastShell === null && lastTurnSummary?.stopReason === "error" ? "recover" : context;

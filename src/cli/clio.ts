@@ -82,7 +82,10 @@ export async function runClioCommand(
 			}
 		}
 		if (!detected && !keptRoute && verdict.kind !== "usable") {
-			process.stdout.write(`${describeVerdict(verdict)} Starting \`clio-coder configure\`.\n`);
+			// The one next action, and that nothing else can run until it is done (HI02).
+			process.stdout.write(
+				`${describeVerdict(verdict)} Clio needs a model before it can do anything else, so setup starts now.\n`,
+			);
 			const { runConfigureCommand } = await import("./configure.js");
 			const configured = await runConfigureCommand([], process.stdin, process.stdout, true);
 			if (configured !== 0) return configured;

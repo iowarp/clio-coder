@@ -1334,9 +1334,8 @@ export async function runOnboardingWizard(
 	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
 	// hold no choice of theirs; the sentence is about the choices.
 	presenter.note(
-		"Escape goes back a step, and from the first step leaves without saving. Your choices are saved only at the review, except a browser sign-in you complete.",
+		"Escape goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only at the review, except a browser sign-in you complete.",
 	);
-	presenter.note(`Saved result: ${shortenPath(settingsPath())}`);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
 	if (options.mode === "first" && !options.runtime) {
@@ -1442,8 +1441,11 @@ function cancel(
 	// choice and not a failure, so the rail says it once and nothing follows on
 	// stderr; the closing line used to be chased by `error: configuration cancelled`.
 	if (answers.mode === "first" && options.advise !== false)
-		presenter.commandAdvice("Set up later:", "clio-coder configure");
-	presenter.done("Cancelled; target settings not saved");
+		presenter.commandAdvice(
+			"Clio cannot start until a model is set up. When you are ready, run:",
+			"clio-coder configure",
+		);
+	presenter.done("Cancelled; nothing was saved");
 	return answers.mode === "first" || options.quit === true ? 130 : 0;
 }
 

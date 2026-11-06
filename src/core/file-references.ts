@@ -8,7 +8,8 @@ import { formatDimensionNote, resizeImage } from "../utils/image-resize.js";
 import { expandConfigPath } from "./resolve-config-value.js";
 
 export interface FileReferenceDiagnostic {
-	type: "warning" | "error";
+	/** `info` marks a file that went in only in part, such as a PDF cut at the attachment cap. */
+	type: "warning" | "error" | "info";
 	message: string;
 	path?: string;
 }
@@ -283,6 +284,13 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 					content = header + content.slice(headerLength);
 				}
 				content += marker(String(lastPage));
+				const of = rendered.pageCount !== undefined ? ` of ${rendered.pageCount}` : "";
+				return result(
+					renderTextFile(filePath, content),
+					[{ type: "info", message: `the first ${lastPage}${of} pages`, path: filePath }],
+					[],
+					[filePath],
+				);
 			}
 			return result(renderTextFile(filePath, content), [], [], [filePath]);
 		}
@@ -329,14 +337,14 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 			notInlined(
 				filePath,
 				`binary file (${size}), not inlined; inspect it with run_script and a library for its format`,
-				`binary file not inlined (${size})`,
+				`a binary file, not text (${size})`,
 			);
 		if (signature.includes(0)) return binary();
 		if (stat.size > INLINE_TEXT_MAX_BYTES) {
 			return notInlined(
 				filePath,
 				`text file (${size}) is larger than the ${formatSize(INLINE_TEXT_MAX_BYTES)} inline limit, not inlined; read it in windows with read and offset/limit`,
-				`text file not inlined (${size})`,
+				`too large to include (${size})`,
 			);
 		}
 		const bytes = readFileSync(filePath);
