@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { parseCodewikiRaw } from "../../domains/context/codewiki/artifact.js";
@@ -27,7 +28,16 @@ import {
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
-const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codemap.json");
+const CLIO_CODEWIKI_RELATIVE_PATH = join("dist", "assets", "codemap.json.gz");
+// A dist built before the map shipped gzipped carries one of these plain names instead.
+const CLIO_CODEWIKI_PLAIN_PATHS = [join("dist", "assets", "codemap.json"), join("dist", "assets", "codewiki.json")];
+
+function readClioCodewikiText(packageRoot: string): string {
+	const gzipped = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
+	if (existsSync(gzipped)) return gunzipSync(readFileSync(gzipped)).toString("utf8");
+	const plain = CLIO_CODEWIKI_PLAIN_PATHS.map((path) => join(packageRoot, path)).find((path) => existsSync(path));
+	return readFileSync(plain ?? gzipped, "utf8");
+}
 
 type CodeNavSource = "workspace" | "clio";
 
@@ -88,9 +98,7 @@ function loadClioCodewikiForTool(): { ok: true; loaded: LoadedNavSource } | { ok
 		if (clioCodewikiCache?.packageRoot === packageRoot) {
 			return { ok: true, loaded: { codewiki: clioCodewikiCache.codewiki, entryRoot: packageRoot } };
 		}
-		const canonical = join(packageRoot, CLIO_CODEWIKI_RELATIVE_PATH);
-		const artifactPath = existsSync(canonical) ? canonical : join(packageRoot, "dist", "assets", "codewiki.json");
-		const parsed = parseCodewikiRaw(readFileSync(artifactPath, "utf8"));
+		const parsed = parseCodewikiRaw(readClioCodewikiText(packageRoot));
 		if (!parsed) throw new Error("bundled artifact is not a valid codemap");
 		const codewiki = packageRootResolvedCodewiki(packageRoot, parsed);
 		clioCodewikiCache = { packageRoot, codewiki };

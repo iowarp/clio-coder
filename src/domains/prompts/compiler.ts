@@ -3,6 +3,7 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import { normalizePromptHint } from "../../core/prompt-hint.js";
 import type { RouteName, RouteSource } from "../../core/route-provenance.js";
 import { formatRouteSources } from "../../core/route-provenance.js";
+import { sourceIsPacked } from "../../core/source-pack.js";
 import type { ToolName } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnAllowsTool } from "../../core/turn-constraints.js";
@@ -929,7 +930,13 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		const rendered = selfAwareness.body
 			.replace("{CLIO_DOCS_PATH}", join(packageRoot, "docs"))
 			.replace("{CLIO_SRC_PATH}", join(packageRoot, "src"))
-			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codemap.json"))
+			// Only an installed package packs its source; a checkout's prompt carries no note.
+			.replace(
+				"{CLIO_SRC_PACKED_NOTE}",
+				sourceIsPacked(packageRoot)
+					? " Part of the .ts source there is packed: read and code_nav open it, but grep, find and bash do not see it."
+					: "",
+			)
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
 		const settingsRouting =
