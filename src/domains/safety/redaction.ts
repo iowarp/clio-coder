@@ -58,10 +58,10 @@ const JDBC_ORACLE_USERINFO_RE = new RegExp(String.raw`(${JDBC_ORACLE_PREFIX})("[
 // percent-encoded URL ends it at `%40` (#448).
 const GIT_TOKEN_PREFIX = "(?:gh[pousr]_|github_pat_|glpat-)";
 const OPAQUE_NAME = String.raw`(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,}`;
-const PERCENT_OPENER_BEHIND = String.raw`(?<=[a-z0-9+.-]%3a%2f%2f)`;
+const PERCENT_OPENER_BEHIND = "(?<=[a-z0-9+.-]%3a%2f%2f)";
 export const URL_USERNAME_TOKEN_RE = new RegExp(
 	String.raw`(?<=${AUTHORITY_OPENER})(?:${OPAQUE_NAME}(?=@)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=:[^\s/@]*@))` +
-		String.raw`|${PERCENT_OPENER_BEHIND}(?:${OPAQUE_NAME}(?=%40)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=%3a${PERCENT_PASSWORD_RUN}%40))`,
+		`|${PERCENT_OPENER_BEHIND}(?:${OPAQUE_NAME}(?=%40)|${GIT_TOKEN_PREFIX}[a-z0-9_-]{8,}(?=%3a${PERCENT_PASSWORD_RUN}%40))`,
 	"giu",
 );
 const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
@@ -576,7 +576,7 @@ export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
 
 // The username token's shape at the very end of a stream that stopped. No `@` will come, and a frame's hold reads it as a host (#446).
 const CUT_OFF_USERNAME_TOKEN_RE = new RegExp(
-	String.raw`(?<=${AUTHORITY_OPENER})${OPAQUE_NAME}(?=:?$)|${PERCENT_OPENER_BEHIND}${OPAQUE_NAME}(?=(?:%(?:3a?|4)?)?$)`,
+	`(?<=${AUTHORITY_OPENER})${OPAQUE_NAME}(?=:?$)|${PERCENT_OPENER_BEHIND}${OPAQUE_NAME}(?=(?:%(?:3a?|4)?)?$)`,
 	"iu",
 );
 
