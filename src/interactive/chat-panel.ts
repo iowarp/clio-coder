@@ -921,6 +921,12 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 /** A fence row as Pi draws it, export-tagged or not; a list or a quote nests it behind its own indent. */
 const FENCE_ROW = /^( *)\uFDD0?```/u;
 
+/** The opening fence as the block's language, or `code` when it names none, at the fence's own indent. */
+function fenceLabelRow(row: string, fenceEnd: number, indent: string): string {
+	const lang = stripTerminalSequences(row).slice(fenceEnd).trim().split(/\s+/u, 1)[0];
+	return `${indent}${clioTheme().fg("annotation", lang || "code")}`;
+}
+
 /**
  * One source line of a fenced code block, rejoined from the pieces Pi cut it
  * into. A line that fits prints as it is; a longer one wraps once at its spaces,
@@ -964,6 +970,12 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 		if (fence !== null) {
 			flushCode();
 			fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
+			if (!bareFences) {
+				// The reader needs where code starts and what language it is, not the Markdown that said so: the
+				// opening fence becomes the language as a quiet label and the closing fence draws nothing.
+				if (fenceIndent !== null) rows.push(fenceLabelRow(row, fence[0].length, fenceIndent));
+				continue;
+			}
 		} else if (fenceIndent !== null) {
 			const trimmed = row.replace(/ +$/u, "");
 			if (stripTerminalSequences(trimmed).startsWith(`${fenceIndent}${CODE_LINE}`) || code === null) {
