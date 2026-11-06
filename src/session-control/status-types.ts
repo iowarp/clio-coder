@@ -151,7 +151,10 @@ export interface OverlayFrame {
 
 export interface AgentStatus {
 	phase: StatusPhase;
+	/** Epoch ms the turn's run began, which every whole-turn clock reads. */
 	since: number;
+	/** Epoch ms the phase on screen began, so a phase clock never carries the whole turn's time (HS20). */
+	phaseSince?: number | undefined;
 	lastMeaningfulAt: number;
 	watchdogTier: WatchdogTier;
 	watchdogPeak: WatchdogTier;

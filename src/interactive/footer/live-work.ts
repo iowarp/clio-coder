@@ -39,7 +39,11 @@ export interface LiveWorkFacts {
 
 /** Whole seconds of the phase on screen; a tool's elapsed is its own call's, as on its card. */
 function phaseElapsedMs(status: AgentStatus, now: number): number {
-	const start = status.phase === "tool_running" ? (status.toolStartedAt ?? status.since) : status.since;
+	// The phase's own start: `is writing · 23s` once carried the whole turn's time into a reply under a second old.
+	const start =
+		status.phase === "tool_running"
+			? (status.toolStartedAt ?? status.phaseSince ?? status.since)
+			: (status.phaseSince ?? status.since);
 	return Math.max(0, now - start);
 }
 
@@ -244,10 +248,12 @@ export function liveWorkStrip(
 		const awaitsWorker =
 			workers !== null && (facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch);
 		const clocked = (text: string): string => {
+			const phaseMs = phaseElapsedMs(facts.status, facts.now);
+			// Under a second is no clock yet, as the rail counts it.
 			const elapsed =
-				awaitsWorker || CARRIES_ELAPSED.test(stripTerminalSequences(text))
+				awaitsWorker || phaseMs < 1000 || CARRIES_ELAPSED.test(stripTerminalSequences(text))
 					? null
-					: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
+					: formatWaitClock(phaseMs);
 			return theme.fg(loose.token, elapsed === null ? text : `${text} · ${elapsed}`);
 		};
 		// The clock the strip may add takes up to eight cells, which the words leave for it.
