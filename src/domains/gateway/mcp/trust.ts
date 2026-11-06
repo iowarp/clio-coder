@@ -259,7 +259,7 @@ function trustStatusFor(server: McpServerDeclaration, projectRoot: string, state
 		return {
 			status: "stale",
 			actionClass: "unknown",
-			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, ${server.plugin !== undefined ? "timeout, or the plugin's content" : entries.length > 0 ? "timeout, or entry scripts" : "or timeout"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
+			reason: `declaration of '${server.id}'${origin} changed (command, args, env, cwd, timeout, ${server.plugin !== undefined ? "tool action classes, or the plugin's content" : entries.length > 0 ? "tool action classes, or entry scripts" : "or tool action classes"}) since it was trusted; review it and run clio-coder mcp trust ${server.id} again`,
 		};
 	}
 	return { status: "trusted", actionClass: record.actionClass, ...(record.network === true ? { network: true } : {}) };

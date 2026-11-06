@@ -344,7 +344,7 @@ describe("mcp server trust", () => {
 		strictEqual(stale?.trust.status, "stale");
 		match(
 			stale?.trust.status === "stale" ? stale.trust.reason : "",
-			/changed \(command, args, env, cwd, or timeout\) since it was trusted/,
+			/changed \(command, args, env, cwd, timeout, or tool action classes\) since it was trusted/,
 		);
 
 		const retrusted = trustMcpServer({ cwd: project, configDir, id: "files" });
