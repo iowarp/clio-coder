@@ -1183,7 +1183,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				onExtract: (shortPath) =>
 					notifications.add({
 						level: "info",
-						text: `reading ${shortPath} · Esc cancels and keeps your message`,
+						text: `Reading ${shortPath} · Esc cancels and keeps your message`,
 						key: SUBMIT_EXPANSION_STATUS,
 						ttlMs: 0,
 					}),
