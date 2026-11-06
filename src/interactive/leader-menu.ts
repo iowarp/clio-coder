@@ -51,16 +51,25 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 				theme.fg("annotation", header),
 				...shown.map((entry, index) => {
 					const focused = start + index === selected;
-					const label = entry.label ?? entry.id ?? "";
+					const whole = entry.label ?? entry.id ?? "";
+					const binding = bindings[start + index] ?? "";
+					// A trailing aside (`(twice quickly closes)`) gives way before the shortcut does; /help keeps it.
+					const brief = whole.replace(/ \([^()]*\)$/u, "");
+					const label =
+						!entry.disabledReason &&
+						binding.length > 0 &&
+						visibleWidth(whole) + 2 + visibleWidth(binding) > width - 5 &&
+						brief !== whole
+							? brief
+							: whole;
 					const reason = entry.disabledReason ? theme.fg("annotation", reasonOf(entry)) : "";
 					// The selection rule: cursor and label in accent, nothing else recolored.
 					// An unbound key is a blank, because `·` is the internal-run mark in a
 					// board's first column and this is a first column.
 					const mark = selectionMark(focused);
 					const room = Math.max(1, width - 5);
-					const binding = bindings[start + index] ?? "";
 					const fullName = `${selectionLabel(focused, label)}${reason}`;
-					const fits = binding.length > 0 && visibleWidth(labelOf(entry)) + 2 + visibleWidth(binding) <= room;
+					const fits = binding.length > 0 && visibleWidth(`${label}${reasonOf(entry)}`) + 2 + visibleWidth(binding) <= room;
 					if (!fits)
 						return `${mark} ${entry.key || " "}  ${truncateToWidth(fullName, room, GLYPH.ellipsis)}`.replace(/ +$/u, "");
 					const nameWidth = aligned ?? room - visibleWidth(binding) - 2;

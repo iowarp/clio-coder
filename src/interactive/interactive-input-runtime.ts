@@ -259,7 +259,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				label: deps.keybindings.getDescription?.(entry.id) ?? entry.id,
 				...(entry.id === "clio-coder.thinking.cycle" &&
 				deps.actions.availableThinkingLevels().every((level) => level === "off")
-					? { disabledReason: "This model supports only off" }
+					? { disabledReason: "Not adjustable on this model" }
 					: {}),
 			};
 		});

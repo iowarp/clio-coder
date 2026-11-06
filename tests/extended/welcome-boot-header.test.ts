@@ -237,7 +237,7 @@ test("stale project context offers refresh", () => {
 test("the welcome action never advertises a submit binding", () => {
 	const actions = ["Enter", "Ctrl+S", null].map((submitKey) => actionLine(rows(banner({ submitKey }), 80)));
 	strictEqual(new Set(actions).size, 1);
-	ok(actions[0]?.endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? "·source" : ""}`));
+	ok(actions[0]?.endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? " · source" : ""}`));
 	ok(!actions[0]?.includes("to send"), actions[0]);
 });
 
@@ -392,7 +392,7 @@ test("the session header keeps the route when everything else has to go", () => 
 	}
 	// Wide enough, identity sits next to the wordmark rather than trailing the row.
 	const wide = rows(component, 120)[0] ?? "";
-	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-(?:dev·source|rc\.\d+|snapshot\.\d{12}\.g[0-9a-f]{7}))? · dynamo/u);
+	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-(?:dev · source|rc\.\d+|snapshot\.\d{12}\.g[0-9a-f]{7}))? · dynamo/u);
 });
 
 test("the collapsed header drops readiness, latency and onboarding", () => {
@@ -1017,7 +1017,7 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 		"24,000-character",
 	])
 		ok(wide.join("\n").includes(label));
-	ok(actionLine(wide).endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? "·source" : ""}`));
+	ok(actionLine(wide).endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? " · source" : ""}`));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
@@ -1142,7 +1142,7 @@ for (const width of [60, 80, 106, 160]) {
 		);
 		const text = stripAnsi(line);
 		t.diagnostic(text.trimEnd());
-		ok(text.includes("v0.6.0-dev·2ca8896"), text);
+		ok(text.includes("v0.6.0-dev · 2ca8896"), text);
 		ok(text.includes("openai-codex · gpt-6-luna"), text);
 		ok(visibleWidth(line) <= width, text);
 	});

@@ -1,6 +1,6 @@
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
-import { previewBudget, previewRows } from "./preview.js";
+import { groupWrappedRows, previewBudget, previewLines, previewRows } from "./preview.js";
 /**
  * Structured renderer for tool-execution chat segments (Slice A of the
  * pi-coding-agent parity work). pi-coding-agent renders every tool call as
@@ -51,7 +51,7 @@ import {
 } from "../../tools/presentation.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
-import { mutationFactsLine } from "../mutation-preview.js";
+import { mutationFactsLine, targetWithoutPayloadSize } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import {
 	clioTheme,
@@ -824,8 +824,10 @@ export function renderToolAwaitingApproval(
 	);
 	const lines = [singleActionLine(parts.lead, AWAITING_APPROVAL_TAIL(), width)];
 	if (view === undefined) return lines;
-	// The lead row already names a target it can show whole, so `target` only adds what that row cut.
-	const leadShowsTarget = view.target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(view.target);
+	// The lead row already names a target it can show whole, so `target` only adds what that row cut. A file
+	// change's size placeholder is serialization; the mutation row names the size and digest.
+	const target = targetWithoutPayloadSize(view.target, view.mutation);
+	const leadShowsTarget = target !== undefined && stripTerminalSequences(lines[0] ?? "").includes(target);
 	// The axis is a level or a rule, not a requester, so the row says why the call stopped as a sentence.
 	const actionWords = `${view.actionClass.replaceAll("_", " ")} action`;
 	const why =
@@ -834,7 +836,7 @@ export function renderToolAwaitingApproval(
 			: `${approvalAxisText(view)} held this ${actionWords} for you`;
 	lines.push(...indentAndWrap(toolMeta(why), width, false));
 	const facts = [
-		...(view.target !== undefined && view.target.length > 0 && !leadShowsTarget ? [["target", view.target]] : []),
+		...(target !== undefined && target.length > 0 && !leadShowsTarget ? [["target", target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
@@ -1716,10 +1718,9 @@ function fromFirstChange(rows: readonly string[]): readonly string[] {
 	return first > 0 ? rows.slice(first) : rows;
 }
 
-/** What the marker holds back, in diff lines: a wrapped line's continuation rows are not lines of the file. */
-function hiddenDiffLines(hidden: readonly string[]): string {
-	const lines = hidden.filter((row) => !DIFF_CONTINUATION_ROW.test(stripTerminalSequences(row))).length;
-	return lines === 1 ? "1 more line" : `${lines} more lines`;
+/** A diff's rows as file lines: a wrapped line's continuation rows belong to the line above them. */
+function diffLines(rows: readonly string[]): string[][] {
+	return groupWrappedRows(rows, (row) => DIFF_CONTINUATION_ROW.test(stripTerminalSequences(row)));
 }
 
 function renderMutationDiffBlock(diff: string, width: number, color: boolean): string[] {
@@ -2458,8 +2459,8 @@ export function renderToolPreview(
 	if (payload !== null) {
 		if (payload.tool === "edit" && options.previewDiff !== undefined && detail.diffRows > 0) {
 			rows.push(
-				...previewRows(
-					renderMutationDiffBlock(redactSecretString(options.previewDiff), width, true),
+				...previewLines(
+					diffLines(renderMutationDiffBlock(redactSecretString(options.previewDiff), width, true)),
 					previewBudget(detail.diffRows, options.terminalRows),
 					width,
 					false,
@@ -2534,14 +2535,13 @@ export function renderToolPreview(
 		const diffRows = renderMutationDiffBlock(redactSecretString(diff), width, options.diffStyle !== "plain");
 		const budget = previewBudget(detail.diffRows, options.terminalRows);
 		rows.push(
-			...previewRows(
-				diffRows.length > budget ? fromFirstChange(diffRows) : diffRows,
+			...previewLines(
+				diffLines(diffRows.length > budget ? fromFirstChange(diffRows) : diffRows),
 				budget,
 				width,
 				false,
 				RAIL_NORMAL(),
 				BODY_INDENT_VISIBLE_WIDTH,
-				hiddenDiffLines,
 			),
 		);
 	} else if (
@@ -2582,11 +2582,11 @@ export function renderToolPreview(
 			// A failed command's body is the command's own output, shown as it ran; a
 			// failed tool's body is the harness's error text, so its paths abbreviate.
 			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
-			const body = toolOutputInk(redactStreamingSecretString(shownText, finished !== undefined).trimEnd()).flatMap(
-				(line) => indentAndWrap(line, width, failure),
+			const body = toolOutputInk(redactStreamingSecretString(shownText, finished !== undefined).trimEnd()).map((line) =>
+				indentAndWrap(line, width, failure),
 			);
 			rows.push(
-				...previewRows(
+				...previewLines(
 					body,
 					limit,
 					width,

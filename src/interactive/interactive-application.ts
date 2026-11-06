@@ -2029,7 +2029,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			tui.requestRender();
 			return true;
 		},
-		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
+		explainThinkingUnavailable: () => notify("info", "Thinking is not adjustable on this model", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
 		keybindings,

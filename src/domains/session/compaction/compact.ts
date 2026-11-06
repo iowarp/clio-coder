@@ -20,7 +20,7 @@ export {
 	COMPACTION_USER_PROMPT_TEMPLATE,
 } from "../../memory/compaction-prompts.js";
 
-import { normalizeTokenUsage } from "../../../core/token-split.js";
+import { ceilChars, normalizeTokenUsage } from "../../../core/token-split.js";
 import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 /**
  * Compaction orchestration.
@@ -179,6 +179,12 @@ export interface CompactInput extends SideCallAuth {
 	preserveUserTurnId?: string;
 	/** A new operator request is pending admission and is not yet in `entries`. */
 	pendingOperatorTurn?: boolean;
+	/**
+	 * Output the summarizer has streamed so far, estimated from the characters
+	 * received, beside the request's output cap when it sends one. Called as
+	 * text or reasoning arrives; the test seam `summarize` never calls it.
+	 */
+	onSummaryOutput?: (written: { tokens: number; limit?: number }) => void;
 	/** Accounting observer; called once per invoked stream, including failures. */
 	onCall?: (call: CompactionCallObservation) => void;
 	/**
@@ -996,7 +1002,15 @@ async function runSummaryRequest(
 			context as unknown as Parameters<typeof streamSimple>[1],
 			options as unknown as Parameters<typeof streamSimple>[2],
 		);
+		let writtenChars = 0;
 		for await (const event of events) {
+			if (input.onSummaryOutput && (event.type === "text_delta" || event.type === "thinking_delta")) {
+				writtenChars += event.delta.length;
+				input.onSummaryOutput({
+					tokens: ceilChars(writtenChars),
+					...(maxTokens !== undefined ? { limit: maxTokens } : {}),
+				});
+			}
 			// Some transports throw after yielding a partial response. Retain the
 			// last reported usage even without a terminal error message.
 			if ("partial" in event) {

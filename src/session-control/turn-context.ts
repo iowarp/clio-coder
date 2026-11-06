@@ -180,6 +180,8 @@ import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
 const AUTO_COMPACT_FAILURE_LIMIT = 3;
+/** The summarizer streams a delta every few milliseconds; the rail needs a few redraws a second. */
+const SUMMARY_PROGRESS_INTERVAL_MS = 250;
 
 export interface TurnContextDeps {
 	getAutonomy?: () => AutonomyLevel;
@@ -224,6 +226,7 @@ export interface TurnContextDeps {
 					| "skillContextState"
 					| "signal"
 					| "beforeSummaryCall"
+					| "onSummaryOutput"
 					| "checkpointForSummary"
 					| "checkpointTokenFigures"
 					| "skipSummaryDigest"
@@ -1569,6 +1572,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			: status === "failed"
 				? compactionActivityPhase
 				: "compact",
+		measure?: { current?: number; total?: number; unit: "tokens" },
 	): void => {
 		if (status === "started" && !compactionLifecycleStarted) {
 			compactionLifecycleStarted = true;
@@ -1583,6 +1587,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			phase,
 			status,
 			message,
+			...(measure ?? {}),
 			...(phase === "summarize" ? { stages: ["compact", "summarize", "state"] as const } : {}),
 		});
 	};
@@ -1999,6 +2004,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return false;
 		}
 		let summaryLifecycleStarted = false;
+		let summaryReportedAt = 0;
 		const startSummaryLifecycle = (): void => {
 			middleware.fireCompactionHook("llm_summary", trigger);
 			emitCompactionActivity("started", "summarizing session history", "summarize");
@@ -2039,6 +2045,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "skillContextState"
 					| "signal"
 					| "beforeSummaryCall"
+					| "onSummaryOutput"
 					| "checkpointForSummary"
 					| "checkpointTokenFigures"
 			  >
@@ -2125,12 +2132,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						beforeSummaryCall: async (hold) => {
 							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold);
 							if (!summaryLifecycleStarted) startSummaryLifecycle();
-							// The size being summarized is the one scale this stage has: the
-							// summarizer reports no progress of its own while it reads.
+							// Nothing is measurable while the summarizer reads, so the rail
+							// stays indeterminate and says what it is waiting for.
+							summaryReportedAt = 0;
+							emitCompactionActivity("running", `reading ${footerTokens(footerTokensBefore)} tokens of history`, "summarize", {
+								unit: "tokens",
+							});
+						},
+						// Once the summary streams, its written size is the scale: against
+						// the request's output cap when it sends one, as a count otherwise.
+						onSummaryOutput: ({ tokens, limit }) => {
+							const now = Date.now();
+							if (now - summaryReportedAt < SUMMARY_PROGRESS_INTERVAL_MS) return;
+							summaryReportedAt = now;
 							emitCompactionActivity(
 								"running",
-								`summarizing ${footerTokens(footerTokensBefore)} tokens of session history`,
+								`summarizing ${footerTokens(footerTokensBefore)} tokens of history`,
 								"summarize",
+								{ current: tokens, ...(limit !== undefined ? { total: limit } : {}), unit: "tokens" },
 							);
 						},
 					})) ?? null
