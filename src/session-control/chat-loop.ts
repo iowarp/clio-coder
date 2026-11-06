@@ -947,6 +947,7 @@ export interface CreateChatLoopDeps {
 			| "skillContextState"
 			| "signal"
 			| "beforeSummaryCall"
+			| "onSummaryOutput"
 			| "checkpointForSummary"
 			| "checkpointTokenFigures"
 		>,

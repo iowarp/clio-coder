@@ -196,6 +196,8 @@ export interface ContextActivityPayload {
 	at: number;
 	current?: number;
 	total?: number;
+	/** What `current` and `total` count; absent means items, shown as a plain fraction. */
+	unit?: "tokens";
 	detail?: string;
 	stages?: ReadonlyArray<ContextActivityPhase>;
 }

@@ -464,9 +464,9 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 function awarenessLabel(stats: WelcomeDashboardStats): string {
 	return {
 		checking: "Checking…",
-		ok: "Current",
-		stale: "Stale",
-		none: "Not indexed",
+		ok: "Up to date",
+		stale: "Out of date",
+		none: "Not indexed yet",
 		malformed: "Needs repair",
 	}[stats.projectContext];
 }
@@ -503,7 +503,7 @@ export function buildWelcomeDashboardLines(
 	terminalRows?: number,
 ): string[] {
 	const version = versionLabel.replace(/ \(unreleased(?: · ([^)]+))?\)$/u, (_match, commit: string | undefined) =>
-		commit ? `·${commit}` : "",
+		commit ? ` · ${commit}` : "",
 	);
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
@@ -634,7 +634,13 @@ export function buildWelcomeDashboardLines(
 	if (inset.length > 0) for (const [index, row] of rows.entries()) rows[index] = fit(`${inset}${row}`);
 	// The launchpad is an island like every other framed block, so it shares the
 	// one frame recipe and its action row sits under the standard inner divider.
-	const versionTag = titleBrand ? "" : theme.fg("brandCopper", `v${version}`);
+	// The build note after the version gives way before the action it shares the row with.
+	const fullTag = `v${version}`;
+	const tagText =
+		visibleWidth(actionRow(theme, stats, Number.MAX_SAFE_INTEGER)) + fullTag.length + 1 > room
+			? fullTag.replace(/ · .*$/u, "")
+			: fullTag;
+	const versionTag = titleBrand ? "" : theme.fg("brandCopper", tagText);
 	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
 	const action = actionRow(theme, stats, leftRoom);
 	const taglineRows =

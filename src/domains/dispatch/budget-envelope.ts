@@ -510,11 +510,15 @@ export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 			? ["more if it has to redo its answer"]
 			: []),
 	];
+	const stop = budget.mode === "advisory" ? (budget.ceiling ?? budget.hardCap) : budget.hardCap;
+	// A plan that equals the stop is one number, said once: `about 20; stops at 20` read as two limits.
 	const limit =
-		budget.mode === "advisory"
-			? `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${budget.ceiling ?? budget.hardCap}`
-			: budget.synthesis
-				? `answers after ${budget.toolCalls} tool calls; Clio stops it at ${budget.hardCap}`
-				: `Clio stops it at ${budget.hardCap} tool calls`;
+		budget.mode === "advisory" && budget.toolCalls === stop
+			? `Clio stops it at ${stop} tool calls`
+			: budget.mode === "advisory"
+				? `planned for about ${budget.toolCalls} tool calls; Clio stops it at ${budget.ceiling ?? budget.hardCap}`
+				: budget.synthesis
+					? `answers after ${budget.toolCalls} tool calls; Clio stops it at ${budget.hardCap}`
+					: `Clio stops it at ${budget.hardCap} tool calls`;
 	return notes.length === 0 ? limit : `${limit} (${notes.join("; ")})`;
 }

@@ -41,7 +41,7 @@ test("a worker checkpoint is marked as needing input and keeps its questions on 
 		detail: { workerRows: 0, workerActivity: false, errorRows: 4 } as never,
 	}).map(stripTerminalSequences);
 	match(rows[0] ?? "", /needs input/u);
-	doesNotMatch(rows[0] ?? "", /execution ok/u, "the folded header names the state the operator has to act on");
+	doesNotMatch(rows[0] ?? "", /✓ done/u, "the folded header names the state the operator has to act on");
 	for (const question of [
 		"Include Mo alongside Nb?",
 		"stop at 200 h?",

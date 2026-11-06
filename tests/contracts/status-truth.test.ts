@@ -34,7 +34,11 @@ import { createWorkerProgressFold, type WorkerProgressSnapshot } from "../../src
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import {
+	createDispatchBoardView,
+	type DispatchBoardRow,
+	isDispatchBoardRowSteerable,
+} from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
 import {
@@ -90,6 +94,7 @@ import type { RetryStatusPayload, TurnRecoveryDeps } from "../../src/session-con
 import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
+import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 
 const STUCK_AFTER_MS = 180_000;
@@ -1651,6 +1656,7 @@ test("a wait names who it is on and keeps its time left as the room shrinks", ()
 	strictEqual(words("operator", 14, true), "fails in 1:59");
 	strictEqual(words("judge", 80, false, "deny"), "waiting for the safety judge · denied in 1:59");
 	strictEqual(words("main", 80, false, "deny"), "waiting for the main agent · denied in 1:59");
+	strictEqual(words("operator", 14, false, "deny"), "1:59 to answer", "a narrow deny form never reads as denied");
 });
 
 test("a run's list row and a credentialed call's title say only what is known", () => {
@@ -2047,6 +2053,43 @@ test("an empty composer after a failed turn offers the receipt's and the rail's 
 	match(footerKeyHint(0, false, 120, "recover") ?? "", /^↑ recalls your prompt/u);
 });
 
+test("each step of a plan opens its own worker card, though every step shares the plan's root at attempt 0", () => {
+	const stream = createWorkerStream({ readResult: () => null });
+	const step = (runId: string, task: string) =>
+		stream.started({
+			runId,
+			assignmentId: "fleet-root",
+			attempt: 0,
+			requestOrigin: "user",
+			agentId: "coder",
+			task,
+			targetId: "local",
+			wireModelId: "worker-model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			pid: 1,
+		} as never);
+	const first = step("run-a", "map the stats");
+	const second = step("run-b", "check the readme");
+	strictEqual(first?.kind, "created");
+	strictEqual(second?.kind, "created", "a sibling step is not a retry of the first");
+	ok(first && second && first.entry !== second.entry);
+	strictEqual(second?.entry.task, "check the readme");
+	strictEqual(step("run-b", "check the readme"), null, "the same run started twice opens nothing new");
+	const progressed = stream.progress({
+		runId: "run-a",
+		agentId: "coder",
+		event: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "mapped" } },
+	});
+	strictEqual(progressed?.entry, first?.entry, "the first step keeps streaming into its own card");
+});
+
+test("a worker that stopped answering takes no steer, and takes one again once it answers", () => {
+	const row = { runtimeKind: "http", status: "stale" } as unknown as DispatchBoardRow;
+	strictEqual(isDispatchBoardRowSteerable(row), false);
+	strictEqual(isDispatchBoardRowSteerable({ ...row, status: "running" }), true);
+});
+
 test("every surface spells a key one way: modifiers title-cased in Ctrl, Alt, Shift order, Esc and PgUp short", async () => {
 	const { keyName } = await import("../../src/interactive/theme/labels.js");
 	const { fitHintEntries } = await import("../../src/interactive/overlay-frame.js");
@@ -2075,4 +2118,76 @@ test("a council card names the task in its pinned headline and does not repeat i
 	ok(plan !== null);
 	strictEqual(planHeadline(plan), "Council of 2 (fast, deep) answers: review the mean function");
 	ok(!planFacts(plan).some((fact) => fact.label === "task"));
+});
+
+test("a plan step's worker card names its step, whether the step is announced before or after its run starts", () => {
+	const stream = createWorkerStream({ readResult: () => null });
+	const start = (runId: string) =>
+		stream.started({
+			runId,
+			assignmentId: "fleet-root",
+			attempt: 0,
+			requestOrigin: "user",
+			agentId: "coder",
+			task: "map the stats",
+			targetId: "local",
+			wireModelId: "worker-model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			pid: 1,
+		} as never);
+	strictEqual(stream.tagPlanStep("run-a", "map-stats"), null, "a step named before its run waits for it");
+	strictEqual(start("run-a")?.entry.planStep, "map-stats");
+	const second = start("run-b")?.entry;
+	strictEqual(second?.planStep, undefined);
+	strictEqual(stream.tagPlanStep("run-b", "check-readme")?.entry, second);
+	strictEqual(second?.planStep, "check-readme");
+	const header = renderWorkerEntryLines(second as never, 100, {}).map(stripTerminalSequences)[0] ?? "";
+	match(header, /coder · check-readme/u);
+});
+
+test("a summarizing compaction measures its written summary against the output cap and says when nothing is measurable", async () => {
+	const { formatContextActivityRailLines } = await import("../../src/interactive/context-activity.js");
+	const base = {
+		kind: "compaction" as const,
+		phase: "summarize" as const,
+		status: "running" as const,
+		startedAtMs: 0,
+		phaseStartedAtMs: 0,
+		updatedAtMs: 1000,
+		completedAtMs: null,
+		detail: null,
+		stages: ["compact", "summarize", "state"] as const,
+	};
+	const reading = formatContextActivityRailLines(
+		{ ...base, message: "reading 13.1K tokens of history", current: null, total: null, unit: "tokens" },
+		40,
+		1000,
+	).map(stripTerminalSequences);
+	match(reading[1] ?? "", / no output yet$/u, "a narrow rail keeps the measure on the bar row");
+	const capped = formatContextActivityRailLines(
+		{ ...base, message: "summarizing 13.1K tokens of history", current: 2000, total: 8000, unit: "tokens" },
+		80,
+		1000,
+	).map(stripTerminalSequences);
+	match(capped[1] ?? "", / 2K of 8K tokens$/u);
+	strictEqual((capped[1] ?? "").split("█").length - 1, 16, "a quarter of the cap fills a quarter of the bar");
+	const open = formatContextActivityRailLines(
+		{ ...base, message: "summarizing 13.1K tokens of history", current: 1, total: null, unit: "tokens" },
+		80,
+		1000,
+	).map(stripTerminalSequences);
+	match(open[1] ?? "", / 1 token, no limit$/u);
+	doesNotMatch(open[1] ?? "", /█/u);
+});
+
+test("a tool preview keeps whole lines and counts the lines it holds back, never wrapped rows", async () => {
+	const { previewLines } = await import("../../src/interactive/renderers/preview.js");
+	const lines = [["a1", "a2"], ["b1"], ["c1", "c2", "c3"], ["d1"]];
+	const head = previewLines(lines, 4, 40).map(stripTerminalSequences);
+	deepStrictEqual(head.slice(0, 3), ["a1", "a2", "b1"], "the third line would be cut between its rows, so it waits");
+	match(head[3] ?? "", /… 2 more lines · \/view/u);
+	const tail = previewLines(lines, 3, 40, true).map(stripTerminalSequences);
+	match(tail[0] ?? "", /… 3 earlier lines · \/view/u);
+	deepStrictEqual(tail.slice(1), ["d1"]);
 });

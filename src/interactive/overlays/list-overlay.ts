@@ -56,6 +56,8 @@ const LEAD_COLUMN_SHARE = 0.4;
 const FOCUS_LINE_ROWS = 3;
 /** A list shorter than this keeps every row for the cursor. */
 const FOCUS_LINE_MIN_LIST_ROWS = 8;
+/** Narrowest text column the focused row's text wraps in beside its lead. */
+const FOCUS_LINE_MIN_TEXT = 24;
 
 /** Fewest list rows a stacked detail pane may leave, and fewest rows it needs to be drawn at all. */
 const STACKED_LIST_MIN_ROWS = 3;
@@ -786,8 +788,22 @@ export class ListOverlayView implements Component {
 		const rows: string[] = [this.padLine(`  ${innerDivider(theme, Math.max(1, width - 4))}`, width)];
 		// The short lead is whole where it exists; the text is what the row cut, so it gets the rows.
 		const lead = cells?.narrowLead ?? cells?.lead ?? "";
-		const body = cells ? `${theme.fg("menuOption", lead)}  ${theme.fg("menuDescription", cells.text)}` : "";
-		const wrapped = body.length === 0 ? [] : wrapTextWithAnsi(body, Math.max(1, width - 4));
+		const room = Math.max(1, width - 4);
+		const textColumn = visibleWidth(lead) + 2;
+		// The text wraps under its own column, as a table cell does; a lead too wide to leave the text a
+		// readable column takes the first row alone and the text starts under it.
+		let wrapped: string[] = [];
+		if (cells && room - textColumn >= FOCUS_LINE_MIN_TEXT) {
+			const text = wrapTextWithAnsi(theme.fg("menuDescription", cells.text), room - textColumn);
+			wrapped = text.map((row, index) =>
+				index === 0 ? `${theme.fg("menuOption", lead)}  ${row}` : `${" ".repeat(textColumn)}${row}`,
+			);
+		} else if (cells) {
+			wrapped = [
+				...wrapTextWithAnsi(theme.fg("menuOption", lead), room).slice(0, 1),
+				...wrapTextWithAnsi(theme.fg("menuDescription", cells.text), room),
+			];
+		}
 		for (let index = 0; index < FOCUS_LINE_ROWS - 1; index += 1) {
 			const row = wrapped[index] ?? "";
 			const cut = index === FOCUS_LINE_ROWS - 2 && wrapped.length > FOCUS_LINE_ROWS - 1;

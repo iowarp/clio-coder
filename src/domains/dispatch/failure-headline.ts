@@ -8,6 +8,12 @@
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import { trustFailureWords } from "../evidence/trust-projection.js";
 
+/**
+ * A run released before it started because the work around it had already stopped. Whoever stopped that work speaks
+ * for it, so surfaces that already name the cause read this to stay quiet rather than say it twice.
+ */
+export const NEVER_STARTED_WORDS = "it never started, because the work it was part of had already stopped";
+
 const HEADLINE_MAX_CHARS = 140;
 
 /**
@@ -112,10 +118,7 @@ const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) =
 		(match) => `its target ${match[1]} is not reachable, so nothing ran there`,
 	],
 	// The slot a run was admitted under was released before it started, because the work around it already stopped.
-	[
-		/^(?:dispatch: )?reservation '[^']+' is not active\b/iu,
-		() => "it never started, because the work it was part of had already stopped",
-	],
+	[/^(?:dispatch: )?reservation '[^']+' is not active\b/iu, () => NEVER_STARTED_WORDS],
 	[
 		/^permission denied by policy: (\S+) raised an operator-authority ask and no operator can answer worker asks/iu,
 		(match) => `its ${match[1]} call needed your approval, and this run had no way to ask you, so the call did not run`,

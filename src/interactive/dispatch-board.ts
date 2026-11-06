@@ -5,7 +5,11 @@ import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import { budgetLimitWords } from "../domains/dispatch/budget-envelope.js";
 import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
-import { completedRunCaveat, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import {
+	completedRunCaveat,
+	NEVER_STARTED_WORDS,
+	workerFailureHeadline,
+} from "../domains/dispatch/failure-headline.js";
 import { fleetNodeTaskBrief } from "../domains/dispatch/fleet-node-prompt.js";
 import type { DispatchRequestOrigin, RunKind } from "../domains/dispatch/types.js";
 import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
@@ -274,8 +278,9 @@ export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
 	return (
 		row.plan === undefined &&
 		runKindSupportsLiveSteering(row.runtimeKind) &&
-		// A queued run has no worker yet, so a message would have nowhere to go.
-		(row.status === "running" || row.status === "stale")
+		// A queued run has no worker yet, and a stale one has stopped answering, so a message would reach no one. A
+		// stale worker that speaks again is running again, and takes messages again.
+		row.status === "running"
 	);
 }
 
@@ -409,7 +414,8 @@ export function dispatchStatusPresentation(
 				token: "dispatchAction",
 			};
 		case "cancelling":
-			return { glyph: GLYPH.cancelled, label: "cancelling", token: "warning" };
+			// The card and the strip say stopping while the process exits, so the board's status cell does too.
+			return { glyph: GLYPH.cancelled, label: "stopping", token: "warning" };
 		case "retrying":
 			return { glyph: GLYPH.phaseRetry, label: "retrying", token: "warning" };
 		case "completed":
@@ -721,6 +727,11 @@ function planFailureWords(plan: FleetPlanRunView): string | null {
 	return plan.failure === undefined ? null : sanitizeCallTargetText(plan.failure.replace(/^dispatch:\s*/u, ""));
 }
 
+/** Steps whose worker finished with a caveat its own card marks as a warning, such as a refused call. */
+export function planWarnedStepCount(plan: FleetPlanRunView): number {
+	return plan.steps.filter((step) => step.state === "passed" && (step.worker?.caveat ?? null) !== null).length;
+}
+
 function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailure = true): string {
 	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
 	const failed = plan.steps.find((step) => step.state === "failed" && !planStepStopped(plan, step.stepId));
@@ -733,7 +744,9 @@ function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailu
 	// Where a status cell already reads cancelled, repeating it on the count only doubles the word.
 	if (plan.state === "cancelled") return statusShown ? count : `${count} · cancelled`;
 	if (plan.failure !== undefined) return withFailure ? `${count} · ${planFailureWords(plan)}` : count;
-	return failed === undefined ? count : `${count} · ${failed.stepId} failed`;
+	if (failed !== undefined) return `${count} · ${failed.stepId} failed`;
+	const warned = planWarnedStepCount(plan);
+	return warned === 0 ? count : `${count} · ${warned} with warnings`;
 }
 
 const PLAN_STEP_MARKS: Record<
@@ -757,11 +770,19 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 	const nameWidth = Math.max(...plan.steps.map((step) => visibleWidth(step.stepId)));
 	return plan.steps.map((step) => {
 		const stopped = planStepStopped(plan, step.stepId) && step.state !== "passed";
+		// The worker's own caveat rides the step, so a step that passed reads the refused call its run's row shows.
+		const caveat = stopped ? null : (step.worker?.caveat ?? null);
+		// A command step passed its exit check. A worker step only finished: nothing checked its work, and a caveat
+		// on it is a warning, as its own card marks it.
 		const mark = stopped
 			? plan.state === "cancelling" && step.state === "running"
 				? { glyph: GLYPH.cancelled, token: "warning" as const, word: "stopping" }
 				: { glyph: GLYPH.cancelled, token: "annotation" as const, word: "stopped" }
-			: PLAN_STEP_MARKS[step.state];
+			: step.state === "passed" && step.worker !== undefined
+				? caveat !== null
+					? { glyph: GLYPH.warn, token: "warning" as const, word: "finished" }
+					: { ...PLAN_STEP_MARKS.passed, word: "done" }
+				: PLAN_STEP_MARKS[step.state];
 		// A step still pending at the end was never reached; while the plan runs it is only waiting.
 		const word =
 			stopped || step.state !== "pending"
@@ -775,8 +796,6 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 		const finishing = !stopped && step.state === "running" && step.worker?.settled === true;
 		// A stopped step's exit code is the signal the stop sent, not a result; its duration still says how far it got.
 		const detail = stopped ? step.detail?.replace(/^exit -?\d+ · /u, "") : step.detail;
-		// The worker's own caveat rides the step, so a step that passed reads the refused call its run's row shows.
-		const caveat = stopped ? null : (step.worker?.caveat ?? null);
 		const facts = [
 			finishing ? "finishing" : word,
 			...(caveat !== null ? [caveat] : []),
@@ -794,7 +813,11 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 }
 
 function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, contentWidth: number): string[] {
-	const presentation = dispatchStatusPresentation(row.status);
+	// Warned worker steps make the plan's status a warning here too, as on its row and its card.
+	const presentation =
+		plan.state === "passed" && planWarnedStepCount(plan) > 0
+			? { glyph: GLYPH.warn, label: "done", token: "warning" as const, glyphToken: undefined }
+			: dispatchStatusPresentation(row.status);
 	const units = [
 		`${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`,
 		theme.fg("body", planProgressText(plan, true, false)),
@@ -814,10 +837,12 @@ function planCardBody(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRu
 		cardUnitsLine(theme, "status", units, contentWidth),
 		...(why === null ? [] : cardWrappedValueLines(theme, "why", theme.fg("error", why), contentWidth)),
 		...steps.map((line, index) => `${index === 0 ? cardKvKey(theme, "steps") : gutter}${line}`),
+		// The plan's step-by-step record lives in its event log, which a shell command prints; the row says so, so the
+		// id reads as that command's argument rather than as a name.
 		...cardWrappedValueLines(
 			theme,
-			"inspect",
-			theme.fg("annotation", `clio-coder fleet events ${plan.rootId}`),
+			"log",
+			theme.fg("annotation", `clio-coder fleet events ${plan.rootId} prints its event log`),
 			contentWidth,
 		),
 	];
@@ -848,8 +873,10 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number): stri
 	const passed = plan.state === "passed";
 	const cancelled = plan.state === "cancelled";
 	const rail = theme.fg("gutter", "  │ ");
-	const tone = passed ? "success" : cancelled ? "toolMetadata" : "error";
-	const glyph = passed ? GLYPH.ok : cancelled ? GLYPH.cancelled : GLYPH.error;
+	// A plan whose steps all ran but one carries a warning reads as its warned steps do, never as a clean pass.
+	const warned = passed && planWarnedStepCount(plan) > 0;
+	const tone = warned ? "warning" : passed ? "success" : cancelled ? "toolMetadata" : "error";
+	const glyph = warned ? GLYPH.warn : passed ? GLYPH.ok : cancelled ? GLYPH.cancelled : GLYPH.error;
 	const head = `${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg(tone, `${glyph} ${planProgressText(plan, false, false)}`)}`;
 	const room = Math.max(1, width - 4);
 	const why = planFailureWords(plan);
@@ -1276,18 +1303,28 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
-	const upFigure = row.usage.kind === "ready" ? usageLineFigure(row.usage.prompt) : compactQuantity(usage.prompt);
-	const downFigure = row.usage.kind === "ready" ? usageLineFigure(row.usage.output) : compactQuantity(usage.output);
-	// Nothing counted yet reads as that, once, rather than as two question marks.
-	const tokens =
-		upFigure === null && downFigure === null
-			? theme.fg("body", isTerminalStatus(row.status) ? "tokens not measured" : "tokens not measured yet")
-			: `${theme.fg("body", `in ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
-					"body",
-					`out ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
-				)}`;
+	const measured = (figure: string | null): string | null => (figure === USAGE_NOT_MEASURED ? null : figure);
+	const upFigure = measured(
+		row.usage.kind === "ready" ? usageLineFigure(row.usage.prompt) : compactQuantity(usage.prompt),
+	);
+	const downFigure = measured(
+		row.usage.kind === "ready" ? usageLineFigure(row.usage.output) : compactQuantity(usage.output),
+	);
+	// Nothing counted yet reads as that, once, rather than as a `not measured` per figure.
+	const unmeasured = upFigure === null && downFigure === null;
+	const tokens = unmeasured
+		? theme.fg(
+				"body",
+				`${cost === USAGE_NOT_MEASURED ? "tokens and cost" : "tokens"} not measured${isTerminalStatus(row.status) ? "" : " yet"}`,
+			)
+		: `${theme.fg("body", `in ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
+				"body",
+				`out ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
+			)}`;
 	const costUnit =
-		cost === "—" ? "" : `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
+		cost === "—" || (unmeasured && cost === USAGE_NOT_MEASURED)
+			? ""
+			: `${dot}${theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)}`;
 	// A narrow dock drops the cost whole before it cuts the token figures, so no unit ends mid-word.
 	const telemetryLine = row.retry
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("body", retryCountdown(row.retry))}`
@@ -1387,6 +1424,18 @@ function councilMemberView(
 		tailText: sanitizeMultilineDisplayText(councilMemberTail(row)).text,
 		droppedLines: row.progress?.droppedLines ?? 0,
 		...(isTerminalStatus(row.status) ? { settled: true } : {}),
+		...memberWhy(row),
+	};
+}
+
+function memberWhy(row: DispatchBoardRow): { why?: string } {
+	if (!isTerminalStatus(row.status) || row.status === "completed") return {};
+	const why = workerFailureHeadline(terminalDetail(row));
+	if (why === null) return {};
+	// Inside a council the work that stopped is the council, whose own notice names the cause.
+	return {
+		why:
+			why === NEVER_STARTED_WORDS ? "it never started, because its council stopped first" : sanitizeCallTargetText(why),
 	};
 }
 
@@ -1614,6 +1663,10 @@ const COMPACT_CAVEAT_WORD: Readonly<Record<CompletedRunCaveat["kind"], string>> 
 
 /** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
 function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
+	// A plan whose worker steps finished with warnings reads as its card does, never as a clean done.
+	if (row.plan !== undefined && row.plan.state === "passed" && planWarnedStepCount(row.plan) > 0) {
+		return theme.fg("warning", `${GLYPH.warn} ${width >= NARROW_STATUS_WIDTH ? "done with warnings" : "warnings"}`);
+	}
 	const failure = completedRunFailure(row);
 	// The caveat replaces `done` rather than trailing it: the mark already says the run finished, and the status
 	// column stays narrow enough that the task beside it still reads.
@@ -1652,7 +1705,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 		case "stale":
 		case "cancelling": {
 			// The worker is being stopped; its last phase would read as work finishing normally.
-			if (row.status === "cancelling") return { text: "stopping", tone: "warning" };
+			if (row.status === "cancelling") return { text: "waiting for it to exit", tone: "warning" };
 			const progress = row.progress;
 			if (progress) {
 				if (progress.awaitingApproval === true) return { text: approvalWaitWords(progress), tone: "warning" };
@@ -1930,7 +1983,9 @@ function boardColumnNote(note: string): string {
 	if (match?.[1] === undefined) return plain;
 	const words = [...new Set(match[1].split(", ").map((label) => DROPPED_COLUMN_WORDS[label.trim()] ?? label.trim()))];
 	const list = words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
-	return `${GLYPH.ellipsis} detail below has ${list}`;
+	// The detail under the table may itself be cut to a few rows, so the note says where the facts live, not that
+	// they are on screen.
+	return `${GLYPH.ellipsis} each run's detail shows its ${list}`;
 }
 
 function formatDispatchBoardBody(
@@ -1993,7 +2048,8 @@ function formatDispatchBoardBody(
 						title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` · ${item.group.task}`}`,
 						meta: item.group.round > 1 ? `round ${item.group.round} · ${item.group.elapsed}` : item.group.elapsed,
 						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
-						body: councilGroupBody(theme, item.group, width),
+						// The table keeps its selected row and position row, and the detail its rule, whatever the council's size.
+						body: councilGroupBody(theme, item.group, width, Math.max(3, budget - notes.length - dividerRows - 3)),
 					}
 				: {
 						title: runRuleTitle(item.row),
@@ -2061,12 +2117,20 @@ function formatDispatchBoardBody(
 		kept[kept.length - 1] = cutRowWithEllipsis(lastKept, width);
 	}
 	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
+	// A plan's row opens nothing and its root is no dispatch run, so it offers neither Enter nor /view: its card in the
+	// transcript lists every step.
+	const plan = item?.kind === "run" && item.row.plan !== undefined;
 	const where = [
 		`${hidden} more rows`,
-		...(detailExpanded ? [] : [`${detailKey} for detail`]),
-		`/view dispatch:${detail.runId}`,
+		...(detailExpanded || plan ? [] : [`${detailKey} for detail`]),
+		...(plan ? [] : [`/view dispatch:${detail.runId}`]),
 	];
-	while (where.length > 1 && visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) > width) where.pop();
+	const fits = (): boolean => visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) <= width;
+	// The /view handle is the only way to the rows a narrow board cut, so the count shortens and Enter goes first.
+	if (!fits() && where.length > 2) where.splice(1, 1);
+	if (!fits()) where[0] = `${hidden} more`;
+	if (!fits() && where.length > 1) where.shift();
+	while (where.length > 1 && !fits()) where.pop();
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
@@ -2115,10 +2179,11 @@ export function dispatchBoardHintEntries(
 	if (row.plan === undefined) {
 		// A run that can take a message leads with steer and cancel; otherwise detail is what is left to read. A
 		// council's detail is its members' answers, which want the rows the table holds.
-		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
-		// The watch pane splits the terminal, so it says so before the key is pressed.
+		// The watch pane splits the terminal, so it says so before the key is pressed. It is listed ahead of Enter
+		// because a narrow rail keeps its later keys first, and the run's detail matters more than a split pane.
 		if (row.council === undefined && board.canWatch())
 			entries.push({ key: "w", verb: "watch in a pane", short: "watch" });
+		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
 	}
 	if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
 	if (isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });

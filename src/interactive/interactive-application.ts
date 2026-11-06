@@ -1581,7 +1581,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		notify,
 		terminal,
 		dispatchBoard,
-		setFleetRunPhase: (runId, phase) => dispatchBoardStore.setFleetPhase(runId, phase),
+		setFleetRunPhase: (runId, phase) => {
+			dispatchBoardStore.setFleetPhase(runId, phase);
+			// The step's worker card names its step too, so two steps sharing an agent and a task read apart.
+			interactiveSubscriptions.tagPlanStep(runId, phase.stepId);
+		},
 		fleetPlans: dispatchBoardStore.plans,
 		chatPanel,
 		resetTranscript: adoptExistingConversation,
@@ -2026,7 +2030,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			tui.requestRender();
 			return true;
 		},
-		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
+		explainThinkingUnavailable: () => notify("info", "Thinking is not adjustable on this model", "keyboard:thinking"),
 		explainSearchUnavailable: () =>
 			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
 		keybindings,

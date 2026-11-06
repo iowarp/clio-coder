@@ -15,6 +15,7 @@ import {
 	type MutationInspector,
 	type MutationPreview,
 	mutationFactsLine,
+	targetWithoutPayloadSize,
 } from "./mutation-preview.js";
 import { fitHintEntries, fitRow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import {
@@ -471,7 +472,7 @@ function cardTargetRows(theme: ClioTheme, view: ApprovalRequestView, width: numb
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
 	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
-	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
+	const targetText = plan !== null ? planHeadline(plan) : targetWithoutPayloadSize(view.target, view.mutation);
 	if (targetText === undefined || targetText.length === 0) return [];
 	return plan !== null
 		? commandBlock(theme, targetText, width, { tone: risk, prose: true })
@@ -611,17 +612,6 @@ interface PermissionFactRows {
 	others: string[];
 	/** The timer sentence as a short card's window carries it; a held timer's position row says all of it. */
 	windowTimer: string[];
-}
-
-/**
- * The target as the card shows it. A file change's size placeholder
- * (`content=<string 18 bytes>`) is serialization, and the mutation row under
- * it already names the size and digest, so the card keeps only the path.
- */
-function cardTarget(view: ApprovalRequestView): string | undefined {
-	if (view.target === undefined || view.mutation === undefined) return view.target;
-	const kept = view.target.split(" · ").filter((part) => !/^[\w.-]+=<\w+ \d+ bytes>$/u.test(part.trim()));
-	return kept.length > 0 ? kept.join(" · ") : view.target;
 }
 
 /**
