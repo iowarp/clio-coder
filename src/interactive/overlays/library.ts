@@ -546,6 +546,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			globalHints: [{ key: "n", verb: "resources", critical: true }],
 			globalActions: { n: close },
 			onClose: close,
+			closeVerb: { verb: "back to resources", short: "back" },
 		});
 		child = { hide: () => notices.hide(), release: () => {} };
 		notices.toggleDetail();

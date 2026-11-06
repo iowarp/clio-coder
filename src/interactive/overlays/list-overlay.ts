@@ -11,7 +11,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { backOutOneLayer, type EscapeLayers, innermostEscapeLayer } from "../escape-layers.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry, innermostEscapeLayer } from "../escape-layers.js";
 import { localKey } from "../keyboard-owner.js";
 import {
 	buildHint,
@@ -197,6 +197,8 @@ export interface ListOverlayOptions {
 	/** Secondary keyed actions, e.g. { i: install }. */
 	actions?: Record<string, (item: ListOverlayItem) => void>;
 	onClose: () => void;
+	/** What the last Esc does, in the rail's words, for a list opened over another surface that it returns to. */
+	closeVerb?: { verb: string; short?: string };
 }
 
 /**
@@ -550,6 +552,21 @@ export class ListOverlayView implements Component {
 	private escapeLayers(): EscapeLayers {
 		const onBack = this.options.onBack;
 		return [
+			// A pane the operator opened with the detail key is a layer: Esc puts it
+			// away and leaves the rows, where it used to close the whole overlay from
+			// inside a view the operator had only opened to read. A pane an opener
+			// shows by default, or the split pane beside the list, is part of the list.
+			this.takeoverAllowed &&
+				this.detailPaneDrawn &&
+				!this.detailPaneSplit && {
+					verb: "hide detail",
+					short: "list",
+					back: () => {
+						this.showDetail = false;
+						this.detailKeyPending = true;
+						this.onChange();
+					},
+				},
 			this.filterText.length > 0 && {
 				verb: "clear filter",
 				back: () => {
@@ -575,7 +592,11 @@ export class ListOverlayView implements Component {
 					this.onChange();
 				},
 			},
-			{ verb: "close", back: () => this.options.onClose() },
+			{
+				verb: this.options.closeVerb?.verb ?? "close",
+				...(this.options.closeVerb?.short !== undefined ? { short: this.options.closeVerb.short } : {}),
+				back: () => this.options.onClose(),
+			},
 		];
 	}
 
@@ -612,7 +633,10 @@ export class ListOverlayView implements Component {
 	getHint(innerWidth?: number): string {
 		const { entries, esc } = this.hintEntries();
 		if (innerWidth === undefined) return buildHint(entries, esc);
-		return fitHintEntries([...entries, { key: "Esc", verb: esc }], innerWidth - 3);
+		return fitHintEntries(
+			[...entries, escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: esc }],
+			innerWidth - 3,
+		);
 	}
 
 	private hintEntries(): { entries: HintEntry[]; esc: OverlayEscVerb } {
@@ -995,7 +1019,7 @@ export class ListOverlayView implements Component {
 	 */
 	private droppedKeys(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb, shownText: string): HintEntry[] {
 		if (this.railRoom <= 0) return [];
-		const all: HintEntry[] = [...entries, { key: "Esc", verb: esc }];
+		const all: HintEntry[] = [...entries, escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: esc }];
 		const { kept } = fitHintEntryList(all, this.railRoom);
 		const shown = (entry: HintEntry): boolean =>
 			shownText.includes(`[${entry.key}]`) || (NAVIGATION_KEYS.has(entry.key) && shownText.includes(entry.key));
