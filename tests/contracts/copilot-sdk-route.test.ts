@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
@@ -36,7 +36,7 @@ const state = (globalThis.__clioCopilotFake ??= {
 class FakeSession {
 	constructor(config, index) {
 		this.config = config;
-		this.sessionId = "copilot-" + index;
+		this.sessionId = config.sessionId ?? "copilot-" + index;
 		this.handlers = new Set();
 		this.tools = new Map((config.tools ?? []).map((tool) => [tool.name, tool]));
 		this.prompts = [];
@@ -84,13 +84,32 @@ class FakeSession {
 	}
 }
 export class CopilotClient {
-	constructor(options) { state.clients.push(options); }
+	constructor(options) {
+		// The real 1.0.26 constructor contract.
+		if (options.mode === "empty" && options.baseDirectory === undefined && options.sessionFs == null)
+			throw new Error("CopilotClient was created with mode: 'empty' but neither 'baseDirectory' nor 'sessionFs' was set. Empty mode requires an explicit per-session persistence location; pick one.");
+		this.options = options;
+		state.clients.push(options);
+	}
 	async start() {}
 	async stop() { return []; }
 	async getAuthStatus() { return state.auth; }
 	async listModels() { return state.models; }
 	async deleteSession(id) { state.deleted.push(id); }
-	async createSession(config) { const session = new FakeSession(config, state.sessions.length + 1); state.sessions.push(session); return session; }
+	async createSession(config) {
+		if (this.options.mode === "empty" && config.availableTools === undefined)
+			throw new Error("CopilotClient is in mode: 'empty' but the session config did not specify 'availableTools'.");
+		const session = new FakeSession(config, state.sessions.length + 1);
+		if (this.options.sessionFs) {
+			if (!config.createSessionFsProvider) throw new Error("createSessionFsProvider is required in session config when sessionFs is enabled in client options.");
+			session.fs = config.createSessionFsProvider(session);
+			await session.fs.mkdir(this.options.sessionFs.sessionStatePath, true);
+			await session.fs.appendFile(this.options.sessionFs.sessionStatePath + "/events.jsonl", "{}\n");
+			session.recordsId = config.sessionId;
+		}
+		state.sessions.push(session);
+		return session;
+	}
 }
 `;
 
@@ -340,11 +359,14 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 	strictEqual(parked.stopReason, "toolUse");
 	const session = fake().sessions.at(-1);
 	ok(session);
+	// Session records live under Clio's cache root, never under COPILOT_HOME, and leave with the session.
+	const records = join(resolveClioDirs().cache, "copilot-sdk", "sessions", session.sessionId);
+	ok(existsSync(join(records, "copilot-session", "events.jsonl")));
 	disposeCopilotConversations("side-session");
 	await new Promise((resolve) => setTimeout(resolve, 20));
+	strictEqual(existsSync(records), false);
 	ok(fake().rejected.some((reason) => /Clio session ended/.test(reason)));
 	ok(fake().disconnected.includes(session.sessionId));
-	ok(fake().deleted.includes(session.sessionId));
 });
 
 test("a copilot-sdk target admits one request at a time unless its capacity says more", () => {

@@ -7,9 +7,11 @@
  * The SDK identifies itself to GitHub with its own client identity plus `clientName`; Clio sets no
  * request headers of its own.
  */
+import type { ChildProcess } from "node:child_process";
 import type { CopilotClient, ModelInfo } from "@github/copilot-sdk";
 import type { CopilotAccount } from "../../domains/providers/copilot-consent.js";
 import { loadCopilotSdk } from "./sdk-module.js";
+import { copilotSessionFsConfig } from "./session-fs.js";
 
 export const COPILOT_CLIENT_NAME = "clio-coder";
 
@@ -40,7 +42,55 @@ function runtimeEnvironment(): Record<string, string | undefined> {
 }
 
 let shared: { client: CopilotClient; started: Promise<void> } | null = null;
-let exitHookInstalled = false;
+let holds = 0;
+
+/**
+ * The runtime child and its stdio pipes keep Node's event loop alive, so a one-shot command (configure, a
+ * probe, headless run) would never exit while it runs. Work that awaits the runtime holds it; with no hold
+ * the child and its pipes are unreferenced, so the process can exit, and the runtime ends with it when its
+ * stdin closes. Live sessions survive an idle period between turns: nothing is stopped, only unreferenced.
+ */
+function setRuntimeReferenced(client: CopilotClient, referenced: boolean): void {
+	// Pinned SDK 1.0.26 keeps the stdio child in `cliProcess` and leaves its 30 s start timeout armed after a
+	// successful start (`cliStartTimeout`); it exposes no public handle for either.
+	const internals = client as unknown as {
+		cliProcess?: ChildProcess | null;
+		cliStartTimeout?: ReturnType<typeof setTimeout> | null;
+	};
+	const child = internals.cliProcess;
+	if (!child) return;
+	for (const handle of [child, child.stdin, child.stdout, child.stderr, internals.cliStartTimeout]) {
+		const counted = handle as { ref?: () => void; unref?: () => void } | null;
+		if (referenced) counted?.ref?.();
+		else counted?.unref?.();
+	}
+}
+
+/** Keep the runtime referenced until the returned release runs. */
+export function holdCopilotClient(): () => void {
+	holds += 1;
+	if (holds === 1 && shared)
+		void shared.started.then(() => shared && holds > 0 && setRuntimeReferenced(shared.client, true));
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		holds -= 1;
+		if (holds === 0 && shared) {
+			const current = shared;
+			void current.started.then(() => holds === 0 && setRuntimeReferenced(current.client, false)).catch(() => {});
+		}
+	};
+}
+
+async function held<T>(use: () => Promise<T>): Promise<T> {
+	const release = holdCopilotClient();
+	try {
+		return await use();
+	} finally {
+		release();
+	}
+}
 
 /** The process's runtime client, started on first use; concurrent callers share one start. */
 export async function copilotClient(): Promise<CopilotClient> {
@@ -52,22 +102,16 @@ export async function copilotClient(): Promise<CopilotClient> {
 				// "empty" keeps the runtime's own memory, skills, session store and config discovery off: Clio
 				// supplies the prompt and every tool, and keeps the transcript.
 				mode: "empty",
+				// Empty mode needs a persistence location; session records go under Clio's cache (session-fs.ts).
+				sessionFs: copilotSessionFsConfig(),
 				env: runtimeEnvironment(),
 				logLevel: "error",
 			});
-			const started = client.start();
+			const started = client.start().then(() => setRuntimeReferenced(client, holds > 0));
 			shared = { client, started };
 			started.catch(() => {
 				if (shared?.client === client) shared = null;
 			});
-			if (!exitHookInstalled) {
-				exitHookInstalled = true;
-				// The runtime is a child on a stdio pipe and exits when the pipe closes; stopping it here also
-				// disconnects every session so none outlives this process.
-				process.once("beforeExit", () => {
-					void stopCopilotClient();
-				});
-			}
 		}
 	}
 	const current = shared;
@@ -76,25 +120,14 @@ export async function copilotClient(): Promise<CopilotClient> {
 	return current.client;
 }
 
-/** Stop the runtime and drop the client; the next call starts a fresh one. */
-async function stopCopilotClient(): Promise<void> {
-	const current = shared;
-	shared = null;
-	if (!current) return;
-	try {
-		await current.started;
-		await current.client.stop();
-	} catch {
-		// A runtime that never started or already exited has nothing left to stop.
-	}
-}
-
 /** The GitHub account the runtime is signed in as, or a login-required error naming `copilot login`. */
-export async function copilotAccount(): Promise<CopilotAccount> {
-	const client = await copilotClient();
-	const status = await client.getAuthStatus();
-	if (!status.isAuthenticated || !status.login) throw new CopilotLoginRequiredError(status.statusMessage);
-	return { login: status.login, host: status.host ?? "https://github.com" };
+export function copilotAccount(): Promise<CopilotAccount> {
+	return held(async () => {
+		const client = await copilotClient();
+		const status = await client.getAuthStatus();
+		if (!status.isAuthenticated || !status.login) throw new CopilotLoginRequiredError(status.statusMessage);
+		return { login: status.login, host: status.host ?? "https://github.com" };
+	});
 }
 
 export interface CopilotModelRow {
@@ -112,7 +145,11 @@ export interface CopilotModelRow {
  * Models the signed-in account may use, from the runtime's own listing. A model whose policy is disabled
  * or still unconfigured is left out: enabling one is the account owner's decision in GitHub, never Clio's.
  */
-export async function listCopilotModels(): Promise<CopilotModelRow[]> {
+export function listCopilotModels(): Promise<CopilotModelRow[]> {
+	return held(() => listHeld());
+}
+
+async function listHeld(): Promise<CopilotModelRow[]> {
 	await copilotAccount();
 	const client = await copilotClient();
 	const models: ModelInfo[] = await client.listModels();

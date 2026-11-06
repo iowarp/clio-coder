@@ -127,6 +127,7 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | --- | --- |
 | `v8-compile-cache/` | Node compile cache |
 | `provider-target-models/<key>.json` | Per-target model discovery snapshots |
+| `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one live `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when Clio closes the conversation |
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `system-one/julia-1-<revision>/tokenizer.json` | The Julia-1 tokenizer, downloaded when a `julia-1` engine is bound |

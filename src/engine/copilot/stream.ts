@@ -15,7 +15,7 @@
  * Every parked handler settles: with Clio's result, or rejected when its call is retired by Copilot, when
  * the conversation is disposed (divergence, abort, Clio session end) or when the process stops the runtime.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
 	Api,
 	AssistantMessage,
@@ -42,7 +42,8 @@ import type {
 import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
 import { copilotConsentMissingMessage, hasCopilotConsent } from "../../domains/providers/copilot-consent.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
-import { COPILOT_CLIENT_NAME, copilotAccount, copilotClient } from "./client.js";
+import { COPILOT_CLIENT_NAME, copilotAccount, copilotClient, holdCopilotClient } from "./client.js";
+import { createCopilotSessionFs, removeCopilotSessionRecords, removeCopilotSessionRecordsSync } from "./session-fs.js";
 
 type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
 
@@ -212,6 +213,7 @@ class Conversation {
 	async dispose(reason: string): Promise<void> {
 		if (this.disposed) return;
 		this.disposed = true;
+		const release = holdCopilotClient();
 		this.sink = null;
 		const error = new Error(reason);
 		for (const waiter of this.parked.values()) waiter.reject(error);
@@ -227,15 +229,37 @@ class Conversation {
 		}
 		try {
 			await this.session.disconnect();
-			// Clio keeps the transcript; Copilot's on-disk copy of this session is not left behind.
-			await (await copilotClient()).deleteSession(sessionId);
 		} catch {
 			// A runtime that already exited took the session with it.
 		}
+		// The runtime wrote this session's records only through Clio's sessionFs, so removing them is the delete;
+		// the SDK's deleteSession looks in COPILOT_HOME and finds nothing there.
+		try {
+			await removeCopilotSessionRecords(sessionId);
+		} catch {
+			// The records directory is disposable cache; a later close or cache sweep removes what is left.
+		}
+		release();
 	}
 }
 
 const conversations: Conversation[] = [];
+let exitCleanupInstalled = false;
+
+/** A process that exits with conversations still open (headless run, a killed TUI) leaves no records behind. */
+function installExitCleanup(): void {
+	if (exitCleanupInstalled) return;
+	exitCleanupInstalled = true;
+	process.once("exit", () => {
+		for (const conversation of conversations) {
+			try {
+				removeCopilotSessionRecordsSync(conversation.session.sessionId);
+			} catch {
+				// Exit-time cleanup is best effort; the directory is disposable cache.
+			}
+		}
+	});
+}
 
 function evictFor(key: string): void {
 	const idle = (list: Conversation[]) =>
@@ -568,7 +592,12 @@ function declareTools(conversationRef: () => Conversation | null, tools: Readonl
 	}));
 }
 
-async function openConversation(input: {
+function openConversation(input: Parameters<typeof openConversationHeld>[0]): Promise<Conversation> {
+	const release = holdCopilotClient();
+	return openConversationHeld(input).finally(release);
+}
+
+async function openConversationHeld(input: {
 	key: string;
 	model: Model<Api>;
 	systemPrompt: string;
@@ -579,27 +608,35 @@ async function openConversation(input: {
 	if (!hasCopilotConsent(account)) throw new Error(copilotConsentMissingMessage(account));
 	const client = await copilotClient();
 	let conversation: Conversation | null = null;
-	const session = await client.createSession({
-		model: input.model.id,
-		clientName: COPILOT_CLIENT_NAME,
-		streaming: true,
-		// Replace, not append: Clio's compiled prompt carries its identity, safety rules and tool contract, and
-		// Copilot's default sections describe built-in tools that are excluded here.
-		systemMessage: { mode: "replace", content: input.systemPrompt },
-		tools: declareTools(() => conversation, input.tools),
-		availableTools: ["custom:*"],
-		infiniteSessions: { enabled: false },
-		enableSessionStore: false,
-		enableSkills: false,
-		enableConfigDiscovery: false,
-		workingDirectory: process.cwd(),
-		...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort as ReasoningEffort } : {}),
-		// No Copilot built-in runs, so any permission request is outside Clio's surface and is refused.
-		onPermissionRequest: () => ({
-			kind: "reject",
-			feedback: "Clio governs every tool call; Copilot built-in tools are disabled in this session.",
-		}),
-	});
+	const sessionId = randomUUID();
+	const session = await client
+		.createSession({
+			sessionId,
+			createSessionFsProvider: () => createCopilotSessionFs(sessionId),
+			model: input.model.id,
+			clientName: COPILOT_CLIENT_NAME,
+			streaming: true,
+			// Replace, not append: Clio's compiled prompt carries its identity, safety rules and tool contract, and
+			// Copilot's default sections describe built-in tools that are excluded here.
+			systemMessage: { mode: "replace", content: input.systemPrompt },
+			tools: declareTools(() => conversation, input.tools),
+			availableTools: ["custom:*"],
+			infiniteSessions: { enabled: false },
+			enableSessionStore: false,
+			enableSkills: false,
+			enableConfigDiscovery: false,
+			workingDirectory: process.cwd(),
+			...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort as ReasoningEffort } : {}),
+			// No Copilot built-in runs, so any permission request is outside Clio's surface and is refused.
+			onPermissionRequest: () => ({
+				kind: "reject",
+				feedback: "Clio governs every tool call; Copilot built-in tools are disabled in this session.",
+			}),
+		})
+		.catch(async (error: unknown) => {
+			await removeCopilotSessionRecords(sessionId).catch(() => {});
+			throw error;
+		});
 	conversation = new Conversation({
 		key: input.key,
 		session,
@@ -669,6 +706,7 @@ async function runStep(
 		if (!conversation) {
 			evictFor(key);
 			conversation = await openConversation({ key, model, systemPrompt, tools, reasoningEffort });
+			installExitCleanup();
 			conversations.push(conversation);
 		}
 		const active = conversation;
@@ -769,6 +807,9 @@ function streamCopilot(
 	options: SimpleStreamOptions | StreamOptions | undefined,
 ): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
+	// The step holds the runtime until its stream ends, so the process cannot exit under a live call.
+	const release = holdCopilotClient();
+	void stream.result().finally(release);
 	void runStep(model, context, options, stream);
 	return stream;
 }
