@@ -2,6 +2,7 @@ import { classifyDecisionPresentation, decisionFactsForAnswer } from "../../doma
 import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/entries.js";
 import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { DecisionSelection } from "../../session-control/decision-correction.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "../escape-layers.js";
 import {
 	fitHintEntries,
 	fitHintEntryList,
@@ -200,6 +201,21 @@ function formatDecisionsOverlayBodyLines(
 					? "Finished without recording an answer."
 					: "Cancelled before an answer was recorded.";
 			lines.push(...emptyState(theme, words, Math.max(1, width - 2)).map((line) => fitRow(`  ${line}`, width)));
+			// What it asked, so an interview that recorded nothing still says what it was about.
+			const asked = interview.questions ?? [];
+			if (asked.length > 0) {
+				lines.push(
+					...factRows(
+						theme,
+						asked.map((question, index) => ({
+							label: index === 0 ? "asked" : "",
+							value: question,
+							tone: "muted" as const,
+						})),
+						Math.max(1, width - 4),
+					).map((line) => fitRow(`    ${line}`, width)),
+				);
+			}
 			continue;
 		}
 		interview.decisions.forEach((decision, decisionIndex) => {
@@ -321,7 +337,8 @@ class DecisionsOverlayBody implements Component {
 		}
 		const rows = selectableRows(this.readInterviews());
 		if (matchesKey(data, "esc")) {
-			this.options.onClose();
+			backOutOneLayer(this.escapeLayers());
+			this.requestRender();
 			return;
 		}
 		if (rows.length === 0) return;
@@ -368,17 +385,31 @@ class DecisionsOverlayBody implements Component {
 		this.correctionInput?.invalidate();
 	}
 
+	/**
+	 * Esc by the shared rule. The correction field handles its own Esc (it keeps
+	 * the draft), so its layer here only names it; an expanded decision folds
+	 * before the board closes, because the answer was opened to read.
+	 */
+	private escapeLayers(): EscapeLayers {
+		return [
+			this.correctionInput !== null && { verb: "back, keeps draft", short: "back", back: () => {} },
+			this.expandedKey !== null && {
+				verb: "fold",
+				back: () => {
+					this.expandedKey = null;
+				},
+			},
+			{ verb: "close", back: () => this.options.onClose() },
+		];
+	}
+
 	/** The keys that act on what is on screen now: a board with nothing to select offers only Esc. */
 	private railEntries(): HintEntry[] {
-		if (this.correctionInput) {
-			return [
-				{ key: "Enter", verb: "send", critical: true },
-				{ key: "Esc", verb: "back, keeps draft", short: "back" },
-			];
-		}
+		const esc = escapeHintEntry(this.escapeLayers()) ?? { key: "Esc", verb: "close" };
+		if (this.correctionInput) return [{ key: "Enter", verb: "send", critical: true }, esc];
 		const rows = selectableRows(this.readInterviews());
 		const selected = rows[this.selectedIndex];
-		if (selected === undefined) return [{ key: "Esc", verb: "close" }];
+		if (selected === undefined) return [esc];
 		const rowKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
 		const drafted = keptCorrections.has(rowKey);
 		return [
@@ -386,7 +417,7 @@ class DecisionsOverlayBody implements Component {
 			{ key: "Enter", verb: this.expandedKey === rowKey ? "fold" : "expand" },
 			...(selected.decision.status === "active" ? [{ key: "s", verb: "supersede" }] : []),
 			{ key: "c", verb: drafted ? "resume draft" : "correct" },
-			{ key: "Esc", verb: "close" },
+			esc,
 		];
 	}
 

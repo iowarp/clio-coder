@@ -45,7 +45,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	doesNotMatch(screen.join("\n"), /more rows/u, "the frame never has to cut the card");
 	match(screen[1] ?? "", /\$ bash · runs a command/u, "the call's identity stays at the top");
 	match(screen.join("\n"), /↑↓ scroll/u, "the card names its scroll keys");
-	match(screen.join("\n"), /Esc or Alt\+T closes/u, "the terms name their own way out");
+	match(screen.join("\n"), /Esc or Alt\+T hides/u, "the terms name their own way out");
 	for (const row of inner(screen)) seen.add(row);
 
 	// The terms are a layer of their own: the answer keys move to the rail while they are open.

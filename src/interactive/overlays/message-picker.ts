@@ -4,8 +4,8 @@ import type { MessageEntry } from "../../domains/session/entries.js";
 import { buildTurnPreview } from "../../domains/session/tree/preview.js";
 import { openSession, sessionPaths } from "../../engine/session.js";
 import { type Component, matchesKey, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
-import { clockLocal, dateLocal } from "../format-time.js";
-import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { stampLocal } from "../format-time.js";
+import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, emptyState } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
@@ -59,10 +59,11 @@ function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePick
 	return rows.reverse();
 }
 
+/** The one local time format: the clock alone for today, the date as well for any other day. */
 function formatTimestampForRow(timestamp: string): string {
 	const millis = Date.parse(timestamp);
 	if (!Number.isFinite(millis)) return "";
-	return `${dateLocal(millis)} ${clockLocal(millis)}`;
+	return stampLocal(millis);
 }
 
 /**
@@ -126,6 +127,9 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
 		markerId: "message-picker",
 		title: "Fork into a new session; workspace files stay unchanged",
-		footerHint: rows.length > 0 ? buildHint([{ key: "Enter", verb: "fork after this reply" }]) : buildHint([]),
+		footerHint: buildResponsiveHint(
+			rows.length > 0 ? [{ key: "Enter", verb: "fork after this reply", short: "fork" }] : [],
+			"close",
+		),
 	});
 }

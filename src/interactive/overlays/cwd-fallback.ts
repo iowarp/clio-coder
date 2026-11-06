@@ -11,7 +11,7 @@
  */
 
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
-import { buildHint, createChoiceList, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildResponsiveHint, createChoiceList, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, collapseHomePath, factRows, statusChip } from "../theme/index.js";
 
 export const CWD_FALLBACK_OVERLAY_WIDTH = 88;
@@ -81,6 +81,11 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		width: CWD_FALLBACK_OVERLAY_WIDTH,
 		markerId: "cwd-fallback",
 		title: "Session Working Directory",
-		footerHint: buildHint([{ key: "Enter", verb: "select" }]),
+		// Esc leaves this choice for the session list it was opened from, so the rail says so.
+		footerHint: buildResponsiveHint([{ key: "Enter", verb: "select" }], {
+			key: "Esc",
+			verb: "back to sessions",
+			short: "back",
+		}),
 	});
 }

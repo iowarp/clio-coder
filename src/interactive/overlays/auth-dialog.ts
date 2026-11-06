@@ -1,5 +1,6 @@
-import { type Component, Input, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
-import { buildHint, FocusBox, fitRow, showClioOverlayFrame } from "../overlay-frame.js";
+import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
+import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "../escape-layers.js";
+import { buildResponsiveHint, FocusBox, fitRow, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, type Fact, factRows, GLYPH, selectionRow, statusChip, titleRow } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
@@ -109,20 +110,32 @@ function renderInputWithDesignCursor(input: Input, width: number): string[] {
 		);
 }
 
+/** A prompt for a secret: what is typed shows as one dot per character, the way the target wizard's key field does. */
+const MASKED_PROMPT = /\b(?:api key|token|secret|password)\b/iu;
+
+function renderMaskedInput(input: Input, width: number): string[] {
+	const theme = clioTheme();
+	const typed = input.getValue().length;
+	const row =
+		typed > 0
+			? `${theme.fg("selectedOption", `${GLYPH.cursor} `)}${theme.fg("inputText", "•".repeat(typed))}`
+			: `${theme.fg("selectedOption", `${GLYPH.cursor} `)}${theme.fg("annotation", "type or paste; each character shows as •")}`;
+	return [fitRow(row, width)];
+}
+
 function createAuthDialogController(
 	title: string,
 	onCancel: () => void,
 ): {
 	box: FocusBox;
 	controller: AuthDialogHandle["controller"];
-	getHint: () => string;
+	getHint: (innerWidth: number) => string;
 } {
 	const input = new Input();
 	let lines: string[] = [];
 	let promptLabel: string | null = null;
 	let resolver: ((value: string) => void) | undefined;
 	let rejecter: ((error: Error) => void) | undefined;
-	let currentHint = buildHint([]);
 	// The static rows are memoized on the lines, the width and the skin; the
 	// input row beneath them is the only thing that changes per keystroke.
 	let revision = 0;
@@ -139,7 +152,7 @@ function createAuthDialogController(
 				...memo.rows,
 				// The label may carry a default id the operator is meant to read whole.
 				...wrapTextWithAnsi(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)), Math.max(1, width)),
-				...renderInputWithDesignCursor(input, width),
+				...(MASKED_PROMPT.test(promptLabel) ? renderMaskedInput(input, width) : renderInputWithDesignCursor(input, width)),
 			];
 		},
 		handleInput: (data) => input.handleInput(data),
@@ -149,8 +162,30 @@ function createAuthDialogController(
 		},
 	};
 
+	/**
+	 * Esc by the shared rule: text typed into the key or code field is a layer,
+	 * so the first Esc clears it and the sign-in stays open; from an empty field
+	 * or a page with no field, Esc cancels the sign-in and nothing is saved.
+	 */
+	const escapeLayers = (): EscapeLayers => [
+		promptLabel !== null &&
+			input.getValue().length > 0 && {
+				verb: "clear field",
+				short: "clear",
+				back: () => {
+					input.setValue("");
+					box.invalidate();
+				},
+			},
+		{ verb: "cancel sign-in", short: "cancel", back: cancel },
+	];
+
 	const box = new FocusBox(view, {
 		onInput: (data) => {
+			if (matchesKey(data, "escape")) {
+				backOutOneLayer(escapeLayers());
+				return;
+			}
 			if (promptLabel) input.handleInput(data);
 		},
 	});
@@ -180,12 +215,15 @@ function createAuthDialogController(
 			cancel,
 			dismiss,
 		},
-		getHint: () => currentHint,
+		getHint: (innerWidth) =>
+			buildResponsiveHint(
+				promptLabel ? [{ key: "Enter", verb: "submit" }] : [],
+				escapeHintEntry(escapeLayers()),
+			)(innerWidth),
 	};
 
 	function rebuild(): void {
 		revision += 1;
-		currentHint = promptLabel ? buildHint([{ key: "Enter", verb: "submit" }]) : buildHint([]);
 		box.invalidate();
 	}
 

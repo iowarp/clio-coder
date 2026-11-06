@@ -23,7 +23,7 @@
 import { emitKeypressEvents } from "node:readline";
 import chalk from "chalk";
 
-import { column, terminalColumns, truncate } from "./text-layout.js";
+import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
 
 export interface SelectChoice<T> {
 	value: T;
@@ -102,6 +102,8 @@ const ESC = "\u001B";
 const CURSOR_HIDE = `${ESC}[?25l`;
 const CURSOR_SHOW = `${ESC}[?25h`;
 const ANSI_PATTERN = new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "gu");
+const LEADING_STYLE = new RegExp(`^(?:${ESC}\\[[0-9;]*m)+`, "u");
+const TRAILING_STYLE = new RegExp(`(?:${ESC}\\[[0-9;]*m)+$`, "u");
 
 /** Printed width of a styled string, which is not its length once it carries color. */
 function printedWidth(text: string): number {
@@ -116,10 +118,34 @@ interface Keypress {
 	sequence?: string;
 }
 
-/** Lines above the list that are not choices, so the viewport can be sized to what is left. */
-function headingLines(heading: PromptHeading | undefined): string[] {
+/**
+ * Lines above the list that are not choices, wrapped to the room beside the
+ * rail, so the viewport can be sized to what is left. A heading line is styled
+ * as a whole (bold question, dim note), so its leading and trailing styles are
+ * carried onto every row it wraps to; at 60 columns the dim note under the
+ * first question ran past the edge and the terminal broke it mid-word.
+ */
+function headingLines(heading: PromptHeading | undefined, room = Number.POSITIVE_INFINITY): string[] {
 	if (heading === undefined) return [];
-	return typeof heading === "string" ? [heading] : [...heading];
+	const lines = typeof heading === "string" ? [heading] : [...heading];
+	return lines.flatMap((line) => {
+		if (printedWidth(line) <= room) return [line];
+		const open = LEADING_STYLE.exec(line)?.[0] ?? "";
+		const close = TRAILING_STYLE.exec(line)?.[0] ?? "";
+		const plain = line.replace(ANSI_PATTERN, "");
+		return wrapPlain(plain, Math.max(10, room)).map((row) => `${open}${row}${close}`);
+	});
+}
+
+/** The key legend packed between entries onto as few rows as `room` allows, never breaking `enter select` apart. */
+function legendRows(parts: ReadonlyArray<string>, room: number): string[] {
+	const rows: string[] = [];
+	for (const part of parts) {
+		const last = rows.at(-1);
+		if (last !== undefined && last.length + 3 + part.length <= room) rows[rows.length - 1] = `${last} · ${part}`;
+		else rows.push(part);
+	}
+	return rows;
 }
 
 /**
@@ -255,7 +281,7 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 	// The rail prefix carries color, so its printed length is not its string
 	// length; the caller's indentation is two spaces plus one glyph either way.
 	const railWidth = 3;
-	const head = headingLines(options.heading);
+	const head = headingLines(options.heading, terminalColumns(output) - railWidth);
 	const frame = makeFrame(output);
 
 	let index = Math.min(Math.max(options.initialIndex ?? 0, 0), choices.length - 1);
@@ -299,10 +325,12 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 		// On the top screen escape and q do the same thing, and listing both as
 		// "quit" reads as two different exits.
 		const legend = ["↑/↓ move", "enter select"];
-		if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`esc ${options.backLabel}`);
+		// With a filter typed, Esc clears it before it leaves, and the legend names the press it is about to make.
+		if (options.searchable && query.length > 0) legend.push("esc clear filter");
+		else if (options.backLabel !== undefined && options.backLabel !== "quit") legend.push(`esc ${options.backLabel}`);
 		if (options.searchable) legend.push("type to filter", "ctrl-u clear", "ctrl-c quit");
 		else legend.push(options.backLabel === "quit" ? "esc or q quit" : "q quit");
-		lines.push(`${rail}${chalk.dim(legend.join(" · "))}`);
+		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
 		frame.draw(lines);
 	};
 
@@ -329,6 +357,12 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 				}
 				if (!key.ctrl && !key.meta && str?.length === 1 && str >= " " && str !== "\x7f") {
 					query += str;
+					filter();
+					return;
+				}
+				// A typed filter is a layer: Esc clears it first, and the next Esc leaves the step.
+				if (key.name === "escape" && query.length > 0) {
+					query = "";
 					filter();
 					return;
 				}
@@ -412,7 +446,7 @@ export async function promptMultiSelect<T>(options: MultiSelectOptions<T>): Prom
 
 	const rail = options.railPrefix ?? "";
 	const railWidth = 3;
-	const head = headingLines(options.heading);
+	const head = headingLines(options.heading, terminalColumns(output) - railWidth);
 	const frame = makeFrame(output);
 	const checked = choices.map((choice) => choice.checked === true);
 
@@ -449,7 +483,7 @@ export async function promptMultiSelect<T>(options: MultiSelectOptions<T>): Prom
 		lines.push(rail.trimEnd());
 		const legend = ["↑/↓ move", "space toggle", `enter ${options.confirmLabel ?? "confirm"}`];
 		if (options.backLabel !== undefined) legend.push(`esc ${options.backLabel}`);
-		lines.push(`${rail}${chalk.dim(legend.join(" · "))}`);
+		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
 		frame.draw(lines);
 	};
 
@@ -545,7 +579,7 @@ export async function promptText(options: TextPromptOptions): Promise<TextResult
 	const output = options.output ?? process.stdout;
 	const rail = options.railPrefix ?? "";
 	const railWidth = printedWidth(rail);
-	const head = headingLines(options.heading);
+	const head = headingLines(options.heading, terminalColumns(output) - railWidth);
 	const frame = makeFrame(output);
 
 	let value = options.initial ?? "";
@@ -574,7 +608,7 @@ export async function promptText(options: TextPromptOptions): Promise<TextResult
 		const legend = ["enter accept"];
 		if (options.backLabel !== undefined) legend.push(`esc ${options.backLabel}`);
 		legend.push("ctrl-c quit");
-		lines.push(`${rail}${chalk.dim(legend.join(" · "))}`);
+		for (const row of legendRows(legend, terminalColumns(output) - railWidth)) lines.push(`${rail}${chalk.dim(row)}`);
 		frame.draw(lines);
 		below = lines.length - fieldIndex;
 		// Park the terminal's own cursor on the field, at the edit position.

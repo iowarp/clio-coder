@@ -56,6 +56,7 @@ import {
 	sectionRule,
 	statusChip,
 } from "../theme/index.js";
+import { refWords } from "./library-words.js";
 
 const MIN_WIDTH = 48;
 const MAX_WIDTH = 110;
@@ -69,7 +70,7 @@ function libraryReviewWidth(columns: number): number {
 }
 
 function stepHeadline(step: LibraryPlanStep): string {
-	return `${step.operation} ${step.identity.ref} in ${step.identity.scope} scope`;
+	return `${step.operation} the ${refWords(step.identity.ref)} in ${step.identity.scope} scope`;
 }
 
 /** The verdict line, bold and wrapped: a long package name folds, it never loses its scope. */
@@ -148,7 +149,7 @@ function afterwardsText(after: NonNullable<LibraryPlanStep["effectiveAfter"]>): 
 
 function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined, detail: boolean): Fact[] {
 	const theme = clioTheme();
-	const facts: Fact[] = [{ label: "Package", value: step.identity.ref }];
+	const facts: Fact[] = [{ label: "Package", value: refWords(step.identity.ref) }];
 	const versions = step.versions;
 	if (versions?.from && versions.to && versions.from !== versions.to)
 		facts.push({ label: "Version", value: `${versions.from} installed → ${versions.to}` });
@@ -169,22 +170,30 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 			),
 		});
 	if (step.dependencies.missing.length)
-		facts.push({ label: "Missing", value: `requires ${step.dependencies.missing.join(", ")}`, tone: "warning" });
+		facts.push({
+			label: "Missing",
+			value: `requires ${step.dependencies.missing.map(refWords).join(", ")}`,
+			tone: "warning",
+		});
 	if (step.dependencies.inactive.length)
-		facts.push({ label: "Inactive", value: `requires ${step.dependencies.inactive.join(", ")}`, tone: "warning" });
+		facts.push({
+			label: "Inactive",
+			value: `requires ${step.dependencies.inactive.map(refWords).join(", ")}`,
+			tone: "warning",
+		});
 	for (const dependent of step.dependents.newlyBroken)
 		facts.push({
 			label: "Dependents",
 			value: statusChip(
 				theme,
 				"error",
-				`would break ${dependent.ref} (${dependent.scope}): needs ${dependent.missing.join(", ")}`,
+				`would break the ${refWords(dependent.ref)} (${dependent.scope}): needs ${dependent.missing.map(refWords).join(", ")}`,
 			),
 		});
 	for (const dependent of step.dependents.preexisting)
 		facts.push({
 			label: "Dependents",
-			value: `already broken ${dependent.ref} (${dependent.scope}): needs ${dependent.missing.join(", ")}`,
+			value: `already broken: the ${refWords(dependent.ref)} (${dependent.scope}) needs ${dependent.missing.map(refWords).join(", ")}`,
 			tone: "muted",
 		});
 	if (step.effectiveAfter)
@@ -197,9 +206,9 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 	facts.push({ label: "Recovery", value: step.recovery, tone: "muted" });
 	facts.push(...reviewFacts(step, review));
 	if (detail) {
-		facts.push({ label: "Destination", value: step.destination, tone: "muted" });
+		facts.push({ label: "Destination", value: shortenHomePath(step.destination), tone: "muted" });
 		if (step.source) {
-			facts.push({ label: "Source", value: step.source.sourceUrl, tone: "muted" });
+			facts.push({ label: "Source", value: shortenHomePath(step.source.sourceUrl), tone: "muted" });
 			facts.push({ label: "sha256", value: step.source.sha256, tone: "muted" });
 		}
 	}
@@ -219,8 +228,15 @@ const APPLY_CONSEQUENCE: Record<LibraryLifecyclePlan["request"]["operation"], st
 function reviewChoices(applicable: boolean, verb: string, consequence: string, detail: boolean): Choice[] {
 	return [
 		...(applicable ? [{ key: "Enter", verb, consequence, tone: "action" as const }] : []),
-		{ key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
-		{ key: "d", verb: "paths", consequence: detail ? "hides paths and digests" : "shows paths and digests" },
+		// The rows say what Esc does now: with the paths open it hides them, the way the rail says.
+		detail
+			? { key: "Esc", verb: "hide paths", consequence: "back to the review; nothing changes" }
+			: { key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
+		{
+			key: "d",
+			verb: detail ? "hide paths" : "paths",
+			consequence: detail ? "back to the review" : "shows paths and digests",
+		},
 	];
 }
 
@@ -248,7 +264,7 @@ export function formatLibraryPlanReview(
 	const rows: string[] = [
 		...headline(
 			"decisionQuestion",
-			target ? stepHeadline(target) : `${plan.request.operation} ${plan.request.ref}`,
+			target ? stepHeadline(target) : `${plan.request.operation} ${refWords(plan.request.ref)}`,
 			width,
 		),
 		...chipRows(
@@ -332,9 +348,9 @@ export function libraryOutcomeHeadline(
 	if (only) {
 		const place = `${only.operation === "remove" ? "from" : "in"} ${only.identity.scope} scope`;
 		if (only.status === "committed")
-			return `${only.imported ? "Imported" : PAST_TENSE[only.operation]} ${only.identity.ref} ${place}`;
-		if (only.status === "failed") return `Could not ${only.operation} ${only.identity.ref} ${place}`;
-		return `Did not start the ${only.operation} of ${only.identity.ref}`;
+			return `${only.imported ? "Imported" : PAST_TENSE[only.operation]} the ${refWords(only.identity.ref)} ${place}`;
+		if (only.status === "failed") return `Could not ${only.operation} the ${refWords(only.identity.ref)} ${place}`;
+		return `Did not start the ${only.operation} of the ${refWords(only.identity.ref)}`;
 	}
 	return `${result.committed} committed · ${result.failed} failed · ${result.unattempted} unattempted`;
 }
@@ -397,7 +413,7 @@ function diskText(verification: LibraryStepVerification): string {
 
 function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult): Fact[] {
 	const theme = clioTheme();
-	const facts: Fact[] = [{ label: "Package", value: outcome.identity.ref }];
+	const facts: Fact[] = [{ label: "Package", value: refWords(outcome.identity.ref) }];
 	if (outcome.error) {
 		facts.push({ label: "Error", value: statusChip(theme, "error", `${outcome.error.code}: ${outcome.error.message}`) });
 		if (outcome.error.changed)
@@ -529,6 +545,18 @@ export function formatLibraryOutcome(rawResult: LibraryApplyResult, width: numbe
  * dropping a companion the instructions need is the failure this wording
  * exists to prevent.
  */
+/** What an import source is, in plain words; the format id itself stays in the paths view. */
+const IMPORT_FORMAT_WORDS: Record<string, string> = {
+	"agent-skill": "a skill folder (SKILL.md)",
+	"claude-code": "a Claude Code plugin",
+	codex: "a Codex plugin",
+	portable: "a portable package",
+};
+
+function importFormatWords(format: string): string {
+	return IMPORT_FORMAT_WORDS[format] ?? format;
+}
+
 function formatLibraryImportReview(
 	rawPlan: LibraryImportPlan,
 	width: number,
@@ -543,8 +571,9 @@ function formatLibraryImportReview(
 			label: "Source",
 			value: `${shortenHomePath(plan.source.input)}${plan.source.transport === "local" ? "" : ` (${plan.source.transport})`}`,
 		},
-		...(plan.format ? [{ label: "Format", value: plan.format }] : []),
-		...(plan.version ? [{ label: "Version", value: plan.version }] : []),
+		...(plan.format ? [{ label: "Format", value: importFormatWords(plan.format) }] : []),
+		// A bare skill folder carries no version of its own; the 0.0.0 the packager gives it says nothing.
+		...(plan.version && plan.version !== "0.0.0" ? [{ label: "Version", value: plan.version }] : []),
 		...(plan.destination ? [{ label: "Destination", value: shortenHomePath(plan.destination) }] : []),
 		{
 			label: "Adds",
@@ -593,7 +622,7 @@ function formatLibraryImportReview(
 				install
 					? statusChip(theme, "pending", "ready to import")
 					: statusChip(theme, "error", "cannot be imported as reviewed"),
-				plan.format ? chip(theme, plan.format, "muted") : null,
+				plan.format ? chip(theme, importFormatWords(plan.format), "muted") : null,
 			],
 			width,
 		),

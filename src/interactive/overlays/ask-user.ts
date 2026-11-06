@@ -237,7 +237,7 @@ export function optionAsksForText(label: string): boolean {
 	);
 }
 
-function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>): SelectItem[] {
+function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>, draft = ""): SelectItem[] {
 	const options = question.options ?? [];
 	const explicitOtherIndex = options.findIndex((option) => isOtherOption(option.label));
 	const items: SelectItem[] = [];
@@ -263,7 +263,9 @@ function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>): 
 		items.push({
 			value: "other",
 			label: question.multi_select === true ? "[ ] Other" : "Other",
-			description: "type your answer",
+			// A draft left with Esc waits here, and the row says so, so backing out of the field reads as keeping it.
+			description:
+				draft.trim().length > 0 ? `your draft, kept: ${draft.trim().replace(/\s+/gu, " ")}` : "type your answer",
 		});
 	}
 	return items;
@@ -899,7 +901,7 @@ class AskUserOverlayView implements Component {
 								: // A confirmation the operator's own key raised is one choice, not a numbered question in a round.
 									this.confirmation && this.questions.length === 1
 									? "Choose one"
-									: `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`,
+									: this.positionWords(),
 							{ bold: true },
 						),
 						width,
@@ -909,7 +911,13 @@ class AskUserOverlayView implements Component {
 					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
 				]
 			: [
-					...this.renderCompactPosition(question, width, pointToMove ? moveKey : null, !named.includes("[a]")),
+					// In a text field `a` types a letter, so the ledger key is not offered there.
+					...this.renderCompactPosition(
+						question,
+						width,
+						pointToMove ? moveKey : null,
+						!named.includes("[a]") && this.currentState()?.mode !== "text",
+					),
 					...countdown,
 				];
 		const header = fit.headers ? this.renderQuestionHeader(question, width, !hasMenu && this.questions.length > 1) : [];
@@ -1002,7 +1010,15 @@ class AskUserOverlayView implements Component {
 		} else {
 			const full = [...(position === null ? [] : [position]), ...move, ...(ledger === null ? [] : [ledger])];
 			if (escKeeps > 0) full.push(keepsWhole);
-			parts = escKeeps > 0 && !fits(full) ? [...shortPosition, ...move, keepsNamed] : full;
+			// Narrowest, the count stands for the answers: `1 kept on cancel` still says what Esc keeps.
+			const keepsCounted = `${escKeeps} kept on cancel${pointer}`;
+			const narrow = [...shortPosition, ...move];
+			parts =
+				escKeeps > 0 && !fits(full)
+					? fits([...narrow, keepsNamed])
+						? [...narrow, keepsNamed]
+						: [...narrow, keepsCounted]
+					: full;
 			// What the question under the row already explains fits whole or gives way.
 			const optional = [
 				...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
@@ -1100,9 +1116,9 @@ class AskUserOverlayView implements Component {
 		return [
 			text &&
 				questionHasOptions(question) && {
-					// The draft is dropped (#260 keeps Esc the discard gesture), so the words say so.
-					verb: "discard text, back to options",
-					short: "discard text",
+					// Backing out of the field keeps what was typed, the way every other field's Esc does; t opens it again.
+					verb: "back to options, keeps text",
+					short: "back",
 					back: () => this.escapeFromTextInput(question, state),
 				},
 			text &&
@@ -1373,6 +1389,20 @@ class AskUserOverlayView implements Component {
 	 * one row and wrap to a second when they must; a question that has been
 	 * answered carries a check, the active one carries the cursor.
 	 */
+	/**
+	 * Where the operator is in the set: which question, how many are answered,
+	 * and the round only once there has been more than one, since `Round 1` on an
+	 * interview that never has a second says nothing.
+	 */
+	private positionWords(): string {
+		const total = this.questions.length;
+		const answered = this.states.filter((state) => Boolean(state?.answer.trim())).length;
+		const parts = [`Question ${this.index + 1} of ${total}`];
+		if (total > 1) parts.push(answered === total ? "all answered" : `${answered} answered`);
+		if (this.roundsAnswered > 0) parts.push(`Round ${this.roundsAnswered + 1}`);
+		return parts.join(" · ");
+	}
+
 	private renderQuestionStrip(width: number, spacing = true): string[] {
 		const theme = clioTheme();
 		if (this.questions.length <= 1) return [];
@@ -1380,7 +1410,12 @@ class AskUserOverlayView implements Component {
 			const state = this.states[index];
 			const active = index === this.index;
 			const answered = Boolean(state?.answer.trim());
-			const mark = answered ? `${theme.fg("success", GLYPH.ok)} ` : "";
+			// Answered or still open, as a shape, so the strip reads without colour; the cursor marks the active one.
+			const mark = active
+				? ""
+				: answered
+					? `${theme.fg("success", GLYPH.ok)} `
+					: `${theme.fg("annotation", GLYPH.queued)} `;
 			const name = `Q${index + 1} ${compactTitle(question)}`;
 			const title = active
 				? `${theme.fg("selectedOption", GLYPH.cursor)} ${theme.style("selectedOption", name, { bold: true })}`
@@ -1480,7 +1515,7 @@ class AskUserOverlayView implements Component {
 		const state = this.currentState();
 		const selectedItem = this.list?.getSelectedItem();
 		if (!question || !state || !selectedItem) return [""];
-		const items = optionItems(question, state.selected);
+		const items = optionItems(question, state.selected, state.inputValue !== state.customAnswer ? state.inputValue : "");
 		const focusedIndex = Math.max(
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
@@ -1568,6 +1603,8 @@ class AskUserOverlayView implements Component {
 		} else {
 			const input = new Input();
 			input.setValue(initial);
+			// End, so a kept draft continues where it stopped.
+			input.handleInput("\x1b[F");
 			input.onSubmit = (value) => this.submitText(question, state, value);
 			this.text = new InputTextControl(input, caption);
 		}
@@ -1575,7 +1612,8 @@ class AskUserOverlayView implements Component {
 	}
 
 	private rebuildSelectList(question: AskUserQuestion, state: QuestionState): void {
-		const items = optionItems(question, state.selected);
+		const draft = state.inputValue !== state.customAnswer ? state.inputValue : "";
+		const items = optionItems(question, state.selected, draft);
 		const activeList = new SelectList(items, Math.max(1, items.length), DEFAULT_SELECT_THEME, {
 			minPrimaryColumnWidth: MIN_LABEL_COLUMN,
 			maxPrimaryColumnWidth: MAX_LABEL_COLUMN,
@@ -1647,19 +1685,18 @@ class AskUserOverlayView implements Component {
 	 * draft unrecoverable: a single-question round had no other question to answer
 	 * first, so the only way off `t` was to abandon the interview (issue #260). A
 	 * question with options has a surface behind the field, so Esc goes back to it
-	 * and drops the draft. A question with no options has nothing behind it, so Esc
-	 * keeps its old meaning and leaves the interview; the footer says which.
-	 *
-	 * The draft is dropped rather than parked because Esc is the discard gesture.
-	 * It never reached `answer`, `options`, or `value` in the first place, since
-	 * only a submit writes those, so #228's clearing rule holds either way.
+	 * and parks the draft where `t` finds it again, because backing out of a layer
+	 * never throws away what the operator typed. A question with no options has
+	 * nothing behind it, so Esc keeps its old meaning and leaves the interview; the
+	 * footer says which. The draft never reached `answer`, `options`, or `value`,
+	 * since only a submit writes those, so #228's clearing rule holds.
 	 */
 	private escapeFromTextInput(question: AskUserQuestion, state: QuestionState): void {
 		if (!questionHasOptions(question)) {
 			this.cancel();
 			return;
 		}
-		state.inputValue = "";
+		state.inputValue = this.text?.getText() ?? state.inputValue;
 		state.selected = new Set(state.selectedBeforeText ?? state.committedSelected);
 		state.selectedBeforeText = null;
 		state.mode = "select";

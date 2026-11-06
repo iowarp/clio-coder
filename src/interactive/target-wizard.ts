@@ -12,11 +12,12 @@ import {
 } from "../engine/tui.js";
 import { backOutOneLayer, type EscapeLayers, escapeHintEntry } from "./escape-layers.js";
 import { maybeOpenExternalUrl } from "./open-external-url.js";
-import type { RowBudgetedBody } from "./overlay-frame.js";
+import type { HintEntry, RowBudgetedBody } from "./overlay-frame.js";
 import {
-	buildResponsiveHint,
 	centeredWindow,
 	FILTER_HINT,
+	fitHintEntries,
+	fitHintEntryList,
 	fitRows,
 	selectionLabel,
 	selectionMark,
@@ -122,6 +123,8 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	/** Where the reports since the last answer start: the prompt on screen shows every one, because they say why it is there. */
 	private freshFrom = 0;
 	private bodyRows = 16;
+	/** Cells the composer rail has for this wizard's keys; zero before the first dock render. */
+	private railRoom = 0;
 	private complete = false;
 	private problem = "";
 	private waitLabel: string | null = null;
@@ -153,6 +156,19 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 
 	setBodyRows(rows: number): void {
 		this.bodyRows = Math.max(1, rows);
+	}
+
+	setRailRoom(cells: number): void {
+		this.railRoom = Math.max(0, Math.floor(cells));
+	}
+
+	/**
+	 * The step on screen, counted from the first question: the flow branches on
+	 * the answers, so the wizard knows how far in it is but never how many steps
+	 * remain, and the title says only what it knows. Null when no step is asking.
+	 */
+	stepNumber(): number | null {
+		return this.pending === null || this.complete ? null : this.answered + 1;
 	}
 	cancelled(): boolean {
 		return this.signal.aborted;
@@ -303,7 +319,17 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			);
 			return fitRows(rows, width, this.bodyRows);
 		}
-		return fitRows(this.renderPrompt(pending, width), width, this.bodyRows);
+		// A rail too narrow for Ctrl+C names it under the step instead, so the way out of the whole wizard is never on no surface.
+		const lost = this.railRoom > 0 && this.ctrlCDropped();
+		const prompt = this.renderPrompt(pending, width, lost ? 1 : 0);
+		if (lost) prompt.push(theme.fg("annotation", noteRow("Ctrl+C cancels the wizard, nothing saved", width)));
+		return fitRows(prompt, width, this.bodyRows);
+	}
+
+	private ctrlCDropped(): boolean {
+		const entries = this.railEntries();
+		const ctrlC = entries.find((entry) => entry.key === "Ctrl+C");
+		return ctrlC !== undefined && !fitHintEntryList(entries, this.railRoom).kept.includes(ctrlC);
 	}
 
 	/**
@@ -315,9 +341,9 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	 * cut without a mark. The selected choice's description wraps in full under
 	 * it, so a narrow dock still reads what the choice means.
 	 */
-	private renderPrompt(pending: PendingChoice | PendingText, width: number): string[] {
+	private renderPrompt(pending: PendingChoice | PendingText, width: number, reserved = 0): string[] {
 		const theme = clioTheme();
-		const budget = this.bodyRows;
+		const budget = Math.max(1, this.bodyRows - reserved);
 		// A prompt that follows a failure is there because of it, so everything reported since the last answer stays up.
 		const fresh = this.messages.slice(this.freshFrom);
 		const notes = fresh.length > 0 ? fresh : this.messages.slice(-1);
@@ -423,6 +449,17 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		};
 		const stopWait = this.stopWait;
 		return [
+			// A typed filter is the innermost layer of a searchable step: Esc clears it and keeps the step.
+			pending?.kind === "select" &&
+				pending.options.searchable === true &&
+				this.input.getValue().length > 0 && {
+					verb: "clear filter",
+					short: "clear",
+					back: () => {
+						this.input.setValue("");
+						this.requestRender();
+					},
+				},
 			pending === null &&
 				stopWait !== null && {
 					verb: "stop waiting, back a step",
@@ -458,26 +495,25 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 
 	/** The rail for the step on screen: a finished wizard offers only the way out, and Enter and Esc both take it. */
 	railHint(innerWidth: number): string {
+		return fitHintEntries(this.railEntries(), innerWidth - 3);
+	}
+
+	private railEntries(): HintEntry[] {
 		const pending = this.pending;
 		const esc = escapeHintEntry(this.escapeLayers());
+		const cancel: HintEntry = { key: "Ctrl+C", verb: "cancel, nothing saved", short: "cancel" };
 		if (!pending) {
-			return this.complete
-				? buildResponsiveHint([], { key: "Enter/Esc", verb: "back to Settings" })(innerWidth)
-				: buildResponsiveHint(
-						this.stopWait === null ? [] : [{ key: "Ctrl+C", verb: "cancel, nothing saved", short: "cancel" }],
-						esc,
-					)(innerWidth);
+			if (this.complete) return [{ key: "Enter/Esc", verb: "back to Settings" }];
+			return [...(this.stopWait === null ? [] : [cancel]), ...(esc === null ? [] : [esc])];
 		}
-		return buildResponsiveHint(
-			[
-				...(pending.kind === "select"
-					? [{ key: "↑↓", verb: "choose" }, ...(pending.options.searchable ? [FILTER_HINT] : [])]
-					: []),
-				{ key: "Enter", verb: "continue" },
-				...(this.answered > 0 ? [{ key: "Ctrl+C", verb: "cancel, nothing saved", short: "cancel" }] : []),
-			],
-			esc,
-		)(innerWidth);
+		return [
+			...(pending.kind === "select"
+				? [{ key: "↑↓", verb: "choose" }, ...(pending.options.searchable ? [FILTER_HINT] : [])]
+				: []),
+			{ key: "Enter", verb: "continue" },
+			...(this.answered > 0 ? [cancel] : []),
+			...(esc === null ? [] : [esc]),
+		];
 	}
 }
 
@@ -490,7 +526,11 @@ export function openTargetWizard(tui: TUI, options: HostedTargetOptions, onClose
 	};
 	const body = new TargetWizardSurface(() => tui.requestRender(), close);
 	handle = showClioOverlayFrame(tui, body, {
-		title: options.mode === "edit" ? `Edit target: ${options.target.id}` : "Add target",
+		title: () => {
+			const step = body.stepNumber();
+			const name = options.mode === "edit" ? `Edit target: ${options.target.id}` : "Add target";
+			return step === null ? name : `${name} · step ${step}`;
+		},
 		markerId: "target-wizard",
 		footerHint: (innerWidth) => body.railHint(innerWidth),
 	});

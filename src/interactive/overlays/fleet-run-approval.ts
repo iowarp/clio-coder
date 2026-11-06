@@ -338,9 +338,14 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 		// A plan that can dispatch is a decision, so the rails carry the approval
 		// tone. A failed preflight has nothing to approve and stays informational.
 		...(acceptable ? { approval: true, awaitingInput: true, tone: "decisionCue" as const } : {}),
-		// The body's own rows name Enter and Esc with what they do; the rail
-		// carries only the key they do not.
-		footerHint: buildResponsiveHint([{ key: "↑↓", verb: "scroll" }], null),
+		// The body's own rows name Enter and Esc with what they do. The rail names
+		// the way out as well, because a frame short enough to cut those rows
+		// would otherwise leave Esc on no surface at all.
+		footerHint: buildResponsiveHint([{ key: "↑↓", verb: "scroll" }], {
+			key: "Esc",
+			verb: acceptable ? "cancel, nothing dispatched" : "leave",
+			short: acceptable ? "cancel" : "leave",
+		}),
 	});
 
 	return {
