@@ -4,24 +4,24 @@ Clio Coder is a TypeScript/Node.js project. It is an open-source coding agent fo
 
 ## Hard invariants
 
-1. Never commit or push a path that `.gitignore` excludes: `scripts/git-guard.mjs` refuses the commit/push and the `tracked-ignored` check fails CI; unstage with `git rm --cached <path>`.
+1. Never commit or push a path that `.gitignore` excludes: `scripts/git-guard.mjs` refuses the `commit/push` and the `tracked-ignored` check fails CI; unstage with `git rm --cached <path>`.
 2. Only `src/engine/**` may import `@earendil-works/pi-*` packages, including type imports (rule1 in `tests/boundaries/check-boundaries.ts`); worker value imports from domains are limited to provider runtime rehydration modules (rule2).
 3. Domains communicate only through contracts and events: never cross-import another domain's `extension.ts`; use the contract exported from that domain's `index.ts` (rule3, `tests/boundaries/check-boundaries.ts`).
 4. `src/tools/**` must not import `src/interactive` (rule4) and turn-runtime modules must not import `src/entry/**` (rule5); entry points compose dependencies, never the reverse.
-5. Do not add a new disjoint reacher into the Stage 0 closure (`src/interactive/**`, `src/engine/**`) outside declared seams in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`; esbuild splits the merged chunk and `tests/contracts/instant-shell-import-graph.test.ts` fails after a full build (32 chunks, 1,400,000 total bytes, 350,000 Clio source bytes).
+5. Do not add a new disjoint reacher into the Stage 0 closure (`src/interactive/**`, `src/engine/**`) outside seams declared in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`; esbuild splits the merged chunk and `tests/contracts/instant-shell-import-graph.test.ts` fails after a full build (32 chunks, 1,400,000 total bytes, 350,000 Clio source bytes).
 6. Never mutate provider usage or put usage-shaped fields on a ledger payload (rule12); the ledger is the conversation record and the call journal owns usage (`tests/boundaries/check-boundaries.ts`).
 7. Only the telemetry domain writes under the telemetry root; other modules go through the telemetry writers, and the telemetry producer path must not import persistence or do synchronous `I/O` (rules 11 and 13 in `tests/boundaries/check-boundaries.ts`).
-8. Format money only through `renderPricing`/`renderUsdSum` in `src/core/telemetry/render.ts` or a DTO display, and show the read model's quantity display instead of summing token/cost fields on surfaces (rules 10 and 14 in `tests/boundaries/check-boundaries.ts`).
+8. Format money only through `renderPricing`/`renderUsdSum` in `src/core/telemetry/render.ts` or a DTO display, and show the read model's quantity display instead of summing `token/cost` fields on surfaces (rules 10 and 14 in `tests/boundaries/check-boundaries.ts`).
 9. Never move a published tag, rebuild a published candidate, or republish different bytes; publish npm first, then the `GitHub` `tag/release`, then promote `main` and `gh-pages`, resuming a partial failure with the original artifact (`CONTRIBUTING.md`).
 10. Agents must leave npm publish and release approval to the owner: the `release` environment requires the owner as required reviewer in `.github/workflows/release.yml`; never grant an App blanket bypass of published-tag immutability.
 
 ## Conventions
 
-- Biome formats with tabs, double quotes, trailing commas, 120 columns (`biome.json`); `apps/clio-coder-gui` is excluded from Biome entirely, so run `pnpm run check:gui` for GUI code.
+- Biome formats with tabs, double quotes, trailing commas, 120 columns (`biome.json`); `apps/clio-coder-gui` is excluded from Biome entirely, so check GUI code with `pnpm run check:gui`.
 - `TypeScript` is strict plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `noImplicitOverride` (`tsconfig.json`): index access yields `T | undefined` and optional properties must not be assigned `undefined` explicitly.
-- Terminal colors live only in `src/interactive/theme`; raw SGR escapes, 38;2;/48;5; fragments, and hex colors anywhere else in `src/interactive` fail the `theme-discipline` check in `scripts/check-hygiene.ts`.
-- Project state paths use the `.clio-coder` namespace; a bare `.clio` path or directory fails the `product-namespace` check in `scripts/check-hygiene.ts` (except `CHANGELOG.md`, `docs/history/`, `.github/releases/`).
-- Prompt fragments are Markdown files under `src/domains/prompts/fragments/**` loaded by `loadFragments` in `src/domains/prompts/fragment-loader.ts`'s sibling `fragment-loader.ts`; duplicate fragment ids throw, and `identity.self-awareness` plus `identity.docs-routing` must stay registered for the `prompts` check.
+- Terminal colors live only in `src/interactive/theme`; raw SGR escapes, `38;2;`/`48;5;` fragments, and hex colors anywhere else in `src/interactive` fail the `theme-discipline` check in `scripts/check-hygiene.ts`.
+- Project state paths use the `.clio-coder` namespace; a bare `.clio` path or directory fails the `product-namespace` check in `scripts/check-hygiene.ts` (except `CHANGELOG.md`, `CLIO-CODER.md`, `docs/history/`, `.github/releases/`).
+- Prompt fragments are Markdown files under `src/domains/prompts/fragments/**` loaded by `loadFragments` in `src/domains/prompts/fragment-loader.ts`; duplicate fragment ids throw, and `identity.self-awareness` plus `identity.docs-routing` must stay registered for the `prompts` check.
 - Keep CLI subcommands dynamically imported to preserve fast `--help` and startup (`CONTRIBUTING.md`).
 - Tests use `pnpm run test:file` (preloads `tests/harness/tmp-root.ts`) with `tests/harness/scratch-env.ts` for state isolation; never mutate `process.stdout.write` across async test boundaries (`CONTRIBUTING.md`).
 
