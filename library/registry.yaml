@@ -415,7 +415,7 @@ entries:
       online launch to build its environment before it runs offline."
     version: 0.2.0
     sourceUrl: plugins/hpc
-    sha256: f1c4e7ad18b8e30fdc9cb5501d93e95d67a87e8e4778b7a74c8b30868fd487f7
+    sha256: 851c7f94bccadb2498a0d8c4e07a1819b215c2b9b9fd32c4a7608ab233f04937
     requires:
       - skill:slurm-jobs
     provides:

@@ -32,8 +32,16 @@ from the project root: `python3 <helper> plan|aggregate ...`.
    below) and stop for their review before planning.
 3. `verify()` with no arguments. The sweep's `check` must be listed with
    `One run per call: <id>/<run>, <run> a directory under <out>/runs`. If it is
-   missing or has no runs directory, show the operator the catalog entry below
-   and stop. Never write `.clio-coder/verifiers.yaml` without their approval.
+   missing or has no runs directory, show the operator the catalog entry below,
+   filled in for this sweep, for them to add, and stop. Do not write or offer to
+   write `.clio-coder/verifiers.yaml` yourself: the catalog decides what Clio
+   may run, so it is the operator's file, and project safety policy often makes
+   it read-only.
+
+Every `ask_user` question in this skill marks the option that does nothing new
+as recommended (`Don't submit`, `No change`), never the one that submits or
+starts work. An unanswered question can resolve to its recommended option, and
+an absent operator must not be steered into spending allocation.
 
 ## The sweep file
 
@@ -92,7 +100,8 @@ call. It refuses to plan over a run directory that already holds output.
 Show the operator the run count, the parameter table, the script and the
 submission call verbatim. Unless the operator's request says to submit, stop
 here: the dry run is the answer. Ask with `ask_user` whether to submit when it
-is available; a headless run reports the dry run and stops.
+is available, with `Don't submit` as the recommended option; a headless run
+reports the dry run and stops.
 
 ## Phase 2 - Submit
 
@@ -146,9 +155,11 @@ scheduler record).
 Show the table and its tally line. Then, attended, use `ask_user` with concrete
 refinements drawn from the table, for example a finer grid between the last
 agreeing and the first disagreeing value of one parameter, a new array of only
-the failed task ids, or no change. A refinement is a new sweep file with a new
-`name`, planned and dry-run like the first; never overwrite a finished sweep's
-directory. Headless: list the refinements in the report and stop.
+the failed task ids, or `No change`, which is the recommended option. A chosen
+refinement is a new sweep file with a new `name`, planned and dry-run like the
+first; never overwrite a finished sweep's directory. Its runs live in a new
+directory, so it needs a check entry whose `runs` names that directory: show
+the operator that entry as in Phase 0 and stop until it is listed. Headless: list the refinements in the report and stop.
 
 ## Final answer
 
