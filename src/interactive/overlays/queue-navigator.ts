@@ -267,7 +267,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			...(send ? [send] : []),
 			{ key: "↑↓", verb: "select" },
 			{ key: this.deps.restoreAllLabel().split(" · ")[0] ?? "", verb: "all to editor" },
-			{ key: "⇧↑↓", verb: "move" },
+			{ key: "Shift+↑↓", verb: "move" },
 			{ key: "t", verb: "steer/later" },
 			{ key: "x", verb: "remove" },
 			...(selected?.origin === undefined ? [{ key: "e", verb: "to editor" }] : []),
