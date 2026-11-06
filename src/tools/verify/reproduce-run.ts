@@ -80,8 +80,11 @@ export interface ReproduceRunFacts {
 
 export type ReproduceOutcome =
 	| { kind: "refused"; refusal: ReproduceRefusal }
-	/** A run did not complete cleanly, so nothing was judged. `run` is 1 or 2; `facts.launched` says whether it started. */
-	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; message: string }
+	/**
+	 * A run did not complete cleanly, so nothing was judged. `run` is 1 or 2; `facts.launched` says whether it started,
+	 * and `completed` holds the runs before it, each launched and completed cleanly: the check ran when either holds.
+	 */
+	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; completed: ReproduceRunFacts[]; message: string }
 	/** The command completed but its output or the reference could not be judged. */
 	| { kind: "unjudgeable"; message: string; facts: ReproduceRunFacts[] }
 	| { kind: "judged"; report: ReproduceReport; facts: ReproduceRunFacts[] };
@@ -296,6 +299,19 @@ function runFacts(result: SafeCommandResult, argv: string[], cwd: string): Repro
 	};
 }
 
+function notLaunchedFacts(argv: ReadonlyArray<string>, cwd: string): ReproduceRunFacts {
+	return {
+		argv: [...argv],
+		cwd,
+		launched: false,
+		exitCode: null,
+		durationMs: 0,
+		aborted: false,
+		timedOut: false,
+		outputCapped: false,
+	};
+}
+
 function runFailure(result: SafeCommandResult, timeoutMs: number): string | null {
 	if (result.launched !== true)
 		return `could not start: ${(result.stderr || result.failure || "no process was created").trim()}`;
@@ -416,12 +432,15 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 				cwd: input.cwd,
 			});
 		} catch (error) {
+			const message = `clean ${reproduceEnvironment(spec)} environment for run ${run} could not be prepared (${errorText(error)})`;
+			// Before the first run nothing ran; after it the check ran, and this run is the one that could not start.
+			if (facts.length === 0) return { kind: "refused", refusal: { reason: "environment-setup-failed", message } };
 			return {
-				kind: "refused",
-				refusal: {
-					reason: "environment-setup-failed",
-					message: `clean ${reproduceEnvironment(spec)} environment for run ${run} could not be prepared (${errorText(error)})`,
-				},
+				kind: "run-failed",
+				run,
+				facts: notLaunchedFacts(argv, input.cwd),
+				completed: [...facts],
+				message: `run ${run} could not start: ${message}`,
 			};
 		}
 		let result: SafeCommandResult;
@@ -440,25 +459,18 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 			return {
 				kind: "run-failed",
 				run,
-				facts: {
-					argv: [...argv],
-					cwd: input.cwd,
-					launched: false,
-					exitCode: null,
-					durationMs: 0,
-					aborted: false,
-					timedOut: false,
-					outputCapped: false,
-				},
+				facts: notLaunchedFacts(argv, input.cwd),
+				completed: [...facts],
 				message: `run ${run} could not start: ${errorText(error)}`,
 			};
 		} finally {
 			await environment.dispose();
 		}
 		const fact = runFacts(result, [...argv], input.cwd);
-		facts.push(fact);
 		const failure = runFailure(result, input.timeoutMs);
-		if (failure !== null) return { kind: "run-failed", run, facts: fact, message: `run ${run} ${failure}` };
+		if (failure !== null)
+			return { kind: "run-failed", run, facts: fact, completed: [...facts], message: `run ${run} ${failure}` };
+		facts.push(fact);
 		const payloadText = extractNumericPayloadText(result.stdout);
 		const payload = parseReproducePayload(payloadText, `run ${run} output`);
 		if (payload instanceof Error) return { kind: "unjudgeable", message: payload.message, facts };

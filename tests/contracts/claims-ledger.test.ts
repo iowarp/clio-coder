@@ -31,6 +31,8 @@ import {
 } from "../../src/domains/claims/index.js";
 import { runHostVerification } from "../../src/domains/dispatch/host-verification.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import type { DeclaredReproduce } from "../../src/tools/verify/reproduce.js";
+import { runProjectCheck } from "../../src/tools/verify/scripts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -724,6 +726,101 @@ describe("claims ledger (#406)", () => {
 				"proposed",
 			);
 		} finally {
+			env.restore();
+		}
+	});
+
+	it("counts a reproduce check whose second run could not start as tested, on both channels", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		const previousCwd = process.cwd();
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			writeFileSync(join(repo, "h.json"), slateText([{ id: "H1", check: "repro" }]));
+			await createHypothesisCaptureRegistration({ cwd: () => repo }).evaluateAsync?.({
+				hook: "after_tool",
+				toolName: "write",
+				toolArgs: { path: "h.json" },
+			});
+			// The first run launches, prints its payload and removes its own executable, so the second cannot start.
+			const once = join(env.dir, "bin", "once");
+			const arm = () => {
+				mkdirSync(join(env.dir, "bin"), { recursive: true });
+				writeFileSync(once, `#!/bin/sh\nrm -f -- "$0"\necho '{"x": 1}'\n`, { mode: 0o755 });
+			};
+			const spec: DeclaredReproduce = {
+				inputs: [],
+				environment: "copy",
+				compare: { mode: "twice" },
+				tolerance: { absolute: 0 },
+			};
+			const statusOfH1 = () => {
+				const read = readClaims(project);
+				return hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(read.hypotheses[0]?.id ?? "")?.status;
+			};
+
+			arm();
+			const hypotheses = await bindHostVerificationHypotheses(repo, "run1", ["repro"]);
+			const verification = await runHostVerification({
+				runId: "run1",
+				workerSuccessful: true,
+				stateDir: join(env.dir, "host-state"),
+				request: {
+					resolvedVerification: [
+						{
+							check: "repro",
+							argv: [once],
+							cwd: repo,
+							timeoutMs: 10_000,
+							kind: "reproduce",
+							reproduce: { declaredCwd: ".", spec },
+						},
+					],
+				},
+			});
+			const [check] = verification?.checks ?? [];
+			assert.ok(check);
+			match(check.outputTail, /run 2 could not start/);
+			assert.equal(check.notRun, undefined);
+			await recordHostVerificationClaims({
+				runId: "run1",
+				receiptDigest: "d".repeat(64),
+				checks: [check],
+				projectCwd: repo,
+				hypotheses,
+			});
+			assert.equal(statusOfH1(), "tested");
+
+			// The main thread's verify reads the same outcome as a failed run, not an unavailable runner.
+			arm();
+			process.chdir(repo);
+			const call = verifyCall(createClaimCaptureRegistration({ cwd: () => repo })).start("repro");
+			await call.started;
+			const result = await runProjectCheck({
+				id: "repro",
+				description: "reproduce twice",
+				command: [once],
+				cwd: ".",
+				timeoutMs: 10_000,
+				tags: [],
+				source: { kind: "project-catalog", path: ".clio-coder/verifiers.json" },
+				kind: "reproduce",
+				reproduce: spec,
+			});
+			match(result.kind === "error" ? result.message : "", /run 2 could not start/);
+			assert.equal((result.details?.judgement as { execution?: string } | undefined)?.execution, "failed");
+			await call.finish(result.details ?? {});
+			const tests = readClaims(project).hypothesisTests;
+			assert.deepEqual(
+				tests.map((test) => [test.source.channel, test.outcome, test.execution]),
+				[
+					["host-verification", "tested", "failed"],
+					["verify", "tested", "failed"],
+				],
+			);
+		} finally {
+			process.chdir(previousCwd);
 			env.restore();
 		}
 	});

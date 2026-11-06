@@ -436,8 +436,9 @@ async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHost
 				argv: outcome.facts.argv,
 				exitCode: outcome.facts.exitCode === 0 || outcome.facts.exitCode === null ? 1 : outcome.facts.exitCode,
 				durationMs: outcome.facts.durationMs,
-				// A run whose process could not be created stopped the check on its environment, not on what it judges.
-				...(outcome.facts.launched ? {} : { notRun: "spawn-failed" as const }),
+				// A check whose first run's process could not be created stopped on its environment, not on what it
+				// judges. Once a run launched the check ran, so a later run that could not start leaves it unjudged.
+				...(outcome.facts.launched || outcome.completed.length > 0 ? {} : { notRun: "spawn-failed" as const }),
 				outputTail: outputTail(`reproduce ${outcome.message}`),
 			};
 		case "unjudgeable":
