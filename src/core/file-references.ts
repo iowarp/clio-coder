@@ -329,14 +329,14 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 			notInlined(
 				filePath,
 				`binary file (${size}), not inlined; inspect it with run_script and a library for its format`,
-				`binary file not inlined (${size})`,
+				`a binary file, not text (${size})`,
 			);
 		if (signature.includes(0)) return binary();
 		if (stat.size > INLINE_TEXT_MAX_BYTES) {
 			return notInlined(
 				filePath,
 				`text file (${size}) is larger than the ${formatSize(INLINE_TEXT_MAX_BYTES)} inline limit, not inlined; read it in windows with read and offset/limit`,
-				`text file not inlined (${size})`,
+				`too large to include (${size})`,
 			);
 		}
 		const bytes = readFileSync(filePath);

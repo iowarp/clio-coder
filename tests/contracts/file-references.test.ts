@@ -61,7 +61,7 @@ describe("contracts/file references", () => {
 				/\[text file \(256\.0KB\) is larger than the 256\.0KB inline limit, not inlined; read it in windows/u,
 			);
 			deepStrictEqual(big.diagnostics, [
-				{ type: "warning", message: "text file not inlined (256.0KB)", path: join(cwd, "big.log") },
+				{ type: "warning", message: "too large to include (256.0KB)", path: join(cwd, "big.log") },
 			]);
 			deepStrictEqual(big.referencedPaths, [join(cwd, "big.log")]);
 

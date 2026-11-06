@@ -79,7 +79,9 @@ function attachmentNote(
 	if (byName.length > ATTACHMENT_NOTE_LIMIT) parts.push(`${byName.length - ATTACHMENT_NOTE_LIMIT} more by name only`);
 	for (const item of unreadable.slice(0, ATTACHMENT_NOTE_LIMIT))
 		parts.push(`could not attach ${shortAttachmentPath(item.path ?? "", cwd)}: ${item.message}`);
-	return parts.length > 0 ? parts.join("; ") : undefined;
+	if (parts.length === 0) return undefined;
+	const note = parts.join("; ");
+	return `${note[0]?.toUpperCase() ?? ""}${note.slice(1)}.`;
 }
 
 export interface SubmitExpansionOptions {
