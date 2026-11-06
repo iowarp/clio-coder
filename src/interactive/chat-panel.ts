@@ -259,8 +259,17 @@ type RowMemo = {
 
 type TextSegment = {
 	kind: "text";
-	text: string;
+	/** Changed only through `appendSegmentText` and `replaceSegmentText`, which keep `unprojected` and `scan` honest. */
+	readonly text: string;
 	finalized: boolean;
+	/**
+	 * Text appended since the last projection, so the next frame projects only
+	 * that (#428); absent until the first projection and after a replacement,
+	 * when the projections compare the whole text.
+	 */
+	unprojected?: string;
+	/** What appends keep current about `text` without reading it whole (#428); absent after a replacement. */
+	scan?: TextScan;
 	/** Cached prose policy for live, replayed and rewritten model output. */
 	prose?: AssistantProseProjection;
 	/** URL credentials stay off screen; the segment's own text stays whole for the ledger and the next turn (#446). */
@@ -271,6 +280,8 @@ type TextSegment = {
 	settled?: SettledBlocks | null;
 	/** Reuse wrapped rows while another entry streams or its clock advances (#428). */
 	rendered?: { source: string; finalized: boolean; epoch: number; layouts: Map<string, string[]> };
+	/** The last rows hung under the gutter, so an unchanged row keeps its hung string (#428). */
+	hung?: { input: string[]; prefix: string; output: string[] };
 	/** Fitted rows by Markdown row, so an unchanged row is not measured again on the next delta. Streaming only. */
 	rowMemo?: RowMemo | undefined;
 	/** Read by the stream renderer to price the next repaint; a new segment starts unpriced. */
@@ -296,15 +307,17 @@ type TextSegment = {
  * renders only the tail. Rendering the head and the tail apart yields the same rows as the whole.
  */
 type SettledBlocks = {
-	/** The settled head: a prefix of the segment's projected prose. */
-	source: string;
-	/** Where each cut fell in `source`, ascending; the last is `source.length`. */
+	/** How long the settled head is: a prefix of the segment's projected prose. */
+	length: number;
+	/** The head's text cut by cut, read from the projection's tail so the reply is never flattened per frame. */
+	pieces: string[];
+	/** Where each piece ends in the prose, ascending; the last is `length`. */
 	cuts: number[];
 	/** The redaction projection's restart count the head was cut under; a restart may have changed the head. */
 	restarts: number;
 	/** How far the prose reached at the last search for a cut. A new cut needs a line completed after that. */
 	searched: number;
-	/** The head's rows at one layout and how much of `source` they cover. */
+	/** The head's rows at one layout and how much of the head they cover. */
 	layout?: { width: number; bareFences: boolean; epoch: number; rows: string[]; through: number };
 	/** The open tail's Markdown component and the source it last rendered. */
 	tail?: { view: Markdown; source: string; epoch: number; bareFences: boolean };
@@ -772,6 +785,7 @@ function lastAssistantIndex(
  * byte range or null.
  */
 function findSkillSuggestionLine(seg: TextSegment): { start: number; end: number } | null {
+	if (!textScan(seg).suggestion) return null;
 	const text = seg.text;
 	let at = text.startsWith(SKILL_SUGGESTION_PREFIX) ? 0 : text.indexOf(`\n${SKILL_SUGGESTION_PREFIX}`);
 	if (at < 0) return null;
@@ -779,6 +793,55 @@ function findSkillSuggestionLine(seg: TextSegment): { start: number; end: number
 	const lineEnd = text.indexOf("\n", at);
 	if (lineEnd < 0) return seg.finalized ? { start: at, end: text.length } : null;
 	return { start: at, end: lineEnd };
+}
+
+/**
+ * What the transcript asks of a text segment on every frame, kept as text is
+ * appended so a streaming reply is never read whole for it (#428): where its
+ * visible text starts and ends, and whether a skill-suggestion line may start
+ * in it. `carry` is the end of the text behind a leading newline, so a line
+ * start that straddles two appends is still found.
+ */
+type TextScan = { length: number; first: number; end: number; carry: string; suggestion: boolean };
+const SUGGESTION_LINE = `\n${SKILL_SUGGESTION_PREFIX}`;
+
+function textScan(seg: TextSegment): TextScan {
+	if (seg.scan !== undefined && seg.scan.length === seg.text.length) return seg.scan;
+	const scan: TextScan = { length: 0, first: -1, end: -1, carry: "\n", suggestion: false };
+	scanAppended(scan, seg.text);
+	seg.scan = scan;
+	return scan;
+}
+
+function scanAppended(scan: TextScan, delta: string): void {
+	const window = scan.carry + delta;
+	if (!scan.suggestion && window.includes(SUGGESTION_LINE)) scan.suggestion = true;
+	scan.carry = window.slice(-SKILL_SUGGESTION_PREFIX.length);
+	const first = /\S/u.exec(delta);
+	if (first !== null) {
+		if (scan.first < 0) scan.first = scan.length + first.index;
+		const last = /\S(?=\s*$)/u.exec(delta);
+		if (last !== null) scan.end = scan.length + last.index + last[0].length;
+	}
+	scan.length += delta.length;
+}
+
+function appendSegmentText(seg: TextSegment, delta: string): void {
+	(seg as { text: string }).text = seg.text + delta;
+	if (seg.unprojected !== undefined) seg.unprojected += delta;
+	if (seg.scan !== undefined) scanAppended(seg.scan, delta);
+}
+
+function replaceSegmentText(seg: TextSegment, text: string): void {
+	(seg as { text: string }).text = text;
+	delete seg.unprojected;
+	delete seg.scan;
+}
+
+/** `isStrayFragment` for a text segment, which reads the text only when at most three visible marks remain. */
+function isStraySegment(seg: TextSegment): boolean {
+	const scan = textScan(seg);
+	return scan.first >= 0 && scan.end - scan.first <= 3 && isStrayFragment(seg.text);
 }
 
 /** Text with no letter or digit and at most three visible marks: punctuation a model left between actions. */
@@ -823,7 +886,7 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
 	split.suggestion = seg.text.slice(found.start, found.end).replace(/\r$/, "");
 	const answer = split.answer;
 	if (answer.text === answerText && answer.finalized === seg.finalized) return split;
-	answer.text = answerText;
+	replaceSegmentText(answer, answerText);
 	answer.finalized = seg.finalized;
 	return split;
 }
@@ -1152,16 +1215,20 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	const startedAt = seg.finalized ? 0 : performance.now();
 	seg.prose ??= new AssistantProseProjection();
 	seg.secrets ??= new RedactedStringProjection(redactUrlCredentials);
-	const prose = seg.secrets.project(seg.prose.project(seg.text, seg.finalized), seg.finalized);
+	// While text only grows, both projections take just what was appended; neither reads the whole reply (#428).
+	const added = seg.unprojected === undefined ? null : seg.prose.append(seg.text, seg.unprojected, seg.finalized);
+	if (added === null) seg.secrets.project(seg.prose.project(seg.text, seg.finalized), seg.finalized);
+	else seg.secrets.append(seg.prose.projected, added, seg.finalized);
+	seg.unprojected = "";
 	let memo = seg.rowMemo;
 	if (memo?.width !== width || memo.bareFences !== bareFences || memo.epoch !== epoch)
 		memo = seg.finalized ? undefined : { width, bareFences, epoch, rows: new Map(), plain: new Map() };
 	// A settled segment can last the whole session, so it keeps only its layouts.
 	seg.rowMemo = seg.finalized ? undefined : memo;
-	let rows =
-		seg.settled !== undefined || !seg.finalized ? renderSettledSplit(seg, prose, width, bareFences, memo) : null;
+	let rows = seg.settled !== undefined || !seg.finalized ? renderSettledSplit(seg, width, bareFences, memo) : null;
 	if (seg.finalized) delete seg.settled;
 	if (rows === null) {
+		const prose = seg.secrets.textFrom(0);
 		if (seg.markdown === undefined || seg.markdown.epoch !== epoch)
 			seg.markdown = { view: chatMarkdown(prose, bareFences), source: prose, epoch };
 		else if (seg.markdown.source !== prose) {
@@ -1192,32 +1259,37 @@ const SETTLED_RUN_CODE_UNITS = 8_192;
  */
 function renderSettledSplit(
 	seg: TextSegment,
-	prose: string,
 	width: number,
 	bareFences: boolean,
 	memo: RowMemo | undefined,
 ): string[] | null {
-	if (seg.settled === null || seg.secrets === undefined) return null;
+	const secrets = seg.secrets;
+	if (seg.settled === null || secrets === undefined) return null;
 	let settled = seg.settled;
 	// The head lies within the redaction's settled text, which only a restart rewrites: a cut-off hold, a
 	// diffusion frame or a replaced message. Comparing the head itself would cost a pass over the reply per frame.
-	const restarts = seg.secrets.restarts;
-	if (settled === undefined || settled.restarts !== restarts) settled = { source: "", cuts: [], restarts, searched: 0 };
+	const restarts = secrets.restarts;
+	if (settled === undefined || settled.restarts !== restarts)
+		settled = { length: 0, pieces: [], cuts: [], restarts, searched: 0 };
 	seg.settled = settled;
+	// Everything after the head, read from the projection's pieces rather than sliced off the whole prose.
+	const from = settled.length;
+	let region = secrets.textFrom(from);
 	// A cut needs a line completed since the last search. A reference definition, which always holds `]:`, is
 	// looked for on every frame it may be in the tail, since it changes how links in the head resolve.
-	const from = settled.source.length;
-	if (prose.indexOf("\n", settled.searched) >= 0 || prose.indexOf("]:", from) >= 0) {
-		settled.searched = prose.length;
-		const limit = seg.secrets.settledLength - from;
-		const cut = limit > 0 ? settledMarkdownHead(prose.slice(from), CODE_SPACE, limit) : 0;
+	if (region.indexOf("\n", Math.max(0, settled.searched - from)) >= 0 || region.includes("]:")) {
+		settled.searched = from + region.length;
+		const limit = secrets.settledLength - from;
+		const cut = limit > 0 ? settledMarkdownHead(region, CODE_SPACE, limit) : 0;
 		if (cut === null) {
 			seg.settled = null;
 			return null;
 		}
 		if (cut > 0) {
-			settled.source = prose.slice(0, from + cut);
-			settled.cuts.push(from + cut);
+			settled.pieces.push(region.slice(0, cut));
+			settled.length = from + cut;
+			settled.cuts.push(settled.length);
+			region = region.slice(cut);
 		}
 	}
 	const epoch = skinEpoch();
@@ -1226,12 +1298,16 @@ function renderSettledSplit(
 		layout = { width, bareFences, epoch, rows: [], through: 0 };
 		settled.layout = layout;
 	}
-	const last = settled.cuts.at(-1) ?? 0;
-	for (const cut of settled.cuts) {
-		if (cut <= layout.through || (cut - layout.through < SETTLED_RUN_CODE_UNITS && cut !== last)) continue;
+	const last = settled.cuts.length - 1;
+	let runStart = -1;
+	for (let index = 0; index <= last; index += 1) {
+		const cut = settled.cuts[index] ?? 0;
+		if (cut <= layout.through) continue;
+		if (runStart < 0) runStart = index;
+		if (cut - layout.through < SETTLED_RUN_CODE_UNITS && index !== last) continue;
 		const exit = { fenceOpen: false };
 		const rows = markdownRows(
-			chatMarkdown(settled.source.slice(layout.through, cut), bareFences),
+			chatMarkdown(settled.pieces.slice(runStart, index + 1).join(""), bareFences),
 			width,
 			bareFences,
 			undefined,
@@ -1244,15 +1320,15 @@ function renderSettledSplit(
 		}
 		for (const row of rows) layout.rows.push(row);
 		layout.through = cut;
+		runStart = -1;
 	}
-	const tailSource = prose.slice(settled.source.length);
 	let tail = settled.tail;
 	if (tail === undefined || tail.epoch !== epoch || tail.bareFences !== bareFences) {
-		tail = { view: chatMarkdown(tailSource, bareFences), source: tailSource, epoch, bareFences };
+		tail = { view: chatMarkdown(region, bareFences), source: region, epoch, bareFences };
 		settled.tail = tail;
-	} else if (tail.source !== tailSource) {
-		tail.view.setText(tailSource);
-		tail.source = tailSource;
+	} else if (tail.source !== region) {
+		tail.view.setText(region);
+		tail.source = region;
 	}
 	return layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
 }
@@ -1336,6 +1412,29 @@ const PROSE_GUTTER_WIDTH = 2;
  */
 function hangProseLines(lines: string[], firstPrefix?: string): string[] {
 	return lines.map((line, index) => `${index === 0 && firstPrefix !== undefined ? firstPrefix : PROSE_GUTTER}${line}`);
+}
+
+/**
+ * A text segment's rows under the gutter, keeping the hung row of every row
+ * that has not changed since the last frame (#428). A streaming answer's rows
+ * above its open tail are the same strings frame to frame, and building a new
+ * string for each of them cost more than rendering the tail, then cost the
+ * terminal renderer again to flatten and compare them.
+ */
+function hangSegmentLines(seg: TextSegment, lines: string[], firstPrefix: string): string[] {
+	const memo = seg.hung;
+	if (memo?.input === lines && memo.prefix === firstPrefix) return memo.output;
+	// The unchanged rows lead: find where they end, copy their hung rows in one native slice, and hang the rest.
+	let same = 0;
+	if (memo?.prefix === firstPrefix) {
+		const limit = Math.min(lines.length, memo.input.length);
+		while (same < limit && memo.input[same] === lines[same]) same += 1;
+	}
+	const output = same > 0 && memo !== undefined ? memo.output.slice(0, same) : [];
+	for (let index = same; index < lines.length; index += 1)
+		output.push(`${index === 0 ? firstPrefix : PROSE_GUTTER}${lines[index] ?? ""}`);
+	seg.hung = { input: lines, prefix: firstPrefix, output };
+	return output;
 }
 
 /**
@@ -1785,33 +1884,34 @@ interface TurnBlock {
  * its body cannot be mistaken for its neighbor's.
  */
 function joinTurnBlocks(blocks: readonly TurnBlock[]): string[] {
-	const out: string[] = [];
+	const parts: (readonly string[])[] = [];
 	let previous: TurnBlock | undefined;
-	for (const raw of blocks) {
+	for (const block of blocks) {
 		// Markdown can open or close a block on an empty row; the gap between
 		// blocks is decided here, so a block's own blank edges would double it.
-		const block = { ...raw, lines: trimBlankEdges(raw.lines) };
-		if (block.lines.length === 0) continue;
+		const lines = block.lines;
+		let start = 0;
+		let end = lines.length;
+		while (start < end && isBlankRow(lines[start] ?? "")) start += 1;
+		while (end > start && isBlankRow(lines[end - 1] ?? "")) end -= 1;
+		if (start === end) continue;
 		if (previous !== undefined) {
 			const stacked = previous.kind === "tool" && block.kind === "tool" && !previous.body && !block.body;
-			if (!stacked) out.push("");
+			if (!stacked) parts.push(GAP_ROW);
 		}
-		for (const line of block.lines) out.push(line);
+		parts.push(start === 0 && end === lines.length ? lines : lines.slice(start, end));
 		previous = block;
 	}
-	return out;
+	// One native concat: a streaming answer's block is the whole reply, and a row-by-row copy of it showed in
+	// the frame time (#428). The result is always a new array, which callers may keep.
+	return NO_ROW_LIST.concat(...parts);
 }
+
+const GAP_ROW: readonly string[] = [""];
+const NO_ROW_LIST: readonly string[] = [];
 
 function isBlankRow(line: string): boolean {
 	return stripTerminalSequences(line).trim().length === 0;
-}
-
-function trimBlankEdges(lines: string[]): string[] {
-	let start = 0;
-	let end = lines.length;
-	while (start < end && isBlankRow(lines[start] ?? "")) start += 1;
-	while (end > start && isBlankRow(lines[end - 1] ?? "")) end -= 1;
-	return start === 0 && end === lines.length ? lines : lines.slice(start, end);
 }
 
 /**
@@ -2029,8 +2129,7 @@ function renderEntryLines(
 		// A stray mark between actions (`.` or `)` left over when a model ends its
 		// words in a tool call) carries nothing to read, and as its own bubble it
 		// looked like a reply. A turn whose only output is that mark keeps it.
-		if (seg.kind === "text" && isStrayFragment(seg.text) && entry.segments.some((other) => carriesOutput(other, seg)))
-			continue;
+		if (seg.kind === "text" && isStraySegment(seg) && entry.segments.some((other) => carriesOutput(other, seg))) continue;
 		// A skill suggestion is advice for the operator, not the answer: it reads
 		// `§ suggests /skill <name>` as its own row, ahead of the answer wherever
 		// the model put it.
@@ -2039,7 +2138,8 @@ function renderEntryLines(
 			flushReasoning("words");
 			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences);
-			if (answerLines.length > 0) blocks.push({ kind: "prose", lines: hangProseLines(answerLines, CLIO_PREFIX()) });
+			if (answerLines.length > 0)
+				blocks.push({ kind: "prose", lines: hangSegmentLines(split.answer, answerLines, CLIO_PREFIX()) });
 			continue;
 		}
 		const suggestionOnly = seg.kind === "text" ? findSkillSuggestionLine(seg) : null;
@@ -2065,7 +2165,7 @@ function renderEntryLines(
 			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR()) });
 			continue;
 		}
-		blocks.push({ kind: "prose", lines: hangProseLines(rendered, CLIO_PREFIX()) });
+		blocks.push({ kind: "prose", lines: hangSegmentLines(seg, rendered, CLIO_PREFIX()) });
 	}
 	// Reasoning at the tail is either still streaming or the turn's last word.
 	flushReasoning("words");
@@ -2794,7 +2894,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		closeOpenThinking(entry);
 		const tail = entry.segments[entry.segments.length - 1];
 		if (tail && tail.kind === "text" && !tail.finalized) {
-			tail.text += delta;
+			appendSegmentText(tail, delta);
 			return;
 		}
 		entry.segments.push({ kind: "text", text: delta, finalized: false });
@@ -2832,7 +2932,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (!live && tail && tail.kind === "text" && !tail.finalized) live = tail;
 		if (live) {
 			const settled = progress >= 1 ? text.length : settledPrefixLength(live.text, text);
-			live.text = text;
+			replaceSegmentText(live, text);
 			live.diffusion = { progress, settled };
 			return;
 		}
@@ -2876,7 +2976,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (segment?.kind === "text" && !segment.finalized) streamed.push(segment);
 		}
 		const finalize = (segment: TextSegment, value: string): void => {
-			segment.text = value;
+			replaceSegmentText(segment, value);
 			segment.finalized = true;
 			delete segment.diffusion;
 		};
@@ -3010,7 +3110,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey) frozen = null;
 		const prefix = frozen === null ? NO_ROWS : frozen.lines;
-		const out: string[] = [];
+		let out: string[] = [];
+		// A row-by-row push of a long streaming reply showed in the frame time, so an entry larger than
+		// everything before it is copied natively (#428).
+		const appendRows = (rows: readonly string[]): void => {
+			if (rows.length > 256 && rows.length > out.length) out = out.concat(rows);
+			else for (const line of rows) out.push(line);
+		};
 		const startIndex = frozen === null ? 0 : frozen.through;
 		// The freeze extends over the contiguous run of stable leading
 		// entries; it grows after the loop by the rows this frame rendered for
@@ -3046,7 +3152,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (cacheable && cached !== undefined) {
 				// A spread here is slower than a loop for large arrays and blows the
 				// stack outright for a single entry that renders enough lines.
-				for (const line of cached) out.push(line);
+				appendRows(cached);
 			} else {
 				entriesRendered += 1;
 				const renderedEntry = renderEntryLines(
@@ -3061,7 +3167,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					workerRenderOptions(entry),
 					options.getStopRequestedAt?.() ?? null,
 				);
-				for (const line of renderedEntry) out.push(line);
+				appendRows(renderedEntry);
 				if (cacheable) {
 					const byKey = renders ?? new Map<string, string[]>();
 					byKey.set(renderKey, renderedEntry);
@@ -3826,7 +3932,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// Display copy only. No later text can resolve what a cut-off stream was holding (#446).
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
 					for (const segment of assistant.segments.slice(messageStart))
-						if (segment.kind === "text") segment.text = holdCutOffText(segment.text);
+						if (segment.kind === "text") replaceSegmentText(segment, holdCutOffText(segment.text));
 					invalidateEntryCache(assistant);
 				}
 				if (terminalError.length > 0) {
