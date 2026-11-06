@@ -838,7 +838,9 @@ export class ClioEditor extends Editor {
 		const lines = [
 			this.topRail(width, theme, rail, title),
 			...body.map((row) => padAnsi(`${pad}${row}${pad}`, width)),
-			this.bottomRail(width, theme, rail, hint?.trim().length ? hint : "", room),
+			// The dock's keys get the hint role like every other rail; unpainted, they took the terminal's own
+			// foreground, which a light scheme such as Solarized sets below 4.5:1.
+			this.bottomRail(width, theme, rail, hint?.trim().length ? theme.base("keyboardHint", hint) : "", room),
 		];
 		// The rail this body replaced is the only place the run's phase showed. A
 		// surface that reports its own lifecycle keeps its rows.
