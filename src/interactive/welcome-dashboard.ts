@@ -373,7 +373,7 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 		...(branch
 			? [
 					{
-						text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", "*") : ""}`,
+						text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", " *") : ""}`,
 						rank: 3,
 					},
 				]
@@ -684,7 +684,7 @@ function compactLaunchpad(
 				...(branch
 					? [
 							{
-								text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", "*") : ""}`,
+								text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", " *") : ""}`,
 								rank: 1,
 							},
 						]
