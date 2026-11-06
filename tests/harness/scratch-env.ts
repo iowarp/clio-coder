@@ -1,6 +1,6 @@
 /**
  * One home for Clio state isolation in tests. Every test that touches Clio state
- * needs a throwaway `CLIO_CODER_HOME` with the five per-root `CLIO_CODER_*_DIR` vars pointing
+ * needs a throwaway `CLIO_CODER_HOME` with the four per-root `CLIO_CODER_*_DIR` vars pointing
  * inside it (per-root vars beat `CLIO_CODER_HOME`, so they must move in lockstep), and
  * in-process tests must also reset the XDG cache so `src/` re-resolves the scratch
  * dirs. This module is the single implementation the harness and contract tests
