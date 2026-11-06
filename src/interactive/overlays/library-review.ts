@@ -206,9 +206,9 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 	facts.push({ label: "Recovery", value: step.recovery, tone: "muted" });
 	facts.push(...reviewFacts(step, review));
 	if (detail) {
-		facts.push({ label: "Destination", value: step.destination, tone: "muted" });
+		facts.push({ label: "Destination", value: shortenHomePath(step.destination), tone: "muted" });
 		if (step.source) {
-			facts.push({ label: "Source", value: step.source.sourceUrl, tone: "muted" });
+			facts.push({ label: "Source", value: shortenHomePath(step.source.sourceUrl), tone: "muted" });
 			facts.push({ label: "sha256", value: step.source.sha256, tone: "muted" });
 		}
 	}
@@ -538,6 +538,18 @@ export function formatLibraryOutcome(rawResult: LibraryApplyResult, width: numbe
  * dropping a companion the instructions need is the failure this wording
  * exists to prevent.
  */
+/** What an import source is, in plain words; the format id itself stays in the paths view. */
+const IMPORT_FORMAT_WORDS: Record<string, string> = {
+	"agent-skill": "a skill folder (SKILL.md)",
+	"claude-code": "a Claude Code plugin",
+	codex: "a Codex plugin",
+	portable: "a portable package",
+};
+
+function importFormatWords(format: string): string {
+	return IMPORT_FORMAT_WORDS[format] ?? format;
+}
+
 function formatLibraryImportReview(
 	rawPlan: LibraryImportPlan,
 	width: number,
@@ -552,8 +564,9 @@ function formatLibraryImportReview(
 			label: "Source",
 			value: `${shortenHomePath(plan.source.input)}${plan.source.transport === "local" ? "" : ` (${plan.source.transport})`}`,
 		},
-		...(plan.format ? [{ label: "Format", value: plan.format }] : []),
-		...(plan.version ? [{ label: "Version", value: plan.version }] : []),
+		...(plan.format ? [{ label: "Format", value: importFormatWords(plan.format) }] : []),
+		// A bare skill folder carries no version of its own; the 0.0.0 the packager gives it says nothing.
+		...(plan.version && plan.version !== "0.0.0" ? [{ label: "Version", value: plan.version }] : []),
 		...(plan.destination ? [{ label: "Destination", value: shortenHomePath(plan.destination) }] : []),
 		{
 			label: "Adds",
@@ -602,7 +615,7 @@ function formatLibraryImportReview(
 				install
 					? statusChip(theme, "pending", "ready to import")
 					: statusChip(theme, "error", "cannot be imported as reviewed"),
-				plan.format ? chip(theme, plan.format, "muted") : null,
+				plan.format ? chip(theme, importFormatWords(plan.format), "muted") : null,
 			],
 			width,
 		),
