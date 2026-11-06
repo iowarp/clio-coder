@@ -1656,6 +1656,7 @@ test("a wait names who it is on and keeps its time left as the room shrinks", ()
 	strictEqual(words("operator", 14, true), "fails in 1:59");
 	strictEqual(words("judge", 80, false, "deny"), "waiting for the safety judge · denied in 1:59");
 	strictEqual(words("main", 80, false, "deny"), "waiting for the main agent · denied in 1:59");
+	strictEqual(words("operator", 14, false, "deny"), "1:59 to answer", "a narrow deny form never reads as denied");
 });
 
 test("a run's list row and a credentialed call's title say only what is known", () => {

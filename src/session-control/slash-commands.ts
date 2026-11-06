@@ -664,6 +664,16 @@ function councilFailureWords(message: string): string {
 	return headline ?? (body.length > 0 ? body : "the council stopped before any member answered");
 }
 
+/**
+ * A council the operator refused at its approval card, said to the operator. The reason is written for the model
+ * (`User denied this call at the permission prompt…`), and the person reading it is that user.
+ */
+function councilRefusalWords(reason: string): string {
+	if (/^User denied\b/u.test(reason)) return "/council did not run: you denied it at its approval card";
+	if (/^User stopped\b/u.test(reason)) return "/council did not run: you stopped it at its approval card";
+	return `/council did not run: ${reason}`;
+}
+
 async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: SlashCommandContext): Promise<void> {
 	// Refused, never queued, exactly as `/oracle` and `/fleet run` are. An
 	// approved council describes the workspace as it stands, and a turn in
@@ -691,7 +701,7 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 			buildCouncilDispatchArgs(task, resolved.roster, options),
 			ctx.standingTurnConstraints?.(),
 		);
-		if (outcome.status === "blocked") ctx.notice("warn", `/council was not admitted: ${outcome.reason}`);
+		if (outcome.status === "blocked") ctx.notice("warn", councilRefusalWords(outcome.reason));
 		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
 	} catch (err) {
 		ctx.notice("error", `/council failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);

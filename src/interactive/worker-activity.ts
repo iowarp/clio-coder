@@ -259,12 +259,15 @@ export function approvalWaitWords(
 	const denied = `denied in ${left}`;
 	const fails = window.fallback === "fail";
 	const [long, mid, short] = APPROVAL_WAITERS[window.decider];
+	// Without the waiter beside it, a bare `denied in 1:53` read as already denied, so a narrow deny form says how
+	// long is left to answer instead.
+	const open = `${left} to answer`;
 	const forms = [
 		[long, ...held, fails ? `run fails in ${left}` : denied],
 		[mid, ...held, fails ? `run fails in ${left}` : denied],
 		[short, ...held, fails ? `fails in ${left}` : denied],
-		[...held, fails ? `fails in ${left}` : denied],
-		[fails ? `fails in ${left}` : denied],
+		[...held, fails ? `fails in ${left}` : open],
+		[fails ? `fails in ${left}` : open],
 	].map((parts) => parts.join(" · "));
 	const room = options.room;
 	if (room === undefined) return forms[0] as string;
