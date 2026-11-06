@@ -89,6 +89,8 @@ export interface LibraryPlanStep {
 	operation: LibraryOperation;
 	identity: LibraryPackageIdentity;
 	destination: string;
+	/** The installed version and the one this step writes, where either is known. */
+	versions?: { from?: string; to?: string };
 	source?: { sourceUrl: string; sha256: string; staged: boolean };
 	content?: {
 		valid: boolean;
@@ -153,6 +155,10 @@ export interface LibraryStepOutcome {
 	status: LibraryStepStatus;
 	operation: LibraryOperation;
 	identity: LibraryPackageIdentity;
+	/** The folder the committed step wrote or removed, so the outcome can say where. */
+	destination?: string;
+	/** The step came from an import of another agent's files, not from a catalog install. */
+	imported?: true;
 	verification?: LibraryStepVerification;
 	recovery?: { packageBackup?: string; stateBackup?: string };
 	diagnostics: string[];
@@ -351,6 +357,14 @@ function installStep(
 		operation,
 		identity,
 		destination: staged.path,
+		...(existing?.version || staged.entry.version
+			? {
+					versions: {
+						...(existing?.version ? { from: existing.version } : {}),
+						...(staged.entry.version ? { to: staged.entry.version } : {}),
+					},
+				}
+			: {}),
 		source: { sourceUrl: staged.entry.sourceUrl, sha256: staged.sha256, staged: staged.sourceRoot !== undefined },
 		content: contentOf(staged.sourceRoot as string),
 		expected,
@@ -814,6 +828,7 @@ function applyStep(
 		status: "committed",
 		operation: step.operation,
 		identity: step.identity,
+		...(step.destination ? { destination: step.destination } : {}),
 		...(result.recovery ? { recovery: result.recovery } : {}),
 		diagnostics: result.diagnostics.map((d) => d.message),
 	};
@@ -1001,7 +1016,16 @@ export function libraryImportOutcome(plan: LibraryImportPlan, result: LibraryImp
 		status: "committed",
 		operation: "install",
 		identity,
-		diagnostics: [...result.diagnostics, `foreign trust; project-import gate ${String(result.admission.gateEnabled)}`],
+		imported: true,
+		...(plan.destination ? { destination: plan.destination } : {}),
+		diagnostics: [
+			...result.diagnostics,
+			result.admission.gateEnabled === true
+				? "imported content keeps its outside origin, and the setting that admits imported content is on"
+				: result.admission.gateEnabled === false
+					? "imported content keeps its outside origin, and the setting that admits imported content is off, so it does not load yet"
+					: "imported content keeps its outside origin; whether it loads depends on the setting that admits imported content",
+		],
 	};
 	annotateVerification(outcome, plan.cwd, "pre-refresh", false);
 	return outcome;

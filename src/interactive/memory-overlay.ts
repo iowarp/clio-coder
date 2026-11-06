@@ -212,7 +212,10 @@ export class MemoryOverlayView implements Component {
 	render(width: number): string[] {
 		const status = this.sync();
 		const theme = clioTheme();
-		const scope = this.currentRepository ? "this repository" : "repository unknown";
+		// Without a repository identity only lessons kept for every project apply, and the header says so.
+		const scope = this.currentRepository
+			? "lessons for this project"
+			: "no project folder here, so only lessons kept for every project apply";
 		// The facts an operator checks before reading a lesson: where it applies,
 		// whether the background step runs, what it holds and what it is doing.
 		const working = status.stepInFlight ? "step running" : (status.guardian ?? null);
@@ -261,13 +264,15 @@ export class MemoryOverlayView implements Component {
 	private emptyMessage(): string {
 		switch (this.list.activeTab()?.id) {
 			case "task":
-				return "No current task state captured. Private status stays within this session.";
+				return "Nothing recorded for the current task yet. Clio keeps task notes here as it works; they stay in this session.";
 			case "review":
-				return "No candidates or excluded lessons to review.";
+				return "Nothing waits for review. Lessons Clio proposes, and ones it set aside, appear here.";
 			case "diagnostics":
 				return "No memory diagnostics captured.";
 			default:
-				return "No eligible lessons for this session. Memory runs in the background; opening this view does not activate it.";
+				return this.getStatus().enabled
+					? "No saved lessons apply here yet. Clio proposes lessons from what worked or failed in earlier tasks, and they wait under Review until they are approved or kept. Opening this view changes nothing."
+					: "Background memory is off, so Clio saves no lessons. /settings, Context & Memory, turns it on.";
 		}
 	}
 
@@ -313,7 +318,7 @@ export class MemoryOverlayView implements Component {
 				`Background memory ${status.enabled ? "on" : "off"} · ${status.stepInFlight ? "step running" : (status.guardian ?? "idle")}`,
 				[
 					"## Background memory",
-					`Enabled: ${status.enabled}`,
+					`Enabled: ${status.enabled ? "yes" : "no"}`,
 					`Tier: ${status.tier}`,
 					`Guardian: ${status.guardian ?? "not recorded"}`,
 					`Last decision: ${status.lastDecision ?? "none"}`,
@@ -332,7 +337,7 @@ export class MemoryOverlayView implements Component {
 			),
 			...(retention
 				? [
-						row("retention", `Lesson retention: ${retention.phase}${retention.reason ? ` · ${retention.reason}` : ""}`, [
+						row("retention", `Saving lessons: ${retention.phase}${retention.reason ? ` · ${retention.reason}` : ""}`, [
 							"## Lesson retention",
 							`Phase: ${retention.phase}`,
 							`Reason: ${retention.reason ?? "none"}`,
@@ -347,7 +352,7 @@ export class MemoryOverlayView implements Component {
 				? [
 						row(
 							"observations",
-							`Continuity preparation: ${observations.enabled ? "on" : "off"}${observations.lastReason ? ` · ${observations.lastReason}` : ""}`,
+							`Notes for compaction: ${observations.enabled ? "on" : "off"}${observations.lastReason ? ` · ${observations.lastReason}` : ""}`,
 							[
 								"## Continuity preparation",
 								"Prepared observations help the existing compactor. They are separate from reusable lessons.",
@@ -366,11 +371,15 @@ export class MemoryOverlayView implements Component {
 				: []),
 			...(spend
 				? [
-						row("spend", formatTaskMemorySpend(spend), [
-							"## Retained telemetry",
-							formatTaskMemorySpend(spend),
-							"Reminder counts measure recorded delivery, not causal usefulness.",
-						]),
+						row(
+							"spend",
+							spend.llmSteps === 0 ? "Memory model use: none yet" : `Memory model use: ${formatTaskMemorySpend(spend)}`,
+							[
+								"## Retained telemetry",
+								formatTaskMemorySpend(spend),
+								"Reminder counts measure recorded delivery, not causal usefulness.",
+							],
+						),
 					]
 				: []),
 			...activityItems(status.activity, "Recent memory steps"),

@@ -28,6 +28,7 @@ import {
 	type LibraryProvidedResource,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
+import { wrapTextWithAnsi } from "../../engine/tui.js";
 import { displaySafe } from "../display-safe.js";
 import {
 	type ClioTheme,
@@ -153,6 +154,27 @@ function libraryFormatLabel(format: string | undefined): string {
 	return "Format unknown";
 }
 
+/** A copy state in words: "loadable" was the loader's term, not what the operator sees happen. */
+function copyStateWords(state: string): string {
+	switch (state) {
+		case "loadable":
+			return "active";
+		case "shadowed":
+			return "overridden";
+		case "incompatible":
+			return "needs another Clio version";
+		case "untrusted":
+			return "not trusted";
+		default:
+			return safe(state);
+	}
+}
+
+/** Where a copy is and what it is doing there, as one phrase. */
+function copyPhrase(scope: string, state: string): string {
+	return `${scope}: ${copyStateWords(state)}`;
+}
+
 /** A copy state as the outcome glyph it carries, so a damaged copy reads as damaged without color. */
 function copyStateStatus(state: string): StatusKind {
 	if (state === "loadable") return "ok";
@@ -189,7 +211,7 @@ export function libraryStatusLine(
 	const unit = view.member ? "member" : view.mode === "browse" ? "package" : "entry";
 	const plural = unit === "entry" ? "entries" : `${unit}s`;
 	const total = `${counts.rows} ${counts.rows === 1 ? unit : plural}`;
-	const wide = width >= 72;
+	const wide = width >= 96;
 	const keyed = width >= 48;
 	const notices =
 		counts.notices > 0
@@ -197,18 +219,34 @@ export function libraryStatusLine(
 			: wide
 				? null
 				: `${keyCap(theme, "n")} ${theme.fg("annotation", "notices")}`;
-	const parts = [
-		keyed ? `${keyCap(theme, "b")} ${theme.fg("fieldValue", mode)}` : theme.fg("fieldValue", mode),
-		keyed
-			? `${keyCap(theme, "s")} ${theme.fg("fieldValue", wide ? `Actions: ${scope}` : scope)}`
-			: theme.fg("fieldValue", scope),
-		notices,
-		theme.fg("annotation", total),
-		counts.truncated ? statusChip(theme, "warning", wide ? "incomplete results" : "incomplete") : null,
-		view.member && wide
-			? theme.fg("annotation", `members of ${safe(view.member.ref)}${view.member.scope ? ` (${view.member.scope})` : ""}`)
-			: null,
-	];
+	// The current view and scope read as facts, and each key names where it goes, so
+	// "[b] Browse" can no longer be read as "press b to browse" while browsing.
+	const otherMode = view.mode === "browse" ? (wide ? "installed only" : "Installed") : wide ? "browse all" : "Browse";
+	const otherScope = view.scope === "user" ? "Project" : "User";
+	const parts = keyed
+		? [
+				wide ? `${theme.fg("fieldValue", `${mode}:`)} ${theme.fg("annotation", total)}` : theme.fg("fieldValue", mode),
+				`${keyCap(theme, "b")} ${theme.fg("annotation", otherMode)}`,
+				wide ? `${theme.fg("annotation", "Scope")} ${theme.fg("fieldValue", scope)}` : theme.fg("fieldValue", scope),
+				// A notice is something to act on, so it outlasts the key that flips the scope.
+				notices,
+				`${keyCap(theme, "s")} ${theme.fg("annotation", otherScope)}`,
+				wide ? null : theme.fg("annotation", total),
+				counts.truncated ? statusChip(theme, "warning", wide ? "incomplete results" : "incomplete") : null,
+				view.member && wide
+					? theme.fg(
+							"annotation",
+							`members of ${safe(view.member.ref)}${view.member.scope ? ` (${view.member.scope})` : ""}`,
+						)
+					: null,
+			]
+		: [
+				theme.fg("fieldValue", mode),
+				theme.fg("fieldValue", scope),
+				notices,
+				theme.fg("annotation", total),
+				counts.truncated ? statusChip(theme, "warning", "incomplete") : null,
+			];
 	// Whole chips are dropped from the right, with the dim ellipsis that says
 	// so, rather than a cut that lands inside a word.
 	return fitUnits(
@@ -272,7 +310,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 		const here = ownerScopeOf(subject.record, view.scope);
 		const reasons: string[] = [];
 		if (subject.record.refusal) reasons.push(subject.record.refusal);
-		if (!here) reasons.push(`No ${view.scope} copy; install writes one. Press s to select the other scope.`);
+		if (!here) reasons.push(`Not in ${view.scope} scope yet, so there is nothing to update or remove; s switches scope.`);
 		return {
 			install: !here && !subject.record.refusal,
 			remove: !!here,
@@ -411,19 +449,30 @@ function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] 
 	const entry = (key: string, verb: string): string => `${keyCap(theme, key)} ${theme.fg("menuDescription", verb)}`;
 	// Enter opens a package's members and does nothing else, so it is named
 	// only where it opens something; Tab is the detail key.
+	const reviews: Array<[string, string]> = [
+		...(actions.install ? [["i", "install"] as [string, string]] : []),
+		...(actions.enable ? [["e", "enable/disable"] as [string, string]] : []),
+		...(actions.update ? [["u", "update"] as [string, string]] : []),
+		...(actions.remove ? [["r", "remove"] as [string, string]] : []),
+	];
+	// "review" is said once ahead of the keys it covers, so three reviews fit on one row.
+	const reviewChips =
+		reviews.length === 1
+			? reviews.map(([key, verb]) => entry(key, `review ${verb}`))
+			: reviews.map(([key, verb], index) =>
+					index === 0 ? `${theme.fg("annotation", "review:")} ${entry(key, verb)}` : entry(key, verb),
+				);
 	return [
 		...(actions.use ? [entry("v", "use")] : []),
 		...(actions.open ? [entry("Enter", "members")] : []),
-		...(actions.install ? [entry("i", "review install")] : []),
-		...(actions.enable ? [entry("e", "review enable/disable")] : []),
-		...(actions.update ? [entry("u", "review update")] : []),
-		...(actions.remove ? [entry("r", "review remove")] : []),
+		...reviewChips,
 	];
 }
 
 /** Each reason an action is absent, right under the keys it explains, as an info chip on its own row. */
 function noteRows(theme: ClioTheme, reasons: ReadonlyArray<string>, width: number): string[] {
-	return reasons.flatMap((reason) => chipRows(theme, [statusChip(theme, "info", safe(reason))], width));
+	// Plain dim prose: an info glyph here read as one more key beside the key caps above it.
+	return reasons.flatMap((reason) => wrapTextWithAnsi(theme.fg("annotation", safe(reason)), Math.max(1, width)));
 }
 
 /** The description last, rendered as Markdown at the pane's width so its code spans and emphasis keep their styling. */
@@ -446,12 +495,14 @@ function packageDetail(
 	const kindText = `${record.kind}${provider ? ` provider package for ${view.category} components` : " package"}`;
 	const status = [
 		here
-			? statusChip(theme, copyStateStatus(here.state), `installed here: ${here.scope} ${safe(here.state)}`)
+			? statusChip(theme, copyStateStatus(here.state), `installed in ${here.scope} scope, ${copyStateWords(here.state)}`)
 			: chip(theme, `not installed in ${view.scope} scope`, "muted", GLYPH.phaseWaiting),
 		here?.update ? statusChip(theme, "warning", libraryUpdateLabel(here.update)) : null,
 		record.refusal ? statusChip(theme, "error", "cannot be installed") : null,
+		// A requirement changes what install will write, so it is said before i is pressed.
+		record.requires?.length ? chip(theme, `needs ${record.requires.join(", ")}`, "warning") : null,
 		record.copies.length > 0 && !here
-			? chip(theme, `${record.copies.map((copy) => `${copy.scope} ${copy.state}`).join(", ")}`, "muted")
+			? chip(theme, `${record.copies.map((copy) => copyPhrase(copy.scope, copy.state)).join(", ")}`, "muted")
 			: null,
 	];
 	const facts: Fact[] = [
@@ -478,7 +529,10 @@ function packageDetail(
 			record.copies.length === 0
 				? "none"
 				: record.copies
-						.map((copy) => `${copy.scope} (${copy.state}${copy.update ? `, ${libraryUpdateLabel(copy.update)}` : ""})`)
+						.map(
+							(copy) =>
+								`${copy.scope} (${copyStateWords(copy.state)}${copy.update ? `, ${libraryUpdateLabel(copy.update)}` : ""})`,
+						)
 						.join(", "),
 	});
 	facts.push({ label: "Selected scope", value: view.scope });
@@ -486,7 +540,11 @@ function packageDetail(
 	facts.push(...pairFacts(record, pairs));
 	facts.push(...lastReceiptFact(record.name, view.scope, record.kind));
 	const notes = [
-		...(provider ? ["Catalog hints describe potential components, not loaded components."] : []),
+		...(provider
+			? [
+					"Catalog hints describe potential components, not loaded components; b switches to Installed, which lists what loaded.",
+				]
+			: []),
 		...(view.category !== "plugin" && (record.provides?.length ?? 0) > hints.length
 			? ["Other component kinds are listed in the Plugins category."]
 			: []),
@@ -496,21 +554,21 @@ function packageDetail(
 	];
 	return {
 		head: [
-			titleRow(theme, safe(record.name), width, { meta: record.version ? `v${safe(record.version)}` : kindText }),
+			// With an update pending the version shown is the catalog's, and it says so.
+			titleRow(theme, safe(record.name), width, {
+				meta: record.version ? `v${safe(record.version)}${here?.update ? " in the catalog" : ""}` : kindText,
+			}),
 			...chipRows(theme, status, width),
 			...chipRows(theme, actionKeyChips(theme, actions), width),
 			...noteRows(theme, actions.reasons, width),
 		],
+		// What the package is comes before how it is filed: the description is the
+		// first thing a reader looking at an unfamiliar name needs.
 		rest: [
-			...chipRows(
-				theme,
-				[`${keyCap(theme, "b")} ${theme.fg("annotation", "shows loaded components in Installed")}`],
-				width,
-			),
+			...proseRows(record.description, width),
 			"",
 			...factRows(theme, facts, width, FACT_OPTIONS),
 			...notes.map((note) => theme.fg("annotation", note)),
-			...proseRows(record.description, width),
 		],
 	};
 }
@@ -561,7 +619,7 @@ function copyDetail(
 			...chipRows(
 				theme,
 				[
-					statusChip(theme, copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`),
+					statusChip(theme, copyStateStatus(copy.state), copyPhrase(copy.scope, copy.state)),
 					copy.update ? statusChip(theme, "warning", libraryUpdateLabel(copy.update)) : null,
 					copy.trust === "foreign" ? statusChip(theme, "warning", "foreign") : null,
 				],
@@ -642,7 +700,10 @@ function memberDetail(
 	const theme = clioTheme();
 	const facts: Fact[] = [
 		{ label: "Kind", value: subject.member.kind },
-		{ label: "Owner", value: `${safe(subject.owner.ref)} (${subject.owner.scope} scope, ${safe(subject.owner.state)})` },
+		{
+			label: "Owner",
+			value: `${safe(subject.owner.ref)} (${subject.owner.scope} scope, ${copyStateWords(subject.owner.state)})`,
+		},
 	];
 	if (subject.member.componentId) facts.push({ label: "Declared component", value: safe(subject.member.componentId) });
 	facts.push({ label: "Path", value: safe(subject.member.path) });
@@ -659,7 +720,7 @@ function memberDetail(
 					statusChip(
 						theme,
 						copyStateStatus(subject.owner.state),
-						`owner ${subject.owner.scope} ${safe(subject.owner.state)}`,
+						`owner ${copyPhrase(subject.owner.scope, subject.owner.state)}`,
 					),
 				],
 				width,
@@ -931,7 +992,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 					// instead of cutting "project" in half; the status row names it too.
 					return metaOf([
 						...worstFirst([
-							here ? [copyStateStatus(here.state), `${here.scope} ${safe(here.state)}`] : undefined,
+							here ? [copyStateStatus(here.state), copyPhrase(here.scope, here.state)] : undefined,
 							here?.update ? ["warning", libraryUpdateLabel(here.update as LibraryCopyUpdate)] : undefined,
 							record.refusal ? ["error", "refused"] : undefined,
 						]),
@@ -962,7 +1023,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				get meta() {
 					return metaOf([
 						...worstFirst([
-							[copyStateStatus(copy.state), `${copy.scope} ${safe(copy.state)}`],
+							[copyStateStatus(copy.state), copyPhrase(copy.scope, copy.state)],
 							copy.update ? ["warning", libraryUpdateLabel(copy.update as LibraryCopyUpdate)] : undefined,
 							copy.trust === "foreign" ? ["warning", "foreign"] : undefined,
 						]),

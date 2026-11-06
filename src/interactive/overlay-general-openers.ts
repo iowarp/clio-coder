@@ -502,8 +502,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			},
 			{
 				activeRepository: () => {
-					const meta = deps.getSessionMeta();
-					return meta ? canonicalMemoryRepositoryIdentity(meta.cwd) : null;
+					// Before the first turn there is no session record yet, but the folder the
+					// session will open in is already known, and lessons for it already apply.
+					return canonicalMemoryRepositoryIdentity(deps.getSessionMeta()?.cwd ?? process.cwd());
 				},
 				activeRuntime: () => {
 					const settings = deps.getSettings?.();
