@@ -78,7 +78,12 @@ function missing(error: unknown): boolean {
  * recursive, so mkdir never walks through a link someone planted). Returns null for a missing level when not
  * creating. A symlink or a non-directory anywhere on the way is refused.
  */
-async function walkDirectories(root: string, parts: readonly string[], create: boolean): Promise<string | null> {
+async function walkDirectories(
+	root: string,
+	parts: readonly string[],
+	create: boolean,
+	beforeCreate?: () => Promise<void>,
+): Promise<string | null> {
 	let current = root;
 	for (const part of parts) {
 		const next = join(current, part);
@@ -88,6 +93,8 @@ async function walkDirectories(root: string, parts: readonly string[], create: b
 		});
 		if (info === null) {
 			if (!create) return null;
+			// Inside a session directory every implicit mkdir first re-verifies that directory's identity.
+			await beforeCreate?.();
 			await mkdir(next).catch((error: unknown) => {
 				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			});
@@ -113,6 +120,8 @@ function sameIdentity(info: { dev: number; ino: number }, identity: Identity): b
 const rootAnchors = new Map<string, { path: string; identity: Identity }>();
 /** Each session directory's identity from when it was first created or found, keyed by its physical path. */
 const sessionIdentities = new Map<string, Identity>();
+/** Session directories Clio removed; a provider never recreates one. */
+const closedSessions = new Set<string>();
 
 /**
  * The cache root as it really was on disk at first use. Later calls reuse that path and refuse to go on when
@@ -190,6 +199,7 @@ export async function removeCopilotSessionRecords(sessionId: string): Promise<vo
 	if (identity) await verifySession(root, target);
 	await rm(target, { recursive: true, force: true });
 	sessionIdentities.delete(target);
+	closedSessions.add(target);
 }
 
 /** At process exit only synchronous work runs; the same rules as removeCopilotSessionRecords. */
@@ -214,6 +224,7 @@ export function removeCopilotSessionRecordsSync(sessionId: string): void {
 	if (identity && !sameIdentity(info, identity)) return;
 	rmSync(target, { recursive: true, force: true });
 	sessionIdentities.delete(target);
+	closedSessions.add(target);
 }
 
 function refuseWorkspaceWrite(path: string): never {
@@ -238,16 +249,35 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 		return { state: false, real: absolute };
 	};
 	/**
-	 * The physical path of a state entry. Every directory from the trusted root to the entry's parent is a real
-	 * directory (created when `create`), and the entry itself is never a symlink. Null when absent and not created.
+	 * The one resolve-and-anchor policy for this session's directory. A directory anchored before must still be
+	 * that directory: one that went missing or was replaced is refused and never recreated, and neither is one
+	 * Clio already closed. Only a session never resolved is walked (created when `create`) and then anchored.
 	 */
-	const statePath = async (inside: string[], create: boolean): Promise<string | null> => {
+	const resolveSession = async (create: boolean): Promise<{ root: string; session: string } | null> => {
 		const root = await trustedRoot();
+		const expected = join(root, ...parts);
+		if (closedSessions.has(expected)) throw new SessionFsEscape(expected, "the session directory was closed");
+		if (sessionIdentities.has(expected)) {
+			await verifySession(root, expected);
+			return { root, session: expected };
+		}
 		const session = await walkDirectories(root, parts, create);
 		if (session === null) return null;
 		await anchorSession(session);
-		if (inside.length === 0) return session;
-		const parent = await walkDirectories(root, [...parts, ...inside.slice(0, -1)], create);
+		return { root, session };
+	};
+	/**
+	 * The physical path of a state entry. The session directory comes from resolveSession; every directory from
+	 * it to the entry's parent is a real directory, each created only after re-verifying the session, and the
+	 * entry itself is never a symlink. Null when absent and not created.
+	 */
+	const statePath = async (inside: string[], create: boolean): Promise<string | null> => {
+		const resolved = await resolveSession(create);
+		if (resolved === null) return null;
+		if (inside.length === 0) return resolved.session;
+		const parent = await walkDirectories(resolved.session, inside.slice(0, -1), create, () =>
+			verifySession(resolved.root, resolved.session),
+		);
 		if (parent === null) return null;
 		const entry = join(parent, inside[inside.length - 1] as string);
 		const info = await lstat(entry).catch((error: unknown) => {
@@ -265,19 +295,11 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 		if (entry === null) throw Object.assign(new Error(`ENOENT: no such session entry ${path}`), { code: "ENOENT" });
 		return entry;
 	};
-	/** The session directory's physical path, anchored on first resolution. */
-	const sessionPath = async (create: boolean): Promise<{ root: string; session: string } | null> => {
-		const root = await trustedRoot();
-		const session = await walkDirectories(root, parts, create);
-		if (session === null) return null;
-		await anchorSession(session);
-		return { root, session };
-	};
 	/** Re-verify the anchored root and session directory right before a mutation (see the known limit above). */
 	const beforeMutation = async () => {
-		const anchored = await sessionPath(false);
-		if (anchored === null) throw new SessionFsEscape(join(...parts), "the session directory disappeared");
-		await verifySession(anchored.root, anchored.session);
+		const resolved = await resolveSession(false);
+		if (resolved === null) throw new SessionFsEscape(join(...parts), "the session directory disappeared");
+		await verifySession(resolved.root, resolved.session);
 	};
 	const writable = async (path: string): Promise<string> => {
 		const located = locate(path);
@@ -325,20 +347,20 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 		async mkdir(path, recursive, mode) {
 			const located = locate(path);
 			if (!located.state) return refuseWorkspaceWrite(path);
-			const anchored = await sessionPath(true);
-			if (anchored === null) throw new SessionFsEscape(join(...parts), "the session directory disappeared");
-			const { root } = anchored;
+			const resolved = await resolveSession(true);
+			if (resolved === null) throw new SessionFsEscape(join(...parts), "the session directory disappeared");
+			const verify = () => verifySession(resolved.root, resolved.session);
 			if (recursive) {
-				await verifySession(root, anchored.session);
-				await walkDirectories(root, [...parts, ...located.inside], true);
+				await walkDirectories(resolved.session, located.inside, true, verify);
 				return;
 			}
-			const parent = await walkDirectories(root, [...parts, ...located.inside.slice(0, -1)], false);
+			const parent = await walkDirectories(resolved.session, located.inside.slice(0, -1), false);
 			if (parent === null)
 				throw Object.assign(new Error(`ENOENT: no parent for session entry ${path}`), { code: "ENOENT" });
 			const name = located.inside[located.inside.length - 1];
-			await verifySession(root, anchored.session);
-			await mkdir(name === undefined ? parent : join(parent, name), mode !== undefined ? { mode } : {});
+			if (name === undefined) return;
+			await verify();
+			await mkdir(join(parent, name), mode !== undefined ? { mode } : {});
 		},
 		readdir: async (path) => readdir(await readable(path)),
 		async readdirWithTypes(path) {
@@ -348,9 +370,10 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 		async rm(path, recursive, force) {
 			const located = locate(path);
 			if (!located.state) return refuseWorkspaceWrite(path);
-			const root = await trustedRoot();
+			const resolved = await resolveSession(false);
 			const name = located.inside[located.inside.length - 1];
-			const parent = await walkDirectories(root, [...parts, ...located.inside.slice(0, -1)], false);
+			const parent =
+				resolved === null ? null : await walkDirectories(resolved.session, located.inside.slice(0, -1), false);
 			const target = parent === null ? null : name === undefined ? parent : join(parent, name);
 			const info = target === null ? null : await lstat(target).catch(() => null);
 			if (target === null || info === null) {

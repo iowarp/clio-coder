@@ -506,7 +506,7 @@ class Step {
 	private usageUncertain = false;
 	/** Whether the tool-requesting call's own usage arrived before the step settled. */
 	private toolUseUsageSeen = false;
-	/** Whether Copilot answered this step at all (any root message or delta), so a usage report is due. */
+	/** Whether Copilot answered this step at all (any root message, text or reasoning), so a usage report is due. */
 	private answered = false;
 	/** Runs when the step stops taking events, before any settling; later usage then waits for the next step. */
 	onDetach: ((step: Step) => void) | null = null;
@@ -652,6 +652,8 @@ class Step {
 				}
 				return;
 			case "assistant.reasoning_delta":
+				// Reasoning is model output too: a call that only reasoned still owes its usage report.
+				this.answered = true;
 				this.thinking(event.data.deltaContent);
 				return;
 			case "assistant.usage":

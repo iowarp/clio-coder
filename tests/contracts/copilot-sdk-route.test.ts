@@ -143,6 +143,19 @@ class FakeSession {
 		}
 		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a", "late-a", "late-a-next"); return; }
 		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null, null, null); return; }
+		if (prompt.includes("op:reasoning-only")) {
+			// A call that only reasoned, then went idle before its usage was reported.
+			this.emit("assistant.reasoning_delta", { reasoningId: "r1", deltaContent: "thinking" });
+			this.emit("session.idle", {});
+			return;
+		}
+		if (prompt.includes("op:after-reasoning")) {
+			this.usage({ model: "fake-model", apiCallId: "msg_A", inputTokens: 60, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.usage({ model: "fake-model", apiCallId: "msg_B", inputTokens: 30, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.emit("assistant.message", { messageId: "b1", content: "after" });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("op:late-namespace")) { await this.lateUsageTool("call_ns", "copilot-A", "msg_A", "msg_B"); return; }
 		if (prompt.includes("op:late-idless-tagged")) { await this.lateUsageTool("call_tag", null, "msg_A", "msg_B"); return; }
 		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
@@ -564,15 +577,9 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 test("sessionFs keeps session state in Clio's cache and serves the workspace read-only at its real paths", async () => {
 	const config = fake().clients[0]?.sessionFs as { initialCwd: string; sessionStatePath: string };
 	strictEqual(config.initialCwd, process.cwd());
-	const session = fake().sessions.at(-1) as FakeSession & {
-		fs: {
-			stat(path: string): Promise<{ isFile: boolean }>;
-			readFile(path: string): Promise<string>;
-			writeFile(path: string, content: string): Promise<void>;
-			mkdir(path: string, recursive: boolean): Promise<void>;
-			rm(path: string, recursive: boolean, force: boolean): Promise<void>;
-		};
-	};
+	// A provider of its own: the fake's last session was closed by the previous test, and a closed session's
+	// state is never written again.
+	const session = { sessionId: "readonly-check-session", fs: createCopilotSessionFs("readonly-check-session") };
 	const workspaceFile = join(process.cwd(), "package.json");
 	ok((await session.fs.stat(workspaceFile)).isFile);
 	match(await session.fs.readFile(workspaceFile), /clio-coder/);
@@ -627,6 +634,20 @@ test("late usage stays with the call that made it and never lands on its success
 		}
 		disposeCopilotConversations(key);
 	}
+});
+
+test("a call that only reasoned still owes its usage, so its late report lands on no step", async () => {
+	const key = "reasoning-session";
+	const first = await step({ messages: [user("op:reasoning-only")] }, key);
+	strictEqual(first.stopReason, "stop");
+	deepStrictEqual(first.content, [{ type: "thinking", thinking: "thinking" }]);
+	const second = await step({ messages: [user("op:reasoning-only"), first, user("op:after-reasoning")] }, key);
+	strictEqual(second.stopReason, "stop");
+	const facts = callSettlementFromMessage(second, "none");
+	strictEqual(facts.usage?.input.kind, "unknown", "not 90 over two calls");
+	strictEqual(facts.usage?.output.kind, "unknown");
+	strictEqual(facts.billing?.premiumRequests.kind, "unknown");
+	disposeCopilotConversations(key);
 });
 
 test("a lost runtime or a closed conversation settles the open step, and the client restarts", async () => {
@@ -816,6 +837,23 @@ test("session state containment is physical: no symlink leads a write or a clean
 		await rejects(ancestorFs.writeFile(join(stateBase, "events.jsonl"), "{}"), /no longer the one first resolved/);
 		await rejects(ancestorFs.mkdir(join(stateBase, "checkpoints"), true), /no longer the one first resolved/);
 		strictEqual(readdirSync(join(sessions, "ancestor-session")).length, 0);
+
+		// A session directory replaced before the operation: write, append and rename create no parent inside
+		// the replacement; one that went missing is never recreated.
+		const replacedFs = createCopilotSessionFs("replaced-session");
+		await replacedFs.writeFile(join(stateBase, "first.txt"), "first");
+		renameSync(join(sessions, "replaced-session"), join(env.dir, "replaced-original"));
+		mkdirSync(join(sessions, "replaced-session"));
+		await rejects(replacedFs.writeFile(join(stateBase, "w", "deep", "f.txt"), "x"), /no longer the one first resolved/);
+		await rejects(replacedFs.appendFile(join(stateBase, "a", "deep", "f.txt"), "x"), /no longer the one first resolved/);
+		await rejects(
+			replacedFs.rename(join(stateBase, "first.txt"), join(stateBase, "r", "deep", "f.txt")),
+			/no longer the one first resolved/,
+		);
+		deepStrictEqual(readdirSync(join(sessions, "replaced-session")), [], "no parent was created in the replacement");
+		rmSync(join(sessions, "replaced-session"), { recursive: true });
+		await rejects(replacedFs.writeFile(join(stateBase, "again.txt"), "x"), /no longer the one first resolved/);
+		strictEqual(existsSync(join(sessions, "replaced-session")), false, "a missing anchored session is not recreated");
 	} finally {
 		rmSync(sessions, { recursive: true, force: true });
 		renameSync(parked, sessions);
