@@ -402,6 +402,41 @@ entries:
           when the issue does not name the code, fixes test-first, and
           self-reviews against the acceptance criteria, leaving a verified
           uncommitted change. Not for filing; use file-ticket. Not for commi"
+  - kind: plugin
+    name: hpc
+    description: "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm
+      server, Lmod and Spack software environments, parallel HDF5 and MPI-IO,
+      Darshan I/O analysis, and ChronoLog run records. Works on air-gapped login
+      nodes."
+    version: 0.1.0
+    sourceUrl: plugins/hpc
+    sha256: c5fe09d4e6808cbac89a18fb9df1c8be2b1d5a1afdd757f5a4ecd8e1aa8f4865
+    requires:
+      - skill:slurm-jobs
+    provides:
+      - kind: skill
+        name: hpc-chronolog
+        description: "Uses ChronoLog 4.0 as durable, time-ordered memory for HPC runs:
+          connects Clio to a ChronoLog instance through chronolog-mcp, records
+          run events under stable operation ids, and reads them back with an
+          explicit completeness verdict. Not for deploying Chrono"
+      - kind: skill
+        name: hpc-darshan
+        description: "Characterizes an application's I/O from a Darshan log: runs
+          darshan-parser through a bundled summarizer, reads volumes, access
+          sizes, sequentiality and collective use, and names the bottleneck the
+          counters support. Not for instrumenting a build or for tuni"
+      - kind: skill
+        name: hpc-modules
+        description: Finds and loads software on an HPC system through Lmod environment
+          modules, and finds Spack-installed packages, from bash. Not for
+          installing software or for writing the job script's science.
+      - kind: skill
+        name: hpc-parallel-io
+        description: Writes or reviews parallel HDF5 and MPI-IO code so many ranks share
+          one file correctly and collectively, and checks the result with
+          Darshan counters. Not for serial file reading; not for choosing the
+          science stored in the file.
   - kind: extension
     name: local-status
     description: A small local status command and ambient status example.
@@ -791,29 +826,30 @@ entries:
           workflow that just happened; use workflow-capture.
   - kind: skill
     name: slurm-jobs
-    description: Submits a batch script to Slurm through the clio-kit Slurm MCP
-      server, polls it to a terminal state, fetches its output, and stamps the
-      scheduler job id into the final answer. Not for writing the science inside
-      the script or for interactive allocations.
+    description: Submits a batch script or job array to Slurm through the clio-kit
+      Slurm MCP server, polls every task to a terminal state, fetches its
+      output, and stamps the scheduler job id into the final answer. Not for
+      writing the science inside the script or for interactive allocations.
     category: research
     audit: pass
     triggers:
       - submit this job to slurm
+      - submit a slurm job array
       - run this on the cluster
       - sbatch this script
       - check my slurm job
       - cancel my slurm job
       - is the queue busy
-    version: 0.1.2
+    version: 0.2.0
     sourceUrl: skills/research/slurm-jobs
-    sha256: 1698b78f04a07898d1c5bf4881c754817d364902432cbb09b253f2f6f52b5c18
+    sha256: e9977876e32f3204a8ab195e1de5194eb71bd4c06427652938582e001ad07f4a
     provides:
       - kind: skill
         name: slurm-jobs
-        description: Submits a batch script to Slurm through the clio-kit Slurm MCP
-          server, polls it to a terminal state, fetches its output, and stamps
-          the scheduler job id into the final answer. Not for writing the
-          science inside the script or for interactive allocations.
+        description: Submits a batch script or job array to Slurm through the clio-kit
+          Slurm MCP server, polls every task to a terminal state, fetches its
+          output, and stamps the scheduler job id into the final answer. Not for
+          writing the science inside the script or for intera
   - kind: skill
     name: sprint-plan
     description: Slices an existing plan, PRD, or milestone into an executable

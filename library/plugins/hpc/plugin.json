@@ -1,0 +1,49 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "hpc",
+	"version": "0.1.0",
+	"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. Works on air-gapped login nodes.",
+	"license": "Apache-2.0",
+	"author": {
+		"name": "IOWarp"
+	},
+	"repository": "https://github.com/iowarp/clio-coder",
+	"keywords": ["hpc", "slurm", "lmod", "spack", "mpi-io", "parallel-hdf5", "darshan", "chronolog"],
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"requires": ["skill:slurm-jobs"],
+			"resources": {
+				"skills": "skills"
+			},
+			"components": [
+				{
+					"kind": "script",
+					"id": "darshan-summary",
+					"path": "assets/scripts/darshan_summary.py"
+				},
+				{
+					"kind": "skill",
+					"id": "hpc-modules",
+					"path": "skills/hpc-modules/SKILL.md"
+				},
+				{
+					"kind": "skill",
+					"id": "hpc-parallel-io",
+					"path": "skills/hpc-parallel-io/SKILL.md"
+				},
+				{
+					"kind": "skill",
+					"id": "hpc-darshan",
+					"path": "skills/hpc-darshan/SKILL.md",
+					"requires": ["script:darshan-summary"]
+				},
+				{
+					"kind": "skill",
+					"id": "hpc-chronolog",
+					"path": "skills/hpc-chronolog/SKILL.md"
+				}
+			]
+		}
+	}
+}

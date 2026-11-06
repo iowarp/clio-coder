@@ -143,6 +143,16 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "hpc",
+			"source": "./library/plugins/hpc",
+			"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. Works on air-gapped login nodes.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
 			"name": "map-codebase",
 			"source": "./library/skills/planning/map-codebase",
 			"description": "Interactive codebase maps from verified repository structure, symbols and imports, rendered natively as standalone HTML.",
@@ -234,8 +244,8 @@
 		{
 			"name": "slurm-jobs",
 			"source": "./library/skills/research/slurm-jobs",
-			"description": "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
-			"version": "0.1.2",
+			"description": "Submits a batch script or job array to Slurm through the clio-kit Slurm MCP server, polls every task to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
+			"version": "0.2.0",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
