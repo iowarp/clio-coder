@@ -1,4 +1,4 @@
-import type { ActionClass } from "./action-classifier.js";
+import { type ActionClass, actionClassWords } from "./action-classifier.js";
 import type { AutonomyExposure } from "./autonomy.js";
 import { SESSION_CODE_CONSENT_RULE_ID, SESSION_CODE_CONSENT_TEXT } from "./session-code-consent.js";
 
@@ -200,7 +200,7 @@ function tierIdentity(
 			return {
 				tierLabel: "Safety-net confirmation",
 				title: "Safety-net confirmation",
-				kind: "safety-net rail",
+				kind: "safety net check",
 				semanticToken: "warning",
 			};
 		case "system":
@@ -236,18 +236,18 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 			: "Your response records an answer for this interview. It grants no tool authority.";
 	}
 	const tool = facts.tool ?? "the presented tool";
-	// The class reads as words (`system modify`), the way the card's identity row says it.
-	const actionClass = (facts.actionClass ?? "unknown").replace(/_/gu, " ");
+	// The class reads as what it does (`runs a command`), the way the card's identity row says it.
+	const effect = actionClassWords(facts.actionClass ?? "unknown");
 	if (facts.origin.kind === "worker") {
-		return `Approval authorizes this one ${actionClass} call to ${tool}. An identical call in this worker run asks again. Each call still passes the safety net. The autonomy level does not change.`;
+		return `Approval allows this one call to ${tool}, which ${effect}. An identical call in this worker run asks again. Each call still passes the safety net. The autonomy level does not change.`;
 	}
 	if (isSessionCodeConsent(facts)) {
-		return `Approval runs this ${actionClass} call to ${tool} and lets test runners run without asking for the rest of this session. It does not change the autonomy level.`;
+		return `Approval runs this call to ${tool}, which ${effect}, and lets test runners run without asking for the rest of this session. It does not change the autonomy level.`;
 	}
 	if (tool === "ask_user" && facts.exposure === "outward") {
 		return "Approval opens this one outward-decision interview. It does not publish or send anything by itself.";
 	}
-	return `Approval authorizes one ${actionClass} call to ${tool}. It does not change the autonomy level.`;
+	return `Approval allows this one call to ${tool}, which ${effect}. It does not change the autonomy level.`;
 }
 
 function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): string {
@@ -264,7 +264,7 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 			if (isSessionCodeConsent(facts)) {
 				return "A test runner executes repository code under your account without a sandbox, whoever wrote it: this session, an earlier one, a worker or a checkout.";
 			}
-			return "An always-on safety-net rail requires a one-shot operator decision before this call can run.";
+			return "The safety net holds this kind of call for your decision at every autonomy level.";
 		case "system":
 			return "The call can change state outside the workspace or state the classifier cannot safely bound.";
 		case "worker":
@@ -285,7 +285,7 @@ function reversibilityCopy(facts: TrustedDecisionFacts): string {
 		case "reversible":
 			return "Reversible: yes. Workspace changes can be reviewed and reverted.";
 		case "limited":
-			return "Reversible: not guaranteed. Effects that already ran or reached an outward system may remain.";
+			return "Reversible: not guaranteed. Effects that already ran, or that reached anything outside this machine, may remain.";
 		case "unknown":
 			return "Reversible: unknown. Treat the effect as not safely reversible.";
 	}
@@ -319,7 +319,7 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			? facts.origin.endsWithTurn === true
 				? "Denies this worker request and ends the main-agent turn, which also stops this worker because the turn is waiting on it. Other worker requests still wait for you."
 				: "Denies this worker request and ends any active main-agent turn. This worker keeps running without the call, and other worker requests still wait for you."
-			: "Denies every parked request from this turn and ends the run.";
+			: "Denies every request waiting in this turn and ends the turn.";
 	return [
 		{
 			id: "approve-once",
@@ -339,7 +339,7 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 					? "Denies this request and refuses identical calls under the same permission conditions in this worker run without asking."
 					: sessionConsent
 						? "Denies only the presented request; the next test runner asks again."
-						: "Denies only the presented request and advances the queue.",
+						: "Denies only this call. Clio continues the turn without it, and the next waiting request, if any, comes up.",
 		},
 		{ id: "stop", label: "Deny and stop", consequence: stopConsequence },
 	];

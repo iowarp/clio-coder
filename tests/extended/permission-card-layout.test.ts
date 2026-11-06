@@ -85,22 +85,22 @@ for (const columns of [80, 120, 160]) {
 			.replace(/\s+/g, " ");
 		for (const token of [
 			"task-03-protocol-arc-melting-and-aging.md",
-			"content=<string 4173 bytes>",
 			"sha256 6e068cd0028e23c4",
 		]) {
 			ok(joined.includes(token), `${columns}: lost "${token}"`);
 		}
 		doesNotMatch(joined, /…/u, "nothing is ellipsized");
+		doesNotMatch(joined, /content=</u, "the size placeholder is left to the mutation row");
 		ok(lines.length <= 10, `${lines.length} rows: the folded card stays short`);
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
-		match(joined, /\[Enter\] allow\s+runs this one write call \[Esc\] deny\s+skips it \[alt\+x\] stop\s+ends the turn/u);
+		match(joined, /\[Enter\] allow\s+runs this one call \[Esc\] deny\s+skips it \[alt\+x\] stop\s+ends the turn/u);
 		match(lines[0] ?? "", /autonomy level default/u);
 
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");
 		ok(opened.includes("Hard-blocked actions remain blocked."));
-		ok(opened.includes("Approval authorizes one write call to write."));
+		ok(opened.includes("Approval allows this one call to write, which writes files."));
 		ok(opened.includes("Reversible: yes."));
 		body.toggleTerms();
 		strictEqual(body.isShowingTerms(), false);

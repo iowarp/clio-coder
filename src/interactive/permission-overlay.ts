@@ -1,4 +1,4 @@
-import type { ActionClass } from "../domains/safety/action-classifier.js";
+import { type ActionClass, actionClassWords } from "../domains/safety/action-classifier.js";
 import { credentialedCallKind } from "../domains/safety/call-consequence.js";
 import {
 	classifyDecisionPresentation,
@@ -193,7 +193,8 @@ function identityRow(
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const axisTone: Tone = presentation.semanticToken === "warning" ? "warning" : "muted";
 	const kind = toolFunction(view.tool);
-	const classWords = view.actionClass.replaceAll("_", " ");
+	// What the call does, in words (`runs a command`), not its class name (`execute action`).
+	const classWords = actionClassWords(view.actionClass);
 	// `write · write action` said the word twice. When the tool and its class
 	// share the word, the tool chip alone carries it, in the risk tone, behind
 	// the function glyph the transcript uses for that tool.
@@ -201,7 +202,7 @@ function identityRow(
 	const tool = shared
 		? `${functionText(theme, kind, FUNCTION_GLYPH[kind])} ${theme.style(toneRole(risk), view.tool, { bold: true })}`
 		: toolChip(theme, view.tool);
-	const action = shared ? null : theme.style(toneRole(risk), `${classWords} action`, { bold: true });
+	const action = shared ? null : theme.style(toneRole(risk), classWords, { bold: true });
 	const axis = chip(theme, axisText(view), axisTone);
 	const full = chipRow(theme, [tool, action, axis], Number.POSITIVE_INFINITY);
 	if (visibleWidth(full) <= width) return { rows: [full], ruleFact: null };
@@ -333,7 +334,6 @@ function permissionChoices(
 	hasDraft: boolean,
 	mainTurn?: boolean,
 ): Parameters<typeof choiceRows>[1] {
-	const actionClass = view.actionClass;
 	const stopWords = "ends the turn";
 	const draftNote = hasDraft ? ` · inert until Backspace clears your draft` : "";
 	if (presentation.tier === "worker") {
@@ -368,7 +368,7 @@ function permissionChoices(
 			{
 				key: "Enter",
 				verb: "allow",
-				consequence: `runs this ${actionClass.replace(/_/gu, " ")} call and later test runners this session${draftNote}`,
+				consequence: `runs it, and later test runners this session${draftNote}`,
 			},
 			{ key: "Esc", verb: "deny", consequence: "skips it; the next test runner asks again" },
 			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
@@ -382,7 +382,7 @@ function permissionChoices(
 		];
 	}
 	return [
-		{ key: "Enter", verb: "allow", consequence: `runs this one ${actionClass.replace(/_/gu, " ")} call${draftNote}` },
+		{ key: "Enter", verb: "allow", consequence: `runs this one call${draftNote}` },
 		{ key: "Esc", verb: "deny", consequence: "skips it" },
 		{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
 	];
@@ -559,6 +559,17 @@ interface PermissionFactRows {
 }
 
 /**
+ * The target as the card shows it. A file change's size placeholder
+ * (`content=<string 18 bytes>`) is serialization, and the mutation row under
+ * it already names the size and digest, so the card keeps only the path.
+ */
+function cardTarget(view: ApprovalRequestView): string | undefined {
+	if (view.target === undefined || view.mutation === undefined) return view.target;
+	const kept = view.target.split(" · ").filter((part) => !/^[\w.-]+=<\w+ \d+ bytes>$/u.test(part.trim()));
+	return kept.length > 0 ? kept.join(" · ") : view.target;
+}
+
+/**
  * The facts that identify the call, in reading order: the identity row, the
  * exact target in a gutter, then the labelled table. The target is the one
  * thing never clipped, because a deep path's file name is what says what the
@@ -577,7 +588,7 @@ function permissionFacts(
 	const identity = identityRow(theme, view, presentation, width);
 	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
 	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
-	const targetText = plan !== null ? planHeadline(plan) : view.target;
+	const targetText = plan !== null ? planHeadline(plan) : cardTarget(view);
 	const target = targetText !== undefined && targetText.length > 0 ? targetBlock(theme, targetText, risk, width) : [];
 	const facts: Fact[] = identity.ruleFact === null ? [] : [identity.ruleFact];
 	if (view.netReason !== undefined && view.netReason.length > 0) facts.push({ label: "why", value: view.netReason });

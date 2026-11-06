@@ -1519,7 +1519,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 							? "system-level change admitted by yolo"
 							: resort?.contained === true
 								? CONTAINED_REASON
-								: "system-level changes require one-shot confirmation in default",
+								: "at the default autonomy level every change outside the workspace needs your approval",
 				],
 				policySource: "builtin-classifier",
 			};
@@ -1980,7 +1980,7 @@ function evaluateBashPolicy(
 			reasonCode: "bash-hidden-content",
 			ruleId: "bash-hidden-content",
 			reasons: [
-				"shell variables, unparsed shell scripts, or interpreter source hide paths from the safety scan and require one-shot confirmation",
+				"shell variables, unparsed shell scripts or interpreter source hide which paths it touches from the safety net, so each such command needs your approval",
 				// A loop over files was the common case in recorded Opus runs; one
 				// command over literal operands does the same without the variable.
 				...(/\bfor\s+[A-Za-z_]\w*\s+in\b/u.test(command)
@@ -2043,7 +2043,7 @@ function evaluateBashPolicy(
 			kind: "ask",
 			ruleId: "bash-command-substitution",
 			reasonCode: "bash-command-substitution",
-			reasons: ["command substitution hides the executed content from the safety net and requires one-shot confirmation"],
+			reasons: ["command substitution hides what will actually run from the safety net, so each such command needs your approval"],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
 		};

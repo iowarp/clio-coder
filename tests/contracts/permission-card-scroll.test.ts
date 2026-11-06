@@ -43,7 +43,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	strictEqual(screen.length, ROW_BUDGET, "the card fills its rows and no more");
 	ok(body.isCardScrollable(), "the open terms do not fit, so the card scrolls");
 	doesNotMatch(screen.join("\n"), /more rows/u, "the frame never has to cut the card");
-	match(screen[1] ?? "", /\$ bash · execute action/u, "the call's identity stays at the top");
+	match(screen[1] ?? "", /\$ bash · runs a command/u, "the call's identity stays at the top");
 	match(screen.join("\n"), /↑↓ scroll/u, "the card names its scroll keys");
 	match(screen.join("\n"), /Esc or alt\+t closes/u, "the terms name their own way out");
 	for (const row of inner(screen)) seen.add(row);
@@ -55,7 +55,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 		ok(body.scrollCard(1), "a scrollable card consumes the arrow even at its end");
 		screen = plain(frame.render(COLUMNS));
 		strictEqual(screen.length, ROW_BUDGET);
-		match(screen[1] ?? "", /\$ bash · execute action/u);
+		match(screen[1] ?? "", /\$ bash · runs a command/u);
 		for (const row of inner(screen)) seen.add(row);
 	}
 	const whole = createPermissionOverlayBody(NET_VIEW);
@@ -71,7 +71,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	const reached = new Set<string>();
 	for (const step of [...Array(30).fill(-1), ...Array(40).fill(1)]) {
 		const frameRows = plain(pinned.render(CONTENT));
-		match(frameRows[0] ?? "", /\$ bash · execute action/u, "the identity stays pinned");
+		match(frameRows[0] ?? "", /\$ bash · runs a command/u, "the identity stays pinned");
 		for (const row of frameRows) reached.add(row);
 		pinned.scrollCard(step);
 	}
@@ -95,7 +95,7 @@ test("a card that fits does not scroll and folding the terms resets the window",
 	body.toggleTerms();
 	body.toggleTerms();
 	const reopened = plain(body.render(CONTENT)).join("\n");
-	match(reopened, /^Approval authorizes one execute call/mu, "reopened terms start at their top");
+	match(reopened, /^Approval allows this one call to bash/mu, "reopened terms start at their top");
 
 	body.setBodyRows(0);
 	const unbounded = plain(body.render(CONTENT)).join("\n");
