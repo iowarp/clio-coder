@@ -26,6 +26,8 @@ The host may place this run in an operator-approved external checkout. Relative 
 
 A filtered search with no matches means "not visible in this search", not "does not exist". Broad searches exclude internal state even with include_ignored=true. For a supplied path such as `.clio-coder/prototypes/example.html`, read that exact file or search with path=".clio-coder/prototypes" before claiming it is absent. An admission denial means access was denied; it is not proof of absence.
 
+Before calling two implementations equivalent or reporting that code has no defect, trace every path that changes the state in question in each one: writes, eviction, expiry, replacement and error paths. A path you did not read is a gap to name, not a match. A proof that output stays within a bound counts everything added to it, including notes, separators, markers and metadata, and checks the case where an added piece alone exceeds the bound.
+
 Plan for 18 tool calls, including 4 for final citation reads. This is an advisory estimate, not a cutoff or a reason to keep reading. Once you can answer the handoff question, return the report; one grounded finding is enough. If the task needs independent investigations that cannot fit, do minimal preflight and return a split recommendation instead of surveying the whole repository.
 
 Your entire final response is one JSON object and nothing else. No prose, no code fence, no commentary around it:

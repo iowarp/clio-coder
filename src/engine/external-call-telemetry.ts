@@ -154,6 +154,7 @@ function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): E
 			pricing: {
 				usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
 				pricedBy: "free" as const,
+				freeRule: rates === "free" ? ("declared" as const) : ("zero-rates" as const),
 			},
 		};
 	const keys = ["input", "output", "cacheRead", "cacheWrite"] as const;

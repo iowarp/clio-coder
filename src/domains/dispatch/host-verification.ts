@@ -10,6 +10,8 @@ import { buildSandboxInvocation } from "../../core/sandbox/invocation.js";
 import { unixSocketLaunch } from "../../core/sandbox/unix-sockets.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { renderReproduceReport } from "../../tools/verify/reproduce.js";
+import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
 import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playbook-commands.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
@@ -388,6 +390,71 @@ function judgeResolvedCheck(
 	return { exitCode: 1, outputTail: `${resolvedCheck.kind}: sealed check carries no parameters` };
 }
 
+/**
+ * A sealed reproduce check runs through the same runner as the verify tool,
+ * from the root its declared cwd implies. It is never memoized: its inputs
+ * may be untracked files the tree fingerprint does not cover, so a stored
+ * pass could outlive the bytes it judged.
+ */
+async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHostVerificationCheck> {
+	const sealed = resolvedCheck.reproduce;
+	const argv = [...resolvedCheck.argv];
+	if (sealed === undefined) {
+		return {
+			check: resolvedCheck.check,
+			argv,
+			cwd: resolvedCheck.cwd,
+			exitCode: 1,
+			durationMs: 0,
+			memo: false,
+			outputTail: "reproduce: sealed check carries no parameters",
+		};
+	}
+	const depth = sealed.declaredCwd === "." ? 0 : sealed.declaredCwd.split("/").length;
+	const root = resolve(resolvedCheck.cwd, ...Array.from({ length: depth }, () => ".."));
+	const outcome = await runReproduce({
+		command: argv,
+		cwd: sealed.declaredCwd,
+		timeoutMs: resolvedCheck.timeoutMs,
+		spec: sealed.spec,
+		workspaceRoot: root,
+	});
+	const base = { check: resolvedCheck.check, argv, cwd: resolvedCheck.cwd, memo: false };
+	switch (outcome.kind) {
+		case "refused":
+			return {
+				...base,
+				exitCode: 1,
+				durationMs: 0,
+				outputTail: outputTail(`reproduce refused: ${outcome.refusal.message}`),
+			};
+		case "run-failed":
+			return {
+				...base,
+				argv: outcome.facts.argv,
+				exitCode: outcome.facts.exitCode === 0 || outcome.facts.exitCode === null ? 1 : outcome.facts.exitCode,
+				durationMs: outcome.facts.durationMs,
+				outputTail: outputTail(`reproduce ${outcome.message}`),
+			};
+		case "unjudgeable":
+			return {
+				...base,
+				exitCode: 1,
+				durationMs: outcome.facts.reduce((sum, fact) => sum + fact.durationMs, 0),
+				outputTail: outputTail(`reproduce: ${outcome.message}`),
+			};
+		case "judged":
+			return {
+				...base,
+				argv: outcome.report.conditions.argv,
+				exitCode: outcome.report.passed ? 0 : 1,
+				durationMs: outcome.facts.reduce((sum, fact) => sum + fact.durationMs, 0),
+				outputTail: outputTail(renderReproduceReport(outcome.report)),
+				report: outcome.report,
+			};
+	}
+}
+
 async function runResolvedCheck(input: {
 	runId: string;
 	index: number;
@@ -397,6 +464,10 @@ async function runResolvedCheck(input: {
 	onDiagnostic?: (error: unknown) => void;
 }): Promise<{ check: RunHostVerificationCheck; outputExcerpt: string }> {
 	const resolvedCheck = input.resolvedCheck;
+	if (resolvedCheck.kind === "reproduce") {
+		const check = await runSealedReproduce(resolvedCheck);
+		return { check, outputExcerpt: check.outputTail };
+	}
 	const command: PlaybookCommand = {
 		id: resolvedCheck.check,
 		argv: [...resolvedCheck.argv],
@@ -522,6 +593,7 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 			cwd: resolve(resolvedCheck.cwd),
 			timeoutMs: resolvedCheck.timeoutMs,
 			kind: resolvedCheck.kind ?? "command",
+			reproduce: resolvedCheck.reproduce,
 			numeric:
 				numeric === undefined
 					? undefined

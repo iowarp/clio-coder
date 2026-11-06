@@ -18,7 +18,13 @@ import {
 	discoverDeclaredChecks,
 	discoverDeclaredChecksAtRoot,
 } from "./discovery.js";
-import { compareNumeric, type NumericCompareReport, parseNumericPayload, renderNumericReport } from "./numeric.js";
+import {
+	compareNumeric,
+	extractNumericPayloadText,
+	type NumericCompareReport,
+	parseNumericPayload,
+	renderNumericReport,
+} from "./numeric.js";
 import {
 	capturePerfEnvironment,
 	evaluatePerfBudget,
@@ -28,6 +34,8 @@ import {
 	parsePerfBaseline,
 	renderPerfBaseline,
 } from "./perf.js";
+import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
+import { type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
 import {
 	type DeclaredProjectEntry,
@@ -37,8 +45,8 @@ import {
 } from "./toolchain.js";
 import { TOOLCHAIN_DISCOVERY_SOURCES, type ToolchainCheck } from "./toolchain-checks.js";
 
-/** The structured verdict a numeric-compare or perf-budget check records beside the command facts. */
-export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport;
+/** The structured verdict a numeric-compare, perf-budget or reproduce check records beside the command facts. */
+export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport | ReproduceReport;
 
 /**
  * Output ceiling for a judged check's command. A numeric payload may carry up
@@ -125,7 +133,8 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 			lines.push(source.kind === "package.json" ? "package.json:" : `${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}:`);
 			for (const check of source.checks) {
 				const tags = check.tags.length > 0 ? ` [${check.tags.join(", ")}]` : "";
-				lines.push(`- ${check.id}${tags}: ${check.description}`);
+				const kind = check.kind === "command" ? "" : ` (${check.kind})`;
+				lines.push(`- ${check.id}${kind}${tags}: ${check.description}`);
 			}
 		}
 		if (derived.length > 0) {
@@ -265,7 +274,7 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 	const message = result.message;
 	const diagnostic = message
 		.replace(
-			/^verify: (?:(?:numeric-compare|perf-budget) command )?exited with code [^:]+(?: before judgement)?:\s*/u,
+			/^verify: (?:(?:numeric-compare|perf-budget) command |reproduce run \d )?exited with code [^:]+(?: before judgement)?:\s*/u,
 			"",
 		)
 		.replace(/^verify:\s*/u, "");
@@ -284,24 +293,6 @@ function classifyUnavailable(result: ToolResult, check: string, command: Readonl
 		message: `verify: unavailable '${check}': ${message.replace(/^verify: /u, "")}. ${UNAVAILABLE_RETRY_DIRECTIVE}`,
 		details: { ...result.details, check, judgement: judgement("unavailable", "not-run") },
 	};
-}
-
-/**
- * The JSON object a numeric-compare command printed. The whole text is tried
- * first; when the command also wrote diagnostics around it, the span from the
- * first `{` to the last `}` is tried once more, so a preamble line does not
- * turn a correct payload into a parse failure.
- */
-export function extractNumericPayloadText(output: string): string {
-	const trimmed = output.trim();
-	try {
-		JSON.parse(trimmed);
-		return trimmed;
-	} catch {
-		const start = trimmed.indexOf("{");
-		const end = trimmed.lastIndexOf("}");
-		return start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
-	}
 }
 
 /**
@@ -510,11 +501,65 @@ async function runJudgedCheck(
 	return { kind: "ok", output: `${rendered}\n`, details };
 }
 
+/**
+ * The tool result for a reproduce outcome. A refusal or a run that could not
+ * complete reads as not run, so no reader can take it for a verdict; the
+ * refusal's typed reason and digest mismatches ride in the details.
+ */
+function reproduceToolResult(outcome: ReproduceOutcome): ToolResult {
+	switch (outcome.kind) {
+		case "refused":
+			return {
+				kind: "error",
+				message: `verify: reproduce refused: ${outcome.refusal.message}${outcome.refusal.provisionCommand ? `; operator provisioning command: ${outcome.refusal.provisionCommand.join(" ")}` : ""}. ${UNAVAILABLE_RETRY_DIRECTIVE}`,
+				details: { reproduceRefusal: outcome.refusal, judgement: judgement("unavailable", "not-run") },
+			};
+		case "run-failed":
+			return {
+				kind: "error",
+				message: `verify: reproduce ${outcome.message}`,
+				details: { ...outcome.facts, judgement: judgement(executionOutcome(outcome.facts), "not-run") },
+			};
+		case "unjudgeable":
+			return {
+				kind: "error",
+				message: `verify: reproduce ${outcome.message}`,
+				details: { runs: outcome.facts, judgement: judgement("succeeded", "not-run") },
+			};
+		case "judged": {
+			const rendered = renderReproduceReport(outcome.report);
+			const details = {
+				runs: outcome.facts,
+				report: outcome.report,
+				judgement: judgement("succeeded", outcome.report.passed ? "passed" : "failed"),
+			};
+			if (!outcome.report.passed) return { kind: "error", message: `verify: ${rendered}`, details };
+			return { kind: "ok", output: `${rendered}\n`, details };
+		}
+	}
+}
+
+async function runReproduceCheck(check: DeclaredCheck, options?: { signal?: AbortSignal }): Promise<ToolResult> {
+	if (check.reproduce === undefined) {
+		return { kind: "error", message: `verify: declared check '${check.id}' has kind reproduce without its parameters` };
+	}
+	const outcome = await runReproduce({
+		command: check.command,
+		cwd: check.cwd,
+		timeoutMs: check.timeoutMs,
+		spec: check.reproduce,
+		workspaceRoot: process.cwd(),
+		...(options?.signal !== undefined ? { signal: options.signal } : {}),
+	});
+	return reproduceToolResult(outcome);
+}
+
 export async function runProjectCheck(check: DeclaredCheck, options?: { signal?: AbortSignal }): Promise<ToolResult> {
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: declared check '${check.id}' has empty argv` };
 	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
 	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
+	if (check.kind === "reproduce") return withDeclaredEvidence(await runReproduceCheck(check, options), check);
 	if (check.kind !== "command") {
 		return withDeclaredEvidence(await runJudgedCheck(check, file, vector, cwd, options), check);
 	}
@@ -630,5 +675,6 @@ export {
 	discoverDeclaredChecks,
 	discoverDeclaredChecksAtRoot,
 	discoverDeclaredProjectEntriesAtRoot,
+	extractNumericPayloadText,
 	VERIFICATION_SCRIPT_FAMILY_HINT,
 };

@@ -7,6 +7,8 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { resolveDispatchFailureStatus } from "../../src/core/dispatch-outcome.js";
+import { pricedUsd } from "../../src/core/telemetry/pricing.js";
+import { renderPricing } from "../../src/core/telemetry/render.js";
 import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 
@@ -44,6 +46,7 @@ describe("resolveEffectivePricing", () => {
 			deepStrictEqual(pricing, {
 				rates: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				pricedBy: "free",
+				freeRule: "declared",
 			});
 			deepStrictEqual(litellm.synthesizeModel(target, modelId, null).cost, pricing.rates);
 		}
@@ -66,9 +69,19 @@ describe("resolveEffectivePricing", () => {
 		const target = (runtime: string) => ({ id: "t", runtime, defaultModel: "qwen" });
 		const local = resolveEffectivePricing(target("lmstudio"), { id: "lmstudio", tier: "local-native" }, "qwen");
 		strictEqual(local.pricedBy, "free");
+		strictEqual(local.freeRule, "local-native");
 		deepStrictEqual(local.rates, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 		strictEqual(resolveEffectivePricing(target("litellm"), { id: "litellm", tier: "protocol" }, "qwen").pricedBy, "none");
 		const priced = { ...target("litellm"), pricing: { input: 1, output: 2 } };
 		strictEqual(resolveEffectivePricing(priced, { id: "litellm", tier: "protocol" }, "qwen").pricedBy, "target-rates");
+		const zero = resolveEffectivePricing({ ...priced, pricing: { input: 0, output: 0 } }, litellm, "qwen");
+		deepStrictEqual([zero.pricedBy, zero.freeRule], ["free", "zero-rates"]);
+		// Only a local-native runtime's zero reads as local; a declared-free proxy may front a cloud model.
+		deepStrictEqual(
+			(["local-native", "declared", "zero-rates", undefined] as const).map((rule) =>
+				renderPricing(pricedUsd("free", 0, rule)),
+			),
+			["$0.00 local", "$0.00 free (declared)", "$0.00 free (zero-rates)", "$0.00 local"],
+		);
 	});
 });

@@ -9,9 +9,24 @@
  * the model with silently replaced bytes would misreport what the server said.
  */
 
+/** The legacy revision Clio negotiates through the initialize handshake. */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
+/**
+ * The modern revision: no handshake, and every request carries its version,
+ * client identity and client capabilities in `_meta`. A server is spoken to in
+ * this revision only when a `server/discover` probe lists it.
+ */
+export const MCP_MODERN_PROTOCOL_VERSION = "2026-07-28";
+/** Extension id of MCP Tasks (modelcontextprotocol/ext-tasks, specification 2026-07-28). */
+export const MCP_TASKS_EXTENSION = "io.modelcontextprotocol/tasks";
+export const MCP_META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
+export const MCP_META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
+export const MCP_META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+export const MCP_META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
 export const DEFAULT_MAX_LINE_BYTES = 4 * 1024 * 1024;
 export const JSON_RPC_METHOD_NOT_FOUND = -32601;
+/** Modern-era error: the server does not serve the requested revision, and names the ones it does. */
+export const MCP_UNSUPPORTED_PROTOCOL_VERSION = -32022;
 
 export type McpErrorCode = "timeout" | "closed" | "protocol" | "server" | "spawn" | "aborted" | "overload";
 
@@ -147,8 +162,15 @@ export function parseJsonRpcLine(line: Buffer): JsonRpcMessage | McpError {
 			}
 			return value;
 		}) as unknown;
-		if (isRecord(parsed) && isRecord(parsed.result) && isRecord(parsed.result.structuredContent)) {
-			const content = parsed.result.structuredContent;
+		// A completed task carries its tool result one level down (`tasks/get`
+		// result.result), and that result needs the same exact numeric evidence.
+		const toolResult = !isRecord(parsed)
+			? undefined
+			: isRecord(parsed.result) && parsed.result.status === "completed" && isRecord(parsed.result.result)
+				? parsed.result.result
+				: parsed.result;
+		if (isRecord(toolResult) && isRecord(toolResult.structuredContent)) {
+			const content = toolResult.structuredContent;
 			// ES2022 typings predate this supported Node runtime API. No custom
 			// tokenizer is needed, and the existing incoming-line cap bounds it.
 			const rawJSON = (JSON as JSON & { rawJSON(source: string): unknown }).rawJSON;
@@ -159,13 +181,13 @@ export function parseJsonRpcLine(line: Buffer): JsonRpcMessage | McpError {
 			// Plain JSON evidence must survive cloning and serialization as well.
 			// Tag tokens that Number cannot round-trip instead of retaining rounded
 			// numbers, Infinity (which serializes to null), or a signless zero.
-			parsed.result.structuredContent = JSON.parse(
+			toolResult.structuredContent = JSON.parse(
 				JSON.stringify(content, function (this: object, key: string, value: unknown) {
 					const source = sources.get(this)?.get(key);
 					return source !== undefined && JSON.stringify(value) !== source ? { $literal: source } : value;
 				}),
 			) as unknown;
-			structuredJson.set(parsed.result, exact);
+			structuredJson.set(toolResult, exact);
 		}
 	} catch (error) {
 		return new McpError(

@@ -2,6 +2,7 @@ import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { listPackedSources, readPackedSource, sourceIsPacked } from "../../core/source-pack.js";
 import { sha256Hex, stableJson } from "./hash.js";
 import type {
 	ComponentAuthority,
@@ -134,7 +135,7 @@ async function collectRecursive(
 	extension: string,
 	kind: ComponentKind,
 ): Promise<HarnessComponent[]> {
-	const files = await listFiles(join(root, dirPath));
+	const files = await listComponentFiles(root, dirPath);
 	const matching = files
 		.map((filePath) => toRepoPath(root, filePath))
 		.filter((repoPath) => repoPath.endsWith(extension))
@@ -143,7 +144,7 @@ async function collectRecursive(
 }
 
 async function collectTools(root: string): Promise<HarnessComponent[]> {
-	const files = await listFiles(join(root, "src/tools"));
+	const files = await listComponentFiles(root, "src/tools");
 	const repoPaths = files
 		.map((filePath) => toRepoPath(root, filePath))
 		.filter((repoPath) => repoPath.startsWith("src/tools/") && repoPath.endsWith(".ts"))
@@ -176,8 +177,11 @@ async function componentFromFile(
 	kind: ComponentKind,
 ): Promise<HarnessComponent | null> {
 	const absolutePath = join(root, repoPath);
-	if (!(await isFile(absolutePath))) return null;
-	const content = await readFile(absolutePath);
+	// An installed package serves most of src/ from its source pack (src/core/source-pack.ts).
+	const content = (await isFile(absolutePath))
+		? await readFile(absolutePath)
+		: (readPackedSource(absolutePath, root)?.bytes ?? null);
+	if (content === null) return null;
 	return baseComponent({
 		id: `${kind}:${repoPath}`,
 		kind,
@@ -245,6 +249,17 @@ function baseComponent(input: {
 	};
 	if (input.description !== undefined) component.description = input.description;
 	return component;
+}
+
+/** Files under `root/dirPath`, loose or packed in the package's source pack, as absolute paths. */
+async function listComponentFiles(root: string, dirPath: string): Promise<string[]> {
+	const loose = await listFiles(join(root, dirPath));
+	if (!sourceIsPacked(root)) return loose;
+	const prefix = `${dirPath}/`;
+	const packed = listPackedSources(root)
+		.filter((repoPath) => repoPath.startsWith(prefix))
+		.map((repoPath) => join(root, repoPath));
+	return [...new Set([...loose, ...packed])];
 }
 
 async function listFiles(dirPath: string): Promise<string[]> {

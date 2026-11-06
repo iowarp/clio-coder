@@ -489,13 +489,13 @@ Pricing is declared per target in `targets[].pricing` ([`src/core/config.ts`](..
 
 `input` and `output` are required nonnegative numbers. `cacheRead` and `cacheWrite` are optional and read as 0 when omitted. Any other key is rejected. `configure` has no pricing flag, so set it in `settings.yaml` directly or through `clio-coder configure --edit`.
 
-[`resolveEffectivePricing`](../../src/domains/providers/catalog.ts) turns a target, its runtime and the wire model id into rates. It takes the first rule that matches, and the rule decides the `pricing` each `call.settled` record carries: a `usd` fact and a `pricedBy` source ([`call-facts.ts`](../../src/domains/telemetry/call-facts.ts)).
+[`resolveEffectivePricing`](../../src/domains/providers/catalog.ts) turns a target, its runtime and the wire model id into rates. It takes the first rule that matches, and the rule decides the `pricing` each `call.settled` record carries: a `usd` fact, a `pricedBy` source and, for `free`, a `freeRule` naming the rule ([`call-facts.ts`](../../src/domains/telemetry/call-facts.ts)).
 
 | Order | Rule | Rates | `pricedBy` and `usd` |
 | --- | --- | --- | --- |
-| 1 | The target declares a rate map | The declared rates | `target-rates`, measured; `free`, measured 0, when every declared rate is 0 |
-| 2 | The target declares `pricing: free` | 0 | `free`, measured 0 |
-| 3 | The runtime tier is `local-native` (`lmstudio`, `ollama`, `llamacpp` and its variants, `vllm`, `sglang`, `lemonade`) | 0 | `free`, measured 0 |
+| 1 | The target declares a rate map | The declared rates | `target-rates`, measured; `free` with `freeRule: zero-rates`, measured 0, when every declared rate is 0 |
+| 2 | The target declares `pricing: free` | 0 | `free` with `freeRule: declared`, measured 0 |
+| 3 | The runtime tier is `local-native` (`lmstudio`, `ollama`, `llamacpp` and its variants, `vllm`, `sglang`, `lemonade`) | 0 | `free` with `freeRule: local-native`, measured 0 |
 | 4 | The Pi catalog has a row for the runtime and wire model | The catalog rates | `catalog`, estimated with method `catalog` |
 | 5 | None of the above | None | `none`, unknown |
 
@@ -512,7 +512,7 @@ Cost appears in these places, and every one renders the journaled facts through 
 | `usd` fact | What the footer, `/usage` and run tables show |
 | --- | --- |
 | measured | A dollar amount such as `$1.23`. |
-| measured 0 with `pricedBy: free` | `$0.00 local` when every priced call was free. |
+| measured 0 with `pricedBy: free` | When every priced call was free: `$0.00 local` under `local-native`, `$0.00 free (declared)` under `declared` and `$0.00 free (zero-rates)` under `zero-rates`. Calls that name different rules, or records written before the rule was kept, read `$0.00 local`. |
 | estimated | `~$1.23 est`. |
 | unknown | Tokens are still counted, but the call adds nothing to the dollar total. A session with some priced calls shows `$1.23 +?`. A session with none shows no cost field in the footer and `/usage`, and `not measured` in the fixed-width tables. |
 

@@ -290,6 +290,24 @@ export function parseNumericPayload(text: string, label: string): NumericPayload
 	return Object.fromEntries(entries);
 }
 
+/**
+ * The JSON object a numeric-compare or reproduce command printed. The whole text is tried
+ * first; when the command also wrote diagnostics around it, the span from the
+ * first `{` to the last `}` is tried once more, so a preamble line does not
+ * turn a correct payload into a parse failure.
+ */
+export function extractNumericPayloadText(output: string): string {
+	const trimmed = output.trim();
+	try {
+		JSON.parse(trimmed);
+		return trimmed;
+	} catch {
+		const start = trimmed.indexOf("{");
+		const end = trimmed.lastIndexOf("}");
+		return start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+	}
+}
+
 function effectiveNumericCombine(tolerance: NumericTolerance): NumericToleranceCombine {
 	return tolerance.combine ?? DEFAULT_NUMERIC_COMBINE;
 }

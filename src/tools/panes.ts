@@ -1,4 +1,6 @@
+import { bashSecretValues } from "../core/bash-exec.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
+import { maskCommandOutput } from "../domains/evidence/output-mask.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
 import {
 	PANE_INTERRUPT_KEYS,
@@ -223,9 +225,11 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				if (target.length === 0) return { kind: "error", message: "panes: action=read requires target" };
 				const result = await deps.panes.read(target, typeof args.lines === "number" ? args.lines : undefined);
 				if (result.status === "read") {
+					// A peer's terminal shows whatever its commands printed, so it is masked as bash output is.
+					const text = maskCommandOutput(result.text, await bashSecretValues());
 					return {
 						kind: "ok",
-						output: `${UNTRUSTED_CONTENT_BANNER}\n--- ${result.label} (${result.paneId})${result.truncated ? ", truncated" : ""} ---\n${result.text}`,
+						output: `${UNTRUSTED_CONTENT_BANNER}\n--- ${result.label} (${result.paneId})${result.truncated ? ", truncated" : ""} ---\n${text}`,
 						details: { action: "read", paneId: result.paneId, truncated: result.truncated },
 					};
 				}

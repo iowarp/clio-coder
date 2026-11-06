@@ -668,7 +668,14 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 					check.argv.every((arg) => typeof arg === "string") &&
 					typeof check.cwd === "string" &&
 					typeof check.timeoutMs === "number" &&
-					(check.kind === undefined || check.kind === "numeric-compare" || check.kind === "perf-budget") &&
+					(check.kind === undefined ||
+						check.kind === "numeric-compare" ||
+						check.kind === "perf-budget" ||
+						check.kind === "reproduce") &&
+					(check.kind !== "reproduce" ||
+						(isRecord(check.reproduce) &&
+							isRecord(check.reproduce.spec) &&
+							typeof check.reproduce.declaredCwd === "string")) &&
 					(check.numeric === undefined || (isRecord(check.numeric) && typeof check.numeric.reference === "string")) &&
 					(check.perf === undefined || isRecord(check.perf)),
 			))

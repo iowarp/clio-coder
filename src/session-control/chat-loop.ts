@@ -17,7 +17,7 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { pricesCalls, sumFacts } from "../core/telemetry/pricing.js";
+import { pricesCalls, pricingBasisFields, sumFacts } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -2138,7 +2138,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const sideCallJournal = (
 		runtime:
 			| AgentRuntime
-			| { targetId: string; runtimeId: string; pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"] },
+			| {
+					targetId: string;
+					runtimeId: string;
+					pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
+					freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
+			  },
 		role: CallJournalOptions["role"],
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
@@ -2151,7 +2156,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						role,
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
-						pricedBy: "runtimeResolution" in runtime ? runtime.runtimeResolution.pricedBy : runtime.pricedBy,
+						...pricingBasisFields("runtimeResolution" in runtime ? runtime.runtimeResolution : runtime),
 					},
 				}
 			: {};
@@ -2436,6 +2441,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		runtimeId: string;
 		wireModelId: string;
 		pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
+		freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
 		apiKey: string | undefined;
 	};
 
@@ -2459,7 +2465,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				targetId: runtime.targetId,
 				runtimeId: resolution.runtime.id,
 				wireModelId: runtime.wireModelId,
-				pricedBy: resolution.pricedBy,
+				...pricingBasisFields(resolution),
 				apiKey: sideAuth.apiKey,
 				...sideAuth,
 			};
@@ -2488,7 +2494,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			targetId: route.targetId,
 			runtimeId: route.runtimeId,
 			wireModelId: route.wireModelId,
-			pricedBy: route.pricedBy,
+			...pricingBasisFields(route),
 			apiKey: sideAuth.apiKey,
 			...sideAuth,
 		};

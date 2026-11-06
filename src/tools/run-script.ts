@@ -28,7 +28,7 @@ import {
 import { knownSecretValues } from "../core/sandbox/env-scrub.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import type { DynamicToolName } from "../core/tool-names.js";
-import { redactKnownSecrets } from "../domains/evidence/redact.js";
+import { CommandOutputMask, maskCommandOutput } from "../domains/evidence/output-mask.js";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
 import { StringEnum } from "../engine/ai.js";
@@ -649,7 +649,7 @@ export interface RunScriptToolDeps {
 
 const DESCRIPTION =
 	"Run one script from the workspace with an explicit interpreter, arguments, and working directory, as an observable scientific step. " +
-	"Complete stdout and stderr stream to .clio-coder/runs/<runId>/stdout.log and stderr.log and a run.json manifest records the script hash, exact argv, cwd, declared env keys, timing, outcome, and the observed state of declared inputs and outputs; the result carries bounded tails of both streams and names the run directory. " +
+	"Complete stdout and stderr, with credentials masked as in the result, stream to .clio-coder/runs/<runId>/stdout.log and stderr.log and a run.json manifest records the script hash, exact argv, cwd, declared env keys, timing, outcome, and the observed state of declared inputs and outputs; the result carries bounded tails of both streams and names the run directory. " +
 	"Declared inputs and outputs are provenance only and do not restrict what the script may touch. No dependency installation, no retries, no hidden environment changes. " +
 	"At autonomy default the script runs in an OS sandbox when the host has one: the workspace, the scratch roots and package caches are writable, the network is on and credentials are hidden. " +
 	`Default timeout ${RUN_SCRIPT_CAPS.defaultTimeoutMs}ms; a nonzero exit, timeout, or cancellation returns an error that still names the logs and any partial outputs.`;
@@ -742,6 +742,26 @@ function writeAll(fd: number, chunk: Buffer): void {
 	}
 }
 
+/**
+ * The log masking for one stream. Bytes are read one character each (latin1), so every byte the mask does not replace is
+ * written back exactly, whatever encoding the script printed in. Known values are matched as their UTF-8 bytes.
+ */
+class ByteLogMask {
+	private readonly mask: CommandOutputMask;
+
+	constructor(secrets: readonly string[]) {
+		this.mask = new CommandOutputMask(secrets.map((value) => Buffer.from(value, "utf8").toString("latin1")));
+	}
+
+	push(chunk: Buffer): Buffer {
+		return Buffer.from(this.mask.push(chunk.toString("latin1")), "latin1");
+	}
+
+	end(ending: "complete" | "cut-off"): Buffer {
+		return Buffer.from(this.mask.end(ending), "latin1");
+	}
+}
+
 function closeQuietly(fd: number): void {
 	try {
 		closeSync(fd);
@@ -809,7 +829,9 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 				...(await bashSecretValues(options?.shellSandbox?.env.secretNames)),
 				...knownSecretValues(request.env),
 			];
-			const mask = (text: string): string => redactKnownSecrets(text, secrets);
+			// A progress tail is a frame of output still growing, which holds back a credential it may have cut.
+			const mask = (text: string): string => maskCommandOutput(text, secrets, "open");
+			const logMasks = { stdout: new ByteLogMask(secrets), stderr: new ByteLogMask(secrets) };
 			const progress =
 				options?.onUpdate === undefined
 					? null
@@ -824,6 +846,8 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			const startedAt = now();
 			let result: SafeCommandResult;
 			let failure: string | null = null;
+			// A run the runner stopped, or one that never resolved, may end inside a credential.
+			let outputEnding: "complete" | "cut-off" = "cut-off";
 			progress?.start();
 			try {
 				result = await runCommand(request.interpreterPath, vector, {
@@ -838,17 +862,18 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 						retainHeadBytes: 0,
 						retainTailBytes: RUN_SCRIPT_CAPS.resultTailBytes,
 						onStdout(chunk) {
-							writeAll(logs.stdout.fd, chunk);
+							writeAll(logs.stdout.fd, logMasks.stdout.push(chunk));
 							written.stdout += chunk.byteLength;
 							progress?.append("stdout", chunk);
 						},
 						onStderr(chunk) {
-							writeAll(logs.stderr.fd, chunk);
+							writeAll(logs.stderr.fd, logMasks.stderr.push(chunk));
 							written.stderr += chunk.byteLength;
 							progress?.append("stderr", chunk);
 						},
 					},
 				});
+				if (!result.aborted && !result.timedOut && !result.outputCapped) outputEnding = "complete";
 			} catch (error) {
 				// The runner threw or rejected instead of resolving: the run never
 				// produced a process outcome, but its directory exists and the
@@ -865,12 +890,23 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			} finally {
 				// Whatever happened above, the descriptors close exactly once here.
 				progress?.settle();
+				for (const name of ["stdout", "stderr"] as const) {
+					try {
+						writeAll(logs[name].fd, logMasks[name].end(outputEnding));
+					} catch {
+						// The log already holds every committed byte; a failed final write only loses the held tail.
+					}
+				}
 				closeQuietly(logs.stdout.fd);
 				closeQuietly(logs.stderr.fd);
 			}
 
-			// Only the tails shaped for the result are masked; the logs on disk keep the bytes the script wrote.
-			result = { ...result, stdout: mask(result.stdout), stderr: mask(result.stderr) };
+			// The tails and the logs are masked alike, so no copy of a credential the script printed stays readable.
+			result = {
+				...result,
+				stdout: maskCommandOutput(result.stdout, secrets, outputEnding),
+				stderr: maskCommandOutput(result.stderr, secrets, outputEnding),
+			};
 			const finishedAt = now();
 			const outcome = classifyOutcome(result);
 			const outputRefs: RunOutputRef[] = [];

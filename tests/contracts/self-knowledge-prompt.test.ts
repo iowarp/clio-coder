@@ -70,9 +70,9 @@ describe("self-knowledge in the session prompt", () => {
 		match(prompt, /Required per-write Apply or policy approval cards still/);
 	});
 
-	it("names the shipped code map and never routes to the removed docs scope", () => {
+	it("never routes to the code map file or the removed docs scope", () => {
 		const prompt = compileSession("safety.default");
-		match(prompt, /dist[/\\]assets[/\\]codemap\.json/);
+		doesNotMatch(prompt, /codemap\.json/);
 		doesNotMatch(prompt, /\{CLIO_[A-Z_]+\}/);
 		doesNotMatch(codeNavToolSurface.description, /scope=docs/);
 		match(codeNavToolSurface.description, /clio_docs/);
