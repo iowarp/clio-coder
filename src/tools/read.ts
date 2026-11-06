@@ -840,7 +840,8 @@ export const readTool: ToolSpec = {
 			// results below that never open the file.
 			const entry = await stat(filePath);
 			file = { bytes: entry.size, mtimeMs: entry.mtimeMs };
-			if (!entry.isFile()) return { kind: "error", message: notAFileMessage(filePath, entry.isDirectory()), details: { file } };
+			if (!entry.isFile())
+				return { kind: "error", message: notAFileMessage(filePath, entry.isDirectory()), details: { file } };
 			if (reservation.exhausted) {
 				const exhausted = observationBudgetExhausted({
 					tool: ToolNames.Read,
