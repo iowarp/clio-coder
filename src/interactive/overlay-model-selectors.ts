@@ -54,7 +54,7 @@ export interface OverlayModelSelectorsDeps {
 	/** Settings → Targets shows this process's dispatch breaker state per route. */
 	getRouteBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Settings → Targets "connect" runs the auth flow over the open settings overlay. */
-	connectTarget?: (targetId: string) => Promise<void> | void;
+	connectTarget?: (targetId: string, options?: { replaceKey?: boolean }) => Promise<void> | void;
 	/** Settings → Advanced offers detected agents on the delegation.agents row. */
 	getInteropProposals?: () => ReadonlyArray<InteropProposal>;
 	openModelOverlay?: typeof openModelOverlay;

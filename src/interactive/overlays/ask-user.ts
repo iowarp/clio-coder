@@ -68,6 +68,8 @@ const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_INNER_ROWS = 6;
 /** The key that moves between a round's questions, spelled once for the rail, the legend and the position row. */
 const MOVE_KEY = "Tab/Shift+Tab";
+/** The key that moves between a question's options; the rail names it when it fits, and the option pointer stands in for it otherwise. */
+const OPTION_MOVE_KEY = "↑↓";
 /** The question region keeps at least this many rows before the options window shrinks. */
 const MIN_QUESTION_ROWS = 3;
 /** At or under this many body rows an option's explanation may give way so every choice stays listed. */
@@ -1053,8 +1055,9 @@ class AskUserOverlayView implements Component {
 		// The fit keeps entries from the end, so the keys with another home give way first:
 		// the question's position row can point at the move key, and the count stands in for `a`.
 		const givesWayFirst = (entry: HintEntry): boolean => entry.key === MOVE_KEY || entry.key === "a";
+		// The option pointer already shows what the arrows do, so the move key never costs the body a legend row.
 		const dropped = entries
-			.filter((entry) => !kept.includes(entry))
+			.filter((entry) => !kept.includes(entry) && entry.key !== OPTION_MOVE_KEY)
 			.sort((left, right) => Number(givesWayFirst(right)) - Number(givesWayFirst(left)));
 		if (dropped.length === 0) return [];
 		const text = fitHintEntries(dropped, Math.max(1, width * maxRows - (maxRows - 1) * 8));
@@ -1188,7 +1191,11 @@ class AskUserOverlayView implements Component {
 			entries.push(record);
 			return { entries, esc };
 		}
-		const entries: HintEntry[] = [{ key: "?", verb: "details" }];
+		// Moving between options is the most guessable key, so it stands first among the extras and a narrow rail drops it first.
+		const entries: HintEntry[] = [
+			{ key: OPTION_MOVE_KEY, verb: "move", critical: false },
+			{ key: "?", verb: "details" },
+		];
 		if (this.ledgerEntries().length > 0)
 			entries.push(
 				this.ledgerExpanded ? { key: "a", verb: "hide answers", short: "hide" } : { key: "a", verb: "answers" },

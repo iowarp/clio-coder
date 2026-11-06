@@ -2192,3 +2192,143 @@ test("a tool preview keeps whole lines and counts the lines it holds back, never
 	match(tail[0] ?? "", /… 3 earlier lines · \/view/u);
 	deepStrictEqual(tail.slice(1), ["d1"]);
 });
+
+test("Connect asks for a replacement key when the target refused the stored one, and the refusal names Connect", async () => {
+	const { createOverlayAuthLifecycle } = await import("../../src/interactive/overlay-auth-lifecycle.js");
+	const target = {
+		id: "keyed",
+		runtime: "openai-compat",
+		url: "http://127.0.0.1:9",
+		auth: { apiKeyRef: "target:keyed" },
+	};
+	const runtime = { id: "openai-compat", auth: "api-key", tier: "protocol" };
+	let accepted = false;
+	let listedRefused = false;
+	let probes = 0;
+	const statusOf = (refused: boolean) => ({
+		target,
+		runtime,
+		available: !refused,
+		reason: refused ? "HTTP 401: Unauthorized" : "",
+		health: {
+			status: refused ? "down" : "healthy",
+			lastCheckAt: "2026-11-06T00:00:00.000Z",
+			lastError: refused ? "HTTP 401: Unauthorized" : null,
+			latencyMs: refused ? null : 4,
+			...(refused ? { credentialRefused: true } : {}),
+		},
+	});
+	const prompts: string[] = [];
+	const lines: string[][] = [];
+	const notices: string[] = [];
+	const stored: string[] = [];
+	let answer: (value: string) => void = () => {};
+	let state = "closed";
+	let handle: unknown = null;
+	const life = createOverlayAuthLifecycle({
+		tui: {} as never,
+		providers: {
+			getRuntime: () => runtime,
+			probeTarget: async () => {
+				probes += 1;
+				return statusOf(!accepted);
+			},
+			list: () => [statusOf(listedRefused)],
+			auth: {
+				statusForTarget: () => ({
+					providerId: "target:keyed",
+					available: true,
+					credentialType: "api_key",
+					source: "stored-api-key",
+					detail: null,
+				}),
+				setApiKey: (_id: string, key: string) => {
+					stored.push(key);
+					accepted = key === "good";
+				},
+				login: async () => {},
+				damageReason: () => null,
+			},
+		} as never,
+		getSettings: () => ({ targets: [target] }) as never,
+		notify: (_level, text) => notices.push(text),
+		refreshFooter() {},
+		renderContextIsland() {},
+		renderTaskIsland() {},
+		requestRender() {},
+		getOverlayState: () => state as never,
+		setOverlayState: (next) => {
+			state = next;
+		},
+		getOverlayHandle: () => handle as never,
+		setOverlayHandle: (next) => {
+			handle = next;
+		},
+		openAuthDialog: () =>
+			({
+				handle: { hide() {} },
+				controller: {
+					setLines: (next: ReadonlyArray<string>) => lines.push([...next]),
+					appendLine() {},
+					prompt: (label: string) => {
+						prompts.push(label);
+						return new Promise<string>((resolve) => {
+							answer = resolve;
+						});
+					},
+					cancel() {},
+					dismiss() {},
+				},
+			}) as never,
+	});
+
+	// A stored key nobody refused yet is tried first; the refusal turns the same dialog into key input.
+	const first = life.openConnectFlow("keyed");
+	for (let i = 0; i < 5 && prompts.length === 0; i++) await nextLoop();
+	strictEqual(probes, 1);
+	deepStrictEqual(prompts, ["API key"]);
+	match(notices.at(-1) ?? "", /^keyed refused the API key \(HTTP 401: Unauthorized\); Connect asks for a new one\.$/u);
+	doesNotMatch(notices.at(-1) ?? "", /Edit URL/u, "a refused key is not an address to fix");
+	match(lines.at(-1)?.at(-1) ?? "", /stored API key was refused \(HTTP 401: Unauthorized\)\. Enter a replacement key/u);
+	answer("bad");
+	await first;
+	deepStrictEqual(stored, ["bad"]);
+
+	// Once refused, Connect does not probe the refused key again: it asks for the replacement at once.
+	listedRefused = true;
+	const second = life.openConnectFlow("keyed");
+	for (let i = 0; i < 5 && prompts.length === 1; i++) await nextLoop();
+	strictEqual(probes, 2, "only the probe of the key just entered ran");
+	deepStrictEqual(prompts, ["API key", "API key"]);
+	answer("good");
+	await second;
+	deepStrictEqual(stored, ["bad", "good"]);
+	strictEqual(probes, 3);
+	match(notices.at(-1) ?? "", /^connected keyed \(healthy\)$/u);
+});
+
+test("the interview rail names the option move key in a list, first among the keys a narrow rail gives up", async () => {
+	const { createAskUserViewForTesting } = await import("../../src/interactive/overlays/ask-user.js");
+	const { fitHintEntries } = await import("../../src/interactive/overlay-frame.js");
+	const view = createAskUserViewForTesting({ rows: 40 });
+	const pending = view.ask([
+		{ header: "Depth", question: "Which depth?", options: [{ label: "Fast" }, { label: "Thorough" }] },
+		{ header: "Summary", question: "Summary length?", options: [{ label: "Short" }, { label: "Long" }] },
+	]);
+	const hint = view.footerHint();
+	match(hint, /^\[↑↓\] move · \[\?\] details · /u, hint);
+	match(hint, /\[Enter\] record answer · \[Esc\] cancel interview$/u, hint);
+	// The rail leads with the key that records, so the move key stands right after it and leaves before the others.
+	const narrow = fitHintEntries(
+		[
+			{ key: "Enter", verb: "record" },
+			{ key: "↑↓", verb: "move", critical: false },
+			{ key: "?", verb: "details" },
+			{ key: "Esc", verb: "cancel" },
+		],
+		44,
+	);
+	strictEqual(narrow, "[Enter] record · [?] details · [Esc] cancel");
+	view.cancel();
+	await pending.catch(() => {});
+});

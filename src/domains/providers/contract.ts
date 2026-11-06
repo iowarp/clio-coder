@@ -24,6 +24,12 @@ export interface TargetHealth {
 	lastCheckAt: string | null;
 	lastError: string | null;
 	latencyMs: number | null;
+	/**
+	 * The last probe reached the server and it turned the stored credential
+	 * down (HTTP 401 or 403). A reachability failure never sets it, so a
+	 * caller can tell "replace the key" apart from "fix the address".
+	 */
+	credentialRefused?: boolean;
 }
 
 export interface TargetStatus {

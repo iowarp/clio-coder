@@ -1261,6 +1261,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * provider-failure paths) and RunAborted carries abort provenance to the
 	 * status reducer.
 	 */
+	/** An operator `/context compact` is between its start and its settled card. */
+	let operatorCompactionRunning = false;
+
 	const emitNotice = (
 		text: string,
 		level: ChatNoticeEvent["level"] = "info",
@@ -4229,6 +4232,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(`[/context compact] ${notConfiguredNotice(deps.getSettings().chat)}`);
 				return;
 			}
+			// A second request while one runs would join it and report the same ending twice, and drop its own instructions.
+			if (operatorCompactionRunning) {
+				emitNotice(
+					"[/context compact] a compaction is already running; its card reports how it ends. Run /context compact again after that if it is still needed.",
+					"warning",
+				);
+				return;
+			}
+			operatorCompactionRunning = true;
 			let compacted = false;
 			const paintCompaction = prepareCompactionPaint();
 			enterPreparation();
@@ -4255,6 +4267,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 				return;
 			} finally {
+				operatorCompactionRunning = false;
 				leavePreparation();
 				endPreparationCompaction();
 			}
