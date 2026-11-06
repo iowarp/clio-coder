@@ -201,7 +201,7 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 			[...order].sort((a, b) => a - b),
 		);
 		// A fresh session's first request re-prefills nothing. A recompiled memory section is named, and its re-prefill,
-		// min(uncached, previous prompt − cache read), is billed at the input rate less the cache-read rate.
+		// min(input + cache write, previous prompt − cache read), is billed at the input rate less the cache-read rate.
 		const counted = (value: unknown) => ({ kind: "measured", value, source: "local-count" });
 		const notApplicable = { kind: "absent", reason: "not-applicable" };
 		deepStrictEqual(sent.cache.firstDivergentSection, notApplicable);
@@ -210,7 +210,10 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		const value = (fact: { kind: string; value?: unknown } | undefined) =>
 			fact?.kind === "measured" ? Number(fact.value) : NaN;
 		const previousPrompt = value(sent.usage?.input) + value(sent.usage?.cacheRead) + value(sent.usage?.cacheWrite);
-		const rePrefilled = Math.min(value(recompiled.usage?.input), previousPrompt - value(recompiled.usage?.cacheRead));
+		const rePrefilled = Math.min(
+			value(recompiled.usage?.input) + value(recompiled.usage?.cacheWrite),
+			previousPrompt - value(recompiled.usage?.cacheRead),
+		);
 		ok(rePrefilled > 0, JSON.stringify([sent.usage, recompiled.usage]));
 		deepStrictEqual(recompiled.cache.firstDivergentSection, counted("memory"));
 		deepStrictEqual(recompiled.cache.rePrefilledTokens, counted(rePrefilled));

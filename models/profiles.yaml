@@ -250,6 +250,35 @@ models:
       runtimeSources:
         - https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
         - https://docs.litellm.ai/docs/providers/openai_compatible
+  - id: nemotron-3.5-bolt-74b-a9b
+    match:
+      exactIds:
+        - nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB
+        - nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16
+      familyPrefixes:
+        - nvidia-nemotron-3.5-bolt-74b-a9b
+        - nemotron-3.5-bolt-74b-a9b
+    claims:
+      modelMaxContext: 262144
+      capabilities:
+        chat: true
+        tools: true
+        toolCallFormat: qwen
+        reasoning: true
+        thinkingFormat: qwen-chat-template
+        vision: true
+        audio: false
+    recommendations:
+      outputTokens: 16384
+    provenance:
+      source: upstream-model-card
+      url: https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB
+      retrieved: 2026-11-06
+      notes: The card serves up to 256K context (vLLM --max-model-len 262144), takes image, video and text and
+        returns text, parses tools with qwen3_coder, and switches reasoning with the enable_thinking chat-template
+        kwarg. Reasoning and the final answer share max_tokens, and the card's client examples send 16384 and treat
+        a length finish as an error, so outputTokens 16384 is the runaway guard after a 169,506-token run; it is not
+        a model output maximum. Sampling is left unset here.
   - id: qwen3.5-4b
     match:
       exactIds:
