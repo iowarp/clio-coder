@@ -222,6 +222,12 @@ Route history is a fold too ([route-history.ts](../../src/domains/telemetry/rout
 
 Decisions are a fold as well: `accountabilityRecords` reads `tool.decided`, `approval.requested`, `approval.resolved`, `completion.evaluated`, `safety.judged`, `gate.decided` and the memory decisions from a session's journal and the run journals it references, which is what `/view`'s decision list, `clio-coder usage report` and the GUI show. There is no separate audit log.
 
+### Insights and cost per verified outcome
+
+`clio-coder telemetry insights` ([telemetry-insights.ts](../../src/cli/telemetry-insights.ts)) folds each recorded session of a project into one research task category and an autonomy level from 1 to 5, then prints the category mix, the autonomy distribution and the share of sessions with a verified outcome. The classifier ([insights.ts](../../src/domains/telemetry/insights.ts)) is fixed rules, a heuristic that says so in its output. It reads only `tool.settled`, `approval.requested`, `approval.resolved`, `message.stepped`, `run.settled`, `config.snapshotted` and `config.changed`, a list typed against the registry so that adding a content-bearing or research kind fails typecheck, plus the settings object a config record cites. Worker runs are counted from the run journals the session references, one per run, readable or not. An MCP capability counts toward a category by its server name, such as an HDF5 or Parquet server for data analysis or a Slurm server for design and development. The verified-outcome share reads the session ledger through `outcomeLedgerProjection`, which keeps check verdicts, payload digests, run ids and task statuses and copies no text. Nothing leaves the machine. The categories, scoring and known confusions are in [research insights](../guide/commands-and-modes.md#research-insights).
+
+The exit summary's `Verified` row and the `/usage` Session view divide the session's processed tokens (input, output, cache read and cache write) and its cost by its verified outcomes ([verified-outcomes.ts](../../src/domains/evidence/verified-outcomes.ts)). An outcome is a passing `reproduce` or `numeric-compare` check, a worker run whose sealed record says host verification passed, or a board task done with every required check observed passing; a worker run whose host checks only repeat a pass already counted folds into that pass. The divided totals are the read model's own folds, so a lower bound, an estimate or an unpriced spend keeps its mark per outcome. The wording is in [exit summary](../guide/commands-and-modes.md#exit-summary).
+
 ## Honest values
 
 A fact is one of four shapes ([fact.ts](../../src/core/telemetry/fact.ts)):
@@ -240,10 +246,10 @@ Cost is a `Pricing`: `usd` is a `Fact<number>`, `pricedBy` says where the rates 
 1. A target's declared `pricing` rate map gives `target-rates`, or `free` (`zero-rates`) when every declared rate is 0. An omitted `cacheRead` or `cacheWrite` counts as 0.
 2. `pricing: free` gives `free` (`declared`).
 3. A runtime whose tier is `local-native` (`llamacpp` and its variants, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`) gives `free` (`local-native`).
-4. A Pi catalog entry for the runtime's catalog provider and wire model gives `catalog`, with an estimated amount.
+4. A Clio catalog row for the runtime and wire model, or else a Pi catalog entry for the runtime's catalog provider and wire model, gives `catalog`, with an estimated amount.
 5. Otherwise `pricedBy` is `none` and the amount is unknown.
 
-A runtime that reports its own cost is priced `provider`. Protocol-tier runtimes (`litellm`, `openai-compat`, `anthropic-compat`, `systemone`) can front paid models, so they stay unpriced until a target declares pricing. The session cost ceiling `safety.limits.sessionCostUsd` (default 5) checks the session's priced spend from the read model, and a value of 0 means no ceiling ([configuration-and-targets.md](../guide/configuration-and-targets.md)).
+The renderer names the rule behind a free amount: only `local-native` reads `$0.00 local`, while the other two read `$0.00 free (declared)` and `$0.00 free (zero-rates)`, so a target declared free never reads as local ([render.ts](../../src/core/telemetry/render.ts)). A runtime that reports its own cost is priced `provider`. Protocol-tier runtimes (`litellm`, `openai-compat`, `anthropic-compat`, `systemone`) can front paid models, so they stay unpriced until a target declares pricing. The session cost ceiling `safety.limits.sessionCostUsd` (default 5) checks the session's priced spend from the read model, and a value of 0 means no ceiling ([configuration-and-targets.md](../guide/configuration-and-targets.md)).
 
 | Disposition | Meaning | Usage |
 | --- | --- | --- |
@@ -276,6 +282,7 @@ The journal events, grouped by subject. The registry in [events.ts](../../src/co
 | `job.clock_resumed` | accountability | content-free | A job's default timeout stopped its final run or follow-up and the job continues it at yolo, with the job id and the bound that fired. |
 | `turn.continued` | accountability | content-free | A turn stopped with nobody behind it and gets another one at yolo, with the cause, the continuations spent against the cap, the cap and the job id when a job owns it. A `tool_budget`, `job_exhausted` or `polls_failing` cause spends none. |
 | `compaction.settled` | accountability | content-free | A compaction's calls and its outcome. |
+| `message.stepped` | accountability | content-free | Each step of a submitted message's path, from `submitted` through `queued`, `held`, `released`, `lane-changed`, `handed-over`, `returned` or `removed` to the call that `carried` it, with who sent it (`operator` or `machine`), its lane and its length, never its text. |
 | `session.opened`, `session.resumed`, `session.forked`, `session.parked`, `session.closed` | accountability | content-free | Session lifecycle. A fork records its parent in the child's `session.forked`; a lineage fold reads each ancestor's journal and counts each record and attempt once. |
 | `session.sealed`, `run.sealed`, `process.sealed`, `share.sealed` | accountability | content-free | A scope's seal, and the reseal a shared scope carries. |
 | `journal.gap`, `journal.segment_closed` | accountability | content-free | Lost, refused or filtered records by reason, and why a segment closed. |
