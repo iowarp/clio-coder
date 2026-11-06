@@ -381,8 +381,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
 	});
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
-	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } =
-		deps.workspaceFacts;
+	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } = deps.workspaceFacts;
 	/**
 	 * The submit binding as the operator has it, or null when it is unbound or
 	 * disabled. The header prints a key only when pressing it would actually
