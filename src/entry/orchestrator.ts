@@ -403,7 +403,7 @@ import { emitApproval } from "../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import {
-	boundKeyLabel,
+	actionKeyLabel,
 	detectPlatformKeybindingWarnings,
 	detectTerminalKeySupport,
 	formatInvalidKeybindingNotice,
@@ -4563,7 +4563,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				enabled: () => getCurrentSettings().interface.demo,
 				autonomy: () => resolveEffectiveAutonomy(),
 				keyFor: (actionId) =>
-					Object.hasOwn(CLIO_KEYBINDINGS, actionId) ? boundKeyLabel(actionId as ClioKeybinding) : null,
+					Object.hasOwn(CLIO_KEYBINDINGS, actionId) ? actionKeyLabel(actionId as ClioKeybinding) : null,
 				hasProjectContext: () => existsSync(join(process.cwd(), "CLIO-CODER.md")),
 				contextPressure: () => {
 					const ledger = chat.contextLedger();

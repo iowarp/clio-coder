@@ -204,12 +204,14 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 	});
 	try {
 		match(manager.actionLabel("clio-coder.notifications.dismiss"), /Ctrl\+N/u);
-		match(manager.actionLabel("clio-coder.model.select"), /Alt\+G M/u);
-		match(footerKeyHint(0, false, Number.POSITIVE_INFINITY, "idle") ?? "", /Ctrl\+M Model picker/u);
+		strictEqual(manager.actionLabel("clio-coder.model.select"), "Ctrl+M");
+		strictEqual(manager.fullActionLabel("clio-coder.model.select"), "Ctrl+M · Alt+G M");
+		strictEqual(manager.actionLabel("clio-coder.autonomy.toggle"), "Alt+G Y");
+		match(footerKeyHint(0, false, Number.POSITIVE_INFINITY, "idle") ?? "", /Ctrl\+M Model\b/u);
 		const state = footerState();
 		state.demo = false;
 		state.session.leaderArmed = true;
-		const queue = createFollowUpQueuePanel({ getDequeueKey: () => manager.actionLabel("clio-coder.message.dequeue") });
+		const queue = createFollowUpQueuePanel({ getNavigateKey: () => manager.actionLabel("clio-coder.queue.open") });
 		queue.setMessages([{ id: "q1", enqueuedAt: 0, kind: "follow-up", text: "inspect this" }]);
 		const notice = {
 			id: "warning",
@@ -223,7 +225,7 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 			const compact = renderCompactDashboard(state, width);
 			match(compact.map(stripTerminalSequences).join("\n"), /Alt\+G → choose key/u);
 			const queued = queue.render(width);
-			match(queued.map(stripTerminalSequences).join("\n"), /\[Alt\+Q · Alt\+G Q\] all to editor/u);
+			match(queued.map(stripTerminalSequences).join("\n"), /\[Alt\+Q\] review, a restores all/u);
 			state.session.leaderArmed = false;
 			state.notices = [notice];
 			const badge = renderCompactDashboard(state, width);
@@ -232,7 +234,7 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 			});
 			match(badge.map(stripTerminalSequences).join("\n"), new RegExp(GLYPH.warn));
 			match(panel.map(stripTerminalSequences).join("\n"), new RegExp(GLYPH.warn));
-			match(panel.map(stripTerminalSequences).join("\n"), /Ctrl\+N · Alt\+G X dismiss/u);
+			match(panel.map(stripTerminalSequences).join("\n"), /Ctrl\+N dismiss/u);
 			state.session.leaderArmed = true;
 			state.notices = [];
 			for (const line of [...compact, ...queued, ...badge, ...panel]) {

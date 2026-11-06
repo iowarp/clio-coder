@@ -64,6 +64,7 @@ export const coreTests = [
 	"plugin-engine",
 	"claims-ledger",
 	"cli-leaf-help",
+	"keyboard-model",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

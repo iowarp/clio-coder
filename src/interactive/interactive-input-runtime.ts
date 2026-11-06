@@ -67,6 +67,8 @@ export interface InteractiveInputRuntimeDeps {
 		leaderTargets(): ReadonlyArray<LeaderTarget>;
 		getKeys?(id: Keybinding): ReadonlyArray<string>;
 		getDescription?(id: Keybinding): string;
+		getLabel?(id: Keybinding): string;
+		actionLabel?(id: Keybinding): string;
 		onReload?(listener: () => void): () => void;
 	};
 	dispatchAction: (id: ClioKeybinding, deps: InteractiveInputKeyActionDeps) => boolean;
@@ -256,7 +258,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			if (entry.id === undefined) return entry;
 			return {
 				...entry,
-				label: deps.keybindings.getDescription?.(entry.id) ?? entry.id,
+				label: deps.keybindings.getLabel?.(entry.id) ?? deps.keybindings.getDescription?.(entry.id) ?? entry.id,
 				...(entry.id === "clio-coder.thinking.cycle" &&
 				deps.actions.availableThinkingLevels().every((level) => level === "off")
 					? { disabledReason: "Not adjustable on this model" }

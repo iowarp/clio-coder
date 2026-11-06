@@ -17,7 +17,7 @@ import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { dispatchBoardItems, renderDispatchActivity, runTableRows } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
-import { formatKeyLabel } from "../keybinding-manager.js";
+import { actionKeyLabel, formatKeyLabel } from "../keybinding-manager.js";
 import type { QuotaProviders } from "../quota-view.js";
 import { quotaAccountRows, routeWeeklyQuota } from "../quota-view.js";
 import {
@@ -286,11 +286,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		}
 	}
 	if (listed.length < history.length) {
-		const boardKey =
-			getKeybindings()
-				.getKeys("clio-coder.dispatchBoard.toggle")
-				.map((key) => formatKeyLabel(key))
-				.join("/") || "Workers shortcut";
+		const boardKey = actionKeyLabel("clio-coder.dispatchBoard.toggle") ?? "/fleet";
 		lines.push(
 			theme.fg("annotation", `${history.length - listed.length} more finished runs · ${boardKey} for full history`),
 		);
@@ -807,11 +803,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const otherNotices = notice
 		? liveNotices.filter((entry) => entry !== notice && (entry.expiresAt === null || entry.expiresAt > state.now)).length
 		: 0;
-	const key =
-		getKeybindings()
-			.getKeys("clio-coder.status.toggle")
-			.map((key) => formatKeyLabel(key))
-			.join("/") || "Dashboard";
+	const key = actionKeyLabel("clio-coder.status.toggle") ?? "Dashboard";
 	const leaderKey = formatKeyLabel(getKeybindings().getKeys("clio-coder.leader")[0], "");
 	const urgent = state.session.shutdownArmed
 		? typeof state.session.shutdownArmed === "string"
