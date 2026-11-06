@@ -9,6 +9,7 @@ const closed = { additionalProperties: false };
 
 export {
 	ACP_INTERVIEW_CANCEL_METHOD as INTERVIEW_CANCEL_METHOD,
+	ACP_INTERVIEW_META_KEY as INTERVIEW_META_KEY,
 	ACP_INTERVIEW_REQUEST_METHOD as INTERVIEW_REQUEST_METHOD,
 } from "./wire.js";
 /** Additive ACP bridge. The current runtime must opt in before the GUI enables it. */
@@ -38,6 +39,8 @@ export const InterviewRequest = Type.Object(
 		sessionId: Id,
 		interviewId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 		questions: Type.Array(InterviewQuestion, { minItems: 1, maxItems: 4 }),
+		// ACP extension data, e.g. `clio-coder/interview` naming an operator_only round.
+		_meta: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 	},
 	closed,
 );
@@ -52,6 +55,12 @@ export const InterviewRound = Type.Object(
 		requestedAt: Type.String(),
 		interviewId: Type.Optional(Type.String({ maxLength: 128 })),
 		questions: Type.Array(InterviewQuestion, { minItems: 1, maxItems: 4 }),
+		/**
+		 * Present only when the runtime marked the round operator_only
+		 * (`_meta["clio-coder/interview"].operatorOnly`): the choice is the
+		 * operator's own, and no agent or policy answers it in their place.
+		 */
+		operatorOnly: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );

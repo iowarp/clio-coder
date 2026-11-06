@@ -31,6 +31,7 @@ export const coreTests = [
 	"worker-permit",
 	"worker-refusal-limit",
 	"job-tool",
+	"judge-screen-park-surfaces",
 	"acp-v1-basics",
 	"configure-routing",
 	"mcp-config-trust",
@@ -41,11 +42,18 @@ export const coreTests = [
 	"plugin-engine",
 	"bootstrap-grounding",
 	"enforcement-inventory",
+	"in-prefix-summary",
+	"packed-source-directory",
+	"skill-frontmatter-cache",
+	"fleet-run-history-prime",
+	"approval-card-arguments",
+	"copilot-sdk-route",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
 	"chat-composer",
 	"chat-approval",
+	"chat-interview",
 	"chat-turns",
 	"egress-policy",
 	"sessions-http",

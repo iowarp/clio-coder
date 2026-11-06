@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { settingsPath, updateSettings } from "../core/config.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import { detectCopilotLogin } from "../domains/providers/copilot-setup.js";
 import { isOrchestratorEligibleRuntime } from "../domains/providers/eligibility.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -25,6 +26,8 @@ export interface DetectedChatRoute {
 	runtime: RuntimeDescriptor;
 	target: TargetDescriptor;
 	model?: string;
+	/** A Copilot route whose account has not consented yet: offered, never adopted without asking. */
+	needsConsent?: boolean;
 }
 
 /**
@@ -151,6 +154,20 @@ export async function detectChatRoutes(
 			...(model ? { model } : {}),
 		});
 	}
+	const copilot = runtimes.find((entry) => entry.id === "copilot-sdk");
+	if (copilot && !settings.targets.some((target) => target.runtime === copilot.id)) {
+		const login = await detectCopilotLogin(3_000);
+		if (login) {
+			const target = buildDescriptor(copilot, deriveTargetId(copilot.id, settings.targets), { model: login.model });
+			routes.push({
+				source: `copilot login (${login.account.login})`,
+				runtime: copilot,
+				target,
+				model: login.model,
+				...(login.consented ? {} : { needsConsent: true }),
+			});
+		}
+	}
 	const served = await localModels(readJson);
 	for (const [id] of Object.entries(DEFAULT_PORTS)) {
 		const runtime = runtimes.find((entry) => entry.id === id);
@@ -211,6 +228,7 @@ export async function adoptDetectedChatRoute(settings: Readonly<ClioSettings>): 
 	const found = (await detectChatRoutes(settings)).find(
 		(candidate) =>
 			candidate.model &&
+			candidate.needsConsent !== true &&
 			(memoryTarget === undefined ||
 				(candidate.target.id !== memoryTarget.id &&
 					(memoryTarget.url === undefined || candidate.target.url !== memoryTarget.url))),

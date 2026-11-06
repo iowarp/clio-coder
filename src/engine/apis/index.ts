@@ -1,4 +1,6 @@
+import { registerEngineSessionCleanup } from "../ai.js";
 import { registerEngineApiProvider } from "../api-registry.js";
+import { copilotSdkApiProvider, disposeCopilotConversations } from "../copilot/stream.js";
 import { ollamaNativeApiProvider } from "./ollama-native.js";
 import { openAICompletionsApiProvider } from "./openai-completions.js";
 
@@ -13,4 +15,7 @@ export function registerClioApiProviders(): void {
 	registered = true;
 	registerEngineApiProvider(openAICompletionsApiProvider, "clio");
 	registerEngineApiProvider(ollamaNativeApiProvider, "clio");
+	registerEngineApiProvider(copilotSdkApiProvider, "clio");
+	// A call without a session id used the "default" conversation key.
+	registerEngineSessionCleanup((sessionId) => disposeCopilotConversations(sessionId ?? "default"));
 }

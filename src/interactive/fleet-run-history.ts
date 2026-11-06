@@ -88,8 +88,10 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
  * This project's newest settled worker runs, for a board whose process never saw them (J2-F16). The telemetry
  * projection behind the board folds only this process's bus, so after a restart the workers vanished while the plans,
  * read from their durable roots, stayed. A malformed row costs itself, never the board.
+ *
+ * Yields once per run read, each a journal read that can take 10 ms or more, so a caller may turn the loop between them.
  */
-export function readDurableWorkerRuns(cwd: string, worktreeRoot?: string): DispatchBoardRow[] {
+function* durableWorkerRunRows(cwd: string, worktreeRoot: string | undefined): Generator<void, DispatchBoardRow[]> {
 	const ownership = dispatchOwnership({ sessionId: null, cwd, ...(worktreeRoot !== undefined ? { worktreeRoot } : {}) });
 	const settled = openLedger()
 		.list()
@@ -108,6 +110,7 @@ export function readDurableWorkerRuns(cwd: string, worktreeRoot?: string): Dispa
 		if (!ownership.inProject(run.cwd)) continue;
 		const status = SETTLED_STATUS[run.status];
 		if (status === undefined) continue;
+		yield;
 		try {
 			rows.push(historyRow(run, status));
 		} catch {
@@ -115,4 +118,47 @@ export function readDurableWorkerRuns(cwd: string, worktreeRoot?: string): Dispa
 		}
 	}
 	return rows;
+}
+
+/** Rows read ahead of the interactive build, taken once by the read they were primed for. */
+let primedRuns: { cwd: string; worktreeRoot: string | undefined; rows: DispatchBoardRow[] } | null = null;
+
+/**
+ * Read the durable worker rows while the Stage 0 shell takes keys, a loop turn between runs, so the board's first
+ * read during the interactive build finds them instead of reading every run's journal in one block. A stop through
+ * `signal` leaves nothing primed and the board reads as before.
+ */
+export async function primeDurableWorkerRuns(
+	cwd: string,
+	worktreeRoot: string | undefined,
+	nextTurn: () => Promise<void>,
+	signal?: AbortSignal,
+): Promise<void> {
+	primedRuns = null;
+	try {
+		const steps = durableWorkerRunRows(cwd, worktreeRoot);
+		for (;;) {
+			// Checked before every read and so before publishing: a stopped boot reads no further and primes nothing.
+			if (signal?.aborted) return;
+			const step = steps.next();
+			if (step.done) {
+				primedRuns = { cwd, worktreeRoot, rows: step.value };
+				return;
+			}
+			await nextTurn();
+		}
+	} catch {
+		// An unreadable ledger primes nothing; the board's own read handles it.
+	}
+}
+
+export function readDurableWorkerRuns(cwd: string, worktreeRoot?: string): DispatchBoardRow[] {
+	const primed = primedRuns;
+	primedRuns = null;
+	if (primed !== null && primed.cwd === cwd && primed.worktreeRoot === worktreeRoot) return primed.rows;
+	const steps = durableWorkerRunRows(cwd, worktreeRoot);
+	for (;;) {
+		const step = steps.next();
+		if (step.done) return step.value;
+	}
 }

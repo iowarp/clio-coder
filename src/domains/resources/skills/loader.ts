@@ -31,6 +31,7 @@ import { readRootEntries, splitToolList, splitYamlFrontmatter, stringField } fro
 import { resolvePackageReferences } from "../package-references.js";
 import { installedSkillNames } from "./availability.js";
 import { normalizedSkillHash } from "./content-hash.js";
+import { cachedFrontmatterParser, withFrontmatterCache } from "./frontmatter-cache.js";
 import { getMarketplaceSkills } from "./marketplace.js";
 
 const MAX_NAME_LENGTH = 64;
@@ -401,8 +402,11 @@ function clioConfigDirSafe(): string | null {
 	}
 }
 
-function splitSkillFrontmatter(raw: string): { frontmatter: Record<string, unknown>; body: string } {
-	const split = splitYamlFrontmatter(raw);
+function splitSkillFrontmatter(
+	raw: string,
+	parseText?: (text: string) => unknown,
+): { frontmatter: Record<string, unknown>; body: string } {
+	const split = splitYamlFrontmatter(raw, parseText);
 	if (!split.ok && split.reason === "missing") {
 		throw new Error("skill file is missing YAML frontmatter");
 	}
@@ -774,7 +778,7 @@ function describeFileType(stat: Stats): string {
  * that never returns, and the type check and the read see the same file with
  * no stat-then-open window between them.
  */
-function readRegularSkillFile(filePath: string): { bytes: Buffer; size: number } {
+function readRegularSkillFile(filePath: string): { bytes: Buffer; size: number; mtimeMs: number } {
 	const fd = openSync(filePath, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
 	try {
 		const stat = fstatSync(fd);
@@ -791,7 +795,7 @@ function readRegularSkillFile(filePath: string): { bytes: Buffer; size: number }
 		}
 		// The read stops one byte past the limit, so the over-limit diagnostic
 		// takes the file's own size to name what the operator actually has.
-		return { bytes: Buffer.concat(chunks, total), size: Math.max(stat.size, total) };
+		return { bytes: Buffer.concat(chunks, total), size: Math.max(stat.size, total), mtimeMs: stat.mtimeMs };
 	} finally {
 		closeSync(fd);
 	}
@@ -804,8 +808,9 @@ function loadSkillFile(
 	const diagnostics: ResourceDiagnostic[] = [];
 	let bytes: Buffer;
 	let size: number;
+	let mtimeMs: number;
 	try {
-		({ bytes, size } = readRegularSkillFile(filePath));
+		({ bytes, size, mtimeMs } = readRegularSkillFile(filePath));
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return {
@@ -853,7 +858,7 @@ function loadSkillFile(
 
 	let parsed: { frontmatter: Record<string, unknown>; body: string };
 	try {
-		parsed = splitSkillFrontmatter(raw);
+		parsed = splitSkillFrontmatter(raw, cachedFrontmatterParser(filePath, { mtimeMs, size }));
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return { candidate: null, diagnostics: [{ type: "warning", message: reason, path: filePath }] };
@@ -1186,7 +1191,7 @@ function requiresDiagnostics(winners: ReadonlyArray<Skill>): ResourceDiagnostic[
 
 /** One catalog load verifies each installed plugin tree once, however many roots consult it. */
 export function loadSkills(input: LoadSkillsInput = {}): SkillList {
-	return withPluginDiscoveryPass(() => loadSkillsInPass(input));
+	return withPluginDiscoveryPass(() => withFrontmatterCache(() => loadSkillsInPass(input)));
 }
 
 function loadSkillsInPass(input: LoadSkillsInput): SkillList {
