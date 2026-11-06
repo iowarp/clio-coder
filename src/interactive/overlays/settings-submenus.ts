@@ -1,5 +1,12 @@
 import type { Component } from "../../engine/tui.js";
-import { getKeybindings, Input, isKeyRelease, matchesKey, truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import {
+	getKeybindings,
+	Input,
+	isKeyRelease,
+	matchesKey,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
 import type { HintEntry, RowBudgetedBody } from "../overlay-frame.js";
 import { clioTheme, errorState, GLYPH, positionRow, selectionRow, titleRow } from "../theme/index.js";
@@ -210,7 +217,8 @@ export class SubmenuWrapper implements Component, RowBudgetedBody {
 		const style = (lines: string[]): string[] =>
 			lines.map((line) => theme.base(child instanceof Input ? "inputText" : "menuOption", line));
 		budget(0);
-		if (this.rows <= 0) return [head, ...note, ...(note.length > 0 ? [""] : []), ...style(child.render(safe)), ...problem];
+		if (this.rows <= 0)
+			return [head, ...note, ...(note.length > 0 ? [""] : []), ...style(child.render(safe)), ...problem];
 		const natural = child.render(safe).length;
 		let left = Math.max(0, this.rows - 1 - problem.length);
 		const bodyFloor = Math.min(natural, left, 3);

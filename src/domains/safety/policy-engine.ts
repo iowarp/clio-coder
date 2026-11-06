@@ -2043,7 +2043,9 @@ function evaluateBashPolicy(
 			kind: "ask",
 			ruleId: "bash-command-substitution",
 			reasonCode: "bash-command-substitution",
-			reasons: ["command substitution hides what will actually run from the safety net, so each such command needs your approval"],
+			reasons: [
+				"command substitution hides what will actually run from the safety net, so each such command needs your approval",
+			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
 		};

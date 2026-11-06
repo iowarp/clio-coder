@@ -549,7 +549,9 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 	if (!item.readOnly && meaning) facts.push(chip(theme, meaning, "neutral"));
 	if (context.homeLabel !== undefined) facts.push(chip(theme, `in ${context.homeLabel}`, "muted"));
 	if (context.pinnable && context.pinned)
-		facts.push(chip(theme, context.rowKeysLive ? `${GLYPH.favorite} pinned · p unpins` : `${GLYPH.favorite} pinned`, "muted"));
+		facts.push(
+			chip(theme, context.rowKeysLive ? `${GLYPH.favorite} pinned · p unpins` : `${GLYPH.favorite} pinned`, "muted"),
+		);
 	else if (context.pinnable && context.rowKeysLive) facts.push(chip(theme, "p pins", "muted"));
 	return facts;
 }

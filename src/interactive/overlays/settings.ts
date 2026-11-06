@@ -1266,10 +1266,30 @@ function controlTextSubmenu(control: SettingControl, live: () => Readonly<ClioSe
  */
 function valueProblem(error: unknown): string {
 	if (error instanceof SettingsValidationError && error.issues.length > 0) {
-		const reasons = error.issues.map((issue) => issue.message);
+		const reasons = error.issues.map((issue) => plainValueReason(issue.message));
 		return `Not accepted: ${reasons.join("; ")}. The setting is unchanged.`;
 	}
 	return error instanceof Error ? error.message : String(error);
+}
+
+/** The validator's `expected a number >= 0, got -3` in the operator's words: `it must be 0 or more, and -3 is not`. */
+function plainValueReason(message: string): string {
+	const bound = /^expected a number (>=|<=|>|<) (\S+), got (.+)$/u.exec(message);
+	if (bound) {
+		const [, op, limit, got] = bound;
+		const words =
+			op === ">="
+				? `${limit} or more`
+				: op === "<="
+					? `${limit} or less`
+					: op === ">"
+						? `more than ${limit}`
+						: `less than ${limit}`;
+		return `it must be ${words}, and ${got} is not`;
+	}
+	const kind = /^expected a number, got (.+)$/u.exec(message);
+	if (kind) return `it must be a number, and ${kind[1]} is not`;
+	return message;
 }
 
 function commonControlItem(control: SettingControl, live: () => Readonly<ClioSettings>): SettingsCenterItem {
@@ -3301,7 +3321,7 @@ export class SettingsCenter implements Component {
 				},
 			submenu !== null && {
 				verb: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "back to list",
-				short: submenu instanceof SubmenuWrapper && submenu.editsText ? "back, keeps draft" : "to list",
+				short: submenu instanceof SubmenuWrapper && submenu.editsText ? "back" : "to list",
 				back: () => {
 					// A text editor hears its own Esc, which is what keeps the typed draft for the next visit.
 					if (submenu instanceof SubmenuWrapper && submenu.editsText) submenu.handleInput("\x1b");
@@ -3689,11 +3709,7 @@ export class SettingsCenter implements Component {
 			this.submenuComponent = null;
 			this.options.requestRender?.();
 		};
-		const wrapper = new SubmenuWrapper(
-			"Change not saved",
-			list,
-			[{ key: "Enter", verb: "choose" }],
-		);
+		const wrapper = new SubmenuWrapper("Change not saved", list, [{ key: "Enter", verb: "choose" }]);
 		wrapper.setProblem(valueProblem(error));
 		this.submenuComponent = wrapper;
 		this.options.requestRender?.();
@@ -3761,12 +3777,7 @@ export class SettingsCenter implements Component {
 		})();
 		const affected = [...new Set(plan.leaves.map((leaf) => settingsPathLabel(leaf.path)))];
 		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} · ${plan.impact}`;
-		const card = new SubmenuWrapper(
-			title,
-			list,
-			[{ key: "Enter", verb: "choose" }],
-			note,
-		);
+		const card = new SubmenuWrapper(title, list, [{ key: "Enter", verb: "choose" }], note);
 		// Esc backs out one layer, to the value being reviewed; only the Cancel row ends the change.
 		if (back !== undefined) card.escape = back;
 		this.submenuComponent = card;

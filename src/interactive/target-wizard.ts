@@ -397,9 +397,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 			const inline = `${selectionMark(false)} ${selectionLabel(false, label)}${theme.fg("annotation", ` · ${hint}`)}`;
 			const showHint =
 				hint.length > 0 && !hint.toLowerCase().startsWith(label.toLowerCase()) && visibleWidth(inline) <= width;
-			out.push(
-				selected || !showHint ? `${selectionMark(selected)} ${selectionLabel(selected, label)}` : inline,
-			);
+			out.push(selected || !showHint ? `${selectionMark(selected)} ${selectionLabel(selected, label)}` : inline);
 			if (selected) for (const row of hintRows) out.push(`    ${theme.fg("annotation", row)}`);
 		}
 		if (windowed) {
