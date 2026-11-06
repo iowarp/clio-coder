@@ -239,7 +239,7 @@ export function providerFailureHeadline(route: ProviderFailureRoute): string | n
  * name: the server's model slots are full and Clio may not free one. The second pane of a two-Clio residency run read
  * `Cold-b failed its last request` with the reason only in the transcript.
  */
-export function admissionRailCause(reason: string | undefined, errorClass: string): ProviderFailureRailFact {
+function admissionRailCause(reason: string | undefined, errorClass: string): ProviderFailureRailFact {
 	const text = reason ?? "";
 	const held = /holds (\d+) models? at a time/u.exec(text)?.[1];
 	if (held !== undefined || (/pinned/u.test(text) && /cannot load/u.test(text))) {

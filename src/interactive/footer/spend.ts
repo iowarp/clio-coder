@@ -1,4 +1,3 @@
-import { formatFooterTokens } from "../../core/display-units.js";
 import type { CallRowV1, FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
@@ -89,14 +88,12 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 }
 
 /**
- * The session's known tokens: measured plus Clio's estimates, marked `~` when any part is estimated. The measured part
- * alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252` for the same session.
+ * The session's tokens as the read model displays them, without the `+?` gap marker the row has no room to explain:
+ * the measured part alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252`.
  */
 function knownSessionCount(quantity: Quantity): string | null {
-	const fact = quantity.fact;
-	if ("kind" in fact) return fact.kind === "estimated" ? `~${formatFooterTokens(fact.value)}` : measuredCount(quantity);
-	if (fact.coverage.estimated === 0) return measuredCount(quantity);
-	return `~${formatFooterTokens(fact.measured + fact.estimated)}`;
+	const figure = renderCompactCount(quantity.fact).replace(/ \+\?$/u, "");
+	return figure === "?" || figure === "n/a" ? null : figure;
 }
 
 export function footerTelemetry(view: TelemetryView | null | undefined): FooterTelemetry {
