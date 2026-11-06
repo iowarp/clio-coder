@@ -3093,6 +3093,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	extensionReload.applyBoot();
 	middleware.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
+	if (lease) {
+		// The fleet board's history reads each earlier worker run's journal. Read it a run per loop turn while Stage 0
+		// takes keys, here, before the chat loop starts producers whose notices reach only the built application.
+		const [{ primeDurableWorkerRuns }, { nextTurn }] = await Promise.all([
+			import("../interactive/index.js"),
+			import("./stage1-preload.js"),
+		]);
+		const worktreeRoot = (config?.get() ?? readSettings()).fleet.worktrees.root;
+		await primeDurableWorkerRuns(process.cwd(), worktreeRoot, nextTurn, lease.abortSignal);
+	}
+	// A lease closed during priming stops boot here, before anything builds against it.
 	await bootPhaseBoundary?.();
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
@@ -5800,19 +5811,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dashboardPlugins = activePluginIds();
 	});
 	termination.onTerminate(() => unsubscribeDashboardPlugins());
-	const { primeDurableWorkerRuns, startInteractive } = await import("../interactive/index.js");
-	if (options.terminalLease) {
-		// The board's history reads each earlier worker run's journal; read it in slices while Stage 0 takes keys.
-		const { nextTurn } = await import("./stage1-preload.js");
-		await primeDurableWorkerRuns(
-			process.cwd(),
-			getCurrentSettings().fleet.worktrees.root,
-			nextTurn,
-			options.terminalLease.abortSignal,
-		);
-		// A lease closed during priming stops boot here; the shutdown that closed it owns the exit.
-		options.terminalLease.abortSignal.throwIfAborted();
-	}
+	const { startInteractive } = await import("../interactive/index.js");
 	await startInteractive({
 		jobs: jobHost.operations,
 		getConnections: () => ({
