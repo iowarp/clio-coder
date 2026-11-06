@@ -4,10 +4,19 @@ import {
 	registerBackgroundStream,
 	registerForegroundStream,
 } from "../endpoint-capacity.js";
+import type { TargetDescriptor } from "../types/target-descriptor.js";
 import { embeddingProfileIdentity } from "./profile.js";
 import { embedOpenAIInputs } from "./transport.js";
-import type { EmbeddingInput, EmbeddingRequest, EmbeddingRoute, EmbeddingService } from "./types.js";
+import type { EmbeddingInput, EmbeddingRequest, EmbeddingService } from "./types.js";
 import { EmbeddingError } from "./types.js";
+
+export interface EmbeddingRoute {
+	target: TargetDescriptor;
+	model: string;
+	/** Explicit qualified modalities; text is required. Video is intentionally unsupported. */
+	modalities: readonly ("text" | "image" | "audio" | "mixed")[];
+	authToken?: string;
+}
 
 export function createEmbeddingService(options: { route: EmbeddingRoute }): EmbeddingService {
 	let busy = false;
