@@ -221,7 +221,9 @@ describe("library inventory", () => {
 			const record = inventory.packages.find((item) => item.ref === "plugin:materio");
 			ok(record);
 			strictEqual(record.origin.kind, "bundled");
-			deepStrictEqual(record.copies, [{ scope: "user", state: "loadable" }]);
+			// Rows name the installed copy's version (af26a2aa2).
+			deepStrictEqual(record.copies, [{ scope: "user", state: "loadable", version: copy.version }]);
+			ok(copy.version);
 			deepStrictEqual(counts(record.provides as LibraryComponent[]), { skill: 6, agent: 6, prompt: 17, playbook: 1 });
 			deepStrictEqual(
 				(record.provides ?? []).filter((hint) => hint.kind === "agent").map((hint) => hint.name),
@@ -395,8 +397,8 @@ describe("library inventory", () => {
 				],
 			);
 			deepStrictEqual(inventory.packages[0]?.copies, [
-				{ scope: "project", state: "loadable" },
-				{ scope: "user", state: "shadowed" },
+				{ scope: "project", state: "loadable", version: "1.0.0" },
+				{ scope: "user", state: "shadowed", version: "1.0.0" },
 			]);
 			for (const copy of inventory.copies) deepStrictEqual(copy.origin, { kind: "local", path: source });
 			const owned = byOwner(inventory.resources, "plugin:twin");

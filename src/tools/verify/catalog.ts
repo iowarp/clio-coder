@@ -87,6 +87,11 @@ export interface DeclaredCheck {
 	numeric?: DeclaredNumericCompare;
 	perf?: DeclaredPerfBudget;
 	reproduce?: DeclaredReproduce;
+	/**
+	 * Repository-relative directory whose subdirectories are the runs of one sweep. A check that declares it judges
+	 * one run per call, named `<id>/<run>`, with the run directory appended to its argv; it is never run bare.
+	 */
+	runs?: string;
 }
 
 export interface DeclaredCheckSource extends DeclaredCheckSourceRef {
@@ -106,7 +111,7 @@ const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs"
  * keeps the original strict-conjunction, non-finite-fails judgement.
  */
 const KIND_FIELDS = [...new Set(["reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS])];
-const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", ...KIND_FIELDS]);
+const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "runs", ...KIND_FIELDS]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const SHELL_EXECUTABLES = new Set([
 	"bash",
@@ -471,9 +476,30 @@ export function parseProjectVerifierCatalogText(
 		if (tags instanceof Error) return catalogDiagnostic(tags.message);
 		const kindFields = validateCheckKind(value, location, version);
 		if (kindFields instanceof Error) return catalogDiagnostic(kindFields.message);
+		let runs: string | undefined;
+		if (Object.hasOwn(value, "runs")) {
+			// A perf-budget baseline times one fixed command, and a reproduce check runs in a clean environment holding
+			// only HEAD or its pinned inputs, where a run's outputs never exist; neither can judge one run of a sweep.
+			if (kindFields.kind === "perf-budget" || kindFields.kind === "reproduce") {
+				return catalogDiagnostic(`${location} kind '${kindFields.kind}' does not accept runs`);
+			}
+			const declared = validateRepositoryFile(value.runs, `${location}.runs`);
+			if (declared instanceof Error) return catalogDiagnostic(declared.message);
+			runs = declared;
+		}
 
 		ids.set(id, index);
-		checks.push({ id, description, command, cwd, timeoutMs, tags, source: { ...sourceRef }, ...kindFields });
+		checks.push({
+			id,
+			description,
+			command,
+			cwd,
+			timeoutMs,
+			tags,
+			source: { ...sourceRef },
+			...kindFields,
+			...(runs !== undefined ? { runs } : {}),
+		});
 	}
 	checks.sort((left, right) => compareCodepoints(left.id, right.id));
 	return { ok: true, source: { ...sourceRef, checks } };
