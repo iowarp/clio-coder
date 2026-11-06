@@ -58,7 +58,7 @@ needs a new review. Legacy records that lack content
 pins still use approval of the exact state-file bytes. Loaders also reverify
 each installed tree against its recorded digest.
 
-A new approval takes effect at `/extensions reload` or the next start. A revoked
+A new approval takes effect at `/extensions reload`, `r` in the `/extensions` list, or the next start. In that list `r` restarts every installed extension, after the current turn when one is running, and `v` puts the selected extension's command in the composer. A revoked
 or changed approval withdraws runtime authority when observed. The next tool
 call reports that the extension was disabled, removed, replaced or changed.
 
@@ -200,7 +200,7 @@ Runtime tools are served by the live runtime: registering one never runs package
 
 ### Interface
 
-UI is bounded data. The host draws everything and maps tones to theme roles. An extension supplies no color, control sequence or component. A view is a tree of `box`, `text`, `markdown`, `kv`, `table`, `list`, `steps`, `board`, `tree`, `progress`, `spark`, `badge`, `actions`, `art`, `divider` and `spacer` nodes, at most 6 levels deep and 400 nodes. A view outside those bounds is dropped whole. `status` is one line of 160 characters with an optional tone, `band` is at most 3 rows above the prompt, `card` at most 24 rows, and `toast` 200 characters. `dock` is a side dock, and a `panel` holds the overlay. The footer shows each owner's status with host-assigned labels, and core activity and permission cues keep ownership. The permission prompt cannot be redrawn. `clio-coder extensions view --watch <frame-file> [--dock-taps <tap-file>]` previews a frame while you author.
+UI is bounded data. The host draws everything and maps tones to theme roles. An extension supplies no color, control sequence or component. A view is a tree of `box`, `text`, `markdown`, `kv`, `table`, `list`, `steps`, `board`, `tree`, `progress`, `spark`, `badge`, `actions`, `art`, `divider` and `spacer` nodes, at most 6 levels deep and 400 nodes. A view outside those bounds is dropped whole. `status` is one line of 160 characters with an optional tone, `band` is at most 3 rows above the prompt, `card` at most 24 rows, and `toast` 200 characters. `dock` is a side dock, and a `panel` holds the overlay. The footer shows the status of each owner that has no band, with host-assigned labels, because a band already states its piece above the prompt on every frame ([registry.ts](../../src/interactive/surfaces/registry.ts)). A band's `actions` are pressed through the leader menu as `<leader> 1` to `<leader> 9`, numbered by extension id and then by each band's action order, so only the first nine are reachable. Core activity and permission cues keep ownership. The permission prompt cannot be redrawn. `clio-coder extensions view --watch <frame-file> [--dock-taps <tap-file>]` previews a frame while you author.
 
 ### Workspaces and skins
 
