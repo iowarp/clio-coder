@@ -293,7 +293,7 @@ def markdown(report: dict) -> str:
         cells = [
             str(row["rank"]), row["id"], row["statement"] or "", row["prediction"] or "", row["data"] or "",
             row["cost"] or "", row["time"] or "", str(row["physicalSteps"]), row["successCriterion"] or "-",
-            "needs confirmation" if row["hazard"] else "-",
+            "flagged" if row["hazard"] else "-",
         ]
         lines.append("| " + " | ".join(str(cell).replace("|", "\\|").replace("\n", " ") for cell in cells) + " |")
     lines.append("")

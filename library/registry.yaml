@@ -454,7 +454,7 @@ entries:
       server needs one online launch to install."
     version: 0.2.0
     sourceUrl: plugins/literature
-    sha256: 70e04eee37981318d4c2cd386d1eb4cb1f7917b2d2f5c6e23669b3fc25671a60
+    sha256: eecfe74737f0c6e9c3890b9b33af6ee42b5d021363abc9216f7d23d8c8b720fb
     requires:
       - skill:arxiv-literature
     provides:

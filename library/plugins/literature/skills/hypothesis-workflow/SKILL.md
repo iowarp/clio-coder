@@ -177,8 +177,10 @@ you judge hazardous yourself, needs the operator's explicit confirmation.
 - Attended: one `ask_user` call per flagged hypothesis, `operator_only: true`,
   header `Hazard check H<n>`, the categories and matched terms in the question,
   and the options `Keep H<n> as an option` (the operator confirms the work has
-  the review and approvals it needs) and `Drop H<n>`. A hypothesis not
-  confirmed is not offered in step 8.
+  the review and approvals it needs, and H<n> is offered in step 8) and
+  `Drop H<n>`. A flagged hypothesis the operator did not keep is not offered.
+  The checker's table still says `flagged` for a kept one; say in your text
+  which flags the operator confirmed.
 - Headless: list each flagged hypothesis as needing confirmation. It stays
   unconfirmed.
 
@@ -189,10 +191,13 @@ review every tool call.
 
 Attended: show the ranked table from the checker (`--markdown`) with the
 disagreements and hazard flags in your text, then ask one `ask_user` question
-with `operator_only: true`, header `Hypothesis choice`, and the options: each
-eligible top hypothesis in rank order (`H2: <short statement>`, with its
-prediction and experiment as the description), `Refine the hypotheses`, and
-`None of these`. Mark no option recommended.
+with `operator_only: true`, header `Hypothesis choice`, and the options: every
+hypothesis still eligible, in rank order (`H2: <short statement>`, with its
+prediction and experiment as the description; one ranked below the top three
+says it has no experiment drafted yet, and one kept at the hazard checkpoint
+says `hazard confirmed`), then `Refine the hypotheses` and `None of these`.
+Eligible means not dropped at the hazard checkpoint. Mark no option
+recommended.
 
 - A hypothesis: report the decision ref the result names, the chosen
   hypothesis, its experiment and its check draft. Start that experiment only
