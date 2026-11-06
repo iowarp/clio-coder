@@ -69,7 +69,12 @@ export interface Ledger {
 	create(input: CreateRunInput): RunEnvelope;
 	update(id: string, patch: Partial<RunEnvelope>): RunEnvelope | null;
 	get(id: string): RunEnvelope | null;
-	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
+	/** `where` selects rows before they are copied, so a caller after a few rows does not clone the whole ring. */
+	list(opts?: {
+		status?: RunStatus;
+		limit?: number;
+		where?: (run: Readonly<RunEnvelope>) => boolean;
+	}): ReadonlyArray<RunEnvelope>;
 	persist(): Promise<void>;
 	reload(): void;
 }
@@ -369,12 +374,17 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			return envelope ? cloneEnvelope(envelope) : null;
 		},
 
-		list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope> {
+		list(opts?: {
+			status?: RunStatus;
+			limit?: number;
+			where?: (run: Readonly<RunEnvelope>) => boolean;
+		}): ReadonlyArray<RunEnvelope> {
 			let filtered: RunEnvelope[] = runs;
 			if (opts?.status) {
 				const want = opts.status;
 				filtered = filtered.filter((r) => r.status === want);
 			}
+			if (opts?.where) filtered = filtered.filter(opts.where);
 			if (opts?.limit !== undefined && opts.limit >= 0) {
 				filtered = filtered.slice(0, opts.limit);
 			}
