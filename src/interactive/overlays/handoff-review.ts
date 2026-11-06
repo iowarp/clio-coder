@@ -20,7 +20,16 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { buildResponsiveHint, createCachedBody, FocusBox, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
+import {
+	buildResponsiveHint,
+	createCachedBody,
+	FocusBox,
+	fitHintEntries,
+	fitHintEntryList,
+	type HintEntry,
+	showClioOverlayFrame,
+	windowRows,
+} from "../overlay-frame.js";
 import {
 	animationStep,
 	chipRows,
@@ -132,12 +141,21 @@ function formatPreparingBody(
  * document as rendered Markdown windowed to `rows`, and the three keys with
  * what each one does, pinned beneath. Zero rows means the frame has not said.
  */
+/** The review's rail, in the order it gives keys up. */
+const REVIEW_RAIL: ReadonlyArray<HintEntry> = [
+	{ key: "Enter", verb: "accept" },
+	{ key: "↑↓", verb: "scroll" },
+	{ key: "e", verb: "edit" },
+	{ key: "Esc", verb: "cancel" },
+];
+
 function formatHandoffReviewBody(
 	goal: string,
 	document: string,
 	width: number,
 	scroll: number,
 	rows = 0,
+	railRoom = 0,
 ): { lines: string[]; maxScroll: number } {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
@@ -154,9 +172,13 @@ function formatHandoffReviewBody(
 	const roomFor = (): number => rows - head.length - 1 - choices.length;
 	if (rows > 0 && roomFor() < MIN_DOCUMENT_ROWS) head = [];
 	if (rows > 0 && roomFor() < MIN_DOCUMENT_ROWS) {
+		// The bare keys name only what the rail could not keep: at 40x15 the body
+		// repeated the rail's accept and cancel and spent a third of the dock on them.
+		const kept = railRoom > 0 ? fitHintEntryList(REVIEW_RAIL, railRoom).kept : [];
+		const missing = CHOICES.filter((choice) => !kept.some((entry) => entry.key === choice.key));
 		choices = chipRows(
 			theme,
-			CHOICES.map((choice) => `${keyCap(theme, choice.key)} ${theme.fg("menuDescription", choice.verb)}`),
+			missing.map((choice) => `${keyCap(theme, choice.key)} ${theme.fg("menuDescription", choice.verb)}`),
 			contentWidth,
 		);
 	}
@@ -169,7 +191,9 @@ function formatHandoffReviewBody(
 			...head,
 			sectionRule(theme, contentWidth, "Document", { meta: fits ? count : "" }),
 			...pane.window,
-			...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, unit: "lines" }, contentWidth)]),
+			...(pane.position === null
+				? []
+				: [positionRow(theme, { ...pane.position, unit: "lines", keys: ["↑↓ scroll"] }, contentWidth)]),
 			...choices,
 		],
 		maxScroll: pane.maxScroll,
@@ -192,17 +216,26 @@ export function openHandoffReviewOverlay(
 	// One Markdown render per (document, width, skin): the review is read for
 	// a while and the document changes only through the editor.
 	let memo: { key: string; lines: string[]; maxScroll: number } | null = null;
-	const body = createCachedBody((width, rows) => {
+	let railRoom = 0;
+	const cached = createCachedBody((width, rows) => {
 		if (preparing) {
 			return formatPreparingBody(options.goal, stage, route, now() - openedAt, spinnerFrame(animationStep(now())), width);
 		}
-		const key = `${width}|${rows}|${scroll}|${skinEpoch()}|${text}`;
+		const key = `${width}|${rows}|${railRoom}|${scroll}|${skinEpoch()}|${text}`;
 		if (memo?.key !== key) {
-			const built = formatHandoffReviewBody(options.goal, text, width, scroll, rows);
+			const built = formatHandoffReviewBody(options.goal, text, width, scroll, rows, railRoom);
 			memo = { key, lines: built.lines, maxScroll: built.maxScroll };
 		}
 		maxScroll = memo.maxScroll;
 		return memo.lines;
+	});
+	const body = Object.assign(cached, {
+		setRailRoom(cells: number): void {
+			const next = Math.max(0, Math.floor(cells));
+			if (next === railRoom) return;
+			railRoom = next;
+			cached.touch();
+		},
 	});
 
 	// Nothing else redraws an idle screen, so the wait's clock keeps its own time.
@@ -282,14 +315,7 @@ export function openHandoffReviewOverlay(
 		footerHint: (innerWidth) =>
 			(preparing
 				? buildResponsiveHint([], { key: "Esc", verb: "cancel" })
-				: buildResponsiveHint(
-						[
-							{ key: "Enter", verb: "accept" },
-							{ key: "↑↓", verb: "scroll" },
-							{ key: "e", verb: "edit" },
-						],
-						{ key: "Esc", verb: "cancel" },
-					))(innerWidth),
+				: (room: number) => fitHintEntries(REVIEW_RAIL, room - 3))(innerWidth),
 	});
 
 	return {
