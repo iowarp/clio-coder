@@ -457,13 +457,19 @@ interface ResolvedToolList {
  * Resolve declared tool names against the tools Clio actually has. Case is
  * normalized because `Bash` and `bash` are the same tool named by two
  * harnesses; nothing else is mapped, because an alias table would let a
- * declaration mean a tool its author never wrote.
+ * declaration mean a tool its author never wrote. A full MCP or extension
+ * capability name (`mcp_<id>__<tool>`, `extension_<id>__<tool>`) is kept
+ * verbatim, as prompt templates already keep it, because those tools register
+ * after skills load; without it a narrowed skill could never call the MCP
+ * server its own workflow names.
  */
 function resolveDeclaredTools(declared: ReadonlyArray<string>): ResolvedToolList {
 	const tools: ToolName[] = [];
 	const unrecognized: string[] = [];
 	for (const entry of declared) {
-		const resolved = TOOL_NAMES_BY_LOWERCASE.get(entry.toLowerCase());
+		const resolved =
+			TOOL_NAMES_BY_LOWERCASE.get(entry.toLowerCase()) ??
+			(isMcpToolName(entry) || isHarnessExtensionToolName(entry) ? entry : undefined);
 		if (resolved === undefined) unrecognized.push(entry);
 		else if (!tools.includes(resolved)) tools.push(resolved);
 	}
