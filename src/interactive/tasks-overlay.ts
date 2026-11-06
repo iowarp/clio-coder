@@ -12,7 +12,14 @@ import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { stampLocal } from "./format-time.js";
 import type { RowBudgetedBody } from "./overlay-frame.js";
-import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "./overlay-frame.js";
+import {
+	buildHint,
+	cutRowWithEllipsis,
+	fitRow,
+	selectionLabel,
+	selectionMark,
+	showClioOverlayFrame,
+} from "./overlay-frame.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme, fitUnits, GLYPH } from "./theme/index.js";
 
@@ -581,7 +588,15 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 				? `lines ${this.offset + 1}–${end} of ${total} · PgUp/PgDn page`
 				: `tasks ${range} of ${layout.spans.length} · PgUp/PgDn page`,
 		);
-		return [...layout.lines.slice(this.offset, end), fitRow(position, safeWidth), ...pinned];
+		const window = layout.lines.slice(this.offset, end);
+		// A task the window ends inside reads as cut, not as finished mid-sentence.
+		const cut = layout.spans.some((taskSpan) => taskSpan.line < end && taskSpan.end > end);
+		const lastShown = window.at(-1);
+		const next = layout.lines[end];
+		if (cut && lastShown !== undefined && next !== undefined && next.trim().length > 0) {
+			window[window.length - 1] = cutRowWithEllipsis(lastShown, safeWidth);
+		}
+		return [...window, fitRow(position, safeWidth), ...pinned];
 	}
 
 	handleInput(data: string): void {

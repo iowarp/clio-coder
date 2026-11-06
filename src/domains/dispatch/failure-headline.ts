@@ -106,6 +106,16 @@ const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) =
 		(match) => `its model gave no complete reply within the ${match[1]}s worker response limit`,
 	],
 	[/^worker executed no tools, so it did none of its assignment/iu, () => "it ran no tools, so the task was not done"],
+	// Admission refused the route before a worker started: the target's health check failed.
+	[
+		/^(?:dispatch: )?target '([^']+)' unavailable: health (?:down|degraded|unknown)\b/iu,
+		(match) => `its target ${match[1]} is not reachable, so nothing ran there`,
+	],
+	// The slot a run was admitted under was released before it started, because the work around it already stopped.
+	[
+		/^(?:dispatch: )?reservation '[^']+' is not active\b/iu,
+		() => "it never started, because the work it was part of had already stopped",
+	],
 	[
 		/^permission denied by policy: (\S+) raised an operator-authority ask and no operator can answer worker asks/iu,
 		(match) => `its ${match[1]} call needed your approval, and this run had no way to ask you, so the call did not run`,

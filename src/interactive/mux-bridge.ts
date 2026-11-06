@@ -150,7 +150,9 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 		const origin = originOfRun.get(identity.lineage?.rootRunId ?? identity.runId) ?? identity.requestOrigin;
 		if (deps.notice === undefined || origin === "user" || retrying.delete(identity.runId)) return;
 		const why = workerFailureHeadline(rawDetail);
-		const text = `${identity.agentId} ${plainOutcomeLabel(outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${identity.runId}`;
+		// A council member goes by the roster label the operator watched it under, as its card and row do.
+		const who = identity.council === undefined ? identity.agentId : `council member ${identity.council.label}`;
+		const text = `${who} ${plainOutcomeLabel(outcome)}${why === null ? "" : `: ${why}`} · /view dispatch:${identity.runId}`;
 		const hold = setTimeoutFn(() => {
 			heldFailures.delete(identity.runId);
 			if (!disposed) deps.notice?.("error", text);

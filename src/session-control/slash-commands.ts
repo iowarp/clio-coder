@@ -462,7 +462,9 @@ async function runAttributed(
 			notice("error", `${request.agentId} ${STALLED_RUN_HEADLINE} · ${view}`);
 		} else if (receipt.exitCode !== 0 || receipt.failureMessage) {
 			const why = workerFailureHeadline(receipt.failureMessage) ?? `exit code ${receipt.exitCode}`;
-			notice("error", `${request.agentId} failed: ${why} · ${view}`);
+			// A run that hit its reply limit timed out, as its card header says; `failed` named a second state for it.
+			const ended = receipt.outcome === "timed_out" ? "timed out" : "failed";
+			notice("error", `${request.agentId} ${ended}: ${why} · ${view}`);
 		}
 		if (share) shareReceipt(request.agentId, receipt, deps);
 	} catch (err) {
@@ -647,6 +649,17 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
  * A private path would have had to reproduce that, and would eventually have
  * reproduced it wrongly.
  */
+/**
+ * A council's failure in the words a person acts on. The dispatch tool's result opens with the note its approval
+ * leaves for the model (`[operator approval] The operator approved this dispatch call once …`), which the operator,
+ * who gave that approval, has no use for; what follows is the failure itself, read through the shared headline.
+ */
+function councilFailureWords(message: string): string {
+	const lines = message.split("\n");
+	const body = (/^\[(?:operator )?approval\]/u.test(lines[0] ?? "") ? lines.slice(1) : lines).join(" ").trim();
+	return workerFailureHeadline(body) ?? (body.length > 0 ? body : "the council stopped before any member answered");
+}
+
 async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: SlashCommandContext): Promise<void> {
 	// Refused, never queued, exactly as `/oracle` and `/fleet run` are. An
 	// approved council describes the workspace as it stands, and a turn in
@@ -675,9 +688,9 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 			ctx.standingTurnConstraints?.(),
 		);
 		if (outcome.status === "blocked") ctx.notice("warn", `/council was not admitted: ${outcome.reason}`);
-		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${outcome.message}`);
+		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
 	} catch (err) {
-		ctx.notice("error", `/council failed: ${err instanceof Error ? err.message : String(err)}`);
+		ctx.notice("error", `/council failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);
 	}
 }
 
@@ -2658,7 +2671,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						),
 						`  ${"Open one".padEnd(width)}  /peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
 					];
-					for (const line of lines) ctx.io.stdout(`${line}\n`);
+					// One write is one block: a write per line drew a spacer between rows wherever a row wrapped.
+					ctx.io.stdout(`${lines.join("\n")}\n`);
 					ctx.render?.();
 					return;
 				}
@@ -2766,7 +2780,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
 			if (command.kind === "panes") {
 				runLocal(async () => {
-					for (const line of formatPanesStatus(panes.status())) ctx.io.stdout(`${line}\n`);
+					ctx.io.stdout(`${formatPanesStatus(panes.status()).join("\n")}\n`);
 					ctx.render?.();
 				});
 				return;

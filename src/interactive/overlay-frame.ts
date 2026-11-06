@@ -9,6 +9,7 @@ import {
 	type SelectItem,
 	SelectList,
 	type SelectListTheme,
+	stripTerminalSequences,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
@@ -28,6 +29,7 @@ import {
 	selectListTheme,
 	withThemeContext,
 } from "./theme/index.js";
+import { keyName } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 
 export const DEFAULT_SELECT_THEME: SelectListTheme = selectListTheme(clioTheme());
@@ -170,6 +172,22 @@ export function selectionLabel(focused: boolean, label: string): string {
 export function fitRow(text: string, width: number): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	return visibleWidth(text) <= safeWidth ? text : truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
+}
+
+/**
+ * The last row a window keeps of a passage it cuts, closed with the ellipsis at a word boundary, so the cut never
+ * reads as the end of a sentence and never leaves half a word (`its answer was not in th`).
+ */
+export function cutRowWithEllipsis(line: string, width: number): string {
+	const room = Math.max(1, Math.floor(width) - 2);
+	const plain = stripTerminalSequences(line).trimEnd();
+	let keep = Math.min(room, visibleWidth(plain));
+	if (visibleWidth(plain) > room) {
+		const space = plain.slice(0, room + 1).lastIndexOf(" ");
+		// Only a boundary in the row's latter half is worth cutting back to; a long token is cut where the room ends.
+		if (space > room / 2) keep = visibleWidth(plain.slice(0, space));
+	}
+	return `${truncateToWidth(line, keep, "", false).trimEnd()} ${clioTheme().fg("annotation", GLYPH.ellipsis)}`;
 }
 
 /** At most `height` rows of `width` cells, without adding blank rows. */
@@ -587,7 +605,7 @@ function canonicalizeKey(key: string): string {
 	if (lower === "tab") return "Tab";
 	if (lower === "r") return "r";
 	if (lower === "type") return "type";
-	return trimmed;
+	return keyName(trimmed);
 }
 
 export function buildHint(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb = "close"): string {

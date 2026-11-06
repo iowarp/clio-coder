@@ -51,6 +51,7 @@ import { routeFirstOutput } from "./footer/silence-note.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
+import { holdInlineMath } from "./renderers/inline-math.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { renderNoticeRow } from "./renderers/notice.js";
@@ -94,6 +95,7 @@ import {
 	SGR_BOLD_OFF,
 	SGR_ITALIC,
 	SGR_RESET,
+	wrapPaths,
 } from "./theme/index.js";
 import { modelNickname } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
@@ -136,9 +138,10 @@ const EXPORT_MARKDOWN_THEME = {
 };
 const mermaidTransform = createMermaidMarkdownTransform(clioTheme());
 const CHAT_MARKDOWN_OPTIONS = {
-	transform: (text: string, width: number) => {
+	transform: (source: string, width: number) => {
+		const text = holdInlineMath(source, CODE_SPACE);
 		// Both transforms need a lex of the whole answer, so each runs only when the text can use it.
-		if (!mayNeedTableFit(text, width)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
+		if (!mayNeedTableFit(text)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
 		const tokens = tableParser.lexer(text);
 		const fitted = fitMarkdownTables(tokens, width);
 		if (!/mermaid/iu.test(fitted.text)) return fitted.text;
@@ -828,16 +831,34 @@ function tableFitsWidth(columns: number, width: number): boolean {
 	return width >= columns * 15 + 1;
 }
 
+/**
+ * Whether the grid still reads at this width: every field keeps 12 columns, and the cells' natural widths come
+ * to under 1.75 times the room the borders leave. Past that the long fields wrap into tall columns of two or three
+ * words a row (an 80-column summary drew a six-row cell per record), and records read better.
+ */
+function tableGridReads(table: Tokens.Table, width: number): boolean {
+	const columns = table.header.length;
+	if (!tableFitsWidth(columns, width)) return false;
+	const room = width - (columns * 3 + 1);
+	let natural = 0;
+	for (let index = 0; index < columns; index += 1) {
+		let widest = visibleWidth(table.header[index]?.text ?? "");
+		for (const row of table.rows) widest = Math.max(widest, visibleWidth(row[index]?.text ?? ""));
+		natural += widest;
+	}
+	return natural <= room * 1.75;
+}
+
 /** Whether a lex could find a table to rewrite. A false positive costs one lex; a false negative would keep a table. */
-function mayNeedTableFit(text: string, width: number): boolean {
+function mayNeedTableFit(text: string): boolean {
 	if (!text.includes("|")) return false;
 	// A lex also removes a repeated link definition, which closes up the blank rows around it, so keep it for those.
 	const definition = text.indexOf("]:");
 	if (definition >= 0 && text.includes("]:", definition + 2)) return true;
 	for (const match of text.matchAll(TABLE_DELIMITER_ROW)) {
 		const row = match[1] ?? "";
-		if (!/[:|]/u.test(row)) continue;
-		if (!tableFitsWidth(row.replace(/^\||\| *$/gu, "").split("|").length, width)) return true;
+		// Any table may need records once its cells are measured, so the width alone no longer rules one out.
+		if (/[:|]/u.test(row)) return true;
 	}
 	return false;
 }
@@ -848,7 +869,7 @@ function fitMarkdownTables(tokens: readonly Tokens.Generic[], width: number): { 
 		.map((token) => {
 			if (token.type !== "table") return token.raw;
 			const table = token as Tokens.Table;
-			if (tableFitsWidth(table.header.length, width) || table.rows.length === 0) {
+			if (tableGridReads(table, width) || table.rows.length === 0) {
 				return token.raw;
 			}
 			rewritten = true;
@@ -918,8 +939,35 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 	);
 }
 
+/**
+ * A paragraph wrapped just before ` - ` or ` + ` starts its next row with what reads as a list bullet
+ * (`- μ)² and the block…`). The operator moves to the end of the row above when it fits there, the way
+ * typesetting breaks after a binary operator. A row above that is itself a list item at the same indent
+ * is a list, not a wrapped paragraph, and is left alone.
+ */
+function liftLeadingOperator(above: string, row: string, width: number): [string, string] | null {
+	const lead = /^( *)([-+]) (?=\S)/u.exec(stripTerminalSequences(row));
+	if (lead === null) return null;
+	const indent = lead[1] ?? "";
+	// Styling may open before the marker, so the marker is found past any escape sequences.
+	const at = row.indexOf(`${lead[2]} `, indent.length);
+	if (at < 0 || stripTerminalSequences(row.slice(0, at)) !== indent) return null;
+	const plainAbove = stripTerminalSequences(above).replace(/ +$/u, "");
+	if (!plainAbove.startsWith(indent) || plainAbove.charAt(indent.length) === " ") return null;
+	if (/^ *(?:[-+*]|\d+[.)]) /u.test(plainAbove)) return null;
+	const raised = `${above.replace(/ +$/u, "")} ${lead[2]}`;
+	if (visibleWidth(raised) > width) return null;
+	return [raised, `${row.slice(0, at)}${row.slice(at + 2)}`];
+}
+
 /** A fence row as Pi draws it, export-tagged or not; a list or a quote nests it behind its own indent. */
 const FENCE_ROW = /^( *)\uFDD0?```/u;
+
+/** The opening fence as the block's language, or `code` when it names none, at the fence's own indent. */
+function fenceLabelRow(row: string, fenceEnd: number, indent: string): string {
+	const lang = stripTerminalSequences(row).slice(fenceEnd).trim().split(/\s+/u, 1)[0];
+	return `${indent}${clioTheme().fg("annotation", lang || "code")}`;
+}
 
 /**
  * One source line of a fenced code block, rejoined from the pieces Pi cut it
@@ -935,9 +983,7 @@ function fitCodeLine(line: string, fenceIndent: string, width: number, bareFence
 	const body = text.startsWith(lead) ? text.slice(lead.length) : text.replace(/^ +/u, "");
 	const mark = bareFences ? lead : `${lead}${theme.fg("annotation", GLYPH.codeWrap)} `;
 	const room = Math.max(1, width - visibleWidth(mark));
-	return wrapTextWithAnsi(body, room).map((part, index) =>
-		theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`),
-	);
+	return wrapPaths(body, room).map((part, index) => theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`));
 }
 
 function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: RowMemo): string[] {
@@ -946,6 +992,8 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 	let fenceIndent: string | null = null;
 	// The code line being rejoined: its first row from Pi, then each piece Pi cut off it.
 	let code: string | null = null;
+	// The prose row last drawn and where its parts sit, so a wrap that left an operator leading the next row can move it back.
+	let prose: { raw: string; at: number; count: number } | null = null;
 	const codeKeys: string[] = [];
 	const flushCode = (): void => {
 		if (code === null) return;
@@ -962,8 +1010,15 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 	for (const row of padded) {
 		const fence = row.includes("```") ? FENCE_ROW.exec(stripTerminalSequences(row)) : null;
 		if (fence !== null) {
+			prose = null;
 			flushCode();
 			fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
+			if (!bareFences) {
+				// The reader needs where code starts and what language it is, not the Markdown that said so: the
+				// opening fence becomes the language as a quiet label and the closing fence draws nothing.
+				if (fenceIndent !== null) rows.push(fenceLabelRow(row, fence[0].length, fenceIndent));
+				continue;
+			}
 		} else if (fenceIndent !== null) {
 			const trimmed = row.replace(/ +$/u, "");
 			if (stripTerminalSequences(trimmed).startsWith(`${fenceIndent}${CODE_LINE}`) || code === null) {
@@ -974,11 +1029,18 @@ function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: R
 			}
 			continue;
 		}
-		let parts = memo?.rows.get(row);
-		if (parts === undefined) {
-			parts = fitMarkdownRow(row, width, bareFences);
-			memo?.rows.set(row, parts);
+		let current = row;
+		const lifted = prose === null ? null : liftLeadingOperator(prose.raw, row, width);
+		if (prose !== null && lifted !== null) {
+			rows.splice(prose.at, prose.count, ...fitMarkdownRow(lifted[0], width, bareFences));
+			current = lifted[1];
 		}
+		let parts = memo?.rows.get(current);
+		if (parts === undefined) {
+			parts = fitMarkdownRow(current, width, bareFences);
+			memo?.rows.set(current, parts);
+		}
+		prose = stripTerminalSequences(current).trim() === "" ? null : { raw: current, at: rows.length, count: parts.length };
 		for (const part of parts) rows.push(part);
 	}
 	flushCode();
@@ -1259,6 +1321,8 @@ function settledExcerptLimit(rows: ReadonlyArray<string>, text: string, limit: n
 	return limit;
 }
 
+const THINKING_LEAD = "thinking · ";
+
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(
 	thinking: string,
@@ -1274,10 +1338,15 @@ function renderThinkingRail(
 		"",
 	);
 	if (text.length === 0) return [];
-	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
-	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
+	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
+	// that says what it is, because the rail alone is the same mark a tool's output wears.
+	const wrapped = wrapTextWithAnsi(`${THINKING_LEAD}${text}`, Math.max(1, width - PROSE_GUTTER_WIDTH));
 	const kept = unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0);
-	const rows = kept.map((row) => `${REASON_RAIL()}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", row)}${RESET}`);
+	const rows = kept.map((row, index) => {
+		const lead = index === 0 && row.startsWith(THINKING_LEAD) ? THINKING_LEAD : "";
+		const body = row.slice(lead.length);
+		return `${REASON_RAIL()}${lead ? clioTheme().fg("annotation", lead) : ""}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", body)}${RESET}`;
+	});
 	if (unbounded) return rows;
 	return previewRows(
 		rows,

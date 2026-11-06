@@ -546,7 +546,7 @@ it("docks the menu in the composer's slot at normal and small sizes, keeps the d
 		const text = composerText(f.editor, columns);
 		assert.match(text, /Library ·/);
 		assert.doesNotMatch(text, /skills-hub|cancel owner/);
-		assert.match(text, /\[Ctrl\+C\] cancel/);
+		assert.match(text, /\[↑↓\] select/);
 		assert.match(text, /\[ctrl\+x\/Esc\] close/i);
 		assert.equal(f.editor.getText(), "draft stays visible");
 		f.terminal.input("\x03");

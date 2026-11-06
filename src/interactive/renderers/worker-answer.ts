@@ -244,12 +244,24 @@ function councilAnswerGist(answer: string): string {
 	return safeWorkerAnswerText(line);
 }
 
-/** A council's sealed report in words: the synthesis, then each member's gist under its label. */
-export function presentCouncilReport(report: CouncilReport): PresentedContractAnswer {
-	const lines: string[] = [];
+/** The council's own answer in words, without the member gists a board column already shows. */
+export function councilSynthesisLines(report: CouncilReport): string[] {
 	const synthesis = report.synthesis;
+	const lines: string[] = [];
 	if (synthesis.kind === "vote" && synthesis.verdict !== undefined) lines.push(`vote: ${synthesis.verdict}`);
 	if (synthesis.text !== undefined && synthesis.text.trim().length > 0) lines.push(synthesis.text.trim());
+	return lines.map(safeWorkerAnswerText);
+}
+
+/** What a council that only collected says in place of an answer of its own. */
+export function councilCollectedWords(report: CouncilReport): string {
+	return `${report.members.length} answers, no synthesis asked for`;
+}
+
+/** A council's sealed report in words: the synthesis, then each member's gist under its label. */
+export function presentCouncilReport(report: CouncilReport): PresentedContractAnswer {
+	const synthesis = report.synthesis;
+	const lines: string[] = councilSynthesisLines(report);
 	for (const member of report.members) {
 		lines.push(
 			member.failed !== undefined
@@ -257,9 +269,6 @@ export function presentCouncilReport(report: CouncilReport): PresentedContractAn
 				: `${member.label}: ${councilAnswerGist(member.answer)}`,
 		);
 	}
-	const footer =
-		synthesis.kind === "none"
-			? `${report.members.length} answers, no synthesis asked for`
-			: `synthesis by ${synthesis.kind}`;
+	const footer = synthesis.kind === "none" ? councilCollectedWords(report) : `synthesis by ${synthesis.kind}`;
 	return { lines: lines.map(safeWorkerAnswerText), footer };
 }

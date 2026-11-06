@@ -91,7 +91,7 @@ for (const columns of [80, 120, 160]) {
 		ok(lines.length <= 10, `${lines.length} rows: the folded card stays short`);
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
-		match(joined, /\[Enter\] allow\s+runs this one call \[Esc\] deny\s+skips it \[alt\+x\] stop\s+ends the turn/u);
+		match(joined, /\[Enter\] allow\s+runs this one call \[Esc\] deny\s+skips it \[Alt\+X\] stop\s+ends the turn/u);
 		match(lines[0] ?? "", /autonomy level default/u);
 
 		body.toggleTerms();
@@ -122,20 +122,20 @@ test("worker terms say an approval covers one call and a denial holds within the
 
 test("the footer names the terms key and drops it before any answer key", () => {
 	const wide = permissionOverlayHint(100, false, "closed", "closed");
-	match(wide, /\[alt\+t\] terms/u);
+	match(wide, /\[Alt\+T\] terms/u);
 	match(wide, /\[Enter\] allow/u);
 	doesNotMatch(wide, /allow once/u);
-	match(wide, /\[alt\+x\] stop turn/u);
+	match(wide, /\[Alt\+X\] stop turn/u);
 	const open = permissionOverlayHint(100, false, "closed", "open");
 	match(open, /\[Esc\] hide terms/u);
-	doesNotMatch(open, /\[alt\+t\]/u);
+	doesNotMatch(open, /\[Alt\+T\]/u);
 	// The longer modifier labels shorten at the 80-column box.
 	strictEqual(
 		permissionOverlayHint(80, false, "closed", "closed"),
-		"[Enter] allow · [alt+t] terms · [alt+v] inspect · [alt+x] stop · [Esc] deny",
+		"[Enter] allow · [Alt+T] terms · [Alt+V] inspect · [Alt+X] stop · [Esc] deny",
 	);
 	// Narrower still, both reading keys yield to the decision keys.
-	strictEqual(permissionOverlayHint(60, false, "closed", "closed"), "[Enter] allow · [alt+x] stop · [Esc] deny");
+	strictEqual(permissionOverlayHint(60, false, "closed", "closed"), "[Enter] allow · [Alt+X] stop · [Esc] deny");
 	const narrow = permissionOverlayHint(36, false, "closed", "closed");
 	doesNotMatch(narrow, /terms/u);
 	match(narrow, /allow/u);

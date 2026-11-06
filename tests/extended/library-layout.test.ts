@@ -209,10 +209,18 @@ it("keeps every key the rail drops on screen at six rows once the pane state set
 	view.setBodyRows(6);
 	const body = view.render(50).map(stripVTControlCharacters);
 	const everywhere = `${body.join("\n")}\n${stripVTControlCharacters(view.getHint(38))}`;
-	for (const key of ["↑↓", "/", "b", "s", "n", "o", "R", "Tab", "e", "u", "r", "v", "Esc"])
+	// Under eight rows the keys take a third of the body, so both rows stay in view and the keys past the
+	// marker are said to exist rather than drawn over the list.
+	for (const key of ["↑↓", "/", "r", "v", "Esc"])
 		ok(everywhere.includes(`[${key}]`), `${key} is on screen:\n${everywhere}`);
-	for (const line of body.filter((row) => row.trimStart().startsWith("[")))
-		ok(!line.includes("…"), `no key hides behind the marker: ${line}`);
+	ok(
+		body.some((row) => row.includes("row 1")),
+		`both rows stay in view:\n${everywhere}`,
+	);
+	ok(
+		body.some((row) => row.trimStart().startsWith("[") && row.includes("…")),
+		`the keys past the cap are marked:\n${everywhere}`,
+	);
 });
 
 it("inverts the pane on every detail key press, two presses before a repaint included", () => {
