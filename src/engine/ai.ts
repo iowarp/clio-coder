@@ -38,6 +38,7 @@ import type { ProbeContext } from "../domains/providers/types/runtime-descriptor
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import {
 	completeEngineSimple,
+	engineMainStreamSimple,
 	engineStream,
 	engineStreamSimple,
 	registerEngineBuiltins,
@@ -65,6 +66,9 @@ export const stream = engineStream;
  * than through `stream`, whose bare-call path has to guess a thinking level.
  */
 export const streamSimple = engineStreamSimple;
+
+/** The session's own turn path, whose cache retention and system split a round reading the turn's prefix must match. */
+export const mainStreamSimple = engineMainStreamSimple;
 
 export interface EngineTextCompletionInput extends SideCallAuth {
 	callTelemetry?: CallMessageObserver;

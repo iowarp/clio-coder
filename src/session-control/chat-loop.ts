@@ -48,7 +48,7 @@ import type { MemoryInterventionRegistration } from "../domains/middleware/memor
 import { estimateAgentMessageTokens } from "../domains/session/context-accounting.js";
 import { createContinuityPersistencePorts } from "../domains/session/continuity/ports.js";
 import { continuityReplayText, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
-import { continueEngineWithoutInput, replaceEngineMessages } from "../engine/agent.js";
+import { continueEngineWithoutInput, engineLiveTurnRequest, replaceEngineMessages } from "../engine/agent.js";
 import { isLockedSynthesisFallbackOnly, lockedSynthesisRepromptMessages } from "../engine/loop-guard.js";
 import { ContinuityController } from "./continuity-controller.js";
 /**
@@ -4057,6 +4057,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						messages,
 						question: text,
 						midTurn: prepared.inFlight,
+						// The turn's own prompt and tools, so the round reads the prefix the turn already cached (S12).
+						livePrefix: (history, tail, signal) => engineLiveTurnRequest(prepared.runtime.agent, history, tail, signal),
 						// The level the session's own next turn would use.
 						thinkingLevel: prepared.runtime.agent.state.thinkingLevel ?? "off",
 						...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
