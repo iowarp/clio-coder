@@ -547,6 +547,9 @@ function wrapArtifactLine(value: string, max: number): string[] {
  */
 const CARD_FACT_ROWS = { stack: "never" } as const;
 
+/** Rows a short card's scrolled window keeps before its choices give up their consequences. */
+const MIN_CARD_WINDOW_ROWS = 3;
+
 interface PermissionFactRows {
 	/** Identity, target, the fact table and the timer, in reading order. */
 	lines: string[];
@@ -1175,12 +1178,21 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		// rows the consequences spend, and they move into the window instead.
 		const targetRoom = (choiceRows: number): number =>
 			budget - identityRows - choiceRows - 1 - parts.effect.length - (hasEffect ? 0 : 1);
-		const bare = targetRoom(fullChoices.length) < (hasTarget ? 1 : 0) && bareChoices.length < fullChoices.length;
-		const choices = bare ? bareChoices : fullChoices;
-		const targetPinned =
-			!hasTarget || budget < identityRows + choices.length + 3
+		const pinnedTarget = (choiceRows: number): number =>
+			!hasTarget || budget < identityRows + choiceRows + 3
 				? 0
-				: Math.max(1, Math.min(parts.target.length, targetRoom(choices.length)));
+				: Math.max(1, Math.min(parts.target.length, targetRoom(choiceRows)));
+		// The keys alone also win when their consequences would leave the window
+		// fewer rows than one short fact takes: at 40x15 a one-row window cut the
+		// reason (it writes outside this workspace) after its first line, and the
+		// consequences are still one scroll away inside the window.
+		const windowHeight = (choiceRows: number): number =>
+			budget - identityRows - pinnedTarget(choiceRows) - choiceRows - 1;
+		const bare =
+			bareChoices.length < fullChoices.length &&
+			(targetRoom(fullChoices.length) < (hasTarget ? 1 : 0) || windowHeight(fullChoices.length) < MIN_CARD_WINDOW_ROWS);
+		const choices = bare ? bareChoices : fullChoices;
+		const targetPinned = pinnedTarget(choices.length);
 		// A cut target must not read as the whole command, and it stays one block rather than folding around the effect.
 		const targetRows = parts.target.slice(0, targetPinned);
 		const lastTarget = targetRows.at(-1);
