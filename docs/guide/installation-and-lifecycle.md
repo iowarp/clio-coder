@@ -535,7 +535,7 @@ Runs a series of health sweeps across the environment:
 *   Asserts owner-only permissions on credentials (`0o600`) and warns when `settings.yaml` is wider than owner-only.
 *   Reports the installed Clio Coder, Node, platform, and engine package readiness.
 *   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
-*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential and settings permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema. `--fix` rewrites retired enum values and YAML 1.1 booleans in place, but it does not remove retired keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; paths with no registered migration still require deliberate editing. The rows, levels and exit codes are in [Doctor](doctor.md).
+*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential and settings permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema. `--fix` rewrites retired enum values and YAML 1.1 booleans in place and removes settings keys that were retired with no replacement (the ones doctor names in its `settings.yaml retired keys` row), but it does not rename moved keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; moved paths with no registered migration still require deliberate editing. The rows, levels and exit codes are in [Doctor](doctor.md).
 
 ### B. Upgrades (`clio-coder upgrade`)
 Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data. The dated migration `2026-10-06-playbooks-and-packages` converts the user home once: `<configDir>/fleets` merges into `<configDir>/playbooks` without overwriting, plugin install records and the user Library index rename the fleet kind to playbook, a Library plugin the current layout cannot read (for example a single plugin that carried an extension manifest) is replaced with the Library copy that ships inside Clio, and an api 2 extension installed before capability envelopes were bound is reinstalled from the Library or named with the command that reinstalls it. A workspace's `.clio-coder/` converts the first time Clio opens it, with one notice. Third-party plugins that still declare `fleets` stay installed but do not load, and the report names the fix for their author. Nothing in the conversion deletes operator data, and each package it writes leaves a Library receipt with actor `upgrade`. The dated migration `2026-10-31-remove-old-telemetry` deletes, once, the files the telemetry stores before #434 wrote, such as `trace.sqlite`, `receipts/`, `audit/`, `evidence-index.json`, `route-history.json` and `<dataDir>/evidence/`, and keeps session ledgers, run recordings, the memory store and `<stateDir>/telemetry/` ([retention](../architecture/telemetry.md#retention)). Boot applies it on its own when a background update skipped `clio-coder upgrade`.
@@ -810,7 +810,7 @@ for a recorded prerelease channel) for installer installs.
 
 #### Current migration contract
 
-The source tree registers six migrations in execution order
+The source tree registers eight migrations in execution order
 (`src/domains/lifecycle/migrations/index.ts`):
 
 1. `2026-09-01-settings-v2`
@@ -819,6 +819,12 @@ The source tree registers six migrations in execution order
 4. `2026-10-07-acp-adapters`
 5. `2026-10-07-claude-subscription`
 6. `2026-10-20-fleet-permissions-judge`
+7. `2026-10-31-remove-old-telemetry`
+8. `2026-11-02-approvals-to-config`
+
+The approvals migration copies project approval records from
+`<stateDir>/workspace-trust/` to `<configDir>/workspace-trust/`, keeps a record
+already at the destination, and then removes the old directory.
 
 The package migration converts the playbook layout and repairs bundled package
 installations as described above. The adapter migration updates only the
@@ -838,9 +844,12 @@ those removed migrations:
   replacement, and `clio-coder doctor --fix` rewrites it in place. In a project
   or local layer the leaf falls back to its default with a diagnostic.
 - `runtime: lmstudio-native` becomes `lmstudio`, and `runtime: ollama-native`
-  becomes `ollama`. The old id passes settings validation, but the target
-  resolves to an unknown runtime and cannot be used; the `target <id>` row of
-  `clio-coder doctor` names the replacement.
+  becomes `ollama`. These ids were removed in 0.7.0 with no alias. The old id
+  passes settings validation, but the target stays unregistered and cannot be
+  used. Selecting or dispatching to it is refused with
+  ``runtime '<id>' was removed in 0.7.0; set `runtime: <replacement>` on this target in settings.yaml``,
+  and the `target <id>` row of `clio-coder doctor` reads
+  `runtime '<id>' is unknown; use '<replacement>' instead in settings.yaml`.
 - A `clio.<action>` keybinding id becomes `clio-coder.<action>`. The old id is
   reported as an unknown action and the default binding stays in effect.
 
@@ -862,6 +871,27 @@ it aside only after reviewing which migrations already changed user data.
 `--skip-migrations` is a recovery override that lets
 the independent install and metadata work proceed after a migration failure.
 Fix the migration's cause and rerun the ordinary upgrade afterward.
+
+#### Upgrading to 0.7.0: removed compatibility
+
+0.7.0 drops several compatibility paths. No migration rewrites them, so check
+these after upgrading; [configuration and targets](configuration-and-targets.md#strict-validation-and-lifecycle-repair)
+has the settings details.
+
+- **Runtime ids `lmstudio-native` and `ollama-native`.** They no longer resolve
+  and have no alias. Set `runtime: lmstudio` or `runtime: ollama` on the target
+  in `settings.yaml`; see [Built-in runtimes](configuration-and-targets.md#built-in-runtimes).
+- **Retired settings keys.** Keys retired without a replacement, such as
+  `context.compaction.excludeLastTurns`, are ignored with a `settings.yaml retired keys`
+  warning from `clio-coder doctor`, and `clio-coder doctor --fix` deletes them.
+- **Plugin manifest `evals` key.** A plugin whose `ai.iowarp.clio` block still
+  declares `evals` is refused with
+  `ai.iowarp.clio key 'evals' was removed in 0.7.0; delete it from the package manifest and reinstall`,
+  and an installed copy reads as an invalid plugin until it is reinstalled without it.
+- **`github-copilot` login.** `clio-coder auth login github-copilot` exits 2 and
+  points at the official `copilot login` plus a target on the `copilot-sdk`
+  runtime. A credential stored under `github-copilot` is ignored, and
+  `COPILOT_GITHUB_TOKEN` no longer supplies a `github-copilot` key. See [GitHub Copilot](configuration-and-targets.md#github-copilot).
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:
@@ -1074,3 +1104,64 @@ When executing tasks headlessly using `clio-coder run`, interactive permission p
 - **Main-agent auto-denial:** At autonomy `default` the safety judge first reviews a call that would park, against the task prompt and nothing the agent wrote: an allow runs it and a block returns the judge's refusal. A main-agent call that still parks for operator authorization, because the judge gave no verdict or the ask is one only the operator answers, is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.` At `yolo`, which a headless run takes only from `--autonomy yolo`, nothing parks. The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome. The headless session prompt states this up front: no operator is attached, approval-required calls are denied, and the model should use recognized commands and typed checks and report what could not run.
 - **Worker non-stall policy:** Dispatched workers use `fleet.permissions.mode`. Under the default `judge`, the main session's safety judge decides a native local worker's ordinary ask while the run is at `default`, and `deny` applies wherever no judge can answer. `deny` turns a refused call into a structured tool denial that returns to the worker model, and the run continues. Only execute-class refusals count, including main-authority denials by the judge: the third one ends the run with worker exit 3 and outcome `failed/permission_required`, whose reason names every refused command. `fail` ends the run at the first refusal with the same outcome. The exit codes and the reason text are in [Exit codes and output](exit-codes-and-output.md).
 - **CI behavior:** Neither path waits for an interactive prompt. Exit status still reflects the final headless or dispatch result rather than the mere fact that a permission ask occurred.
+
+---
+
+## 8. What the npm Package Ships
+
+The published package carries Clio Coder's own TypeScript source and code map so
+that Clio can answer questions about itself, but in compressed form:
+
+- **Packed source.** Every `.ts` file under `src/`, except the extension scaffold
+  templates in `src/domains/extensions/authoring/templates/`, is stored in one
+  file, `dist/assets/source.pack`: an 8-byte `CLIOSRC1` header, a JSON index, and
+  one brotli stream per file (`src/core/source-pack.ts`). Other files under
+  `src/`, such as prompt fragments and recipes, ship loose. The public extension
+  types ship as bundled declarations in `dist/extensions/`.
+- **Code map.** Clio's own code map ships gzipped as `dist/assets/codemap.json.gz`.
+  `code_nav` with `source: "clio"` reads it, and falls back to a plain
+  `codemap.json` or `codewiki.json` in an older build.
+
+In an installed package, the `read` tool serves a packed file when the loose file
+is absent from `src/`, and a packed directory still reads as a directory.
+`code_nav` and the component inventory see packed files too. `grep`, `find` and
+`bash` do not, and the session prompt says so in an installed package. A source
+checkout has no pack and reads its real files.
+
+## 9. First-Use Downloads and Air-Gapped Hosts
+
+A few optional assets are not in the package. Clio Coder downloads each one the first
+time it is needed, checks it against a pinned sha256, and caches it under the
+cache root (`src/core/pinned-asset.ts`). A file that fails the check is never
+loaded.
+
+| Asset | Fetched when | Source | Cache path | Bound |
+| --- | --- | --- | --- | --- |
+| Ruby and C# tree-sitter grammars | The code map first indexes a `.rb` or `.cs` file | `https://cdn.jsdelivr.net/npm/@vscode/tree-sitter-wasm@0.3.1/wasm/<file>` | `<cache>/grammars/@vscode__tree-sitter-wasm@0.3.1/<file>` | 5 s per download, connect included |
+| HDF5/NetCDF-4 and Parquet readers (h5wasm, hyparquet) | The `data` tool first opens such a file | The pinned npm registry tarball | `<cache>/data-readers/<name>@<version>/` | 20 s per download |
+
+The grammars for TypeScript, TSX, JavaScript, Python, Go, Rust, C, C++ and Java
+ship in `dist/assets/grammars/` and need no network.
+
+A failed grammar or reader download writes a `<path>.unavailable.json` record
+beside the cache path. For 10 minutes no process on the host retries that asset,
+so an air-gapped node pays the timeout once per window rather than once per
+session. A later successful download removes the record.
+
+On a host with no network:
+
+- Indexing still completes. Ruby and C# files fall back to line-pattern symbol
+  extraction, and `code_nav` symbol and outline results carry a `grammarNote`
+  saying those symbols come from line patterns, quoting the recorded failure, and
+  recommending `grep` for an exhaustive search.
+- The `data` tool refuses HDF5, NetCDF-4 and Parquet files with the URL, sha256
+  and cache path to pre-seed, and names a `run_script` fallback. See
+  [data](tool-usage.md#data-inspect-structured-files-through-the-gateway).
+- A System One route bound to the `julia-1` engine fetches its 34 MB tokenizer
+  from the published model repository, pinned by revision and sha256, with a
+  120 s bound. Offline, Clio keeps its byte-length check, which only makes that
+  engine abstain more often.
+
+To pre-seed an offline host, download the file on a connected machine and copy
+it to the cache path in the table, under the cache root of the account that runs
+Clio. The hash is checked when it is loaded.

@@ -134,6 +134,56 @@ fetches bounded output, and ends its answer with
 `Slurm job <id>: <state>, exit <code>, stdout <path>, stderr <path>`. It never
 falls back to `sbatch` through `bash`.
 
+## Parameter sweeps
+
+A parameter sweep runs as a Slurm job array that Clio Coder plans, checks and
+tabulates as one experiment. The `hpc-sweep` skill in the `hpc` plugin drives
+it on top of `slurm-jobs`:
+
+```bash
+clio-coder library install skill:slurm-jobs --project
+clio-coder library install plugin:hpc --project
+```
+
+Then run `/library reload` in the session and ask for the sweep, for example
+`/skill hpc-sweep dry run sweeps/decay.yaml`.
+
+The sweep file (YAML, or JSON when PyYAML is absent) names the sweep and lists
+its `parameters`, a `mode` of `grid` or `sample`, the run `template` script,
+the Slurm `resources`, a `concurrency` cap that becomes the array's `%N`, the
+verify `check` that judges one run and an optional `metrics` file. The plugin's
+`sweep.py` helper plans and tabulates under `sweeps/<name>/` in the project. It
+never submits, polls or cancels; those go through the five capabilities above.
+
+1. **Plan and dry run.** The default. The helper writes `manifest.tsv`, the
+   array script, `plan.json` and one `runs/<task>/params.json` per run, and the
+   skill shows the run table, the script and the exact
+   `mcp_slurm__slurm_submit` call. Without an explicit request to submit, the
+   skill stops here and asks with `Don't submit` as the recommended option.
+2. **Submit.** Only on the operator's word, exactly as `plan.json` names it,
+   with the `%N` concurrency suffix kept. The submission is an execute-class
+   call and follows [How autonomy treats them](#how-autonomy-treats-them).
+3. **Monitor.** Each array task is polled by `<array id>_<task>` until every
+   task is terminal.
+4. **Check each run.** For every task that completed with exit 0, the skill
+   calls `verify(check="<check>/<task>")`, one call per run. The check is a
+   `.clio-coder/verifiers.yaml` entry with `runs: <directory>`; verify appends
+   the run directory to its command and refuses a bare call or a run outside
+   that directory. See [Project verifier catalog](tool-usage.md#project-verifier-catalog).
+5. **Tabulate.** `clio-coder claims list --check <check> --json` feeds the
+   helper's `aggregate`, which writes `results.tsv` and `results.md`. Every
+   run gets a verdict: `agrees`, `disagrees`, `unverified`, `run failed`,
+   `not terminal` or `unknown`. Failed and unverified runs stay in the table.
+6. **Refine.** A refinement is a new sweep with a new name and its own `runs`
+   check entry; a finished sweep's directory is never overwritten.
+
+The verdicts say whether each run agreed with its reference within the check's
+declared tolerance, not that the simulation is right.
+
+For this release, the Slurm path (the server, the skills and the doctor rows)
+was checked against fake Slurm client binaries only, not against a live
+cluster controller.
+
 ## Doctor rows
 
 `clio-coder doctor` runs `slurmMcpFindings` and never fails because of it: every
