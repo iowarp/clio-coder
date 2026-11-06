@@ -92,6 +92,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
 	dismissNotification?: (key: string) => void;
 	onToolResumed?: (toolCallId: string) => void;
+	/** The safety judge holds this started call before admission. */
+	onToolJudging?: (toolCallId: string) => void;
 	terminal: Pick<import("../engine/tui.js").ProcessTerminal, "columns">;
 	dispatchBoard: ReturnType<typeof import("./dispatch-board.js").createDispatchBoardView>;
 	/** Record a dispatched fleet step's plan position for the board's phase column. */
@@ -386,6 +388,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		applyApprovalState: (event) => {
 			chatRenderer.applyEvent(event);
 			if (event.state === "resumed") deps.onToolResumed?.(event.toolCallId);
+			if (event.state === "judging") deps.onToolJudging?.(event.toolCallId);
 		},
 		requestRender: () => tui.requestRender(),
 		// An operator cancel, audited as one. The reason distinguishes it from an

@@ -81,6 +81,8 @@ export interface ToolOverlay {
 	toolSubject?: string | undefined;
 	/** The operator started this process directly; no model asked for it. */
 	operatorShell?: boolean | undefined;
+	/** The safety judge holds the call before admission: started by the engine, not yet running. */
+	judging?: boolean | undefined;
 }
 
 export interface DispatchOverlay {

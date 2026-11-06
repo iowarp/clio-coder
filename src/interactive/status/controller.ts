@@ -34,6 +34,8 @@ export interface StatusController {
 	reset(): void;
 	/** An allowed call has left its approval card, so its clock starts now. */
 	noteToolResumed(toolCallId: string): void;
+	/** The safety judge holds this started call; it runs only once admitted. */
+	noteToolJudging(toolCallId: string): void;
 	dispose(): void;
 }
 
@@ -267,6 +269,9 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 		},
 		noteToolResumed(toolCallId) {
 			apply({ type: "tool_resumed", toolCallId });
+		},
+		noteToolJudging(toolCallId) {
+			apply({ type: "tool_judging", toolCallId }, true);
 		},
 		reset() {
 			if (disposed) return;

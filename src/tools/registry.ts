@@ -831,6 +831,19 @@ export interface ToolRegistry {
 	onPermissionRequired(
 		listener: (call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void,
 	): () => void;
+	/**
+	 * Subscribe to the safety judge's hold on a started call: `judging` when a
+	 * review that asks a model begins, `admitted` when its allow lets the body
+	 * run. A park answers with `onPermissionRequired` and a block settles the
+	 * call, so neither needs a state here. Returns an unsubscribe handle.
+	 */
+	onAdmissionReview?(listener: (event: AdmissionReviewEvent) => void): () => void;
+}
+
+/** One step of the safety judge's hold on a started call, keyed by the engine's tool call id. */
+export interface AdmissionReviewEvent {
+	toolCallId: string;
+	state: "judging" | "admitted";
 }
 
 /** How a parked call ended without an approval. */
@@ -929,6 +942,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const permissionListeners = new Set<
 		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
 	>();
+	const admissionReviewListeners = new Set<(event: AdmissionReviewEvent) => void>();
 	let approvalRequestCounter = 0;
 	const approvalRequestToken = randomBytes(4).toString("hex");
 
@@ -2001,6 +2015,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		parked.splice(index, 0, entry);
 	};
 
+	/** The status surfaces read a started call as running; until the judge admits it, nothing is running (B01). */
+	const notifyAdmissionReview = (options: ToolInvokeOptions | undefined, state: AdmissionReviewEvent["state"]): void => {
+		const toolCallId = options?.toolCallId;
+		if (toolCallId === undefined || toolCallId.length === 0) return;
+		for (const listener of admissionReviewListeners) {
+			try {
+				listener({ toolCallId, state });
+			} catch {
+				// A status listener's failure never changes the verdict.
+			}
+		}
+	};
+
 	const nextApprovalRequestId = (): string => `apr-${approvalRequestToken}-${++approvalRequestCounter}`;
 
 	const notifyPermissionRequired = (
@@ -2092,7 +2119,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		};
 		// Only a review that asks a model is awaited, so every other ask parks in
 		// the same tick it did before the judge existed.
-		return pending instanceof Promise ? pending.then(report, () => SAFETY_JUDGE_SKIP) : report(pending);
+		if (!(pending instanceof Promise)) return report(pending);
+		notifyAdmissionReview(options, "judging");
+		return pending.then(report, () => SAFETY_JUDGE_SKIP);
 	};
 
 	/** Admit, park or run one call; `invoke` adds the main agent's denial memory around it. */
@@ -2117,6 +2146,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			recordRegistryDisposition(admissionCall, allowed, "allowed", {
 				reasonCode: SAFETY_JUDGE_ALLOW_REASON_CODE,
 			});
+			notifyAdmissionReview(options, "admitted");
 			const verdict = await runSpec(judgedSpec, admissionCall, allowed, options);
 			refreshHooksAfterGitControlWrite(admissionCall, outcome.decision, verdict);
 			return verdict;
@@ -2598,6 +2628,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			permissionListeners.add(listener);
 			return () => {
 				permissionListeners.delete(listener);
+			};
+		},
+		onAdmissionReview(listener) {
+			admissionReviewListeners.add(listener);
+			return () => {
+				admissionReviewListeners.delete(listener);
 			};
 		},
 	};

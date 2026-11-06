@@ -415,6 +415,8 @@ function shortToolLabel(status: AgentStatus, width: number): string {
 	const name = status.tool?.toolName?.trim();
 	if (name === ToolNames.AskUser) return "Needs input";
 	if (name === ToolNames.Dispatch) return "Waiting for worker";
+	// Started by the engine, not admitted: nothing runs until the judge answers (B01).
+	if (status.tool?.judging === true) return width < 72 ? "Checking permission" : "Waiting for the safety judge";
 	if (!name || width < 72) return "Running tool";
 	const nameWidth = width >= 100 ? 18 : 12;
 	// The pill label is never padded; truncate without pad so the tool name is
@@ -1006,8 +1008,13 @@ function toolActivity(
 	// The operator's own line reads `you` on a narrow rail in every state, as its card does (`you are stopping`).
 	const tight = width < TOOL_ACTOR_TIGHT_WIDTH && (verb === null || mine);
 	const subject = mine ? (tight ? "you" : "your shell") : "Clio";
-	const full =
-		verb !== null
+	// A call the safety judge still holds is not running; the claim waits for admission (B01).
+	const judging = verb === null && tool?.judging === true;
+	const full = judging
+		? tight
+			? "awaits the judge on"
+			: "is waiting for the safety judge on"
+		: verb !== null
 			? mine && tight
 				? verb.replace(/^is /u, "are ")
 				: verb
@@ -1027,7 +1034,13 @@ function toolActivity(
 	const lead = tight || verb !== null || spare - visibleWidth(full) >= 24 ? full : full.replace(/^is /u, "");
 	const span = object === null ? null : Math.max(4, Math.min(48, spare - visibleWidth(lead) - 3));
 	const bareObject = activity === undefined ? "a command" : (/^is \S+ (.+)$/u.exec(activity.bare)?.[1] ?? null);
-	const bareWords = tight ? (bareObject === null ? full : `${full} ${bareObject}`) : activity?.bare;
+	const bareWords = judging
+		? `${full} ${truncateToWidth(name, room >= 40 ? 18 : 12, GLYPH.ellipsis, false)}`
+		: tight
+			? bareObject === null
+				? full
+				: `${full} ${bareObject}`
+			: activity?.bare;
 	const phrase =
 		object === null || span === null
 			? verb !== null
@@ -1042,7 +1055,7 @@ function toolActivity(
 			// The harness sees a tool's output; a direct shell line's goes straight to its card, so its silence is unknown here.
 			{
 				text:
-					verb === null && tier >= 3 && !mine
+					verb === null && tier >= 3 && !mine && !judging
 						? `no output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}`
 						: null,
 				keep: 5,

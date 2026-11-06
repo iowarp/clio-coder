@@ -352,7 +352,12 @@ export type ToolApprovalStateEvent =
 	| {
 			type: "tool_approval_state";
 			toolCallId: string;
-			state: "resumed";
+			/**
+			 * `judging`: the safety judge holds the call before admission, so it is
+			 * not running yet. `resumed`: the call was admitted, by the operator's
+			 * grant or the judge's allow, and its body runs from here.
+			 */
+			state: "judging" | "resumed";
 	  };
 
 function noOutcomeUsage(): TurnTokens {

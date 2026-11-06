@@ -50,6 +50,7 @@ type PermissionToolRegistry = Pick<
 	| "hasParkedCalls"
 	| "isParked"
 	| "onPermissionRequired"
+	| "onAdmissionReview"
 	| "parkedCount"
 	| "renotifyHead"
 	| "resumeParkedCalls"
@@ -607,6 +608,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		deps.requestRender();
 	};
 
+	// The judge holds a started call before admission: the transcript and the rail say so until it is admitted (B01).
+	const unsubscribeAdmissionReview =
+		deps.toolRegistry?.onAdmissionReview?.((event) =>
+			deps.applyApprovalState({
+				type: "tool_approval_state",
+				toolCallId: event.toolCallId,
+				state: event.state === "judging" ? "judging" : "resumed",
+			}),
+		) ?? (() => {});
+
 	const unsubscribePermission =
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
 			const autonomy = deps.getAutonomy();
@@ -843,6 +854,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			dispatchWindows.clear();
 			heldWorkerCeilings.clear();
 			unsubscribePermission();
+			unsubscribeAdmissionReview();
 			unsubscribeWorker();
 			unsubscribeWorkerResolution();
 			unsubscribeWorkerCompleted();

@@ -106,6 +106,7 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 			const name = status.tool?.toolName ?? "tool";
 			if (name === ToolNames.Dispatch) return { text: "Waiting for worker", toneHint: "normal" };
 			if (name === ToolNames.AskUser) return { text: "Needs input", toneHint: "normal" };
+			if (status.tool?.judging === true) return { text: "Waiting for the safety judge", toneHint: "normal" };
 			return { text: `Running ${name}`, toneHint: "normal" };
 		}
 		case "tool_blocked":

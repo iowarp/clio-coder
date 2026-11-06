@@ -72,6 +72,7 @@ import {
 	hasToolBody,
 	renderFoldedGroup,
 	renderToolAwaitingApproval,
+	renderToolAwaitingJudge,
 	renderToolExecution,
 	renderToolPreview,
 	stopSentRow,
@@ -345,6 +346,8 @@ type ToolSegment = {
 	 * while `!finished`.
 	 */
 	awaitingApproval?: boolean | undefined;
+	/** The safety judge holds the call before admission; set and cleared by `tool_approval_state` like `awaitingApproval`. */
+	judging?: boolean | undefined;
 	/** Live, redacted approval facts. Never reconstructed during replay. */
 	approvalView?: ApprovalRequestView | undefined;
 	/** The axis an operator grant answered, kept past settlement (BT-003). Live only, like `approvalView`. */
@@ -1595,6 +1598,7 @@ function renderToolSegmentLines(
 	};
 	if (!seg.finished && seg.awaitingApproval)
 		return renderToolAwaitingApproval(call, width, detail.style === "compact" ? undefined : seg.approvalView);
+	if (!seg.finished && seg.judging === true) return renderToolAwaitingJudge(call, width);
 	const finished = {
 		...call,
 		result: seg.result,
@@ -2331,12 +2335,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (seg.result === undefined)
 			seg.result = "(no result: the call did not complete; execution was aborted, blocked, or orphaned)";
 		seg.settlement = settlement;
-		seg.notRun = !seg.executionStarted || seg.awaitingApproval === true ? true : undefined;
+		seg.notRun = !seg.executionStarted || seg.awaitingApproval === true || seg.judging === true ? true : undefined;
 		seg.partialResult = undefined;
 		seg.live = undefined;
 		seg.previewDiff = undefined;
 		seg.awaitingApproval = undefined;
 		seg.approvalView = undefined;
+		seg.judging = undefined;
 	};
 
 	/**
@@ -3564,6 +3569,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// Time on the card is not time running: an allowed command starts its clock now.
 					if (event.state === "resumed") tool.startedAtMs = now();
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
+					tool.judging = event.state === "judging" ? true : undefined;
 					tool.approvalView = event.state === "awaiting-approval" ? event.view : undefined;
 					markDirty();
 				}
@@ -3651,6 +3657,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.previewDiff = undefined;
 					tool.awaitingApproval = undefined;
 					tool.approvalView = undefined;
+					tool.judging = undefined;
 				}
 				markDirty();
 				return;

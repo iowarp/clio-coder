@@ -805,6 +805,21 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
  */
 const AWAITING_APPROVAL_TAIL = () => ` ${yellow(GLYPH.phaseBlocked)}${toolMeta(" awaiting approval")}`;
 
+/** A started call the safety judge still holds: it has not been admitted, so it does not read as running (B01). */
+const AWAITING_JUDGE_TAIL = () => ` ${toolMeta(GLYPH.phaseWaiting)}${toolMeta(" waiting for the safety judge")}`;
+
+/** Subline for an in-flight call the safety judge is reviewing before admission. Nothing runs and nothing ticks. */
+export function renderToolAwaitingJudge(wire: ToolExecutionStart, width: number): string[] {
+	const call = withoutLivePayload(presentedCall(wire));
+	const parts = sublineParts(
+		{ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args, viaGateway: call.viaGateway },
+		"ready",
+		{},
+		width,
+	);
+	return [singleActionLine(parts.lead, AWAITING_JUDGE_TAIL(), width)];
+}
+
 /**
  * Subline for an in-flight call whose body is parked at the permission gate.
  * No elapsed counter (nothing is running) and no status glyph (nothing has

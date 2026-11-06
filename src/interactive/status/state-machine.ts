@@ -81,6 +81,12 @@ export interface ToolResumedStatusEvent {
 	toolCallId: string;
 }
 
+/** The safety judge holds a started call before admission, so nothing is executing yet. */
+export interface ToolJudgingStatusEvent {
+	type: "tool_judging";
+	toolCallId: string;
+}
+
 /** The cancelled submit has returned, so nothing of the turn is still running. */
 export interface CancelSettledStatusEvent {
 	type: "cancel_settled";
@@ -97,7 +103,8 @@ export type StatusInputEvent =
 	| SubmitAcceptedStatusEvent
 	| SubmitSettledStatusEvent
 	| CancelSettledStatusEvent
-	| ToolResumedStatusEvent;
+	| ToolResumedStatusEvent
+	| ToolJudgingStatusEvent;
 
 const OVERLAY_PHASES = new Set<StatusPhase>(["tool_blocked", "retrying", "compacting", "dispatching", "stuck"]);
 const CORE_ACTIVE_PHASES = new Set<StatusPhase>(["preparing", "waiting_model", "thinking", "writing", "tool_running"]);
@@ -208,6 +215,28 @@ function statusForVisibleOverlay(
 		dispatch: visible.dispatch,
 		activePhases: new Set(frames.keys()),
 		overlayStack: overlayStackWithoutVisible(frames, visible),
+	};
+}
+
+/**
+ * One call's overlay rewritten wherever the status holds it: the visible tool, the parallel set and any stashed
+ * overlay frame, so an approval card popping back restores the call as it now stands.
+ */
+function mapToolOverlays(prev: AgentStatus, toolCallId: string, map: (tool: ToolOverlay) => ToolOverlay): AgentStatus {
+	const holds = (tool: ToolOverlay | undefined): boolean => tool?.toolCallId === toolCallId;
+	if (
+		!holds(prev.tool) &&
+		!(prev.activeTools ?? []).some(holds) &&
+		!(prev.overlayStack ?? []).some((frame) => holds(frame.tool))
+	)
+		return prev;
+	return {
+		...prev,
+		...(prev.tool ? { tool: map(prev.tool) } : {}),
+		...(prev.activeTools ? { activeTools: prev.activeTools.map(map) } : {}),
+		...(prev.overlayStack
+			? { overlayStack: prev.overlayStack.map((frame) => (frame.tool ? { ...frame, tool: map(frame.tool) } : frame)) }
+			: {}),
 	};
 }
 
@@ -660,17 +689,20 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 				activeTools: [...(prev.activeTools ?? []).filter((active) => active.toolCallId !== event.toolCallId), tool],
 			};
 		}
+		case "tool_judging": {
+			const held = (tool: ToolOverlay): ToolOverlay =>
+				tool.toolCallId === event.toolCallId ? { ...tool, judging: true } : tool;
+			return mapToolOverlays(prev, event.toolCallId, held);
+		}
 		case "tool_resumed": {
-			// The engine started this call before it parked on the card; time on the card is not time running.
-			const restart = (tool: ToolOverlay): ToolOverlay =>
-				tool.toolCallId === event.toolCallId ? { ...tool, startedAt: ctx.now } : tool;
-			const current = prev.tool?.toolCallId === event.toolCallId;
-			return {
-				...prev,
-				...(prev.tool ? { tool: restart(prev.tool) } : {}),
-				...(current ? { toolStartedAt: ctx.now } : {}),
-				...(prev.activeTools ? { activeTools: prev.activeTools.map(restart) } : {}),
+			// The engine started this call before it parked on the card or the judge's review; that time is not time running.
+			const restart = (tool: ToolOverlay): ToolOverlay => {
+				if (tool.toolCallId !== event.toolCallId) return tool;
+				const { judging: _held, ...admitted } = tool;
+				return { ...admitted, startedAt: ctx.now };
 			};
+			const next = mapToolOverlays(prev, event.toolCallId, restart);
+			return prev.tool?.toolCallId === event.toolCallId ? { ...next, toolStartedAt: ctx.now } : next;
 		}
 		case "retry_status": {
 			const phase = event.status.phase;
