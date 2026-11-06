@@ -56,6 +56,7 @@ import {
 	sectionRule,
 	statusChip,
 } from "../theme/index.js";
+import { refWords } from "./library-words.js";
 
 const MIN_WIDTH = 48;
 const MAX_WIDTH = 110;
@@ -69,7 +70,7 @@ function libraryReviewWidth(columns: number): number {
 }
 
 function stepHeadline(step: LibraryPlanStep): string {
-	return `${step.operation} ${step.identity.ref} in ${step.identity.scope} scope`;
+	return `${step.operation} the ${refWords(step.identity.ref)} in ${step.identity.scope} scope`;
 }
 
 /** The verdict line, bold and wrapped: a long package name folds, it never loses its scope. */
@@ -148,7 +149,7 @@ function afterwardsText(after: NonNullable<LibraryPlanStep["effectiveAfter"]>): 
 
 function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined, detail: boolean): Fact[] {
 	const theme = clioTheme();
-	const facts: Fact[] = [{ label: "Package", value: step.identity.ref }];
+	const facts: Fact[] = [{ label: "Package", value: refWords(step.identity.ref) }];
 	const versions = step.versions;
 	if (versions?.from && versions.to && versions.from !== versions.to)
 		facts.push({ label: "Version", value: `${versions.from} installed → ${versions.to}` });
@@ -169,22 +170,30 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 			),
 		});
 	if (step.dependencies.missing.length)
-		facts.push({ label: "Missing", value: `requires ${step.dependencies.missing.join(", ")}`, tone: "warning" });
+		facts.push({
+			label: "Missing",
+			value: `requires ${step.dependencies.missing.map(refWords).join(", ")}`,
+			tone: "warning",
+		});
 	if (step.dependencies.inactive.length)
-		facts.push({ label: "Inactive", value: `requires ${step.dependencies.inactive.join(", ")}`, tone: "warning" });
+		facts.push({
+			label: "Inactive",
+			value: `requires ${step.dependencies.inactive.map(refWords).join(", ")}`,
+			tone: "warning",
+		});
 	for (const dependent of step.dependents.newlyBroken)
 		facts.push({
 			label: "Dependents",
 			value: statusChip(
 				theme,
 				"error",
-				`would break ${dependent.ref} (${dependent.scope}): needs ${dependent.missing.join(", ")}`,
+				`would break the ${refWords(dependent.ref)} (${dependent.scope}): needs ${dependent.missing.map(refWords).join(", ")}`,
 			),
 		});
 	for (const dependent of step.dependents.preexisting)
 		facts.push({
 			label: "Dependents",
-			value: `already broken ${dependent.ref} (${dependent.scope}): needs ${dependent.missing.join(", ")}`,
+			value: `already broken: the ${refWords(dependent.ref)} (${dependent.scope}) needs ${dependent.missing.map(refWords).join(", ")}`,
 			tone: "muted",
 		});
 	if (step.effectiveAfter)
@@ -248,7 +257,7 @@ export function formatLibraryPlanReview(
 	const rows: string[] = [
 		...headline(
 			"decisionQuestion",
-			target ? stepHeadline(target) : `${plan.request.operation} ${plan.request.ref}`,
+			target ? stepHeadline(target) : `${plan.request.operation} ${refWords(plan.request.ref)}`,
 			width,
 		),
 		...chipRows(
@@ -332,9 +341,9 @@ export function libraryOutcomeHeadline(
 	if (only) {
 		const place = `${only.operation === "remove" ? "from" : "in"} ${only.identity.scope} scope`;
 		if (only.status === "committed")
-			return `${only.imported ? "Imported" : PAST_TENSE[only.operation]} ${only.identity.ref} ${place}`;
-		if (only.status === "failed") return `Could not ${only.operation} ${only.identity.ref} ${place}`;
-		return `Did not start the ${only.operation} of ${only.identity.ref}`;
+			return `${only.imported ? "Imported" : PAST_TENSE[only.operation]} the ${refWords(only.identity.ref)} ${place}`;
+		if (only.status === "failed") return `Could not ${only.operation} the ${refWords(only.identity.ref)} ${place}`;
+		return `Did not start the ${only.operation} of the ${refWords(only.identity.ref)}`;
 	}
 	return `${result.committed} committed · ${result.failed} failed · ${result.unattempted} unattempted`;
 }
@@ -397,7 +406,7 @@ function diskText(verification: LibraryStepVerification): string {
 
 function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult): Fact[] {
 	const theme = clioTheme();
-	const facts: Fact[] = [{ label: "Package", value: outcome.identity.ref }];
+	const facts: Fact[] = [{ label: "Package", value: refWords(outcome.identity.ref) }];
 	if (outcome.error) {
 		facts.push({ label: "Error", value: statusChip(theme, "error", `${outcome.error.code}: ${outcome.error.message}`) });
 		if (outcome.error.changed)

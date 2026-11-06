@@ -53,6 +53,7 @@ import {
 	openLibraryReviewOverlay,
 } from "./library-review.js";
 import { isLibraryTab, LIBRARY_TABS } from "./library-tabs.js";
+import { refWords } from "./library-words.js";
 import { type ListOverlayHandle, type ListOverlayItem, type ListOverlayTab, openListOverlay } from "./list-overlay.js";
 
 export { isLibraryTab, LIBRARY_TABS };
@@ -243,7 +244,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		} catch (error) {
 			// A failed inspection is this package's problem, said once as a notice;
 			// it is not a library read failure, which would paint every empty tab red.
-			deps.notice("error", `${member.ref}: ${error instanceof Error ? error.message : String(error)}`);
+			deps.notice("error", `${refWords(member.ref)}: ${error instanceof Error ? error.message : String(error)}`);
 			view.member = undefined;
 			return undefined;
 		}
@@ -336,7 +337,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				...(withRequirements ? { withRequirements: true } : {}),
 			});
 		} catch (error) {
-			deps.notice("error", `${ref}: ${error instanceof Error ? error.message : String(error)}`);
+			deps.notice("error", `${refWords(ref)}: ${error instanceof Error ? error.message : String(error)}`);
 			return;
 		}
 		const missing = plan.steps.flatMap((step) => step.dependencies.missing);
@@ -345,7 +346,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			pendingWithRequirements = ref;
 			deps.notice(
 				"info",
-				`${ref} needs ${missing.join(", ")}, which ${missing.length === 1 ? "is" : "are"} not installed. Press i again to review installing ${missing.length === 1 ? "both" : "them all"}; nothing is written until you confirm.`,
+				`The ${refWords(ref)} needs ${missing.map(refWords).join(", ")}, which ${missing.length === 1 ? "is" : "are"} not installed. Press i again to review installing ${missing.length === 1 ? "both" : "them all"}; nothing is written until you confirm.`,
 			);
 			return;
 		}
@@ -369,7 +370,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				child = null;
 				deps.lifecycle.release(plan);
 				restore();
-				deps.notice("info", `${ref}: cancelled; nothing was written.`);
+				deps.notice("info", `${refWords(ref)}: cancelled; nothing was written.`);
 				review.hide();
 			},
 			onDone: (result) => {
@@ -377,7 +378,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				restore();
 				const level: NoticeLevel = result.failed > 0 ? "error" : result.committed > 0 ? "success" : "info";
 				const next = result.committed > 0 ? libraryRefreshSummary(result.refresh) : "";
-				const said = result.outcomes.length > 0 ? libraryOutcomeHeadline(result) : `${ref}: nothing changed`;
+				const said = result.outcomes.length > 0 ? libraryOutcomeHeadline(result) : `${refWords(ref)}: nothing changed`;
 				deps.notice(level, `${said}.${next ? ` ${next}` : ""}`);
 				// A partial batch still redraws: the writes that landed are real.
 				if (result.committed > 0) redraw(selectionId);
@@ -494,7 +495,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 					const next = libraryRowActions(subject, view).install ? " Press i to review an install." : "";
 					deps.notice(
 						"info",
-						`${subject.record.ref} is not installed here; its catalog hints describe what it says it contains.${next}`,
+						`The ${refWords(subject.record.ref)} is not installed here; its catalog hints describe what it says it contains.${next}`,
 					);
 				}
 				return;
