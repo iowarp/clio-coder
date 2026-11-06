@@ -426,16 +426,15 @@ describe("plugin library lifecycle", () => {
 		equal(libraryEntryInstalled(item), false);
 	});
 
-	it("registers scoped pins, preserves all copies after index removal, and still loads a retired evals key", async () => {
+	it("registers scoped pins, preserves all copies after index removal, and refuses a removed evals key", async () => {
 		const source = bundle();
-		// Package evals are retired; a manifest that still declares them must keep
-		// registering and installing until the v0.7.0 compatibility window.
-		mkdirSync(path.join(source, "evals"));
-		writeFileSync(path.join(source, "evals/check.yaml"), "version: 2\n");
 		const file = path.join(source, "plugin.json");
-		const manifest = JSON.parse(readFileSync(file, "utf8"));
+		const original = readFileSync(file, "utf8");
+		const manifest = JSON.parse(original);
 		manifest.extensions = { "ai.iowarp.clio": { manifestVersion: 1, evals: { check: "evals/check.yaml" } } };
 		writeFileSync(file, JSON.stringify(manifest));
+		throws(() => registerLibraryPackage(source, { scope: "project" }), /'evals' was removed in 0\.7\.0/);
+		writeFileSync(file, original);
 		const registered = registerLibraryPackage(source, { scope: "project" });
 		equal(registered.sha256, pluginContentDigest(source));
 		throws(() => registerLibraryPackage(source, { scope: "project" }), /already registered/);
