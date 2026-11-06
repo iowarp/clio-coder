@@ -13,6 +13,7 @@ import {
 	resolveExtensionCommands,
 } from "./operator-commands.js";
 import type { OperatorReloadResult, OperatorRuntimeEntry } from "./operator-runtime.js";
+import { extensionOwnerLabel } from "./owner-label.js";
 import type { ExtensionRuntimeSnapshot } from "./public-api.js";
 import type {
 	ExtensionEffect,
@@ -193,9 +194,14 @@ async function withinSessionClose(tasks: ReadonlyArray<Promise<unknown>>): Promi
 	clearTimeout(timer);
 }
 
+/** Missed observations in a row before a slow runtime is worth a notice. */
+const SLOW_OBSERVATIONS_REPORTED_AFTER = 3;
+
 interface ObservationQueue {
 	events: ExtensionObservationV2[];
 	draining: boolean;
+	/** Observations in a row the runtime did not answer in time. */
+	missed?: number;
 	/** Settles when the running drain ends. */
 	drained?: Promise<void>;
 }
@@ -1131,9 +1137,20 @@ export class OperatorExtensionRuntimeV2 {
 				const lifetime = this.lifetime;
 				try {
 					const output = await process.observe(event);
+					queue.missed = 0;
 					if (output && lifetime === this.lifetime) this.apply(process, output, "observation");
 				} catch (error) {
-					this.report(`extension ${process.extension.id}: ${event.event} handler skipped: ${message(error)}`);
+					const name = extensionOwnerLabel(process.extension.id);
+					// One late answer under load is not a fault the operator can act on, and the runtime stays up; a
+					// `session_open handler skipped` warning beside `● running` read as a contradiction. A runtime that
+					// keeps missing is said once, plainly.
+					if (error instanceof ExtensionRequestTimeout) {
+						queue.missed = (queue.missed ?? 0) + 1;
+						if (queue.missed === SLOW_OBSERVATIONS_REPORTED_AFTER)
+							this.report(`${name} is answering slowly and missed its last ${queue.missed} updates; /extensions shows it`);
+						continue;
+					}
+					this.report(`${name} could not handle the ${event.event.replaceAll("_", " ")} update: ${message(error)}`);
 				}
 			}
 		} finally {

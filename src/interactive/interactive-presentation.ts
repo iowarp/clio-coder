@@ -12,20 +12,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForProviders, thinkingEffectNote } from "../domains/providers/index.js";
-
-/**
- * Why the rail's thinking word differs from the level asked for, in the operator's terms (TY05). `medium runs as on`
- * made the reader decode a mapping; a toggle model has no levels at all, which is the fact that explains the word.
- */
-function railThinkingNote(thinking: Parameters<typeof thinkingEffectNote>[0]): string | null {
-	const note = thinkingEffectNote(thinking);
-	if (note === null) return null;
-	if (thinking.mechanism === "on-off") return "this model has no levels";
-	if (thinking.mechanism === "always-on") return "this model always thinks";
-	if (thinking.mechanism === "none") return note;
-	return `${thinking.configuredLevel} not offered`;
-}
+import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
@@ -106,6 +93,7 @@ import { createDropAlerts } from "./telemetry-drops.js";
 import { ACTIVITY_STEP_MS } from "./theme/glyphs.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { formatWaitClock, modelNickname } from "./theme/labels.js";
+import { thinkingNoteWords } from "./thinking-note.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import { bindWorkerResponseLimit, workerActivityWords } from "./worker-activity.js";
@@ -389,8 +377,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
 	});
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
-	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
-		deps.workspaceFacts;
+	const { getExtensionStats, getLiveWorkspaceSnapshot, refreshLiveWorkspaceGit } = deps.workspaceFacts;
 	/**
 	 * The submit binding as the operator has it, or null when it is unbound or
 	 * disabled. The header prints a key only when pressing it would actually
@@ -414,7 +401,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		providers: deps.providers,
 		getTerminalRows: () => (deps.tui as Partial<Pick<TUI, "terminal">>).terminal?.rows,
 		...(deps.agents ? { getAgentCount: () => deps.agents?.listSpecs().filter(isUserVisibleAgent).length ?? 0 } : {}),
-		getWorkspaceSnapshot,
+		// The launchpad's Git row reads the same live probe as the footer, so the two never disagree about the repository.
+		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
 		// The authoritative project-context reader. It is synchronous on a cache
 		// miss, so the banner refreshes it off the frame rather than calling it
 		// during render; the frame that shows the result is asked for below.
@@ -918,7 +906,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			)?.thinking;
 			// A route with no thinking control can still send reasoning, and what it sent outranks what its catalog row says.
 			if (thinking?.mechanism === "none" && reasoningRoutes.has(routeKey(current?.chat?.target, current?.chat?.model))) {
-				return { label: "off", hasLevels: false, supportedLevels: [], note: "model reasons anyway" };
+				// `think off (model reasons anyway)` read as a contradiction; what the model does is the label.
+				return { label: "on", hasLevels: false, supportedLevels: [], note: "this model always thinks" };
 			}
 			// Before the first probe answers, a local or gateway route's capabilities are guesses: `model has no thinking` showed
 			// on the first frame of a route about to say `think on`. Until then the rail says what was asked for and no more.
@@ -931,7 +920,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			// The rail states what the model will do. A setting the model cannot honor
 			// says so in words, where `low→off` left the reader to decode the arrow (F13).
-			const note = thinking ? railThinkingNote(thinking) : null;
+			const note = thinking ? thinkingNoteWords(thinking) : null;
 			return {
 				label:
 					note !== null && thinking

@@ -1,8 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
 import { internalGitArgv } from "../../../core/internal-git.js";
-
-const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 1000;
 /**
@@ -82,14 +79,42 @@ function gateSync(cwd: string, args: string[]): GateAnswer {
 	return { out: null, timedOut: true };
 }
 
+/**
+ * One Git question off the loop, with Clio's own timer instead of `execFile`'s. When the event loop stalls past the
+ * timeout (a busy launch, a long synchronous render), `execFile` fires its timer after Git already exited, destroys
+ * stdout unread, and then reports success with empty output: `rev-parse --is-inside-work-tree` answered `""`, the
+ * probe read that as no repository, and session bind kept it. Here the timer only signals the child; output is never
+ * cut, so an exit Git finished on its own keeps every byte, and a child that the timer actually stopped is unknown.
+ */
+function askGit(cwd: string, args: string[], timeout: number): Promise<GateAnswer> {
+	return new Promise((resolve) => {
+		let argv: string[];
+		try {
+			argv = internalGitArgv(args, cwd);
+		} catch {
+			resolve({ out: null, timedOut: false });
+			return;
+		}
+		let stopped = false;
+		const child = execFile("git", argv, { cwd, encoding: "utf8" }, (err, stdout) => {
+			clearTimeout(timer);
+			if (err === null) {
+				resolve({ out: stdout.trim(), timedOut: false });
+				return;
+			}
+			resolve({ out: null, timedOut: (stopped && err.signal !== null) || timedOut(err) });
+		});
+		const timer = setTimeout(() => {
+			stopped = child.exitCode === null && child.signalCode === null;
+			if (stopped) child.kill("SIGTERM");
+		}, timeout);
+	});
+}
+
 async function gateAsync(cwd: string, args: string[]): Promise<GateAnswer> {
 	for (const timeout of [TIMEOUT_MS, GATE_RETRY_TIMEOUT_MS]) {
-		try {
-			const { stdout } = await execFileAsync("git", internalGitArgv(args, cwd), { cwd, timeout, encoding: "utf8" });
-			return { out: stdout.trim(), timedOut: false };
-		} catch (err) {
-			if (!timedOut(err)) return { out: null, timedOut: false };
-		}
+		const answer = await askGit(cwd, args, timeout);
+		if (!answer.timedOut) return answer;
 	}
 	return { out: null, timedOut: true };
 }
@@ -108,16 +133,7 @@ function gitOk(cwd: string, args: string[]): string | null {
 }
 
 async function gitOkAsync(cwd: string, args: string[]): Promise<string | null> {
-	try {
-		const { stdout } = await execFileAsync("git", internalGitArgv(args, cwd), {
-			cwd,
-			timeout: TIMEOUT_MS,
-			encoding: "utf8",
-		});
-		return stdout.trim();
-	} catch {
-		return null;
-	}
+	return (await askGit(cwd, args, TIMEOUT_MS)).out;
 }
 
 function normalizeRemote(url: string): string {

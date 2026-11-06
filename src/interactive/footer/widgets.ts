@@ -590,11 +590,12 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: Ra
 /** The hint row says `Esc stops the run`; the rail uses the same verb so the two never read as two different keys. */
 /** Whole or absent: a bare `Esc` said nothing about what it does, and it outlived the name it should have outranked. */
 const ESC_CANCELS: Omit<RailFact, "keep"> = { text: "Esc stops" };
-const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model to switch", short: "/model" };
+const MODEL_SWITCHES: Omit<RailFact, "keep"> = { text: "/model to switch" };
 /** Once output has started a route change waits for the next turn, so the way to another model now runs through Esc. */
-const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model to switch", short: "then /model" };
+// Whole or absent: a bare `/model` beside a wait named no action, and the action is what the fact is for (HS22).
+const MODEL_AFTER_ESC: Omit<RailFact, "keep"> = { text: "then /model to switch" };
 /** While nothing has come back, a pick reroutes the request itself. */
-const MODEL_MOVES: Omit<RailFact, "keep"> = { text: "/model to reroute", short: "/model" };
+const MODEL_MOVES: Omit<RailFact, "keep"> = { text: "/model to reroute" };
 
 /** The server a route goes to, by the name the operator gave it, or plain words when the rail does not know it. */
 function serverName(target: string | undefined): string {
@@ -1168,7 +1169,8 @@ export function composerPhasePresentation(
 			break;
 		case "dispatching":
 			label = fit([
-				{ text: "is waiting for a worker", keep: 9 },
+				// A narrow rail keeps the way out beside a shorter wait rather than the long wait alone.
+				{ text: "is waiting for a worker", short: "awaits a worker", keep: 9 },
 				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 			]);
 			break;
@@ -1370,7 +1372,11 @@ export interface ShellSettlement {
 export function routeBlockerWords(facts: RouteReadinessFacts): string | null {
 	if (!facts.available) return "is unavailable";
 	if (facts.health === "down") return `cannot reach ${facts.targetId}`;
-	if (facts.lastStop === "error") return "failed its last request";
+	if (facts.lastStop === "error") {
+		// The cause rides with the blocker, so a shell line's rail does not leave the reason to the transcript.
+		const cause = facts.lastFailure ? providerFailureRailFacts(facts.lastFailure)?.cause : undefined;
+		return cause ? `failed its last request: ${cause.short ?? cause.text}` : "failed its last request";
+	}
 	if (facts.lastStop === "no_answer") return "gave no answer last turn";
 	return null;
 }

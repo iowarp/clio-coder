@@ -4,11 +4,7 @@ import { formatFooterTokens } from "../core/display-units.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { InteropProposal } from "../domains/interop/index.js";
-import {
-	type ProvidersContract,
-	resolveModelRuntimeCapabilitiesForProviders,
-	thinkingEffectNote,
-} from "../domains/providers/index.js";
+import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { TUI } from "../engine/tui.js";
 import type { RouteMoveFit, RouteMoveResult, RouteMoveWait } from "../session-control/chat-loop.js";
@@ -25,6 +21,7 @@ import {
 import { modelResidencySentence, modelResidencyWord, openModelOverlay } from "./overlays/model-selector.js";
 import { openSettingsOverlay, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
 import type { SettingValueOrigin } from "./overlays/settings-presentation.js";
+import { thinkingNoteWords } from "./thinking-note.js";
 
 export interface OverlayModelSelectorsDeps {
 	tui: TUI;
@@ -226,7 +223,8 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					ref.model,
 					deps.getSettings?.().chat?.thinkingLevel ?? "off",
 				)?.thinking;
-				const note = thinking ? thinkingEffectNote(thinking) : null;
+				// The rail's words for the same fact: `thinking on (medium runs as on)` made the reader decode a mapping (TY05).
+				const note = thinking ? thinkingNoteWords(thinking) : null;
 				const facts = [
 					applied,
 					down ? "this route is down, so turns fail until it answers; /model switches" : null,

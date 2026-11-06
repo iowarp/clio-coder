@@ -39,7 +39,11 @@ export interface LiveWorkFacts {
 
 /** Whole seconds of the phase on screen; a tool's elapsed is its own call's, as on its card. */
 function phaseElapsedMs(status: AgentStatus, now: number): number {
-	const start = status.phase === "tool_running" ? (status.toolStartedAt ?? status.since) : status.since;
+	// The phase's own start: `is writing · 23s` once carried the whole turn's time into a reply under a second old.
+	const start =
+		status.phase === "tool_running"
+			? (status.toolStartedAt ?? status.phaseSince ?? status.since)
+			: (status.phaseSince ?? status.since);
 	return Math.max(0, now - start);
 }
 
@@ -200,6 +204,8 @@ const BEHIND_VIEW = "continues behind this view";
  * `Esc close`, and nothing on screen said the run was one key further away (S3).
  */
 const BEHIND_VIEW_STOP = "close this view, then Esc stops it";
+/** The same way out where the long form does not fit: at 60 and 40 columns the strip had no way out at all. */
+const BEHIND_VIEW_STOP_SHORT = "close, then Esc stops";
 
 /**
  * The line, or null when nothing is active. Candidates run from fullest to leanest and the first that fits wins. The
@@ -244,10 +250,12 @@ export function liveWorkStrip(
 		const awaitsWorker =
 			workers !== null && (facts.status.phase === "dispatching" || facts.status.tool?.toolName === ToolNames.Dispatch);
 		const clocked = (text: string): string => {
+			const phaseMs = phaseElapsedMs(facts.status, facts.now);
+			// Under a second is no clock yet, as the rail counts it.
 			const elapsed =
-				awaitsWorker || CARRIES_ELAPSED.test(stripTerminalSequences(text))
+				awaitsWorker || phaseMs < 1000 || CARRIES_ELAPSED.test(stripTerminalSequences(text))
 					? null
-					: formatWaitClock(phaseElapsedMs(facts.status, facts.now));
+					: formatWaitClock(phaseMs);
 			return theme.fg(loose.token, elapsed === null ? text : `${text} · ${elapsed}`);
 		};
 		// The clock the strip may add takes up to eight cells, which the words leave for it.
@@ -260,10 +268,30 @@ export function liveWorkStrip(
 		const bare = `${glyph} ${clocked(railFree(loose.label).replace(/^is /u, ""))}`;
 		// A stop already asked for owes nothing more; anything else a person may want to stop says how.
 		const stoppable = facts.status.phase !== "cancelling";
+		// What runs behind the turn is fitted to the cells the lead and tail leave, so a worker's wait cause shortens
+		// before it is dropped: at 80 columns a worker silent for 20s outgrew the row and the strip lost it (F2).
+		const background = backgroundSummary(facts, room);
+		const workersIn = (lead: string, tail: string | null): string | null => {
+			if (workers === null) return null;
+			const cells = room - visibleWidth(lead) - 3 - (tail === null ? 0 : tailCells([tail]));
+			if (cells < 12) return null;
+			const named = workerSummary(facts, cells, cells);
+			const both = [named, background].filter(Boolean).join(" · ");
+			if (both.length > 0 && visibleWidth(both) <= cells) return both;
+			return named !== null && visibleWidth(named) <= cells ? named : null;
+		};
+		const behind = (tail: string | null): string[] => {
+			const fitted = workersIn(owned, tail);
+			return fitted === null ? [] : [render(owned, tail === null ? [fitted] : [fitted, tail])];
+		};
 		candidates = [
 			...(stoppable ? [render(ownedWith(tailCells([workers, BEHIND_VIEW_STOP])), [workers, BEHIND_VIEW_STOP])] : []),
+			...(stoppable ? behind(BEHIND_VIEW_STOP) : []),
+			...(stoppable && workers === null ? [render(owned, [BEHIND_VIEW_STOP_SHORT])] : []),
 			render(owned, [workers, BEHIND_VIEW]),
+			...behind(BEHIND_VIEW),
 			...(workers === null ? [] : [render(owned, [workers])]),
+			...behind(null),
 			// A worker asking outranks the tail: with an overlay over its card, this row is all that says time is running.
 			...(facts.workers.some((row) => row.progress?.awaitingApproval === true)
 				? [
@@ -273,6 +301,8 @@ export function liveWorkStrip(
 				: []),
 			...(stoppable ? [render(ownedWith(tailCells([BEHIND_VIEW_STOP])), [BEHIND_VIEW_STOP])] : []),
 			render(owned, [BEHIND_VIEW]),
+			// The way out outranks the subject on a narrow strip, as it does on the rail.
+			...(stoppable ? [render(bare, [BEHIND_VIEW_STOP_SHORT])] : []),
 			render(owned, []),
 			render(bare, []),
 		];

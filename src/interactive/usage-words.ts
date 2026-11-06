@@ -80,6 +80,11 @@ export function usageSaysNothing(figure: string): boolean {
 	return figure === USAGE_NOT_MEASURED || figure === "≥0" || figure === "≥~0";
 }
 
+/** `1 call still running`: a call that has not settled yet, so its figures are still to come. */
+export function usageStillRunning(running: number): string {
+	return `${count(running)} ${running === 1 ? "call" : "calls"} still running`;
+}
+
 /** `3 calls had no usage data`, or null when every call reported. The noun names what was missing. */
 export function usageCoverage(gap: number, data = "usage data"): string | null {
 	if (gap <= 0) return null;
@@ -93,8 +98,10 @@ export function usageCoverage(gap: number, data = "usage data"): string | null {
 export function usageLineCoverage(
 	figures: ReadonlyArray<{ label: string; quantity: UsageQuantity | null | undefined }>,
 	data = "usage data",
+	running = 0,
 ): string | null {
-	const gaps = figures.map((entry) => ({ label: entry.label, gap: usageGap(entry.quantity) }));
+	// A call still out has not reported yet, which is not the same as a call that never will.
+	const gaps = figures.map((entry) => ({ label: entry.label, gap: Math.max(0, usageGap(entry.quantity) - running) }));
 	const base = gaps[0]?.gap ?? 0;
 	const wider = gaps.filter((entry) => entry.gap > base && !usageUnmeasured(figureOf(figures, entry.label)));
 	const lead = usageCoverage(base, data);
@@ -126,7 +133,10 @@ function listWords(words: ReadonlyArray<string>): string {
  * only when they have something to say. The exit card and /usage read their notes here, so a session's gaps read the
  * same on both (U1, U5).
  */
-export function usageLineNotes(figures: ReadonlyArray<{ label: string; quantity: UsageQuantity | null | undefined }>): {
+export function usageLineNotes(
+	figures: ReadonlyArray<{ label: string; quantity: UsageQuantity | null | undefined }>,
+	running = 0,
+): {
 	shown: ReadonlyArray<{ label: string; quantity: UsageQuantity | null | undefined }>;
 	notes: string[];
 } {
@@ -138,12 +148,15 @@ export function usageLineNotes(figures: ReadonlyArray<{ label: string; quantity:
 	});
 	const coverage = usageLineCoverage(
 		[input, output, ...shown].filter((entry): entry is NonNullable<typeof entry> => entry !== undefined),
+		"usage data",
+		running,
 	);
 	return {
 		shown,
 		notes: [
 			...(unmeasured.length > 0 ? [`no ${listWords(unmeasured)} data`] : []),
 			...(coverage !== null ? [coverage] : []),
+			...(running > 0 ? [usageStillRunning(running)] : []),
 		],
 	};
 }

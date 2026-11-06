@@ -473,7 +473,8 @@ function awarenessLabel(stats: WelcomeDashboardStats): string {
 
 function gitSummary(stats: WelcomeDashboardStats): string {
 	const workspace = stats.workspace;
-	if (workspace === null) return "Checking…";
+	// Before the first probe lands the placeholder says nothing about Git, so it reads as a check in progress.
+	if (workspace === null || workspace.pending === true) return "Checking…";
 	// A probe that ran out of time is no answer: a real repository read `No Git repository` under load.
 	if (workspace.gitUnknown === true) return "Git did not answer yet";
 	if (!workspace.isGit) return "No Git repository";
@@ -764,7 +765,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 	return [
 		stats.cwd,
 		workspace &&
-			`${workspace.isGit}\x01${workspace.branch}\x01${workspace.dirty}\x01${workspace.ahead}\x01${workspace.behind}`,
+			`${workspace.isGit}\x01${workspace.branch}\x01${workspace.dirty}\x01${workspace.ahead}\x01${workspace.behind}\x01${workspace.pending}\x01${workspace.gitUnknown}`,
 		stats.targetLabel,
 		stats.modelLabel,
 		stats.route,
