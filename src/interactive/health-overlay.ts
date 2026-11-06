@@ -153,7 +153,8 @@ function healthSummary(data: HealthData): { text: string; ok: boolean } {
 			const owner = names[index];
 			return owner ? journalLosses(journal, owner) : [];
 		}),
-		loss(measured(health.producer.unownedRecords), "had nowhere to be saved", false),
+		// The table counts these in its own `no journal open` row under `dropped`, so the verdict uses the same word.
+		loss(measured(health.producer.unownedRecords), "dropped because no journal was open for them"),
 		loss(measured(health.producer.sinkFailures), "refused by a journal"),
 	].filter((entry) => entry.count > 0);
 	const total = losses.reduce((sum, entry) => sum + entry.count, 0);
@@ -244,17 +245,25 @@ function healthLines(data: HealthData, width: number): string[] {
 			),
 		);
 		const outside = [
-			unit(
-				"records with nowhere to be saved",
-				health.producer.unownedRecords.display,
-				lost(health.producer.unownedRecords),
-			),
 			unit("records a journal refused", health.producer.sinkFailures.display, lost(health.producer.sinkFailures)),
 		];
+		const unowned = health.producer.unownedRecords;
 		if (health.journals.length === 0)
-			lines.push(...missing("No journal is open in this process yet."), ...chipRows(theme, outside, safe));
+			lines.push(
+				...missing("No journal is open in this process yet."),
+				...chipRows(theme, [unit("dropped with no journal open", unowned.display, lost(unowned)), ...outside], safe),
+			);
 		else
-			lines.push(...journalRows(health.journals, ownerNames(health.journals, data.sessionId), safe, lossCell, outside));
+			lines.push(
+				...journalRows(
+					health.journals,
+					ownerNames(health.journals, data.sessionId),
+					safe,
+					lossCell,
+					outside,
+					lost(unowned) ? unowned : null,
+				),
+			);
 
 		lines.push(sectionRule(theme, safe, "Responsiveness"));
 		const lag = health.loopLag;
@@ -380,8 +389,13 @@ function journalRows(
 	names: ReadonlyArray<OwnerName>,
 	width: number,
 	lossCell: (quantity: LiveCount) => TableCell,
-	/** The records no journal took, as `label count` units, under every journal's counts. */
+	/** The records a journal refused, as `label count` units, under every journal's counts. */
 	outside: ReadonlyArray<string>,
+	/**
+	 * Records emitted while no journal was open for them. They are a loss like any other, so they get a row of their own
+	 * under `dropped`: a warning verdict above a table of zeros read as two different reports (H4).
+	 */
+	unowned: LiveCount | null = null,
 ): string[] {
 	const theme = clioTheme();
 	const counts = (journal: Journal) =>
@@ -399,10 +413,22 @@ function journalRows(
 			{ label: "journal", priority: 10 },
 			...counts(journals[0] as Journal).map((count) => ({ label: count.label, align: "right" as const, priority: 5 })),
 		],
-		rows: journals.map((journal, index) => [
-			theme.fg("footerIdentity", names[index]?.label ?? journal.owner),
-			...counts(journal).map((count) => count.cell),
-		]),
+		rows: [
+			...journals.map((journal, index) => [
+				theme.fg("footerIdentity", names[index]?.label ?? journal.owner),
+				...counts(journal).map((count) => count.cell),
+			]),
+			...(unowned === null
+				? []
+				: [
+						[
+							theme.fg("footerIdentity", NO_JOURNAL),
+							...counts(journals[0] as Journal).map((count) =>
+								count.label === "dropped" ? lossCell(unowned) : ({ text: "–" } as TableCell),
+							),
+						],
+					]),
+		],
 	};
 	// The ids are for someone matching a journal on disk, so they come after the counts, whole or not at all.
 	const idRow = (name: OwnerName | undefined): string[] => {
@@ -438,8 +464,14 @@ function journalRows(
 			).map((row) => `  ${row}`),
 		);
 	}
+	if (unowned !== null) {
+		lines.push(theme.style("groupHeading", NO_JOURNAL, { bold: true }));
+		lines.push(`  ${theme.fg("fieldName", "dropped")} ${theme.fg("warning", unowned.display)}`);
+	}
 	return [...lines, ...below, ...explain];
 }
+
+const NO_JOURNAL = "no journal open";
 
 export interface OpenHealthOverlayOptions {
 	getBreakers?: () => ReadonlyArray<RouteBreakerView>;
