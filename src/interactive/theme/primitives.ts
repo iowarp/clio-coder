@@ -67,7 +67,9 @@ function wrap(text: string, width: number): string[] {
 	return wrapPaths(text, width);
 }
 
-const ANSI_OR_WORD = /\u001b\[[0-9;:]*[A-Za-z]|[^\s\u001b]+/gu;
+/** An escape sequence or a run of visible text; built from the escape code so the source carries no control character. */
+const ESCAPE = String.fromCharCode(27);
+const ANSI_OR_WORD = new RegExp(`${ESCAPE}\\[[0-9;:]*[A-Za-z]|[^\\s${ESCAPE}]+`, "gu");
 
 /**
  * Word-wrap to `width` the way `wrapTextWithAnsi` does, except that a word wider than the row which contains `/`
@@ -77,7 +79,7 @@ export function wrapPaths(text: string, width: number): string[] {
 	const room = Math.max(1, Math.floor(width));
 	if (!text.includes("/")) return wrapTextWithAnsi(text, room);
 	const broken = text.replace(ANSI_OR_WORD, (token) => {
-		if (token.startsWith("\u001b") || !token.includes("/") || visibleWidth(token) <= room) return token;
+		if (token.startsWith(ESCAPE) || !token.includes("/") || visibleWidth(token) <= room) return token;
 		const lines: string[] = [];
 		let line = "";
 		for (const part of token.split(/(?<=\/)/u)) {

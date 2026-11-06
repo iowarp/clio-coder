@@ -23,7 +23,7 @@ export function holdInlineMath(text: string, hold: string): string {
 		.map((line) => {
 			const opened = FENCE.exec(line);
 			if (fence !== null) {
-				if (opened !== null && opened[1]?.startsWith(fence)) fence = null;
+				if (opened?.[1]?.startsWith(fence)) fence = null;
 				return line;
 			}
 			if (opened !== null) {
