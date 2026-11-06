@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import {
 	copyFileSync,
@@ -875,18 +875,21 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			// A directory that exists only in the pack answers like a loose one, not "File not found".
 			const packedDirectory = dirname(packedSource);
 			strictEqual(existsSync(packedDirectory), false, "src/interactive must ship packed, not as a loose directory");
-			const packedDirectoryRead = JSON.parse(
-				execFileSync(process.execPath, ["--input-type=module", "--eval", readChild, readChunk, packedDirectory], {
-					cwd: foreign,
-					env: isolatedEnv(home),
-					encoding: "utf8",
-				}),
-			) as { kind: string; message?: string };
-			strictEqual(packedDirectoryRead.kind, "error");
-			strictEqual(
-				packedDirectoryRead.message,
-				`read: ${packedDirectory} is a directory, not a file. List its entries with ls.`,
-			);
+			const looseDirectory = join(packageRoot, "src");
+			const readDirectory = (path: string) => {
+				const result = JSON.parse(
+					execFileSync(process.execPath, ["--input-type=module", "--eval", readChild, readChunk, path], {
+						cwd: foreign,
+						env: isolatedEnv(home),
+						encoding: "utf8",
+					}),
+				) as { kind: string; message?: string };
+				return { kind: result.kind, message: result.message?.replaceAll(path, "<dir>") };
+			};
+			const looseDirectoryRead = readDirectory(looseDirectory);
+			strictEqual(looseDirectoryRead.kind, "error");
+			deepStrictEqual(readDirectory(packedDirectory), looseDirectoryRead);
+			notDeepStrictEqual(readDirectory(join(packageRoot, "src", "absent")), looseDirectoryRead);
 
 			const libraryHome = join(work, "isolated library home with spaces");
 			const libraryProject = join(work, "isolated library project with spaces");

@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notDeepStrictEqual, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,29 +58,24 @@ describe("packed source directory read", () => {
 		rmSync(pkg, { recursive: true, force: true });
 	});
 
-	const directoryAnswer = (path: string) => ({
-		kind: "error",
-		message: `read: ${path} is a directory, not a file. List its entries with ls.`,
-	});
-
-	it("answers a loose directory as a directory", async () => {
-		const loose = join(pkg, "src", "loose");
-		const result = (await readTool.run({ path: loose })) as { kind: string; message?: string };
-		deepStrictEqual({ kind: result.kind, message: result.message }, directoryAnswer(loose));
-	});
+	/** A read's verdict with its own path taken out, so two paths compare by behavior rather than by wording. */
+	async function readVerdict(path: string): Promise<{ kind: string; message: string | undefined }> {
+		const result = (await readTool.run({ path })) as { kind: string; message?: string };
+		return { kind: result.kind, message: result.message?.replaceAll(path, "<dir>") };
+	}
 
 	for (const relative of ["src/interactive", "src/interactive/nested"]) {
-		it(`answers the pack-only ${relative} the same way`, async () => {
-			const packed = join(pkg, ...relative.split("/"));
-			const result = (await readTool.run({ path: packed })) as { kind: string; message?: string };
-			deepStrictEqual({ kind: result.kind, message: result.message }, directoryAnswer(packed));
+		it(`answers the pack-only ${relative} as the loose src/loose answers`, async () => {
+			const loose = await readVerdict(join(pkg, "src", "loose"));
+			strictEqual(loose.kind, "error");
+			deepStrictEqual(await readVerdict(join(pkg, ...relative.split("/"))), loose);
 		});
 	}
 
 	it("still reports a path in neither the pack nor on disk as missing", async () => {
-		const result = (await readTool.run({ path: join(pkg, "src", "absent") })) as { kind: string; message?: string };
-		strictEqual(result.kind, "error");
-		strictEqual(/is a directory/.test(result.message ?? ""), false, result.message);
+		const missing = await readVerdict(join(pkg, "src", "absent"));
+		strictEqual(missing.kind, "error");
+		notDeepStrictEqual(missing, await readVerdict(join(pkg, "src", "loose")));
 	});
 
 	it("still reads a packed member as a file", async () => {
