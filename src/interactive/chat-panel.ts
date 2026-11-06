@@ -95,6 +95,7 @@ import {
 	SGR_BOLD_OFF,
 	SGR_ITALIC,
 	SGR_RESET,
+	wrapPaths,
 } from "./theme/index.js";
 import { modelNickname } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
@@ -982,7 +983,7 @@ function fitCodeLine(line: string, fenceIndent: string, width: number, bareFence
 	const body = text.startsWith(lead) ? text.slice(lead.length) : text.replace(/^ +/u, "");
 	const mark = bareFences ? lead : `${lead}${theme.fg("annotation", GLYPH.codeWrap)} `;
 	const room = Math.max(1, width - visibleWidth(mark));
-	return wrapTextWithAnsi(body, room).map((part, index) =>
+	return wrapPaths(body, room).map((part, index) =>
 		theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`),
 	);
 }
