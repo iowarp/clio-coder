@@ -58,14 +58,17 @@ function cacheFilePath(): string | null {
 	}
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function isEntry(value: unknown): value is CacheEntry {
-	if (value === null || typeof value !== "object") return false;
-	const entry = value as Record<string, unknown>;
 	return (
-		typeof entry.mtimeMs === "number" &&
-		typeof entry.size === "number" &&
-		typeof entry.text === "string" &&
-		typeof entry.json === "string"
+		isRecord(value) &&
+		typeof value.mtimeMs === "number" &&
+		typeof value.size === "number" &&
+		typeof value.text === "string" &&
+		typeof value.json === "string"
 	);
 }
 
@@ -80,15 +83,16 @@ function fileSignature(file: string): string {
 
 function readCache(file: string): Map<string, CacheEntry> {
 	const entries = new Map<string, CacheEntry>();
-	let parsed: Partial<CacheFile>;
+	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<CacheFile>;
+		parsed = JSON.parse(readFileSync(file, "utf8"));
 	} catch {
 		// Missing or corrupt cache: start empty and rewrite it on the next flush.
 		return entries;
 	}
-	if (parsed.format !== CACHE_FORMAT || parsed.clioVersion !== readClioVersion()) return entries;
-	if (parsed.entries === null || typeof parsed.entries !== "object") return entries;
+	// Anything but this format's envelope, `null` and arrays included, reads as an empty cache.
+	if (!isRecord(parsed) || parsed.format !== CACHE_FORMAT || parsed.clioVersion !== readClioVersion()) return entries;
+	if (!isRecord(parsed.entries)) return entries;
 	for (const [key, value] of Object.entries(parsed.entries)) {
 		if (isEntry(value)) entries.set(key, value);
 	}
@@ -139,6 +143,15 @@ function isJsonExact(value: unknown): boolean {
 	return Object.values(value as Record<string, unknown>).every(isJsonExact);
 }
 
+/** The cached parse, or undefined when the entry's JSON does not parse and the source must be read instead. */
+function decodeEntry(entry: CacheEntry): { value: unknown } | undefined {
+	try {
+		return { value: JSON.parse(entry.json) as unknown };
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * A frontmatter text parser for one skill file, answering from the cache when
  * the file is unchanged. Throws exactly what the YAML parser throws.
@@ -149,10 +162,17 @@ export function cachedFrontmatterParser(
 ): (text: string) => unknown {
 	return (text) => {
 		const cache = currentCache();
-		const hit = cache?.entries.get(filePath);
+		let hit = cache?.entries.get(filePath);
 		if (cache && hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size && hit.text === text) {
-			cache.touched.add(filePath);
-			return JSON.parse(hit.json) as unknown;
+			const decoded = decodeEntry(hit);
+			if (decoded) {
+				cache.touched.add(filePath);
+				return decoded.value;
+			}
+			// A damaged entry is evicted and the source parsed below, which replaces it when the parse is cacheable.
+			cache.entries.delete(filePath);
+			cache.dirty = true;
+			hit = undefined;
 		}
 		const value = parseYaml(text) as unknown;
 		if (cache && isJsonExact(value) && (hit !== undefined || cache.entries.size < MAX_ENTRIES)) {
