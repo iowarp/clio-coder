@@ -9,7 +9,7 @@ import type { ContextLedger, ContextLedgerGroup } from "../domains/session/conte
 import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
 import type { TelemetryReadModel, TelemetryView } from "../domains/telemetry/contract.js";
 import { type OverlayHandle, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { coldReasonText } from "../session-control/cold-reasons.js";
+import { coldReasonList } from "../session-control/cold-reasons.js";
 import {
 	contextCategorySwatch,
 	contextPercentRole,
@@ -345,8 +345,9 @@ function renderContextLedgerLines(
 				lines.push(theme.fg("annotation", prefill));
 			}
 			if (coldReasons.length > 0) {
-				const reasons = coldReasons.map(coldReasonText).join(", ");
-				lines.push(theme.fg("annotation", `last cache-affecting events: ${reasons} (reuse measured separately)`));
+				lines.push(
+					theme.fg("annotation", `prompt read again after ${coldReasonList(coldReasons)} (reuse measured separately)`),
+				);
 			}
 		}
 	}
