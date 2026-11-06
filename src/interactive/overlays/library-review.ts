@@ -228,8 +228,15 @@ const APPLY_CONSEQUENCE: Record<LibraryLifecyclePlan["request"]["operation"], st
 function reviewChoices(applicable: boolean, verb: string, consequence: string, detail: boolean): Choice[] {
 	return [
 		...(applicable ? [{ key: "Enter", verb, consequence, tone: "action" as const }] : []),
-		{ key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
-		{ key: "d", verb: "paths", consequence: detail ? "hides paths and digests" : "shows paths and digests" },
+		// The rows say what Esc does now: with the paths open it hides them, the way the rail says.
+		detail
+			? { key: "Esc", verb: "hide paths", consequence: "back to the review; nothing changes" }
+			: { key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
+		{
+			key: "d",
+			verb: detail ? "hide paths" : "paths",
+			consequence: detail ? "back to the review" : "shows paths and digests",
+		},
 	];
 }
 

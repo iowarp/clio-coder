@@ -911,7 +911,13 @@ class AskUserOverlayView implements Component {
 					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
 				]
 			: [
-					...this.renderCompactPosition(question, width, pointToMove ? moveKey : null, !named.includes("[a]")),
+					// In a text field `a` types a letter, so the ledger key is not offered there.
+					...this.renderCompactPosition(
+						question,
+						width,
+						pointToMove ? moveKey : null,
+						!named.includes("[a]") && this.currentState()?.mode !== "text",
+					),
 					...countdown,
 				];
 		const header = fit.headers ? this.renderQuestionHeader(question, width, !hasMenu && this.questions.length > 1) : [];

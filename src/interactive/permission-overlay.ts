@@ -850,7 +850,7 @@ function permissionInspectionLines(
 			content,
 			CARD_FACT_ROWS,
 		),
-		sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
+		sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} hides` }),
 		...previewReason(theme, preview.heading, content),
 	];
 	const tail =
@@ -862,7 +862,7 @@ function permissionInspectionLines(
 		? [
 				...identity.rows.slice(0, 1),
 				...target.slice(0, 1),
-				sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
+				sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} hides` }),
 			]
 		: fullHead;
 	const visibleRows = compact
@@ -1074,7 +1074,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				...identity.rows,
 				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content, CARD_FACT_ROWS)),
 				sectionRule(theme, content, artifact !== undefined ? "Details" : "Exact invocation", {
-					meta: `Esc or ${MUTATION_PREVIEW_KEY} closes`,
+					meta: `Esc or ${MUTATION_PREVIEW_KEY} hides`,
 				}),
 			];
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
@@ -1240,7 +1240,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const identity = identityRow(theme, this.view, permissionDecisionPresentation(this.view), content);
 		const head = [
 			...identity.rows,
-			sectionRule(theme, content, "Terms", { meta: `Esc or ${PERMISSION_TERMS_KEY} closes` }),
+			sectionRule(theme, content, "Terms", { meta: `Esc or ${PERMISSION_TERMS_KEY} hides` }),
 		];
 		const rows = permissionTermsRows(theme, this.view, content);
 		const clause = compactCountdownClause(this.view, countdown);
