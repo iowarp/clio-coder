@@ -2,7 +2,8 @@
  * Every leaf command answers `--help` the way the routers and most leaves do:
  * its usage on stdout, exit 0, and nothing executed. These leaves used to run
  * their strict argument loop first, so `--help` came back as an unknown flag
- * with exit 2, or as "--help needs a value" from `telemetry share`.
+ * with exit 2, or as "--help needs a value" from `telemetry share`, whose
+ * parser asked any unknown flag for a value before naming it as unknown.
  */
 import { equal, match } from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -57,6 +58,19 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 			equal(result.stderr, "", `${args.join(" ")} wrote to stderr`);
 			equal(result.status, 0, result.stdout);
 			match(result.stdout, usage);
+		});
+	}
+});
+
+describe("telemetry share names the flag it refuses", { concurrency: 2 }, () => {
+	for (const [args, refusal] of [
+		[["telemetry", "share", "--bogus"], /error: unknown flag --bogus\n/],
+		[["telemetry", "share", "--repo", "a", "--repo", "b"], /error: repeated flag --repo\n/],
+	] as const) {
+		it(`clio-coder ${args.join(" ")} exits 2 naming it`, async () => {
+			const result = await cli(args);
+			equal(result.status, 2, result.stderr);
+			match(result.stderr, refusal);
 		});
 	}
 });
