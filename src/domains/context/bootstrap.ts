@@ -1105,6 +1105,54 @@ function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<R
 	});
 }
 
+const CHECKER_SECTION_TITLE = "Checker-enforced invariants";
+const CODED_FAILURE_RE = /^([A-Za-z]{0,12}\d{1,4}[a-z]?(?:\/[A-Za-z]{0,12}\d{1,4}[a-z]?)*): (.+)$/;
+
+/** Whether handbook prose names a rule code, alone (`rule8`) or in a list (`rules 10 and 14`). */
+function namesRuleCode(code: string, text: string): boolean {
+	const lower = text.toLowerCase();
+	const exact = code.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	if (new RegExp(`(?:^|[^a-z0-9])${exact}(?![a-z0-9])`).test(lower)) return true;
+	const parts = /^([a-z]+)(\d+[a-z]?)$/.exec(code.toLowerCase());
+	if (!parts) return false;
+	return new RegExp(`\\b${parts[1]}s\\s+(?:[\\w-]+\\s*(?:,|and|or|/|&)\\s*)*${parts[2]}(?![a-z0-9])`).test(lower);
+}
+
+/**
+ * Every coded rule a check file declares and the handbook does not name,
+ * stated in that checker's own failure message. A model given fourteen
+ * boundary rules and ten invariant slots dropped the session-control and
+ * turn-control import rules; a reader is now told each rule exists, and why
+ * it is listed in the checker's words rather than the model's.
+ */
+function uncoveredCheckerRules(enforcement: EnforcementInventory | undefined, handbook: string): ClioMdSection | null {
+	const lines: string[] = [];
+	let chars = 0;
+	for (const file of enforcement?.checkFiles ?? []) {
+		const seen = new Set<string>();
+		for (const failure of file.failures) {
+			const head = CODED_FAILURE_RE.exec(failure);
+			const label = head?.[1];
+			if (!label || seen.has(label)) continue;
+			seen.add(label);
+			const codes = label.split("/");
+			if (codes.every((code) => namesRuleCode(code, handbook))) continue;
+			const line = `- ${codes.map((code) => `\`${code}\``).join(", ")} in \`${file.path}\`: ${head?.[2] ?? ""}`;
+			if (chars + line.length + 1 > HANDBOOK_TARGETS.sectionChars - 200) break;
+			lines.push(line);
+			chars += line.length + 1;
+		}
+	}
+	if (lines.length === 0) return null;
+	return {
+		title: CHECKER_SECTION_TITLE,
+		body: [
+			"Coded rules the checks below declare that the rules above do not state, quoted from each failure message (… marks an interpolated value). A change that matches one fails that check.",
+			...lines,
+		].join("\n"),
+	};
+}
+
 function stabilizeGeneratedOutput(
 	input: BootstrapGenerateInput,
 	base: BootstrapStructuredOutput,
@@ -1175,11 +1223,17 @@ function stabilizeGeneratedOutput(
 	for (const section of authoredRules) addSection(section);
 	// Authored sections, then the model's grounded sections, then heuristics:
 	// the model reads the repository, the heuristics only read its metadata.
-	for (const section of existingSections) addSection(section);
+	// The checker section is derived on every run; a stale copy from the previous handbook is not authored.
+	for (const section of existingSections) if (section.title !== CHECKER_SECTION_TITLE) addSection(section);
 	for (const section of base.sections ?? []) {
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
+	const checkerRules = uncoveredCheckerRules(
+		input.enforcement,
+		[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
+	);
+	if (checkerRules) addSection(checkerRules);
 	for (const section of inferredSections) addSection(section);
 	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
 	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);

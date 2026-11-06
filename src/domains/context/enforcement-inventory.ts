@@ -46,6 +46,14 @@ const FAILURE_RE = /[`'"]([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:[^`'"\\]|\\.){8,})/g
  */
 const FAILURE_CALL_RE =
 	/\b\w*(?:fail|error|report|violation|issue|problem)\w*\(\s*["'`]([a-z][\w.:-]{1,40})["'`]\s*,\s*["'`]((?:[^`'"\\]|\\.){8,})/gi;
+/**
+ * A failure whose code comes from a variable: `${rule}: ...` after
+ * `const rule = inSessionControl ? "rule8" : "rule9"`. Clio's boundary checker
+ * reports its session-control and engine import rules this way, and the
+ * literal form alone left both out of every generated handbook.
+ */
+const FAILURE_VAR_RE = /[`'"]\$\{(\w+)\}: ((?:[^`'"\\]|\\.){8,})/g;
+const RULE_CODE_RE = /^[A-Za-z]{0,12}\d{1,4}[a-z]?$/;
 const MAX_FAILURE_CHARS = 360;
 /** One rule often fails in a few distinct ways; keep the first of each, not every variant. */
 const MAX_FAILURES_PER_CODE = 2;
@@ -100,18 +108,48 @@ function checkNames(text: string): string[] {
 	return names;
 }
 
+/**
+ * The string literals the nearest assignment before `at` gives a variable,
+ * when that is all it gives: `const owner = inSessionControl ? "the session
+ * contract" : "the engine"`. An empty literal is an absent qualifier, not a
+ * word, so a variable that can be empty resolves to nothing.
+ */
+function literalChoices(text: string, name: string, at: number): string[] {
+	const assignment = new RegExp(`\\b(?:const|let|var)\\s+${name}\\s*=\\s*([^;\\n]+)`, "g");
+	const value = [...text.slice(0, at).matchAll(assignment)].at(-1)?.[1];
+	if (value === undefined) return [];
+	const literals = [...value.matchAll(/(["'])((?:(?!\1)[^\\\n])*)\1/g)].map((literal) => literal[2] ?? "");
+	// Anything but a condition around the literals computes the value; it is not a choice.
+	const rest = value.replace(/(["'])(?:(?!\1)[^\\\n])*\1/g, "").replace(/[\s?:()]/g, "");
+	if (literals.length === 0 || literals.some((literal) => literal.trim().length === 0)) return [];
+	return /^[\w.!&|=<>]*$/.test(rest) ? [...new Set(literals)] : [];
+}
+
 function failureHeads(text: string): string[] {
 	const heads: string[] = [];
 	const perCode = new Map<string, number>();
 	const bodies = new Set<string>();
-	const matches = [...text.matchAll(FAILURE_RE), ...text.matchAll(FAILURE_CALL_RE)].sort(
-		(a, b) => (a.index ?? 0) - (b.index ?? 0),
-	);
+	const plain = [...text.matchAll(FAILURE_RE), ...text.matchAll(FAILURE_CALL_RE)].map((match) => ({
+		index: match.index ?? 0,
+		code: match[1] ?? "",
+		body: match[2] ?? "",
+	}));
+	const coded = [...text.matchAll(FAILURE_VAR_RE)].flatMap((match) => {
+		const codes = literalChoices(text, match[1] ?? "", match.index ?? 0);
+		if (codes.length === 0 || !codes.every((code) => RULE_CODE_RE.test(code))) return [];
+		return [{ index: match.index ?? 0, code: codes.join("/"), body: match[2] ?? "" }];
+	});
+	const matches = [...plain, ...coded].sort((a, b) => a.index - b.index);
 	for (const match of matches) {
-		const code = match[1] ?? "";
+		const code = match.code;
 		const count = perCode.get(code) ?? 0;
 		if (count >= MAX_FAILURES_PER_CODE) continue;
-		const body = (match[2] ?? "")
+		const body = match.body
+			// A variable assigned only string literals reads as those literals.
+			.replace(/\$\{(\w+)\}/g, (whole, name: string) => {
+				const choices = literalChoices(text, name, match.index);
+				return choices.length > 0 ? choices.join(" / ") : whole;
+			})
 			.replace(/\$\{[^}]*\}/g, "…")
 			// The capture stops at the first quote, which can fall inside an
 			// interpolation such as `${names.join(", ")}`; elide the fragment.
