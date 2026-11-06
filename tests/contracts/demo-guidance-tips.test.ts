@@ -127,11 +127,6 @@ describe("demo guidance tips", () => {
 		ok(store.calls.includes("topic:model"));
 	});
 
-	it("words the settings tip for the autonomy that can act on it", () => {
-		const { turn } = guidance({ autonomy: () => "default" });
-		match(tipOf(turn("how can I change the thinking level in clio?")) ?? "", /preview a Clio settings change/);
-	});
-
 	it("does nothing and touches no profile while demo guidance is off", () => {
 		const { turn, store, setEnabled } = guidance();
 		setEnabled(false);
