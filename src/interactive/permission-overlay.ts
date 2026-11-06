@@ -44,6 +44,7 @@ import {
 	toneRole,
 	toolFunction,
 } from "./theme/index.js";
+import { keyName } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
@@ -605,7 +606,7 @@ function permissionFacts(
 	if (view.mutation !== undefined) {
 		facts.push({
 			label: "mutation",
-			value: `${mutationFactsLine(view.mutation)} · ${MUTATION_PREVIEW_KEY} reads it before you decide`,
+			value: `${mutationFactsLine(view.mutation)} · ${keyName(MUTATION_PREVIEW_KEY)} reads it before you decide`,
 		});
 	} else if (view.origin.kind === "worker" && isFileMutationTool(view.tool)) {
 		facts.push({
@@ -755,7 +756,7 @@ function permissionCardSections(
 			...(plan === null
 				? [sectionRule(theme, content, "Resolved dispatch plan"), ...planTextRows(view.artifact.text, content)]
 				: [
-						sectionRule(theme, content, "Plan", { meta: `${MUTATION_PREVIEW_KEY} shows every field` }),
+						sectionRule(theme, content, "Plan", { meta: `${keyName(MUTATION_PREVIEW_KEY)} shows every field` }),
 						...factRows(theme, planFacts(plan), content, CARD_FACT_ROWS),
 					]),
 		);
@@ -764,7 +765,7 @@ function permissionCardSections(
 	// The rail gives up its reading keys before its scroll arrows; when the two
 	// together overflow it, the choice rows carry them instead.
 	const allReading = readingKeys(inspectable);
-	const railText = [...allReading.map((entry) => `[${entry.key}] ${entry.verb}`), "[↑↓] scroll"].join(" · ");
+	const railText = [...allReading.map((entry) => `[${keyName(entry.key)}] ${entry.verb}`), "[↑↓] scroll"].join(" · ");
 	const readingFolded = visibleWidth(railText) > content - 3;
 	const reading = readingFolded ? allReading : [];
 	const bareChoices = bareChoiceRows(theme, choices, content, hasDraft, reading);
@@ -847,7 +848,9 @@ function permissionInspectionLines(
 			content,
 			CARD_FACT_ROWS,
 		),
-		sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
+		sectionRule(theme, content, previewLabel(preview.heading), {
+			meta: `Esc or ${keyName(MUTATION_PREVIEW_KEY)} closes`,
+		}),
 		...previewReason(theme, preview.heading, content),
 	];
 	const tail =
@@ -859,7 +862,9 @@ function permissionInspectionLines(
 		? [
 				...identity.rows.slice(0, 1),
 				...target.slice(0, 1),
-				sectionRule(theme, content, previewLabel(preview.heading), { meta: `Esc or ${MUTATION_PREVIEW_KEY} closes` }),
+				sectionRule(theme, content, previewLabel(preview.heading), {
+					meta: `Esc or ${keyName(MUTATION_PREVIEW_KEY)} closes`,
+				}),
 			]
 		: fullHead;
 	const visibleRows = compact
@@ -1071,7 +1076,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				...identity.rows,
 				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content, CARD_FACT_ROWS)),
 				sectionRule(theme, content, artifact !== undefined ? "Details" : "Exact invocation", {
-					meta: `Esc or ${MUTATION_PREVIEW_KEY} closes`,
+					meta: `Esc or ${keyName(MUTATION_PREVIEW_KEY)} closes`,
 				}),
 			];
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
@@ -1228,7 +1233,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const identity = identityRow(theme, this.view, permissionDecisionPresentation(this.view), content);
 		const head = [
 			...identity.rows,
-			sectionRule(theme, content, "Terms", { meta: `Esc or ${PERMISSION_TERMS_KEY} closes` }),
+			sectionRule(theme, content, "Terms", { meta: `Esc or ${keyName(PERMISSION_TERMS_KEY)} closes` }),
 		];
 		const rows = permissionTermsRows(theme, this.view, content);
 		const clause = compactCountdownClause(this.view, countdown);

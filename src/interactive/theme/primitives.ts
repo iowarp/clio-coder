@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
-import { fitIdentityLabel } from "./labels.js";
+import { fitIdentityLabel, keyName } from "./labels.js";
 import { padAnsi, rule } from "./rules.js";
 import { dotSep } from "./segments.js";
 import type { ClioTheme, ClioToken, SemanticRole } from "./tokens.js";
@@ -62,9 +62,40 @@ function clip(text: string, width: number): string {
 	return visibleWidth(text) <= safe ? text : truncateToWidth(text, safe, GLYPH.ellipsis, false);
 }
 
-/** Word-wrap to `width`, with a hard fold for a token longer than the row. */
+/** Word-wrap to `width`; a path or URL longer than the row breaks after a `/`, and only a longer segment folds hard. */
 function wrap(text: string, width: number): string[] {
-	return wrapTextWithAnsi(text, Math.max(1, Math.floor(width)));
+	return wrapPaths(text, width);
+}
+
+/**
+ * A run with no whitespace, escape sequences inside it included: a highlighter that re-opens its colour on every
+ * row Pi cut leaves escapes in the middle of one URL. Built from the escape code so the source carries no control
+ * character.
+ */
+const ESCAPE = String.fromCharCode(27);
+const ANSI_OR_WORD = new RegExp(`(?:${ESCAPE}\\[[0-9;:]*[A-Za-z]|[^\\s${ESCAPE}])+`, "gu");
+
+/**
+ * Word-wrap to `width` the way `wrapTextWithAnsi` does, except that a word wider than the row which contains `/`
+ * breaks after a separator: `/home/me/.config/` then `herdr/herdr.sock`, not `/home/me/.config/he` then `rdr/…`.
+ */
+export function wrapPaths(text: string, width: number): string[] {
+	const room = Math.max(1, Math.floor(width));
+	if (!text.includes("/")) return wrapTextWithAnsi(text, room);
+	const broken = text.replace(ANSI_OR_WORD, (token) => {
+		if (!token.includes("/") || visibleWidth(token) <= room) return token;
+		const lines: string[] = [];
+		let line = "";
+		for (const part of token.split(/(?<=\/)/u)) {
+			if (line.length > 0 && visibleWidth(line + part) > room) {
+				lines.push(line);
+				line = part;
+			} else line += part;
+		}
+		lines.push(line);
+		return lines.join("\n");
+	});
+	return wrapTextWithAnsi(broken, room);
 }
 
 /** A short fact in its tone, with an optional leading glyph. */
@@ -131,7 +162,7 @@ export function statusChip(theme: ClioTheme, status: StatusKind, label?: string)
 
 /** `[Enter]`, in the key color, the spelling the rails and footers already use. */
 export function keyCap(theme: ClioTheme, key: string, role: SemanticRole = "decisionKey"): string {
-	return theme.fg(role, `[${key}]`);
+	return theme.fg(role, `[${keyName(key)}]`);
 }
 
 /** Chips on one row, joined by the quiet middot, clipped to `width`. */

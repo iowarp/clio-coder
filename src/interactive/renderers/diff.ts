@@ -8,7 +8,7 @@
  */
 import * as Diff from "diff";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { type ClioTheme, clioTheme } from "../theme/index.js";
+import { type ClioTheme, clioTheme, GLYPH, wrapPaths } from "../theme/index.js";
 
 export interface DiffRenderOptions {
 	color?: boolean;
@@ -97,7 +97,7 @@ const MIN_HANGING_CONTENT = 12;
 /**
  * Render Clio's numbered diff string as width-bounded transcript rows. A row
  * too long for the width wraps its content under itself, past the sign and the
- * line number, so the gutter column stays the sign and number alone.
+ * line number; its continuation rows repeat the sign and mark the number column.
  */
 export function renderDiffLines(diffText: string, width: number, options: DiffRenderOptions = {}): string[] {
 	const color = options.color ?? true;
@@ -151,8 +151,10 @@ export function renderDiffLines(diffText: string, width: number, options: DiffRe
 		if (row.prefix === null || bounded - gutterWidth < MIN_HANGING_CONTENT) {
 			return wrapTextWithAnsi(styleLine(`${row.gutter}${row.content}`, row.prefix, color, theme), bounded);
 		}
-		const hang = " ".repeat(gutterWidth);
-		return wrapTextWithAnsi(row.content, bounded - gutterWidth).map((content, part) =>
+		// A continuation keeps its sign, so an added line still reads as added without colour, and marks the
+		// number column with the code block's continuation glyph rather than a blank that reads as context.
+		const hang = `${row.prefix}${" ".repeat(Math.max(0, gutterWidth - 3))}${GLYPH.codeWrap} `;
+		return wrapPaths(row.content, bounded - gutterWidth).map((content, part) =>
 			styleLine(`${part === 0 ? row.gutter : hang}${content}`, row.prefix, color, theme),
 		);
 	});

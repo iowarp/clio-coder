@@ -2671,7 +2671,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						),
 						`  ${"Open one".padEnd(width)}  /peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
 					];
-					for (const line of lines) ctx.io.stdout(`${line}\n`);
+					// One write is one block: a write per line drew a spacer between rows wherever a row wrapped.
+					ctx.io.stdout(`${lines.join("\n")}\n`);
 					ctx.render?.();
 					return;
 				}
@@ -2779,7 +2780,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
 			if (command.kind === "panes") {
 				runLocal(async () => {
-					for (const line of formatPanesStatus(panes.status())) ctx.io.stdout(`${line}\n`);
+					ctx.io.stdout(`${formatPanesStatus(panes.status()).join("\n")}\n`);
 					ctx.render?.();
 				});
 				return;
