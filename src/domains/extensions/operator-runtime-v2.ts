@@ -5,7 +5,6 @@ import type { UnixSocketMode } from "../../core/sandbox/types.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import { extensionIdentity } from "./activity.js";
-import { extensionOwnerLabel } from "./owner-label.js";
 import {
 	type ExtensionCommandRow,
 	extensionInvocation,
@@ -14,6 +13,7 @@ import {
 	resolveExtensionCommands,
 } from "./operator-commands.js";
 import type { OperatorReloadResult, OperatorRuntimeEntry } from "./operator-runtime.js";
+import { extensionOwnerLabel } from "./owner-label.js";
 import type { ExtensionRuntimeSnapshot } from "./public-api.js";
 import type {
 	ExtensionEffect,
