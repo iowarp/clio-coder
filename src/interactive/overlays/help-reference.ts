@@ -168,6 +168,20 @@ export function openHelpOverlay(
 	// and with the live footer hints on the surface it documents.
 	const topics: ListOverlayItem[] = [
 		{
+			id: "topic-learning-clio",
+			label: "learning clio & tips  Demo guidance: what it teaches, how tips retire, how to turn it off",
+			cells: { lead: "learning clio & tips", text: "Demo guidance: what it teaches, how tips retire, how to turn it off" },
+			group: "Topics",
+			detail: () => [
+				"# Learning Clio",
+				"**Ask Clio**: questions about Clio itself, such as how to switch models or what workers do, get answered from its own settings and docs.",
+				"**Demo guidance** (on by default) teaches as you work: the launchpad, one footer tip at a time, and after some turns a `[tip]` naming a feature that would have helped that turn. A newcomer gets two post-turn tips a session, later one.",
+				"**Tips retire**: a tip stops once you use its feature or key, or after a few showings. What you have learned is kept in `harness-profile.json` in Clio's state directory; delete it to start the lessons over.",
+				`**Worth knowing**: /model or ${manager.actionLabel("clio-coder.model.select")} picks a model; /run coder <task> hands work to a background worker, and /run coder --read-only <task> one that cannot change files; /skills and /library run and install skills; /usage shows quota and spend; /doctor checks the install; ${manager.actionLabel("clio-coder.leader")} y switches this session to YOLO.`,
+				"**Turning it off**: Demo guidance in /settings (`interface.demo: false`) for good, or `--no-demo` for one session. The Minimal output style also stays quiet.",
+			],
+		},
+		{
 			id: "topic-keyboard-model",
 			label: "keyboard model  Alt for actions, Ctrl+G for any terminal, Ctrl for editing",
 			cells: { lead: "keyboard model", text: "Alt for actions, Ctrl+G for any terminal, Ctrl for editing" },
