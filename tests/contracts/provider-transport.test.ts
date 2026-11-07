@@ -904,6 +904,15 @@ describe("provider transport boundary", () => {
 				),
 				fallback.output,
 			);
+			ok(!fallback.output.includes("is not set in this shell"), fallback.output);
+
+			delete process.env.GOOGLE_API_KEY;
+			const unset = await configure("gem-unset");
+			strictEqual(unset.code, 0, unset.output);
+			ok(
+				unset.output.includes("warning: GOOGLE_API_KEY is not set in this shell; export it before using target gem-unset"),
+				unset.output,
+			);
 		} finally {
 			await stub.close();
 			env.restore();

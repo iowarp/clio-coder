@@ -658,6 +658,11 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 			`note: authenticate ${runtime.id} with \`clio-coder auth login ${runtime.id}\` before using this target\n`,
 		);
 	}
+	if (args.apiKeyEnv !== undefined && !process.env[args.apiKeyEnv]) {
+		process.stderr.write(
+			`warning: ${args.apiKeyEnv} is not set in this shell; export it before using target ${args.id}\n`,
+		);
+	}
 	printOk(`target ${args.id} saved`);
 	return 0;
 }
