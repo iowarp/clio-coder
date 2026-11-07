@@ -8,7 +8,7 @@
  * runs in the pane sees `HERDR_ENV=1` and joins as a guest through the ordinary
  * detection ladder, so there is one pane code path, not two.
  *
- * Three ownership rules. The host is Clio's own, one per project directory
+ * Three ownership rules. The host is Clio's own, one per project and Clio state directory
  * and named for it, laid out by the platform (src/domains/mux/workspace/
  * platform.ts) so the operator's own herdr, its sessions and its socket are
  * never listed, touched or stopped. The host always runs Clio's vendored herdr
@@ -17,8 +17,9 @@
  * server and deletes what the platform marked disposable rather than leaving a
  * daemon nobody asked for.
  *
- * Two launchers share a session when `clio-coder` is run twice in one
- * project, and that is intended: the second reattaches to the first's
+ * Two launchers using the same Clio state root share a session when
+ * `clio-coder` is run twice in one project, and that is intended:
+ * the second reattaches to the first's
  * workspace. So everything that changes the session's shape, which is
  * starting the server, creating a workspace, closing one and stopping the
  * server, happens under one cross-process lock keyed by the session. A launcher that finds the session empty and stops it
@@ -28,8 +29,9 @@
  * workspace with a fresh one the moment it closes under an attached client, so
  * "the session is empty" never becomes true while the operator is looking at
  * it. Instead the Clio in the pane drops a marker when it quits cleanly
- * (`markWorkspaceExit`), and the launcher detaches the client first and closes
- * the workspace second, with nobody attached to trigger a replacement. A Clio
+ * (`markWorkspaceExit`), and the launcher detaches its client. When this is
+ * the last workspace it stops the server directly, so a delayed co-attached
+ * client cannot trigger a replacement; otherwise it closes only this workspace. A Clio
  * that crashed records its exit status too, so its utility panes cannot outlive it. The
  * marker carries the exit summary Clio printed in its pane, and the launcher
  * prints it in the operator's terminal once the host is gone, so the summary
@@ -56,6 +58,7 @@ import { writeWorkspaceConfig } from "./config.js";
 import {
 	exitMarkerPath,
 	exitMarkerStem,
+	markWorkspaceExit,
 	readWorkspaceExitResult,
 	WORKSPACE_SESSION_PREFIX,
 	workspaceSessionFor,
@@ -75,14 +78,6 @@ const WORKSPACE_NONCE = /^[0-9a-f-]{36}$/u;
 const EXIT_POLL_MS = 200;
 /** Every this many exit polls, also ask whether the workspace still exists. */
 const WORKSPACE_CHECK_EVERY = 5;
-/**
- * A launcher that saw the marker waits this long before it closes the
- * workspace, so a second launcher on the same workspace has polled the marker
- * and hung up its own client first. herdr replaces the last workspace when it
- * closes under an attached client, and that replacement would keep the server
- * alive with nothing in it.
- */
-const SHARED_DETACH_SETTLE_MS = 3 * EXIT_POLL_MS;
 
 export interface WorkspaceLaunchOptions {
 	/** Absolute path of Clio's vendored herdr pin. */
@@ -158,7 +153,7 @@ interface Host {
 	platform: MuxHostPlatform;
 	layout: HostLayout;
 	hostEnv: NodeJS.ProcessEnv;
-	/** The session name, `clio-coder-<hash of the resolved directory>`. */
+	/** The session name, keyed by canonical Clio state root and project directory. */
 	session: string;
 	/** The project directory with every symlink resolved. */
 	cwd: string;
@@ -277,6 +272,7 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 
 	// No server is running, so whatever an earlier one saved is dead panes.
 	rmSync(host.layout.sessionFile, { force: true });
+	const hadSocket = existsSync(host.socketPath);
 	const server = spawn(host.options.herdrPath, [...host.layout.herdrArgs, "server"], {
 		cwd: host.cwd,
 		env: host.hostEnv,
@@ -284,17 +280,45 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 		stdio: "ignore",
 		windowsHide: true,
 	});
-	let spawnFailed = false;
-	server.once("error", () => {
-		spawnFailed = true;
+	let exited = false;
+	const serverExited = new Promise<void>((resolve) => {
+		server.once("exit", () => {
+			exited = true;
+			resolve();
+		});
+		server.once("error", () => {
+			exited = true;
+			resolve();
+		});
 	});
 	server.unref();
 
 	const deadline = performance.now() + SERVER_START_TIMEOUT_MS;
-	while (performance.now() < deadline && !spawnFailed) {
+	while (performance.now() < deadline && !exited) {
 		await sleep(SERVER_POLL_MS);
 		const started = await pingOnce(host);
 		if (started !== null) return { client: started.client, started: true };
+	}
+	if (!exited) {
+		// This child has not been handed over to any workspace. Reap it before
+		// releasing the lifecycle lock, or it can become ready behind plain Clio.
+		const signal = (name: NodeJS.Signals): void => {
+			try {
+				if (process.platform !== "win32" && server.pid !== undefined) process.kill(-server.pid, name);
+				else server.kill(name);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+			}
+		};
+		server.ref();
+		signal("SIGTERM");
+		await Promise.race([serverExited, sleep(1_000, undefined, { ref: false })]);
+		if (!exited) signal("SIGKILL");
+		await serverExited;
+	}
+	if (!hadSocket) {
+		rmSync(host.socketPath, { force: true });
+		cleanupHostFiles(host);
 	}
 	return { refused: `the pane host did not start (${host.options.herdrPath})` };
 }
@@ -337,6 +361,10 @@ async function stopServerIfEmpty(host: Host, client: MuxClient): Promise<boolean
 	} catch {
 		return (await pingOnce(host)) === null;
 	}
+	return stopServerAndClean(host, client);
+}
+
+async function stopServerAndClean(host: Host, client: MuxClient): Promise<boolean> {
 	if (!(await stopServer(host, client))) return false;
 	// With the server gone its pane ids start over, so every marker is stale.
 	const stem = basename(exitMarkerStem(host.socketPath));
@@ -347,6 +375,11 @@ async function stopServerIfEmpty(host: Host, client: MuxClient): Promise<boolean
 	} catch {
 		// A marker left behind is cleared by the next Clio in that pane.
 	}
+	cleanupHostFiles(host);
+	return true;
+}
+
+function cleanupHostFiles(host: Host): void {
 	// One host per project would otherwise leave one stopped host behind for
 	// every directory Clio was ever run in. It holds nothing, it is Clio's own
 	// by name, and the lock that guards this lives outside it.
@@ -366,7 +399,6 @@ async function stopServerIfEmpty(host: Host, client: MuxClient): Promise<boolean
 			windowsHide: true,
 		});
 	}
-	return true;
 }
 
 /**
@@ -551,12 +583,33 @@ async function attachWorkspace(
 
 	// The client owns the terminal, so Ctrl+C belongs to the pane it is typed in.
 	const ignore = (): void => undefined;
+	let termination: Promise<void> | null = null;
 	const terminate = (): void => {
 		signalExitCode = 143;
-		// A reattached launcher owns its client, not the earlier launch's workspace.
-		clioQuit = opened.createdWorkspace;
 		clearInterval(poll);
-		host.platform.detach(attach);
+		termination ??= (async () => {
+			// A reattached launcher owns its client, not the earlier launch's workspace.
+			if (opened.createdWorkspace) {
+				try {
+					if (await stillOwnsWorkspace(client, opened)) {
+						clioQuit = true;
+						if (!existsSync(marker)) {
+							markWorkspaceExit(
+								{
+									HERDR_ENV: "1",
+									HERDR_SOCKET_PATH: host.socketPath,
+									HERDR_PANE_ID: clioPane.paneId,
+								},
+								143,
+							);
+						}
+					}
+				} catch (error) {
+					host.log("debug", `workspace termination could not verify ownership: ${messageOf(error)}`);
+				}
+			}
+			host.platform.detach(attach);
+		})();
 	};
 	process.on("SIGINT", ignore);
 	process.on("SIGTERM", terminate);
@@ -564,6 +617,7 @@ async function attachWorkspace(
 		attach.once("error", (error) => resolve({ spawnError: error }));
 		attach.once("exit", (code) => resolve({ code: code ?? 0 }));
 	});
+	await termination;
 	process.off("SIGINT", ignore);
 	clearInterval(poll);
 	host.platform.afterClientExit();
@@ -593,18 +647,21 @@ async function attachWorkspace(
 	// Read before the workspace and its marker are cleaned up below.
 	const markedExit = clioQuit ? readWorkspaceExitResult(marker) : null;
 	const exitSummary = markedExit?.summary ?? null;
-	if (clioQuit) await sleep(SHARED_DETACH_SETTLE_MS);
 	let workspaceLeftRunning = true;
 	try {
 		workspaceLeftRunning = await withStateFileLock(lockTarget, async () => {
 			// A co-attached launcher may already have removed our workspace and a new server may reuse its ids.
 			if (!(await stillOwnsWorkspace(client, opened))) return false;
 			if (clioQuit) {
-				// Clio is done, and so is every pane in its workspace. The host is
-				// hidden, and the next launch opens a fresh workspace, so a pane left
-				// here could never be reached again, only kept running with the
-				// server under it. The marker goes only with the workspace, so
-				// another launcher still attached to it is never left waiting.
+				// Closing the last workspace under any attached client creates a
+				// replacement. Stop the host instead: delayed co-attached clients
+				// cannot race this into an unowned replacement shell.
+				const workspaces = await client.workspaceList();
+				if (workspaces.length === 1 && workspaces[0]?.workspaceId === workspaceId) {
+					return !(await stopServerAndClean(host, client));
+				}
+				// Another workspace keeps this host alive; close only the one whose
+				// nonce we verified, leaving every unrelated workspace untouched.
 				try {
 					await client.workspaceClose(workspaceId);
 					rmSync(marker, { force: true });

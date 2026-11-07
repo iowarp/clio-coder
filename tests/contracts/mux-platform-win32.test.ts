@@ -1,11 +1,13 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { parseTomlDocument } from "../../src/core/toml.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import { socketTransportPath } from "../../src/domains/mux/socket-client.js";
+import { workspaceSessionFor } from "../../src/domains/mux/workspace/exit-marker.js";
 import { isClioHostSocket } from "../../src/domains/mux/workspace/platform.js";
 import { createWin32HostPlatform, win32PaneLaunch } from "../../src/domains/mux/workspace/platform-win32.js";
 import { renderYaziKeymap } from "../../src/domains/mux/yazi/profile.js";
@@ -30,6 +32,26 @@ afterEach(() => {
 });
 
 describe("win32 pane host layout", () => {
+	it("keeps named sessions separate for two Clio roots sharing APPDATA and a project", (t) => {
+		const first = platform();
+		const second = platform();
+		const saved = process.env.CLIO_CODER_STATE_DIR;
+		t.after(() => {
+			if (saved === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = saved;
+			resetXdgCache();
+		});
+		const env = { APPDATA: "C:\\Users\\operator\\AppData\\Roaming" };
+		process.env.CLIO_CODER_STATE_DIR = first.state;
+		resetXdgCache();
+		const a = first.host.hostLayout({ session: workspaceSessionFor(first.state).session, env });
+		process.env.CLIO_CODER_STATE_DIR = second.state;
+		resetXdgCache();
+		const b = second.host.hostLayout({ session: workspaceSessionFor(first.state).session, env });
+		notStrictEqual(a.socketPath, b.socketPath);
+		notStrictEqual(a.herdrArgs[1], b.herdrArgs[1]);
+	});
+
 	it("is herdr's named session under APPDATA with only the config file redirected to Clio", () => {
 		const { state, host } = platform();
 		const layout = host.hostLayout({

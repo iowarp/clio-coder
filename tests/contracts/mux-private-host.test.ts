@@ -1,12 +1,28 @@
-import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, match, notEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createHash } from "node:crypto";
+import {
+	chmodSync,
+	closeSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { panesFindings, panesModeFinding } from "../../src/cli/doctor-panes.js";
 import { workspaceEligibility } from "../../src/cli/workspace-launch.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	renderWorkspaceConfig,
 	rerenderWorkspaceConfig,
@@ -18,8 +34,10 @@ import {
 	hostedInWorkspace,
 	markWorkspaceExit,
 	readWorkspaceExitResult,
+	workspaceSessionFor,
 } from "../../src/domains/mux/workspace/exit-marker.js";
 import { holdExitSummaryForLauncher } from "../../src/domains/mux/workspace/exit-summary-handoff.js";
+import { launchWorkspace } from "../../src/domains/mux/workspace/launch.js";
 import {
 	createPosixHostPlatform,
 	posixRuntimeDirCandidates,
@@ -66,11 +84,10 @@ describe("private pane host layout (POSIX)", () => {
 	});
 
 	it("lays the socket out in TMPDIR when the runtime dir is too long for one", (t) => {
-		// A short name, so the socket path fits under the harness tmp root.
 		const scratch = mkdtempSync(join(tmpdir(), "h"));
 		t.after(() => rmSync(scratch, { recursive: true, force: true }));
 		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
-		const tmp = scratch;
+		const tmp = tmpdir();
 		const candidates = posixRuntimeDirCandidates({ TMPDIR: tmp }, SESSION, "linux", process.getuid?.() ?? 0);
 		// The harness tmp root may itself be too long for a socket; then only the fallback case applies.
 		if (candidates[0] !== join(tmp, `clio-coder-${process.getuid?.() ?? 0}`)) {
@@ -210,6 +227,267 @@ describe("private pane host layout (POSIX)", () => {
 			line: " /usr/bin/node '/opt/clio coder/index.js' 'it'\\''s'",
 		});
 	});
+
+	it("replaces a changed shell shim without truncating an existing reader's inode", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "host-atomic-"));
+		t.after(() => rmSync(scratch, { recursive: true, force: true }));
+		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
+		const input = { session: "clio-coder-atomic", env: { XDG_RUNTIME_DIR: tmpdir() } };
+		const layout = platform.hostLayout(input);
+		const shim = layout.shell.defaultShell!;
+		writeFileSync(shim, "previous complete shim\n");
+		const reader = openSync(shim, "r");
+		try {
+			platform.hostLayout(input);
+			equal(readFileSync(reader, "utf8"), "previous complete shim\n");
+			equal(readFileSync(shim, "utf8"), renderPosixShellShim("linux"));
+			equal(statSync(shim).mode & 0o777, 0o755);
+		} finally {
+			closeSync(reader);
+		}
+	});
+});
+
+describe("private host startup cleanup", () => {
+	it("reaps a spawned server that never becomes ready before falling back", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "host-start-"));
+		const binary = join(scratch, "host");
+		const pidFile = join(scratch, "server.pid");
+		const layoutRoot = join(scratch, "layout");
+		const socketPath = join(tmpdir(), "start.sock");
+		const program = join(scratch, "host.mjs");
+		writeFileSync(
+			program,
+			`import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nwriteFileSync(${JSON.stringify(socketPath)}, "");\nprocess.on("SIGTERM", () => {});\nsetInterval(() => {}, 1000);\n`,
+		);
+		writeFileSync(
+			binary,
+			`#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${program.replaceAll("'", "'\\''")}' "$@"\n`,
+			{ mode: 0o755 },
+		);
+		t.after(() => {
+			if (existsSync(pidFile)) {
+				try {
+					const pid = Number(readFileSync(pidFile, "utf8"));
+					if (Number.isSafeInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+				} catch {}
+			}
+			rmSync(scratch, { recursive: true, force: true });
+			rmSync(socketPath, { force: true });
+		});
+		const result = await launchWorkspace({
+			herdrPath: binary,
+			herdrVersion: null,
+			nested: false,
+			outputStyle: "standard",
+			cwd: scratch,
+			clioArgv: ["unused"],
+			platform: {
+				hostLayout: () => ({
+					socketPath,
+					herdrArgs: [],
+					hostEnv: {},
+					configPath: join(layoutRoot, "config.toml"),
+					shell: { defaultShell: null, shellMode: "non_login" },
+					sessionFile: join(layoutRoot, "session.json"),
+					disposableDirs: [layoutRoot],
+					cleanupArgs: null,
+				}),
+				paneLaunch: () => ({ env: {}, line: "" }),
+				detach: () => undefined,
+				afterClientExit: () => undefined,
+			},
+		});
+		equal(result.status, "fallback");
+		const pid = Number(readFileSync(pidFile, "utf8"));
+		let alive = true;
+		try {
+			process.kill(pid, 0);
+		} catch {
+			alive = false;
+		}
+		equal(alive, false, "the failed server must be reaped before fallback");
+		equal(existsSync(layoutRoot), false);
+		equal(existsSync(socketPath), false);
+	});
+});
+
+describe("private host attached-client shutdown", () => {
+	for (const scenario of ["last workspace", "another workspace", "reused workspace", "reattached launcher"] as const) {
+		it(`handles launcher termination with a delayed co-attached client (${scenario})`, {
+			skip: process.platform === "win32",
+		}, async (t) => {
+			const scratch = mkdtempSync(join(tmpdir(), "host-clients-"));
+			const socketPath = join(tmpdir(), `${SESSION}.sock`);
+			const binary = join(scratch, "client");
+			const program = join(scratch, "client.mjs");
+			writeFileSync(
+				program,
+				[
+					'import { createConnection } from "node:net";',
+					'if (process.argv[2] === "pane") process.exit(0);',
+					"const socket = createConnection(process.env.HERDR_SOCKET_PATH);",
+					'socket.on("connect", () => socket.write(JSON.stringify({ method: "test.attach", params: { pid: process.pid } }) + "\\n"));',
+					'socket.on("end", () => process.exit(0));',
+					'socket.on("error", () => process.exit(1));',
+					'process.on("SIGHUP", () => setTimeout(() => { socket.end(); process.exit(0); }, Number(process.env.DETACH_DELAY ?? 0)));',
+				].join("\n"),
+			);
+			writeFileSync(
+				binary,
+				`#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${program.replaceAll("'", "'\\''")}' "$@"\n`,
+				{ mode: 0o755 },
+			);
+			const connections = new Set<Socket>();
+			const attached = new Set<Socket>();
+			const pids = new Set<number>();
+			const methods: string[] = [];
+			const detaches: Array<{ delay: number; marked: boolean }> = [];
+			let replacements = 0;
+			let stopped = false;
+			let workspace = false;
+			const other = scenario === "another workspace";
+			let nonce = "";
+			const pane = () => ({
+				pane_id: "w1:p1",
+				tab_id: "t1",
+				workspace_id: "w1",
+				cwd: scratch,
+				tokens: { clio_coder_workspace: nonce },
+			});
+			const server = createServer((socket) => {
+				connections.add(socket);
+				socket.on("close", () => {
+					connections.delete(socket);
+					attached.delete(socket);
+				});
+				let pending = "";
+				socket.on("data", (chunk) => {
+					pending += chunk.toString();
+					if (!pending.includes("\n")) return;
+					const request = JSON.parse(pending.trim());
+					if (request.method === "test.attach") {
+						attached.add(socket);
+						pids.add(request.params.pid);
+						return;
+					}
+					methods.push(request.method);
+					let result: unknown = {};
+					if (request.method === "ping") result = { version: "fixture", protocol: 21 };
+					if (request.method === "workspace.list") {
+						result = {
+							workspaces: [...(workspace ? [{ workspace_id: "w1" }] : []), ...(other ? [{ workspace_id: "other" }] : [])],
+						};
+					}
+					if (request.method === "pane.list") result = { panes: request.params.workspace_id === "w1" ? [pane()] : [] };
+					if (request.method === "workspace.create") {
+						workspace = true;
+						result = { workspace: { workspace_id: "w1" }, root_pane: pane() };
+					}
+					if (request.method === "pane.report_metadata") nonce = request.params.tokens.clio_coder_workspace;
+					if (request.method === "workspace.close") {
+						workspace = false;
+						if (!other && attached.size > 0) {
+							replacements += 1;
+							workspace = true;
+							nonce = "replacement";
+						}
+					}
+					socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+					if (request.method === "server.stop") {
+						stopped = true;
+						workspace = false;
+						server.close();
+						for (const connection of attached) connection.end();
+					}
+				});
+			});
+			const launches: Array<ReturnType<typeof launchWorkspace>> = [];
+			t.after(async () => {
+				for (const pid of pids) {
+					try {
+						process.kill(pid, "SIGKILL");
+					} catch {}
+				}
+				for (const socket of connections) socket.destroy();
+				if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+				await Promise.allSettled(launches);
+				rmSync(socketPath, { force: true });
+				rmSync(scratch, { recursive: true, force: true });
+			});
+			await new Promise<void>((resolve, reject) => {
+				server.once("error", reject);
+				server.listen(socketPath, resolve);
+			});
+			const base = {
+				herdrPath: binary,
+				herdrVersion: "fixture",
+				nested: false,
+				outputStyle: "standard" as const,
+				cwd: scratch,
+				clioArgv: ["unused"],
+			};
+			const host = (delay: number) => ({
+				...base,
+				platform: {
+					hostLayout: () => ({
+						socketPath,
+						herdrArgs: [],
+						hostEnv: { HERDR_SOCKET_PATH: socketPath, DETACH_DELAY: String(delay) },
+						configPath: join(scratch, "config.toml"),
+						shell: { defaultShell: null, shellMode: "non_login" as const },
+						sessionFile: join(scratch, "session.json"),
+						disposableDirs: [],
+						cleanupArgs: null,
+					}),
+					paneLaunch: () => ({ env: {}, line: "" }),
+					detach: (child: import("node:child_process").ChildProcess) => {
+						detaches.push({ delay, marked: existsSync(exitMarkerPath(socketPath, "w1:p1")) });
+						child.kill("SIGHUP");
+					},
+					afterClientExit: () => undefined,
+				},
+			});
+			const waitForClients = async (count: number): Promise<void> => {
+				for (let attempt = 0; attempt < 400 && attached.size !== count; attempt++) await sleep(25);
+				equal(attached.size, count, "fixture clients did not attach");
+			};
+			const before = new Set(process.listeners("SIGTERM"));
+			const creator = launchWorkspace(host(0));
+			launches.push(creator);
+			await waitForClients(1);
+			const terminate = process.listeners("SIGTERM").find((handler) => !before.has(handler));
+			ok(terminate);
+			const beforeFollower = new Set(process.listeners("SIGTERM"));
+			const follower = launchWorkspace(host(1_200));
+			launches.push(follower);
+			await waitForClients(2);
+			if (scenario === "reused workspace") nonce = "00000000-0000-0000-0000-000000000000";
+			const terminateFollower = process.listeners("SIGTERM").find((handler) => !beforeFollower.has(handler));
+			ok(terminateFollower);
+			const reattached = scenario === "reattached launcher";
+			(reattached ? terminateFollower : terminate)("SIGTERM");
+			const first = await (reattached ? follower : creator);
+			equal(first.status, "closed");
+			if (first.status === "closed") equal(first.exitCode, 143);
+			if (scenario === "reused workspace" || reattached) {
+				equal(stopped, false);
+				equal(methods.includes("workspace.close"), false);
+				equal(
+					detaches.some((request) => request.marked),
+					false,
+				);
+			} else {
+				ok(detaches.some((request) => request.delay === 0 && request.marked));
+				equal(replacements, 0, "closing the last workspace under an attached client must not create a replacement");
+				equal(stopped, !other);
+				equal(methods.includes("workspace.close"), other);
+			}
+			if (!reattached) await follower;
+		});
+	}
 });
 
 describe("managed herdr config", () => {
@@ -251,6 +529,36 @@ describe("managed herdr config", () => {
 });
 
 describe("host identity and exit markers", () => {
+	it("does not reuse another Clio state root's host for the same project", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "host-identity-"));
+		const saved = process.env.CLIO_CODER_STATE_DIR;
+		t.after(() => {
+			if (saved === undefined) delete process.env.CLIO_CODER_STATE_DIR;
+			else process.env.CLIO_CODER_STATE_DIR = saved;
+			resetXdgCache();
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		const state = join(scratch, "state-a");
+		mkdirSync(state);
+		process.env.CLIO_CODER_STATE_DIR = state;
+		resetXdgCache();
+		const first = workspaceSessionFor(scratch);
+		notEqual(first.session, `clio-coder-${createHash("sha256").update(first.cwd).digest("hex").slice(0, 12)}`);
+		process.env.CLIO_CODER_STATE_DIR = join(scratch, "state-b");
+		mkdirSync(process.env.CLIO_CODER_STATE_DIR);
+		resetXdgCache();
+		const second = workspaceSessionFor(scratch);
+		notEqual(first.session, second.session);
+		process.env.CLIO_CODER_STATE_DIR = state;
+		resetXdgCache();
+		deepStrictEqual(workspaceSessionFor(scratch), first);
+		symlinkSync(state, join(scratch, "state-link"), "junction");
+		symlinkSync(scratch, join(scratch, "project-link"), "junction");
+		process.env.CLIO_CODER_STATE_DIR = join(scratch, "state-link");
+		resetXdgCache();
+		deepStrictEqual(workspaceSessionFor(join(scratch, "project-link")), first);
+	});
+
 	it("recognises only Clio's host sockets, in either layout", () => {
 		equal(clioHostSessionOf(`/run/user/1/clio-coder/${SESSION}.sock`), SESSION);
 		equal(clioHostSessionOf(`C:\\Users\\me\\AppData\\Roaming\\herdr\\sessions\\${SESSION}\\herdr.sock`), SESSION);

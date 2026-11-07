@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { clioStateDir } from "../../../core/xdg.js";
 import { heldExitSummary } from "./exit-summary-handoff.js";
 import { isClioHostSocket } from "./platform.js";
 
@@ -27,7 +28,7 @@ import { isClioHostSocket } from "./platform.js";
 export const WORKSPACE_SESSION_PREFIX = "clio-coder-";
 
 /**
- * The host for one project: one per concrete directory. herdr keeps focus per
+ * The host for one project and Clio state root. herdr keeps focus per
  * server, so two projects sharing a host would share one view, and keys typed
  * in one terminal would land in the other project's Clio. The directory is
  * resolved first, so a symlinked path reaches the same host as the directory
@@ -35,8 +36,12 @@ export const WORKSPACE_SESSION_PREFIX = "clio-coder-";
  */
 export function workspaceSessionFor(cwd: string): { session: string; cwd: string } {
 	const canonical = realpathSync(cwd);
+	const state = realpathSync(clioStateDir());
 	return {
-		session: `${WORKSPACE_SESSION_PREFIX}${createHash("sha256").update(canonical).digest("hex").slice(0, 12)}`,
+		session: `${WORKSPACE_SESSION_PREFIX}${createHash("sha256")
+			.update(JSON.stringify([state, canonical]))
+			.digest("hex")
+			.slice(0, 12)}`,
 		cwd: canonical,
 	};
 }

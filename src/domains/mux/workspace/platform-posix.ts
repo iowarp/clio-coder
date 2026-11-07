@@ -20,8 +20,9 @@
  */
 
 import type { ChildProcess } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { shellQuote } from "../../../core/shell-quote.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import type { HostLayout, MuxHostPlatform } from "./platform.js";
@@ -136,7 +137,7 @@ function writeIfChanged(path: string, content: string, mode: number): void {
 	} catch {
 		current = null;
 	}
-	if (current !== content) writeFileSync(path, content, { mode });
+	if (current !== content) safeResourceWrite(path, content, { mode });
 	chmodSync(path, mode);
 }
 
@@ -146,7 +147,7 @@ function posixHostRoot(stateDir: string, session: string): string {
 }
 
 /**
- * The socket of a root's host. The root is keyed by project alone while the
+ * The socket of a root's host. The root is keyed by project and Clio state root while the
  * runtime directory comes from the environment, so a launch with another
  * `XDG_RUNTIME_DIR` or `TMPDIR` would start a second server on the same root,
  * and the first to stop would delete the other's shim and config. The root
