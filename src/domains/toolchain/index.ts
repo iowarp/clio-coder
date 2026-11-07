@@ -31,4 +31,4 @@ export type {
 	ToolSource,
 	ToolStatus,
 } from "./types.js";
-export { compareVersions, parseVersion, resetVersionProbeCache, satisfiesMinimum } from "./version.js";
+export { compareVersions, parseVersion, satisfiesMinimum } from "./version.js";

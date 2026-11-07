@@ -82,7 +82,7 @@ Test coverage for this flow is in `tests/contracts/asciinema-toolchain.test.ts`.
 3. Otherwise returns `source: "vendored"` when `vendoredBinaryPath` points to an existing file.
 4. Otherwise returns `source: "none"`.
 
-`satisfiesMinimum` is `compareVersions(found, minimum) >= 0`, and a null version never satisfies. The probe in `src/domains/toolchain/version.ts` runs `spawnSync` with a two-second timeout and `stdio: ["ignore", "pipe", "pipe"]`, and memoizes the result per absolute path in a module-level map. `resetVersionProbeCache` clears that map.
+`satisfiesMinimum` is `compareVersions(found, minimum) >= 0`, and a null version never satisfies. The probe in `src/domains/toolchain/version.ts` runs `spawnSync` with a two-second timeout and `stdio: ["ignore", "pipe", "pipe"]`, and memoizes the result per absolute path in a module-level map.
 
 `toolStatus` reports `installed` as `resolution.vendoredPath !== null`, so `installed` refers to the vendored copy specifically, not the resolved binary. `describeResolution` renders one sentence for `tools status` and doctor rows. Its branches are: a PATH resolution, a vendored resolution (noting any rejected PATH copy), an unsupported platform, superseded vendored versions (suggesting `clio-coder tools install <id>`), a floor rejection with nothing vendored, and finally not found.
 

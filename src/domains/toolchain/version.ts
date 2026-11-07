@@ -74,11 +74,6 @@ export function probeBinaryVersion(binaryPath: string, args: ReadonlyArray<strin
 	return version;
 }
 
-/** Drop memoized probe results. Tests that swap binaries under a path need it. */
-export function resetVersionProbeCache(): void {
-	probeCache.clear();
-}
-
 const probeCache = new Map<string, string | null>();
 
 function numericParts(value: string): number[] {
