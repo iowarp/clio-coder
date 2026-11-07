@@ -1,8 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readSettings, validateSettingsFile } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { SETTINGS_FIELD_NAMES } from "../../src/core/settings-fields.js";
 import { repairSettingsCoercions } from "../../src/core/settings-repair.js";
 import { migrateSettingsV1Document } from "../../src/domains/lifecycle/migrations/2026-09-01-settings-v2.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -132,4 +134,26 @@ test("doctor removes a section its last retired key emptied, so the repaired hom
 	strictEqual(after.issues.length, 0);
 	strictEqual(after.retired.length, 0);
 	ok(readSettings());
+});
+
+// A name in SETTINGS_FIELD_NAMES is shared verbatim by telemetry share, so a name no schema
+// carries any more would let an operator's dictionary key of that spelling go out unanonymized.
+test("every settings field name is still a key some settings schema reads", () => {
+	const keys = new Set<string>();
+	const walk = (value: unknown): void => {
+		if (value === null || typeof value !== "object") return;
+		for (const [key, child] of Object.entries(value)) {
+			keys.add(key);
+			walk(child);
+		}
+	};
+	walk(DEFAULT_SETTINGS);
+	const schemaSources = [
+		"src/core/config.ts",
+		"src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts",
+	].map((path) => readFileSync(path, "utf8"));
+	const stale = SETTINGS_FIELD_NAMES.filter(
+		(name) => !keys.has(name) && !schemaSources.some((source) => new RegExp(`["'.]${name}["'.\\[]`, "u").test(source)),
+	);
+	deepStrictEqual(stale, []);
 });
