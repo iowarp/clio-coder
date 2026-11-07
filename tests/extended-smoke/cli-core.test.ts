@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { readVerifiedRun, telemetryRunsDirectory } from "../../src/domains/telemetry/index.js";
+import { findPinnedTool } from "../../src/domains/toolchain/registry.js";
 import { formatUserTaskHandoff } from "../../src/domains/user-tasks/handoff.js";
 import { initializeScratchHome } from "../harness/headless-run.js";
 
@@ -322,9 +323,14 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			const version = await runCli(["--version"], { env: scratch.env });
 			strictEqual(version.code, 0);
 			// A development build names its commit (3d4ae7621); a release prints the plain version.
+			// The version stays alone on line one; the pinned herdr credit follows it (69ba19993).
+			const [versionLine, ...rest] = version.stdout.split("\n");
 			if (/-dev(?:[.+]|$)/.test(VERSION))
-				match(version.stdout, new RegExp(`^Clio Coder ${VERSION.replaceAll(".", "\\.")} \\(unreleased · [^)]+\\)\n$`));
-			else strictEqual(version.stdout, `Clio Coder ${VERSION}\n`);
+				match(versionLine ?? "", new RegExp(`^Clio Coder ${VERSION.replaceAll(".", "\\.")} \\(unreleased · [^)]+\\)$`));
+			else strictEqual(versionLine, `Clio Coder ${VERSION}`);
+			const herdr = findPinnedTool("herdr");
+			const credit = herdr === null ? [] : [`Panes powered by herdr ${herdr.version} (${herdr.license})`];
+			deepStrictEqual(rest, [...credit, ""]);
 			strictEqual(version.stderr, "");
 
 			const help = await runCli(["--help"], { env: scratch.env });
@@ -360,11 +366,24 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(fixedReport.fix, true);
 			ok(existsSync(join(scratch.root, "config", "settings.yaml")));
 			const freshSettings = readFileSync(join(scratch.root, "config", "settings.yaml"), "utf8");
-			match(freshSettings, /panes:\n {4}enabled: embedded[\s\S]*layout: off[\s\S]*files:\n {6}enabled: false/u);
+			// interface.panes.enabled is retired (69ba19993): the template no longer writes it.
+			match(freshSettings, /panes:\n {4}notifications: failures\n {4}layout: off[\s\S]*files:\n {6}enabled: false/u);
+			strictEqual(
+				(parseYaml(freshSettings) as { interface: { panes: Record<string, unknown> } }).interface.panes.enabled,
+				undefined,
+			);
+			// Panes are on by default now, so a fresh home warns that the pinned pane host
+			// is not installed yet and names the launch that installs it (69ba19993).
+			const paneHost = fixedReport.findings.find((entry) => entry.name === "external tool herdr");
+			match(
+				paneHost?.detail ?? "",
+				/^pane host \S+ is not installed; the next `clio-coder` installs it|Clio's pinned copy|no pinned pane host/u,
+			);
 			for (const finding of fixedReport.findings.filter((entry) =>
 				/panes|yazi|external tool (herdr|yazi)/u.test(entry.name),
 			)) {
-				strictEqual(finding.level === undefined || finding.level === "ok", true, `${finding.name}: ${finding.detail}`);
+				if (finding !== paneHost)
+					strictEqual(finding.level === undefined || finding.level === "ok", true, `${finding.name}: ${finding.detail}`);
 				strictEqual(/install with|set interface\.panes|--with-panes/u.test(finding.detail), false, finding.detail);
 			}
 

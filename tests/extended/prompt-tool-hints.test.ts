@@ -57,7 +57,7 @@ describe("role-aware prompt hints", () => {
 		const hint = hintFor(ToolNames.CodeNav, "session");
 		match(hint, /source=workspace \(default\)/u);
 		match(hint, /source=clio/u);
-		match(hint, /wiki \(workspace only\)/u);
+		match(hint, /\(wiki and project are workspace only\)/u);
 	});
 
 	it("normalizes role variants to one stable line", () => {
