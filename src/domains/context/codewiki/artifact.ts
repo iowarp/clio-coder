@@ -117,7 +117,7 @@ function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 				hash: file.hash,
 				imports: uniqueSorted(file.imports),
 				...(file.summary ? { summary: file.summary } : {}),
-				...(file.grammarMissing ? { grammarMissing: true as const } : {}),
+				...(file.grammarMissing !== undefined ? { grammarMissing: file.grammarMissing } : {}),
 			}))
 			.sort(compareFiles),
 		symbols: codewiki.symbols.map(normalizeSymbol).sort(compareSymbols),
@@ -261,7 +261,7 @@ function validFile(value: unknown, hash: boolean): boolean {
 				Array.isArray(item.imports) &&
 				item.imports.every((v) => typeof v === "string"))) &&
 		(!("summary" in item) || typeof item.summary === "string") &&
-		(!("grammarMissing" in item) || item.grammarMissing === true)
+		(!("grammarMissing" in item) || typeof item.grammarMissing === "boolean")
 	);
 }
 function validSymbol(value: unknown): boolean {

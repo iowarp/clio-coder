@@ -59,6 +59,7 @@ export const coreTests = [
 	"skill-frontmatter-cache-gate",
 	"read-only-mode",
 	"read-only-cache-writers",
+	"codewiki-grammar-note",
 	"read-only-workspace",
 	"sandbox-clio-roots",
 	"fleet-run-history-prime",

@@ -7,6 +7,7 @@ import type { ProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { extractCMake, isCMakePath } from "./cmake.js";
 import { type CooperativeSlicer, createSlicer } from "./cooperative.js";
+import { FETCHED_GRAMMARS } from "./grammar-assets.js";
 import { isIndexablePath, languageForPath } from "./paths.js";
 import {
 	type BuildCodewikiInput,
@@ -812,6 +813,7 @@ function buildFile(
 		role: roleFor(relPath, language),
 		hash: contentHash(text),
 		imports: [],
+		...(FETCHED_GRAMMARS.some((grammar) => grammar.lang === language) ? { grammarMissing: false } : {}),
 	};
 	if (text.trim().length === 0) return { file, symbols: [] };
 	const extracted: (LanguageExtraction & { grammarMissing?: true }) | null = isCMakePath(relPath)

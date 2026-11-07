@@ -15,11 +15,14 @@ export interface CodewikiFile {
 	imports: string[];
 	summary?: string;
 	/**
-	 * Its tree-sitter grammar could not be loaded when the file was indexed, so its
-	 * symbols and imports came from line patterns. Recorded per file because the
-	 * grammar may have been held only in memory, by whichever process indexed it.
+	 * Set on every file of a language whose tree-sitter grammar Clio downloads on
+	 * first use: true when that grammar could not be loaded when the file was
+	 * indexed, so its symbols and imports came from line patterns. Recorded per
+	 * file because the grammar may have been held only in memory, by whichever
+	 * process indexed it. Absent on other languages and on files indexed before
+	 * Clio recorded it.
 	 */
-	grammarMissing?: true;
+	grammarMissing?: boolean;
 }
 
 export interface CodewikiSymbol {

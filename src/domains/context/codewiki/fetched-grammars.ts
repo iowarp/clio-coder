@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { type PinnedAsset, pinnedAssetFailure } from "../../../core/pinned-asset.js";
+import { type PinnedAsset, pinnedAssetFailure, pinnedAssetPresent } from "../../../core/pinned-asset.js";
 import { resolveClioDirs } from "../../../core/xdg.js";
 import { FETCHED_GRAMMAR_PACKAGE, FETCHED_GRAMMARS, type FetchedGrammar } from "./grammar-assets.js";
 import type { CodewikiFile } from "./schema.js";
@@ -43,12 +43,21 @@ export function fetchedGrammarForFile(file: string): FetchedGrammar | undefined 
  * The plain statement code_nav gives when files of a fetched-grammar language
  * were indexed without their parser. Each file records that when it is indexed,
  * in whichever process: the grammar's cache file says nothing about it, since
- * read-only mode parses with a downloaded grammar it never keeps on disk.
+ * read-only mode parses with a downloaded grammar it never keeps on disk. A file
+ * indexed before Clio recorded it falls back to that cache file: without the
+ * grammar on disk, no process could have parsed it.
  */
 export function missingGrammarNote(files: Iterable<CodewikiFile>): string | undefined {
-	const langs = new Set<string>();
-	for (const file of files) if (file.grammarMissing) langs.add(file.lang);
-	const missing = FETCHED_GRAMMARS.filter((grammar) => langs.has(grammar.lang));
+	const recorded = new Set<string>();
+	const unrecorded = new Set<string>();
+	for (const file of files) {
+		if (file.grammarMissing === true) recorded.add(file.lang);
+		else if (file.grammarMissing === undefined) unrecorded.add(file.lang);
+	}
+	const missing = FETCHED_GRAMMARS.filter(
+		(grammar) =>
+			recorded.has(grammar.lang) || (unrecorded.has(grammar.lang) && !pinnedAssetPresent(fetchedGrammarAsset(grammar))),
+	);
 	if (missing.length === 0) return undefined;
 	const names = missing.map((grammar) => grammar.language).join(" and ");
 	const reasons = missing

@@ -252,10 +252,18 @@ describe("read-only cache writers", () => {
 			const built = await withReadOnlyMode(() => buildCodewiki({ cwd: project, language: "unknown" }));
 			deepEqual(
 				built.files.map((file) => [file.path, file.grammarMissing]),
-				[["b.rb", undefined]],
+				[["b.rb", false]],
 			);
 			ok(built.symbols.some((symbol) => symbol.name === "Two"));
 			equal(missingGrammarNote(built.files), undefined);
+			// The record that the grammar loaded survives the artifact, so it is not mistaken for an older map.
+			writeCodewiki(project, built);
+			const files = readCodewiki(project)?.files ?? [];
+			deepEqual(
+				files.map((file) => file.grammarMissing),
+				[false],
+			);
+			equal(missingGrammarNote(files), undefined);
 		} finally {
 			restore();
 		}
