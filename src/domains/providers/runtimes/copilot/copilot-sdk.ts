@@ -120,6 +120,8 @@ const copilotSdkRuntime = {
 	auth: "none",
 	authNotice: COPILOT_SDK_AUTH_NOTICE,
 	defaultCapabilities: copilotCapabilities,
+	// The runtime's listing omits models the account can call (Gemini 3.8 Flash on runtime 1.0.26).
+	servesUnlistedModels: true,
 	probe: probeCopilotSdk,
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		const discovered = listed.get(wireModelId);

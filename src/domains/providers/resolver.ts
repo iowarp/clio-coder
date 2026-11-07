@@ -241,5 +241,45 @@ export function resolveModelReference(
 			};
 		}
 	}
+	if (matches.length === 0) {
+		const unlisted = resolveUnlisted(base, thinkingLevel, providers, options);
+		if (unlisted) return unlisted;
+	}
 	return buildResult(base, matches, thinkingLevel, options, familyPattern);
+}
+
+/**
+ * An id no listing names, sent as typed to the one target it was named on (`target/model`, or a list scoped to
+ * one target) when that target's provider serves models it does not list; the provider answers an id it does
+ * not serve. Named on no target, the error shows the qualified form instead of picking a target.
+ */
+function resolveUnlisted(
+	base: string,
+	thinkingLevel: ThinkingLevel | undefined,
+	providers: ProvidersContract,
+	options: ResolveModelOptions,
+): ResolveModelResult | null {
+	if (GLOB_CHARS.test(base)) return null;
+	const statuses = providers.list();
+	const slash = base.indexOf("/");
+	const qualifier = slash === -1 ? null : base.slice(0, slash).toLowerCase();
+	const qualified = statuses.find((status) => status.target.id.toLowerCase() === qualifier);
+	const scoped = qualified ?? (statuses.length === 1 ? statuses[0] : undefined);
+	if (scoped) {
+		const model = qualified ? base.slice(slash + 1) : base;
+		const runtime = scoped.runtime;
+		if (!runtime?.servesUnlistedModels || model.length === 0) return null;
+		if (options.use === "chat" && (!isOrchestratorEligibleRuntime(runtime) || scoped.target.capabilities?.chat === false))
+			return null;
+		const ref: ResolvedModelRef = { target: scoped.target.id, model };
+		if (thinkingLevel) ref.thinkingLevel = thinkingLevel;
+		return { ref, warning: `${scoped.target.id} does not list "${model}"; sending it as typed` };
+	}
+	const serving = statuses.filter((status) => status.runtime?.servesUnlistedModels).map((status) => status.target.id);
+	const first = serving[0];
+	if (first === undefined || qualifier !== null) return null;
+	return {
+		ref: null,
+		error: `no models match pattern "${base}"; ${serving.join(", ")} ${serving.length === 1 ? "serves models it does" : "serve models they do"} not list, so name it on a target, as ${first}/${base}`,
+	};
 }

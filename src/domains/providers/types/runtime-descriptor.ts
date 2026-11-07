@@ -218,6 +218,13 @@ export interface RuntimeDescriptor {
 		detail?: string;
 	};
 	knownModels?: string[];
+	/**
+	 * Set when the provider serves model ids its live listing leaves out (the
+	 * Copilot runtime does not list every model an account can call). An id
+	 * named on this target alone, as `target/model` or under `--target`, then
+	 * resolves as typed, and the provider itself answers an id it does not serve.
+	 */
+	servesUnlistedModels?: boolean;
 	/** Curated chat choice from knownModels or the pinned provider catalog. */
 	defaultModel?: string;
 	binaryName?: string;

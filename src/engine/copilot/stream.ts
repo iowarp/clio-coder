@@ -47,6 +47,7 @@ import {
 	copilotAccount,
 	copilotClient,
 	holdCopilotClient,
+	listCopilotModels,
 	onCopilotRuntimeGone,
 } from "./client.js";
 import { createCopilotSessionFs, removeCopilotSessionRecords, removeCopilotSessionRecordsSync } from "./session-fs.js";
@@ -893,7 +894,7 @@ async function openConversationHeld(input: {
 		})
 		.catch(async (error: unknown) => {
 			await removeCopilotSessionRecords(sessionId).catch(() => {});
-			throw error;
+			throw await withListedModels(error, input.model.id);
 		});
 	const opened = new Conversation({
 		key: input.key,
@@ -911,6 +912,18 @@ async function openConversationHeld(input: {
 
 interface Plan {
 	conversation: Conversation | null;
+}
+
+/** A model the runtime does not serve fails with the account's listed models named, so the fix is one copy away. */
+async function withListedModels(error: unknown, modelId: string): Promise<unknown> {
+	const message = error instanceof Error ? error.message : String(error);
+	if (!message.includes(`Model "${modelId}" is not available`)) return error;
+	const ids = await listCopilotModels().then(
+		(rows) => rows.map((row) => row.id),
+		() => [],
+	);
+	if (ids.length === 0) return error;
+	return new Error(`${message} GitHub Copilot lists these models for this account: ${ids.join(", ")}.`);
 }
 
 function plan(key: string, systemHash: string, core: ReadonlyArray<CoreMessage>, prints: ReadonlyArray<string>): Plan {

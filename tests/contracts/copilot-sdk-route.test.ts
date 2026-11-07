@@ -228,6 +228,8 @@ export class CopilotClient {
 	async createSession(config) {
 		if (this.options.mode === "empty" && config.availableTools === undefined)
 			throw new Error("CopilotClient is in mode: 'empty' but the session config did not specify 'availableTools'.");
+		if (!state.models.some((model) => model.id === config.model) && config.model !== "served-unlisted")
+			throw new Error('Request session.create failed with message: Model "' + config.model + '" is not available.');
 		state.creating += 1;
 		if (state.createGate) await state.createGate;
 		const session = new FakeSession(config, state.sessions.length + 1, this);
@@ -436,6 +438,25 @@ test("the signed-in account is the authorization: no Clio consent is asked, and 
 	const answered = await step({ messages: [user("hello")] });
 	strictEqual(answered.stopReason, "stop");
 	deepStrictEqual(answered.content, [{ type: "text", text: "hello" }]);
+});
+
+test("a model the runtime does not serve fails naming the account's enabled models; an unlisted one it serves runs", async () => {
+	const refused = await engineStreamSimple(
+		{ ...model, id: "no-such-model" },
+		normalizeContext({ messages: [user("hello")] }),
+		{ sessionId: "unknown-model" },
+	).result();
+	strictEqual(refused.stopReason, "error");
+	match(
+		refused.errorMessage ?? "",
+		/Model "no-such-model" is not available\. GitHub Copilot lists these models for this account: fake-model\.$/,
+	);
+	const served = await engineStreamSimple(
+		{ ...model, id: "served-unlisted" },
+		normalizeContext({ messages: [user("hello")] }),
+		{ sessionId: "unlisted-model" },
+	).result();
+	strictEqual(served.stopReason, "stop");
 });
 
 test("the runtime authenticates as the copilot login user only, and no token reaches Clio's files", () => {

@@ -77,3 +77,55 @@ test("chat model resolution excludes worker runtimes and prefers the active elig
 	strictEqual(explicitWorker.ref, null);
 	match(explicitWorker.error ?? "", /target claude-sdk-worker.*chat needs a loaded HTTP runtime/u);
 });
+
+test("an id a Copilot target does not list resolves only when named on that target", () => {
+	function status(id: string, runtimeId: string, servesUnlistedModels: boolean): TargetStatus {
+		return {
+			target: { id, runtime: runtimeId, defaultModel: "gpt-6-luna" },
+			runtime: {
+				id: runtimeId,
+				displayName: runtimeId,
+				kind: "http",
+				apiFamily: runtimeId === "copilot-sdk" ? "copilot-sdk" : "openai-completions",
+				auth: "none",
+				...(servesUnlistedModels ? { servesUnlistedModels } : {}),
+				defaultCapabilities: EMPTY_CAPABILITIES,
+				synthesizeModel() {
+					throw new Error("resolver must not invoke a model");
+				},
+			},
+			available: true,
+			reason: "",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+			capabilities: EMPTY_CAPABILITIES,
+			discoveredModels: ["gpt-6-luna", "claude-haiku-5.5"],
+			discoveredModelsSource: "probe",
+		};
+	}
+	const copilot = status("cp", "copilot-sdk", true);
+	const local = status("local", "openai-compat", false);
+	const both = { list: () => [copilot, local] } as unknown as ProvidersContract;
+	const onlyCopilot = { list: () => [copilot] } as unknown as ProvidersContract;
+	const onlyLocal = { list: () => [local] } as unknown as ProvidersContract;
+
+	const qualified = resolveModelReference("cp/gemini-3.8-flash:low", both, { use: "chat" });
+	deepStrictEqual(qualified.ref, { target: "cp", model: "gemini-3.8-flash", thinkingLevel: "low" });
+	match(qualified.warning ?? "", /cp does not list "gemini-3\.8-flash"; sending it as typed/u);
+	deepStrictEqual(resolveModelReference("gemini-3.8-flash", onlyCopilot, { use: "chat" }).ref, {
+		target: "cp",
+		model: "gemini-3.8-flash",
+	});
+
+	const unscoped = resolveModelReference("gemini-3.8-flash", both, { use: "chat" });
+	strictEqual(unscoped.ref, null);
+	match(unscoped.error ?? "", /cp serves models it does not list, so name it on a target, as cp\/gemini-3\.8-flash/u);
+	for (const providers of [onlyLocal, both]) {
+		const refused = resolveModelReference("local/gemini-3.8-flash", providers, { use: "chat" });
+		strictEqual(refused.ref, null);
+		strictEqual(refused.error, 'no models match pattern "local/gemini-3.8-flash"');
+	}
+	strictEqual(resolveModelReference("gemini-*", onlyCopilot, { use: "chat" }).ref, null);
+	deepStrictEqual(resolveModelReference("luna", onlyCopilot, { use: "chat" }), {
+		ref: { target: "cp", model: "gpt-6-luna" },
+	});
+});
