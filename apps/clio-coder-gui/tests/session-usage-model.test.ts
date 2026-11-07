@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { taskOverview } from "../client/chat/overview-model.js";
-import { sessionSpend, usageRows, usageSummary, usageTotals } from "../client/chat/session-usage-model.js";
+import {
+	chipFigures,
+	contextFigure,
+	sessionSpend,
+	usageRows,
+	usageSummary,
+	usageTotals,
+} from "../client/chat/session-usage-model.js";
 import type { SessionSnapshot } from "../contracts/sessions.js";
 import type { SessionUsage } from "../contracts/usage.js";
 
@@ -17,6 +24,7 @@ test("the turn overview counts turns and wall time and sums no tokens or cost (#
 	});
 	// With neither a usage read nor telemetry, a session shows no spend: nothing outside the read model folds one.
 	assert.deepEqual(sessionSpend({}), {
+		known: { tokens: false, cost: false },
 		tokens: null,
 		cost: null,
 		calls: null,
@@ -29,8 +37,12 @@ test("the turn overview counts turns and wall time and sums no tokens or cost (#
 const telemetry = {
 	session: {
 		totals: {
-			tokens: { display: "≥5,120 (1 call unknown)", ref: "session:s1#total" },
-			usd: { display: "$0.42 +?", ref: "session:s1#usd" },
+			tokens: {
+				display: "≥5,120 (1 call unknown)",
+				ref: "session:s1#total",
+				fact: { measured: 5120, estimated: 0, coverage: { measured: 6, estimated: 0, unknown: 1 } },
+			},
+			usd: { display: "$0.42 +?", ref: "session:s1#usd", fact: { kind: "measured", value: 0.42 } },
 		},
 		own: {
 			counts: {
@@ -62,6 +74,7 @@ const telemetry = {
 test("the usage view renders the read model displays (#434)", () => {
 	const withTelemetry = { telemetry, telemetryQuota: { providers: [] } } as unknown as SessionUsage;
 	assert.deepEqual(sessionSpend({ usage: withTelemetry }), {
+		known: { tokens: true, cost: true },
 		tokens: "≥5,120 (1 call unknown)",
 		cost: "$0.42 +?",
 		calls: "7",
@@ -89,4 +102,24 @@ test("the usage view renders the read model displays (#434)", () => {
 	const summary = usageSummary(true, withTelemetry, undefined);
 	assert.equal(summary.source, "telemetry");
 	assert.match(summary.note, /read model/);
+});
+
+test("the top bar leaves out a figure nobody measured and falls back to the ledger's context percent", () => {
+	const unknown = { fact: { kind: "unknown", reason: "not reported" } as never };
+	const cold = {
+		...telemetry.session,
+		totals: { tokens: { ...unknown, display: "unknown" }, usd: { ...unknown, display: "unknown" } },
+	} as never;
+	assert.deepEqual(chipFigures(sessionSpend({ cold })), { tokens: null, cost: null });
+	const withTelemetry = { telemetry, telemetryQuota: { providers: [] } } as unknown as SessionUsage;
+	assert.deepEqual(chipFigures(sessionSpend({ usage: withTelemetry })), {
+		tokens: "Tokens: ≥5,120 (1 call unknown)",
+		cost: "$0.42 +?",
+	});
+	assert.deepEqual(contextFigure({ ...unknown, display: "unknown" }, "12%"), { text: "12%", fromShare: false });
+	assert.deepEqual(contextFigure({ fact: { kind: "measured", value: 0.3 } as never, display: "30%" }, "12%"), {
+		text: "30%",
+		fromShare: true,
+	});
+	assert.equal(contextFigure(undefined, null), null);
 });

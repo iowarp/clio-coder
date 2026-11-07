@@ -24,6 +24,7 @@ import {
 	type SteerMode,
 } from "../../contracts/steering.js";
 import { compactDuration } from "./overview-model.js";
+import { quantityValue } from "./session-usage-model.js";
 
 /** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
 export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
@@ -829,15 +830,6 @@ export function usageTitle(usage: Usage): string {
 				.map(([key, quantity]) => `${key} ${quantity.display}`)
 				.join(" · ")
 		: "not journaled";
-}
-
-type Quantity = NonNullable<Usage["quantities"]>["input"];
-/** The reported number behind a quantity, or null when it was not measured or estimated. */
-export function quantityValue(quantity: Quantity): number | null {
-	const fact = quantity.fact;
-	if (!("kind" in fact))
-		return fact.coverage.measured + fact.coverage.estimated > 0 ? fact.measured + fact.estimated : null;
-	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
 }
 
 /** Tokens per second as a reader says it: one decimal under ten, whole above. */

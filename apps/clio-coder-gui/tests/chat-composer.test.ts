@@ -14,7 +14,6 @@ import {
 	noticeForRefusal,
 	PROMPT_TEXT_MAX_CHARACTERS,
 	projectQueue,
-	quantityValue,
 	queueAccess,
 	queueActions,
 	queueSummary,
@@ -31,6 +30,7 @@ import {
 	usageSummary,
 	usageTitle,
 } from "../client/chat/composer-model.js";
+import { quantityValue } from "../client/chat/session-usage-model.js";
 import type { KeyEventLike } from "../client/interaction/keybindings.js";
 import type { AgentCapabilities } from "../contracts/capabilities.js";
 import type { Turn, Usage } from "../contracts/sessions.js";

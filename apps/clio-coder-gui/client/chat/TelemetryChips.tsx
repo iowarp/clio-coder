@@ -13,7 +13,7 @@ import {
 	useTelemetrySession,
 } from "./session-telemetry.js";
 import type { Spend } from "./session-usage-model.js";
-import { sessionSpend, tokensText } from "./session-usage-model.js";
+import { chipFigures, contextFigure, sessionSpend } from "./session-usage-model.js";
 
 const RING = 2 * Math.PI * 6;
 const SOURCE_TITLE: Record<Spend["source"], string> = {
@@ -53,12 +53,14 @@ export const TelemetryChips = memo(function TelemetryChips({
 		live: turns.at(-1)?.status === "running" || !usage.data || usage.isPlaceholderData ? telemetry?.usage : undefined,
 		cold: cold.data,
 	});
+	const figures = chipFigures(spend);
+	const share = meter ? contextFigure(context?.share, meter.figure) : null;
 	const contextId = `${sessionId}-chip-context`;
 	const spendId = `${sessionId}-chip-spend`;
 	return (
 		<>
 			{meter ? (
-				<div id={contextId} className="wb-chip wb-chip--meter" data-tone={meter.tone}>
+				<div id={contextId} className="wb-chip wb-chip--meter" data-tone={meter.tone} title={meter.text}>
 					<svg className="wb-ring" viewBox="0 0 16 16" aria-hidden="true">
 						<circle cx="8" cy="8" r="6" className="wb-ring__track" />
 						<circle
@@ -69,20 +71,23 @@ export const TelemetryChips = memo(function TelemetryChips({
 							strokeDasharray={`${(meter.percent / 100) * RING} ${RING}`}
 						/>
 					</svg>
-					<Explained
-						client={client}
-						label="Context share"
-						value={context?.share.display ?? "not journaled"}
-						factRef={context?.share.ref ?? null}
-					/>
+					{share === null ? (
+						<span className="sr-only">{meter.text}</span>
+					) : share.fromShare ? (
+						<Explained client={client} label="Context share" value={share.text} factRef={context?.share.ref ?? null} />
+					) : (
+						<span>{share.text}</span>
+					)}
 				</div>
 			) : null}
-			{spend.cost || spend.tokens !== null ? (
+			{figures.cost !== null || figures.tokens !== null ? (
 				<div id={spendId} className="wb-chip wb-chip--figure" title={SOURCE_TITLE[spend.source]}>
-					{spend.tokens !== null ? (
-						<Explained client={client} label="Tokens" value={tokensText(spend.tokens, "tok")} factRef={spend.refs.tokens} />
+					{figures.tokens !== null ? (
+						<Explained client={client} label="Tokens" value={figures.tokens} factRef={spend.refs.tokens} />
 					) : null}
-					{spend.cost ? <Explained client={client} label="Cost" value={spend.cost} factRef={spend.refs.cost} /> : null}
+					{figures.cost !== null ? (
+						<Explained client={client} label="Cost" value={figures.cost} factRef={spend.refs.cost} />
+					) : null}
 				</div>
 			) : null}
 		</>

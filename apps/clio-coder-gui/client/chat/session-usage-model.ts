@@ -6,6 +6,15 @@ import type { Explainable } from "../telemetry/quantity-model.js";
 
 const BARE_COUNT = /^~?\d[\d,]*$/;
 
+type Fact = SessionTelemetryV1["totals"]["tokens"]["fact"];
+/** The reported number behind a quantity's fact, or null when none of it was measured or estimated. */
+export function quantityValue(quantity: { fact: Fact }): number | null {
+	const fact = quantity.fact;
+	if (!("kind" in fact))
+		return fact.coverage.measured + fact.coverage.estimated > 0 ? fact.measured + fact.estimated : null;
+	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
+}
+
 /**
  * A token display with its unit. The unit follows a bare count ("5,120 tokens"); a display that carries its own gap
  * or method clause ("≥5,120 (1 call unknown)") takes the unit as a label instead, because a unit after the clause
@@ -16,6 +25,8 @@ export function tokensText(display: string, unit: "tokens" | "tok" = "tokens"): 
 }
 
 export interface Spend {
+	/** Whether any of the token total and the cost was measured or estimated; an unknown figure says nothing in a chip. */
+	readonly known: { readonly tokens: boolean; readonly cost: boolean };
 	readonly tokens: string | null;
 	readonly cost: string | null;
 	readonly calls: string | null;
@@ -37,6 +48,10 @@ export function sessionSpend(input: {
 	const session = input.live?.session ?? input.usage?.telemetry.session ?? input.cold;
 	return session
 		? {
+				known: {
+					tokens: quantityValue(session.totals.tokens) !== null,
+					cost: quantityValue(session.totals.usd) !== null,
+				},
 				tokens: session.totals.tokens.display,
 				cost: session.totals.usd.display,
 				calls: session.own.counts.calls.display,
@@ -47,7 +62,27 @@ export function sessionSpend(input: {
 					calls: session.own.counts.calls.ref ?? null,
 				},
 			}
-		: { tokens: null, cost: null, calls: null, source: "none", refs: NO_REFS };
+		: { known: { tokens: false, cost: false }, tokens: null, cost: null, calls: null, source: "none", refs: NO_REFS };
+}
+
+/**
+ * What the top bar's figures say. A chip is a glance, so a figure nobody measured stays out of it: the
+ * pane still states it, with its reason, one click away.
+ */
+export function chipFigures(spend: Spend): { tokens: string | null; cost: string | null } {
+	return {
+		tokens: spend.known.tokens && spend.tokens !== null ? tokensText(spend.tokens, "tok") : null,
+		cost: spend.known.cost ? spend.cost : null,
+	};
+}
+
+/** The context chip's words: the journaled share when it was measured, else the live ledger's own percent. */
+export function contextFigure(
+	share: { fact: Fact; display: string } | undefined,
+	ledgerPercent: string | null,
+): { text: string; fromShare: boolean } | null {
+	if (share && quantityValue(share) !== null) return { text: share.display, fromShare: true };
+	return ledgerPercent === null ? null : { text: ledgerPercent, fromShare: false };
 }
 
 export interface SpendTotal extends Explainable {
