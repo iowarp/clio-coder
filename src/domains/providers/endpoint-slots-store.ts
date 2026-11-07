@@ -169,11 +169,11 @@ export async function recordDiscoveredEndpointSlots(
 ): Promise<void> {
 	if (!Number.isInteger(entry.slots) || entry.slots <= 0) return;
 	if (entry.endpointKey.length === 0 || entry.runtimeId.length === 0) return;
-	// Checked before the lock because acquiring it creates the lock file, and again
-	// under it because an uninstall can land while this call waits. The lock checks
-	// read-only mode itself, before its file and after every wait, so a mode entered
-	// while this call waits records nothing either.
-	if (stateRootRemoved()) return;
+	// Checked before the lock path is resolved, because resolving it creates the
+	// state root, and again under the lock because an uninstall can land while this
+	// call waits. The lock checks read-only mode itself, before its file and after
+	// every wait, so a mode entered while this call waits records nothing either.
+	if (readOnlyMode() || stateRootRemoved()) return;
 	const nowMs = options?.nowMs ?? Date.now();
 	const ttlMs = options?.ttlMs ?? endpointSlotsTtlMs();
 	let readOnly = false;

@@ -37,7 +37,7 @@ describe("read-only mode", () => {
 		});
 		equal(readTargetModelSnapshot(target), null);
 		ok(!existsSync(join(home, "cache")), "neither the refused write nor the read creates the cache root");
-		ok(!existsSync(join(home, "state", "endpoint-slots.json")), "no slot count is recorded");
+		ok(!existsSync(join(home, "state")), "the refused slot count creates no state root");
 
 		equal(recordTargetModelSnapshot(target, ["model-a"]), true);
 		deepEqual(readTargetModelSnapshot(target)?.models, ["model-a"]);
