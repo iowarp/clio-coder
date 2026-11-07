@@ -71,6 +71,8 @@ copies the script to a temporary file, writes the call's `cores`, `memory`,
 script's own, and redirects output to `logs/slurm_output/` under the server's
 working directory, so a disagreement is a bug to fix now. The job runs from
 that working directory, not the script's: use absolute paths inside the script.
+Any `--output` or `--error` directory must exist before submission, or Slurm
+silently drops the logs: create it with `mkdir -p` first.
 
 ## Phase 2 - Submit
 

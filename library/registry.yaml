@@ -939,7 +939,7 @@ entries:
       - is the queue busy
     version: 0.2.0
     sourceUrl: skills/research/slurm-jobs
-    sha256: e9977876e32f3204a8ab195e1de5194eb71bd4c06427652938582e001ad07f4a
+    sha256: 753d197d9f2c9ab99b4be78e073754eb9137f624b511864f6dd3823547905e3d
     provides:
       - kind: skill
         name: slurm-jobs
