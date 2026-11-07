@@ -1,6 +1,6 @@
 // Wording and grouping for the settings write surface. Pure, so it is testable without a browser.
 
-import type { SettingControl } from "../../contracts/settings-controls.js";
+import type { SettingControl, SettingsControls } from "../../contracts/settings-controls.js";
 
 /** The engine's own three sentences (`controlInstructions`), so the terminal and the app say the same words. */
 export const TIMING_SENTENCE: Record<SettingControl["timing"], string> = {
@@ -156,6 +156,40 @@ const CALM: Readonly<Record<Exclude<SettingsScopeId, "advanced">, (control: Sett
 export function inScope(scope: SettingsScopeId, control: SettingControl): boolean {
 	if (scope !== "advanced") return CALM[scope](control);
 	return !Object.values(CALM).some((claims) => claims(control));
+}
+
+export function settingsControlSelection(
+	report: Pick<SettingsControls, "controls" | "sections"> | undefined,
+	discovery: {
+		scope: SettingsScopeId | undefined;
+		filter: string;
+		section: string | null;
+		showDrafts: boolean;
+		drafts: Readonly<Record<string, string>>;
+		compact: boolean;
+		selectedControl: string | null;
+	},
+) {
+	const { scope, filter, section, showDrafts, drafts, compact, selectedControl } = discovery;
+	const everything = report?.controls ?? [];
+	const sections = report?.sections ?? [];
+	const controls =
+		scope && !(scope === "advanced" && filter.trim())
+			? everything.filter((control) => inScope(scope, control))
+			: everything;
+	const unsaved = controls.filter(
+		(control) => drafts[control.path] !== undefined && drafts[control.path] !== control.value,
+	);
+	const active =
+		scope || showDrafts || filter.trim() || (compact && section === "all")
+			? null
+			: (sections.find((candidate) => candidate.id === section)?.id ?? sections[0]?.id ?? null);
+	const visible = showDrafts
+		? unsaved
+		: controls.filter((control) => (active ? control.section === active : matchesControl(control, filter)));
+	const current = sections.find((candidate) => candidate.id === active);
+	const chosen = visible.find((control) => control.path === selectedControl) ?? visible[0];
+	return { unsaved, active, visible, current, chosen, editorControls: compact && chosen ? [chosen] : visible };
 }
 
 /** Collection keys are trimmed on save, so validation compares the same normalized keys. */

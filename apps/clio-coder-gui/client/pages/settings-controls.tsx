@@ -15,8 +15,6 @@ import {
 	emptyMeaning,
 	groupControls,
 	groupNote,
-	inScope,
-	matchesControl,
 	OPEN_CHOICES,
 	type OpenChoice,
 	type SettingsScopeId,
@@ -24,6 +22,7 @@ import {
 	sentence,
 	settingBaselineChanged,
 	settingReviewMatches,
+	settingsControlSelection,
 	sourceLabel,
 	TIMING_PHRASE,
 	TIMING_SENTENCE,
@@ -496,7 +495,16 @@ export function SettingsControlsView({
 	}, [report.data, setDrafts]);
 	// Model settings pick from their target's catalog. The inventory is read only when one is on
 	// screen, and "Check again" asks that target's endpoint for its current list.
-	const modelsVisible = (report.data?.controls ?? []).some((control) => MODEL_TARGET_PATHS[control.path]);
+	const { unsaved, active, visible, current, chosen, editorControls } = settingsControlSelection(report.data, {
+		scope,
+		filter,
+		section,
+		showDrafts,
+		drafts,
+		compact,
+		selectedControl,
+	});
+	const modelsVisible = editorControls.some((control) => MODEL_TARGET_PATHS[control.path]);
 	const inventory = useQuery({
 		queryKey: ["targets", workspaceId],
 		queryFn: () => client.call(routes.targetsList, { ...emptyInput, params: { id: workspaceId } }),
@@ -582,25 +590,7 @@ export function SettingsControlsView({
 			void queries.invalidateQueries({ queryKey: [stale] });
 		return result;
 	};
-	const { sections, controls: everything, userFile } = report.data;
-	// A search on the Advanced page reaches every control, so a link to any setting finds it.
-	const controls =
-		scope && !(scope === "advanced" && filter.trim())
-			? everything.filter((control) => inScope(scope, control))
-			: everything;
-	const unsaved = controls.filter(
-		(control) => drafts[control.path] !== undefined && drafts[control.path] !== control.value,
-	);
-	const active =
-		scope || showDrafts || filter.trim() || (compact && section === "all")
-			? null
-			: (sections.find((candidate) => candidate.id === section)?.id ?? sections[0]?.id ?? null);
-	const visible = showDrafts
-		? unsaved
-		: controls.filter((control) => (active ? control.section === active : matchesControl(control, filter)));
-	const current = sections.find((candidate) => candidate.id === active);
-	const chosen = visible.find((control) => control.path === selectedControl) ?? visible[0];
-	const editorControls = compact && chosen ? [chosen] : visible;
+	const { sections, userFile } = report.data;
 	return (
 		<>
 			{report.error ? (

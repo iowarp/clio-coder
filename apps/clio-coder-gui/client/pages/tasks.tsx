@@ -30,18 +30,28 @@ export function TaskHistoryActions({
 	summary: SessionSummary;
 }) {
 	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState<string | null>(null);
 	const rename = useRenameTask(client);
 	return (
 		<div className="taskpage__actions">
 			{editing ? (
 				<InlineRename
 					value={summary.name ?? ""}
+					initialDraft={draft ?? summary.name ?? ""}
 					label={`Name ${row.title}`}
 					onCommit={(label) => {
 						setEditing(false);
-						rename.mutate({ sessionId: row.id, workspaceId: row.workspaceId, label });
+						setDraft(label);
+						rename.mutate(
+							{ sessionId: row.id, workspaceId: row.workspaceId, label },
+							{ onSuccess: () => setDraft(null), onError: () => setEditing(true) },
+						);
 					}}
-					onCancel={() => setEditing(false)}
+					onCancel={() => {
+						setEditing(false);
+						setDraft(null);
+						rename.reset();
+					}}
 				/>
 			) : (
 				<button
@@ -122,13 +132,18 @@ export function Sessions({ client }: { client: Client }) {
 			<HomeAside client={client} workspace={workspace.data ?? null} />
 			<TopBar title={name}>
 				<span className="wb-bar__spacer" />
-				<Link className="wb-icon wb-icon--text" to={`/settings/models?workspace=${workspaceId}`}>
+				<Link
+					className="wb-icon wb-icon--text"
+					to={`/settings/models?workspace=${workspaceId}`}
+					aria-label="Project settings"
+				>
 					<Icon name="models" />
 					<span>Project settings</span>
 				</Link>
 				<button
 					type="button"
 					className="wb-icon wb-icon--text"
+					aria-label={refreshing ? "Updating project work" : "Refresh project work"}
 					disabled={refreshing}
 					onClick={() => {
 						void workspace.refetch();

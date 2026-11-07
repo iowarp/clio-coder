@@ -6,6 +6,7 @@ import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { Client } from "../client/api/client.js";
+import { settingsControlSelection } from "../client/pages/settings-control-model.js";
 import type { SessionSummary } from "../contracts/sessions.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
 
@@ -21,7 +22,9 @@ const { ShellContext } = await import("../client/shell/shell-context.js");
 const { SettingsPage } = await import("../client/pages/settings.js");
 const { SystemPage } = await import("../client/pages/system.js");
 const { Toolchain } = await import("../client/pages/toolchain.js");
-const { TaskHistoryActions } = await import("../client/pages/tasks.js");
+const { Sessions, TaskHistoryActions } = await import("../client/pages/tasks.js");
+const { MissionControl } = await import("../client/pages/mission-control.js");
+const { SessionControlsProvider } = await import("../client/shell/SessionControls.js");
 const { useWorkspaceSelection, WorkspacePicker } = await import("../client/pages/workspace-selection.js");
 const client = { token: "test", call: () => new Promise(() => {}) } as unknown as Client;
 const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -54,9 +57,70 @@ const controls: SettingsControls = {
 	],
 };
 
+test("settings model catalogs follow the displayed scope, search and compact selection", () => {
+	const base = controls.controls[0];
+	assert.ok(base);
+	const report: SettingsControls = {
+		...controls,
+		sections: [...controls.sections, { id: "safety", label: "Safety", description: "Limits" }],
+		controls: [
+			{ ...base, path: "chat.model" },
+			{ ...base, path: "safety.limits.toolCallsPerTurn", section: "safety", label: "Tool calls" },
+		],
+	};
+	const discovery = {
+		scope: undefined,
+		filter: "",
+		section: null,
+		showDrafts: false,
+		drafts: {},
+		compact: false,
+		selectedControl: null,
+	};
+	const paths = (selection: ReturnType<typeof settingsControlSelection>) =>
+		selection.editorControls.map((control) => control.path);
+	assert.deepEqual(paths(settingsControlSelection(report, discovery)), ["chat.model"]);
+	assert.deepEqual(paths(settingsControlSelection(report, { ...discovery, scope: "safety" })), [
+		"safety.limits.toolCallsPerTurn",
+	]);
+	assert.deepEqual(paths(settingsControlSelection(report, { ...discovery, filter: "does-not-exist" })), []);
+	assert.deepEqual(
+		paths(
+			settingsControlSelection(report, {
+				...discovery,
+				compact: true,
+				section: "all",
+				selectedControl: "safety.limits.toolCallsPerTurn",
+			}),
+		),
+		["safety.limits.toolCallsPerTurn"],
+	);
+});
+
 function ProjectPicker() {
 	return <WorkspacePicker selection={useWorkspaceSelection(client)} />;
 }
+
+test("project and session toolbar controls retain names when their visible text is hidden on phones", () => {
+	const project = render(
+		queries(),
+		"/workspaces/workspace-1/sessions",
+		<SessionControlsProvider client={client}>
+			<Sessions client={client} />
+		</SessionControlsProvider>,
+	);
+	assert.match(project, /aria-label="Project settings"/);
+	assert.match(project, /aria-label="(?:Updating|Refresh) project work"/);
+	const sessions = render(
+		queries(),
+		"/sessions",
+		<SessionControlsProvider client={client}>
+			<MissionControl client={client} />
+		</SessionControlsProvider>,
+	);
+	for (const label of ["Trace replay", "Evidence", "Machines"]) assert.ok(sessions.includes(`aria-label="${label}"`));
+	assert.match(sessions, /aria-label="(?:Updating|Refresh) sessions"/);
+});
 
 test("read-only project inspection never describes a save and an empty project list has a working open action", () => {
 	const cache = queries();

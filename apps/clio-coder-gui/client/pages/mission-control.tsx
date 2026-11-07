@@ -74,21 +74,22 @@ export function MissionControl({ client }: { client: Client }) {
 		<>
 			<TopBar title="Sessions">
 				<span className="wb-bar__spacer" />
-				<Link className="wb-icon wb-icon--text" to="/traces">
+				<Link className="wb-icon wb-icon--text" to="/traces" aria-label="Trace replay">
 					<Icon name="traces" />
 					<span>Trace replay</span>
 				</Link>
-				<Link className="wb-icon wb-icon--text" to="/evidence">
+				<Link className="wb-icon wb-icon--text" to="/evidence" aria-label="Evidence">
 					<Icon name="evidence" />
 					<span>Evidence</span>
 				</Link>
-				<Link className="wb-icon wb-icon--text" to="/machines">
+				<Link className="wb-icon wb-icon--text" to="/machines" aria-label="Machines">
 					<Icon name="system" />
 					<span>Machines</span>
 				</Link>
 				<button
 					type="button"
 					className="wb-icon wb-icon--text"
+					aria-label={overview.isFetching ? "Updating sessions" : "Refresh sessions"}
 					disabled={overview.isFetching}
 					onClick={() => void overview.refetch()}
 				>
