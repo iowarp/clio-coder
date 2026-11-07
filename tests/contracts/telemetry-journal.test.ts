@@ -76,6 +76,7 @@ import {
 	telemetryPromptStructure,
 } from "../../src/domains/telemetry/objects.js";
 import {
+	telemetryBundlePath,
 	telemetryProcessDirectory,
 	telemetryProcessesDirectory,
 	telemetryRunDirectory,
@@ -87,6 +88,7 @@ import {
 	DEFAULT_PRUNE_POLICY,
 	planTelemetryPrune,
 } from "../../src/domains/telemetry/retention.js";
+import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
@@ -967,6 +969,145 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		);
 		deepStrictEqual(await readdir(expired), [], "the expired session keeps no telemetry");
 		deepStrictEqual(await readdir(join(keptDirectory, "objects")), [`${structure.id}.json`]);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("prune protects objects covered by current and historical session seals", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-prune-sealed-content-"));
+	const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+	try {
+		for (const id of ["current", "historical"]) {
+			const meta = join(stateDir, "sessions", "hash", id);
+			await mkdir(meta, { recursive: true });
+			await writeFile(join(meta, "meta.json"), JSON.stringify({ endedAt: old.toISOString(), owner: null }));
+			const directory = telemetrySessionDirectory(stateDir, id);
+			const ctx: TelemetryContext = { sessionId: id, agent: { role: "main", id } };
+			const options = {
+				directory,
+				context: ctx,
+				writer,
+				capture: () =>
+					effectiveTelemetryCapture(
+						{
+							mode: "research",
+							research: { content: true, deltas: false, providerHeaders: false, busTrace: false },
+						},
+						true,
+					),
+			};
+			const journal = await openCallJournal(options);
+			const text = await journal.storeObject("prompt-text", { text: "retained sealed content" });
+			const orphan = await journal.storeObject("tool-schemas", [{ name: "unreferenced but sealed" }]);
+			telemetryHub().emit("prompt.text_captured", { text, bytes: 23 }, ctx);
+			ok(await journal.sealAndClose());
+			if (id === "historical") await (await openCallJournal(options)).close();
+			for (const ref of [text, orphan]) await utimes(join(directory, "objects", `${ref.id}.json`), old, old);
+		}
+		const plan = await planTelemetryPrune(stateDir, { ...DEFAULT_PRUNE_POLICY, researchMaxBytes: 0 });
+		deepStrictEqual(plan.remove, [], "neither research expiry nor orphan collection may break an earlier seal");
+		ok(plan.researchBytes > 0, "protected content still counts toward the research budget");
+		deepStrictEqual(
+			plan.held.map(({ reason }) => reason),
+			["sealed", "sealed"],
+		);
+		await applyTelemetryPrune(plan);
+		for (const id of ["current", "historical"]) {
+			const directory = telemetrySessionDirectory(stateDir, id);
+			const reopened = await openCallJournal({
+				directory,
+				context: { sessionId: id, agent: { role: "main", id } },
+				writer,
+			});
+			ok(await reopened.sealAndClose());
+			strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(directory)).status, "verified");
+		}
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("whole-session prune retires sealed bundles and bundle-only remnants", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-prune-bundles-"));
+	const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+	try {
+		for (const id of ["sealed", "bundle-only"]) {
+			const meta = join(stateDir, "sessions", "hash", id);
+			await mkdir(meta, { recursive: true });
+			await writeFile(join(meta, "meta.json"), JSON.stringify({ endedAt: old.toISOString(), owner: null }));
+			const directory = telemetrySessionDirectory(stateDir, id);
+			const journal = await openCallJournal({
+				directory,
+				context: { sessionId: id, agent: { role: "main", id } },
+				writer,
+			});
+			if (id === "sealed") await journal.storeObject("tool-schemas", [{ name: "expired with its scope" }]);
+			ok(await journal.sealAndClose());
+			for (const name of await readdir(directory)) await utimes(join(directory, name), old, old);
+			if (id === "bundle-only") await rm(join(directory, "journal.jsonl"));
+		}
+		const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY);
+		for (const id of ["sealed", "bundle-only"])
+			ok(plan.remove.some((action) => action.path === telemetryBundlePath(telemetrySessionDirectory(stateDir, id))));
+		deepStrictEqual((await applyTelemetryPrune(plan)).skipped, []);
+		for (const id of ["sealed", "bundle-only"])
+			deepStrictEqual(await readdir(telemetrySessionDirectory(stateDir, id)), []);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("whole-session prune refuses a scope resealed after planning", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-prune-resealed-"));
+	const id = "refreshed";
+	const directory = telemetrySessionDirectory(stateDir, id);
+	const ctx: TelemetryContext = { sessionId: id, agent: { role: "main", id } };
+	const options = { directory, context: ctx, writer };
+	const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+	try {
+		const meta = join(stateDir, "sessions", "hash", id);
+		await mkdir(meta, { recursive: true });
+		await writeFile(join(meta, "meta.json"), JSON.stringify({ endedAt: old.toISOString(), owner: null }));
+		const journal = await openCallJournal(options);
+		const object = await journal.storeObject("tool-schemas", [{ name: "unchanged across seals" }]);
+		ok(await journal.sealAndClose());
+		for (const name of ["journal.jsonl", "bundle.json"]) await utimes(join(directory, name), old, old);
+		const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY);
+		ok(plan.remove.some((action) => action.path === join(directory, "objects", `${object.id}.json`)));
+		const reopened = await openCallJournal(options);
+		ok(telemetryHub().emit("session.resumed", { via: "resume" }, ctx));
+		ok(await reopened.sealAndClose());
+		deepStrictEqual((await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY)).remove, [], "the scope is now fresh");
+		deepStrictEqual((await applyTelemetryPrune(plan)).removed, [], "the stale plan must preserve the new seal's objects");
+		strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(directory)).status, "verified");
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("a prune plan cannot remove objects after their journal is sealed", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-prune-late-seal-"));
+	const id = "late-seal";
+	const directory = telemetrySessionDirectory(stateDir, id);
+	const options = { directory, context: { sessionId: id, agent: { role: "main" as const, id } }, writer };
+	try {
+		const meta = join(stateDir, "sessions", "hash", id);
+		await mkdir(meta, { recursive: true });
+		await writeFile(join(meta, "meta.json"), JSON.stringify({ endedAt: new Date().toISOString(), owner: null }));
+		const journal = await openCallJournal(options);
+		await journal.storeObject("tool-schemas", [{ name: "unreferenced" }]);
+		await journal.close();
+		const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY);
+		strictEqual(plan.remove.length, 1);
+		const sealing = await openCallJournal(options);
+		ok(await sealing.sealAndClose());
+		// Withdrawing the manifest must not hide the historical seal from a plan made before it existed.
+		await (await openCallJournal(options)).close();
+		deepStrictEqual((await applyTelemetryPrune(plan)).removed, []);
+		const reopened = await openCallJournal(options);
+		ok(await reopened.sealAndClose());
+		strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(directory)).status, "verified");
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}

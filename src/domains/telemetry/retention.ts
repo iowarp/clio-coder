@@ -1,11 +1,12 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, unlinkSync } from "node:fs";
 import { lstat, readdir, readFile, rmdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
 import {
+	TELEMETRY_BUNDLE_FILE,
 	TELEMETRY_JOURNAL_FILE,
 	telemetryBundlePath,
 	telemetryJournalFiles,
@@ -35,6 +36,7 @@ export const DEFAULT_PRUNE_POLICY: PrunePolicy = {
 };
 
 export type PruneReason = "expired" | "over-size" | "research-expired" | "research-over-size" | "unreferenced-object";
+type JournalStamp = Readonly<Record<string, string>>;
 
 export interface PruneAction {
 	path: string;
@@ -43,14 +45,14 @@ export interface PruneAction {
 	reason: PruneReason;
 	/** The session, run or process whose ownership is re-checked immediately before the delete. */
 	owner:
-		| { kind: "session"; directory: string; meta: string | null }
+		| { kind: "session"; directory: string; meta: string | null; journalStamp: JournalStamp }
 		| { kind: "run"; directory: string }
 		| { kind: "process"; directory: string };
 }
 
 export interface PruneHold {
 	path: string;
-	reason: "live" | "unknown-owner" | "fork-parent" | "referenced-run" | "unreadable" | "symlink";
+	reason: "live" | "unknown-owner" | "fork-parent" | "referenced-run" | "sealed" | "unreadable" | "symlink";
 }
 
 export interface PrunePlan {
@@ -72,6 +74,9 @@ interface SessionTelemetry {
 	sessionId: string;
 	/** The session's `meta.json` in its store, which says whether its owner is alive; null when no store holds it. */
 	meta: string | null;
+	bundle: FileInfo | null;
+	sealed: boolean;
+	journalStamp: JournalStamp | null;
 	segments: FileInfo[];
 	objects: Map<string, FileInfo>;
 	lastWriteMs: number;
@@ -101,6 +106,34 @@ async function info(path: string): Promise<FileInfo | null> {
 	} catch {
 		return null;
 	}
+}
+
+/** A session plan is valid only while the journal and bundle that established its eligibility are unchanged. */
+function sessionJournalStamp(directory: string): JournalStamp | null {
+	try {
+		const entries = readdirSync(directory);
+		const names = [
+			...telemetryJournalFiles(entries),
+			...(entries.includes(TELEMETRY_BUNDLE_FILE) ? [TELEMETRY_BUNDLE_FILE] : []),
+		];
+		return Object.fromEntries(
+			names.sort().map((name) => {
+				const stat = lstatSync(join(directory, name));
+				if (!stat.isFile()) throw new Error("nonregular telemetry scope file");
+				return [name, `${stat.dev}:${stat.ino}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`];
+			}),
+		);
+	} catch {
+		return null;
+	}
+}
+
+function sameJournalStamp(expected: JournalStamp, current: JournalStamp | null): boolean {
+	return (
+		current !== null &&
+		Object.keys(expected).length === Object.keys(current).length &&
+		Object.entries(expected).every(([name, stamp]) => current[name] === stamp)
+	);
 }
 
 async function names(directory: string): Promise<string[]> {
@@ -154,26 +187,31 @@ async function readSessionTelemetry(
 	sessionId: string,
 	meta: string | null,
 ): Promise<SessionTelemetry | null> {
+	const journalStamp = sessionJournalStamp(directory);
 	const entries = await names(directory);
 	const segmentNames = telemetryJournalFiles(entries);
+	const bundle = await info(telemetryBundlePath(directory));
 	const objectsDirectory = telemetryObjectsDirectory(directory);
 	const objectNames = (await realDirectory(objectsDirectory))
 		? (await names(objectsDirectory)).filter((name) => OBJECT_FILE.test(name))
 		: [];
-	if (segmentNames.length === 0 && objectNames.length === 0) return null;
+	if (segmentNames.length === 0 && objectNames.length === 0 && bundle === null) return null;
 	const session: SessionTelemetry = {
 		directory,
 		sessionId,
 		meta,
+		bundle,
+		sealed: bundle !== null,
+		journalStamp,
 		segments: [],
 		objects: new Map(),
-		lastWriteMs: 0,
-		bytes: 0,
+		lastWriteMs: bundle?.mtimeMs ?? 0,
+		bytes: bundle?.bytes ?? 0,
 		refs: new Map(),
 		runs: new Set(),
 		parent: null,
-		hold: null,
-		partial: false,
+		hold: journalStamp === null ? "unreadable" : null,
+		partial: journalStamp === null,
 	};
 	for (const name of segmentNames) {
 		const file = await info(join(directory, name));
@@ -199,6 +237,7 @@ async function readSessionTelemetry(
 			}
 			if (row.kind !== "record") continue;
 			const record = row.record;
+			if (record.k === "session.sealed" || record.k === "share.sealed") session.sealed = true;
 			collectRefs(record.data, session.refs);
 			if (record.k === "call.linked" || record.k === "run.linked") session.runs.add(record.data.runId);
 			if (record.k === "session.forked") session.parent = record.data.parentSessionId;
@@ -252,8 +291,8 @@ async function readScopeTelemetry(directory: string, id: string): Promise<ScopeT
  * Read-only: what a prune under `policy` would remove and what it must keep (#434). A live or
  * unreadable session keeps every file; a fork parent with a kept child, a run a kept journal
  * references, and an object a kept record cites are never collected. Research retention is
- * the one exception by decision (O5): content preimages expire after their research window while the
- * records citing them stay, and those references then read as missing.
+ * the exception for scopes never sealed: content preimages expire after their research window while the
+ * records citing them stay. A historical seal protects all individual objects until whole-scope retirement.
  */
 export async function planTelemetryPrune(
 	stateDir: string,
@@ -330,9 +369,16 @@ export async function planTelemetryPrune(
 	standing = plan.standardBytes - [...doomed].reduce((sum, session) => sum + sessionBytes(session), 0);
 	for (const session of sessions) if (session.hold) plan.held.push({ path: session.directory, reason: session.hold });
 	for (const session of [...doomed].sort((a, b) => a.lastWriteMs - b.lastWriteMs)) {
+		if (session.journalStamp === null) continue;
 		const reason: PruneReason = session.lastWriteMs < cutoff ? "expired" : "over-size";
-		const owner = { kind: "session" as const, directory: session.directory, meta: session.meta };
-		for (const file of [...session.segments, ...session.objects.values()]) plan.remove.push({ ...file, reason, owner });
+		const owner = {
+			kind: "session" as const,
+			directory: session.directory,
+			meta: session.meta,
+			journalStamp: session.journalStamp,
+		};
+		for (const file of [...(session.bundle ? [session.bundle] : []), ...session.segments, ...session.objects.values()])
+			plan.remove.push({ ...file, reason, owner });
 	}
 
 	// A run's sealed bundle and objects expire with its journal so retained evidence stays complete (#434).
@@ -358,19 +404,31 @@ export async function planTelemetryPrune(
 	const researchCutoff = nowMs - policy.researchDays * DAY_MS;
 	const research: Array<{ file: FileInfo; owner: PruneAction["owner"] }> = [];
 	for (const session of sessions) {
-		if (session.hold !== null || doomed.has(session)) continue;
-		if (session.partial) {
+		if (doomed.has(session)) continue;
+		// Held content remains visible in the budget even when a seal prevents meeting the research cap.
+		for (const [id, file] of session.objects)
+			if (CONTENT_SUBJECTS.has(session.refs.get(id) ?? "")) plan.researchBytes += file.bytes;
+		if (session.hold !== null) continue;
+		if (session.partial || session.journalStamp === null) {
 			plan.held.push({ path: session.directory, reason: "unreadable" });
 			continue;
 		}
-		const owner = { kind: "session" as const, directory: session.directory, meta: session.meta };
+		if (session.sealed) {
+			if (session.objects.size > 0) plan.held.push({ path: session.directory, reason: "sealed" });
+			continue;
+		}
+		const owner = {
+			kind: "session" as const,
+			directory: session.directory,
+			meta: session.meta,
+			journalStamp: session.journalStamp,
+		};
 		for (const [id, file] of session.objects) {
 			const subject = session.refs.get(id);
 			if (subject === undefined) plan.remove.push({ ...file, reason: "unreferenced-object", owner });
 			else if (CONTENT_SUBJECTS.has(subject)) research.push({ file, owner });
 		}
 	}
-	plan.researchBytes = research.reduce((sum, item) => sum + item.file.bytes, 0);
 	let researchStanding = plan.researchBytes;
 	for (const item of research.sort((a, b) => a.file.mtimeMs - b.file.mtimeMs)) {
 		if (item.file.mtimeMs >= researchCutoff && researchStanding <= policy.researchMaxBytes) break;
@@ -408,6 +466,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 	}
 	for (const batch of batches.values()) {
 		const owner = (batch[0] as PruneAction).owner;
+		const expectedJournal = owner.kind === "session" ? { ...owner.journalStamp } : null;
 		if (await live(owner)) {
 			for (const action of batch) result.skipped.push({ path: action.path, reason: "became live" });
 			continue;
@@ -418,6 +477,10 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			// link during that read must not redirect the delete. Node has no unlinkat to pin the directory itself.
 			if (!unlinkedStateDirectory(plan.stateDir, dirname(action.path))) {
 				result.skipped.push({ path: action.path, reason: "directory is no longer contained" });
+				continue;
+			}
+			if (expectedJournal !== null && !sameJournalStamp(expectedJournal, sessionJournalStamp(owner.directory))) {
+				result.skipped.push({ path: action.path, reason: "journal changed since planning" });
 				continue;
 			}
 			if (!current || current.bytes !== action.bytes || current.mtimeMs !== action.mtimeMs) {
@@ -432,6 +495,9 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			try {
 				unlinkSync(action.path);
 				result.removed.push(action);
+				// Only our successful deletions advance this snapshot; never adopt a concurrent writer's changes.
+				if (expectedJournal !== null && dirname(action.path) === owner.directory)
+					delete expectedJournal[basename(action.path)];
 			} catch (error) {
 				result.skipped.push({ path: action.path, reason: error instanceof Error ? error.message : String(error) });
 			}
