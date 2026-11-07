@@ -101,6 +101,7 @@ export const guiTests = [
 	"egress-policy",
 	"sessions-http",
 	"library-http",
+	"file-preview",
 	"app-state",
 	"ssh-model",
 	"machine-proxy",

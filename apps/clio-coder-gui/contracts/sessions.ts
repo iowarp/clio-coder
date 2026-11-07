@@ -39,6 +39,40 @@ export const PathCompletion = Type.Object(
 	{ additionalProperties: false },
 );
 export type PathCompletion = Static<typeof PathCompletion>;
+/**
+ * One workspace file, read for a person to look at. The server reads it only when it resolves inside the
+ * workspace, is a regular file, is not under `.git` and is not one of the secret files the agent's own
+ * read tool refuses; anything else answers with why it is not shown, never with its bytes.
+ */
+export const FilePreview = Type.Union([
+	Type.Object(
+		{
+			status: Type.Literal("text"),
+			/** Relative to the workspace root with `/` separators. */
+			path: Type.String({ maxLength: 4096 }),
+			text: Type.String({ maxLength: 262_144 }),
+			/** Bytes on disk; larger than `text` when the read stopped at the preview limit. */
+			size: Type.Integer({ minimum: 0 }),
+			truncated: Type.Boolean(),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{
+			status: Type.Union([
+				Type.Literal("binary"),
+				Type.Literal("withheld"),
+				Type.Literal("missing"),
+				Type.Literal("outside"),
+				Type.Literal("not-a-file"),
+			]),
+			path: Type.String({ maxLength: 4096 }),
+			reason: Type.String({ maxLength: 512 }),
+		},
+		{ additionalProperties: false },
+	),
+]);
+export type FilePreview = Static<typeof FilePreview>;
 /** Files and folders under one workspace that match a typed `@path`, as paths relative to its root. */
 export const FileCompletion = Type.Object(
 	{

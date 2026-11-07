@@ -11,6 +11,7 @@ export {
 } from "../../../../src/core/telemetry/render.js";
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";
+export { WORKSPACE_SECRET_PATHS } from "../../../../src/domains/safety/secret-paths.js";
 export {
 	AcpProcessError,
 	AcpProtocolError,

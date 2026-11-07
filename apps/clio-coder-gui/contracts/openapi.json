@@ -14801,6 +14801,140 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/file": {
+			"get": {
+				"operationId": "workspaceFile",
+				"summary": "Read one workspace file for preview, never a secret file or one outside the workspace",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "path",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "path", "text", "size", "truncated"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "text"
+												},
+												"path": {
+													"type": "string",
+													"maxLength": 4096
+												},
+												"text": {
+													"type": "string",
+													"maxLength": 262144
+												},
+												"size": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "path", "reason"],
+											"properties": {
+												"status": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "binary"
+														},
+														{
+															"type": "string",
+															"const": "withheld"
+														},
+														{
+															"type": "string",
+															"const": "missing"
+														},
+														{
+															"type": "string",
+															"const": "outside"
+														},
+														{
+															"type": "string",
+															"const": "not-a-file"
+														}
+													]
+												},
+												"path": {
+													"type": "string",
+													"maxLength": 4096
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/sessions": {
 			"get": {
 				"operationId": "sessionHistory",

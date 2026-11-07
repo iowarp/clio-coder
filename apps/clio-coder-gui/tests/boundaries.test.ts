@@ -94,6 +94,8 @@ const adapters = new Set([
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
 const testModules = new Set([
+	// Tests that compare with the canonical CLI run the checkout's source, not a build (tests/fixtures/source-cli.mjs).
+	"src/cli/index.ts",
 	"src/domains/extensions/manager.ts",
 	"src/engine/session.ts",
 	"src/domains/session/entries.ts",

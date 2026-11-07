@@ -177,6 +177,7 @@ export function sessionRoutes(
 	register(app, hub, routes.workspacePick, (_input, context) => workspaces.pick(context.req.raw.signal));
 	register(app, hub, routes.workspace, ({ params }) => workspaces.get(params.id));
 	register(app, hub, routes.workspaceFiles, ({ params, query }) => workspaces.completeFile(params.id, query.input));
+	register(app, hub, routes.workspaceFile, ({ params, query }) => workspaces.readFile(params.id, query.path));
 	register(app, hub, routes.openWorkspace, ({ body }, context) =>
 		commands.run("workspace.open", idempotencyKey(context), body, () => workspaces.open(body.path)),
 	);

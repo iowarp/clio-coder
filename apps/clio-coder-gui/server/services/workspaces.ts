@@ -3,10 +3,17 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { FileCompletion, type PathCompletion, Workspace, type WorkspacePick } from "../../contracts/sessions.js";
+import {
+	FileCompletion,
+	type FilePreview,
+	type PathCompletion,
+	Workspace,
+	type WorkspacePick,
+} from "../../contracts/sessions.js";
 import { runFolderPicker } from "../process-policy.js";
 import type { AppFiles } from "../state/files.js";
 import type { WorkerHost } from "../worker/host.js";
+import { readFilePreview } from "./file-preview.js";
 import { completePath, completeWorkspaceFile, detectPathHost, type PathHost, toServerPath } from "./path-complete.js";
 import { AppProblem } from "./problem.js";
 
@@ -50,6 +57,10 @@ export class WorkspaceService {
 			}
 		}
 		return completeWorkspaceFile(root, input);
+	}
+	/** One workspace file for a person to read; never written, never outside the workspace, never a secret. */
+	async readFile(id: string, path: string): Promise<FilePreview> {
+		return readFilePreview((await this.get(id)).path, path);
 	}
 	/** One native folder dialog at a time: a second would stack behind the first on the person's desktop. */
 	async pick(signal?: AbortSignal): Promise<WorkspacePick> {

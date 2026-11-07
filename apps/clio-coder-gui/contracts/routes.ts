@@ -60,6 +60,7 @@ import { SessionConfig, SetConfigOption } from "./session-config.js";
 import { SessionOverview } from "./session-overview.js";
 import {
 	FileCompletion,
+	FilePreview,
 	PathCompletion,
 	SessionSnapshot,
 	SessionSummary,
@@ -875,6 +876,14 @@ export const routes = {
 		query: Type.Object({ input: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),
 		response: FileCompletion,
 		summary: "Complete a typed @path against the files of one workspace",
+	}),
+	workspaceFile: defineRoute({
+		...get,
+		params: operationParams,
+		path: "/api/workspaces/:id/file",
+		query: Type.Object({ path: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
+		response: FilePreview,
+		summary: "Read one workspace file for preview, never a secret file or one outside the workspace",
 	}),
 	sessionHistory: defineRoute({
 		...get,
