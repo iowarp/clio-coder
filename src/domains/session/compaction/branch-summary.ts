@@ -21,8 +21,16 @@ import {
 	toolResultValue,
 } from "../message-projection.js";
 
-/** Tool-result bodies are truncated to this char count inside summaries. */
+/**
+ * Tool-result and bash bodies are truncated to this char count inside
+ * summaries unless the caller gives a larger per-body cap.
+ */
 export const TOOL_RESULT_MAX_CHARS = 2000;
+
+export interface SerializeConversationOptions {
+	/** Per-body char cap for tool results and bash output; defaults to TOOL_RESULT_MAX_CHARS. */
+	toolResultMaxChars?: number;
+}
 
 export interface PreparedBranchEntries {
 	/** Entries up to (exclusive) the first-kept index. These get summarized. */
@@ -118,7 +126,11 @@ function toolResultText(entry: MessageEntry): string {
  * to the replayed LLM context, so summarizing them would waste tokens on
  * bookkeeping.
  */
-export function serializeConversation(entries: ReadonlyArray<SessionEntry>): string {
+export function serializeConversation(
+	entries: ReadonlyArray<SessionEntry>,
+	options: SerializeConversationOptions = {},
+): string {
+	const bodyMax = options.toolResultMaxChars ?? TOOL_RESULT_MAX_CHARS;
 	const parts: string[] = [];
 	for (const entry of entries) {
 		if (entry.kind === "message") {
@@ -140,7 +152,7 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 					parts.push(`[Assistant tool calls]: ${toolCallText(entry).trim()}`);
 					break;
 				case "tool_result":
-					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), TOOL_RESULT_MAX_CHARS)}`);
+					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), bodyMax)}`);
 					break;
 				case "system":
 					if (text.length === 0) break;
@@ -157,7 +169,7 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 			// entry remains available to transcript replay, but neither its command
 			// nor its output may cross a model boundary through compaction.
 			if (entry.excludeFromContext === true) continue;
-			parts.push(`[Bash]: $ ${entry.command}\n${truncate(entry.output, TOOL_RESULT_MAX_CHARS)}`);
+			parts.push(`[Bash]: $ ${entry.command}\n${truncate(entry.output, bodyMax)}`);
 			continue;
 		}
 		if (entry.kind === "branchSummary") {

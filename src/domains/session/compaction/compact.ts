@@ -58,7 +58,7 @@ import {
 	skillContextContentHash,
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
-import { serializeConversation } from "./branch-summary.js";
+import { serializeConversation, TOOL_RESULT_MAX_CHARS } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
 import {
@@ -1375,17 +1375,46 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// Recorded only once the request is actually sent, so a request skipped as a
 	// repeat leaves no offer-used event behind.
 	let commitMemoryOffer: (() => void) | undefined;
+	// A summary request sees whole tool results when they fit the summarizer's
+	// window beside its output room, else the largest per-result cap that fits,
+	// never below TOOL_RESULT_MAX_CHARS. The fixed 2000-char cap kept only a long
+	// read's opening even with the window nearly empty, so a checkpoint written
+	// between two reads and the answer lost every value past it and the answer
+	// filled the gap from the other file. The margin covers the chars/4 estimate
+	// running under real tokenization of code.
+	const summaryWindow = input.model.contextWindow;
+	const summaryInputBudget =
+		summaryWindow > 0
+			? Math.floor((summaryWindow - Math.min(maxTokens ?? summaryRoom, Math.floor(summaryWindow / 2))) * 0.8)
+			: 0;
+	const serializeWithinBudget = (slice: readonly SessionEntry[], build: (text: string) => string): string => {
+		const capped = serializeConversation(slice);
+		if (summaryInputBudget <= 0) return capped;
+		const price = (text: string) =>
+			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(build(text))] });
+		const whole = serializeConversation(slice, { toolResultMaxChars: Number.POSITIVE_INFINITY });
+		if (whole === capped || price(whole) <= summaryInputBudget) return whole;
+		if (price(capped) >= summaryInputBudget) return capped;
+		let fits = TOOL_RESULT_MAX_CHARS;
+		let over = whole.length;
+		while (over - fits > 1) {
+			const cap = Math.floor((fits + over) / 2);
+			if (price(serializeConversation(slice, { toolResultMaxChars: cap })) <= summaryInputBudget) fits = cap;
+			else over = cap;
+		}
+		return serializeConversation(slice, { toolResultMaxChars: fits });
+	};
 	const represent = (
 		slice: readonly SessionEntry[],
 		rawSlice: readonly SessionEntry[],
 		previous: string,
 		split: boolean,
 	): string => {
-		const ordinary = serializeConversation(slice);
 		const build = (text: string) =>
 			split
 				? buildTurnPrefixUserText(text, input.instructions, previous)
 				: buildUserText(text, input.instructions, previous, activeRequest);
+		const ordinary = serializeWithinBudget(slice, build);
 		const raw = build(ordinary);
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
 		const offer = input.offerMemory(rawSlice, ordinary, slice);

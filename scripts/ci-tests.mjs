@@ -64,6 +64,7 @@ export const coreTests = [
 	"stale-edit-guard",
 	"replay-unsent-call-usage",
 	"overflow-compaction-fit",
+	"compaction-summary-tool-results",
 	"packed-source-directory",
 	"code-nav",
 	"skill-frontmatter-cache",
