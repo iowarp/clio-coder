@@ -67,6 +67,7 @@ import type {
 	EvidenceAssessedPayload,
 	LoopBlockedPayload,
 	PermissionRequestedPayload,
+	PermissionResolvedPayload,
 	ProviderHealthPayload,
 	ToolBudgetExceededPayload,
 } from "../../core/telemetry/live-events.js";
@@ -2902,6 +2903,59 @@ function installWorkerAskBridge(
 	};
 }
 
+/** Distinct (run, tool) pairs one connection remembers before it starts over. */
+const ACP_UNANSWERED_WORKER_ASK_MEMORY = 256;
+
+/**
+ * Tells the client when a dispatched worker's ask was settled without anyone
+ * answering it: no responder (the client did not opt into worker permissions,
+ * so the worker applied its fallback at once) or the ask's window closed. The
+ * worker is not stuck, but without this the client never learns that it wanted
+ * something and was refused. One notice per run and tool, built only from
+ * bounded identifiers; the worker-composed reason never reaches the wire.
+ */
+function installUnansweredWorkerAskNotice(input: {
+	bus?: TelemetryHub;
+	activeSessionId: () => string | null;
+	workerAsksEnabled: () => boolean;
+	notice?: (sessionId: string, text: string) => void;
+}): () => void {
+	const bus = input.bus;
+	const notice = input.notice;
+	if (bus === undefined || notice === undefined) return () => {};
+	const told = new Set<string>();
+	return bus.subscribe("approval.resolved", (payload: PermissionResolvedPayload) => {
+		const timedOut = payload.decidedBy === "timeout";
+		if (!timedOut && payload.decidedBy !== "policy:no-operator") return;
+		if (payload.status === "granted") return;
+		const origin = typeof payload.origin === "string" ? payload.origin : "";
+		if (!origin.startsWith("worker:") && !origin.startsWith("delegation:")) return;
+		const sessionId = input.activeSessionId();
+		if (sessionId === null || (payload.sessionId !== undefined && payload.sessionId !== sessionId)) return;
+		const runId = safeStoredIdentifier(
+			typeof payload.requestedBy === "string" ? payload.requestedBy : origin.slice(origin.indexOf(":") + 1),
+			ACP_MAX_WORKER_ASK_ID_BYTES,
+		);
+		const tool = safeStoredIdentifier(payload.tool, 64) ?? "a tool";
+		const actionClass = safeStoredIdentifier(payload.actionClass, 32);
+		const key = `${runId ?? "?"}\u0000${tool}`;
+		if (told.has(key)) return;
+		if (told.size >= ACP_UNANSWERED_WORKER_ASK_MEMORY) told.clear();
+		told.add(key);
+		const who = runId === null ? "A dispatched worker" : `Worker run ${runId}`;
+		const what = actionClass === null ? tool : `${tool} (${actionClass})`;
+		const fallback = payload.fallback === "fail" ? "fail, which ends the run" : "deny";
+		const why = timedOut
+			? `nobody answered before its window closed, so its fallback applied: ${fallback}.`
+			: `it was refused by policy without asking anyone.${
+					input.workerAsksEnabled()
+						? ""
+						: " This client did not opt into clio-coder/workerPermissions, so worker asks cannot reach it."
+				}`;
+		notice(sessionId, `\n\n${who} asked to use ${what}; ${why}\n`);
+	});
+}
+
 interface AcpPermissionBridge {
 	unregister(): void;
 	/** Settles the outstanding permission request, if any, as cancellation. */
@@ -3015,12 +3069,24 @@ function installPermissionBridge(input: {
 	cancelActivePrompt: (reason: string) => void;
 	/** Forwarded worker asks; absent leaves them to the worker's own timeout fallback. */
 	workerAsks?: AcpWorkerAskPort;
+	/** Shows a warning in the active turn when a worker's ask was settled with no one answering it. */
+	workerAskNotice?: (sessionId: string, text: string) => void;
 	diagnostics?: (line: string) => void;
 }): AcpPermissionBridge {
 	// One client-facing ask at a time: a main-agent ask and a forwarded worker ask
 	// share this queue because the client holds a single pending permission.
 	const queue: AcpPermissionQueue = { chain: Promise.resolve(), cancel: null, cancelWorkers: null };
-	const unregisterWorkerAsks = installWorkerAskBridge(input, queue);
+	const unregisterAskBridge = installWorkerAskBridge(input, queue);
+	const unregisterUnansweredNotice = installUnansweredWorkerAskNotice({
+		...(input.bus !== undefined ? { bus: input.bus } : {}),
+		activeSessionId: input.activeSessionId,
+		workerAsksEnabled: () => input.workerAsks?.enabled() === true,
+		...(input.workerAskNotice !== undefined ? { notice: input.workerAskNotice } : {}),
+	});
+	const unregisterWorkerAsks = (): void => {
+		unregisterAskBridge();
+		unregisterUnansweredNotice();
+	};
 	if (!input.toolRegistry) {
 		return {
 			unregister: unregisterWorkerAsks,
@@ -4116,6 +4182,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			activePromptState === null ? null : (activePromptState.toolCallSnapshots.get(wireId) ?? null),
 		permissionTimeoutMs,
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
+		workerAskNotice: (sessionId, text) => {
+			const active = activePromptState;
+			// Outside a turn there is no message to attach it to; the run's own outcome still says it.
+			if (active === null || activeSessionId !== sessionId) {
+				options.diagnostics?.(text.trim());
+				return;
+			}
+			sendUpdate(
+				options.transport,
+				sessionId,
+				active,
+				{ sessionUpdate: "agent_message_chunk", content: textContent(text) },
+				{ ...ORCHESTRATOR_UPDATE_META, [ACP_NOTICE_META_KEY]: { level: "warning" } },
+			);
+		},
 		...(options.workerPermissions !== undefined
 			? {
 					workerAsks: {
